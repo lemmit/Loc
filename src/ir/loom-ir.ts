@@ -1158,7 +1158,15 @@ export interface ProvSite {
 // Expressions — fully resolved, every name has a kind tag.
 // ---------------------------------------------------------------------------
 
-export type LiteralKind = "string" | "int" | "decimal" | "money" | "bool" | "null" | "now";
+export type LiteralKind =
+  | "string"
+  | "int"
+  | "long"
+  | "decimal"
+  | "money"
+  | "bool"
+  | "null"
+  | "now";
 
 export type RefKind =
   | "param"

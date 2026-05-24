@@ -1073,17 +1073,20 @@ export class DddValidator {
     // Cascade suppression — broken upstream already reports.
     if (lt.kind === "unknown" || rt.kind === "unknown") return;
 
-    // Literal promotion to money — mirrors `lowerExpr`'s binary
-    // handler.  When one operand is money and the other is a bare
-    // numeric literal (not a typed value), the literal acts as
-    // money; the validator must accept what the lowering will
-    // elaborate.  Same promotion as `lowerExpr`'s binary handler.
-    const lIsMoney = lt.kind === "primitive" && lt.name === "money";
-    const rIsMoney = rt.kind === "primitive" && rt.name === "money";
-    if (lIsMoney && !rIsMoney && (isIntLit(bin.right) || isDecLit(bin.right))) {
-      rt = T.prim("money");
-    } else if (rIsMoney && !lIsMoney && (isIntLit(bin.left) || isDecLit(bin.left))) {
-      lt = T.prim("money");
+    // Literal promotion — mirrors `lowerExpr`'s binary handler.
+    // When one operand is typed as long / decimal / money (the
+    // "anchor"), the other operand's bare numeric literal acts as
+    // that anchor type.  Both sides may have anchor types
+    // (`subtotal + taxRate` — money + decimal); the per-call
+    // `canPromoteAstLitTo` check rejects typed values, so a typed
+    // VALUE opposite an anchor still rejects per the strict gate.
+    const lAnchor = literalPromotionAnchor(lt);
+    const rAnchor = literalPromotionAnchor(rt);
+    if (lAnchor && canPromoteAstLitTo(bin.right, lAnchor)) {
+      rt = T.prim(lAnchor);
+    }
+    if (rAnchor && canPromoteAstLitTo(bin.left, rAnchor)) {
+      lt = T.prim(rAnchor);
     }
 
     const op = bin.op;
@@ -2017,29 +2020,66 @@ function pathString(lv: LValue): string {
 
 /**
  * Literal-promotion gate.  A bare numeric literal (IntLit or DecLit)
- * may flow into a `money`-typed target context — the lowering layer
- * elaborates the literal to a money IR node so the backend emits a
- * precise constructor (`new Decimal("373.34")`) rather than the raw
- * numeric literal.  Mirrors `lowerExprInContext` in `lower-expr.ts`;
- * the validator MUST stay in lockstep so the strict
- * `isAssignable(decimal, money)=false` rule doesn't reject what the
- * lowering happily accepts.
+ * may flow into a typed numeric / money target context — the
+ * lowering layer elaborates the literal to the matching IR literal
+ * kind so backends emit the right form (`new Decimal("373.34")` for
+ * money, `5L` for large long literals in C#, `5m` for decimal
+ * literals in C#).  Mirrors `lowerExprInContext` in
+ * `lower-expr.ts`; the validator MUST stay in lockstep so the
+ * strict gates (`isAssignable`, comparable, arithmeticResult) don't
+ * reject what the lowering happily elaborates.
  *
- * The promotion is one-sided.  A money-typed VALUE (e.g. a
- * `taxRate: decimal` field used in `subtotal := taxRate`) still
- * rejects — the rule fires only on AST forms that are bare numeric
- * literals, not on typed expressions that happen to resolve to a
- * numeric type.  Keeps strict-mode guarantees intact while letting
- * the ergonomic `derived total: money = 373.34` source form
- * typecheck.
+ * The promotion is one-sided.  A typed VALUE (e.g. a `taxRate:
+ * decimal` field used opposite money, or a `count: int` field used
+ * opposite long) still rejects — the rule fires only on AST forms
+ * that are bare numeric literals, not on typed expressions that
+ * happen to resolve to a numeric type.  Keeps strict-mode
+ * guarantees intact while letting ergonomic source forms typecheck.
+ *
+ * Promotions admitted:
+ *   IntLit / DecLit → money   (the original #508 case)
+ *   IntLit          → long    (C# `L` suffix — without elaboration,
+ *                              long literals > Int32.MaxValue
+ *                              silently overflow at .NET compile time)
+ *   IntLit          → decimal (C# `m` suffix; IR type-honesty)
+ * DecLit → long / int is intentionally NOT admitted — a fractional
+ * literal in an integer context is almost certainly a typo and the
+ * strict gate should surface it.
  */
 function canPromoteLiteralTo(
   expr: import("./generated/ast.js").Expression | undefined,
   target: import("./type-system.js").DddType,
 ): boolean {
   if (!expr) return false;
-  if (target.kind !== "primitive" || target.name !== "money") return false;
-  return isIntLit(expr) || isDecLit(expr);
+  if (target.kind !== "primitive") return false;
+  return canPromoteAstLitTo(expr, target.name);
+}
+
+/** Inner gate used by both `canPromoteLiteralTo` (top-level checks)
+ *  and `checkSingleBinaryOperands` (per-operand checks).  Takes a
+ *  bare target name (not a wrapped `DddType`) so the caller doesn't
+ *  have to box the type they already have in hand. */
+function canPromoteAstLitTo(
+  expr: import("./generated/ast.js").Expression | undefined,
+  target: string,
+): boolean {
+  if (!expr) return false;
+  if (target === "money") return isIntLit(expr) || isDecLit(expr);
+  if (target === "long" || target === "decimal") return isIntLit(expr);
+  return false;
+}
+
+/** Mirror of `lower-expr.ts`'s `literalPromotionAnchor`: when one
+ *  side of a binary expression is typed as long / decimal / money,
+ *  that type is the "anchor" a bare numeric literal on the other
+ *  side promotes against.  int isn't an anchor — every IntLit
+ *  already types as int. */
+function literalPromotionAnchor(
+  t: import("./type-system.js").DddType,
+): "long" | "decimal" | "money" | null {
+  if (t.kind !== "primitive") return null;
+  if (t.name === "long" || t.name === "decimal" || t.name === "money") return t.name;
+  return null;
 }
 
 // ---------------------------------------------------------------------------

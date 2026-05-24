@@ -398,27 +398,34 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     let rightType = inferExprType(expr.right, env);
     let left = lowerExpr(expr.left, env);
     let right = lowerExpr(expr.right, env);
-    // Literal promotion to money: a bare numeric literal opposite a
-    // money operand is elaborated to a money IR literal so the
-    // binary's IR metadata reflects money arithmetic and backends
-    // emit precision-preserving operator calls (e.g.
-    // `subtotal.plus(new Decimal("0.50"))`, not `subtotal.plus(0.50)`).
-    // The promotion is one-sided: a money-typed VALUE (a field like
-    // `taxRate: decimal`) opposite money still rejects.  See the
-    // validator's `checkSingleBinaryOperands` for the matching gate.
-    const lIsMoney = leftType.kind === "primitive" && leftType.name === "money";
-    const rIsMoney = rightType.kind === "primitive" && rightType.name === "money";
-    if (lIsMoney && !rIsMoney) {
-      const promoted = tryPromoteToMoneyLit(expr.right);
+    // Literal promotion: a bare numeric literal opposite a typed
+    // numeric / money operand is elaborated to that operand's IR
+    // literal kind so the binary's IR metadata stays type-honest
+    // and backends emit the right form (e.g.
+    // `subtotal.plus(new Decimal("0.50"))` for money, `5L` for a
+    // long argument).  One-sided: a typed VALUE opposite the same
+    // type still rejects via the validator's strict gate (#506).
+    // Anchor types (long / decimal / money) on either side pull a
+    // bare numeric literal opposite them up to that type.
+    // `tryPromoteNumericLit` is the AST-literal gate — typed values
+    // never promote (they remain subject to the strict gate).  Both
+    // sides may have anchor types simultaneously
+    // (`subtotal + taxRate` — money + decimal, both typed values);
+    // neither call returns a promotion so nothing changes.
+    const lAnchor = literalPromotionAnchor(leftType);
+    const rAnchor = literalPromotionAnchor(rightType);
+    if (lAnchor) {
+      const promoted = tryPromoteNumericLit(expr.right, lAnchor);
       if (promoted) {
         right = promoted;
-        rightType = { kind: "primitive", name: "money" };
+        rightType = { kind: "primitive", name: lAnchor };
       }
-    } else if (rIsMoney && !lIsMoney) {
-      const promoted = tryPromoteToMoneyLit(expr.left);
+    }
+    if (rAnchor) {
+      const promoted = tryPromoteNumericLit(expr.left, rAnchor);
       if (promoted) {
         left = promoted;
-        leftType = { kind: "primitive", name: "money" };
+        leftType = { kind: "primitive", name: rAnchor };
       }
     }
     return {
@@ -827,38 +834,86 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
 /**
  * Lower an expression in a context that knows the target type — used
  * by assignment / derived prop / typed-parameter binding so a bare
- * numeric literal flowing into a money-typed target is elaborated to
- * a money IR node (`lit("money", ...)`) rather than the default
- * decimal lowering.  Other expressions pass through unchanged.
+ * numeric literal flowing into a money/long/decimal-typed target is
+ * elaborated to the matching IR literal kind rather than its
+ * source-form default (IntLit → "int", DecLit → "decimal").  Other
+ * expressions pass through unchanged.
  *
- * The contextual promotion is the bridge between the strict binary
- * validator (#506) — which rejects `decimal → money` for typed
- * values — and the ergonomic source form `derived total: money =
- * 373.34`.  Without it, every money assignment / derivation has to
- * write `money("373.34")` even when the context fully determines
- * the intent.  See `tryPromoteToMoneyLit` for the matching binary-
- * operator path.
+ * Why this matters:
+ *   • For money: backends emit `new Decimal("...")` / `Decimal.new("...")`
+ *     for money literals — without elaboration the inline transform
+ *     never fires and the literal renders as a raw JS number / float.
+ *   • For long: large literals (e.g. `9999999999`) must carry the
+ *     `L` suffix when emitted to C# (`long big = 9999999999L;`),
+ *     otherwise the literal parses as int and overflows.  Without
+ *     elaboration the IR carries `lit("int", ...)` and the .NET
+ *     emitter has no signal to add the suffix.
+ *   • For decimal: backends mostly tolerate `lit("int", "5")` in a
+ *     decimal context via implicit conversions (C# / TS), but the
+ *     IR-side type-honesty is the bridge for any future emitter
+ *     (Rust's `rust_decimal::Decimal::from(5)` vs raw `5`).
+ *
+ * The promotion is one-sided in all cases: a typed VALUE (e.g.
+ * `taxRate: decimal` used in a money context, or `count: int` used
+ * in a long context) still rejects per the strict binary validator
+ * (#506).  Only bare IntLit / DecLit AST nodes — which carry no
+ * user-chosen type — flow.
  */
 export function lowerExprInContext(
   expr: Expression | undefined,
   expected: TypeIR,
   env: Env,
 ): ExprIR {
-  if (expr && expected.kind === "primitive" && expected.name === "money") {
-    const promoted = tryPromoteToMoneyLit(expr);
+  if (expr && expected.kind === "primitive") {
+    const promoted = tryPromoteNumericLit(expr, expected.name);
     if (promoted) return promoted;
   }
   return lowerExpr(expr, env);
 }
 
-/** Detect a bare numeric literal AST node and rewrite it to a money
- *  literal IR.  Returns null for any expression that isn't an IntLit
- *  or DecLit (typed values, member access, calls, etc.) — those keep
- *  their original lowering and remain subject to the strict
- *  same-value-type rules. */
-function tryPromoteToMoneyLit(expr: Expression): ExprIR | null {
-  if (isIntLit(expr)) return lit("money", String(expr.value));
-  if (isDecLit(expr)) return lit("money", expr.value);
+/** Detect a bare numeric literal AST node and rewrite it to the
+ *  target primitive's literal IR kind.  Returns null for any
+ *  expression that isn't an IntLit or DecLit (typed values, member
+ *  access, calls, etc.) — those keep their original lowering and
+ *  remain subject to the strict same-value-type rules.
+ *
+ *  Promotions:
+ *    IntLit → "long"    when target is long      (.NET emits L suffix)
+ *    IntLit → "decimal" when target is decimal   (.NET emits m suffix)
+ *    IntLit → "money"   when target is money
+ *    DecLit → "money"   when target is money
+ *    DecLit → "decimal" is a no-op (already lit("decimal", ...))
+ *
+ *  Narrowing (DecLit → int, DecLit → long) is intentionally NOT
+ *  admitted — a fractional literal in an integer context is almost
+ *  certainly a typo, and the strict gate should surface it. */
+/** When a binary operand is typed as long / decimal / money, that
+ *  type is the "anchor" the other operand's bare numeric literal
+ *  promotes against (the binary handler in `lowerExpr`).  Returns
+ *  null for non-anchor types (int, string, bool, etc.) — int doesn't
+ *  anchor anything because every IntLit already types as int. */
+function literalPromotionAnchor(
+  t: TypeIR,
+): "long" | "decimal" | "money" | null {
+  if (t.kind !== "primitive") return null;
+  if (t.name === "long" || t.name === "decimal" || t.name === "money") return t.name;
+  return null;
+}
+
+function tryPromoteNumericLit(
+  expr: Expression,
+  target: "int" | "long" | "decimal" | "money" | "string" | "bool" | "datetime" | "guid",
+): ExprIR | null {
+  if (target === "money") {
+    if (isIntLit(expr)) return lit("money", String(expr.value));
+    if (isDecLit(expr)) return lit("money", expr.value);
+  }
+  if (target === "long") {
+    if (isIntLit(expr)) return lit("long", String(expr.value));
+  }
+  if (target === "decimal") {
+    if (isIntLit(expr)) return lit("decimal", String(expr.value));
+  }
   return null;
 }
 
