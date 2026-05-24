@@ -36,6 +36,14 @@ export function renderProgram(
      *  (now under `/api/*`, see `routePrefix` in the api template)
      *  match first.  Off for backend-only .NET. */
     hasEmbeddedSpa?: boolean;
+    /** When true, the deployable's `Migrations/` directory carries
+     *  EF Core Migration classes (one per `MigrationsIR`).  Program.cs
+     *  adds a `Database.Migrate()` call at startup (idempotent — EF
+     *  tracks applied versions in `__EFMigrationsHistory`) and
+     *  configures the DbContext to suppress the
+     *  `PendingModelChangesWarning` that fires because our
+     *  ModelSnapshot stub is intentionally empty. */
+    hasMigrations?: boolean;
     /** When true, register `DomainLogBehavior` (a Mediator pipeline
      *  behavior) so the request-scoped ILogger reaches the domain
      *  layer via `DomainLog.Current` — used by --trace-injected
@@ -48,6 +56,7 @@ export function renderProgram(
   const usesValidators = !!options?.usesValidators;
   const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
+  const hasMigrations = !!options?.hasMigrations;
   const emitTrace = !!options?.emitTrace;
   const repoRegistrations = ctx.aggregates
     .map(
@@ -272,7 +281,20 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
-
+${
+  hasMigrations
+    ? `
+// Apply pending EF Core migrations before serving traffic.  Idempotent —
+// EF tracks applied versions in the __EFMigrationsHistory table.  Runs
+// synchronously at startup so the schema is current on first request.
+using (var migrationScope = app.Services.CreateScope())
+{
+    var db = migrationScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
+}
+`
+    : ""
+}
 // Catalog server-lifecycle events.  Same event names + level Hono and
 // Phoenix emit so a cross-backend dashboard pivots on one identity.
 // A separate logger keeps these lines distinct from per-request

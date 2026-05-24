@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "tables": [
+    {
+      "name": "customers",
+      "ownerModule": "CustomerMgmt",
+      "columns": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "uuid"
+          },
+          "nullable": false
+        },
+        {
+          "name": "username",
+          "type": {
+            "kind": "text"
+          },
+          "nullable": false
+        },
+        {
+          "name": "email",
+          "type": {
+            "kind": "text"
+          },
+          "nullable": false
+        },
+        {
+          "name": "age",
+          "type": {
+            "kind": "int"
+          },
+          "nullable": false
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [],
+      "indexes": []
+    }
+  ],
+  "lastVersion": "20260101000000",
+  "migrationHistory": [
+    {
+      "version": "20260101000000",
+      "name": "Initial"
+    }
+  ]
+}

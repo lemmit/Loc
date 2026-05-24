@@ -1,6 +1,6 @@
 import {
-  contextUsesMoney,
   type BoundedContextIR,
+  contextUsesMoney,
   type TypeIR,
   type ViewIR,
 } from "../../ir/loom-ir.js";
