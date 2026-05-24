@@ -32,8 +32,15 @@ import { AstUtils, URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Expression, Model } from "../src/language/generated/ast.js";
-import { isBinaryExpr } from "../src/language/generated/ast.js";
-import { arithmeticResult, envForNode, type DddType, typeOf, typeToString } from "../src/language/type-system.js";
+import { isBinaryExpr, isDecLit, isIntLit } from "../src/language/generated/ast.js";
+import {
+  arithmeticResult,
+  type DddType,
+  envForNode,
+  T,
+  typeOf,
+  typeToString,
+} from "../src/language/type-system.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
@@ -130,10 +137,24 @@ function scanModel(file: string, model: Model, findings: Finding[]): void {
   for (const node of AstUtils.streamAllContents(model)) {
     if (!isBinaryExpr(node)) continue;
     const env = envForNode(node);
-    const lt = typeOf(node.left as Expression, env);
-    const rt = typeOf(node.right as Expression, env);
+    let lt = typeOf(node.left as Expression, env);
+    let rt = typeOf(node.right as Expression, env);
     // Skip cascade — broken upstream already reports.
     if (lt.kind === "unknown" || rt.kind === "unknown") continue;
+
+    // Literal promotion to money — mirrors the validator's
+    // `checkSingleBinaryOperands` so the audit doesn't report
+    // ergonomic cases the validator now accepts (e.g.
+    // `subtotal > 0` where `subtotal: money`).  Same one-sided
+    // rule: typed values stay strict; only bare numeric literals
+    // get promoted opposite a money operand.
+    const lIsMoney = lt.kind === "primitive" && lt.name === "money";
+    const rIsMoney = rt.kind === "primitive" && rt.name === "money";
+    if (lIsMoney && !rIsMoney && (isIntLit(node.right) || isDecLit(node.right))) {
+      rt = T.prim("money");
+    } else if (rIsMoney && !lIsMoney && (isIntLit(node.left) || isDecLit(node.left))) {
+      lt = T.prim("money");
+    }
     const op = node.op;
     const cstNode = node.$cstNode;
     const line = cstNode ? cstNode.range.start.line + 1 : 0;

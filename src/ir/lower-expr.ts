@@ -332,10 +332,14 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
       };
     }
     const path: PathIR = { segments: [lv.head, ...lv.tail] };
-    const value = lowerExpr(stmt.value, env);
     const prov = provSiteFor(path, stmt.value, stmt, env);
     if (stmt.op === ":=") {
+      // Contextual lowering: a numeric literal flowing into a
+      // money-typed target lowers as money — `subtotal := 0.50`
+      // becomes `lit("money", "0.50")` so the backend emits the
+      // precise constructor.
       const targetType = pathType(path, env);
+      const value = lowerExprInContext(stmt.value, targetType, env);
       return {
         stmt: { kind: "assign", target: path, value, targetType, prov },
         envAfter: env,
@@ -344,6 +348,9 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
     if (stmt.op === "+=" || stmt.op === "-=") {
       const targetType = pathType(path, env);
       const elementType = targetType.kind === "array" ? targetType.element : targetType;
+      // Element-type context applies for both array push (`+=`) and
+      // remove (`-=`) — same numeric-literal-into-money elaboration.
+      const value = lowerExprInContext(stmt.value, elementType, env);
       return {
         stmt: {
           kind: stmt.op === "+=" ? "add" : "remove",
@@ -387,13 +394,38 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     };
   }
   if (isBinaryExpr(expr)) {
-    const leftType = inferExprType(expr.left, env);
-    const rightType = inferExprType(expr.right, env);
+    let leftType = inferExprType(expr.left, env);
+    let rightType = inferExprType(expr.right, env);
+    let left = lowerExpr(expr.left, env);
+    let right = lowerExpr(expr.right, env);
+    // Literal promotion to money: a bare numeric literal opposite a
+    // money operand is elaborated to a money IR literal so the
+    // binary's IR metadata reflects money arithmetic and backends
+    // emit precision-preserving operator calls (e.g.
+    // `subtotal.plus(new Decimal("0.50"))`, not `subtotal.plus(0.50)`).
+    // The promotion is one-sided: a money-typed VALUE (a field like
+    // `taxRate: decimal`) opposite money still rejects.  See the
+    // validator's `checkSingleBinaryOperands` for the matching gate.
+    const lIsMoney = leftType.kind === "primitive" && leftType.name === "money";
+    const rIsMoney = rightType.kind === "primitive" && rightType.name === "money";
+    if (lIsMoney && !rIsMoney) {
+      const promoted = tryPromoteToMoneyLit(expr.right);
+      if (promoted) {
+        right = promoted;
+        rightType = { kind: "primitive", name: "money" };
+      }
+    } else if (rIsMoney && !lIsMoney) {
+      const promoted = tryPromoteToMoneyLit(expr.left);
+      if (promoted) {
+        left = promoted;
+        leftType = { kind: "primitive", name: "money" };
+      }
+    }
     return {
       kind: "binary",
       op: expr.op,
-      left: lowerExpr(expr.left, env),
-      right: lowerExpr(expr.right, env),
+      left,
+      right,
       leftType,
       resultType: binaryResultType(expr.op, leftType, rightType),
     };
@@ -792,6 +824,44 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
  * For non-numeric, non-money operands the function returns the left
  * operand's type (matches the prior behaviour of `widenNumeric`).
  */
+/**
+ * Lower an expression in a context that knows the target type — used
+ * by assignment / derived prop / typed-parameter binding so a bare
+ * numeric literal flowing into a money-typed target is elaborated to
+ * a money IR node (`lit("money", ...)`) rather than the default
+ * decimal lowering.  Other expressions pass through unchanged.
+ *
+ * The contextual promotion is the bridge between the strict binary
+ * validator (#506) — which rejects `decimal → money` for typed
+ * values — and the ergonomic source form `derived total: money =
+ * 373.34`.  Without it, every money assignment / derivation has to
+ * write `money("373.34")` even when the context fully determines
+ * the intent.  See `tryPromoteToMoneyLit` for the matching binary-
+ * operator path.
+ */
+export function lowerExprInContext(
+  expr: Expression | undefined,
+  expected: TypeIR,
+  env: Env,
+): ExprIR {
+  if (expr && expected.kind === "primitive" && expected.name === "money") {
+    const promoted = tryPromoteToMoneyLit(expr);
+    if (promoted) return promoted;
+  }
+  return lowerExpr(expr, env);
+}
+
+/** Detect a bare numeric literal AST node and rewrite it to a money
+ *  literal IR.  Returns null for any expression that isn't an IntLit
+ *  or DecLit (typed values, member access, calls, etc.) — those keep
+ *  their original lowering and remain subject to the strict
+ *  same-value-type rules. */
+function tryPromoteToMoneyLit(expr: Expression): ExprIR | null {
+  if (isIntLit(expr)) return lit("money", String(expr.value));
+  if (isDecLit(expr)) return lit("money", expr.value);
+  return null;
+}
+
 function binaryResultType(op: string, a: TypeIR, b: TypeIR): TypeIR {
   if (op === "&&" || op === "||") return { kind: "primitive", name: "bool" };
   if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {

@@ -31,10 +31,12 @@ import {
   isAssignOrCallStmt,
   isBinaryExpr,
   isContainment,
+  isDecLit,
   isDerivedProp,
   isEmitStmt,
   isEntityPart,
   isFunctionDecl,
+  isIntLit,
   isInvariant,
   isLetStmt,
   isOperation,
@@ -1066,10 +1068,23 @@ export class DddValidator {
     accept: ValidationAcceptor,
   ): void {
     const env = envForNode(bin);
-    const lt = typeOf(bin.left, env);
-    const rt = typeOf(bin.right, env);
+    let lt = typeOf(bin.left, env);
+    let rt = typeOf(bin.right, env);
     // Cascade suppression — broken upstream already reports.
     if (lt.kind === "unknown" || rt.kind === "unknown") return;
+
+    // Literal promotion to money — mirrors `lowerExpr`'s binary
+    // handler.  When one operand is money and the other is a bare
+    // numeric literal (not a typed value), the literal acts as
+    // money; the validator must accept what the lowering will
+    // elaborate.  Same promotion as `lowerExpr`'s binary handler.
+    const lIsMoney = lt.kind === "primitive" && lt.name === "money";
+    const rIsMoney = rt.kind === "primitive" && rt.name === "money";
+    if (lIsMoney && !rIsMoney && (isIntLit(bin.right) || isDecLit(bin.right))) {
+      rt = T.prim("money");
+    } else if (rIsMoney && !lIsMoney && (isIntLit(bin.left) || isDecLit(bin.left))) {
+      lt = T.prim("money");
+    }
 
     const op = bin.op;
 
@@ -1330,7 +1345,8 @@ export class DddValidator {
     if (
       declared.kind !== "unknown" &&
       actual.kind !== "unknown" &&
-      !isAssignable(actual, declared)
+      !isAssignable(actual, declared) &&
+      !canPromoteLiteralTo(d.expr, declared)
     ) {
       accept(
         "error",
@@ -1475,7 +1491,8 @@ export class DddValidator {
       if (
         targetType.kind !== "unknown" &&
         valueType.kind !== "unknown" &&
-        !isAssignable(valueType, targetType)
+        !isAssignable(valueType, targetType) &&
+        !canPromoteLiteralTo(stmt.value, targetType)
       ) {
         accept(
           "error",
@@ -1996,6 +2013,33 @@ function _singular(selector: string): string {
 
 function pathString(lv: LValue): string {
   return [lv.head, ...lv.tail].join(".");
+}
+
+/**
+ * Literal-promotion gate.  A bare numeric literal (IntLit or DecLit)
+ * may flow into a `money`-typed target context — the lowering layer
+ * elaborates the literal to a money IR node so the backend emits a
+ * precise constructor (`new Decimal("373.34")`) rather than the raw
+ * numeric literal.  Mirrors `lowerExprInContext` in `lower-expr.ts`;
+ * the validator MUST stay in lockstep so the strict
+ * `isAssignable(decimal, money)=false` rule doesn't reject what the
+ * lowering happily accepts.
+ *
+ * The promotion is one-sided.  A money-typed VALUE (e.g. a
+ * `taxRate: decimal` field used in `subtotal := taxRate`) still
+ * rejects — the rule fires only on AST forms that are bare numeric
+ * literals, not on typed expressions that happen to resolve to a
+ * numeric type.  Keeps strict-mode guarantees intact while letting
+ * the ergonomic `derived total: money = 373.34` source form
+ * typecheck.
+ */
+function canPromoteLiteralTo(
+  expr: import("./generated/ast.js").Expression | undefined,
+  target: import("./type-system.js").DddType,
+): boolean {
+  if (!expr) return false;
+  if (target.kind !== "primitive" || target.name !== "money") return false;
+  return isIntLit(expr) || isDecLit(expr);
 }
 
 // ---------------------------------------------------------------------------
