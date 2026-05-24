@@ -152,6 +152,7 @@ import {
 } from "./lower-expr.js";
 import {
   buildExpandContext,
+  expandInlineScaffoldPrimitives,
   expandWalkerPrimitive,
   type WalkerExpandContext,
 } from "./walker-primitive-expander.js";
@@ -531,7 +532,37 @@ function lowerSystem(sys: System): SystemIR {
   // `e2e/pages/<agg>.ts` helper classes (rich domain methods:
   // fill, submit, expectRow).
   expandWalkerPrimitives(built);
+  expandInlineScaffoldPrimitiveCalls(built);
   return built;
+}
+
+/** True when `body` already carries the explicit
+ *  `Stack(scaffoldDetails(of:), scaffoldOperations(of:))` shape —
+ *  scaffold's new Detail-page emission.  Used by
+ *  `expandWalkerPrimitives` to skip body replacement on
+ *  aggregate-detail pages whose body is already a customisable
+ *  primitive composition; only the emit-path + auto-`id`-param
+ *  side-effects fire. */
+function isExplicitDetailBody(body: ExprIR | undefined): boolean {
+  if (!body || body.kind !== "call" || body.name !== "Stack") return false;
+  return body.args.some((arg) => arg.kind === "call" && arg.name === "scaffoldDetails");
+}
+
+/** Rewrite the inline body primitives `scaffoldDetails(of:)` and
+ *  `scaffoldOperations(of:)` into their expanded ExprIR forms.
+ *  Runs against EVERY page's body (not just archetype-tagged ones)
+ *  because the scaffold detail page emits an explicit body that
+ *  doesn't trigger archetype detection.  Pages whose body never
+ *  uses these primitives are no-ops — the rewriter walks each tree
+ *  once and returns the same reference when nothing changed. */
+function expandInlineScaffoldPrimitiveCalls(sys: SystemIR): void {
+  for (const ui of sys.uis) {
+    const ctx = buildExpandContext(sys, ui);
+    for (const page of ui.pages) {
+      if (!page.body) continue;
+      page.body = expandInlineScaffoldPrimitives(page.body, ctx);
+    }
+  }
 }
 
 /** In-place rewrite of every UI's pages.  When the
@@ -551,7 +582,14 @@ function expandWalkerPrimitives(sys: SystemIR): void {
       // scaffold renderer would have used).  Preserves URL/file
       // shape when scaffold expansion becomes the default.
       page.emitPath = conventionalEmitPath(page.archetype, ctx);
-      page.body = expanded;
+      // Skip body replacement when the page already carries the
+      // explicit Stack(scaffoldDetails, scaffoldOperations) form
+      // — the inline-primitive pass handles those.  Without this
+      // check we'd clobber the user's explicit body with the
+      // archetype-driven shape.
+      if (!isExplicitDetailBody(page.body)) {
+        page.body = expanded;
+      }
       // Detail-page expansion references `id` as a
       // route param (`Sales.Order.byId(id)`).  The scaffold AST
       // expander synthesises detail pages with `route:
@@ -946,6 +984,27 @@ function inferPageArchetype(page: Page, body: ExprIR | undefined): PageArchetype
       aggregateName: aggName,
       contextName: "",
     };
+  }
+  // Explicit-body detail shape emitted by `scaffold` (and any
+  // user-written page that follows the same pattern):
+  // `Stack(scaffoldDetails(of: <Agg>), scaffoldOperations(of: <Agg>))`.
+  // Recognised so the page still gets the conventional emit path
+  // + auto-`id` route param, even though the archetype-driven
+  // body expansion is short-circuited (the body is already
+  // explicit — `expandWalkerPrimitives` keeps it as-is).
+  if (callName === "Stack") {
+    for (const arg of body.args) {
+      if (arg.kind !== "call") continue;
+      if (arg.name !== "scaffoldDetails") continue;
+      const ofIdx = (arg.argNames ?? []).findIndex((n) => n === "of");
+      const ofArg = ofIdx >= 0 ? arg.args[ofIdx] : undefined;
+      if (!ofArg || ofArg.kind !== "ref") continue;
+      return {
+        kind: "aggregate-detail",
+        aggregateName: ofArg.name,
+        contextName: "",
+      };
+    }
   }
   if (callName === "Detail" && argNames[0] === "of") {
     const aggName = argRef(0);

@@ -54,6 +54,16 @@ export function emitFormOf(
   // rest.
   const runsArg = namedArgValue(call, "runs");
   if (runsArg) return emitFormRuns(call, ctx, depth, runsArg);
+  // `Form(of: <Agg>, op: <opName>)` → operation form bound by
+  // aggregate name + op name, without needing an in-scope instance.
+  // Used by `scaffoldOperations(of: …)`: the modals live at top
+  // level (no enclosing QueryView lambda), so there's no `data` to
+  // dot into.  The mutation hook resolves the id from the route.
+  const ofArg = namedArgValue(call, "of");
+  const opArg = namedArgValue(call, "op");
+  if (ofArg && opArg && ofArg.kind === "ref" && opArg.kind === "ref") {
+    return emitFormOfOperationByName(call, ctx, ofArg.name, opArg.name);
+  }
   // `Form(<instance>.<operation>)` → operation-invocation form.
   // The operation is referenced through an in-scope aggregate
   // instance (a `member` node with a `ref` receiver), mirroring the
@@ -65,6 +75,58 @@ export function emitFormOf(
     return emitFormOfOperation(call, ctx, opRef);
   }
   return emitFormOfAggregate(call, ctx, depth);
+}
+
+/** Like `emitFormOfOperation` but addressed by aggregate name +
+ *  op name (`Form(of: <Agg>, op: <opName>)`) instead of an
+ *  instance-qualified member.  No in-scope record needed — the
+ *  mutation hook resolves the id from the route `id`.  Used by
+ *  the auto-fanning `scaffoldOperations(of: <Agg>)` primitive. */
+function emitFormOfOperationByName(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  aggName: string,
+  opName: string,
+): string {
+  const agg = ctx.aggregatesByName.get(aggName);
+  const bc = ctx.bcByAggregate.get(aggName);
+  if (!agg || !bc) {
+    return `{/* Form(of: ${aggName}, op: ${opName}): aggregate not found */}`;
+  }
+  const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
+  if (!op) {
+    return `{/* Form(of: ${aggName}, op: ${opName}): no public operation '${opName}' on ${aggName} */}`;
+  }
+  const fields = op.params;
+  const fieldsForHelpers = fields.map((f) => ({ ...f, optional: false }));
+  const testidNamespace = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-op-${op.name}`;
+  const prepared = prepareFormFields(ctx, fields, fieldsForHelpers, bc, testidNamespace);
+  addImport(
+    ctx,
+    `../api/${lowerFirst(agg.name)}`,
+    `${upperFirst(op.name)}Request`,
+    `use${upperFirst(op.name)}${agg.name}`,
+  );
+  ctx.collectedTestids.add(testidNamespace);
+  ctx.collectedTestids.add(`${testidNamespace}-form`);
+  ctx.collectedTestids.add(`${testidNamespace}-submit`);
+  ctx.formOfs.push({
+    kind: "operation",
+    agg,
+    op,
+    bc,
+    fields,
+    idExpr: `id ?? ""`,
+    idTargets: prepared.idTargets,
+    useController: prepared.useController,
+    defaultValuesTs: prepared.defaultValuesTs,
+    testidNamespace,
+    fieldHtmls: prepared.fieldHtmls,
+    onSubmitJs: null,
+    triggerLabel: humanize(op.name),
+    triggerPrimary: true,
+  });
+  return "";
 }
 
 interface PreparedForm {
@@ -426,12 +488,20 @@ export function emitModal(
   // Walk the form child first — records the OperationFormState
   // (and returns "" — the form has no inline JSX).
   walk(formChild, ctx, depth);
-  // The op-form references the operation through an instance
-  // (`Form(data.confirm)`); the operation name is the member.
+  // The op-form names its operation either through an instance-
+  // member shape (`Form(data.confirm)`) or through the new
+  // `Form(of: <Agg>, op: <opName>)` flat shape (used by
+  // `scaffoldOperations(of:)` so modals can live outside a
+  // QueryView data lambda).  Recover the op name from whichever
+  // shape the child carries.
   const opRef = positionalArgs(formChild)[0];
-  const opName = opRef && opRef.kind === "member" ? opRef.member : undefined;
+  const opNameNamed = (() => {
+    const opArg = namedArgValue(formChild, "op");
+    return opArg && opArg.kind === "ref" ? opArg.name : undefined;
+  })();
+  const opName = opRef && opRef.kind === "member" ? opRef.member : opNameNamed;
   if (!opName) {
-    return `{/* Modal: child Form must be Form(<instance>.<operation>) */}`;
+    return `{/* Modal: child Form must be Form(<instance>.<op>) or Form(of:, op:) */}`;
   }
   const label = unwrapTextLiteral(firstPositionalContent(triggerArg, ctx) ?? '"Action"');
   // Platform-neutral emphasis token from the scaffold-expander

@@ -32,9 +32,29 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
     page({
       name: `${aggName}Detail`,
       route: `/${pluralSnake}/:id`,
-      body: callExpr("Detail", [
-        { name: "of", value: nameRefExpr(aggName) },
-        { name: "by", value: nameRefExpr("id") },
+      // Explicit Stack of two body primitives — see
+      // `expandInlineScaffoldPrimitives` in
+      // src/ir/walker-primitive-expander.ts.
+      //
+      //   * scaffoldDetails(of: <Agg>)    — full read view
+      //     (Breadcrumbs, Heading, QueryView wrapping the field
+      //     card + related-entity cards).  Customisable: replacing
+      //     this slot with custom JSX doesn't disturb operations.
+      //   * scaffoldOperations(of: <Agg>) — Group(Modal × N), one
+      //     per public operation.  Auto-fans at lowering time, so
+      //     adding `operation reactivate()` to the aggregate later
+      //     makes its modal appear without touching this page.
+      body: callExpr("Stack", [
+        {
+          value: callExpr("scaffoldDetails", [{ name: "of", value: nameRefExpr(aggName) }]),
+        },
+        {
+          value: callExpr("scaffoldOperations", [{ name: "of", value: nameRefExpr(aggName) }]),
+        },
+        // Match the legacy archetype expansion's testid on the
+        // outer Stack so the e2e page-objects can still anchor on
+        // `<plural>-detail` without source-level changes.
+        { name: "testid", value: stringLit(`${pluralSnake}-detail`) },
       ]),
       menu: { hidden: boolLit(true) },
     }),

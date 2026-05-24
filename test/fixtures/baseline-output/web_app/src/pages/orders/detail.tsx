@@ -132,12 +132,6 @@ export default function OrderDetail() {
                 <KeyValueRow label="Placed At" data-testid="orders-detail-placedAt"><DateTimeValue iso={ orderById.data.placedAt } /></KeyValueRow>
               </Stack>
             </Card>
-            <Group>
-              <Button variant="filled" onClick={() => openAddLineModal(addLine)} data-testid="orders-op-addLine">Add Line</Button>
-    
-              <Button variant="light" onClick={() => openConfirmModal(confirm)} data-testid="orders-op-confirm">Confirm</Button>
-    
-            </Group>
             <Card withBorder padding="md" data-testid="orders-detail-lines">
               <Stack>
                 <Title order={4}>Lines</Title>
@@ -162,6 +156,12 @@ export default function OrderDetail() {
           </Stack>
         ) }
       </>
+      <Group>
+        <Button variant="filled" onClick={() => openAddLineModal(addLine)} data-testid="orders-op-addLine">Add Line</Button>
+    
+        <Button variant="light" onClick={() => openConfirmModal(confirm)} data-testid="orders-op-confirm">Confirm</Button>
+    
+      </Group>
     </Stack>
   );
 }
