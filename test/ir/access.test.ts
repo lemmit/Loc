@@ -10,7 +10,7 @@ import type { Model } from "../../src/language/generated/ast.js";
 // ---------------------------------------------------------------------------
 // Field access modifier — grammar + lowering + enrichment resolution.
 // Covers the declared form (`name: T managed`), the type-driven inference
-// (`Id<X>` → token), the default (no modifier → editable), the nullable-
+// (`X id` → token), the default (no modifier → editable), the nullable-
 // token validator rule, and the propagation onto `WireField.access`.
 // ---------------------------------------------------------------------------
 
@@ -99,8 +99,8 @@ describe("field access — enrichment defaults", () => {
     expect(label.accessSource).toBe("default");
   });
 
-  it("infers token for a declared Id<X> field", async () => {
-    const src = SYSTEM(`        author: Id<Post>
+  it("infers token for a declared X id field", async () => {
+    const src = SYSTEM(`        author: Post id
 `);
     const { model } = await parseModel(src);
     const agg = aggregateFrom(model, "Post");
@@ -110,7 +110,7 @@ describe("field access — enrichment defaults", () => {
   });
 
   it("declared modifier wins over type inference", async () => {
-    const src = SYSTEM(`        author: Id<Post> internal
+    const src = SYSTEM(`        author: Post id internal
 `);
     const { model } = await parseModel(src);
     const agg = aggregateFrom(model, "Post");
