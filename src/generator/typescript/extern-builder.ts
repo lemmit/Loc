@@ -22,8 +22,18 @@ export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR)
   if (externOps.length === 0) return "";
   const usedVOs = collectVOs(externOps, ctx);
 
+  // Whether any extern op's request shape carries a money parameter
+  // — gates the per-file `import Decimal from "decimal.js";` so the
+  // generated `<Op><Agg>Request` interface can reference `Decimal`.
+  const externUsesMoney = externOps.some((op) =>
+    op.params.some((p) => typeRefMentionsMoney(p.type)),
+  );
+
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
+  if (externUsesMoney) {
+    lines.push(`import Decimal from "decimal.js";`);
+  }
   lines.push(`import type { ${agg.name} } from "./${lowerFirst(agg.name)}";`);
   if (usedVOs.length > 0) {
     lines.push(`import type { ${usedVOs.join(", ")} } from "./value-objects";`);
@@ -114,6 +124,8 @@ function wireTsType(t: TypeIR): string {
         case "long":
         case "decimal":
           return "number";
+        case "money":
+          return "Decimal";
         case "string":
         case "guid":
           return "string";
@@ -136,6 +148,13 @@ function wireTsType(t: TypeIR): string {
     case "optional":
       return `${wireTsType(t.inner)} | null`;
   }
+}
+
+function typeRefMentionsMoney(t: TypeIR): boolean {
+  if (t.kind === "primitive") return t.name === "money";
+  if (t.kind === "array") return typeRefMentionsMoney(t.element);
+  if (t.kind === "optional") return typeRefMentionsMoney(t.inner);
+  return false;
 }
 
 function collectVOs(ops: AggregateIR["operations"], ctx: BoundedContextIR): string[] {

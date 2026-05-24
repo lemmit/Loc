@@ -349,6 +349,11 @@ function openApiType(t: TypeIR): string {
           return "%OpenApiSpex.Schema{type: :integer}";
         case "decimal":
           return "%OpenApiSpex.Schema{type: :number, format: :float}";
+        case "money":
+          // Cross-backend wire parity with Hono / .NET: `{type: string,
+          // format: decimal}` is the canonical money encoding declared
+          // in `.loom/wire-spec.json`.
+          return "%OpenApiSpex.Schema{type: :string, format: :decimal}";
         case "string":
           return "%OpenApiSpex.Schema{type: :string}";
         case "guid":

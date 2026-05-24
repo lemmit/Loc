@@ -39,18 +39,10 @@ export function buildWorkflowsFile(
   aggsByName: Map<string, AggregateIR>,
 ): string {
   if (ctx.workflows.length === 0) return "";
-  const lines: string[] = [];
-  lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
-  lines.push(`import * as Ids from "../domain/ids";`);
-  lines.push(
-    `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
-  );
-  lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
-  lines.push(`import type * as Events from "../domain/events";`);
-  lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
-  lines.push(`import type * as schema from "../db/schema";`);
-  // Aggregate + repo imports — every aggregate the workflows touch.
+  // Build the body first; imports are derived from what the body actually
+  // references (keeps the generated import line free of dead names per the
+  // generated-code Biome gate). Aggregate / repository / VO / enum imports
+  // are all conditional on appearing in the body text.
   const aggsTouched = new Set<string>();
   for (const wf of ctx.workflows) {
     for (const st of wf.statements) {
@@ -59,14 +51,6 @@ export function buildWorkflowsFile(
       }
     }
   }
-  for (const aggName of aggsTouched) {
-    lines.push(`import { ${aggName} } from "../domain/${lowerFirst(aggName)}";`);
-    lines.push(
-      `import { ${aggName}Repository } from "../db/repositories/${lowerFirst(aggName)}-repository";`,
-    );
-  }
-  // Per-aggregate extern handler registry import — only when at least
-  // one workflow op-call targets an extern op on this aggregate.
   const externAggs = new Set<string>();
   for (const wf of ctx.workflows) {
     for (const st of wf.statements) {
@@ -75,21 +59,11 @@ export function buildWorkflowsFile(
       if (op?.extern) externAggs.add(st.aggName);
     }
   }
-  for (const aggName of externAggs) {
-    lines.push(
-      `import { externHandlers as ${lowerFirst(aggName)}ExternHandlers } from "../domain/${lowerFirst(aggName)}-extern";`,
-    );
-  }
-  // Value object + enum imports.  Enums are runtime-imported so
-  // expressions like `OrderStatus.Draft` inside factory-let payloads
-  // resolve; VOs need their constructor in scope for VO literals.
   const usedVOs = ctx.valueObjects.map((v) => v.name);
   const usedEnums = ctx.enums.map((e) => e.name);
   const valueObjectImport = [...usedVOs, ...usedEnums];
-  if (valueObjectImport.length > 0) {
-    lines.push(`import { ${valueObjectImport.join(", ")} } from "../domain/value-objects";`);
-  }
-  lines.push("");
+
+  const body: string[] = [];
 
   // Wire-schema declarations for every VO / enum a workflow param
   // references.  Without these, `zodFor(p.type)` below emits a bare
@@ -104,10 +78,10 @@ export function buildWorkflowsFile(
   const workflowEnumsUsed = collectUsedEnums(ctx);
   for (const e of workflowEnumsUsed) {
     const values = e.values.map((v) => `"${v}"`).join(", ");
-    lines.push(`const ${e.name}Schema = z.enum([${values}]).openapi("${e.name}");`);
+    body.push(`const ${e.name}Schema = z.enum([${values}]).openapi("${e.name}");`);
   }
   for (const vo of workflowVOs) {
-    lines.push(
+    body.push(
       ...emitWireSchema(
         `const ${vo.name}Schema`,
         `${vo.name}`,
@@ -118,54 +92,114 @@ export function buildWorkflowsFile(
     );
   }
   if (workflowVOs.length > 0 || workflowEnumsUsed.length > 0) {
-    lines.push("");
+    body.push("");
   }
 
   // Per-workflow request schema.
   for (const wf of ctx.workflows) {
-    lines.push(`const ${upperFirst(wf.name)}Request = z.object({`);
+    body.push(`const ${upperFirst(wf.name)}Request = z.object({`);
     for (const p of wf.params) {
-      lines.push(`  ${p.name}: ${zodFor(p.type)},`);
+      body.push(`  ${p.name}: ${zodFor(p.type)},`);
     }
-    lines.push(`}).openapi("${upperFirst(wf.name)}Request");`);
+    body.push(`}).openapi("${upperFirst(wf.name)}Request");`);
   }
-  lines.push("");
+  body.push("");
 
-  lines.push(`export function workflowsRoutes(`);
-  lines.push(`  db: NodePgDatabase<typeof schema>,`);
-  lines.push(`  events: DomainEventDispatcher,`);
-  lines.push(`): OpenAPIHono {`);
-  lines.push(`  const app = new OpenAPIHono();`);
-  lines.push("");
+  body.push(`export function workflowsRoutes(`);
+  body.push(`  db: NodePgDatabase<typeof schema>,`);
+  body.push(`  events: DomainEventDispatcher,`);
+  body.push(`): OpenAPIHono {`);
+  body.push(`  const app = new OpenAPIHono();`);
+  body.push("");
 
   for (const wf of ctx.workflows) {
-    lines.push(...emitWorkflowRoute(wf, ctx, aggsByName).map((l) => `  ${l}`));
-    lines.push("");
+    body.push(...emitWorkflowRoute(wf, ctx, aggsByName).map((l) => `  ${l}`));
+    body.push("");
   }
 
-  lines.push(`  app.onError((err, c) => {`);
-  lines.push(
+  body.push(`  app.onError((err, c) => {`);
+  body.push(
     `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
   );
-  lines.push(
+  body.push(
     `    if (err instanceof ForbiddenError) return c.json({ error: err.message, trace_id }, 403);`,
   );
-  lines.push(
+  body.push(
     `    if (err instanceof DomainError) return c.json({ error: err.message, trace_id }, 400);`,
   );
-  lines.push(
+  body.push(
     `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message, trace_id }, 404);`,
   );
-  lines.push(
+  body.push(
     `    if (err instanceof ExternHandlerError) { console.error(err); return c.json({ error: err.message, trace_id }, 500); }`,
   );
-  lines.push(`    console.error(err);`);
-  lines.push(`    return c.json({ error: "internal", trace_id }, 500);`);
-  lines.push(`  });`);
-  lines.push("");
-  lines.push(`  return app;`);
-  lines.push(`}`);
-  return lines.join("\n") + "\n";
+  body.push(`    console.error(err);`);
+  body.push(`    return c.json({ error: "internal", trace_id }, 500);`);
+  body.push(`  });`);
+  body.push("");
+  body.push(`  return app;`);
+  body.push(`}`);
+  // Now derive imports from what the body actually references.
+  const rawBodyStr = body.join("\n");
+  // Strip string contents before scanning so symbols mentioned only in
+  // string literals (e.g. .openapi("Name")) don't count as references.
+  const bodyStr = rawBodyStr
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/`(?:\\.|[^`\\])*`/g, "``");
+  const hasRef = (name: string): boolean => new RegExp(`\\b${name}\\b`).test(bodyStr);
+  const errorClasses = [
+    "DomainError",
+    "AggregateNotFoundError",
+    "ForbiddenError",
+    "ExternHandlerError",
+  ].filter(hasRef);
+  const usesEvents = /\bEvents\.\w/.test(bodyStr);
+  const usesIds = /\bIds\.\w/.test(bodyStr);
+  const usesSchema = /\bschema\.\w/.test(bodyStr);
+  const usesDb = /\bNodePgDatabase\b/.test(bodyStr);
+  const usesDispatcher = /\bDomainEventDispatcher\b/.test(bodyStr);
+  const aggsReferenced = [...aggsTouched].filter((n) =>
+    new RegExp(`\\bnew\\s+${n}\\(|\\b${n}\\.\\w`).test(bodyStr),
+  );
+  const reposReferenced = [...aggsTouched].filter((n) =>
+    new RegExp(`\\bnew\\s+${n}Repository\\(`).test(bodyStr),
+  );
+  const externReferenced = [...externAggs].filter((n) =>
+    new RegExp(`\\b${lowerFirst(n)}ExternHandlers\\b`).test(bodyStr),
+  );
+  const voEnumReferenced = valueObjectImport.filter(hasRef);
+
+  const imports: string[] = [];
+  imports.push("// Auto-generated.  Do not edit by hand.");
+  imports.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
+  if (usesIds) imports.push(`import * as Ids from "../domain/ids";`);
+  if (errorClasses.length > 0) {
+    imports.push(`import { ${errorClasses.join(", ")} } from "../domain/errors";`);
+  }
+  if (usesDispatcher)
+    imports.push(`import type { DomainEventDispatcher } from "../domain/events";`);
+  if (usesEvents) imports.push(`import type * as Events from "../domain/events";`);
+  if (usesDb) imports.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
+  if (usesSchema) imports.push(`import type * as schema from "../db/schema";`);
+  for (const aggName of aggsReferenced) {
+    imports.push(`import { ${aggName} } from "../domain/${lowerFirst(aggName)}";`);
+  }
+  for (const aggName of reposReferenced) {
+    imports.push(
+      `import { ${aggName}Repository } from "../db/repositories/${lowerFirst(aggName)}-repository";`,
+    );
+  }
+  for (const aggName of externReferenced) {
+    imports.push(
+      `import { externHandlers as ${lowerFirst(aggName)}ExternHandlers } from "../domain/${lowerFirst(aggName)}-extern";`,
+    );
+  }
+  if (voEnumReferenced.length > 0) {
+    imports.push(`import { ${voEnumReferenced.join(", ")} } from "../domain/value-objects";`);
+  }
+
+  return [...imports, "", ...body].join("\n") + "\n";
 }
 
 function emitWorkflowRoute(
@@ -299,10 +333,10 @@ function renderStmt(
         return [
           `${indent}${st.target}.${checkName}(${args});`,
           `${indent}{`,
-          `${indent}  const __handler = ${externAlias}.${handlerKey};`,
-          `${indent}  if (!__handler) throw new Error("Missing extern handler for ${handlerKey}.  Register one before app.listen().");`,
+          `${indent}  const handler = ${externAlias}.${handlerKey};`,
+          `${indent}  if (!handler) throw new Error("Missing extern handler for ${handlerKey}.  Register one before app.listen().");`,
           `${indent}  try {`,
-          `${indent}    await __handler(${st.target}, ${reqLiteral});`,
+          `${indent}    await handler(${st.target}, ${reqLiteral});`,
           `${indent}  } catch (err) {`,
           `${indent}    if (err instanceof DomainError) throw err;`,
           `${indent}    if (err instanceof ForbiddenError) throw err;`,

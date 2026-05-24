@@ -1,9 +1,8 @@
 // Auto-generated.
 import * as Ids from "./ids";
-import { Money } from "./value-objects";
+import type { Money } from "./value-objects";
 import type * as Events from "./events";
 import { DomainError } from "./errors";
-
 
 export class Product {
   private _id: Ids.ProductId;

@@ -1523,7 +1523,9 @@ config :${appName}, ${appModule}.Repo,
   pool_size: 10
 
 config :${appName}, ${appModule}Web.Endpoint,
-  http: [ip: {127, 0, 0, 1}, port: ${port}],
+  # PORT env var overrides the dev default so test harnesses + parallel
+  # dev workflows can avoid port collisions without editing this file.
+  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "${port}")],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,

@@ -297,6 +297,11 @@ function renderLiteral(kind: string, value: string): string {
     case "int":
     case "decimal":
       return value;
+    case "money":
+      // Money literal as an Elixir Decimal.new("…") call; the HEEx
+      // template embeds it via `<%= … %>` so the precise value is
+      // rendered as the canonical decimal string at request time.
+      return `Decimal.new(${JSON.stringify(value)})`;
     case "bool":
       return value === "true" ? "true" : "false";
     case "null":
@@ -931,7 +936,15 @@ function renderFieldInputForField(f: { name: string; type: TypeIR }, formAssign 
   const label = humanize(f.name);
   const inputType = htmlInputTypeForIRType(f.type);
   const isDecimal = f.type.kind === "primitive" && f.type.name === "decimal";
-  const extraAttrs = isDecimal ? ` step="0.01"` : "";
+  const isMoney = f.type.kind === "primitive" && f.type.name === "money";
+  // money fields render as text inputs with a decimal-format pattern
+  // — number inputs can carry "1e10" notation that's lossy on parse;
+  // text + pattern preserves the precise string the wire expects.
+  const extraAttrs = isDecimal
+    ? ` step="0.01"`
+    : isMoney
+      ? ` pattern="^-?\\d+(\\.\\d+)?$" inputmode="decimal"`
+      : "";
   return `<.input field={@${formAssign}[:${fieldName}]} type="${inputType}" label="${label}"${extraAttrs} />`;
 }
 
@@ -948,6 +961,8 @@ function htmlInputTypeForIRType(t: TypeIR): string {
     case "long":
     case "decimal":
       return "number";
+    case "money":
+      return "text";
     case "bool":
       return "checkbox";
     case "datetime":
@@ -1510,6 +1525,8 @@ export function defaultInitFor(t: TypeIR): string {
         case "long":
         case "decimal":
           return "0";
+        case "money":
+          return `Decimal.new("0")`;
         case "bool":
           return "false";
         case "string":

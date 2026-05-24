@@ -166,6 +166,134 @@ context Sales with audit, softDelete {
     expect(unfolded).toMatch(/filter for "softDeletable" !this\.isDeleted/);
   });
 
+  it("threads ref-list args through unfold (scaffold with modules: [Sales])", async () => {
+    // Regression: pre-fix, unfold ran the macro with empty `{}`
+    // args, so `scaffold(modules: [Sales])` recorded no invocations.
+    // After the resolveMacroArgs wiring + the scaffold-family
+    // refactor, the top-level macro fans `scaffoldModule(of: Sales)`
+    // via `invokeMacro` — which the one-level unfold turns into a
+    // `with scaffoldModule(of: Sales)` clause on the ui.
+    const source = `
+system Demo {
+  module Sales {
+    context S {
+      aggregate Order {
+        subject: string
+      }
+      repository Orders for Order { }
+    }
+  }
+  ui Admin with scaffold(modules: [Sales]) { }
+}
+`;
+    const unfolded = await unfold(source, "scaffold");
+    // The composer call is gone, replaced by the per-module child:
+    expect(unfolded).not.toMatch(/with scaffold\(/);
+    expect(unfolded).toMatch(/with scaffoldModule\(of: Sales\)/);
+    // The shared index pages (direct emissions) get inlined:
+    expect(unfolded).toMatch(/page Home/);
+    // NOT flattened all the way — per-aggregate pages stay opaque
+    // behind the scaffoldModule call; users drill further if they
+    // want the OrderList/OrderDetail breakdown.
+    expect(unfolded).not.toMatch(/page OrderList/);
+    expect(unfolded).not.toMatch(/page OrderDetail/);
+  });
+
+  it("scaffold composability lets users drill to single-aggregate granularity", async () => {
+    // Three-level drill: scaffold(modules: [Sales]) →
+    // scaffoldModule(of: Sales) → scaffoldContext(of: S) →
+    // scaffoldAggregate(of: Order) → raw page declarations.  Proves
+    // the composer chain lets users materialise just one aggregate's
+    // scaffold while leaving the rest of the UI under macros.
+    const source = `
+system Demo {
+  module Sales {
+    context S {
+      aggregate Order {
+        subject: string
+      }
+      repository Orders for Order { }
+    }
+  }
+  ui Admin with scaffold(modules: [Sales]) { }
+}
+`;
+    let result = await unfold(source, "scaffold");
+    expect(result).toMatch(/with scaffoldModule\(of: Sales\)/);
+    result = await unfold(result, "scaffoldModule");
+    expect(result).toMatch(/with scaffoldContext\(of: S\)/);
+    result = await unfold(result, "scaffoldContext");
+    expect(result).toMatch(/with scaffoldAggregate\(of: Order\)/);
+    result = await unfold(result, "scaffoldAggregate");
+    // Final level: the three pages land as source.
+    expect(result).toMatch(/page OrderList/);
+    expect(result).toMatch(/page OrderNew/);
+    expect(result).toMatch(/page OrderDetail/);
+    // And the source re-parses cleanly:
+    const reparse = await validate(result);
+    expect(reparse.diagnostics.filter((d) => d.severity === 1)).toEqual([]);
+  });
+
+  it("unfolds `with softDeleteByDefault` one level into child `with` clauses", async () => {
+    // Composer macros like `*ByDefault` use `invokeMacro` to fan
+    // child macros across descendants.  Unfold is one-level: the
+    // composer is replaced by the child macro calls themselves
+    // (`with softDelete` on the context, `with softDeletable` on
+    // each aggregate) rather than the children's fully-expanded
+    // contributions.  The user can drill further by unfolding the
+    // children too.
+    const source = `
+context Sales with softDeleteByDefault {
+  aggregate Order {
+    subject: string
+  }
+  aggregate Customer {
+    name: string
+  }
+  repository Orders for Order { }
+  repository Customers for Customer { }
+}
+`;
+    const unfolded = await unfold(source, "softDeleteByDefault");
+    // The composer call is gone:
+    expect(unfolded).not.toMatch(/with softDeleteByDefault/);
+    // Replaced by `with softDelete` on the context:
+    expect(unfolded).toMatch(/context Sales with softDelete \{/);
+    // And `with softDeletable` on each aggregate:
+    expect(unfolded).toMatch(/aggregate Order with softDeletable \{/);
+    expect(unfolded).toMatch(/aggregate Customer with softDeletable \{/);
+    // NOT flattened — child contributions stay opaque at this level:
+    expect(unfolded).not.toMatch(/filter for "softDeletable"/);
+    expect(unfolded).not.toMatch(/implements "softDeletable"/);
+    expect(unfolded).not.toMatch(/isDeleted: bool/);
+    // Re-parses cleanly (running the macros gives the same end IR):
+    const reparse = await validate(unfolded);
+    expect(reparse.diagnostics.filter((d) => d.severity === 1)).toEqual([]);
+  });
+
+  it("unfold one level can be applied recursively to reach raw source", async () => {
+    // The composer test above proves shallow unfold.  This proves
+    // that the user can keep unfolding to drill all the way down:
+    // first softDeleteByDefault → `with softDelete` + `with
+    // softDeletable`, then unfold `softDelete` → the context filter
+    // lands at context level (and one `with softDeletable` remains).
+    const source = `
+context Sales with softDeleteByDefault {
+  aggregate Order {
+    subject: string
+  }
+}
+`;
+    let result = await unfold(source, "softDeleteByDefault");
+    expect(result).toMatch(/with softDelete/);
+    result = await unfold(result, "softDelete");
+    // After the second unfold, the filter materializes at the context:
+    expect(result).toMatch(/filter for "softDeletable" !this\.isDeleted/);
+    // And the aggregate still carries `with softDeletable` — the
+    // user can keep going if they want the field/op breakdown.
+    expect(result).toMatch(/aggregate Order with softDeletable/);
+  });
+
   it("does not offer unfold when cursor isn't on a macro call", async () => {
     const source = `
 context Sales {

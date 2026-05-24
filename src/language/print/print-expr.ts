@@ -30,6 +30,8 @@ export function printExpr(node: Expression): string {
       return String(node.value);
     case "DecLit":
       return node.value;
+    case "MoneyLit":
+      return `money(${JSON.stringify(node.value ?? "0")})`;
     case "BoolLit":
       return node.value;
     case "NullLit":

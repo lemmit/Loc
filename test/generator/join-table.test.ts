@@ -50,10 +50,10 @@ describe("reference-collection join tables (TS/Hono)", () => {
     expect(repo).toMatch(/Ids\.PokemonId\(r\.t\)/);
     // save: delete removed pairs, then upsert current rows carrying their
     // position so reorders persist
-    expect(repo).toMatch(/__toDeleteParty/);
-    expect(repo).toMatch(/ordinal: __i/);
+    expect(repo).toMatch(/toDeleteParty/);
+    expect(repo).toMatch(/ordinal: i/);
     expect(repo).toMatch(
-      /onConflictDoUpdate\(\{ target: \[schema\.trainerParty\.trainerId, schema\.trainerParty\.pokemonId\], set: \{ ordinal: __i \} \}\)/,
+      /onConflictDoUpdate\(\{ target: \[schema\.trainerParty\.trainerId, schema\.trainerParty\.pokemonId\], set: \{ ordinal: i \} \}\)/,
     );
   });
 

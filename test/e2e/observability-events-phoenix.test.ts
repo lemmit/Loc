@@ -105,7 +105,7 @@ const FIXTURE_DDD = `system PhxObs {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin { scaffold modules: Sales }
+  ui SalesAdmin with scaffold(modules: [Sales]) { }
   deployable phoenixApp {
     platform: phoenixLiveView
     modules: Sales
@@ -116,36 +116,72 @@ const FIXTURE_DDD = `system PhxObs {
 }
 `;
 
-describe.skipIf(!ENABLED || !hasDocker() || !hasElixir())(
+describe.skipIf(!ENABLED)(
   "generated Phoenix backend emits the observability catalog on stdout (LOOM_OBS_E2E_PHOENIX=1)",
   () => {
     it("boot + /health round-trip emits the catalog lifecycle + request bracket", async () => {
+      // Prerequisite check INSIDE the test (not in skipIf) so that
+      // LOOM_OBS_E2E_PHOENIX=1 with missing docker / mix fails loudly
+      // rather than passing silently — silent-skip would hide CI
+      // environment drift.  Docker is only required when no external
+      // postgres URL is supplied.
+      if (!process.env.LOOM_OBS_PG_URL && !hasDocker()) {
+        throw new Error(
+          "LOOM_OBS_E2E_PHOENIX=1 set but no LOOM_OBS_PG_URL was provided and " +
+            "the docker daemon is unreachable. " +
+            "Either supply LOOM_OBS_PG_URL=postgres://… (CI service container) " +
+            "or ensure docker is available for the local postgres sidecar.",
+        );
+      }
+      if (!hasElixir()) {
+        throw new Error(
+          "LOOM_OBS_E2E_PHOENIX=1 set but `mix` is not on PATH. " +
+            "The suite needs Erlang/OTP + Elixir. " +
+            "Add `erlef/setup-beam@v1` with `otp-version: '27.0'` and `elixir-version: '1.17.2'` to the workflow.",
+        );
+      }
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-obs-px-"));
       const dddPath = path.join(outDir, "phx-obs.ddd");
       fs.writeFileSync(dddPath, FIXTURE_DDD);
-      const pgPort = await freePort();
+      // Postgres source: either a workflow-supplied service container
+      // (set LOOM_OBS_PG_URL=postgres://postgres:postgres@127.0.0.1:5432
+      // and LOOM_OBS_PG_DB=phoenix_app — see .github/workflows/
+      // phoenix-obs-e2e.yml) or a throwaway docker container spun up
+      // here.  The workflow path is more reliable on GitHub-hosted
+      // runners: it uses the host network, pre-runs the healthcheck,
+      // and sidesteps the OOM-under-load failure mode where docker's
+      // postgres process gets killed mid-CREATE-DATABASE during
+      // mix's parallel compile.
+      const externalPgUrl = process.env.LOOM_OBS_PG_URL;
+      const externalPgDb = process.env.LOOM_OBS_PG_DB ?? "phoenix_app";
+      const useExternalPg = !!externalPgUrl;
+      const pgPort = useExternalPg
+        ? Number(new URL(externalPgUrl).port || "5432")
+        : await freePort();
       const appPort = await freePort();
       const pgContainer = `loom-obs-px-pg-${Date.now()}`;
       let mixChild: ReturnType<typeof spawn> | null = null;
       try {
-        // 1. Postgres sidecar.
-        execSync(
-          `docker run -d --rm --name ${pgContainer} ` +
-            `-e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=phoenix_app ` +
-            `-p ${pgPort}:5432 postgres:16-alpine`,
-          { stdio: "pipe", timeout: 60_000 },
-        );
-        // Wait pg ready.
-        const pgDeadline = Date.now() + 60_000;
-        while (Date.now() < pgDeadline) {
-          try {
-            execSync(`docker exec ${pgContainer} pg_isready -U postgres`, {
-              stdio: "pipe",
-              timeout: 5_000,
-            });
-            break;
-          } catch {
-            await new Promise((r) => setTimeout(r, 500));
+        // 1. Postgres sidecar (only when no external one supplied).
+        if (!useExternalPg) {
+          execSync(
+            `docker run -d --rm --name ${pgContainer} ` +
+              `-e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=${externalPgDb} ` +
+              `-p ${pgPort}:5432 postgres:16-alpine`,
+            { stdio: "pipe", timeout: 60_000 },
+          );
+          // Wait pg ready.
+          const pgDeadline = Date.now() + 60_000;
+          while (Date.now() < pgDeadline) {
+            try {
+              execSync(`docker exec ${pgContainer} pg_isready -U postgres`, {
+                stdio: "pipe",
+                timeout: 5_000,
+              });
+              break;
+            } catch {
+              await new Promise((r) => setTimeout(r, 500));
+            }
           }
         }
 
@@ -167,10 +203,14 @@ describe.skipIf(!ENABLED || !hasDocker() || !hasElixir())(
           shell: "/bin/bash",
         });
 
-        // 4. Set up the DB schema (Ash codegen + migrate against the
-        //    postgres sidecar).
-        const dbUrl = `ecto://postgres:postgres@127.0.0.1:${pgPort}/phoenix_app`;
-        execSync(`mix ash.setup --quiet`, {
+        // 4. Set up the DB schema.  Use ecto.create + ecto.migrate
+        //    rather than `mix ash.setup` — the latter additionally runs
+        //    `mix ash.codegen` which touches AshPostgres' ResourceGenerator
+        //    (Owl.IO prompts + Igniter.Inflex), neither of which add value
+        //    here (the project is already fully generated by the CLI in
+        //    step 3) and which can wedge under -d on a TTY-less CI runner.
+        const dbUrl = `ecto://postgres:postgres@127.0.0.1:${pgPort}/${externalPgDb}`;
+        execSync(`mix ecto.create && mix ecto.migrate`, {
           cwd: projDir,
           stdio: "pipe",
           env: { ...process.env, DATABASE_URL: dbUrl, MIX_ENV: "dev" },
@@ -286,7 +326,9 @@ describe.skipIf(!ENABLED || !hasDocker() || !hasElixir())(
           /* ignore */
         }
         try {
-          execSync(`docker rm -f ${pgContainer}`, { stdio: "pipe", timeout: 30_000 });
+          if (!useExternalPg) {
+            execSync(`docker rm -f ${pgContainer}`, { stdio: "pipe", timeout: 30_000 });
+          }
         } catch {
           /* ignore */
         }

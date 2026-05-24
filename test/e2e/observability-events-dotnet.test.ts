@@ -100,10 +100,28 @@ function parseCatalogLines(raw: string): DotnetLogLine[] {
   return out;
 }
 
-describe.skipIf(!ENABLED || !hasDocker() || !hasDotnet())(
+describe.skipIf(!ENABLED)(
   "generated .NET backend emits the observability catalog on stdout (LOOM_OBS_E2E_DOTNET=1)",
   () => {
     it("boot + /health round-trip emits the catalog lifecycle + request bracket", async () => {
+      // Prerequisite check INSIDE the test (not in skipIf) so that
+      // LOOM_OBS_E2E_DOTNET=1 with missing docker / dotnet fails
+      // loudly rather than passing silently — silent-skip would hide
+      // CI environment drift.
+      if (!hasDocker()) {
+        throw new Error(
+          "LOOM_OBS_E2E_DOTNET=1 set but docker daemon is unreachable. " +
+            "The suite needs docker for the postgres sidecar. " +
+            "Check the runner has docker enabled (GitHub-hosted ubuntu runners do by default).",
+        );
+      }
+      if (!hasDotnet()) {
+        throw new Error(
+          "LOOM_OBS_E2E_DOTNET=1 set but `dotnet` is not on PATH. " +
+            "The suite needs the .NET SDK 8+. " +
+            "Add `actions/setup-dotnet@v4` with `dotnet-version: '8.0.x'` to the workflow.",
+        );
+      }
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-obs-dn-"));
       const pgPort = await freePort();
       const appPort = await freePort();

@@ -36,6 +36,9 @@ export function prepareFormFieldVM(
     if (inner.name === "decimal") {
       return { template: "field-input-decimal", path, label, testId, errorExpr };
     }
+    if (inner.name === "money") {
+      return { template: "field-input-money", path, label, testId, errorExpr };
+    }
     if (inner.name === "bool") {
       return { template: "field-input-bool", path, label, testId, errorExpr };
     }

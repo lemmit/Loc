@@ -9,9 +9,16 @@ import type {
   ValueObject,
 } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
+// The playground re-exports the canonical primitive set the toolchain
+// declares — keeps the field-builder's type picker in lockstep with
+// the IR so a new primitive (e.g. `money` in #498) shows up here
+// automatically.
+import { PRIMITIVES, type PrimitiveName } from "../../../../src/ir/loom-ir.js";
 import { parseDdd } from "../parse";
 import { spliceNode } from "../edit-engine";
 import type { NodeKind } from "./model";
+
+export { PRIMITIVES, type PrimitiveName };
 
 // ---------------------------------------------------------------------------
 // Inline field editing for the Model builder's Property-bearing constructs
@@ -27,25 +34,6 @@ import type { NodeKind } from "./model";
 // expressions/views are resolved during IR lowering, not as Langium
 // cross-references, so they can't be safely tracked here.
 // ---------------------------------------------------------------------------
-
-export type PrimitiveName =
-  | "bool"
-  | "datetime"
-  | "decimal"
-  | "guid"
-  | "int"
-  | "long"
-  | "string";
-
-export const PRIMITIVES: PrimitiveName[] = [
-  "string",
-  "int",
-  "long",
-  "decimal",
-  "bool",
-  "datetime",
-  "guid",
-];
 
 export type BaseSpec =
   | { kind: "primitive"; name: PrimitiveName }

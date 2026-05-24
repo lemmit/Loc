@@ -33,7 +33,6 @@ import type {
   UnaryExpr,
 } from "../language/generated/ast.js";
 import { isProperty } from "../language/generated/ast.js";
-import type { OriginToken } from "./define.js";
 import {
   _currentOrigin,
   _setContainer,
@@ -66,7 +65,7 @@ const setContainer = _setContainer;
 /** A primitive type reference: `string`, `int`, `datetime`, etc.
  * Wraps the primitive in a `TypeRef` envelope as the parser does. */
 export function primType(
-  name: "bool" | "datetime" | "decimal" | "guid" | "int" | "long" | "string",
+  name: "bool" | "datetime" | "decimal" | "guid" | "int" | "long" | "money" | "string",
   opts: { array?: boolean; optional?: boolean } = {},
 ): TypeRef {
   const origin = currentOrigin();

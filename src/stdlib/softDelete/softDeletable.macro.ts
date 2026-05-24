@@ -6,8 +6,8 @@ import {
   nullLit,
   operation,
   primType,
-} from "../macro-api/index.js";
-import { boolLit, callExpr } from "../macro-api/ui-factories.js";
+} from "../../macro-api/index.js";
+import { boolLit, callExpr } from "../../macro-api/ui-factories.js";
 
 /** Aggregate-level state for the soft-delete capability.
  *

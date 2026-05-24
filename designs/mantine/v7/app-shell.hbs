@@ -82,10 +82,9 @@ export default function App() {
   // mobile app behaves.  Desktop is unaffected — the navbar isn't
   // collapsible above the `sm` breakpoint, so close() is a no-op there.
   const location = useLocation();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: close() from useDisclosure is reference-stable; intentionally omitted to avoid re-firing on unrelated re-renders.
   React.useEffect(() => {
     close();
-    // close() is stable from useDisclosure; depending on location
-    // alone keeps the effect from re-firing on unrelated re-renders.
   }, [location.pathname]);
   return (
     <AppShell
