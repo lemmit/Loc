@@ -210,6 +210,9 @@ export function domainToRequestExpr(domainExpr: string, t: TypeIR, ctx: BoundedC
 function csIsValueType(t: TypeIR): boolean {
   switch (t.kind) {
     case "primitive":
+      // `string` is the only reference-type primitive — others (int, long,
+      // decimal, bool, datetime, guid, money) lower to value types.
+      return t.name !== "string";
     case "id":
     case "enum":
       return true;

@@ -78,7 +78,7 @@ system DevPlatform {
                 visibility: Visibility
                 active: bool
                 sequence: long
-                externalId: guid
+                externalId: guid?
                 tags: string[]?
                 budget: decimal
                 createdAt: datetime
@@ -147,8 +147,7 @@ system DevPlatform {
                         visibility: Public,
                         active: true,
                         sequence: 1,
-                        externalId: "00000000-0000-0000-0000-000000000000",
-                        createdAt: "2024-01-01T00:00:00Z"
+                                createdAt: "2024-01-01T00:00:00Z"
                     })
                     expectThrows p.rename("")
                 }
@@ -168,8 +167,7 @@ system DevPlatform {
                     visibility: visibility,
                     active: true,
                     sequence: 0,
-                    externalId: "00000000-0000-0000-0000-000000000000",
-                    budget: 0.0,
+                        budget: 0.0,
                     createdAt: now()
                 })
                 proj.addPipeline("default")
