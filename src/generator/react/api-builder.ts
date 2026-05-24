@@ -1,8 +1,8 @@
 import { wireShapeFor } from "../../ir/enrichments.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/invariant-classify.js";
 import {
-  aggregateUsesMoney,
   type AggregateIR,
+  aggregateUsesMoney,
   type BoundedContextIR,
   type EntityPartIR,
   type EnumIR,

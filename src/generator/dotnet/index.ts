@@ -1,12 +1,14 @@
 import { enrichLoomModel } from "../../ir/enrichments.js";
 import type { BoundedContextIR, DeployableIR, RepositoryIR, SystemIR } from "../../ir/loom-ir.js";
 import { lowerModel } from "../../ir/lower.js";
+import type { MigrationsIR } from "../../ir/migrations-ir.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural } from "../../util/naming.js";
 import { generateReactForContexts } from "../react/index.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
+import { emitDotnetMigrations } from "./emit/migrations.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import {
   joinEntityName,
@@ -91,7 +93,7 @@ export function generateDotnet(
 export function generateDotnetForContexts(
   contexts: BoundedContextIR[],
   namespace?: string,
-  system?: { deployable: DeployableIR; sys: SystemIR },
+  system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
   options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
@@ -111,7 +113,7 @@ function emitProjectFromContexts(
   contexts: BoundedContextIR[],
   ns: string,
   out: Map<string, string>,
-  system?: { deployable: DeployableIR; sys: SystemIR },
+  system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
   emitTrace = false,
 ): void {
   // Fullstack-dotnet branch — when the deployable declares a `ui:`
@@ -183,11 +185,20 @@ function emitProjectFromContexts(
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
+  // Per-module Postgres migrations — empty `migrations` (legacy
+  // callers / non-system mode) → no-op.  Emitted before the project
+  // shell so Program.cs sees `hasMigrations` and adds the
+  // `Database.Migrate()` startup call.
+  const hasMigrations = !!(system?.migrations && system.migrations.length > 0);
+  if (hasMigrations) {
+    emitDotnetMigrations(system!.migrations!, ns, out);
+  }
   emitProject(merged, ns, out, {
     authRequired,
     usesValidators,
     usesStamping,
     hasEmbeddedSpa,
+    hasMigrations,
     emitTrace,
   });
   emitTestProject(merged, ns, out);
@@ -417,6 +428,7 @@ function emitProject(
     usesValidators?: boolean;
     usesStamping?: boolean;
     hasEmbeddedSpa?: boolean;
+    hasMigrations?: boolean;
     emitTrace?: boolean;
   },
 ): void {
@@ -424,6 +436,7 @@ function emitProject(
   const usesValidators = !!options?.usesValidators;
   const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
+  const hasMigrations = !!options?.hasMigrations;
   const emitTrace = !!options?.emitTrace;
   out.set(
     "Program.cs",
@@ -432,6 +445,7 @@ function emitProject(
       usesValidators,
       usesStamping,
       hasEmbeddedSpa,
+      hasMigrations,
       emitTrace,
     }),
   );

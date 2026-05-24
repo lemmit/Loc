@@ -109,6 +109,15 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
+// Apply pending EF Core migrations before serving traffic.  Idempotent —
+// EF tracks applied versions in the __EFMigrationsHistory table.  Runs
+// synchronously at startup so the schema is current on first request.
+using (var migrationScope = app.Services.CreateScope())
+{
+    var db = migrationScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
+}
+
 // Catalog server-lifecycle events.  Same event names + level Hono and
 // Phoenix emit so a cross-backend dashboard pivots on one identity.
 // A separate logger keeps these lines distinct from per-request

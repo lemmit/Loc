@@ -335,6 +335,34 @@ describe("phoenixLiveView pipeline", () => {
     expect(errors.some((e) => /'targets:'/.test(e.message))).toBe(true);
   });
 
+  it("emits an initial Ecto migration per table + a snapshot under .loom/", async () => {
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    // One createTable file per top-level aggregate (Customer).  The
+    // fixture has no contained parts on Customer, so just one .exs.
+    const exsFiles = [...files.keys()].filter((k) =>
+      /^phoenix_app\/priv\/repo\/migrations\/\d+_create_.*\.exs$/.test(k),
+    );
+    expect(exsFiles.length).toBeGreaterThanOrEqual(1);
+    const customerMig = exsFiles.find((k) => k.endsWith("_create_customers.exs"));
+    expect(customerMig, "customers migration emitted").toBeDefined();
+    const body = files.get(customerMig!)!;
+    expect(body).toMatch(/defmodule PhoenixApp\.Repo\.Migrations\.CreateCustomers do/);
+    expect(body).toMatch(/use Ecto\.Migration/);
+    expect(body).toMatch(/create table\(:customers, primary_key: false\) do/);
+    expect(body).toMatch(/add :id, :uuid, primary_key: true, null: false/);
+    // Money is a valueobject, lowers to a :map column.
+    expect(body).toMatch(/add :credit_limit, :map, null: false/);
+    expect(body).toMatch(/timestamps\(\)/);
+
+    // Snapshot file at .loom/snapshots/<module>.snapshot.json.
+    const snap = files.get(".loom/snapshots/Sales.snapshot.json");
+    expect(snap, "snapshot json present").toBeDefined();
+    const parsed = JSON.parse(snap!);
+    expect(parsed.tables.map((t: { name: string }) => t.name)).toContain("customers");
+    expect(parsed.lastVersion).toBe("20260101000000");
+  });
+
   it("rejects platform: phoenixLiveView paired with framework: react", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pliv-fw-"));
     const file = path.join(dir, "fw.ddd");

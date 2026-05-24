@@ -21,6 +21,7 @@ import { generateTypeScript } from "../platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
 import { generateSystemsFromLoom } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
+import { fsSnapshotStore } from "../system/snapshot.js";
 import {
   renderVerdictGraph,
   renderVerificationJson,
@@ -272,7 +273,15 @@ async function runGenerate(
 
   let files: Map<string, string>;
   if (target === "system") {
-    files = generateSystemsFromLoom(loom, { emitTrace: options.emitTrace }).files;
+    // Diff each module's current schema against the snapshot the LAST
+    // regen wrote into `.loom/snapshots/` (under `outDir`).  Fresh
+    // output dirs ⇒ `fsSnapshotStore.read` returns null ⇒ initial
+    // migration; existing snapshots ⇒ delta migration when the source
+    // moves.  See `docs/migrations-design.md`.
+    files = generateSystemsFromLoom(loom, {
+      emitTrace: options.emitTrace,
+      snapshots: fsSnapshotStore(outDir),
+    }).files;
     if (files.size === 0) {
       console.error(
         `No \`system\` block declared in ${file}.  Use \`generate ts\` or \`generate dotnet\` for legacy single-deployable sources.`,

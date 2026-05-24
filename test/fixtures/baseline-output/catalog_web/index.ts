@@ -4,6 +4,7 @@ import pg from "pg";
 import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { baseLogger } from "./obs/log";
 
 // Fail fast on a missing DATABASE_URL.  Without this an unset value
@@ -32,6 +33,12 @@ pool.on("error", (err) => {
   });
 });
 const db = drizzle(pool, { schema });
+
+// Apply pending schema migrations before serving traffic.  Drizzle's
+// runtime migrator reads db/migrations/meta/_journal.json + each
+// referenced .sql file, tracking state in `__drizzle_migrations`;
+// idempotent across boots.
+await migrate(db, { migrationsFolder: "./db/migrations" });
 const app = createApp(db);
 const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });
