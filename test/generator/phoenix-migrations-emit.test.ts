@@ -27,7 +27,6 @@ describe("phoenix migrations-emit — delta path", () => {
   it("renders one alter table block per addColumn step", () => {
     const ir: MigrationsIR = {
       module: "Sales",
-      ownerDeployable: "phoenixApp",
       storageName: "",
       baseline: EMPTY_SNAP,
       next: EMPTY_SNAP,
@@ -53,7 +52,6 @@ describe("phoenix migrations-emit — delta path", () => {
   it("renders references(...) for an FK-carrying addColumn", () => {
     const ir: MigrationsIR = {
       module: "Sales",
-      ownerDeployable: "phoenixApp",
       storageName: "",
       baseline: EMPTY_SNAP,
       next: EMPTY_SNAP,
@@ -78,7 +76,6 @@ describe("phoenix migrations-emit — delta path", () => {
   it("renders dropColumn / dropTable / addIndex steps", () => {
     const ir: MigrationsIR = {
       module: "Sales",
-      ownerDeployable: "phoenixApp",
       storageName: "",
       baseline: EMPTY_SNAP,
       next: EMPTY_SNAP,
@@ -100,10 +97,35 @@ describe("phoenix migrations-emit — delta path", () => {
     expect(body).toMatch(/create index\(:orders, \[:status\]\)/);
   });
 
+  it("modifies a column with its current type on a nullability flip", () => {
+    // Ecto's `modify` requires the type to be re-stated even when only
+    // nullability changes — the step carries it so the emitter doesn't
+    // have to guess (the pre-fix bug hardcoded `:text`, silently
+    // converting the column's type).
+    const ir: MigrationsIR = {
+      module: "Sales",
+      storageName: "",
+      baseline: EMPTY_SNAP,
+      next: EMPTY_SNAP,
+      steps: [
+        {
+          op: "alterColumnNullable",
+          table: "orders",
+          name: "total",
+          type: { kind: "int" },
+          nullable: true,
+        },
+      ],
+      version: "20260101000010",
+      name: "MakeTotalOptional",
+    };
+    const body = emit(ir).get("priv/repo/migrations/20260101000010_make_total_optional.exs")!;
+    expect(body).toMatch(/modify :total, :integer, null: true/);
+  });
+
   it("is a no-op when steps is empty", () => {
     const ir: MigrationsIR = {
       module: "Sales",
-      ownerDeployable: "phoenixApp",
       storageName: "",
       baseline: EMPTY_SNAP,
       next: EMPTY_SNAP,
@@ -118,7 +140,6 @@ describe("phoenix migrations-emit — delta path", () => {
   it("renders initial-migration createTable steps as one file per top-level table", () => {
     const ir: MigrationsIR = {
       module: "Sales",
-      ownerDeployable: "phoenixApp",
       storageName: "",
       baseline: null,
       next: EMPTY_SNAP,

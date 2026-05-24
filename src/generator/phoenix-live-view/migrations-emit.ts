@@ -210,7 +210,7 @@ function renderEctoStep(step: MigrationStep): string[] {
     case "alterColumnNullable":
       return [
         `alter table(:${step.table}) do`,
-        `  modify :${step.name}, ${ectoColumnType({ kind: "text" })}, null: ${step.nullable}`,
+        `  modify :${step.name}, ${ectoColumnType(step.type)}, null: ${step.nullable}`,
         `end`,
       ];
     case "alterColumnType":

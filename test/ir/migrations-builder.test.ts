@@ -169,7 +169,13 @@ describe("diffSchema", () => {
     }));
     const steps = diffSchema(prev, next);
     expect(steps).toEqual([
-      { op: "alterColumnNullable", table: "orders", name: "total", nullable: false },
+      {
+        op: "alterColumnNullable",
+        table: "orders",
+        name: "total",
+        type: { kind: "int" },
+        nullable: false,
+      },
     ]);
   });
 

@@ -21,7 +21,12 @@ import {
   renderSequenceDiagram,
   renderWorkflowDiagram,
 } from "./mermaid.js";
-import { memorySnapshotStore, type SnapshotStore, serializeSnapshot } from "./snapshot.js";
+import {
+  memorySnapshotStore,
+  type SnapshotStore,
+  serializeSnapshot,
+  snapshotRelPath,
+} from "./snapshot.js";
 import { renderTraceabilityArtifacts } from "./traceability.js";
 import { renderUIE2EFile } from "./ui-e2e-render.js";
 import { renderWireSpec } from "./wire-spec.js";
@@ -110,7 +115,7 @@ function emitSystem(
   // modules where `module.migrationsOwner` is set.
   const migrations = buildMigrations(sys, options.snapshots);
   for (const m of migrations) {
-    out.set(`.loom/snapshots/${m.module}.snapshot.json`, serializeSnapshot(m.next));
+    out.set(snapshotRelPath(m.module), serializeSnapshot(m.next));
   }
 
   for (const d of sys.deployables) {

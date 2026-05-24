@@ -125,6 +125,7 @@ function diffTable(prev: TableShape, next: TableShape, steps: MigrationStep[]): 
         op: "alterColumnNullable",
         table: next.name,
         name: c.name,
+        type: c.type,
         nullable: c.nullable,
       });
     }

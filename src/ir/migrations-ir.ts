@@ -81,7 +81,7 @@ export type MigrationStep =
   | { op: "dropTable"; name: string }
   | { op: "addColumn"; table: string; column: ColumnShape; fk?: FKShape }
   | { op: "dropColumn"; table: string; name: string }
-  | { op: "alterColumnNullable"; table: string; name: string; nullable: boolean }
+  | { op: "alterColumnNullable"; table: string; name: string; type: ColumnType; nullable: boolean }
   | { op: "alterColumnType"; table: string; name: string; from: ColumnType; to: ColumnType }
   | { op: "addIndex"; index: IndexShape }
   | { op: "dropIndex"; table: string; name: string };
