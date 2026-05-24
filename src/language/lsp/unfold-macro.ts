@@ -1,20 +1,32 @@
 // Unfold a `with X(...)` macro call into its expanded source.
 //
+// Unfold is **one level only**: when the macro composes child macros
+// via `invokeMacro` (e.g. `softDeleteByDefault` runs `softDelete` on
+// the context and `softDeletable` on each child aggregate), those
+// children are NOT executed.  Instead, each `invokeMacro` call
+// becomes a `with <child>(...)` clause on its target.  The user can
+// drill further by unfolding those children too.
+//
 // Computes a workspace edit that:
 //   1. Invokes the macro's `expand()` against its host.
-//   2. Groups returned nodes by destination (most go to the host;
-//      cross-level macros like `softDeleteByDefault` route some
-//      nodes into descendant aggregates via `invokeMacro`).
-//   3. Prints each group through the structural printer.
-//   4. Inserts the printed text into the right host's body, just
-//      before the closing `}`.
-//   5. Removes the macro from the calling `with X, Y, Z` clause
-//      (or the whole `with` clause if X was the only one).
+//   2. Records every `invokeMacro(child, { target })` call without
+//      executing the child — these become `with child` clause edits
+//      on the target.
+//   3. Groups the macro's directly-returned nodes by destination
+//      (only the host for normal macros; descendants too if a future
+//      macro emits direct cross-level nodes without invokeMacro).
+//   4. Prints each direct-node group through the structural printer
+//      and inserts the text into the right host's body, just before
+//      the closing `}`.
+//   5. Rewrites the host's `with X, Y, Z` clause atomically: removes
+//      the unfolded call, splices in any new `with child` entries
+//      from invocations targeting the host, strips the whole clause
+//      if empty.
 //
 // Macros become demonstrably sugar — any user can unfold and edit
 // the result without reading the macro source.  Combined with the
 // structural printer roundtrip guarantees from the print-roundtrip
-// test, the unfolded output re-parses to the same IR as the macro.
+// test, the unfolded output re-parses to a working program.
 
 import type { LangiumDocument } from "langium";
 import type { TextEdit } from "vscode-languageserver";
@@ -63,11 +75,11 @@ export function unfoldMacro(document: LangiumDocument, call: MacroCall): UnfoldR
     callNode: call,
   };
 
-  // Provide a `invokeMacro` that propagates destination tags the
-  // same way the real expander does.  Catches cross-level macros
-  // like `softDeleteByDefault` so their returned nodes carry the
-  // right destination for splicing into multiple AST locations.
-  const invokeMacro = makeInvokeMacro(origin);
+  // Record `invokeMacro(child, { target })` calls instead of running
+  // them.  Each recording becomes a `with child` clause on its target
+  // — that's the one-level unfold semantics.
+  const invocations: InvocationRecord[] = [];
+  const invokeMacro = makeRecordingInvokeMacro(invocations);
 
   let produced: ReadonlyArray<unknown>;
   try {
@@ -83,7 +95,10 @@ export function unfoldMacro(document: LangiumDocument, call: MacroCall): UnfoldR
     return undefined;
   }
 
-  // Flatten one level, group by destination AST node.
+  // Flatten one level, group directly-returned nodes by destination
+  // AST node.  `invokeMacro` no longer contributes nodes here (it
+  // returned []), so this map holds only the macro's own direct
+  // emissions — e.g. `softDelete` returns one `FilterDecl`.
   const byDest = new Map<object, unknown[]>();
   for (const item of produced) {
     const items = Array.isArray(item) ? item : [item];
@@ -105,10 +120,50 @@ export function unfoldMacro(document: LangiumDocument, call: MacroCall): UnfoldR
     if (insertEdit) edits.push(insertEdit);
   }
 
-  const removeEdit = buildMacroCallRemovalEdit(document, call);
-  if (removeEdit) edits.push(removeEdit);
+  // Group recorded invocations by target so all `with`-clause
+  // additions to the same target produce a single comma-separated
+  // edit (rather than colliding zero-width inserts at the same
+  // offset).
+  const invocationsByTarget = new Map<object, InvocationRecord[]>();
+  for (const r of invocations) {
+    const list = invocationsByTarget.get(r.target) ?? [];
+    list.push(r);
+    invocationsByTarget.set(r.target, list);
+  }
+
+  // Host-clause edit: rewrite the host's `with X, Y, Z` clause
+  // atomically as (existing calls minus the one being unfolded)
+  // plus (new entries from invocations targeting host).  Doing this
+  // as one replace avoids the comma-collision bug that would happen
+  // if we appended `, child` and then separately removed the macro
+  // call when it was the sole call in the clause.
+  const hostClauseEdit = buildHostClauseRewriteEdit(
+    document,
+    host,
+    call,
+    invocationsByTarget.get(host) ?? [],
+  );
+  if (hostClauseEdit) edits.push(hostClauseEdit);
+
+  // Non-host targets (e.g. child aggregates for `softDeleteByDefault`)
+  // get their `with child` added via the simpler append path — they
+  // aren't entangled with the call-removal logic above.
+  for (const [target, recs] of invocationsByTarget) {
+    if (target === host) continue;
+    const edit = buildWithClauseInsertEdit(document, target, recs);
+    if (edit) edits.push(edit);
+  }
 
   return { title: `Unfold macro '${call.name}'`, edits };
+}
+
+/** Recording of a single `invokeMacro(...)` call made by the macro
+ * being unfolded.  Translated into a `with <childName>(...)` clause
+ * on the target during edit generation. */
+interface InvocationRecord {
+  childName: string;
+  target: object;
+  args?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,40 +200,17 @@ function bindArgsForUnfold(
   return resolveMacroArgs(macro, call, model) ?? {};
 }
 
-/** Mirrors the expander's invokeMacro: looks up the named macro,
- * runs expand() against the passed target, tags each returned node
- * with $destination so downstream grouping routes correctly. */
-function makeInvokeMacro(origin: OriginToken) {
+/** Recording `invokeMacro` — appends the call to a shared list and
+ * returns `[]` so the composer's `.flatMap(...)` / spread patterns
+ * yield no nodes for the splice path.  The recorded calls drive
+ * `with <child>(...)` insertions on the targets in a separate pass. */
+function makeRecordingInvokeMacro(records: InvocationRecord[]) {
   return (
     childName: string,
     opts: { target: object; args?: Record<string, unknown> },
   ): unknown[] => {
-    const child = lookupMacro(childName);
-    if (!child) return [];
-    let produced: ReadonlyArray<unknown> = [];
-    try {
-      produced = _withOrigin(origin, () =>
-        child.expand({
-          target: opts.target as never,
-          args: (opts.args ?? {}) as never,
-          origin,
-          invokeMacro: makeInvokeMacro(origin),
-        }),
-      );
-    } catch {
-      return [];
-    }
-    const flat: unknown[] = [];
-    for (const item of produced) {
-      const items = Array.isArray(item) ? item : [item];
-      for (const node of items) {
-        if (node && typeof node === "object") {
-          (node as Record<string, unknown>)[DEST_PROP] = opts.target;
-          flat.push(node);
-        }
-      }
-    }
-    return flat;
+    records.push({ childName, target: opts.target, args: opts.args });
+    return [];
   };
 }
 
@@ -240,70 +272,156 @@ function buildInsertEdit(
   };
 }
 
-/** Build a TextEdit that removes this MacroCall from its
- * containing WithClause.  Handles three cases:
- *   - Only macro in the clause → remove the whole `with X` text
- *   - First / last macro in a list → remove the call + its comma
- *   - Middle macro → remove the call + its trailing comma
- * Returns undefined if the CST range can't be located. */
-function buildMacroCallRemovalEdit(
+/** Replace the host's existing `with` clause atomically with the
+ * post-unfold composition: (other calls in the clause, preserved
+ * verbatim) + (new entries from invocations targeting host).  If
+ * the result is empty (no other calls, no host invocations), the
+ * whole clause is removed (including its leading whitespace). */
+function buildHostClauseRewriteEdit(
   document: LangiumDocument,
-  call: MacroCall,
+  host: Aggregate | Ui | BoundedContext,
+  callBeingUnfolded: MacroCall,
+  hostInvocations: InvocationRecord[],
 ): TextEdit | undefined {
-  const callCst = (call as { $cstNode?: { range: { start: unknown; end: unknown } } }).$cstNode;
-  if (!callCst) return undefined;
-  const withClause = call.$container as WithClause;
-  const calls = withClause.calls ?? [];
-  // Only call in the clause → remove the whole `with X` text.
-  if (calls.length === 1) {
-    const wcCst = (withClause as { $cstNode?: { range: { start: unknown; end: unknown } } })
-      .$cstNode;
-    if (!wcCst) return undefined;
-    // Include the leading whitespace before `with` to keep the
-    // source clean.  Find the previous non-whitespace char.
-    const text = document.textDocument.getText();
-    const startOffset = document.textDocument.offsetAt(wcCst.range.start as never);
-    let trimStart = startOffset;
+  const withClause = callBeingUnfolded.$container as WithClause;
+  const wcCst = (
+    withClause as {
+      $cstNode?: {
+        range: {
+          start: { line: number; character: number };
+          end: { line: number; character: number };
+        };
+      };
+    }
+  ).$cstNode;
+  if (!wcCst) return undefined;
+  const text = document.textDocument.getText();
+
+  // Preserve other existing call source verbatim — keeps any
+  // user-formatted args intact across the rewrite.
+  const otherCallTexts: string[] = [];
+  for (const c of withClause.calls ?? []) {
+    if (c === callBeingUnfolded) continue;
+    const cCst = (
+      c as {
+        $cstNode?: {
+          range: {
+            start: { line: number; character: number };
+            end: { line: number; character: number };
+          };
+        };
+      }
+    ).$cstNode;
+    if (!cCst) continue;
+    const startOff = document.textDocument.offsetAt(cCst.range.start);
+    const endOff = document.textDocument.offsetAt(cCst.range.end);
+    otherCallTexts.push(text.slice(startOff, endOff));
+  }
+  const newCallTexts = hostInvocations.map((r) => renderMacroCallSyntax(r.childName, r.args));
+  const allCalls = [...otherCallTexts, ...newCallTexts];
+
+  if (allCalls.length === 0) {
+    // Whole `with X` becomes empty — strip the clause along with its
+    // leading whitespace (matches the existing removal behavior).
+    const startOff = document.textDocument.offsetAt(wcCst.range.start);
+    let trimStart = startOff;
     while (trimStart > 0 && (text[trimStart - 1] === " " || text[trimStart - 1] === "\t")) {
       trimStart--;
     }
     return {
       range: {
         start: document.textDocument.positionAt(trimStart),
-        end: wcCst.range.end as never,
+        end: wcCst.range.end,
       },
       newText: "",
     };
   }
-  // Multi-call clause → remove this call + its adjacent comma.
-  const idx = calls.indexOf(call);
-  const text = document.textDocument.getText();
-  const callStart = document.textDocument.offsetAt(callCst.range.start as never);
-  const callEnd = document.textDocument.offsetAt(callCst.range.end as never);
-  let removeStart = callStart;
-  let removeEnd = callEnd;
-  if (idx === 0) {
-    // First in list: remove call + trailing comma + space.
-    let scan = removeEnd;
-    while (scan < text.length && text[scan] !== ",") scan++;
-    if (text[scan] === ",") removeEnd = scan + 1;
-    while (removeEnd < text.length && text[removeEnd] === " ") removeEnd++;
-  } else {
-    // Not first: remove preceding comma + spaces + call.
-    let scan = removeStart - 1;
-    while (scan > 0 && (text[scan] === " " || text[scan] === "\t")) scan--;
-    if (text[scan] === ",") removeStart = scan;
-    while (removeStart > 0 && (text[removeStart - 1] === " " || text[removeStart - 1] === "\t")) {
-      removeStart--;
-    }
-  }
+  void host;
   return {
-    range: {
-      start: document.textDocument.positionAt(removeStart),
-      end: document.textDocument.positionAt(removeEnd),
-    },
-    newText: "",
+    range: { start: wcCst.range.start, end: wcCst.range.end },
+    newText: `with ${allCalls.join(", ")}`,
   };
+}
+
+/** Build a TextEdit that adds (or extends) a `with <child>, ...`
+ * clause on `target`'s declaration head, one entry per recording.
+ *
+ *   - No existing clause: insert ` with A, B` just before the `{`.
+ *   - Existing clause with N calls: append `, A, B` after the last
+ *     call.
+ *
+ * Returns undefined if the target's CST node can't be located. */
+function buildWithClauseInsertEdit(
+  document: LangiumDocument,
+  target: object,
+  records: InvocationRecord[],
+): TextEdit | undefined {
+  const callsSyntax = records.map((r) => renderMacroCallSyntax(r.childName, r.args)).join(", ");
+  const existing = (target as { withClause?: WithClause }).withClause;
+  if (existing && (existing.calls ?? []).length > 0) {
+    const calls = existing.calls ?? [];
+    const lastCall = calls[calls.length - 1]!;
+    const lastCst = (
+      lastCall as { $cstNode?: { range: { end: { line: number; character: number } } } }
+    ).$cstNode;
+    if (!lastCst) return undefined;
+    return {
+      range: { start: lastCst.range.end, end: lastCst.range.end },
+      newText: `, ${callsSyntax}`,
+    };
+  }
+  const cst = (target as { $cstNode?: { range: { start: { line: number; character: number } } } })
+    .$cstNode;
+  if (!cst) return undefined;
+  // Find the `{` that opens this target's body; the `with` clause
+  // goes immediately before it.  Walk forward from the target's
+  // start until we hit `{`, then back over any trailing whitespace.
+  const text = document.textDocument.getText();
+  const startOffset = document.textDocument.offsetAt(cst.range.start);
+  let braceOffset = startOffset;
+  while (braceOffset < text.length && text[braceOffset] !== "{") braceOffset++;
+  if (text[braceOffset] !== "{") return undefined;
+  let insertOffset = braceOffset;
+  while (
+    insertOffset > startOffset &&
+    (text[insertOffset - 1] === " " || text[insertOffset - 1] === "\t")
+  ) {
+    insertOffset--;
+  }
+  const insertPos = document.textDocument.positionAt(insertOffset);
+  return {
+    range: { start: insertPos, end: insertPos },
+    newText: ` with ${callsSyntax}`,
+  };
+}
+
+/** Render a macro call back to source syntax: `name` for no args,
+ * `name(k: v, ...)` for args.  Mirrors the macro-call grammar in
+ * `src/language/ddd.langium`. */
+function renderMacroCallSyntax(name: string, args?: Record<string, unknown>): string {
+  const entries = Object.entries(args ?? {}).filter(([, v]) => v !== undefined);
+  if (entries.length === 0) return name;
+  const argSyntax = entries.map(([k, v]) => `${k}: ${renderArgValue(v)}`).join(", ");
+  return `${name}(${argSyntax})`;
+}
+
+/** Render an arg value to its source-side representation.  Handles
+ * the primitive shapes the grammar supports (string / bool / int /
+ * ref / refList) plus resolved AST-node refs (which carry `.name`). */
+function renderArgValue(v: unknown): string {
+  if (typeof v === "string") return JSON.stringify(v);
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "number") return String(v);
+  if (Array.isArray(v)) return `[${v.map(renderArgValue).join(", ")}]`;
+  if (
+    v &&
+    typeof v === "object" &&
+    "name" in v &&
+    typeof (v as { name: unknown }).name === "string"
+  ) {
+    return (v as { name: string }).name;
+  }
+  return "?";
 }
 
 /** Indent every line of `text` by `prefix`. */
