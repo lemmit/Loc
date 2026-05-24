@@ -6,7 +6,7 @@ import {
   operation,
   param,
   primType,
-  writableUserFields,
+  writableUpdateFields,
 } from "../macro-api/index.js";
 
 /** Adds standardised CRUD-style operations to an aggregate, built
@@ -23,13 +23,18 @@ import {
  * generator to emit an `Input` value object alongside the aggregate;
  * see the `needsCrudInput` flag).
  *
- * "Writable user fields" means: declared Properties on the
- * aggregate that were NOT contributed by another macro.  This is
- * the deduplication the conversation worried about — `auditable`
- * adds `createdAt` etc., but they shouldn't appear on the update
- * surface because the audit interceptor (Phase 2.5) stamps them
- * automatically.  Detection is by origin tag on the field node,
- * which only macro-emitted fields carry.
+ * "Writable update fields" means: declared Properties on the
+ * aggregate that are eligible to appear on a generic `update`
+ * operation.  Two filters AND together (see
+ * `writableUpdateFields` in `src/macro-api/factories.ts`):
+ *   1. Excludes fields contributed by another macro (origin-tag
+ *      check) — catches `createdAt` from `auditable`, `isDeleted`
+ *      from `softDeletable`, etc., regardless of access modifier.
+ *   2. Excludes fields whose `access` modifier puts them outside
+ *      the update payload (`immutable`, `managed`, `token`,
+ *      `internal`).  `secret` stays — write-only fields belong IN
+ *      update inputs.  This catches user-declared modifiers like
+ *      `field slug: string immutable` without involving any macro.
  *
  * Composition note: combining `crudish` with `softDeletable` would
  * conflict on `delete()` once that lands.  The v2 plan is to add
@@ -46,7 +51,7 @@ export default defineMacro({
     "Field-list iteration on the host validates that the macro mechanism " +
     "supports compile-time AST inspection of the target declaration.",
   expand({ target }) {
-    const fields = writableUserFields(target);
+    const fields = writableUpdateFields(target);
     // Per-field positional parameters; once input-type synthesis
     // lands this collapses to a single `input: <Name>Input` param.
     const params = fields.map((f) => param(f.name, cloneType(f.type)));

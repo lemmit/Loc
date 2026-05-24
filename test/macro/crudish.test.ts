@@ -102,6 +102,73 @@ describe("crudish stdlib macro", () => {
     );
   });
 
+  it.each([
+    ["immutable", "string"],
+    ["managed", "datetime"],
+    ["internal", "bool"],
+  ])("excludes user-declared fields marked %s from update params", async (modifier, ty) => {
+    const { model, errors } = await parseString(
+      wrap(`
+        module M { context C {
+          aggregate Order with crudish {
+            subject: string
+            ${modifier === "managed" ? `frozenAt` : modifier === "internal" ? `flag` : `slug`}: ${ty} ${modifier}
+          }
+        }}
+      `),
+    );
+    expect(errors).toEqual([]);
+    const agg = findAggregate(model, "Order");
+    const update = (agg.members ?? []).filter(isOperation).find((o) => o.name === "update")!;
+    const paramNames = update.params.map((p) => p.name);
+    // The restrictively-accessed field is filtered out of the update
+    // operation's params even though it was declared by the user (no
+    // origin tag).  The access filter in `writableUpdateFields`
+    // catches it independently.
+    expect(paramNames).toEqual(["subject"]);
+  });
+
+  it("excludes user-declared `token` field from update params", async () => {
+    // `token` separately so we satisfy the non-nullable validator
+    // (token forbids `T?`).  Tests the same access-filter path as
+    // the parametrized test above.
+    const { model, errors } = await parseString(
+      wrap(`
+        module M { context C {
+          aggregate Order with crudish {
+            subject: string
+            rev: int token
+          }
+        }}
+      `),
+    );
+    expect(errors).toEqual([]);
+    const agg = findAggregate(model, "Order");
+    const update = (agg.members ?? []).filter(isOperation).find((o) => o.name === "update")!;
+    expect(update.params.map((p) => p.name)).toEqual(["subject"]);
+  });
+
+  it("INCLUDES user-declared `secret` field in update params (write-only)", async () => {
+    // Regression bait: the easiest mistake when wiring the access
+    // filter is "exclude everything non-default."  `secret` is
+    // write-only — secrets go INTO update inputs (password changes,
+    // API key rotation, etc.) but never come back out in reads.
+    const { model, errors } = await parseString(
+      wrap(`
+        module M { context C {
+          aggregate Account with crudish {
+            handle: string
+            passwordHash: string secret
+          }
+        }}
+      `),
+    );
+    expect(errors).toEqual([]);
+    const agg = findAggregate(model, "Account");
+    const update = (agg.members ?? []).filter(isOperation).find((o) => o.name === "update")!;
+    expect(update.params.map((p) => p.name)).toEqual(["handle", "passwordHash"]);
+  });
+
   it("works with empty aggregate — no params, empty body, still emits update", async () => {
     const { model } = await parseString(
       wrap(`

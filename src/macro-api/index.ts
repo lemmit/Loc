@@ -8,6 +8,7 @@ export type {
   Aggregate,
   AggregateMember,
   BoundedContext,
+  FieldAccess,
   Module,
   Operation,
   Page,
@@ -55,7 +56,7 @@ export {
   thisRef,
   viewsIn,
   workflowsIn,
-  writableUserFields,
+  writableUpdateFields,
 } from "./factories.js";
 // UI-side factories — separate file because the surfaces don't
 // overlap and bundling everything into one file makes both harder
