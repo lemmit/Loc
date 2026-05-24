@@ -39,7 +39,7 @@ export class DddSemanticTokenProvider extends AbstractSemanticTokenProvider {
     acceptor: SemanticTokenAcceptor,
     // biome-ignore lint/suspicious/noConfusingVoidType: must match the
     // overridden AbstractSemanticTokenProvider.highlightElement signature.
-  ): undefined | "prune" {
+  ): void | "prune" {
     if (isAggregate(node) || isEntityPart(node)) {
       acceptor({ node, property: "name", type: SemanticTokenTypes.class });
     } else if (isValueObject(node)) {
