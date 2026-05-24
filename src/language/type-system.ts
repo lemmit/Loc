@@ -1,5 +1,6 @@
 import type { AstNode } from "langium";
 import { AstUtils } from "langium";
+import type { PrimitiveName } from "../ir/loom-ir.js";
 import type {
   Aggregate,
   BaseType,
@@ -54,7 +55,6 @@ import {
   isView,
   isWorkflow,
 } from "./generated/ast.js";
-import type { PrimitiveName } from "../ir/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Type representation
