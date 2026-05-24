@@ -36,6 +36,25 @@ export type PrimitiveName =
   | "datetime"
   | "guid";
 
+/** Canonical ordering for UI surfaces that enumerate primitives —
+ *  playground type picker, docs tables, completion provider, future
+ *  tooling.  Keeps related primitives adjacent (numeric block,
+ *  money-after-decimal so the precision contrast is visible, scalars
+ *  last) so the dropdown reads top-to-bottom by "most user-facing
+ *  first."  Sourced from here, not duplicated per-consumer, so a
+ *  future primitive addition shows up everywhere without touching
+ *  N call sites. */
+export const PRIMITIVES: readonly PrimitiveName[] = [
+  "string",
+  "int",
+  "long",
+  "decimal",
+  "money",
+  "bool",
+  "datetime",
+  "guid",
+] as const;
+
 /** Information-flow sensitivity tags carried by a value's type.  See
  * `docs/proposals/sensitivity-and-compliance.md`.  Mirror of
  * `SensitivityTags` in `src/language/type-system.ts`; kept as a sorted,

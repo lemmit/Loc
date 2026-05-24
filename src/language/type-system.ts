@@ -54,6 +54,7 @@ import {
   isView,
   isWorkflow,
 } from "./generated/ast.js";
+import type { PrimitiveName } from "../ir/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Type representation
@@ -80,15 +81,12 @@ export type DddType =
   | { kind: "never"; sensitivity?: SensitivityTags }
   | { kind: "unknown"; sensitivity?: SensitivityTags };
 
-export type PrimitiveName =
-  | "int"
-  | "long"
-  | "decimal"
-  | "money"
-  | "string"
-  | "bool"
-  | "datetime"
-  | "guid";
+// `PrimitiveName` is the canonical primitive-type set sourced from
+// `src/ir/loom-ir.ts` (the IR layer downstream consumes the same
+// union the type-system layer assigns names against — kept in one
+// place so a new primitive shows up in both without N parallel
+// updates).  See `experience_gathered.md` → "Adding a new primitive".
+export type { PrimitiveName };
 
 export const T = {
   prim: (name: PrimitiveName): DddType => ({ kind: "primitive", name }),
