@@ -17,9 +17,10 @@ import { upperFirst } from "../../../util/naming.js";
 // `dotnet ef migrations add` to compute diffs against the DbContext —
 // since Loom owns migration generation end-to-end, that tooling path
 // is never taken, and skipping the snapshot avoids a perpetually
-// stale stub.  `Program.cs` still suppresses
-// `PendingModelChangesWarning` defensively in case EF widens the
-// check to "no snapshot found".
+// stale stub.  EF's `PendingModelChangesWarning` is gated on a
+// snapshot existing in the migrations assembly; with no snapshot
+// class present, the warning has nothing to compare against and
+// stays silent (validated via `LOOM_DOTNET_BUILD=1 /warnaserror`).
 // ---------------------------------------------------------------------------
 
 export function emitDotnetMigrations(

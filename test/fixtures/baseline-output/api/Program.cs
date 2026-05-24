@@ -51,14 +51,7 @@ builder.Services.AddHttpLogging(opts =>
 });
 
 builder.Services.AddDbContext<AppDbContext>(opts =>
-{
-    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default"));
-    // Suppress PendingModelChangesWarning — our ModelSnapshot stub is
-    // intentionally empty (generator owns the schema source of truth
-    // via raw SQL in Migration.Up).  Without this, every startup logs
-    // an "EF Core has detected pending model changes" warning.
-    opts.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
-});
+    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
 
 // Mediator (martinothamar/Mediator) — source-generated, free to use.
 builder.Services.AddMediator(opts => opts.ServiceLifetime = ServiceLifetime.Scoped);

@@ -622,7 +622,7 @@ pipeline; the per-backend artefacts are:
 | --- | --- | --- |
 | Phoenix | `priv/repo/migrations/<ts>_<name>.exs` (Ecto DSL) | `mix ash.migrate` at boot via the existing release config |
 | Hono | `db/migrations/<version>_<name>.sql` + `db/migrations/meta/_journal.json` | Drizzle's runtime migrator: `await migrate(db, { migrationsFolder })` in `index.ts` reads the journal + .sql files, tracks state in `__drizzle_migrations`.  `npm run db:migrate` (drizzle-kit migrate) works out of band |
-| .NET | `Migrations/<Version>_<Name>.cs` (`migrationBuilder.Sql(@"...")`) + `Migrations/AppDbContextModelSnapshot.cs` | `db.Database.Migrate()` in `Program.cs` after `builder.Build()`; `PendingModelChangesWarning` is suppressed because the snapshot stub is empty by design |
+| .NET | `Migrations/<Version>_<Name>.cs` (`migrationBuilder.Sql(@"...")`) | `db.Database.Migrate()` in `Program.cs` after `builder.Build()`; no `ModelSnapshot` is emitted — Loom owns SQL generation, so `dotnet ef migrations add` is never run and the runtime migrator is happy without one |
 
 Phoenix stays in Ecto DSL because its output is Elixir.  Hono and
 .NET share `src/system/sql-pg.ts` for bit-identical Postgres DDL.
