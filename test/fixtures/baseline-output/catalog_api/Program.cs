@@ -51,7 +51,14 @@ builder.Services.AddHttpLogging(opts =>
 });
 
 builder.Services.AddDbContext<AppDbContext>(opts =>
-    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+{
+    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default"));
+    // Suppress PendingModelChangesWarning — our ModelSnapshot stub is
+    // intentionally empty (generator owns the schema source of truth
+    // via raw SQL in Migration.Up).  Without this, every startup logs
+    // an "EF Core has detected pending model changes" warning.
+    opts.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+});
 
 // Mediator (martinothamar/Mediator) — source-generated, free to use.
 builder.Services.AddMediator(opts => opts.ServiceLifetime = ServiceLifetime.Scoped);
@@ -107,6 +114,15 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+
+// Apply pending EF Core migrations before serving traffic.  Idempotent —
+// EF tracks applied versions in the __EFMigrationsHistory table.  Runs
+// synchronously at startup so the schema is current on first request.
+using (var migrationScope = app.Services.CreateScope())
+{
+    var db = migrationScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
+}
 
 // Catalog server-lifecycle events.  Same event names + level Hono and
 // Phoenix emit so a cross-backend dashboard pivots on one identity.
