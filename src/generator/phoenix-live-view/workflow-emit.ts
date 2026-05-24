@@ -219,7 +219,7 @@ function renderWorkflowBody(
 
 function renderWorkflowStmt(
   st: WorkflowStmtIR,
-  _ctx: BoundedContextIR,
+  ctx: BoundedContextIR,
   renderCtx: RenderCtx,
   contextModule: string,
 ): WorkflowBodyLine[] {
@@ -275,11 +275,21 @@ function renderWorkflowStmt(
     }
 
     case "op-call": {
-      const argList = st.args.map((a) => renderExpr(a, renderCtx)).join(", ");
+      // Ash actions take a NAMED-arg map (`%{key: value}`).  Zip the
+      // positional st.args with the operation's param names so an op
+      // like `promote(env: string)` called as `b.promote("production")`
+      // emits `%{env: "production"}` — bare `%{"production"}` is invalid
+      // Elixir map syntax.
+      const op = ctx.aggregates
+        .find((a) => a.name === st.aggName)
+        ?.operations.find((o) => o.name === st.op);
+      const argEntries = (op?.params ?? []).map(
+        (p, i) => `${snake(p.name)}: ${renderExpr(st.args[i]!, renderCtx)}`,
+      );
       const action = `${snake(st.op)}_${snake(st.aggName)}`;
       const callTarget = snake(st.target);
-      const call = argList
-        ? `${contextModule}.${action}(${callTarget}, %{${argList}})`
+      const call = argEntries.length
+        ? `${contextModule}.${action}(${callTarget}, %{${argEntries.join(", ")}})`
         : `${contextModule}.${action}(${callTarget})`;
       return [
         {
