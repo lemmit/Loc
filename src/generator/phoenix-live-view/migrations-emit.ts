@@ -143,14 +143,15 @@ function renderInitialJoinFile(
   const pkSet = new Set(table.primaryKey);
   const lines: string[] = [];
   for (const c of table.columns) {
+    const defaultClause = c.default !== undefined ? `, default: ${c.default}` : "";
     const fk = table.foreignKeys.find((f) => f.column === c.name);
     if (fk) {
       const ref = `references(:${fk.refTable}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${fk.onDelete === "cascade" ? "delete_all" : "restrict"})`;
       const pk = pkSet.has(c.name) ? ", primary_key: true" : "";
-      lines.push(`      add :${c.name}, ${ref}, null: ${c.nullable}${pk}`);
+      lines.push(`      add :${c.name}, ${ref}, null: ${c.nullable}${pk}${defaultClause}`);
     } else {
       const pk = pkSet.has(c.name) ? ", primary_key: true" : "";
-      lines.push(`      add :${c.name}, ${ectoColumnType(c.type)}, null: ${c.nullable}${pk}`);
+      lines.push(`      add :${c.name}, ${ectoColumnType(c.type)}, null: ${c.nullable}${pk}${defaultClause}`);
     }
   }
   const indexLines = table.indexes.map((i) => {
@@ -248,12 +249,13 @@ function renderCreateTableInline(table: TableShape): string[] {
 }
 
 function renderEctoColumn(c: ColumnShape, table: TableShape): string {
+  const defaultClause = c.default !== undefined ? `, default: ${c.default}` : "";
   const fk = table.foreignKeys.find((f) => f.column === c.name);
   if (fk) {
     const ref = `references(:${fk.refTable}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${fk.onDelete === "cascade" ? "delete_all" : "restrict"})`;
-    return `add :${c.name}, ${ref}, null: ${c.nullable}`;
+    return `add :${c.name}, ${ref}, null: ${c.nullable}${defaultClause}`;
   }
-  return `add :${c.name}, ${ectoColumnType(c.type)}, null: ${c.nullable}`;
+  return `add :${c.name}, ${ectoColumnType(c.type)}, null: ${c.nullable}${defaultClause}`;
 }
 
 // ---------------------------------------------------------------------------

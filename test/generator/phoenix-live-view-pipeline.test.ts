@@ -2401,7 +2401,10 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
     expect(tp!).toMatch(/defmodule PhoenixApp\.Roster\.TrainerParty do/);
     expect(tp!).toMatch(/attribute :trainer_id, :uuid, primary_key\?: true, allow_nil\?: false/);
     expect(tp!).toMatch(/attribute :pokemon_id, :uuid, primary_key\?: true, allow_nil\?: false/);
-    expect(tp!).toMatch(/attribute :ordinal, :integer, allow_nil\?: false/);
+    // Ordinal is nullable + defaulted so manage_relationship writes
+    // succeed without per-row ordinal injection (cross-backend
+    // ordering parity is a follow-up, see generators.md).
+    expect(tp!).toMatch(/attribute :ordinal, :integer, allow_nil\?: true, default: 0/);
     expect(files.has("phoenix_app/lib/phoenix_app/roster/trainer_caught.ex")).toBe(true);
   });
 
@@ -2453,7 +2456,7 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
     expect(partyMig!).toMatch(
       /add :pokemon_id, references\(:pokemons, type: :uuid, on_delete: :delete_all\), null: false, primary_key: true/,
     );
-    expect(partyMig!).toMatch(/add :ordinal, :integer, null: false/);
+    expect(partyMig!).toMatch(/add :ordinal, :integer, null: true, default: 0/);
     expect(partyMig!).toMatch(/create index\(:trainer_party, \[:pokemon_id\]\)/);
   });
 
@@ -2474,6 +2477,16 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
     expect(tr).toMatch(
       /Ash\.Changeset\.manage_relationship\(changeset, :party_through, \[pokemon\], type: :remove, use_identities: \[:id\]\)/,
     );
+  });
+
+  it("auto-loads the ref-collection calculations on every read", async () => {
+    const files = await generateRoster();
+    const tr = files.get("phoenix_app/lib/phoenix_app/roster/trainer.ex")!;
+    // Without this `prepare build(load: …)` block the JSON wire-shape
+    // `party` / `caught` fields would be missing (Ash calculations are
+    // opt-in by default).  Applies to every read action on the
+    // resource — default `:read` + custom finds.
+    expect(tr).toMatch(/preparations do\s+prepare build\(load: \[:party, :caught\]\)\s+end/);
   });
 
   it("registers the join resource on the context's Ash.Domain", async () => {
