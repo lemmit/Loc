@@ -298,7 +298,7 @@ function renderEventModule(
 defmodule ${moduleName} do
   @moduledoc "Domain event: ${upperFirst(ev.name)}"
 
-  defstruct ${ev.fields.map((f) => `:${snake(f.name)}`).join(", ")}
+  defstruct [${ev.fields.map((f) => `:${snake(f.name)}`).join(", ")}]
   @type t :: %__MODULE__{
 ${ev.fields.map((f) => `    ${snake(f.name)}: term()`).join(",\n")}
   }
