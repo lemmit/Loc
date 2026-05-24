@@ -187,7 +187,11 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): strin
       return `%${ctx.contextModule}.${upperFirst(e.name)}{${args}}`;
     case "function":
     case "private-operation":
-      return `${snake(e.name)}(${ctx.thisName}, ${args})`;
+      // Receiver-prefixed call.  Skip the trailing comma when the user
+      // function has no params — `passed(changeset, )` is invalid Elixir.
+      return args.length > 0
+        ? `${snake(e.name)}(${ctx.thisName}, ${args})`
+        : `${snake(e.name)}(${ctx.thisName})`;
     case "free":
       return `${snake(e.name)}(${args})`;
   }
