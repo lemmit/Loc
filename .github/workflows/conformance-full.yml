@@ -58,16 +58,11 @@ jobs:
           LOOM_E2E: '1'
         run: npx vitest run test/e2e/e2e.test.ts
 
-      - name: Capture compose state on failure
+      - name: Surface compose diagnostics on failure
         if: failure()
         run: |
-          set +e
-          OUTDIR=$(ls -td /tmp/loom-e2e-* 2>/dev/null | head -n1)
-          if [ -z "$OUTDIR" ]; then
-            echo "No /tmp/loom-e2e-* directory found"
-            exit 0
+          if [ -f /tmp/loom-e2e-diagnostics.log ]; then
+            cat /tmp/loom-e2e-diagnostics.log
+          else
+            echo "/tmp/loom-e2e-diagnostics.log not found — test failed before the up -d step"
           fi
-          echo "=== compose ps ==="
-          docker compose -f "$OUTDIR/docker-compose.yml" ps -a
-          echo "=== compose logs (tail 200) ==="
-          docker compose -f "$OUTDIR/docker-compose.yml" logs --tail=200

@@ -99,12 +99,11 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         timeout: 120_000,
       });
     } catch (err) {
-      // `afterAll` immediately tears the stack down via `down -v`, taking
-      // the containers' stdout/stderr with them.  Dump state + tail before
-      // we re-throw so the failed run leaves a forensic trail.
-      // Use `pipe` and explicit console.error: vitest captures console output
-      // per-test reliably, whereas inherited stdio can be silently dropped
-      // by the worker.
+      // `afterAll` immediately tears the stack down via `down -v` and
+      // removes outDir, taking the containers' stdout/stderr with them.
+      // Dump state + tail before we re-throw — both to console.error
+      // (vitest's per-test capture) and to a fixed file path that survives
+      // the cleanup so the workflow's post-failure step can surface it.
       const capture = (cmd: string): string => {
         try {
           return execSync(cmd, {
@@ -117,11 +116,23 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
           return `[capture failed] ${ex.message ?? "unknown"}\nstdout: ${ex.stdout ?? ""}\nstderr: ${ex.stderr ?? ""}`;
         }
       };
-      console.error("\n===== compose ps -a (post-failure) =====");
-      console.error(capture(`docker compose -f ${outDir}/docker-compose.yml ps -a`));
-      console.error("\n===== compose logs --tail=400 (post-failure) =====");
-      console.error(capture(`docker compose -f ${outDir}/docker-compose.yml logs --tail=400`));
-      console.error("===== end compose diagnostics =====\n");
+      const sections = [
+        "===== compose ps -a (post-failure) =====",
+        capture(`docker compose -f ${outDir}/docker-compose.yml ps -a`),
+        "===== compose logs --tail=400 (post-failure) =====",
+        capture(`docker compose -f ${outDir}/docker-compose.yml logs --tail=400`),
+        "===== end compose diagnostics =====",
+      ];
+      const body = sections.join("\n");
+      // 1) inline so a developer running the test locally sees it.
+      console.error("\n" + body + "\n");
+      // 2) persisted so CI's post-failure step can re-print it even after
+      //    the e2e test's afterAll deletes outDir.
+      try {
+        fs.writeFileSync("/tmp/loom-e2e-diagnostics.log", body);
+      } catch {
+        /* ignore */
+      }
       throw err;
     }
 

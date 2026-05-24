@@ -86,19 +86,15 @@ jobs:
           LOOM_E2E_PARITY_ONLY: '1'
         run: npx vitest run test/e2e/e2e.test.ts
 
-      # On any failure above, dump container state + logs so the next
-      # diagnosis doesn't depend on guessing — `up -d` failures
-      # otherwise just say "Command failed" with no docker context.
-      - name: Capture compose state on failure
+      # On any failure above, surface the compose diagnostics the e2e test
+      # writes to /tmp/loom-e2e-diagnostics.log just before its `afterAll`
+      # tears the stack down.  We can't reach the compose project directly
+      # from this step (outDir is gone) — the file is the bridge.
+      - name: Surface compose diagnostics on failure
         if: failure()
         run: |
-          set +e
-          OUTDIR=$(ls -td /tmp/loom-e2e-* 2>/dev/null | head -n1)
-          if [ -z "$OUTDIR" ]; then
-            echo "No /tmp/loom-e2e-* directory found"
-            exit 0
+          if [ -f /tmp/loom-e2e-diagnostics.log ]; then
+            cat /tmp/loom-e2e-diagnostics.log
+          else
+            echo "/tmp/loom-e2e-diagnostics.log not found — test failed before the up -d step"
           fi
-          echo "=== compose ps ==="
-          docker compose -f "$OUTDIR/docker-compose.yml" ps -a
-          echo "=== compose logs (tail 200) ==="
-          docker compose -f "$OUTDIR/docker-compose.yml" logs --tail=200
