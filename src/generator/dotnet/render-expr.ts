@@ -150,7 +150,11 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: CsRenderContext): s
 
 function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: CsRenderContext): string {
   const recv = renderCsExpr(e.receiver, ctx);
-  if (e.receiverType.kind === "array" && e.member === "count") return `${recv}.Count`;
+  // Arrays lower to `List<T>` which has `.Count` (not `.Length`).  The
+  // DSL admits both `.count` and `.length` on arrays; map both to .Count.
+  if (e.receiverType.kind === "array" && (e.member === "count" || e.member === "length")) {
+    return `${recv}.Count`;
+  }
   if (
     e.receiverType.kind === "primitive" &&
     e.receiverType.name === "string" &&
