@@ -215,10 +215,18 @@ function makeRecordingInvokeMacro(records: InvocationRecord[]) {
 }
 
 /** Build a TextEdit that inserts the printed `nodes` just before
- * the closing `}` of `target`'s body block.  Returns undefined if
- * the target's CST node can't be located (which would mean the
- * AST node is synthesised — shouldn't happen for unfold's
- * destinations, but defensively skip rather than throw). */
+ * the closing `}` of `target`'s body block.  Handles two shapes:
+ *
+ *   1. Closing brace on its own line (own-line `}` — the common
+ *      multi-line block shape): insert the members at the start of
+ *      the brace's line, indented one level deeper than the brace.
+ *
+ *   2. Closing brace shares its line with other content (e.g. an
+ *      empty `{ }` body or a single-line block): insert immediately
+ *      before the `}`, surrounded by newlines so the `}` ends up on
+ *      its own line at the original indent.
+ *
+ * Returns undefined if the target's CST node can't be located. */
 function buildInsertEdit(
   document: LangiumDocument,
   target: object,
@@ -228,47 +236,63 @@ function buildInsertEdit(
     target as { $cstNode?: { range: { start: unknown; end: { line: number; character: number } } } }
   ).$cstNode;
   if (!cst) return undefined;
-  // Find the closing `}` position.  Langium gives us the range of
-  // the whole block; the `}` is at `range.end` (exclusive), so
-  // we insert one character before.
-  const endPos = cst.range.end;
-  // Insert at the position just before `}`.  Compute the character
-  // by scanning back over whitespace + the closing brace.
   const text = document.textDocument.getText();
-  const endOffset = document.textDocument.offsetAt(endPos);
+  const endOffset = document.textDocument.offsetAt(cst.range.end);
   // Walk back to find the closing brace.
   let braceOffset = endOffset - 1;
   while (braceOffset > 0 && text[braceOffset] !== "}") braceOffset--;
   if (text[braceOffset] !== "}") return undefined;
   const bracePos = document.textDocument.positionAt(braceOffset);
 
-  // Derive indent from the line containing the closing brace.
-  // The brace itself is preceded by N leading spaces; new members
-  // get N+2 (one level deeper).  Falls back to two-space indent if
-  // the brace is at column 0 (rare; only for top-level contexts
-  // when not nested in a system).
-  const lineStart = document.textDocument.offsetAt({
+  // Inspect the line containing the brace: is it whitespace-only
+  // before the brace (own-line case) or does it share with content
+  // (inline case)?  The base indent is the leading whitespace of
+  // the line; new members get N+2 columns.
+  const lineStartOffset = document.textDocument.offsetAt({
     line: bracePos.line,
     character: 0,
   });
+  let preBraceContent = false;
   let baseCol = 0;
-  while (
-    lineStart + baseCol < braceOffset &&
-    (text[lineStart + baseCol] === " " || text[lineStart + baseCol] === "\t")
-  ) {
-    baseCol++;
+  for (let i = lineStartOffset; i < braceOffset; i++) {
+    if (text[i] === " " || text[i] === "\t") continue;
+    preBraceContent = true;
+    break;
+  }
+  if (!preBraceContent) {
+    // Own-line brace — count leading whitespace.
+    while (
+      lineStartOffset + baseCol < braceOffset &&
+      (text[lineStartOffset + baseCol] === " " || text[lineStartOffset + baseCol] === "\t")
+    ) {
+      baseCol++;
+    }
+  } else {
+    // Inline brace — recover the host's indent from its own start
+    // column (or fall back to 0 for top-level blocks).
+    baseCol = (cst.range.start as { line: number; character: number }).character ?? 0;
   }
   const memberIndent = " ".repeat(baseCol + 2);
+  const baseIndent = " ".repeat(baseCol);
   const printed = nodes.map((n) => indent(printStructural(n as never), memberIndent)).join("\n");
-  // Insert at the start of the brace's line — this avoids the
-  // first printed line inheriting the brace's leading whitespace.
-  // The closing brace's own indent is preserved automatically (it
-  // was already present in source and untouched by the edit).
-  const insertPos = { line: bracePos.line, character: 0 };
-  const newText = `${printed}\n`;
+  if (!preBraceContent) {
+    // Own-line `}`: insert at line-start; the brace keeps its
+    // existing leading whitespace and lands on the next line.
+    return {
+      range: {
+        start: { line: bracePos.line, character: 0 },
+        end: { line: bracePos.line, character: 0 },
+      },
+      newText: `${printed}\n`,
+    };
+  }
+  // Inline `}`: split it onto its own line by inserting the members
+  // (with surrounding newlines) immediately before the brace.  The
+  // `\n${baseIndent}` after `printed` lands the `}` at the host's
+  // original indent.
   return {
-    range: { start: insertPos, end: insertPos },
-    newText,
+    range: { start: bracePos, end: bracePos },
+    newText: `\n${printed}\n${baseIndent}`,
   };
 }
 
