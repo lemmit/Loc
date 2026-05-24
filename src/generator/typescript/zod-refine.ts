@@ -188,6 +188,10 @@ function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>): string {
     e.receiverType.name === "string" &&
     args.length === 1
   ) {
+    const arg0 = e.args[0];
+    if (arg0?.kind === "literal" && arg0.lit === "string") {
+      return `/${arg0.value.replace(/\//g, "\\/")}/.test(${recv})`;
+    }
     return `new RegExp(${args[0]}).test(${recv})`;
   }
   return `${recv}.${e.member}(${args.join(", ")})`;
@@ -199,8 +203,8 @@ function renderCollectionOp(recv: string, name: string, args: string[]): string 
       return `${recv}.length`;
     case "sum":
       return args.length === 1
-        ? `${recv}.reduce((__a, __x) => __a + (${args[0]})(__x), 0)`
-        : `${recv}.reduce((__a, __x) => __a + __x, 0)`;
+        ? `${recv}.reduce((acc, x) => acc + (${args[0]})(x), 0)`
+        : `${recv}.reduce((acc, x) => acc + x, 0)`;
     case "all":
       return `${recv}.every(${args[0] ?? "() => true"})`;
     case "any":

@@ -35,6 +35,7 @@ import {
   isLetStmt,
   isMatchExpr,
   isMemberAccess,
+  isMoneyLit,
   isNamedType,
   isNameRef,
   isNewExpr,
@@ -371,6 +372,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (isStringLit(expr)) return lit("string", expr.value);
   if (isIntLit(expr)) return lit("int", String(expr.value));
   if (isDecLit(expr)) return lit("decimal", expr.value);
+  if (isMoneyLit(expr)) return lit("money", expr.value ?? "0");
   if (isBoolLit(expr)) return lit("bool", expr.value);
   if (isNullLit(expr)) return lit("null", "null");
   if (isNowExpr(expr)) return lit("now", "now");
@@ -385,11 +387,15 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     };
   }
   if (isBinaryExpr(expr)) {
+    const leftType = inferExprType(expr.left, env);
+    const rightType = inferExprType(expr.right, env);
     return {
       kind: "binary",
       op: expr.op,
       left: lowerExpr(expr.left, env),
       right: lowerExpr(expr.right, env),
+      leftType,
+      resultType: binaryResultType(expr.op, leftType, rightType),
     };
   }
   if (isTernaryExpr(expr)) {
@@ -662,6 +668,7 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
   if (isStringLit(expr)) return { kind: "primitive", name: "string" };
   if (isIntLit(expr)) return { kind: "primitive", name: "int" };
   if (isDecLit(expr)) return { kind: "primitive", name: "decimal" };
+  if (isMoneyLit(expr)) return { kind: "primitive", name: "money" };
   if (isBoolLit(expr)) return { kind: "primitive", name: "bool" };
   if (isNullLit(expr)) return { kind: "primitive", name: "string" };
   if (isNowExpr(expr)) return { kind: "primitive", name: "datetime" };
@@ -703,7 +710,7 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     }
     const left = inferExprType(expr.left, env);
     const right = inferExprType(expr.right, env);
-    return widenNumeric(left, right);
+    return binaryResultType(op, left, right);
   }
   if (isTernaryExpr(expr)) return inferExprType(expr.thenExpr, env);
   if (isMatchExpr(expr)) {
@@ -766,7 +773,44 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
   return { kind: "primitive", name: "string" };
 }
 
-function widenNumeric(a: TypeIR, b: TypeIR): TypeIR {
+/**
+ * IR-layer mirror of `type-system.ts`'s `arithmeticResult`/comparison
+ * logic, but operating on `TypeIR` and dispatching on the operator.
+ *
+ * Used to populate `leftType`/`resultType` on binary IR nodes so
+ * backends never re-run expression-type inference.  Rules:
+ *   • Logical (`&&`, `||`) and comparison (`==` `!=` `<` `<=` `>` `>=`)
+ *     → primitive bool, regardless of operand types.
+ *   • Arithmetic with money operands is closed: `money ± money =
+ *     money`, `money × {int|long|decimal} = money` (commutative),
+ *     `money ÷ scalar = money`.  Anything else involving money falls
+ *     through to the left operand's type (best-effort — the validator
+ *     is expected to reject the mix upstream).
+ *   • Otherwise the existing `int → long → decimal` widening applies
+ *     when both operands are in that chain.
+ *
+ * For non-numeric, non-money operands the function returns the left
+ * operand's type (matches the prior behaviour of `widenNumeric`).
+ */
+function binaryResultType(op: string, a: TypeIR, b: TypeIR): TypeIR {
+  if (op === "&&" || op === "||") return { kind: "primitive", name: "bool" };
+  if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
+    return { kind: "primitive", name: "bool" };
+  }
+  const aIsMoney = a.kind === "primitive" && a.name === "money";
+  const bIsMoney = b.kind === "primitive" && b.name === "money";
+  if (aIsMoney || bIsMoney) {
+    if (aIsMoney && bIsMoney) {
+      return op === "+" || op === "-" ? { kind: "primitive", name: "money" } : a;
+    }
+    const other = aIsMoney ? b : a;
+    if (other.kind !== "primitive") return a;
+    const isScalar = other.name === "int" || other.name === "long" || other.name === "decimal";
+    if (!isScalar) return a;
+    if (op === "*") return { kind: "primitive", name: "money" };
+    if (op === "/" && aIsMoney) return { kind: "primitive", name: "money" };
+    return a;
+  }
   if (a.kind === "primitive" && b.kind === "primitive") {
     const order = ["int", "long", "decimal"] as const;
     type NumericName = (typeof order)[number];
@@ -795,6 +839,13 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
       case "count":
         return { kind: "primitive", name: "int" };
       case "sum":
+        // Sum preserves the element type for money arrays so the
+        // string-on-wire precision is maintained end-to-end; numeric
+        // element types continue to widen to decimal (the existing
+        // JS-friendly default).
+        if (t.element.kind === "primitive" && t.element.name === "money") {
+          return { kind: "primitive", name: "money" };
+        }
         return { kind: "primitive", name: "decimal" };
       case "all":
       case "any":

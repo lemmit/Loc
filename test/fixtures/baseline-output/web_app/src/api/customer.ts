@@ -8,7 +8,7 @@ export const CreateCustomerRequest = z.object({
   username: z.string().min(3).max(32),
   email: z.string(),
   age: z.number().int().min(18).max(150),
-}).refine((data) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data) => new RegExp("^[^@]+@[^@]+\\.[^@]+$").test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
+}).refine((data) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 export type CreateCustomerRequest = z.infer<typeof CreateCustomerRequest>;
 
 

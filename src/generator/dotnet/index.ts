@@ -11,6 +11,7 @@ import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
 import { emitDotnetMigrations } from "./emit/migrations.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import {
+  joinEntityName,
   renderAuditableInterceptor,
   renderCommon,
   renderConfiguration,
@@ -24,6 +25,8 @@ import {
   renderExceptionFilter,
   renderIDomainEvent,
   renderId,
+  renderJoinEntity,
+  renderJoinEntityConfiguration,
   renderNoopDispatcher,
   renderProgram,
   renderRepositoryImpl,
@@ -383,6 +386,18 @@ function emitAggregate(
     `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
     renderConfiguration(agg, ns, ctx),
   );
+  // One file per reference-collection association: the join entity
+  // class + its EF Core configuration (composite PK, ordinal, FK
+  // converters).  Skipped silently when the aggregate has no
+  // `Id<T>[]` fields.
+  for (const assoc of agg.associations ?? []) {
+    const cls = joinEntityName(assoc);
+    out.set(`Infrastructure/Persistence/JoinTables/${cls}.cs`, renderJoinEntity(assoc, ns));
+    out.set(
+      `Infrastructure/Persistence/Configurations/${cls}Configuration.cs`,
+      renderJoinEntityConfiguration(assoc, ns),
+    );
+  }
   emitCqrs(agg, repo, ctx, ns, out, { routePrefix, emitTrace });
   const testsFile = renderTestsFile(agg, ctx, ns);
   if (testsFile) {

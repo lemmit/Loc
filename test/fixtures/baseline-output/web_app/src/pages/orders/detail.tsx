@@ -18,7 +18,7 @@ function openAddLineModal(mut: ReturnType<typeof useAddLineOrder>): void {
 
 function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>; onClose: () => void }) {
   const __products = useAllProducts();
-  const { register, handleSubmit, control, formState: { errors } } = useForm<AddLineRequest>({
+  const { handleSubmit, control } = useForm<AddLineRequest>({
     resolver: zodResolver(AddLineRequest),
     defaultValues: { productId: "", qty: 0 },
   });
@@ -68,7 +68,7 @@ function openConfirmModal(mut: ReturnType<typeof useConfirmOrder>): void {
 }
 
 function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>; onClose: () => void }) {
-  const { register, handleSubmit, formState: { errors } } = useForm<ConfirmRequest>({
+  const { handleSubmit } = useForm<ConfirmRequest>({
     resolver: zodResolver(ConfirmRequest),
     defaultValues: {  },
   });

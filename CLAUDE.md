@@ -22,7 +22,7 @@ npm run prepare              # = langium:generate && build; runs on `npm install
 
 ### Tests
 
-The default `npm test` excludes three slow opt-in suites. Run a single test by path:
+The default `npm test` excludes the slow opt-in suites below. Run a single test by path:
 
 ```bash
 npm test                                   # fast vitest suite (~all unit + IR + generator tests)
@@ -35,7 +35,12 @@ npm run test:e2e          # LOOM_E2E=1 — boots docker-compose stack + hits /he
 npm run test:tsc          # LOOM_TS_BUILD=1 — emits TS projects and runs `tsc --noEmit` against them
 npm run test:tsc-react    # LOOM_REACT_BUILD=1 — emits React projects for every example × design pack and tscs them
                           # CI shards via LOOM_REACT_BUILD_CASE=<ddd-path>:<pack>
-LOOM_PHOENIX_BUILD=1 npx vitest run test/generated-phoenix-build.test.ts   # mix compile against real Ash 3.x in Elixir docker
+npm run test:dotnet       # LOOM_DOTNET_BUILD=1 — `dotnet build /warnaserror` against generated .NET projects
+npm run test:phoenix      # LOOM_PHOENIX_BUILD=1 — `mix compile --warnings-as-errors` against real Ash 3.x in Elixir docker
+npm run test:obs          # LOOM_OBS_E2E=1 — boots generated Hono backend, asserts catalog envelope on stdout
+npm run test:obs-dotnet   # LOOM_OBS_E2E_DOTNET=1 — same for the .NET backend (postgres sidecar via docker)
+npm run test:obs-phoenix  # LOOM_OBS_E2E_PHOENIX=1 — same for the Phoenix backend (postgres sidecar via docker)
+npm run test:biome-gen    # LOOM_BIOME=1 — Biome lint against emitted TS/TSX (already run in `test.yml`)
 ```
 
 `LOOM_E2E_CA_DIR=<dir-of-*.crt>` injects custom CAs when running the e2e suite behind a TLS-intercepting proxy.

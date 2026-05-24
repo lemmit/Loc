@@ -1,0 +1,103 @@
+name: .NET observability events (runtime e2e)
+
+# Boots the generated .NET backend against a real postgres sidecar, hits
+# /health, then asserts the JSON-per-line stdout from AddJsonConsole
+# carries the catalog envelope:
+#   server_starting → server_listening → request_start → request_end →
+#   server_shutdown → server_drained
+#
+# Catches drift the unit tests miss — e.g. ASP.NET silently dropping the
+# State.Event scope key, IHostApplicationLifetime callbacks racing,
+# duration_ms losing its integer type at the framework boundary.
+#
+# Triggers narrowly: only when the .NET generator, the catalog, the
+# shared renderer, or this workflow itself changes.  Other PRs don't
+# pay the postgres-pull + dotnet-restore cost (~2-3min cold, ~30s warm).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/dotnet/**'
+      - 'src/generator/_obs/**'
+      - 'src/platform/dotnet.ts'
+      - 'test/e2e/observability-events-dotnet.test.ts'
+      - 'package.json'
+      - '.github/workflows/dotnet-obs-e2e.yml'
+  pull_request:
+    paths:
+      - 'src/generator/dotnet/**'
+      - 'src/generator/_obs/**'
+      - 'src/platform/dotnet.ts'
+      - 'test/e2e/observability-events-dotnet.test.ts'
+      - 'package.json'
+      - '.github/workflows/dotnet-obs-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet-obs-e2e:
+    runs-on: ubuntu-latest
+    # Cold path: nuget restore + dotnet build + postgres pull is ~3-5min.
+    # Warm path (with the build cache below): ~60s.  10min leaves
+    # headroom without letting a hung server burn through quota.
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # The Loom toolchain — npm ci runs the `prepare` lifecycle which
+      # populates src/language/generated/ (langium output is gitignored,
+      # required before tsc and any vitest transform).
+      - name: Install Loom toolchain
+        run: npm ci
+
+      # The e2e test calls `bin/cli.js generate dotnet ...` then spawns
+      # `dotnet run`.  Both work against the host filesystem; we don't
+      # pre-generate here — the test itself does, into a tmpdir.
+
+      # Pre-warm the NuGet HTTP cache.  Without this, every run pays the
+      # full ~2-3min cold restore against api.nuget.org.  The cache key
+      # tracks the docker tag baked into the generated csproj so the cache
+      # invalidates when the dep set changes.
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          # Hash the .NET emitter source so any change to the generated
+          # csproj (TargetFramework bump, package ref add) mints a fresh
+          # entry.  Avoids stale caches that mask dep-related failures.
+          key: nuget-obs-${{ hashFiles('src/generator/dotnet/emit/program.ts') }}
+          restore-keys: |
+            nuget-obs-
+
+      - name: Run .NET observability runtime e2e
+        env:
+          LOOM_OBS_E2E_DOTNET: '1'
+          # The test pulls postgres:16-alpine via the docker CLI; the
+          # github-actions runner has docker available without extra
+          # setup, but we set DOCKER_BUILDKIT=1 for faster image fetches.
+          DOCKER_BUILDKIT: '1'
+        run: npx vitest run test/e2e/observability-events-dotnet.test.ts --reporter=verbose
+
+      # Surface stdout of the failing test as a step-summary annotation.
+      # The test captures the .NET server's stdout; on failure it embeds
+      # the first 4kB in the assertion message, which vitest --reporter=verbose
+      # prints to the job log already.  This step just makes that log
+      # easier to find via the run-summary page.
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## .NET runtime e2e failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the "Run .NET observability runtime e2e" step above for the captured server stdout.' >> $GITHUB_STEP_SUMMARY
+          echo 'The test asserts the AddJsonConsole stream carries the catalog envelope (server_starting → server_listening → request_start → request_end → server_shutdown → server_drained).' >> $GITHUB_STEP_SUMMARY

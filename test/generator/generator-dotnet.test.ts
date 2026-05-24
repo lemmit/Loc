@@ -1656,4 +1656,98 @@ describe(".NET generator", () => {
       expect(v).toMatch(/\.WithMessage\("Invariant violated:[^"]+"\)/);
     });
   });
+
+  describe("reference-collection join tables (.NET)", () => {
+    // Mirrors `test/generator/join-table.test.ts` (TS/Hono).  Pins the
+    // .NET emission seams: join entity + configuration, DbContext
+    // wiring, `b.Ignore` on the aggregate, internal setter, repository
+    // load + save diff-sync, and the `this.<refColl>.contains(...)`
+    // → subquery lowering.
+
+    it("emits a join entity + EF configuration per Id<T>[] field", async () => {
+      const model = await buildModel("examples/roster.ddd");
+      const files = generateDotnet(model);
+      // Join entity class shape — one per association.
+      const tp = files.get("Infrastructure/Persistence/JoinTables/TrainerParty.cs")!;
+      expect(tp).toMatch(/public sealed class TrainerParty/);
+      expect(tp).toMatch(/public TrainerId TrainerId \{ get; set; \}/);
+      expect(tp).toMatch(/public PokemonId PokemonId \{ get; set; \}/);
+      expect(tp).toMatch(/public int Ordinal \{ get; set; \}/);
+      expect(files.has("Infrastructure/Persistence/JoinTables/TrainerCaught.cs")).toBe(true);
+      // EF configuration: composite PK + index on target FK + HasConversion on both ids.
+      const cfg = files.get(
+        "Infrastructure/Persistence/Configurations/TrainerPartyConfiguration.cs",
+      )!;
+      expect(cfg).toMatch(/b\.ToTable\("trainer_party"\)/);
+      expect(cfg).toMatch(/b\.HasKey\(x => new \{ x\.TrainerId, x\.PokemonId \}\)/);
+      expect(cfg).toMatch(/b\.HasIndex\(x => x\.PokemonId\)/);
+      expect(cfg).toMatch(/HasConversion\(v => v\.Value, v => new TrainerId\(v\)\)/);
+      expect(cfg).toMatch(/HasConversion\(v => v\.Value, v => new PokemonId\(v\)\)/);
+    });
+
+    it("DbContext exposes a DbSet per join entity and applies its configuration", async () => {
+      const model = await buildModel("examples/roster.ddd");
+      const files = generateDotnet(model);
+      const ctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
+      expect(ctx).toMatch(/public DbSet<TrainerParty> TrainerParties => Set<TrainerParty>\(\);/);
+      expect(ctx).toMatch(/public DbSet<TrainerCaught> TrainerCaughts => Set<TrainerCaught>\(\);/);
+      expect(ctx).toMatch(
+        /ApplyConfiguration\(new Configurations\.TrainerPartyConfiguration\(\)\)/,
+      );
+    });
+
+    it("ignores ref-collection properties on the owning aggregate's configuration", async () => {
+      const model = await buildModel("examples/roster.ddd");
+      const files = generateDotnet(model);
+      const trainerCfg = files.get(
+        "Infrastructure/Persistence/Configurations/TrainerConfiguration.cs",
+      )!;
+      // EF auto-mapping of List<PokemonId> as a JSON column would defeat
+      // the relational join — explicit Ignore is the load-bearing line.
+      expect(trainerCfg).toMatch(/b\.Ignore\(x => x\.Party\)/);
+      expect(trainerCfg).toMatch(/b\.Ignore\(x => x\.Caught\)/);
+    });
+
+    it("widens the entity's ref-collection setters to internal for repo hydration", async () => {
+      const model = await buildModel("examples/roster.ddd");
+      const files = generateDotnet(model);
+      const trainer = files.get("Domain/Trainers/Trainer.cs")!;
+      expect(trainer).toMatch(/public List<PokemonId> Party \{ get; internal set; \}/);
+      expect(trainer).toMatch(/public List<PokemonId> Caught \{ get; internal set; \}/);
+    });
+
+    it("repository GetByIdAsync hydrates ref collections in ordinal order", async () => {
+      const model = await buildModel("examples/roster.ddd");
+      const files = generateDotnet(model);
+      const repo = files.get("Infrastructure/Repositories/TrainerRepository.cs")!;
+      expect(repo).toMatch(
+        /found\.Party = await _db\.TrainerParties\s+\.Where\(j => j\.TrainerId == id\)\s+\.OrderBy\(j => j\.Ordinal\)\s+\.Select\(j => j\.PokemonId\)\s+\.ToListAsync\(ct\);/,
+      );
+      expect(repo).toMatch(/found\.Caught = await _db\.TrainerCaughts/);
+    });
+
+    it("repository SaveAsync diff-syncs join rows with ordinal updates", async () => {
+      const model = await buildModel("examples/roster.ddd");
+      const files = generateDotnet(model);
+      const repo = files.get("Infrastructure/Repositories/TrainerRepository.cs")!;
+      // Delete removed pairs.
+      expect(repo).toMatch(/_db\.TrainerParties\.Remove\(__stale\)/);
+      // Upsert with ordinal: existing row → update Ordinal; new pair → Add row.
+      expect(repo).toMatch(/if \(__row != null\) \{ __row\.Ordinal = __i; \}/);
+      expect(repo).toMatch(
+        /_db\.TrainerParties\.Add\(new TrainerParty\(aggregate\.Id, __tid, __i\)\)/,
+      );
+    });
+
+    it("lowers `this.<refColl>.contains(param)` to a join-table subquery", async () => {
+      const model = await buildModel("examples/roster.ddd");
+      const files = generateDotnet(model);
+      const repo = files.get("Infrastructure/Repositories/TrainerRepository.cs")!;
+      // The membership filter is admitted by the IR validator and
+      // lowered here to an EXISTS-style subquery against the join entity.
+      expect(repo).toMatch(
+        /_db\.Trainers\.Where\(x => _db\.TrainerParties\.Any\(__j => __j\.TrainerId == x\.Id && __j\.PokemonId == pokemon\)\)/,
+      );
+    });
+  });
 });

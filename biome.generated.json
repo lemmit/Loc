@@ -28,10 +28,11 @@
         "noArrayIndexKey": "off"
       },
       "correctness": {
-        "noUnusedImports": "warn",
-        "noUnusedVariables": "warn",
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error",
         "noUnusedFunctionParameters": "error",
-        "useExhaustiveDependencies": "warn"
+        "noUnusedPrivateClassMembers": "off",
+        "useExhaustiveDependencies": "error"
       }
     }
   }

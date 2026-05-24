@@ -1,5 +1,6 @@
 import type { AstNode } from "langium";
 import { AstUtils } from "langium";
+import type { PrimitiveName } from "../ir/loom-ir.js";
 import type {
   Aggregate,
   BaseType,
@@ -36,6 +37,7 @@ import {
   isLambda,
   isLetStmt,
   isMemberAccess,
+  isMoneyLit,
   isNamedType,
   isNameRef,
   isNewExpr,
@@ -79,7 +81,12 @@ export type DddType =
   | { kind: "never"; sensitivity?: SensitivityTags }
   | { kind: "unknown"; sensitivity?: SensitivityTags };
 
-export type PrimitiveName = "int" | "long" | "decimal" | "string" | "bool" | "datetime" | "guid";
+// `PrimitiveName` is the canonical primitive-type set sourced from
+// `src/ir/loom-ir.ts` (the IR layer downstream consumes the same
+// union the type-system layer assigns names against — kept in one
+// place so a new primitive shows up in both without N parallel
+// updates).  See `experience_gathered.md` → "Adding a new primitive".
+export type { PrimitiveName };
 
 export const T = {
   prim: (name: PrimitiveName): DddType => ({ kind: "primitive", name }),
@@ -301,6 +308,7 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
   if (isStringLit(expr)) return T.prim("string");
   if (isIntLit(expr)) return T.prim("int");
   if (isDecLit(expr)) return T.prim("decimal");
+  if (isMoneyLit(expr)) return T.prim("money");
   if (isBoolLit(expr)) return T.prim("bool");
   if (isNullLit(expr)) return T.opt(T.never);
   if (isNowExpr(expr)) return T.prim("datetime");
@@ -332,7 +340,7 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
     }
     const lt = typeOf(expr.left, env);
     const rt = typeOf(expr.right, env);
-    return arithmeticResult(lt, rt);
+    return arithmeticResult(lt, rt, op);
   }
   if (isTernaryExpr(expr)) {
     // Union the branches' sensitivity — the chosen value could come from
@@ -363,11 +371,26 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
   return T.unknown;
 }
 
-function arithmeticResult(a: DddType, b: DddType): DddType {
+export function arithmeticResult(a: DddType, b: DddType, op: string): DddType {
   // Sensitivity flows through any arithmetic or string concatenation.
   // `"Hello " + email` ⇒ string!{pii}; `(price + tax)` inherits whatever
   // tags either operand carries.
   const tags = mergeTags(a.sensitivity, b.sensitivity);
+
+  // money is a closed type with restricted arithmetic.  Checked before
+  // the general numeric-widening path so a stray decimal in a money
+  // expression is rejected instead of silently widening through
+  // `int → long → decimal`.  Rules:
+  //   money ± money              → money
+  //   money × {int|long|decimal} → money   (also commutative)
+  //   money ÷ {int|long|decimal} → money
+  //   anything else involving money → unknown (rejected)
+  const aIsMoney = a.kind === "primitive" && a.name === "money";
+  const bIsMoney = b.kind === "primitive" && b.name === "money";
+  if (aIsMoney || bIsMoney) {
+    return withTags(moneyArithmetic(a, b, op, aIsMoney, bIsMoney), tags);
+  }
+
   if (a.kind === "primitive" && b.kind === "primitive") {
     const order = ["int", "long", "decimal"] as const;
     const ai = (order as readonly string[]).indexOf(a.name);
@@ -376,6 +399,30 @@ function arithmeticResult(a: DddType, b: DddType): DddType {
     if (a.name === "string" && b.name === "string") return withTags(T.prim("string"), tags);
   }
   return withTags(T.unknown, tags);
+}
+
+function moneyArithmetic(
+  a: DddType,
+  b: DddType,
+  op: string,
+  aIsMoney: boolean,
+  bIsMoney: boolean,
+): DddType {
+  if (aIsMoney && bIsMoney) {
+    // money ± money = money; money × money / money ÷ money rejected.
+    return op === "+" || op === "-" ? T.prim("money") : T.unknown;
+  }
+  // Exactly one operand is money.  The other must be a numeric scalar
+  // (int / long / decimal) for scaling; anything else is rejected.
+  const other = aIsMoney ? b : a;
+  if (other.kind !== "primitive") return T.unknown;
+  const isScalar = other.name === "int" || other.name === "long" || other.name === "decimal";
+  if (!isScalar) return T.unknown;
+  // money × scalar (commutative) = money;
+  // money ÷ scalar = money (but scalar ÷ money is rejected).
+  if (op === "*") return T.prim("money");
+  if (op === "/" && aIsMoney) return T.prim("money");
+  return T.unknown;
 }
 
 function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env: Env): DddType {

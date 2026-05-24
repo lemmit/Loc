@@ -3,6 +3,7 @@ import type { SnapshotStore } from "../system/snapshot.js";
 
 import type {
   AggregateIR,
+  AssociationIR,
   EntityPartIR,
   FieldIR,
   IdValueType,
@@ -46,6 +47,14 @@ export function schemaFromModule(module: ModuleIR): SchemaSnapshot {
     tables.push(tableForAggregate(agg, module.name));
     for (const part of agg.parts) {
       tables.push(tableForPart(part, agg, module.name));
+    }
+    // Reference-collection fields (`Target id[]`) persist via a join
+    // table rather than a column on the owner row — enrichment derives
+    // one `AssociationIR` per such field, and the schema picks them up
+    // here.  `tableForAggregate` / `tableForPart` skip the column at
+    // emission time (see `mapField`).
+    for (const assoc of agg.associations ?? []) {
+      tables.push(tableForAssociation(assoc, module.name));
     }
   }
   tables.sort((a, b) => a.name.localeCompare(b.name));
@@ -218,6 +227,9 @@ function tableForAggregate(agg: AggregateIR, ownerModule: string): TableShape {
   const indexes: IndexShape[] = [];
 
   for (const f of agg.fields) {
+    // Reference collections (`Target id[]`) lower to a separate join
+    // table (see `tableForAssociation`); no column on the owner row.
+    if (isReferenceCollection(f.type)) continue;
     const mapped = mapField(f);
     columns.push(mapped.column);
     if (mapped.fkRefTable) {
@@ -270,6 +282,7 @@ function tableForPart(
   ];
 
   for (const f of part.fields) {
+    if (isReferenceCollection(f.type)) continue;
     const mapped = mapField(f);
     columns.push(mapped.column);
     if (mapped.fkRefTable) {
@@ -295,6 +308,41 @@ function tableForPart(
     foreignKeys,
     indexes,
   };
+}
+
+function tableForAssociation(
+  assoc: AssociationIR,
+  ownerModule: string,
+): TableShape {
+  const ownerTable = plural(snake(assoc.ownerAgg));
+  const targetTable = plural(snake(assoc.targetAgg));
+  const idType = idColumnType(assoc.valueType);
+  return {
+    name: assoc.joinTable,
+    ownerModule,
+    columns: [
+      { name: assoc.ownerFk, type: idType, nullable: false },
+      { name: assoc.targetFk, type: idType, nullable: false },
+      { name: "ordinal", type: { kind: "int" }, nullable: false },
+    ],
+    primaryKey: [assoc.ownerFk, assoc.targetFk],
+    foreignKeys: [
+      { column: assoc.ownerFk, refTable: ownerTable, onDelete: "cascade" },
+      { column: assoc.targetFk, refTable: targetTable, onDelete: "cascade" },
+    ],
+    indexes: [
+      {
+        name: `${assoc.joinTable}_${assoc.targetFk}_idx`,
+        table: assoc.joinTable,
+        columns: [assoc.targetFk],
+        unique: false,
+      },
+    ],
+  };
+}
+
+function isReferenceCollection(t: TypeIR): boolean {
+  return t.kind === "array" && t.element.kind === "id";
 }
 
 interface MappedColumn {

@@ -50,24 +50,30 @@ function emitInitial(
   appModule: string,
   out: Map<string, string>,
 ): void {
-  // Separate top-level tables from part tables (cascade-delete FK to a
-  // parent table in this same module).  Parents get sequential timestamps;
-  // parts get a higher block of timestamps so Ecto's apply order keeps
-  // parent CREATE-before-part.
+  // Three classes of table, separated so timestamps preserve the
+  // create-order required by FK targets:
+  //   - aggregate (no cascade FK) → BASE + i
+  //   - part      (one cascade FK to a parent aggregate)
+  //     → BASE + N*10 + parentIndex*10 + partIndex+1
+  //   - join      (two cascade FKs — Id<T>[] many-to-many)
+  //     → BASE + N*100 + joinIdx
+  // Matches the pre-refactor Phoenix scheme byte-for-byte, including
+  // the gap between parent and part blocks.
   const createSteps = m.steps.filter((s): s is Extract<MigrationStep, { op: "createTable" }> =>
     s.op === "createTable",
   );
   const allTables = createSteps.map((s) => s.table);
-  const partTables = allTables.filter(isPartTable);
+  const joinTables = allTables.filter(isJoinTable);
+  const partTables = allTables.filter((t) => !joinTables.includes(t) && isPartTable(t));
   const parentTables = allTables
-    .filter((t) => !partTables.includes(t))
+    .filter((t) => !joinTables.includes(t) && !partTables.includes(t))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   // Parents — BASE + i.
   for (let i = 0; i < parentTables.length; i++) {
     writeInitialFile(parentTables[i]!, BASE_TIMESTAMP + i, appModule, out);
   }
-  // Parts — grouped by parent, BASE + N*10 + parentIndex*10 + partIndex+1.
+  // Parts — grouped by parent.
   const parentCount = parentTables.length;
   for (let i = 0; i < parentTables.length; i++) {
     const parent = parentTables[i]!;
@@ -81,6 +87,13 @@ function emitInitial(
       writeInitialFile(partsOfThis[j]!, ts, appModule, out);
     }
   }
+  // Join tables — placed above the part block so the references on
+  // both endpoints resolve.  Sorted by name for stable allocation.
+  const sortedJoins = [...joinTables].sort((a, b) => a.name.localeCompare(b.name));
+  for (let k = 0; k < sortedJoins.length; k++) {
+    const ts = BASE_TIMESTAMP + parentCount * 100 + k;
+    writeInitialFile(sortedJoins[k]!, ts, appModule, out);
+  }
 }
 
 function writeInitialFile(
@@ -91,7 +104,10 @@ function writeInitialFile(
 ): void {
   const path = `priv/repo/migrations/${ts}_create_${table.name}.exs`;
   const migrationName = `Create${tableToPascal(table.name)}`;
-  out.set(path, renderInitialFile(table, migrationName, appModule));
+  const body = isJoinTable(table)
+    ? renderInitialJoinFile(table, migrationName, appModule)
+    : renderInitialFile(table, migrationName, appModule);
+  out.set(path, body);
 }
 
 function renderInitialFile(
@@ -117,6 +133,45 @@ function renderInitialFile(
       add :id, ${pkType}, primary_key: true, null: false
 ${colLines.join("\n")}
       timestamps()
+    end
+${indexLines.join("\n")}${indexLines.length > 0 ? "\n" : ""}  end
+end
+`;
+}
+
+/** Render a many-to-many join-table migration.  Composite PK on the
+ *  two FK columns, both `primary_key: true`; an `ordinal :integer`
+ *  preserves owner-side list order; no `timestamps()` (join rows are
+ *  pure relationship records). */
+function renderInitialJoinFile(
+  table: TableShape,
+  migrationName: string,
+  appModule: string,
+): string {
+  const pkSet = new Set(table.primaryKey);
+  const lines: string[] = [];
+  for (const c of table.columns) {
+    const fk = table.foreignKeys.find((f) => f.column === c.name);
+    if (fk) {
+      const ref = `references(:${fk.refTable}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${fk.onDelete === "cascade" ? "delete_all" : "restrict"})`;
+      const pk = pkSet.has(c.name) ? ", primary_key: true" : "";
+      lines.push(`      add :${c.name}, ${ref}, null: ${c.nullable}${pk}`);
+    } else {
+      const pk = pkSet.has(c.name) ? ", primary_key: true" : "";
+      lines.push(`      add :${c.name}, ${ectoColumnType(c.type)}, null: ${c.nullable}${pk}`);
+    }
+  }
+  const indexLines = table.indexes.map((i) => {
+    const cols = i.columns.map((n) => `:${n}`).join(", ");
+    const unique = i.unique ? ", unique: true" : "";
+    return `    create index(:${i.table}, [${cols}]${unique})`;
+  });
+  return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
+  use Ecto.Migration
+
+  def change do
+    create table(:${table.name}, primary_key: false) do
+${lines.join("\n")}
     end
 ${indexLines.join("\n")}${indexLines.length > 0 ? "\n" : ""}  end
 end
@@ -252,7 +307,18 @@ function ectoPrimaryKeyType(t: ColumnType): string {
 // ---------------------------------------------------------------------------
 
 function isPartTable(t: TableShape): boolean {
-  return t.foreignKeys.some((fk) => fk.onDelete === "cascade");
+  // A part has exactly one cascade FK back to its parent aggregate.
+  // Join tables (Id<T>[] many-to-many) also have cascades but to two
+  // different parents — distinguished by `isJoinTable`.
+  return t.foreignKeys.filter((fk) => fk.onDelete === "cascade").length === 1;
+}
+
+function isJoinTable(t: TableShape): boolean {
+  // Many-to-many join: two cascade FKs to different parent tables,
+  // and the table has no `id` column (composite PK).
+  const cascades = t.foreignKeys.filter((fk) => fk.onDelete === "cascade");
+  if (cascades.length !== 2) return false;
+  return !t.columns.some((c) => c.name === "id");
 }
 
 function tableToPascal(name: string): string {

@@ -31,7 +31,11 @@ export function buildFindBodies(
 
 function filterClauseFor(find: FindIR, agg: AggregateIR, usings?: Set<string>): string {
   if (find.filter) {
-    return `.Where(x => ${renderCsExpr(find.filter, { thisName: "x", usings })})`;
+    // `agg` is threaded so the renderer can resolve a
+    // `this.<refColl>.contains(param)` predicate to its
+    // AssociationIR and emit a join-table subquery.  See
+    // `render-expr.ts:renderMethodCall`.
+    return `.Where(x => ${renderCsExpr(find.filter, { thisName: "x", usings, agg })})`;
   }
   if (find.params.length === 0) return "";
   const conditions: string[] = [];

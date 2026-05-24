@@ -305,6 +305,13 @@ function drizzleColumnLinesForName(
           return [`${fieldName}: bigint("${colName}", { mode: "number" })${not},`];
         case "decimal":
           return [`${fieldName}: numeric("${colName}")${not},`];
+        case "money":
+          // Bounded NUMERIC(19,4) is the finance default — same shape
+          // sqlx + rust_decimal will read cleanly when the Rust
+          // backend lands.  Drizzle's numeric() returns a string at
+          // runtime so the repository-builder hydrates via
+          // `new Decimal(row.col)` without precision loss.
+          return [`${fieldName}: numeric("${colName}", { precision: 19, scale: 4 })${not},`];
         case "string":
           return [`${fieldName}: text("${colName}")${not},`];
         case "bool":

@@ -29,7 +29,10 @@ export function buildFindActions(
   agg: AggregateIR,
   contextModule: string,
 ): string[] {
-  const ctx: RenderCtx = { thisName: "record", contextModule };
+  // `agg` threaded so renderMethodCall's contains branch (see
+  // render-expr.ts) can resolve `this.<refColl>.contains(param)` to
+  // `exists(<rel>, id == ^arg(:<param>))` against the join entity.
+  const ctx: RenderCtx = { thisName: "record", contextModule, agg };
   // Skip the IR-enriched "all" find: Ash's `defaults [:read, ...]`
   // already provides an equivalent default :read action.  Emitting a
   // custom `read :all do end` block alongside is harmless but

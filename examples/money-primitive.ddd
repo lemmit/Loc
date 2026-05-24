@@ -1,0 +1,48 @@
+// Alignment fixture for the `money` primitive type.
+//
+// Exercises every shape money should appear in:
+//   * field on an aggregate root              (wire round-trip)
+//   * `money("…")` constructor literal        (precise-decimal source form)
+//   * `money × decimal = money`               (closed scaling)
+//   * `money + money = money`                 (closed addition)
+//   * `money <op> money` comparison           (Phoenix `Decimal.compare/2`,
+//                                              TS `a.gt(b)`, .NET native)
+//   * `:= subtotal - amount`                  (assignment in an operation)
+//   * invariant on money                      (per-backend validator emission)
+//   * repository CRUD                         (TS hydrate via `new Decimal`,
+//                                              persist via `.toString()`;
+//                                              .NET parse/format via
+//                                              InvariantCulture; Phoenix
+//                                              Ash `:decimal`)
+//   * form input for a money parameter        (React text + pattern,
+//                                              Phoenix HEEx text + pattern)
+//
+// Kept separate from `examples/acme.ddd` and `examples/banking.ddd` —
+// those wrap precise amounts in a `valueobject Money { amount: decimal,
+// currency: string }`, which stays the canonical pattern for currency-
+// tagged amounts.  This fixture covers the *primitive* form, where
+// nothing surrounds the value and money is the whole field.
+
+context Billing {
+
+  aggregate Invoice {
+    subtotal: money
+    taxRate: decimal
+
+    // money × decimal → money (commutative); money ± money → money.
+    derived tax:   money = subtotal * taxRate
+    derived total: money = subtotal + tax
+
+    // Money comparison + assignment.
+    operation applyDiscount(amount: money) {
+      precondition amount > money("0.00")
+      precondition amount <= subtotal
+      subtotal := subtotal - amount
+    }
+
+    // Money invariant — every backend emits a comparable check.
+    invariant subtotal >= money("0.00")
+  }
+
+  repository Invoices for Invoice { }
+}

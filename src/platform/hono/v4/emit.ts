@@ -20,11 +20,12 @@ import { emitTypescriptMigrations } from "../../../generator/typescript/emit/mig
 import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import { enrichLoomModel } from "../../../ir/enrichments.js";
-import type {
-  BoundedContextIR,
-  DeployableIR,
-  RepositoryIR,
-  SystemIR,
+import {
+  type BoundedContextIR,
+  contextUsesMoney,
+  type DeployableIR,
+  type RepositoryIR,
+  type SystemIR,
 } from "../../../ir/loom-ir.js";
 import { lowerModel } from "../../../ir/lower.js";
 import type { MigrationsIR } from "../../../ir/migrations-ir.js";
@@ -212,13 +213,20 @@ export function generateTypeScriptForContexts(
     emitAuthFiles(system.sys, out);
   }
   emitObservabilityFiles(out);
-  // Per-module Postgres migrations + co-emitted db/migrate.ts script.
-  // Empty `migrations` (legacy callers / non-system mode) → no-op.
+  // Per-module Postgres migrations + Drizzle journal — emitted whenever
+  // the system orchestrator hands us a migrations slice.  Empty slice
+  // (legacy / non-system entry) → no-op.
   const hasMigrations = !!(system?.migrations && system.migrations.length > 0);
   if (hasMigrations) {
     emitTypescriptMigrations(system!.migrations!, out);
   }
-  out.set("package.json", projectPackageJson(pins));
+  // decimal.js is conditional: only depended on when at least one
+  // aggregate in any of the served contexts uses a `money` field.
+  // Server bundle size matters; client-side React always ships the
+  // dep.  Detected by walking the IR rather than scanning the rendered
+  // strings.
+  const projectUsesMoney = contexts.some(contextUsesMoney);
+  out.set("package.json", projectPackageJson(pins, { withMoney: projectUsesMoney }));
   out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
   out.set("tsup.config.ts", TSUP_CONFIG);
   out.set("index.ts", renderProjectIndexTs(hasMigrations));
@@ -244,7 +252,7 @@ export interface BackendPins {
   devDependencies: Record<string, string>;
 }
 
-function projectPackageJson(pins: BackendPins): string {
+function projectPackageJson(pins: BackendPins, opts: { withMoney: boolean }): string {
   return (
     JSON.stringify(
       {
@@ -268,7 +276,10 @@ function projectPackageJson(pins: BackendPins): string {
           "db:push": "drizzle-kit push",
           "db:studio": "drizzle-kit studio",
         },
-        dependencies: { ...pins.dependencies },
+        dependencies: {
+          ...pins.dependencies,
+          ...(opts.withMoney ? { "decimal.js": "^10.4.3" } : {}),
+        },
         devDependencies: { ...pins.devDependencies },
       },
       null,

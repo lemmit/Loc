@@ -700,3 +700,72 @@ or not.
   project from a single context), so the workspace mechanics would
   add error surface without buying anything.  Keep the seam at the
   one subcommand whose output model is "many things composed."
+- **`money` is additive to `decimal`, not a migration.**  `decimal`'s
+  JSON-number wire was a JS-friendly compromise that all original
+  backends (TS/Hono, .NET, Phoenix, React) silently tolerated.  Adding
+  a precise-decimal backend (Rust) forced the wire decision; rather
+  than migrating `decimal` to string-on-wire (which would have cost
+  an arithmetic-site rewrite in every TS/React generated project), a
+  new `money` primitive was introduced — string-on-wire (OpenAPI
+  `{type: string, format: decimal}`, the PayPal/Coinbase/ISO 20022
+  convention), closed arithmetic (`money ± money = money`, scaling
+  by int/long/decimal preserves money, anything else rejected), and
+  a constructor literal `money("…")` (Rust-friendly: every host
+  Decimal parses from string).  Existing `.ddd` source files don't
+  change.  Three design decisions worth their own bullet:
+  * **Binary IR carries `leftType` / `resultType`.**  Backends today
+    re-derive operand types from operator heuristics; money
+    arithmetic (TS `.plus()`, Phoenix `Decimal.add/2`) can't be
+    emitted without operand-type information.  Threading the types
+    through the binary node at lowering time lets every backend —
+    current and future — emit money-aware code without re-running
+    inference.
+  * **Phoenix `Decimal.compare/2` isn't a token swap.**  Elixir's
+    Decimal comparison returns `:lt | :eq | :gt`, not a boolean — so
+    `${l} ${op} ${r}` doesn't fit and the renderer needs an
+    expression-shape branch for money operands (`Decimal.compare(a,
+    b) == :gt` for `>`, `in [:lt, :eq]` for `<=`).
+  * **Money invariants run server-side only.**  Client-side JS can't
+    compare `Decimal` instances faithfully via host operators; both
+    the single-field-chain absorption (`.min(N)`) and the `.refine`
+    fallback would emit broken predicates.  The
+    `classifyForWire` gate rejects any expression with a money
+    literal or money-typed binary operand, leaving the aggregate's
+    server-side `_assertInvariants` (which renders via `.gte()` /
+    `.lte()`) as the sole enforcement.
+- **Adding a new primitive type — the checklist.**  `PrimitiveName`
+  + `PRIMITIVES` live in **one place**: `src/ir/loom-ir.ts`.  Every
+  other layer (the type-system at `src/language/type-system.ts`, the
+  playground field-builder at `web/src/builder/system/fields.ts`)
+  re-exports / imports from there — adding the primitive in the IR
+  surfaces it in every consumer automatically.  Then in order:
+  1. `src/language/ddd.langium` — add the literal to the
+     `PrimitiveType` rule's union.
+  2. `src/ir/loom-ir.ts` — append to `PrimitiveName` AND to
+     `PRIMITIVES` (the array's order is the playground type-picker's
+     display order; keep related primitives adjacent).
+  3. `npm run langium:generate` — the AST regenerates with the new
+     literal in `PrimitiveType.name`'s union.
+  4. `tsc -b` from the repo root — every non-exhaustive switch over
+     `PrimitiveName` errors with "Fallthrough case in switch" or "Type
+     'X' is not assignable to type 'PrimitiveName'."  Those errors
+     are the checklist: wire spec (`src/system/wire-spec.ts`'s
+     `jsonPropertyForType`), each backend's render-expr /
+     dto-mapping / column-type emitter, the Drizzle schema, every
+     Zod-for-type switch in routes/views/workflows builders, the
+     React form-fields preparer, the macro-api factories union.
+  5. Per-backend literal + arithmetic rendering — `render-expr.ts`'s
+     `renderLiteral` / `renderBinary` / `renderTsType` (or the
+     `.NET` / Phoenix equivalents).  If the new primitive needs
+     operator dispatch beyond what native operators give the host
+     language (the way `money` needed `Decimal.compare/2` on
+     Phoenix), the binary-IR's `leftType` stash is the channel — see
+     the `money` entry above.
+  6. Tests — parsing + IR lowering coverage under `test/language/` and
+     `test/ir/`; per-backend snapshot under `test/generator/`.
+  The trap that bit us first time: when a primitive was added but its
+  union wasn't synced to the playground's local copy, CI broke at
+  `playground-e2e.yml`'s `tsc -b` step (see #499).  Sourcing both
+  from `src/ir/loom-ir.ts` removes the failure mode entirely — the
+  playground's type picker now picks up new primitives without an
+  additional code change.

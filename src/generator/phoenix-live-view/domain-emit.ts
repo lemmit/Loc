@@ -1,6 +1,7 @@
 import { classifyForWire, singleFieldShape } from "../../ir/invariant-classify.js";
 import type {
   AggregateIR,
+  AssociationIR,
   BoundedContextIR,
   ContainmentIR,
   DerivedIR,
@@ -8,10 +9,18 @@ import type {
   FieldIR,
   InvariantIR,
   OperationIR,
+  TypeIR,
 } from "../../ir/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
-import { type RenderCtx, renderAshType, renderExpr } from "./render-expr.js";
+import { joinEntityName } from "./join-resource-emit.js";
+import { type RenderCtx, relationshipNameFor, renderAshType, renderExpr } from "./render-expr.js";
 import { renderElixirStatements } from "./render-stmt.js";
+
+/** True for a field type that is a collection of references
+ * (`Id<T>[]`) — persisted via a join table, not a column. */
+function isRefCollection(t: TypeIR): boolean {
+  return t.kind === "array" && t.element.kind === "id";
+}
 
 // ---------------------------------------------------------------------------
 // Ash domain emitter — per `AggregateIR` produce one `Ash.Resource` module.
@@ -56,12 +65,22 @@ function renderAggregateResource(
   const tableSnake = snake(plural(agg.name));
   const repoModule = `${appModule}.Repo`;
 
-  const renderCtx: RenderCtx = { thisName: "record", contextModule: ctxModule };
+  const renderCtx: RenderCtx = { thisName: "record", contextModule: ctxModule, agg };
 
-  // Build the @derive field list: :id, all declared fields, :inserted_at, :updated_at
+  // Reference-collection fields (`Id<T>[]`) are persisted via a separate
+  // join table (see join-resource-emit.ts), not as a column on this row.
+  // Skip them in the attribute list and the @derive Jason list (Jason
+  // serialises attributes / loaded calculations; the calculation we
+  // emit below is unloaded by default and would surface as nil — so
+  // it's intentionally absent from the wire shape until the caller
+  // explicitly loads it).
+  const associations = agg.associations ?? [];
+  const persistedFields = agg.fields.filter((f) => !isRefCollection(f.type));
+
+  // Build the @derive field list: :id, persisted fields only, timestamps.
   const deriveFields = [
     ":id",
-    ...agg.fields.map((f) => `:${snake(f.name)}`),
+    ...persistedFields.map((f) => `:${snake(f.name)}`),
     ":inserted_at",
     ":updated_at",
   ].join(", ");
@@ -79,10 +98,10 @@ function renderAggregateResource(
 
   attributes do
     ${renderPrimaryKey(agg.idValueType)}
-    ${agg.fields.map((f) => renderAttribute(f, ctxModule)).join("\n    ")}
+    ${persistedFields.map((f) => renderAttribute(f, ctxModule)).join("\n    ")}
     timestamps()
   end
-${renderRelationships(agg.contains, ctxModule)}${renderCalculations(agg.derived, renderCtx)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}
+${renderRelationships(agg.contains, associations, ctxModule, agg)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}
 end
 `;
 }
@@ -169,9 +188,14 @@ function renderAttribute(f: FieldIR, ctxModule: string): string {
 // Relationships
 // ---------------------------------------------------------------------------
 
-function renderRelationships(contains: ContainmentIR[], ctxModule: string): string {
-  if (contains.length === 0) return "";
-  const lines = contains.map((c) => {
+function renderRelationships(
+  contains: ContainmentIR[],
+  associations: AssociationIR[],
+  ctxModule: string,
+  agg: AggregateIR,
+): string {
+  if (contains.length === 0 && associations.length === 0) return "";
+  const containLines = contains.map((c) => {
     const relName = snake(c.name);
     const destModule = `${ctxModule}.${upperFirst(c.partName)}`;
     if (c.collection) {
@@ -179,6 +203,19 @@ function renderRelationships(contains: ContainmentIR[], ctxModule: string): stri
     }
     return `    has_one :${relName}, ${destModule}`;
   });
+  const m2mLines = associations.flatMap((a) => {
+    const rel = relationshipNameFor(agg, a.fieldName);
+    const target = `${ctxModule}.${upperFirst(a.targetAgg)}`;
+    const join = `${ctxModule}.${joinEntityName(a)}`;
+    return [
+      `    many_to_many :${rel}, ${target} do`,
+      `      through ${join}`,
+      `      source_attribute_on_join_resource :${snake(a.ownerFk)}`,
+      `      destination_attribute_on_join_resource :${snake(a.targetFk)}`,
+      `    end`,
+    ];
+  });
+  const lines = [...containLines, ...m2mLines];
   return `\n  relationships do\n${lines.join("\n")}\n  end\n`;
 }
 
@@ -186,13 +223,29 @@ function renderRelationships(contains: ContainmentIR[], ctxModule: string): stri
 // Calculations (derived properties)
 // ---------------------------------------------------------------------------
 
-function renderCalculations(derived: DerivedIR[], ctx: RenderCtx): string {
-  if (derived.length === 0) return "";
-  const lines = derived.map((d) => {
+function renderCalculations(
+  derived: DerivedIR[],
+  associations: AssociationIR[],
+  ctx: RenderCtx,
+  agg: AggregateIR,
+): string {
+  if (derived.length === 0 && associations.length === 0) return "";
+  const derivedLines = derived.map((d) => {
     const ashType = renderAshType(d.type, ctx.contextModule);
     const exprStr = renderExpr(d.expr, ctx);
     return `    calculate :${snake(d.name)}, ${ashType}, expr(${exprStr})`;
   });
+  // Re-expose each reference collection as a calculation that maps the
+  // m2m relationship to a list of target ids — same wire shape as the
+  // TS/Hono `party: string[]` and .NET `List<TargetId> Party`.  Loaded
+  // explicitly on demand (callers add `load: [:party, :caught]`); not
+  // auto-derived into JSON to avoid an N+1 on every read.
+  const assocLines = associations.map((a) => {
+    const fieldName = snake(a.fieldName);
+    const rel = relationshipNameFor(agg, a.fieldName);
+    return `    calculate :${fieldName}, {:array, :uuid}, expr(${rel}.id)`;
+  });
+  const lines = [...derivedLines, ...assocLines];
   return `\n  calculations do\n${lines.join("\n")}\n  end\n`;
 }
 
@@ -248,7 +301,14 @@ function renderActions(
   ctxModule: string,
 ): string {
   const ops = agg.operations;
-  const fieldNames = agg.fields.map((f) => `:${snake(f.name)}`);
+  // Ref-collection fields (`Id<T>[]`) aren't attributes on the
+  // resource (they live in a join table); the create action can't
+  // `accept` them without a `change manage_relationship` block, which
+  // we defer.  Callers seed reference collections via the operations
+  // that mutate them (`addToParty`, etc.).
+  const fieldNames = agg.fields
+    .filter((f) => !isRefCollection(f.type))
+    .map((f) => `:${snake(f.name)}`);
 
   const defaultCreate = `    create :create do
       primary? true

@@ -1,4 +1,4 @@
-import type { BinOp, ExprIR, TypeIR } from "../../ir/loom-ir.js";
+import type { AggregateIR, BinOp, ExprIR, TypeIR } from "../../ir/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -20,9 +20,32 @@ export interface RenderCtx {
   thisName: string;
   /** Module prefix for the current bounded context, e.g. `"MyApp.Sales"`. */
   contextModule: string;
+  /** Aggregate whose finds/derived/op bodies we're lowering.  Required
+   *  for `this.<refColl>.contains(param)` membership predicates, which
+   *  lower to an Ash `exists(<rel>, id == ^arg(:<param>))` filter
+   *  against the field's join entity.  When unset, contains falls back
+   *  to in-memory `Enum.member?` — the validator only admits the
+   *  membership form inside repository `where` clauses, so other
+   *  emission contexts (derived, invariant) shouldn't reach it. */
+  agg?: AggregateIR;
 }
 
 const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };
+
+/** Ash relationship name for a reference-collection association —
+ *  always `<fieldName>_through`.  We can't reuse the field name
+ *  (`:party`) because that conflicts with the calculation that
+ *  re-exposes the m2m as an `{:array, :uuid}` wire field of the same
+ *  name (Ash treats both as queryable references on the resource).
+ *  Suffixing keeps both registrable and signals intent ("this is the
+ *  m2m through-relationship for `party`").  Shared by the four
+ *  emitters that need to reference the relationship name in lockstep:
+ *  domain-emit (declares the m2m), render-expr (contains → `exists`
+ *  lowering), render-stmt (manage_relationship), and the calculation's
+ *  `expr(<rel>.id)` body. */
+export function relationshipNameFor(_agg: AggregateIR, fieldName: string): string {
+  return `${snake(fieldName)}_through`;
+}
 
 export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
   switch (e.kind) {
@@ -56,7 +79,7 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
     case "unary":
       return renderUnary(e.op, e.operand, ctx);
     case "binary":
-      return renderBinary(e.op, e.left, e.right, ctx);
+      return renderBinary(e.op, e.left, e.right, e.leftType, ctx);
     case "ternary":
       // Lower to `if … do … else … end`
       return `if ${renderExpr(e.cond, ctx)}, do: ${renderExpr(e.then, ctx)}, else: ${renderExpr(e.otherwise, ctx)}`;
@@ -75,6 +98,7 @@ function renderLiteral(lit: string, value: string): string {
   if (lit === "bool") return value === "true" ? "true" : "false";
   if (lit === "now") return "DateTime.utc_now()";
   if (lit === "decimal") return value; // Elixir decimals are plain numbers
+  if (lit === "money") return `Decimal.new(${JSON.stringify(value)})`;
   // int
   return value;
 }
@@ -132,6 +156,41 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: RenderCtx): s
 function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>, ctx: RenderCtx): string {
   const recv = renderExpr(e.receiver, ctx);
   const args = e.args.map((a) => renderExpr(a, ctx));
+  // `this.<refColl>.contains(x)` — membership over a reference
+  // collection.  Inside an Ash `filter expr(...)` this lowers to a
+  // join-table subquery via the auto-emitted many_to_many relationship:
+  // `exists(<rel>, id == ^arg(:<param>))`.  Detection is structural:
+  // receiverType is array<id>, receiver chains through this.<field>,
+  // single arg, and ctx.agg is set (only the repository find emitter
+  // threads it).  Other emission contexts fall through to the in-memory
+  // `Enum.member?` shape below.
+  if (
+    e.member === "contains" &&
+    e.receiverType.kind === "array" &&
+    e.receiverType.element.kind === "id" &&
+    e.args.length === 1 &&
+    ctx.agg
+  ) {
+    const fieldName = refCollectionFieldName(e.receiver);
+    if (fieldName) {
+      const assoc = (ctx.agg.associations ?? []).find((a) => a.fieldName === fieldName);
+      if (assoc) {
+        const rel = relationshipNameFor(ctx.agg, fieldName);
+        // The arg is typically a `ref` to the find's named parameter;
+        // Ash filter syntax binds it via `^arg(:<param>)`.  When the
+        // arg renders to a bare identifier we map it through; for
+        // literals / refs we trust renderExpr to produce a valid
+        // Ash-expr token (Ash accepts `^var` for in-scope Elixir
+        // values too).
+        const argSrc = e.args[0];
+        const argRendered =
+          argSrc?.kind === "ref" && (argSrc.refKind === "param" || argSrc.refKind === "let")
+            ? `^arg(:${snake(argSrc.name)})`
+            : args[0]!;
+        return `exists(${rel}, id == ${argRendered})`;
+      }
+    }
+  }
   if (e.isCollectionOp) {
     return renderCollectionOp(recv, e.member, args, ctx);
   }
@@ -258,15 +317,58 @@ function isStringType(e: ExprIR): boolean {
   return false;
 }
 
-function renderBinary(op: BinOp, left: ExprIR, right: ExprIR, ctx: RenderCtx): string {
+function renderBinary(
+  op: BinOp,
+  left: ExprIR,
+  right: ExprIR,
+  leftType: TypeIR | undefined,
+  ctx: RenderCtx,
+): string {
   const l = renderExpr(left, ctx);
   const r = renderExpr(right, ctx);
+  // Money operands cannot use the native `+`/`*`/`>` operators in
+  // Elixir — `Decimal` is a struct.  Arithmetic dispatches through
+  // `Decimal.add/2` / `mult/2` / `div/2`; comparisons go through
+  // `Decimal.compare/2` (returns `:lt | :eq | :gt` — three tokens,
+  // not a single operator, so the result shape isn't `${l} ${op}
+  // ${r}` like the primitive path).
+  if (leftType?.kind === "primitive" && leftType.name === "money") {
+    return renderMoneyBinary(op, l, r);
+  }
   const elOp = elixirOp(op, isStringType(left));
   if (op === "%") {
     // `rem` is a function in Elixir.
     return `rem(${l}, ${r})`;
   }
   return `${l} ${elOp} ${r}`;
+}
+
+const MONEY_ARITH: Record<string, string | undefined> = {
+  "+": "Decimal.add",
+  "-": "Decimal.sub",
+  "*": "Decimal.mult",
+  "/": "Decimal.div",
+};
+
+const MONEY_COMPARE: Record<string, string | undefined> = {
+  "==": ":eq",
+  "<": ":lt",
+  "<=": ":lt_or_eq",
+  ">": ":gt",
+  ">=": ":gt_or_eq",
+};
+
+function renderMoneyBinary(op: BinOp, l: string, r: string): string {
+  const arithFn = MONEY_ARITH[op];
+  if (arithFn) return `${arithFn}(${l}, ${r})`;
+  if (op === "==") return `Decimal.compare(${l}, ${r}) == :eq`;
+  if (op === "!=") return `Decimal.compare(${l}, ${r}) != :eq`;
+  if (op === "<") return `Decimal.compare(${l}, ${r}) == :lt`;
+  if (op === "<=") return `Decimal.compare(${l}, ${r}) in [:lt, :eq]`;
+  if (op === ">") return `Decimal.compare(${l}, ${r}) == :gt`;
+  if (op === ">=") return `Decimal.compare(${l}, ${r}) in [:gt, :eq]`;
+  // Fall through for unsupported ops — surfaces in generated Elixir.
+  return `${l} ${op} ${r}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +401,12 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
           return ":integer";
         case "decimal":
           return ":decimal";
+        case "money":
+          // Ash + Ecto :decimal is the canonical precise type;
+          // Decimal serialises as string via Jason by default — matches
+          // the wire-spec without extra config.  Arithmetic on these
+          // values dispatches through `Decimal.add/2` in `renderBinary`.
+          return ":decimal";
         case "string":
           return ":string";
         case "bool":
@@ -322,4 +430,14 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
     case "optional":
       return renderAshType(t.inner, contextModule);
   }
+}
+
+/** Field name behind a `this.<field>` receiver (used to look up the
+ * AssociationIR when lowering `.contains(...)`), or null if the
+ * receiver isn't a `this`-rooted single member access. */
+function refCollectionFieldName(e: ExprIR): string | null {
+  if (e.kind === "paren") return refCollectionFieldName(e.inner);
+  if (e.kind === "member" && e.receiver.kind === "this") return e.member;
+  if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
+  return null;
 }

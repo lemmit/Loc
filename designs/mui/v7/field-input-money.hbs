@@ -1,0 +1,7 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field, fieldState }) => (
+            <TextField label="{{label}}" type="text" data-testid="{{testId}}" value={field.value instanceof Decimal ? field.value.toString() : String(field.value ?? "0")} onChange={(e) => { try { field.onChange(new Decimal(e.target.value || "0")); } catch { field.onChange(new Decimal("0")); } }} error={!!fieldState.error} helperText={fieldState.error?.message} inputProps=\{{ inputMode: "decimal", pattern: "^-?\\d+(\\.\\d+)?$" }} />
+          )}
+        />

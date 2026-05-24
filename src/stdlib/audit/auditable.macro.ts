@@ -1,4 +1,10 @@
-import { defineMacro, field, idRef, implementsCapability, primType } from "../macro-api/index.js";
+import {
+  defineMacro,
+  field,
+  idRef,
+  implementsCapability,
+  primType,
+} from "../../macro-api/index.js";
 
 /** Aggregate-level state for the audit capability.
  *
