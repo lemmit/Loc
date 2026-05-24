@@ -133,9 +133,11 @@ export function projectToResponse(domainExpr: string, t: TypeIR, ctx: BoundedCon
     case "array":
       return `${domainExpr}.Select(__e => ${projectToResponse("__e", t.element, ctx)}).ToList()`;
     case "optional":
-      // Null-forgiving (`!`) on the recursive call so `.Value`/`.ToUniversalTime`
-      // etc. type-check against the unwrapped value rather than the nullable.
-      return `(${domainExpr} is null ? null : ${projectToResponse(`${domainExpr}!`, t.inner, ctx)})`;
+      // `is { } __v` pattern works for both nullable value types
+      // (Nullable<T>, requires .Value to unwrap) and nullable reference
+      // types — binds the unwrapped value so the inner recursion's
+      // `.ToUniversalTime()` / `.Value` etc. type-check correctly.
+      return `(${domainExpr} is { } __v ? ${projectToResponse("__v", t.inner, ctx)} : null)`;
   }
 }
 
@@ -170,9 +172,9 @@ export function domainToRequestExpr(domainExpr: string, t: TypeIR, ctx: BoundedC
     case "array":
       return `${domainExpr}.Select(__e => ${domainToRequestExpr("__e", t.element, ctx)}).ToList()`;
     case "optional":
-      // Null-forgiving (`!`) on the recursive call so `.Value`/`.ToUniversalTime`
-      // etc. type-check against the unwrapped value rather than the nullable.
-      return `(${domainExpr} is null ? null : ${domainToRequestExpr(`${domainExpr}!`, t.inner, ctx)})`;
+      // See projectToResponse — same pattern unwraps Nullable<T> for both
+      // value and reference inner types.
+      return `(${domainExpr} is { } __v ? ${domainToRequestExpr("__v", t.inner, ctx)} : null)`;
   }
 }
 
