@@ -157,24 +157,34 @@ export function buildRepositoryFile(
     `}`,
   );
 
+  // Strip string contents so symbols mentioned only inside error messages
+  // or labels don't register as references for the import narrowing below.
+  const bodyScan = bodyStr
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/`(?:\\.|[^`\\])*`/g, "``");
   // Narrow `drizzle-orm` ops to those actually called in the body, drop
   // `type Tx` when no method declares a `(tx: Tx)` parameter.
   const usedDrizzleOps = [...drizzleOps]
-    .filter((op) => new RegExp(`\\b${op}\\(`).test(bodyStr))
+    .filter((op) => new RegExp(`\\b${op}\\(`).test(bodyScan))
     .sort();
-  const usesTx = /:\s*Tx\b/.test(bodyStr);
-  // VO/enum imports go in as `import type` when the body never
-  // constructs them (`new Money(...)`); enums never have a runtime form
-  // here, so the helper trivially picks type-only for them.
-  const voOrEnumConstructed = voOrEnumImports.some((n) =>
-    new RegExp(`new\\s+${n}\\(`).test(bodyStr),
-  );
-  const voOrEnumImportLine =
-    voOrEnumImports.length === 0
-      ? false
-      : voOrEnumConstructed
-        ? `import { ${voOrEnumImports.join(", ")} } from "../../domain/value-objects";`
-        : `import type { ${voOrEnumImports.join(", ")} } from "../../domain/value-objects";`;
+  const usesTx = /:\s*Tx\b/.test(bodyScan);
+  // VO / enum imports: per-symbol. A name needs a runtime value when
+  // the body uses `new <Vo>(` (value-object construction) or `<Name>.<member>`
+  // (enum value access). Otherwise it's type-only.
+  const isValueUsed = (n: string): boolean =>
+    new RegExp(`new\\s+${n}\\(|\\b${n}\\.\\w`).test(bodyScan);
+  const voOrEnumReferenced = voOrEnumImports.filter((n) => new RegExp(`\\b${n}\\b`).test(bodyScan));
+  const anyVoOrEnumValueUsed = voOrEnumReferenced.some(isValueUsed);
+  let voOrEnumImportLine: string | false = false;
+  if (voOrEnumReferenced.length > 0) {
+    if (!anyVoOrEnumValueUsed) {
+      voOrEnumImportLine = `import type { ${voOrEnumReferenced.join(", ")} } from "../../domain/value-objects";`;
+    } else {
+      const symbols = voOrEnumReferenced.map((n) => (isValueUsed(n) ? n : `type ${n}`));
+      voOrEnumImportLine = `import { ${symbols.join(", ")} } from "../../domain/value-objects";`;
+    }
+  }
 
   const repoUsesMoney = aggregateUsesMoney(agg);
 

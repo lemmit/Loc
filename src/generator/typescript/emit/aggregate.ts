@@ -85,32 +85,46 @@ export function renderAggregate(
   // Render the body up front so the value-object import can be narrowed
   // to `import type` when no operation constructs a VO (`new Money(...)`),
   // and dropped entirely when no VO appears in any type position either.
-  const body =
+  const rawBody =
     (partsRendered.length > 0 ? partsRendered.map((p) => p + "\n").join("\n") : "") + rootRendered;
-  const usedVOs = valueObjectAliases.filter((n) => new RegExp(`\\b${n}\\b`).test(body));
-  const voConstructed = usedVOs.some((n) => new RegExp(`new\\s+${n}\\(`).test(body));
-  const voImport =
-    usedVOs.length === 0
-      ? null
-      : voConstructed
-        ? `import { ${usedVOs.join(", ")} } from "./value-objects";`
-        : `import type { ${usedVOs.join(", ")} } from "./value-objects";`;
+  // Strip string-literal contents so a symbol name that only appears
+  // inside a quoted string (e.g. an error message) doesn't count as a
+  // reference.
+  const body = rawBody
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/`(?:\\.|[^`\\])*`/g, "``");
+  // Per-symbol narrowing: a VO / enum needs a runtime value when the body
+  // uses `new <Vo>(` (value-object construction) or `<Name>.<member>` (enum
+  // value access). Type-only positions (annotation, `as <Name>`) qualify
+  // for `type <Name>` inline. Symbols never referenced are dropped.
+  const isValueUsed = (n: string): boolean => new RegExp(`new\\s+${n}\\(|\\b${n}\\.\\w`).test(body);
+  const usedVoOrEnum = [...valueObjectAliases, ...enumAliases].filter((n) =>
+    new RegExp(`\\b${n}\\b`).test(body),
+  );
+  const anyValueUsed = usedVoOrEnum.some(isValueUsed);
+  let voEnumImport: string | null = null;
+  if (usedVoOrEnum.length > 0) {
+    if (!anyValueUsed) {
+      voEnumImport = `import type { ${usedVoOrEnum.join(", ")} } from "./value-objects";`;
+    } else {
+      const symbols = usedVoOrEnum.map((n) => (isValueUsed(n) ? n : `type ${n}`));
+      voEnumImport = `import { ${symbols.join(", ")} } from "./value-objects";`;
+    }
+  }
   return (
     lines(
       "// Auto-generated.",
       usesMoney ? 'import Decimal from "decimal.js";' : null,
       'import * as Ids from "./ids";',
-      voImport,
-      enumAliases.length > 0
-        ? `import { ${enumAliases.join(", ")} } from "./value-objects";`
-        : null,
+      voEnumImport,
       'import type * as Events from "./events";',
       errorsImportList ? `import { ${errorsImportList} } from "./errors";` : null,
       hasProv ? 'import { type ProvLineage } from "./provenance";' : null,
       hasDomainTrace ? 'import { requestLog } from "../obs/als";' : null,
       usesUser ? 'import type { User } from "../auth/user-types";' : null,
       "",
-      body,
+      rawBody,
     ) + "\n\n"
   );
 }

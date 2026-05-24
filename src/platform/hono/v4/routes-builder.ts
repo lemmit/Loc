@@ -117,11 +117,12 @@ export function buildRoutesFile(
   // (`new Money(...)` from the validated body), so the runtime classes
   // must be in scope.  Enums travel as strings on the wire — no
   // import needed.
-  if (usedVOs.length > 0) {
-    lines.push(
-      `import { ${usedVOs.map((v) => v.name).join(", ")} } from "../domain/value-objects";`,
-    );
-  }
+  // Defer the value-objects import line: emit a placeholder so the actual
+  // names + per-symbol `type` qualifiers can be derived from the assembled
+  // body below (a VO needs a runtime value only when the body constructs
+  // it with `new <Vo>(`; otherwise inline `type` keeps the import green).
+  const VO_IMPORT_PLACEHOLDER = "/* __LOOM_VO_IMPORT__ */";
+  if (usedVOs.length > 0) lines.push(VO_IMPORT_PLACEHOLDER);
   lines.push("");
 
   for (const e of usedEnums) {
@@ -384,7 +385,35 @@ export function buildRoutesFile(
   lines.push("");
   lines.push(`  return app;`);
   lines.push(`}`);
-  return lines.join("\n") + "\n";
+  // Patch the deferred VO import: keep only names the body actually
+  // references; tag each as `type` unless the body constructs it via
+  // `new <Vo>(`.
+  const assembled = lines.join("\n");
+  if (usedVOs.length > 0) {
+    const usedNames = usedVOs.map((v) => v.name);
+    // Strip string-literal contents before scanning so `.openapi("Quantity")`
+    // doesn't count as a reference to the `Quantity` symbol.
+    const rawAfterImport = assembled.slice(assembled.indexOf(VO_IMPORT_PLACEHOLDER));
+    const bodyAfterImport = rawAfterImport
+      .replace(/"(?:\\.|[^"\\])*"/g, '""')
+      .replace(/'(?:\\.|[^'\\])*'/g, "''")
+      .replace(/`(?:\\.|[^`\\])*`/g, "``");
+    const referenced = usedNames.filter((n) => new RegExp(`\\b${n}\\b`).test(bodyAfterImport));
+    const isValue = (n: string): boolean => new RegExp(`new\\s+${n}\\(`).test(bodyAfterImport);
+    const anyValue = referenced.some(isValue);
+    // When every referenced VO is type-only, emit the whole-import form
+    // `import type { … }` (Biome's useImportType prefers it over inline
+    // `type` qualifiers when all named imports are type-only).
+    let replacement = "";
+    if (referenced.length > 0 && !anyValue) {
+      replacement = `import type { ${referenced.join(", ")} } from "../domain/value-objects";`;
+    } else if (referenced.length > 0) {
+      const symbols = referenced.map((n) => (isValue(n) ? n : `type ${n}`));
+      replacement = `import { ${symbols.join(", ")} } from "../domain/value-objects";`;
+    }
+    return assembled.replace(VO_IMPORT_PLACEHOLDER, replacement) + "\n";
+  }
+  return assembled + "\n";
 }
 
 function emitOperationRoute(
