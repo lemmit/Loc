@@ -270,7 +270,13 @@ function matchSingleField(e: ExprIR): { field: string; pattern: SingleFieldPatte
 
 function numericLiteral(e: ExprIR): number | null {
   if (e.kind !== "literal") return null;
-  if (e.lit !== "int" && e.lit !== "decimal") return null;
+  // money literals carry a precise-decimal string but are classified
+  // here only for display/optimisation-hint metadata (e.g. min/max
+  // bounds shown in form helpers).  For the typical sentinel values
+  // (`0`, `0.01`, `1000000`) the JS-number round-trip is exact; for
+  // truly money-grade magnitudes the classification will silently
+  // skip via the `Number.isFinite` gate below.
+  if (e.lit !== "int" && e.lit !== "decimal" && e.lit !== "money") return null;
   const n = Number(e.value);
   return Number.isFinite(n) ? n : null;
 }

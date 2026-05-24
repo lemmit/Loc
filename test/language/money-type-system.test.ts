@@ -92,6 +92,67 @@ context Billing {
 }
 `;
 
+describe("money — literal form `money(\"...\")`", () => {
+  // `money(...)` is a primary expression form for a precise-decimal
+  // literal — analogous to `now()` for datetime.  The string argument
+  // is what every backend's host-language Decimal type parses from
+  // without precision loss.
+
+  it("`money(\"10.50\")` parses as a primary expression", async () => {
+    const m = await linkedModel(`
+      context Billing {
+        aggregate Invoice {
+          derived starting: money = money("10.50")
+        }
+        repository Invoices for Invoice { }
+      }
+    `);
+    const inv = findAgg(m, "Invoice");
+    const starting = derivedExpr(inv, "starting");
+    const t = typeOf(starting, envForNode(starting));
+    expect(t.kind).toBe("primitive");
+    expect((t as { name: string }).name).toBe("money");
+  });
+
+  it("`money(\"…\")` lowers to a `literal` IR node with kind=money", async () => {
+    const { buildLoomModel } = await import("../_helpers/index.js");
+    const loom = await buildLoomModel(`
+      context Billing {
+        aggregate Invoice {
+          derived starting: money = money("10.50")
+        }
+        repository Invoices for Invoice { }
+      }
+    `);
+    const { allAggregates } = await import("../../src/ir/loom-ir.js");
+    const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
+    const starting = inv.derived.find((d) => d.name === "starting")!;
+    expect(starting.expr).toEqual({
+      kind: "literal",
+      lit: "money",
+      value: "10.50",
+    });
+  });
+
+  it("`money(\"…\")` participates in money arithmetic", async () => {
+    const { buildLoomModel } = await import("../_helpers/index.js");
+    const loom = await buildLoomModel(`
+      context Billing {
+        aggregate Invoice {
+          subtotal: money
+          derived withFee: money = subtotal + money("1.00")
+        }
+        repository Invoices for Invoice { }
+      }
+    `);
+    const { allAggregates } = await import("../../src/ir/loom-ir.js");
+    const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
+    const withFee = inv.derived.find((d) => d.name === "withFee")!;
+    const bin = withFee.expr as Extract<typeof withFee.expr, { kind: "binary" }>;
+    expect(bin.resultType).toEqual({ kind: "primitive", name: "money" });
+  });
+});
+
 describe("money — primitive type parses and lowers", () => {
   let model: Model;
   beforeAll(async () => {
@@ -157,6 +218,103 @@ describe("money — closed arithmetic", () => {
   it("money × money → rejected (unknown)", () => expectUnknown("mulMoney"));
   it("money ÷ money → rejected (unknown)", () => expectUnknown("divMoney"));
   it("decimal ÷ money → rejected (unknown)", () => expectUnknown("scalarDivMoney"));
+});
+
+describe("money — IR binary node carries leftType & resultType", () => {
+  // The binary IR node gains `leftType`/`resultType` populated during
+  // lowering.  Backends use them to dispatch operator rendering
+  // (e.g. Phoenix `Decimal.add/2`, TS `a.plus(b)`) without re-running
+  // type inference.
+
+  it("`money + money` IR carries leftType=money and resultType=money", async () => {
+    const { buildLoomModel } = await import("../_helpers/index.js");
+    const loom = await buildLoomModel(`
+      context Billing {
+        aggregate Invoice {
+          subtotal: money
+          derived plus: money = subtotal + subtotal
+        }
+        repository Invoices for Invoice { }
+      }
+    `);
+    const { allAggregates } = await import("../../src/ir/loom-ir.js");
+    const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
+    const plus = inv.derived.find((d) => d.name === "plus")!;
+    expect(plus.expr.kind).toBe("binary");
+    const bin = plus.expr as Extract<typeof plus.expr, { kind: "binary" }>;
+    expect(bin.leftType).toEqual({ kind: "primitive", name: "money" });
+    expect(bin.resultType).toEqual({ kind: "primitive", name: "money" });
+  });
+
+  it("`money * decimal` IR carries resultType=money (scaling)", async () => {
+    const { buildLoomModel } = await import("../_helpers/index.js");
+    const loom = await buildLoomModel(`
+      context Billing {
+        aggregate Invoice {
+          subtotal: money
+          taxRate: decimal
+          derived tax: money = subtotal * taxRate
+        }
+        repository Invoices for Invoice { }
+      }
+    `);
+    const { allAggregates } = await import("../../src/ir/loom-ir.js");
+    const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
+    const tax = inv.derived.find((d) => d.name === "tax")!;
+    const bin = tax.expr as Extract<typeof tax.expr, { kind: "binary" }>;
+    expect(bin.leftType).toEqual({ kind: "primitive", name: "money" });
+    expect(bin.resultType).toEqual({ kind: "primitive", name: "money" });
+  });
+
+  it("`money == money` IR carries resultType=bool (comparison)", async () => {
+    const { buildLoomModel } = await import("../_helpers/index.js");
+    const loom = await buildLoomModel(`
+      context Billing {
+        aggregate Invoice {
+          subtotal: money
+          paid: money
+          derived isSettled: bool = subtotal == paid
+        }
+        repository Invoices for Invoice { }
+      }
+    `);
+    const { allAggregates } = await import("../../src/ir/loom-ir.js");
+    const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
+    const settled = inv.derived.find((d) => d.name === "isSettled")!;
+    const bin = settled.expr as Extract<typeof settled.expr, { kind: "binary" }>;
+    expect(bin.leftType).toEqual({ kind: "primitive", name: "money" });
+    expect(bin.resultType).toEqual({ kind: "primitive", name: "bool" });
+  });
+});
+
+describe("money — array.sum is money-aware", () => {
+  // The IR-layer `memberType` for `array.sum` now returns money when
+  // the array's element type is money, so collection-op aggregation
+  // doesn't silently demote precision through the wire shape.
+
+  it("money[].sum → money (not decimal)", async () => {
+    const { buildLoomModel } = await import("../_helpers/index.js");
+    const loom = await buildLoomModel(`
+      context Billing {
+        aggregate Invoice {
+          contains lines: LineItem[]
+          derived total: money = lines.sum(l => l.amount)
+          entity LineItem {
+            amount: money
+          }
+        }
+        repository Invoices for Invoice { }
+      }
+    `);
+    const { allAggregates } = await import("../../src/ir/loom-ir.js");
+    const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
+    const total = inv.derived.find((d) => d.name === "total")!;
+    // The IR-side wireShape for the derived 'total' field carries the
+    // computed type — money preserved through the collection-op.
+    const totalField = inv.wireShape!.find((f) => f.name === "total");
+    expect(totalField).toBeDefined();
+    expect(totalField!.type).toEqual({ kind: "primitive", name: "money" });
+  });
 });
 
 describe("money — isAssignable", () => {

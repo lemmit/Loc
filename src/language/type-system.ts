@@ -36,6 +36,7 @@ import {
   isLambda,
   isLetStmt,
   isMemberAccess,
+  isMoneyLit,
   isNamedType,
   isNameRef,
   isNewExpr,
@@ -309,6 +310,7 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
   if (isStringLit(expr)) return T.prim("string");
   if (isIntLit(expr)) return T.prim("int");
   if (isDecLit(expr)) return T.prim("decimal");
+  if (isMoneyLit(expr)) return T.prim("money");
   if (isBoolLit(expr)) return T.prim("bool");
   if (isNullLit(expr)) return T.opt(T.never);
   if (isNowExpr(expr)) return T.prim("datetime");

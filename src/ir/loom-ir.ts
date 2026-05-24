@@ -1130,7 +1130,7 @@ export interface ProvSite {
 // Expressions — fully resolved, every name has a kind tag.
 // ---------------------------------------------------------------------------
 
-export type LiteralKind = "string" | "int" | "decimal" | "bool" | "null" | "now";
+export type LiteralKind = "string" | "int" | "decimal" | "money" | "bool" | "null" | "now";
 
 export type RefKind =
   | "param"
@@ -1234,7 +1234,26 @@ export type ExprIR =
     }
   | { kind: "paren"; inner: ExprIR }
   | { kind: "unary"; op: "-" | "!"; operand: ExprIR }
-  | { kind: "binary"; op: BinOp; left: ExprIR; right: ExprIR }
+  | {
+      kind: "binary";
+      op: BinOp;
+      left: ExprIR;
+      right: ExprIR;
+      /** Type of the left operand, populated during lowering when
+       *  available.  Backends use this to dispatch operator rendering —
+       *  e.g. Phoenix emits `Decimal.add(l, r)` for money operands,
+       *  TS emits `l.plus(r)` against a decimal.js Decimal — without
+       *  re-running expression-type inference.  Synthetic binary nodes
+       *  (built by walker-primitive-expander, etc.) may leave this
+       *  undefined; those paths only need operand-blind operator
+       *  rendering. */
+      leftType?: TypeIR;
+      /** Type of the binary expression as a whole — comparison/logical
+       *  ops are `bool`; arithmetic ops follow the type-system's
+       *  closed-money and numeric-widening rules.  Same population
+       *  policy as `leftType`. */
+      resultType?: TypeIR;
+    }
   | { kind: "ternary"; cond: ExprIR; then: ExprIR; otherwise: ExprIR }
   /**
    * Predicate-arms expression — first arm whose

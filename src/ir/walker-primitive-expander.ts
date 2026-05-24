@@ -453,7 +453,12 @@ function typedCellFor(receiver: ExprIR, type: import("./loom-ir.js").TypeIR): Ex
     if (inner.name === "datetime") {
       return call("DateDisplay", [receiver]);
     }
-    if (inner.name === "decimal" || inner.name === "int" || inner.name === "long") {
+    if (
+      inner.name === "decimal" ||
+      inner.name === "money" ||
+      inner.name === "int" ||
+      inner.name === "long"
+    ) {
       return call("Text", [receiver]);
     }
   }
@@ -869,7 +874,12 @@ function columnAccessorFor(
     if (inner.name === "datetime") {
       return call("DateDisplay", [member(ref(rowVar), fieldName)]);
     }
-    if (inner.name === "decimal" || inner.name === "int" || inner.name === "long") {
+    if (
+      inner.name === "decimal" ||
+      inner.name === "money" ||
+      inner.name === "int" ||
+      inner.name === "long"
+    ) {
       return call("Text", [member(ref(rowVar), fieldName)]);
     }
   }
