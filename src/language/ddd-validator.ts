@@ -66,6 +66,7 @@ import {
 } from "./generated/ast.js";
 import {
   arithmeticResult,
+  comparable,
   type DddType,
   type Env,
   envForNode,
@@ -122,12 +123,15 @@ export class DddValidator {
     // Type-position references: bare aggregate name (must be `X id`),
     // and cross-aggregate entity-part name (must go through the root).
     this.checkTypeReferences(model, accept);
-    // Binary expressions with `money` operands: a closed type that
-    // can't silently mix with `decimal`/`int`/`long`/etc. — see
-    // type-system.ts's arithmeticResult.  Walks every binary in the
-    // model so derivations, invariants, preconditions, assignments,
-    // and emit fields all get the same scrutiny.
-    this.checkBinaryMoneyOperands(model, accept);
+    // Binary operand compatibility: every binary expression's
+    // operands must agree with the operator's semantics.
+    // Arithmetic uses `arithmeticResult` (numeric widening, closed
+    // money rules, string concat); comparison uses `comparable`
+    // (same type / numeric-chain / money / optional-unwrap);
+    // logical requires bool.  Replaces the per-feature suppression
+    // pattern in `checkDerived` etc. — see the function's header
+    // for the full rationale.
+    this.checkBinaryOperands(model, accept);
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
         this.checkContext(m, accept);
@@ -1013,82 +1017,108 @@ export class DddValidator {
   }
 
   // ---------------------------------------------------------------------------
-  // money operand-compatibility check.
+  // Binary operand-compatibility check.
   //
-  // The type-system layer's `arithmeticResult` already returns
-  // `T.unknown` when money is mixed with a non-money primitive in
-  // arithmetic, but downstream consumers (`checkDerived`,
-  // `checkAssignOrCall`, etc.) suppress error emission when an
-  // operand's type is unknown to avoid cascading from upstream
-  // resolution failures.  That suppression is correct in general,
-  // but it silently swallows the very money/decimal mismatch the
-  // primitive exists to flag.
+  // Loom's type-system layer (`typeOf`) already detects invalid
+  // binary expressions — `arithmeticResult` returns `T.unknown` for
+  // mixes like `string + int`, `bool + decimal`, `money + decimal` —
+  // but every downstream gate that consumes a typed expression
+  // (`checkDerived`, `checkAssignOrCall`, etc.) suppresses errors
+  // when `actual.kind === "unknown"` to avoid cascading from upstream
+  // resolution failures.  That suppression is correct for the
+  // "couldn't figure it out" case (broken ref, missing member) but
+  // silently swallows the "this expression IS invalid" case — the
+  // exact bug the type-system is meant to catch.
   //
-  // This pass walks every binary node in the model and runs the
-  // `arithmeticResult` rule (for `+ - * / %`) and an explicit
-  // same-money-ness check (for `< <= > >= == !=`) so a fixture like
-  // `derived total: money = subtotal + taxRate` (where `taxRate`
-  // is `decimal`) errors clearly instead of typechecking to `unknown`
-  // and slipping past.
+  // This pass walks every binary node in the model and emits an
+  // explicit diagnostic for operand combinations the type-system
+  // rejects (rather than letting the unknown propagate into the
+  // suppression).  Three classes:
+  //
+  //   • Arithmetic (`+ - * / %`)  — `arithmeticResult(l, r, op)` is
+  //     unknown.  Covers numeric / string mismatches, money / non-
+  //     money mixes outside the closed rules, etc.
+  //   • Comparison (`== != < <= > >=`) — operand types aren't
+  //     `comparable`.  typeOf always returns bool for these (no
+  //     "unknown" signal); without this rule, `string == int` would
+  //     silently typecheck.
+  //   • Logical (`&& ||`) — both operands must be bool.
+  //
+  // Cascade prevention: skips when either operand type is already
+  // unknown (an upstream checker has reported it; the second
+  // diagnostic here would duplicate the noise).
+  //
+  // Audit confirms zero impact on the existing example / fixture
+  // corpus (see `scripts/audit-binary-operands.mts`); pre-#506
+  // every silent-invalid expression had to be hand-fixed via a
+  // per-feature validator pass (e.g. the money rule that this
+  // function replaces).
   // ---------------------------------------------------------------------------
-  private checkBinaryMoneyOperands(model: Model, accept: ValidationAcceptor): void {
+  private checkBinaryOperands(model: Model, accept: ValidationAcceptor): void {
     for (const node of AstUtils.streamAllContents(model)) {
       if (!isBinaryExpr(node)) continue;
-      this.checkSingleBinaryMoneyOperands(node, accept);
+      this.checkSingleBinaryOperands(node, accept);
     }
   }
 
-  private checkSingleBinaryMoneyOperands(
+  private checkSingleBinaryOperands(
     bin: import("./generated/ast.js").BinaryExpr,
     accept: ValidationAcceptor,
   ): void {
     const env = envForNode(bin);
     const lt = typeOf(bin.left, env);
     const rt = typeOf(bin.right, env);
-    // Cascade suppression — if either operand's type is unknown for
-    // an upstream reason (unresolved ref, broken member, etc.), the
-    // existing checkers will already report it; piling on here would
-    // duplicate the noise.
+    // Cascade suppression — broken upstream already reports.
     if (lt.kind === "unknown" || rt.kind === "unknown") return;
 
-    const lIsMoney = lt.kind === "primitive" && lt.name === "money";
-    const rIsMoney = rt.kind === "primitive" && rt.name === "money";
-    // Only fire on money-touching expressions; broader operand
-    // checks (string + int, etc.) are out of scope for this gate.
-    if (!lIsMoney && !rIsMoney) return;
-
     const op = bin.op;
-    // Comparisons must have BOTH sides money or NEITHER side money —
-    // mixing produces meaningless `Decimal.compare(d, decimal)` /
-    // `m.eq(numeric)` calls on emit.
-    if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
-      if (lIsMoney !== rIsMoney) {
-        const other = lIsMoney ? rt : lt;
+
+    // Logical: both operands must be bool.
+    if (op === "&&" || op === "||") {
+      const lBool = lt.kind === "primitive" && lt.name === "bool";
+      const rBool = rt.kind === "primitive" && rt.name === "bool";
+      if (!lBool || !rBool) {
         accept(
           "error",
-          `Operator '${op}' cannot compare 'money' with '${typeToString(other)}'. ` +
-            `money is a closed type — convert the other operand via money("...") if it is decimal-shaped.`,
+          `Operator '${op}' requires boolean operands; got '${typeToString(lt)}' and '${typeToString(rt)}'.`,
           { node: bin },
         );
       }
       return;
     }
 
-    // Logical ops on money don't make sense — but typeOf will already
-    // have flagged the operand as non-bool via the invariant /
-    // derived shape check.  Skip to avoid duplicate errors.
-    if (op === "&&" || op === "||") return;
+    // Comparison: operands must be pairwise comparable.
+    if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
+      if (!comparable(lt, rt)) {
+        accept(
+          "error",
+          `Operator '${op}' cannot compare '${typeToString(lt)}' with '${typeToString(rt)}'. ` +
+            `Operands must be the same type, both numeric (int / long / decimal), both money, ` +
+            `or one a null literal against an optional.`,
+          { node: bin },
+        );
+      }
+      return;
+    }
 
-    // Arithmetic: arithmeticResult returns unknown for any money
-    // mixing outside the closed rules.  Surfacing that as a
-    // validator error is the whole point of this pass.
+    // Arithmetic: `arithmeticResult` returns unknown for invalid
+    // combinations — surface the rejection with a per-operator
+    // message that names the closed-arithmetic rules for money
+    // when relevant.
     const result = arithmeticResult(lt, rt, op);
     if (result.kind === "unknown") {
+      const isMoney = (t: typeof lt) => t.kind === "primitive" && t.name === "money";
+      const moneyHint =
+        isMoney(lt) || isMoney(rt)
+          ? ` Allowed for money: money ± money, money × {int|long|decimal}, money ÷ {int|long|decimal}.`
+          : op === "+"
+            ? ` Numeric arithmetic requires both operands in the int / long / decimal chain; ` +
+              `string concatenation requires both operands 'string'.`
+            : ` Numeric arithmetic requires both operands in the int / long / decimal chain.`;
       accept(
         "error",
-        `Operator '${op}' has incompatible operand types with 'money': ` +
-          `left is '${typeToString(lt)}', right is '${typeToString(rt)}'. ` +
-          `Allowed: money ± money, money × {int|long|decimal}, money ÷ {int|long|decimal}.`,
+        `Operator '${op}' has incompatible operand types: ` +
+          `left is '${typeToString(lt)}', right is '${typeToString(rt)}'.${moneyHint}`,
         { node: bin },
       );
     }
