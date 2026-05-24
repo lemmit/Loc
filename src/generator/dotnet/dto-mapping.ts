@@ -133,7 +133,9 @@ export function projectToResponse(domainExpr: string, t: TypeIR, ctx: BoundedCon
     case "array":
       return `${domainExpr}.Select(__e => ${projectToResponse("__e", t.element, ctx)}).ToList()`;
     case "optional":
-      return `(${domainExpr} is null ? null : ${projectToResponse(domainExpr, t.inner, ctx)})`;
+      // Null-forgiving (`!`) on the recursive call so `.Value`/`.ToUniversalTime`
+      // etc. type-check against the unwrapped value rather than the nullable.
+      return `(${domainExpr} is null ? null : ${projectToResponse(`${domainExpr}!`, t.inner, ctx)})`;
   }
 }
 
@@ -168,7 +170,9 @@ export function domainToRequestExpr(domainExpr: string, t: TypeIR, ctx: BoundedC
     case "array":
       return `${domainExpr}.Select(__e => ${domainToRequestExpr("__e", t.element, ctx)}).ToList()`;
     case "optional":
-      return `(${domainExpr} is null ? null : ${domainToRequestExpr(domainExpr, t.inner, ctx)})`;
+      // Null-forgiving (`!`) on the recursive call so `.Value`/`.ToUniversalTime`
+      // etc. type-check against the unwrapped value rather than the nullable.
+      return `(${domainExpr} is null ? null : ${domainToRequestExpr(`${domainExpr}!`, t.inner, ctx)})`;
   }
 }
 
