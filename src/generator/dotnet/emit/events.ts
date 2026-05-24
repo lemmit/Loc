@@ -10,6 +10,8 @@ export function renderEvent(e: EventIR, ns: string): string {
   const params = e.fields.map((f) => `${renderCsType(f.type)} ${upperFirst(f.name)}`).join(", ");
   return `// Auto-generated.
 using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
 
 namespace ${ns}.Domain.Events;
 
