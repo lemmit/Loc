@@ -312,6 +312,7 @@ ${cases}
 export const E2E_FIXTURES_TS = `// Auto-generated.
 import { test as base, expect } from "@playwright/test";
 
+// biome-ignore lint/suspicious/noConfusingVoidType: Playwright fixtures use \`void\` to mean "no value".
 export const test = base.extend<{ _consoleCapture: void }>({
   _consoleCapture: [
     async ({ page }, use, testInfo) => {

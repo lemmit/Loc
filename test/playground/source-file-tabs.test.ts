@@ -100,16 +100,12 @@ describe("SourceFileTabs — new-file basename validation", () => {
   describe("newFolderSeedPath", () => {
     it("seeds an `untitled.ddd` inside the new folder", () => {
       const existing = new Set(["/workspace/main.ddd"]);
-      expect(newFolderSeedPath("billing", existing)).toBe(
-        "/workspace/billing/untitled.ddd",
-      );
+      expect(newFolderSeedPath("billing", existing)).toBe("/workspace/billing/untitled.ddd");
     });
 
     it("strips leading + trailing slashes from the folder name", () => {
       const existing = new Set(["/workspace/main.ddd"]);
-      expect(newFolderSeedPath("/audit/", existing)).toBe(
-        "/workspace/audit/untitled.ddd",
-      );
+      expect(newFolderSeedPath("/audit/", existing)).toBe("/workspace/audit/untitled.ddd");
     });
 
     it("disambiguates when `untitled.ddd` is already taken", () => {
@@ -117,9 +113,7 @@ describe("SourceFileTabs — new-file basename validation", () => {
         "/workspace/billing/untitled.ddd",
         "/workspace/billing/untitled-2.ddd",
       ]);
-      expect(newFolderSeedPath("billing", existing)).toBe(
-        "/workspace/billing/untitled-3.ddd",
-      );
+      expect(newFolderSeedPath("billing", existing)).toBe("/workspace/billing/untitled-3.ddd");
     });
   });
 });

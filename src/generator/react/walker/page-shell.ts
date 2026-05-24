@@ -400,9 +400,21 @@ function renderFormOpWiring(
     fieldHtmls,
     triggerLabel: state.triggerLabel,
     triggerPrimary: state.triggerPrimary,
-    destructured: useController
-      ? "{ register, handleSubmit, control, formState: { errors } }"
-      : "{ register, handleSubmit, formState: { errors } }",
+    destructured: (() => {
+      // Scan the rendered field markup to keep only the destructured
+      // pieces the form actually references — when every field is wired
+      // via <Controller render={({ field, fieldState }) => …}>, `register`
+      // and the formState `errors` map fall out as unused locals.
+      const formBody = fieldHtmls.join("\n");
+      const usesRegister = /\bregister\(/.test(formBody);
+      const usesErrors = /\berrors\./.test(formBody);
+      const parts: string[] = [];
+      if (usesRegister) parts.push("register");
+      parts.push("handleSubmit");
+      if (useController) parts.push("control");
+      if (usesErrors) parts.push("formState: { errors }");
+      return `{ ${parts.join(", ")} }`;
+    })(),
   };
   const decls = pack.render("form-op-decls", tplCtx);
   const moduleScope = pack.render("form-op-module", tplCtx);

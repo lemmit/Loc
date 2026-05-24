@@ -1947,7 +1947,7 @@ function pagePropDisplayName(typeName: string): string {
   }
 }
 
-function singular(selector: string): string {
+function _singular(selector: string): string {
   switch (selector) {
     case "modules":
       return "module";

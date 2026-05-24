@@ -82,14 +82,25 @@ export function renderAggregate(
     .filter(Boolean)
     .join(", ");
 
+  // Render the body up front so the value-object import can be narrowed
+  // to `import type` when no operation constructs a VO (`new Money(...)`),
+  // and dropped entirely when no VO appears in any type position either.
+  const body =
+    (partsRendered.length > 0 ? partsRendered.map((p) => p + "\n").join("\n") : "") + rootRendered;
+  const usedVOs = valueObjectAliases.filter((n) => new RegExp(`\\b${n}\\b`).test(body));
+  const voConstructed = usedVOs.some((n) => new RegExp(`new\\s+${n}\\(`).test(body));
+  const voImport =
+    usedVOs.length === 0
+      ? null
+      : voConstructed
+        ? `import { ${usedVOs.join(", ")} } from "./value-objects";`
+        : `import type { ${usedVOs.join(", ")} } from "./value-objects";`;
   return (
     lines(
       "// Auto-generated.",
       usesMoney ? 'import Decimal from "decimal.js";' : null,
       'import * as Ids from "./ids";',
-      valueObjectAliases.length > 0
-        ? `import { ${valueObjectAliases.join(", ")} } from "./value-objects";`
-        : null,
+      voImport,
       enumAliases.length > 0
         ? `import { ${enumAliases.join(", ")} } from "./value-objects";`
         : null,
@@ -99,8 +110,7 @@ export function renderAggregate(
       hasDomainTrace ? 'import { requestLog } from "../obs/als";' : null,
       usesUser ? 'import type { User } from "../auth/user-types";' : null,
       "",
-      partsRendered.length > 0 ? partsRendered.map((p) => p + "\n").join("\n") : "",
-      rootRendered,
+      body,
     ) + "\n\n"
   );
 }
@@ -150,7 +160,7 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
   // the root) the static `create` factory body.
   // Provenanced fields carry a co-located `_<field>_provenance` backing
   // field (current lineage, persisted on the row) threaded through the
-  // ctor state so repository hydration can restore it.  `__provTraces`
+  // ctor state so repository hydration can restore it.  `_provTraces`
   // (the append-only history buffer drained by the route handler) is
   // emitted only where domain logic actually writes a provenanced field.
   const provFields = emitProvenance ? e.fields.filter((f) => f.provenanced) : [];
@@ -184,7 +194,7 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
     fieldDecls.push(`  private _${c.name}: ${containsType(c)};`);
   }
   if (hasOwnProvWrite) {
-    fieldDecls.push("  private __provTraces: ProvLineage[] = [];");
+    fieldDecls.push("  private _provTraces: ProvLineage[] = [];");
   }
 
   const ctorAssignments: string[] = [];
@@ -348,9 +358,9 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
   // transaction and inserts one `provenance_records` row per lineage.
   const provDrain = hasOwnProvWrite
     ? [
-        "  __drainProv(): ProvLineage[] {",
-        "    const out = this.__provTraces;",
-        "    this.__provTraces = [];",
+        "  drainProv(): ProvLineage[] {",
+        "    const out = this._provTraces;",
+        "    this._provTraces = [];",
         "    return out;",
         "  }",
         "",

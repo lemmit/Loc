@@ -33,7 +33,6 @@ import type {
   UnaryExpr,
 } from "../language/generated/ast.js";
 import { isProperty } from "../language/generated/ast.js";
-import type { OriginToken } from "./define.js";
 import {
   _currentOrigin,
   _setContainer,

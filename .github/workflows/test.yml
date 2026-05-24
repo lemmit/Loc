@@ -30,6 +30,14 @@ on:
 permissions:
   contents: read
 
+# Cancel in-flight runs of the same branch when a new commit lands —
+# saves CI minutes on rebases / force-pushes (mirrors the pattern in
+# playground-e2e.yml and generated-react-build.yml).  The latest
+# commit is what ultimately gets gated.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
