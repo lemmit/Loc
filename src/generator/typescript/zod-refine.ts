@@ -188,6 +188,10 @@ function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>): string {
     e.receiverType.name === "string" &&
     args.length === 1
   ) {
+    const arg0 = e.args[0];
+    if (arg0?.kind === "literal" && arg0.lit === "string") {
+      return `/${arg0.value.replace(/\//g, "\\/")}/.test(${recv})`;
+    }
     return `new RegExp(${args[0]}).test(${recv})`;
   }
   return `${recv}.${e.member}(${args.join(", ")})`;

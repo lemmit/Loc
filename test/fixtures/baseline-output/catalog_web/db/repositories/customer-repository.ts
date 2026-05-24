@@ -1,6 +1,6 @@
 // Auto-generated.  Do not edit by hand.
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import * as schema from "../schema";
 import { Customer } from "../../domain/customer";
 import * as Ids from "../../domain/ids";
@@ -9,7 +9,6 @@ import type { DomainEventDispatcher } from "../../domain/events";
 import { requestLog } from "../../obs/als";
 
 type Db = NodePgDatabase<typeof schema>;
-type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 export class CustomerRepository {
   constructor(
