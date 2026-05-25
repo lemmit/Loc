@@ -239,6 +239,7 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
       )}
       <Handle
         type="source"
+        id="bottom"
         position={Position.Bottom}
         style={{ background: "var(--mantine-color-dark-3)" }}
       />
