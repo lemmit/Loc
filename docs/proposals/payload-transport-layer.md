@@ -551,7 +551,7 @@ matters; `A or B` and `B or A` are the same type.
 ```
 authorize for PaymentRequest {
   # Any payload of type PaymentRequest, regardless of which operation carries it
-  requires actor has "payments.execute"
+  requires currentUser.permissions.contains(permissions.paymentsExecute)
 }
 
 validate for OrderItem {

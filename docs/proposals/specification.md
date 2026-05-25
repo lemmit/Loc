@@ -591,4 +591,4 @@ Independent of Spec1-4; can ship before or after.
   `private invariant`; `private workflow` follows the same pattern.
 - #466 — macro system; macros can inject `from <Spec>(args)`
   bindings on parameters (e.g., an `audited` macro adding a spec
-  for actor permissions).
+  that checks `currentUser.permissions`).
