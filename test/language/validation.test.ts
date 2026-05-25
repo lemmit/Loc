@@ -956,7 +956,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         aggregate Order {
           sku: string display
           test "money builds" {
-            let m = Money(1.0, "USD")
+            let m = Money { amount: 1.0, currency: "USD" }
             expect m.amount == 1.0
           }
         }

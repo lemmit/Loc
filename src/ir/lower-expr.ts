@@ -588,12 +588,30 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
 
 /** Lower a v2 BuilderCall (`Type { slot: value, ... }`).  The type name
  *  resolves at lowering time against the in-scope declarations:
- *    - EntityPart / Aggregate / ValueObject   → value construction
- *    - (events handled separately by EmitStmt; unknown names fall
- *      through to a `new`-shaped IR for the validator to flag)
- *  Bare positional entries (no `name:`) are dropped in this phase —
- *  the walker-primitive migration in a later slice consumes them.  */
+ *    - ValueObject  → "call" IR with callKind "value-object-ctor"
+ *      (same shape today's `Money(10, "USD")` CallExpr produces, so
+ *      every downstream backend keeps working unchanged)
+ *    - EntityPart / Aggregate → "new" IR (part/aggregate construction)
+ *    - Unknown name → "new" IR; validator surfaces the missing-type
+ *      diagnostic.  Events are handled by EmitStmt, not here.
+ *  Bare positional entries (no `name:`) are kept in the named-args
+ *  list with `undefined` names — the walker-primitive migration in a
+ *  later slice uses them. */
 function lowerBuilderCall(expr: BuilderCall, env: Env): ExprIR {
+  const name = expr.type;
+  const vo = findValueObjectByName(env, name);
+  if (vo) {
+    const args = expr.entries.map((e) => lowerExpr(e.value, env));
+    const argNames = expr.entries.map((e) => e.name || undefined);
+    const named = argNames.some((n) => n !== undefined);
+    return {
+      kind: "call",
+      callKind: "value-object-ctor",
+      name,
+      args,
+      ...(named ? { argNames } : {}),
+    };
+  }
   const fields = expr.entries
     .filter((e) => e.name !== undefined)
     .map((e) => ({
@@ -602,7 +620,7 @@ function lowerBuilderCall(expr: BuilderCall, env: Env): ExprIR {
     }));
   return {
     kind: "new",
-    partName: expr.type,
+    partName: name,
     fields,
   };
 }

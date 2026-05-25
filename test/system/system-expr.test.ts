@@ -58,32 +58,32 @@ describe("structured expression editor — model", () => {
     expect(emitExpr(tree)).toBe("amount >= 0");
   });
 
-  it("structures calls (callee + args), keeping lambdas as raw leaves", () => {
-    // derived total = Money(lines.sum(l => l.subtotal.amount), "USD")
+  it("structures builder-calls (type + entries), keeping lambdas as raw leaves", () => {
+    // derived total = Money { amount: lines.sum(l => l.subtotal.amount), currency: "USD" }
     const tree = seedExpr(
       slotExpr(parse(sales), { kind: "derived", owner: "Order", name: "total" })!,
     );
-    if (tree.kind !== "call") throw new Error("expected a call");
-    expect(tree.callee).toMatchObject({ kind: "raw", text: "Money" });
-    expect(tree.args).toHaveLength(2);
-    expect(tree.args[0].value).toMatchObject({ kind: "member", member: "sum", call: true });
-    expect(tree.args[1].value).toMatchObject({ kind: "lit", lit: "string", value: "USD" });
-    expect(emitExpr(tree)).toBe('Money(lines.sum(l => l.subtotal.amount), "USD")');
+    if (tree.kind !== "builder") throw new Error("expected a builder-call");
+    expect(tree.type).toBe("Money");
+    expect(tree.entries).toHaveLength(2);
+    expect(tree.entries[0].value).toMatchObject({ kind: "member", member: "sum", call: true });
+    expect(tree.entries[1].value).toMatchObject({ kind: "lit", lit: "string", value: "USD" });
+    expect(emitExpr(tree)).toBe('Money { amount: lines.sum(l => l.subtotal.amount), currency: "USD" }');
   });
 
   it("structures expression-body lambdas (param + body)", () => {
-    // derived total = Money(lines.sum(l => l.subtotal.amount), "USD")
+    // derived total = Money { amount: lines.sum(l => l.subtotal.amount), currency: "USD" }
     const tree = seedExpr(
       slotExpr(parse(sales), { kind: "derived", owner: "Order", name: "total" })!,
     );
-    if (tree.kind !== "call") throw new Error("expected a call");
-    const sum = tree.args[0].value;
+    if (tree.kind !== "builder") throw new Error("expected a builder-call");
+    const sum = tree.entries[0].value;
     if (sum.kind !== "member") throw new Error("expected a member call");
     const lam = sum.args[0].value;
     expect(lam).toMatchObject({ kind: "lambda", param: "l" });
     if (lam.kind !== "lambda") throw new Error("expected a lambda");
     expect(lam.body).toMatchObject({ kind: "member", member: "amount" });
-    expect(emitExpr(tree)).toBe('Money(lines.sum(l => l.subtotal.amount), "USD")');
+    expect(emitExpr(tree)).toBe('Money { amount: lines.sum(l => l.subtotal.amount), currency: "USD" }');
   });
 
   it("structures ternary expressions (cond / then / else)", () => {
@@ -481,13 +481,15 @@ describe("structured expression editor — scope-aware name candidates", () => {
 
 describe("structured expression editor — type-directed member candidates", () => {
   it("types member receivers, including through a collection-op lambda", async () => {
-    // derived total = Money(lines.sum(l => l.subtotal.amount), "USD")
+    // derived total = Money { amount: lines.sum(l => l.subtotal.amount), currency: "USD" }
     const m = await memberCandidates(sales, { kind: "derived", owner: "Order", name: "total" });
-    // `lines` (containment) is an array → collection ops.
-    expect(m.get("a0")).toEqual(expect.arrayContaining(["count", "sum", "all"]));
+    // `lines` (containment) is an array → collection ops.  Path prefix
+    // is `f0` (BuilderCall entry index) instead of pre-v2's `a0` (CallExpr
+    // arg index) — the suffix structure under it is unchanged.
+    expect(m.get("f0")).toEqual(expect.arrayContaining(["count", "sum", "all"]));
     // Inside the lambda: `l` binds to OrderLine, `l.subtotal` is Money.
-    expect(m.get("a0a0br")).toEqual(expect.arrayContaining(["subtotal", "quantity", "id"]));
-    expect(m.get("a0a0b")).toEqual(["amount", "currency"]);
+    expect(m.get("f0a0br")).toEqual(expect.arrayContaining(["subtotal", "quantity", "id"]));
+    expect(m.get("f0a0b")).toEqual(["amount", "currency"]);
   });
 
   it("types a `this`-rooted receiver in a find filter", async () => {
@@ -519,9 +521,8 @@ describe("structured expression editor — type-directed member candidates", () 
     expect(mt.get("m0v")).toEqual(expect.arrayContaining(["qty", "status"]));
   });
 
-  it("labels positional call arguments with the callee's parameter names", async () => {
-    // derived total = Money(lines.sum(l => l.subtotal.amount), "USD")
-    const h = await exprHints(sales, { kind: "derived", owner: "Order", name: "total" });
-    expect(h.argLabels.get("")).toEqual(["amount", "currency"]); // Money(amount, currency)
-  });
+  // Positional-call argLabels (used pre-v2 to hint Money(10, "USD") with
+  // ["amount", "currency"]) no longer applies once every VO construction
+  // is a BuilderCall with named slots written into the source.  Slot-name
+  // suggestion for empty BuilderCall entries is a separate feature.
 });

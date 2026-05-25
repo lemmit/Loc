@@ -39,7 +39,7 @@ context Sales {
     contains lines: OrderLine[]
 
     derived total: Money =
-      Money(lines.sum(l => l.subtotal.amount), "USD")
+      Money { amount: lines.sum(l => l.subtotal.amount), currency: "USD" }
 
     invariant lines.count > 0 when status == Confirmed
 
@@ -73,19 +73,19 @@ context Sales {
       function subtotalAmount(): decimal = unitPrice.amount * quantity
 
       derived subtotal: Money =
-        Money(subtotalAmount(), unitPrice.currency)
+        Money { amount: subtotalAmount(), currency: unitPrice.currency }
 
       invariant quantity > 0
     }
 
     test "money literal builds" {
-      let m = Money(10.5, "USD")
+      let m = Money { amount: 10.5, currency: "USD" }
       expect(m.amount).toBe(10.5)
       expect(m.currency).toBe("USD")
     }
 
     test "negative money rejected" {
-      expectThrows Money(-1.0, "USD")
+      expectThrows Money { amount: -1.0, currency: "USD" }
     }
   }
 

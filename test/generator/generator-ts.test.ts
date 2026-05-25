@@ -1243,11 +1243,11 @@ describe("typescript generator", () => {
           balance: Money
           operation deposit(amount: Money) {
             precondition amount.amount > 0
-            balance := Money(balance.amount + amount.amount, balance.currency)
+            balance := Money { amount: balance.amount + amount.amount, currency: balance.currency }
           }
           operation withdraw(amount: Money) {
             precondition amount.amount > 0
-            balance := Money(balance.amount - amount.amount, balance.currency)
+            balance := Money { amount: balance.amount - amount.amount, currency: balance.currency }
           }
         }
         repository Accounts for Account { }

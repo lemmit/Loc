@@ -47,7 +47,7 @@ context Banking {
     operation deposit(amount: Money) {
       precondition isMutable()
       precondition amount.amount > 0
-      balance := Money(balance.amount + amount.amount, balance.currency)
+      balance := Money { amount: balance.amount + amount.amount, currency: balance.currency }
       transactions += AccountTransaction {
         amount: amount,
         kind: "Deposit",
@@ -60,7 +60,7 @@ context Banking {
       precondition isMutable()
       precondition amount.amount > 0
       precondition balance.amount >= amount.amount
-      balance := Money(balance.amount - amount.amount, balance.currency)
+      balance := Money { amount: balance.amount - amount.amount, currency: balance.currency }
       transactions += AccountTransaction {
         amount: amount,
         kind: "Withdrawal",
