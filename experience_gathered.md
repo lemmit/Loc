@@ -622,12 +622,23 @@ or not.
   `(owner_fk, target_fk)` makes that idempotent).  Load batches the join
   rows into a `Map<ownerId, targetId[]>` and brands them back to
   `Ids.<Target>Id`.
-- **Order is preserved via an `ordinal` column.**  The collection is a
-  list, not a bag — `party[0]` must round-trip as the lead.  Each join
-  row carries its position; save upserts with `onConflictDoUpdate(set:
-  {ordinal})` so reorders persist, load `ORDER BY ordinal`.  The
-  composite PK stays `(owner_fk, target_fk)` (a target appears once per
-  owner); ordinal is positional, not part of identity.
+- **The contract is set semantics; ordinal is implementation detail.**
+  An earlier iteration of this work pitched `X id[]` as an ordered list
+  and added an `ordinal` column to preserve `party[0]` across a
+  round-trip.  TS/Drizzle and .NET/EF honour ordinal (write per-row on
+  `+=`, `ORDER BY ordinal` on load); Phoenix/Ash leaves the column at
+  its default because `Ash.Changeset.manage_relationship` doesn't
+  inject join-row attributes.  Three backends, three different ordering
+  guarantees — a false promise on the cross-backend contract.  Pulled
+  back: a relational join table is naturally a set (composite
+  `(owner_fk, target_fk)` PK enforces "each pair appears once"), and
+  *that* is what `X id[]` now contractually means.  The ordinal column
+  stays on TS/.NET (harmless, gives stable iteration order on those
+  backends as a byproduct) and is nullable+defaulted on Phoenix.  When
+  position genuinely belongs to the domain — battle slots, draft picks
+  — model it as an explicit ordinal field on a dedicated child
+  aggregate, not on a `X id[]` field.  Lesson: don't let the natural
+  ordering of one backend become an accidental contract.
 - **Only `primaryKey` import is conditional.**  Adding `primaryKey` to the
   Drizzle import line unconditionally drifted every existing schema's
   byte-for-byte fixture.  Gate the import on "context has ≥1 join table"

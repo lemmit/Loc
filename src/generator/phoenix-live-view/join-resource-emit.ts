@@ -5,8 +5,10 @@ import type { AssociationIR } from "../../ir/loom-ir.js";
 //
 // One file per association — a thin Ash.Resource module that owns the
 // join table.  Two `belongs_to` attrs marked `primary_key?: true` form
-// the composite PK; an `ordinal` int preserves insertion order for the
-// cross-backend round-trip (parity with TS Drizzle and .NET EF).
+// the composite PK, which enforces the set-semantics contract: a target
+// appears at most once per owner (see docs/language.md "Reference
+// collections" — iteration order is explicitly not part of the wire
+// contract).
 //
 // The owning aggregate declares a `many_to_many :<rel>` pointing at the
 // target through this resource (see domain-emit.ts:renderManyToMany);
@@ -56,13 +58,11 @@ export function renderJoinResource(
   attributes do
     attribute :${snake(assoc.ownerFk)}, :uuid, primary_key?: true, allow_nil?: false
     attribute :${snake(assoc.targetFk)}, :uuid, primary_key?: true, allow_nil?: false
-    # Ordinal records insertion order for cross-backend wire-shape
-    # parity with the TS Drizzle (\`onConflictDoUpdate set: ordinal\`)
-    # and .NET EF (\`__row.Ordinal = __i\`) emitters.  Nullable + default
-    # so plain \`Ash.Changeset.manage_relationship\` writes succeed
-    # without per-row ordinal injection; preserving ordering across a
-    # round-trip is a known Phoenix-side follow-up — write-path stays
-    # functional in the meantime.
+    # The wire contract for \`Id<T>[]\` is a set: composite PK enforces
+    # uniqueness, iteration order is not promised across backends.  The
+    # ordinal column stays in the schema because TS/.NET write it as an
+    # implementation byproduct of their diff-sync; Ash's
+    # \`manage_relationship\` doesn't populate it, so we default to 0.
     attribute :ordinal, :integer, allow_nil?: true, default: 0
   end
 
