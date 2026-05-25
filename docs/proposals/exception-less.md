@@ -435,9 +435,92 @@ land in the extension array.
 These hit the global error middleware on every backend. Generated:
 500 ProblemDetails with `type: "/errors/internal"`, `title:
 "Internal Server Error"`, structured logging of the underlying
-exception via the catalog's `invariant_violated` event. No
-ProblemDetails leak of internal details (no stack traces in the
-body); the catalog event has the full context for operators.
+exception via the catalog's `invariant_violated` event. The
+**catalog event** carries full context regardless of environment
+(exception class + message + stack + aggregate state snapshot +
+rule text + correlation id); the **response body** shape is
+controlled by `LOOM_EXPOSE_INTERNAL_ERRORS` — see next subsection.
+
+### Env-aware internals exposure
+
+Dev/test wants stack traces and aggregate state in the response
+body for fast debugging; prod must redact — both for security and
+to avoid information leakage to clients. The 500 fallback is
+**env-aware**.
+
+**Single Loom-level env var** drives the behaviour:
+
+```
+LOOM_EXPOSE_INTERNAL_ERRORS=true    # full body — dev / test default
+LOOM_EXPOSE_INTERNAL_ERRORS=false   # minimal body — prod default
+```
+
+**Defaults** when the env var is unset, per backend's native "is
+dev" check:
+- TS/Hono: `process.env.NODE_ENV !== "production"` → `true`, else `false`.
+- .NET: `IHostEnvironment.IsDevelopment()` → `true`, else `false`.
+- Phoenix: `config :<App>, env:` if `:dev` or `:test` → `true`,
+  else `false`.
+
+The env var overrides the native check when set.
+
+**`expose=true` body** carries extension members beyond the
+standard ProblemDetails fields:
+
+```json
+{
+  "type": "/errors/internal",
+  "title": "Internal Server Error",
+  "status": 500,
+  "detail": "Invariant violation in Order.placeLine: quantity must be > 0",
+  "instance": "/orders/abc",
+  "_exception": {
+    "type": "InvariantViolation",
+    "message": "quantity must be > 0",
+    "rule": "quantity > 0",
+    "aggregate": "Order",
+    "operation": "placeLine"
+  },
+  "_stack": [
+    "src/generator/.../OrderRepository.cs:142",
+    "src/generator/.../OrderController.cs:87"
+  ],
+  "_state": { "id": "...", "lines": [...] }
+}
+```
+
+**`expose=false` body** — constant shape, no info leak:
+
+```json
+{
+  "type": "/errors/internal",
+  "title": "Internal Server Error",
+  "status": 500,
+  "detail": "An internal error occurred. Reference: 2025-05-25-abc123",
+  "instance": "/orders/abc"
+}
+```
+
+The correlation id in `detail` lets operators look up the full
+catalog event server-side. The body is constant-shape regardless of
+which invariant fired — no information leakage.
+
+### Sensitivity intersection (even in dev)
+
+Even with `LOOM_EXPOSE_INTERNAL_ERRORS=true`, fields marked
+`sensitive(<tag>)` (per
+[`sensitivity-and-compliance.md`](./sensitivity-and-compliance.md))
+**stay redacted** in the body. The dev convenience does not
+override the sensitivity contract — a `sensitive(pii)` field
+appears as `"[redacted:pii]"` in `_state` even in dev. The
+sensitivity proposal's sink-rejection rule extends to the
+dev-exposure path.
+
+This applies only to the implicit internals of the 500 fallback.
+For **expected** errors (`NotFound`, `OutOfStock`, etc.), the
+ProblemDetails body carries author-declared fields only; the
+author's sensitivity annotations on those fields are honoured at
+every status code, in every environment.
 
 ## Find-variant alignment
 
@@ -853,9 +936,14 @@ Once shipped, several follow-ups become small:
     `ProblemDetails.from/2` and `put_status` + `json`.
 - Global fallback per backend: aggregate-invariant throws hit a
   500 ProblemDetails handler with `type: "/errors/internal"`.
-  Domain-internal details (stack traces, internal field values)
-  do NOT leak to the body; the catalog `invariant_violated` event
-  has the full context for operators.
+  Body shape is **env-aware** (controlled by
+  `LOOM_EXPOSE_INTERNAL_ERRORS`; defaults from each backend's
+  native dev/prod check). Dev/test → full details (exception,
+  stack, aggregate state); prod → minimal body with a
+  correlation id pointing at the catalog event. Sensitive fields
+  stay redacted in either mode (see "Sensitivity intersection"
+  subsection above). The catalog `invariant_violated` event has
+  the full context regardless.
 - Validator: `loom.unmapped-error-status` warning when an error
   variant flows into an api but has no mapping (neither per-api
   nor stdlib).

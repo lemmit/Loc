@@ -396,6 +396,16 @@ emitter auto-generates the ProblemDetails translator.
     via `ProblemDetails.from/2` and `conn |> put_status(pd.status)
     |> json(pd)`. Aggregate exceptions hit a Plug.ErrorHandler
     fallback that emits the same 500 ProblemDetails shape.
+- **Env-aware 500 body** (D21). Generator emits a `buildInternalErrorBody`
+  helper per backend that reads `LOOM_EXPOSE_INTERNAL_ERRORS`
+  (defaulting from the native dev/prod check). Two body shapes:
+  - `expose=true`: ProblemDetails + `_exception` / `_stack` /
+    `_state` extension members.
+  - `expose=false`: minimal ProblemDetails + correlation id in
+    `detail`.
+  Sensitive fields (per `sensitivity-and-compliance.md`)
+  redacted in either mode. Catalog `invariant_violated` event
+  carries full context regardless.
 - Validator: `loom.unmapped-error-status` warning when an error
   type flows into an api but is in neither the per-api `status`
   list nor the stdlib defaults.
@@ -406,8 +416,13 @@ emitter auto-generates the ProblemDetails translator.
   emission test for the ProblemDetails shape; one end-to-end test
   with a 4xx ProblemDetails body; one test asserting success
   bodies carry NO `kind` envelope and NO ProblemDetails wrapping;
-  one test asserting aggregate-invariant throws yield the 500
-  ProblemDetails fallback with the catalog event logged.
+  one test per backend asserting aggregate-invariant throws yield
+  the 500 ProblemDetails fallback with the catalog event logged;
+  **one test per backend with `LOOM_EXPOSE_INTERNAL_ERRORS=true`
+  asserting `_exception`/`_stack`/`_state` are present and
+  sensitive fields are redacted**; one test with
+  `LOOM_EXPOSE_INTERNAL_ERRORS=false` asserting the minimal body
+  shape with correlation id.
 
 #### A4 — find-variant re-shape (~1 week, +2-3 days fixture re-baseline)
 
@@ -600,6 +615,7 @@ priority order.
 | D18 | Where status mapping lives | **In the api surface as `status <Error> <Code>` lines; stdlib defaults in the generator's `src/system/error-defaults.ts`; domain `error` declarations carry no status** (pinned) | A3 | exception-less.md |
 | D19 | Per-error customisation of ProblemDetails `type` URI / `title` / `detail` template | **Deferred to v2**. v1 auto-derives all fields except `status` (which comes from the api mapping). | A3 | exception-less.md |
 | D20 | Per-surface mappings beyond the api layer (UI / queue / CLI) | **Out of scope.** UI consumes ProblemDetails like any HTTP client; no language-level UI error-mapping surface. Queue / CLI deferred to v2 when those surfaces become real. | — | — |
+| D21 | Env-aware 500-ProblemDetails body (dev shows internals, prod redacts) | **`LOOM_EXPOSE_INTERNAL_ERRORS` env var; defaults from each backend's native dev/prod check** (TS `NODE_ENV !== "production"`, .NET `IHostEnvironment.IsDevelopment()`, Phoenix `:dev`/`:test`). Catalog event always carries full context; sensitive fields stay redacted even in dev. | A3 | exception-less.md |
 
 **Workflow**: before starting each phase the implementing agent
 should explicitly confirm the relevant decisions with the
