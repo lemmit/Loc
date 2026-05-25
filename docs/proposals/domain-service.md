@@ -546,8 +546,9 @@ can ship before or after.
    aggregate's shape, reused across that aggregate's ops". Read-only.
 3. **Should `pre` clauses also accept inline boolean expressions
    (not just validator calls)?** E.g., `pre amount > 0 else
-   BadAmount`. Lean **no** — that's what `precondition` (throws) or
-   the existing aggregate-op `requires X is E` sugar (typed) are for.
+   BadAmount`. Lean **no** — `precondition` (throws) covers the
+   guard case, and an explicit `if !X { return E { ... } }` in the
+   op body covers the typed-return case for own-state outcomes.
    `pre` reserved for named validators.
 4. **Cyclic validator/service calls**: detected and rejected
    (`loom.service-cycle`)? Lean **yes** — keep call graphs DAG-shaped.

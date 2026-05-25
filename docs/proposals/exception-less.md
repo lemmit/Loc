@@ -227,9 +227,11 @@ aggregate Order {
   customerId: Customer id
   status: OrderStatus
 
-  operation place(customer: Customer, lines: OrderLine[]): or OutOfStock {
-    requires lines.length > 0                # throws (bug — workflow should validate)
-    # ... domain logic; returns OutOfStock if any line is unavailable
+  # Takes primitives only. Does NOT receive a Customer aggregate
+  # handle — that would smuggle a load into the domain layer.
+  operation place(lines: OrderLine[]): or OutOfStock {
+    precondition lines.length > 0            # throws on violation (bug — workflow should validate)
+    # ... own-state mutations; may return OutOfStock based on self.lines
   }
 }
 
@@ -244,7 +246,7 @@ workflow placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or Insufficient
   let customer = Customers.getById(cmd.customerId)?       # NotFound
   customer.deductCredit(cmd.totalAmount)?                  # InsufficientCredit
   let order = Order.create({ customerId: customer.id, status: Draft })
-  order.place(customer, cmd.lines)?                        # OutOfStock
+  order.place(cmd.lines)?                                  # OutOfStock from own domain
   return order.id
 }
 
