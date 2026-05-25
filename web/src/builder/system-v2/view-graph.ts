@@ -85,10 +85,13 @@ export interface VNode {
  *   - "writes"     : an operation assigns a field
  *   - "constrains" : an invariant references a field
  *   - "emits"      : an operation emits an event
+ *   - "contains"   : the synthesised root node owns this child (structural —
+ *                    rendered as a faint backdrop so semantic edges remain
+ *                    visually dominant)
  *
  *  The pane renders different stroke/colour/dashing per kind. Defaulting to
  *  `undefined` keeps backwards compatibility with pre-aggregate-edges callers. */
-export type EdgeKind = "binding" | "next" | "reads" | "writes" | "constrains" | "emits";
+export type EdgeKind = "binding" | "next" | "reads" | "writes" | "constrains" | "emits" | "contains";
 
 export interface VEdge {
   id: string;
@@ -147,40 +150,57 @@ const nid = (kind: ViewKind, name: string): string => `${kind}:${name}`;
  *  attached. Used by every view that surfaces a title. */
 const TITLE_Y_OFFSET = 110;
 
-/** Synthesize a "title" VNode for the current path leaf. Centred over the
- *  given `nodes`' bounding-box X centre and parked above row 0. The id is
+/** Synthesize a "title" VNode for the current path leaf AND a backdrop of
+ *  `contains` edges from it to its children — the structural cue that
+ *  everything below is "inside" the current container. Children at the top
+ *  tier get the full set; lower-tier children connect only if `connectAll`
+ *  is true (most views set it, the linear stmtFlow leaves only stmt:0
+ *  attached to keep the flow chain visually clean).
+ *
+ *  Centred over the children's bounding box and parked above row 0. The id is
  *  prefixed with `root:` so it can never collide with a real child id. */
-function withRootTitle(nodes: VNode[], kind: ViewKind, name: string): VNode[] {
-  if (nodes.length === 0) {
-    return [{
-      id: `root:${kind}:${name}`,
-      kind,
-      name,
-      x: 0,
-      y: 0,
-      drillable: false,
-      isRoot: true,
-    }];
+function withRoot(
+  g: ViewGraph,
+  kind: ViewKind,
+  name: string,
+  opts: { connectAll?: boolean } = {},
+): ViewGraph {
+  const rootId = `root:${kind}:${name}`;
+  if (g.nodes.length === 0) {
+    return {
+      ...g,
+      nodes: [{ id: rootId, kind, name, x: 0, y: 0, drillable: false, isRoot: true }],
+    };
   }
-  const xs = nodes.map((n) => n.x);
+  const xs = g.nodes.map((n) => n.x);
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
-  const minY = Math.min(...nodes.map((n) => n.y));
-  // Shift every child down by TITLE_Y_OFFSET so the banner has space above
-  // row 0, and (if minY is non-zero) normalise so the banner anchors at y=0.
-  const shifted = nodes.map((n) => ({ ...n, y: n.y - minY + TITLE_Y_OFFSET }));
-  return [
-    {
-      id: `root:${kind}:${name}`,
-      kind,
-      name,
-      x: Math.round((minX + maxX) / 2),
-      y: 0,
-      drillable: false,
-      isRoot: true,
-    },
-    ...shifted,
-  ];
+  const minY = Math.min(...g.nodes.map((n) => n.y));
+  const shifted = g.nodes.map((n) => ({ ...n, y: n.y - minY + TITLE_Y_OFFSET }));
+  const rootNode: VNode = {
+    id: rootId,
+    kind,
+    name,
+    x: Math.round((minX + maxX) / 2),
+    y: 0,
+    drillable: false,
+    isRoot: true,
+  };
+  // Decide which children get a containment edge from the root. The
+  // `connectAll` option fans an edge out to every member (default for the
+  // structural views — aggregate/context/system/module/repository); the
+  // statement-flow views keep the chain visually clean by linking only the
+  // first statement and letting `next` edges carry the rest.
+  const targets = opts.connectAll
+    ? shifted
+    : shifted.filter((n) => n.y === Math.min(...shifted.map((s) => s.y)));
+  const containsEdges: VEdge[] = targets.map((n) => ({
+    id: `contains:${rootId}->${n.id}`,
+    source: rootId,
+    target: n.id,
+    kind: "contains",
+  }));
+  return { ...g, nodes: [rootNode, ...shifted], edges: [...containsEdges, ...g.edges] };
 }
 
 const ROOT_ORDER: readonly ViewKind[] = ["system", "context"];
@@ -255,7 +275,12 @@ function systemView(ast: Model, name: string): ViewGraph {
     const tgt = deployableTargets(d);
     if (tgt) edges.push({ id: `bind:${src}->deployable:${tgt}`, source: src, target: nid("deployable", tgt), label: "targets", kind: "binding" });
   }
-  return { title: `system ${name}`, nodes: withRootTitle(layout(items, SYSTEM_ORDER), "system", name), edges };
+  return withRoot(
+    { title: `system ${name}`, nodes: layout(items, SYSTEM_ORDER), edges },
+    "system",
+    name,
+    { connectAll: true },
+  );
 }
 
 function moduleView(ast: Model, name: string): ViewGraph {
@@ -269,7 +294,12 @@ function moduleView(ast: Model, name: string): ViewGraph {
   }
   if (!mod) return { title: name, nodes: [], edges: [] };
   const items = mod.contexts.map((c) => ({ id: nid("context", c.name), kind: "context" as const, name: c.name }));
-  return { title: `module ${name}`, nodes: withRootTitle(layout(items, ["context"]), "module", name), edges: [] };
+  return withRoot(
+    { title: `module ${name}`, nodes: layout(items, ["context"]), edges: [] },
+    "module",
+    name,
+    { connectAll: true },
+  );
 }
 
 // Vertical (top→bottom) tier order for the context view. Consumers feed
@@ -471,7 +501,12 @@ function contextView(ast: Model, name: string): ViewGraph {
       });
     }
   }
-  return { title: `context ${name}`, nodes: withRootTitle(contextLayout(items), "context", name), edges };
+  return withRoot(
+    { title: `context ${name}`, nodes: contextLayout(items), edges },
+    "context",
+    name,
+    { connectAll: true },
+  );
 }
 
 // Vertical (top→bottom) tier order for the aggregate view. Consumers feed
@@ -670,7 +705,12 @@ function aggregateView(ast: Model, name: string): ViewGraph {
   pushFieldEdges(consumerReads, "reads");
   pushFieldEdges(rel.writes, "writes");
 
-  return { title: `aggregate ${name}`, nodes: withRootTitle(aggregateLayout(items), "aggregate", name), edges };
+  return withRoot(
+    { title: `aggregate ${name}`, nodes: aggregateLayout(items), edges },
+    "aggregate",
+    name,
+    { connectAll: true },
+  );
 }
 
 const EMPTY: ReadonlySet<string> = new Set();
@@ -748,7 +788,7 @@ function stmtFlow(title: string, body: Statement[], rootKind: ViewKind, rootName
     target: `stmt:${i + 1}`,
     kind: "next",
   }));
-  return { title, nodes: withRootTitle(nodes, rootKind, rootName), edges };
+  return withRoot({ title, nodes, edges }, rootKind, rootName);
 }
 
 function operationView(ast: Model, aggName: string, opName: string): ViewGraph {
@@ -799,7 +839,12 @@ function repositoryView(ast: Model, name: string): ViewGraph {
   const repo = findRepository(ast, name);
   if (!repo) return { title: `repository ${name}`, nodes: [], edges: [] };
   const items = repo.finds.map((f) => ({ id: nid("find", f.name), kind: "find" as const, name: f.name }));
-  return { title: `repository ${name}`, nodes: withRootTitle(layout(items, ["find"]), "repository", name), edges: [] };
+  return withRoot(
+    { title: `repository ${name}`, nodes: layout(items, ["find"]), edges: [] },
+    "repository",
+    name,
+    { connectAll: true },
+  );
 }
 
 /** Dispatch on the last step of `path` to the per-level builder; empty path
