@@ -52,7 +52,7 @@ context Sales {
     operation addLine(productId: Product id, qty: int, price: Money) {
       precondition isMutable()
       precondition qty > 0
-      lines += new OrderLine {
+      lines += OrderLine {
         productId: productId, quantity: qty, unitPrice: price
       }
       emit LineAdded { order: id, productId: productId, quantity: qty }

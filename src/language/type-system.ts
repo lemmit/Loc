@@ -40,7 +40,7 @@ import {
   isMoneyLit,
   isNamedType,
   isNameRef,
-  isNewExpr,
+  isBuilderCall,
   isNowExpr,
   isNullLit,
   isOperation,
@@ -390,10 +390,8 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
     // Lambda type is contextual; without a target type it's unknown.
     return T.unknown;
   }
-  if (isNewExpr(expr)) {
-    const part = expr.partType?.ref;
-    if (part) return { kind: "entity", ref: part };
-    return T.unknown;
+  if (isBuilderCall(expr)) {
+    return typeOfBuilderCall(expr, env);
   }
   if (isMemberAccess(expr)) {
     return typeOfMemberAccess(expr, env);
@@ -625,6 +623,49 @@ function lookupFunctionInScope(
     if (!s) continue;
     for (const m of s.members) {
       if (isFunctionDecl(m) && m.name === name) return m;
+    }
+  }
+  return undefined;
+}
+
+/** v2 BuilderCall typing.  The type name resolves against the enclosing
+ *  bounded context (value objects + aggregates + parts).  Unknown names
+ *  type as `unknown` — the validator surfaces the diagnostic. */
+function typeOfBuilderCall(
+  expr: import("./generated/ast.js").BuilderCall,
+  env: Env,
+): DddType {
+  const name = expr.type;
+  const vo = lookupValueObjectByName(name, env);
+  if (vo) return { kind: "valueobject", ref: vo };
+  const ent = lookupEntityByName(name, env);
+  if (ent) {
+    return ent.$type === "Aggregate"
+      ? { kind: "aggregate", ref: ent }
+      : { kind: "entity", ref: ent };
+  }
+  return T.unknown;
+}
+
+function lookupEntityByName(
+  name: string,
+  env: Env,
+): Aggregate | EntityPart | undefined {
+  let cur: AstNode | undefined = (env.aggregate ?? env.part ?? env.valueObject) as
+    | AstNode
+    | undefined;
+  while (cur && cur.$type !== "BoundedContext") cur = cur.$container;
+  if (!cur) return undefined;
+  const ctxMembers = (cur as unknown as { members: AstNode[] }).members;
+  for (const m of ctxMembers) {
+    if (m.$type === "Aggregate") {
+      const agg = m as Aggregate;
+      if (agg.name === name) return agg;
+      for (const inner of agg.members) {
+        if (inner.$type === "EntityPart" && (inner as EntityPart).name === name) {
+          return inner as EntityPart;
+        }
+      }
     }
   }
   return undefined;

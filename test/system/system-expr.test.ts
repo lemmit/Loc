@@ -177,19 +177,19 @@ describe("structured expression editor — model", () => {
     );
   });
 
-  it("structures `new` expressions (partType + fields)", () => {
-    // addLine: lines += new OrderLine { productId: productId, quantity: qty, unitPrice: price }
+  it("structures builder-call expressions (type + entries)", () => {
+    // addLine: lines += OrderLine { productId: productId, quantity: qty, unitPrice: price }
     const order = owner<Aggregate>(parse(sales), "Aggregate", "Order");
     const addLine = order.members.find((m) => (m as { name?: string }).name === "addLine") as {
       body: { $type: string; value?: unknown }[];
     };
     const newNode = addLine.body.find((s) => s.$type === "AssignOrCallStmt")!.value;
     const tree = seedExpr(newNode as never);
-    if (tree.kind !== "new") throw new Error("expected a new expression");
-    expect(tree.partType).toBe("OrderLine");
-    expect(tree.fields.map((f) => f.name)).toEqual(["productId", "quantity", "unitPrice"]);
+    if (tree.kind !== "builder") throw new Error("expected a builder-call expression");
+    expect(tree.type).toBe("OrderLine");
+    expect(tree.entries.map((e) => e.name)).toEqual(["productId", "quantity", "unitPrice"]);
     expect(emitExpr(tree)).toBe(
-      "new OrderLine { productId: productId, quantity: qty, unitPrice: price }",
+      "OrderLine { productId: productId, quantity: qty, unitPrice: price }",
     );
   });
 
@@ -329,9 +329,9 @@ describe("structured expression editor — assignment & emit statement slots", (
   it("exposes assignment values and one slot per emit field", () => {
     const opts = exprSlotOptions(owner<Aggregate>(parse(sales), "Aggregate", "Order"));
     const byValue = new Map(opts.map((o) => [o.value, o.label]));
-    // addLine: `lines += new OrderLine { … }` (assign) then `emit LineAdded { … }`.
+    // addLine: `lines += OrderLine { … }` (assign) then `emit LineAdded { … }`.
     expect(byValue.get("stmt:addLine:2")).toBe(
-      "addLine: lines += new OrderLine { productId: productId, quantity: qty, unitPrice: price }",
+      "addLine: lines += OrderLine { productId: productId, quantity: qty, unitPrice: price }",
     );
     expect(byValue.get("stmt:addLine:3:2")).toBe("addLine: emit LineAdded.quantity = qty");
     // confirm: `status := Confirmed`.
@@ -341,7 +341,7 @@ describe("structured expression editor — assignment & emit statement slots", (
   it("resolves and edits an assignment value (only the value is spliced)", () => {
     expect(
       seedExpr(slotExpr(order(), { kind: "stmtExpr", owner: "Order", op: "addLine", index: 2 })!),
-    ).toMatchObject({ kind: "new", partType: "OrderLine" });
+    ).toMatchObject({ kind: "builder", type: "OrderLine" });
     const out = editExprSlot(
       sales,
       { kind: "stmtExpr", owner: "Order", op: "confirm", index: 2 },

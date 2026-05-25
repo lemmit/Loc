@@ -58,8 +58,8 @@ export function printExpr(node: Expression): string {
       return `${printExpr(node.callee)}(${printArgs(node.args)})`;
     case "Lambda":
       return printLambda(node);
-    case "NewExpr":
-      return `new ${node.partType.$refText} {${printObjectFields(node.fields)}}`;
+    case "BuilderCall":
+      return `${node.type} {${printBuilderEntries(node.entries)}}`;
     case "ObjectLit":
       return `{${printObjectFields(node.fields)}}`;
     case "MatchExpr":
@@ -86,6 +86,16 @@ function printArgs(args: CallArg[]): string {
 function printObjectFields(fields: { name: string; value: Expression }[]): string {
   if (fields.length === 0) return "";
   const inner = fields.map((f) => `${f.name}: ${printExpr(f.value)}`).join(", ");
+  return ` ${inner} `;
+}
+
+function printBuilderEntries(
+  entries: { name?: string; value: Expression }[],
+): string {
+  if (entries.length === 0) return "";
+  const inner = entries
+    .map((e) => (e.name ? `${e.name}: ${printExpr(e.value)}` : printExpr(e.value)))
+    .join(", ");
   return ` ${inner} `;
 }
 

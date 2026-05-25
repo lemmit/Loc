@@ -85,7 +85,7 @@ system BankingSystem {
           precondition isMutable()
           precondition amount.amount > 0
           balance := Money(balance.amount + amount.amount, balance.currency)
-          transactions += new AccountTransaction {
+          transactions += AccountTransaction {
             amount: amount,
             kind: "Deposit",
             at: now()
@@ -98,7 +98,7 @@ system BankingSystem {
           precondition amount.amount > 0
           precondition balance.amount >= amount.amount
           balance := Money(balance.amount - amount.amount, balance.currency)
-          transactions += new AccountTransaction {
+          transactions += AccountTransaction {
             amount: amount,
             kind: "Withdrawal",
             at: now()

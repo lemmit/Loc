@@ -18,7 +18,7 @@ const SRC = `
       function isMutable(): bool = status == Draft
       operation addLine(qty: int) {
         precondition isMutable()
-        lines += new OrderLine { quantity: qty }
+        lines += OrderLine { quantity: qty }
       }
       entity OrderLine { quantity: int  invariant quantity > 0 }
     }

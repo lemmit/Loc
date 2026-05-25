@@ -950,7 +950,7 @@ Lambda:
 
 PrimaryExpr infers Expression:
       Lambda
-    | NewExpr
+    | BuilderCall
     | ObjectLit
     | ParenExpr
     | LiteralExpr
@@ -960,16 +960,28 @@ PrimaryExpr infers Expression:
     | IdRef
     | NameRef;
 
-NewExpr:
-    'new' partType=[EntityPart:ID] '{'
-        (fields+=ObjectFieldInit (',' fields+=ObjectFieldInit)* ','?)?
+// Universal construction form (Loom v2).  Replaces `new Part { ... }`
+// and the walker-call form (`Form(state: ..., body: ...)`).  The type
+// name resolves at lowering time:
+//   - ValueObject / EntityPart  → value construction, runs invariants
+//   - EventDecl                 → event construction (only as `emit` operand)
+//   - Component (stdlib walker primitive or user component) → UI element
+// Entries are `(name ':')? expr` so named slots and bare positional
+// children (Stack { Heading{...}, Button{...} }) coexist; commas
+// optional, newline-separated.
+BuilderCall:
+    type=ID '{'
+        (entries+=BuilderEntry (','? entries+=BuilderEntry)* ','?)?
     '}';
+
+BuilderEntry:
+    (name=LooseName ':')? value=Expression;
 
 // Bare object literal — used inside e2e test bodies to build request
 // payloads (`api.orders.create({ customerId: "..." })`).  Distinct
-// from `new PartName {…}`: no aggregate / part type binding, no
-// invariant checks; it is a structural literal that the e2e renderer
-// hands straight to JSON.stringify.
+// from a typed `BuilderCall`: no type binding, no invariant checks; it
+// is a structural literal that the e2e renderer hands straight to
+// JSON.stringify.
 ObjectLit:
     '{' (fields+=ObjectFieldInit (',' fields+=ObjectFieldInit)* ','?)? '}';
 

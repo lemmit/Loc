@@ -96,7 +96,7 @@ system StorefrontDotnet {
         operation addLine(productId: Product id, unitPrice: Money, qty: int) {
           precondition isMutable()
           precondition qty > 0
-          lines += new OrderLine {
+          lines += OrderLine {
             productId: productId,
             unitPrice: unitPrice,
             quantity: qty

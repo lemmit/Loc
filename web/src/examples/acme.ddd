@@ -59,7 +59,7 @@ system Acme {
                 operation addLine(productId: Product id, qty: int) {
                     precondition isMutable()
                     precondition qty > 0
-                    lines += new OrderLine {
+                    lines += OrderLine {
                         productId: productId, quantity: qty
                     }
                 }

@@ -4,6 +4,7 @@ import type {
   Aggregate,
   AggregateMember,
   BoundedContext,
+  BuilderCall,
   EntityPart,
   EntityPartMember,
   Expression,
@@ -38,7 +39,7 @@ import {
   isMoneyLit,
   isNamedType,
   isNameRef,
-  isNewExpr,
+  isBuilderCall,
   isNowExpr,
   isNullLit,
   isObjectLit,
@@ -498,15 +499,8 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
       })),
     };
   }
-  if (isNewExpr(expr)) {
-    return {
-      kind: "new",
-      partName: expr.partType?.ref?.name ?? "Unknown",
-      fields: expr.fields.map((f) => ({
-        name: f.name,
-        value: lowerExpr(f.value, env),
-      })),
-    };
+  if (isBuilderCall(expr)) {
+    return lowerBuilderCall(expr, env);
   }
   if (isMemberAccess(expr)) {
     // `permissions.<name>` magic identifier.  Resolves only when the
@@ -590,6 +584,36 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     return resolveNameRef(expr.name, env);
   }
   return lit("null", "null");
+}
+
+/** Lower a v2 BuilderCall (`Type { slot: value, ... }`).  The type name
+ *  resolves at lowering time against the in-scope declarations:
+ *    - EntityPart / Aggregate / ValueObject   → value construction
+ *    - (events handled separately by EmitStmt; unknown names fall
+ *      through to a `new`-shaped IR for the validator to flag)
+ *  Bare positional entries (no `name:`) are dropped in this phase —
+ *  the walker-primitive migration in a later slice consumes them.  */
+function lowerBuilderCall(expr: BuilderCall, env: Env): ExprIR {
+  const fields = expr.entries
+    .filter((e) => e.name !== undefined)
+    .map((e) => ({
+      name: e.name as string,
+      value: lowerExpr(e.value, env),
+    }));
+  return {
+    kind: "new",
+    partName: expr.type,
+    fields,
+  };
+}
+
+function inferBuilderCallType(expr: BuilderCall, env: Env): TypeIR {
+  const name = expr.type;
+  const vo = findValueObjectByName(env, name);
+  if (vo) return { kind: "valueobject", name };
+  const ent = findEntityByName(env, name);
+  if (ent) return { kind: "entity", name };
+  return { kind: "entity", name };
 }
 
 function resolveNameRef(name: string, env: Env): ExprIR {
@@ -765,8 +789,8 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     return { kind: "primitive", name: "string" };
   }
   if (isLambda(expr)) return { kind: "primitive", name: "string" };
-  if (isNewExpr(expr)) {
-    return { kind: "entity", name: expr.partType?.ref?.name ?? "Unknown" };
+  if (isBuilderCall(expr)) {
+    return inferBuilderCallType(expr, env);
   }
   if (isMemberAccess(expr)) {
     // `permissions.<name>` always types as `string` (matches the
