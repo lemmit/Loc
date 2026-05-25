@@ -1187,30 +1187,42 @@ export class DddValidator {
     // Cascade suppression: upstream resolution failure already
     // reported elsewhere.
     if (valueType.kind === "unknown") return;
-    // Only primitive sources are admitted today.  An aggregate /
-    // valueobject / array / etc. source needs a different design
-    // (e.g. `Order.toString()` would be a method-call, not a
-    // conversion).
-    if (valueType.kind !== "primitive") {
-      accept(
-        "error",
-        `Cannot convert '${typeToString(valueType)}' to '${node.target}': ` +
-          `only primitive sources are supported.`,
-        { node, property: "value" },
-      );
-      return;
-    }
     // Grammar guarantees `target` is one of the admitted strings;
     // null-guard for the langium AST's optional-prop typing.
     const target = node.target;
     if (!target) return;
+    // `string(x)` admits enum + `X id` in addition to primitives —
+    // every backend stringifies enum values to their case name and
+    // `X id` to its underlying primitive form.  The conversion
+    // vocabulary calls these "implicitly stringifiable" sources;
+    // they're also the set the `string + X` implicit-concat rule
+    // admits (see `arithmeticResult.isImplicitlyStringifiable`).
+    if (target === "string" && (valueType.kind === "enum" || valueType.kind === "id")) {
+      return;
+    }
+    // Domain-shaped sources (VO / aggregate / entity / array) need
+    // a separate design — `display:` resolution or a custom toString
+    // function on the type.  Deferred.
+    if (valueType.kind !== "primitive") {
+      accept(
+        "error",
+        `Cannot convert '${typeToString(valueType)}' to '${target}': ` +
+          `domain types (value objects, aggregates, entities, collections) ` +
+          `have no canonical string form.  ` +
+          `Either annotate a field with \`display\` on the type and ` +
+          `write \`string(value.<displayField>)\` explicitly, or define a ` +
+          `\`toString\` derivation (pending design).`,
+        { node, property: "value" },
+      );
+      return;
+    }
     const source = valueType.name;
     if (source === target) return; // identity no-op
     if (isInfallibleConversion(source, target)) return;
     accept(
       "error",
       `Cannot convert '${source}' to '${target}': not supported.  ` +
-        `Today's conversion vocabulary admits: string ← any primitive; ` +
+        `Today's conversion vocabulary admits: string ← any primitive | enum | X id; ` +
         `long ← int; decimal ← int | long | money; money ← int | long | decimal.  ` +
         `Fallible parses (string → numeric / datetime / bool) and narrowing ` +
         `(long → int, decimal → long) are deferred pending a failure-model decision.`,
