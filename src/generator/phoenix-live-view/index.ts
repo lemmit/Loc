@@ -477,6 +477,13 @@ function emitShellFiles(
   // lib/<app>_web/components/layouts/app.html.heex
   out.set(`lib/${appName}_web/components/layouts/app.html.heex`, renderAppLayout());
 
+  // Error views — the endpoint config wires these as the render_errors
+  // formats so a 500 in (say) the openapi controller renders a JSON
+  // body instead of crashing the cowboy adapter on a missing
+  // ErrorView module.
+  out.set(`lib/${appName}_web/controllers/error_json.ex`, renderErrorJson(appModule));
+  out.set(`lib/${appName}_web/controllers/error_html.ex`, renderErrorHtml(appModule));
+
   // Config
   out.set("config/config.exs", renderConfigExs(appName, appModule, contexts));
   out.set("config/dev.exs", renderDevExs(appName, appModule, port));
@@ -1511,6 +1518,40 @@ function renderAppLayout(): string {
 `;
 }
 
+/** Minimal ErrorJSON module — Phoenix's render_errors pipeline calls
+ *  `render/2` with template names like "404.json" / "500.json" and
+ *  expects a map back.  Phoenix.Controller.status_message_from_template/1
+ *  turns the template ("500.json") into a status reason string ("Internal
+ *  Server Error"), which we surface in the envelope. */
+function renderErrorJson(appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}Web.ErrorJSON do
+  @moduledoc "Render exceptions as JSON envelopes for the API."
+
+  # Catch-all: e.g. "404.json" → %{error: "Not Found"}, "500.json" → %{error: "Internal Server Error"}.
+  def render(template, _assigns) do
+    %{error: Phoenix.Controller.status_message_from_template(template)}
+  end
+end
+`;
+}
+
+/** Minimal ErrorHTML module — Phoenix's render_errors pipeline picks
+ *  json or html based on the request's Accept header.  Browser requests
+ *  hit this one; the body is intentionally minimal so an exception
+ *  doesn't leak internal state. */
+function renderErrorHtml(appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}Web.ErrorHTML do
+  @moduledoc "Render exceptions as a plain HTML body for browser callers."
+
+  def render(template, _assigns) do
+    Phoenix.Controller.status_message_from_template(template)
+  end
+end
+`;
+}
+
 function renderConfigExs(appName: string, appModule: string, contexts: BoundedContextIR[]): string {
   // Ash 3.x requires every domain to be registered here; without it
   // `mix compile --warnings-as-errors` rejects with
@@ -1522,7 +1563,15 @@ function renderConfigExs(appName: string, appModule: string, contexts: BoundedCo
 import Config
 
 config :${appName}, ecto_repos: [${appModule}.Repo]
-config :${appName}, ${appModule}Web.Endpoint, url: [host: "localhost"]
+config :${appName}, ${appModule}Web.Endpoint,
+  url: [host: "localhost"],
+  # Wire the generated ErrorJSON / ErrorHTML modules so an exception in a
+  # controller (e.g. a 500 on /api/openapi.json) renders through them
+  # instead of crashing again on a missing default ErrorView.
+  render_errors: [
+    formats: [json: ${appModule}Web.ErrorJSON, html: ${appModule}Web.ErrorHTML],
+    layout: false
+  ]
 
 config :${appName},
   ash_domains: [${ashDomains}]
