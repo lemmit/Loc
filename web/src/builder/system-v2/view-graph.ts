@@ -150,10 +150,12 @@ function layout(
 
 const nid = (kind: ViewKind, name: string): string => `${kind}:${name}`;
 
-/** Pixel gap above row-0 where the title node sits — far enough to read as a
- *  separate banner, close enough that the dropped-down children still feel
- *  attached. Used by every view that surfaces a title. */
-const TITLE_Y_OFFSET = 110;
+/** Pixel gap above row-0 where the title node sits. Sized so the smoothstep
+ *  fork from the root banner (whose horizontal segment lands ~20-30 px below
+ *  the source handle) is fully visible BEFORE the first child row — otherwise
+ *  the topmost child (e.g. the workflow row in the context view) sits on top
+ *  of the fork and hides where the contains edges branch out. */
+const TITLE_Y_OFFSET = 200;
 
 /** ViewKinds that act as the *structural pivot* of their containing view —
  *  the "core" children of the root (context → workflows + aggregates,
