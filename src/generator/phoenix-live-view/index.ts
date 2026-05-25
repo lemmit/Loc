@@ -321,7 +321,7 @@ function renderEventModule(
 defmodule ${moduleName} do
   @moduledoc "Domain event: ${upperFirst(ev.name)}"
 
-  defstruct ${ev.fields.map((f) => `:${snake(f.name)}`).join(", ")}
+  defstruct [${ev.fields.map((f) => `:${snake(f.name)}`).join(", ")}]
   @type t :: %__MODULE__{
 ${ev.fields.map((f) => `    ${snake(f.name)}: term()`).join(",\n")}
   }
@@ -477,6 +477,13 @@ function emitShellFiles(
   // lib/<app>_web/components/layouts/app.html.heex
   out.set(`lib/${appName}_web/components/layouts/app.html.heex`, renderAppLayout());
 
+  // Error views — the endpoint config wires these as the render_errors
+  // formats so a 500 in (say) the openapi controller renders a JSON
+  // body instead of crashing the cowboy adapter on a missing
+  // ErrorView module.
+  out.set(`lib/${appName}_web/controllers/error_json.ex`, renderErrorJson(appModule));
+  out.set(`lib/${appName}_web/controllers/error_html.ex`, renderErrorHtml(appModule));
+
   // Config
   out.set("config/config.exs", renderConfigExs(appName, appModule, contexts));
   out.set("config/dev.exs", renderDevExs(appName, appModule, port));
@@ -588,7 +595,9 @@ ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \\
     HEX_CACERTS_PATH=/etc/ssl/certs/ca-certificates.crt
 RUN mix local.hex --force && mix local.rebar --force
 ENV MIX_ENV="prod"
-COPY mix.exs mix.lock ./
+# The generator emits mix.exs but no mix.lock (deps aren't pinned at
+# generation time), so mix deps.get resolves and writes the lock here.
+COPY mix.exs ./
 RUN mix deps.get --only $MIX_ENV
 RUN mkdir config
 COPY config/config.exs config/$MIX_ENV.exs config/
@@ -601,8 +610,11 @@ COPY rel rel
 RUN mix release
 
 FROM \${RUNNER_IMAGE}
+# wget is here so the compose healthcheck (which shells out to wget) works
+# in the slim Debian runner image — without it the container reports
+# unhealthy even though the Phoenix endpoint is responding.
 RUN apt-get update -y \\
-    && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates \\
+    && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates wget \\
     && apt-get clean && rm -f /var/lib/apt/lists/*_*
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
@@ -610,6 +622,11 @@ WORKDIR /app
 RUN chown nobody /app
 ENV MIX_ENV="prod"
 COPY --from=build --chown=nobody:root /app/_build/\${MIX_ENV}/rel/${appName} ./
+# mix release preserves overlay file perms verbatim, and the generator
+# writes scripts with the default 0644 — chmod +x here so the entrypoint
+# is actually executable (without this the container is stuck in
+# "Created" state because docker's exec fails with EACCES).
+RUN chmod +x /app/bin/server
 USER nobody
 CMD ["/app/bin/server"]
 `;
@@ -1501,6 +1518,40 @@ function renderAppLayout(): string {
 `;
 }
 
+/** Minimal ErrorJSON module — Phoenix's render_errors pipeline calls
+ *  `render/2` with template names like "404.json" / "500.json" and
+ *  expects a map back.  Phoenix.Controller.status_message_from_template/1
+ *  turns the template ("500.json") into a status reason string ("Internal
+ *  Server Error"), which we surface in the envelope. */
+function renderErrorJson(appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}Web.ErrorJSON do
+  @moduledoc "Render exceptions as JSON envelopes for the API."
+
+  # Catch-all: e.g. "404.json" → %{error: "Not Found"}, "500.json" → %{error: "Internal Server Error"}.
+  def render(template, _assigns) do
+    %{error: Phoenix.Controller.status_message_from_template(template)}
+  end
+end
+`;
+}
+
+/** Minimal ErrorHTML module — Phoenix's render_errors pipeline picks
+ *  json or html based on the request's Accept header.  Browser requests
+ *  hit this one; the body is intentionally minimal so an exception
+ *  doesn't leak internal state. */
+function renderErrorHtml(appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}Web.ErrorHTML do
+  @moduledoc "Render exceptions as a plain HTML body for browser callers."
+
+  def render(template, _assigns) do
+    Phoenix.Controller.status_message_from_template(template)
+  end
+end
+`;
+}
+
 function renderConfigExs(appName: string, appModule: string, contexts: BoundedContextIR[]): string {
   // Ash 3.x requires every domain to be registered here; without it
   // `mix compile --warnings-as-errors` rejects with
@@ -1512,7 +1563,15 @@ function renderConfigExs(appName: string, appModule: string, contexts: BoundedCo
 import Config
 
 config :${appName}, ecto_repos: [${appModule}.Repo]
-config :${appName}, ${appModule}Web.Endpoint, url: [host: "localhost"]
+config :${appName}, ${appModule}Web.Endpoint,
+  url: [host: "localhost"],
+  # Wire the generated ErrorJSON / ErrorHTML modules so an exception in a
+  # controller (e.g. a 500 on /api/openapi.json) renders through them
+  # instead of crashing again on a missing default ErrorView.
+  render_errors: [
+    formats: [json: ${appModule}Web.ErrorJSON, html: ${appModule}Web.ErrorHTML],
+    layout: false
+  ]
 
 config :${appName},
   ash_domains: [${ashDomains}]
@@ -1592,9 +1651,14 @@ if config_env() == :prod do
     http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}, port: port],
     secret_key_base: secret_key_base
 
-  config :${appName}, ${appModule}.Repo,
-    ssl: true,
-    ssl_opts: [verify: :verify_none]
+  # SSL to the database is opt-in.  Managed Postgres (RDS, Cloud SQL, etc.)
+  # usually requires it; local docker-compose Postgres doesn't support it
+  # out of the box, so default off and let deployments flip DATABASE_SSL=1.
+  if System.get_env("DATABASE_SSL") in ["1", "true"] do
+    config :${appName}, ${appModule}.Repo,
+      ssl: true,
+      ssl_opts: [verify: :verify_none]
+  end
 end
 `;
 }
@@ -1612,11 +1676,16 @@ function renderRelEnv(appName: string): string {
 }
 
 function renderRelServer(appName: string): string {
+  // `#!/bin/sh` here is dash on Debian, which doesn't support
+  // `pipefail`.  Drop that flag — `set -eu` is enough for a one-line
+  // exec, and the path is rooted relative to the release directory
+  // (which the Dockerfile copies into `/app/`, so the binary lives
+  // at `/app/bin/<app>`, NOT `/app/<app>/bin/<app>`).
   return `#!/bin/sh
 # Auto-generated.
-set -euo pipefail
+set -eu
 
-exec "./${appName}/bin/${appName}" start
+exec "./bin/${appName}" start
 `;
 }
 

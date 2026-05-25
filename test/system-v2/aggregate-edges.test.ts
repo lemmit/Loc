@@ -2,8 +2,8 @@
 // (no linking required) — covers each statement form, derived/invariant/
 // function consumers, and the `this.` vs bare-name read flavours.
 
-import type { Aggregate, BoundedContext, Model } from "../../src/language/generated/ast.js";
 import { describe, expect, it } from "vitest";
+import type { Aggregate, BoundedContext, Model } from "../../src/language/generated/ast.js";
 import { computeAggregateRelations } from "../../web/src/builder/system-v2/aggregate-edges.js";
 import { parseRaw as parse } from "../_helpers/index.js";
 
@@ -11,12 +11,14 @@ function findAggregate(ast: Model, name: string): Aggregate {
   for (const m of ast.members) {
     if (m.$type === "BoundedContext") {
       const ctx = m as BoundedContext;
-      for (const cm of ctx.members) if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) return cm as Aggregate;
+      for (const cm of ctx.members)
+        if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) return cm as Aggregate;
     } else if (m.$type === "System") {
       for (const sm of m.members) {
         if (sm.$type === "BoundedContext") {
           const ctx = sm as BoundedContext;
-          for (const cm of ctx.members) if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) return cm as Aggregate;
+          for (const cm of ctx.members)
+            if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) return cm as Aggregate;
         }
       }
     }

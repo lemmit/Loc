@@ -577,7 +577,7 @@ defmodule ${moduleName} do
   OpenApiSpex.schema(%{
     title: "${schemaName}",
     type: :array,
-    items: %{
+    items: %OpenApiSpex.Schema{
       type: :object,
       properties: %{
 ${propsBlock}

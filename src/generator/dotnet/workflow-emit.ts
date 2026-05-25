@@ -1,8 +1,10 @@
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  WorkflowIR,
-  WorkflowStmtIR,
+import {
+  type AggregateIR,
+  type BoundedContextIR,
+  exprUsesCurrentUser,
+  operationUsesCurrentUser,
+  type WorkflowIR,
+  type WorkflowStmtIR,
 } from "../../ir/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
@@ -136,21 +138,46 @@ public sealed record ${upperFirst(wf.name)}Command(${params}) : ICommand;
 // Handler — orchestrates the workflow body.
 // ---------------------------------------------------------------------------
 
+/** True when any statement (or sub-expression inside it) references
+ *  `currentUser`.  When true, the handler injects ICurrentUserAccessor
+ *  and materialises a `var currentUser` local at the top of `Handle`. */
+function workflowUsesCurrentUser(wf: WorkflowIR): boolean {
+  return wf.statements.some((s) => {
+    switch (s.kind) {
+      case "precondition":
+      case "requires":
+      case "expr-let":
+        return exprUsesCurrentUser(s.expr);
+      case "emit":
+      case "factory-let":
+        return s.fields.some((f) => exprUsesCurrentUser(f.value));
+      case "repo-let":
+      case "op-call":
+        return s.args.some(exprUsesCurrentUser);
+    }
+  });
+}
+
 function renderHandler(
   wf: WorkflowIR,
   usage: WorkflowUsage,
   ns: string,
   ctx: BoundedContextIR,
 ): string {
-  void ctx;
   const cmdName = `${upperFirst(wf.name)}Command`;
   const handlerName = `${upperFirst(wf.name)}Handler`;
+  const usesUser = workflowUsesCurrentUser(wf);
   // Workflow handler emits domain-logic statements via renderCsExpr and
   // (when transactional with an explicit isolation level) an
   // IsolationLevel.X enum literal.  Both surfaces may reach namespaces
   // outside the SDK's implicit-usings set — collect them per file.
   const usings = new Set<string>();
   if (wf.transactional && wf.isolation) usings.add("System.Data");
+  // BeginTransactionAsync(IsolationLevel, CancellationToken) lives on
+  // RelationalDatabaseFacadeExtensions, so transactional handlers need
+  // the EntityFrameworkCore namespace for the 2-arg overload.
+  if (wf.transactional) usings.add("Microsoft.EntityFrameworkCore");
+  if (usesUser) usings.add(`${ns}.Auth`);
   // Field declarations for injected dependencies.
   const repoEntries = [...usage.repos.entries()];
   const fields: string[] = [];
@@ -172,6 +199,11 @@ function renderHandler(
     ctorParamPairs.push(`${ns}.Infrastructure.Persistence.AppDbContext db`);
     ctorAssigns.push("_db = db");
   }
+  if (usesUser) {
+    fields.push("    private readonly ICurrentUserAccessor _currentUser;");
+    ctorParamPairs.push("ICurrentUserAccessor currentUser");
+    ctorAssigns.push("_currentUser = currentUser");
+  }
   // Extern op-call DI: each unique extern target needs its
   // user-supplied IXAggHandler injected.  Field name follows the
   // op+agg convention (`_confirmOrderHandler`).
@@ -187,6 +219,12 @@ function renderHandler(
   const stmtLines: string[] = [];
   if (usage.hasEmit) {
     stmtLines.push("        var _workflowEvents = new List<IDomainEvent>();");
+  }
+  if (usesUser) {
+    // Materialise `currentUser` so the rendered `renderCsExpr` output
+    // (which emits the literal token `currentUser`) resolves against
+    // the request-scoped accessor.
+    stmtLines.push("        var currentUser = _currentUser.User;");
   }
   // Workflow params resolve to bare-identifier `name` refs in the ExprIR, but
   // in a command handler they must print as `cmd.<PascalName>`.
@@ -362,7 +400,16 @@ function renderStatement(
           `${INDENT}${st.target}.AssertInvariants();`,
         ];
       }
-      return [`${INDENT}${st.target}.${upperFirst(st.op)}(${argList});`];
+      // Operations that reference `currentUser` pick up a trailing
+      // `User currentUser` parameter on the aggregate method — pass
+      // the workflow handler's local `currentUser` through.
+      const callArgs =
+        op && operationUsesCurrentUser(op)
+          ? argList.length > 0
+            ? `${argList}, currentUser`
+            : "currentUser"
+          : argList;
+      return [`${INDENT}${st.target}.${upperFirst(st.op)}(${callArgs});`];
     }
     case "expr-let": {
       const exprText = renderArg(st.expr);

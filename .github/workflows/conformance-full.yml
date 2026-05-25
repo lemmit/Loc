@@ -1,0 +1,68 @@
+name: Conformance full (nightly)
+
+# Full tier of the cross-generator conformance harness.  Generates
+# examples/showcase.ddd, builds + boots the WHOLE stack (three
+# backends + three React frontends + postgres), and runs:
+#   - /health on every deployable,
+#   - the generated DSL-level e2e suite (vitest + fetch),
+#   - the generated Playwright UI suite,
+#   - the 3-way OpenAPI parity diff.
+#
+# This is the behavioral + UI half of the L-matrix backend strip.  It
+# is heavy (full image builds + browser install), so it runs nightly
+# and on demand rather than per-PR.  The per-PR `conformance-parity`
+# workflow covers the cheap spec-diff on every relevant change.
+
+on:
+  schedule:
+    # 03:42 UTC nightly — off-peak, after most merges have landed.
+    - cron: '42 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: conformance-full-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Keep Playwright's browser download in a cacheable location; the
+      # generated frontends' e2e/ dirs install + run Playwright against
+      # this path (the e2e test forwards PLAYWRIGHT_BROWSERS_PATH).
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.pw-browsers
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.pw-browsers
+          key: pw-browsers-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Run full conformance e2e (build + boot + behavioral + UI + parity)
+        env:
+          LOOM_E2E: '1'
+        run: npx vitest run test/e2e/e2e.test.ts
+
+      - name: Surface compose diagnostics on failure
+        if: failure()
+        run: |
+          if [ -f /tmp/loom-e2e-diagnostics.log ]; then
+            cat /tmp/loom-e2e-diagnostics.log
+          else
+            echo "/tmp/loom-e2e-diagnostics.log not found — test failed before the up -d step"
+          fi

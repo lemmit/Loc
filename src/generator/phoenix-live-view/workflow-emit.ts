@@ -1,4 +1,4 @@
-import type { BoundedContextIR, ParamIR, WorkflowIR, WorkflowStmtIR } from "../../ir/loom-ir.js";
+import type { BoundedContextIR, WorkflowIR, WorkflowStmtIR } from "../../ir/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
@@ -60,20 +60,6 @@ function renderWorkflow(
 
   const bodyLines = renderWorkflowBody(wf, ctx, renderCtx, contextModule, appModule);
 
-  // Collect precondition statements to generate a validate_args/1 private
-  // function that runs at the top of the with chain (mirrors dotnet Mediator
-  // validation pipeline pattern).
-  const precondStmts = wf.statements.filter(
-    (s): s is Extract<typeof s, { kind: "precondition" | "requires" }> =>
-      s.kind === "precondition" || s.kind === "requires",
-  );
-  const validateArgsSection = renderValidateArgsFunction(
-    wf.name,
-    wf.params,
-    precondStmts,
-    renderCtx,
-  );
-
   // Emit event broadcasts that are collected separately (stmt-level emits
   // are woven into the with-chain by renderWorkflowBody).
   const body = wf.transactional
@@ -104,63 +90,7 @@ defmodule ${moduleName} do
     ${startedCall}
 ${body}
   end
-${validateArgsSection}end
-`;
-}
-
-// ---------------------------------------------------------------------------
-// validate_args/1 — private validation helper for workflow params.
-//
-// Mirrors the .NET Mediator validation pipeline: precondition / requires
-// statements whose predicates reference only workflow parameters are
-// lowered to a `validate_args(args)` private function that the `run/1`
-// function calls first via an `:ok <-` with-clause.
-//
-// The function returns `:ok` on success and `{:error, reason}` on failure,
-// matching the with-chain protocol.
-//
-// When no precondition / requires statements exist, an empty string is
-// returned so no dead code is emitted.
-// ---------------------------------------------------------------------------
-
-type PrecondOrRequires = Extract<WorkflowStmtIR, { kind: "precondition" | "requires" }>;
-
-function renderValidateArgsFunction(
-  _wfName: string,
-  params: ParamIR[],
-  stmts: PrecondOrRequires[],
-  renderCtx: RenderCtx,
-): string {
-  if (stmts.length === 0 && params.length === 0) return "";
-  // Only emit the function when there are actual guard predicates.
-  if (stmts.length === 0) return "";
-
-  const paramKeys = new Set(params.map((p) => p.name));
-
-  // Build the body: each stmt becomes one guard clause.
-  const guardLines: string[] = [];
-  for (const stmt of stmts) {
-    const exprStr = renderExpr(stmt.expr, { ...renderCtx, thisName: "args" });
-    if (stmt.kind === "precondition") {
-      const msg = JSON.stringify(`Precondition failed: ${stmt.source}`);
-      guardLines.push(`    if not (${exprStr}), do: throw({:error, ${msg}})`);
-    } else {
-      guardLines.push(`    if not (${exprStr}), do: throw({:error, :forbidden})`);
-    }
-  }
-  void paramKeys; // available for future extension (matches-on-param-type)
-
-  const body = guardLines.join("\n");
-  return `
-  defp validate_args(args) do
-    try do
-${body}
-      :ok
-    catch
-      {:error, _} = err -> err
-    end
-  end
-
+end
 `;
 }
 
@@ -184,32 +114,11 @@ function renderWorkflowBody(
   void appModule;
   const lines: WorkflowBodyLine[] = [];
 
-  // When the workflow has precondition/requires statements, inject a
-  // `validate_args(args)` with-clause at the head of the chain — mirrors
-  // the .NET Mediator validation pipeline pattern.  The private
-  // `validate_args/1` function (emitted below `run/1`) contains the actual
-  // guards; this keeps `run/1` declarative.
-  const hasPreconditions = wf.statements.some(
-    (s) => s.kind === "precondition" || s.kind === "requires",
-  );
-  const paramPattern =
-    wf.params.length > 0 ? `%{${wf.params.map((p) => `${snake(p.name)}: _`).join(", ")}}` : "_args";
-  void paramPattern;
-  if (hasPreconditions && wf.params.length > 0) {
-    // Use the arg map pattern that run/1 destructures.
-    const argsVar = wf.params.map((p) => `${snake(p.name)}: ${snake(p.name)}`).join(", ");
-    lines.push({
-      kind: "with-clause",
-      text: `      :ok <- validate_args(%{${argsVar}})`,
-    });
-  } else if (hasPreconditions) {
-    // No named params — validate_args receives an empty map.
-    lines.push({
-      kind: "with-clause",
-      text: `      :ok <- validate_args(%{})`,
-    });
-  }
-
+  // precondition / requires are emitted as standalone `unless ... throw`
+  // lines (kind: "precondition" | "requires") and hoisted by
+  // renderTransactionalBody / renderSequentialBody to run before the
+  // with-chain — no separate validate_args helper to thread current_user
+  // through.
   for (const st of wf.statements) {
     lines.push(...renderWorkflowStmt(st, ctx, renderCtx, contextModule));
   }
@@ -219,7 +128,7 @@ function renderWorkflowBody(
 
 function renderWorkflowStmt(
   st: WorkflowStmtIR,
-  _ctx: BoundedContextIR,
+  ctx: BoundedContextIR,
   renderCtx: RenderCtx,
   contextModule: string,
 ): WorkflowBodyLine[] {
@@ -261,7 +170,13 @@ function renderWorkflowStmt(
 
     case "repo-let": {
       const argList = st.args.map((a) => renderExpr(a, renderCtx)).join(", ");
-      const action = `${snake(st.method)}_${snake(st.aggName)}`;
+      // The auto-generated `getById` finder maps to Ash's primary-key read
+      // code-interface, which is just `get_<resource>/1` — `get_by_id_<res>`
+      // would name a separate `:by_id` read action that doesn't exist.
+      const action =
+        st.method === "getById"
+          ? `get_${snake(st.aggName)}`
+          : `${snake(st.method)}_${snake(st.aggName)}`;
       const call = argList
         ? `${contextModule}.${action}(${argList})`
         : `${contextModule}.${action}()`;
@@ -275,11 +190,21 @@ function renderWorkflowStmt(
     }
 
     case "op-call": {
-      const argList = st.args.map((a) => renderExpr(a, renderCtx)).join(", ");
+      // Ash actions take a NAMED-arg map (`%{key: value}`).  Zip the
+      // positional st.args with the operation's param names so an op
+      // like `promote(env: string)` called as `b.promote("production")`
+      // emits `%{env: "production"}` — bare `%{"production"}` is invalid
+      // Elixir map syntax.
+      const op = ctx.aggregates
+        .find((a) => a.name === st.aggName)
+        ?.operations.find((o) => o.name === st.op);
+      const argEntries = (op?.params ?? []).map(
+        (p, i) => `${snake(p.name)}: ${renderExpr(st.args[i]!, renderCtx)}`,
+      );
       const action = `${snake(st.op)}_${snake(st.aggName)}`;
       const callTarget = snake(st.target);
-      const call = argList
-        ? `${contextModule}.${action}(${callTarget}, %{${argList}})`
+      const call = argEntries.length
+        ? `${contextModule}.${action}(${callTarget}, %{${argEntries.join(", ")}})`
         : `${contextModule}.${action}(${callTarget})`;
       return [
         {
@@ -356,9 +281,18 @@ function renderTransactionalBody(
   if (withClauses.length === 0 && exprLines.length === 0) {
     txBody = `      {:ok, :ok}`;
   } else {
+    // Elixir's `with` must start with its first clause on the same line —
+    // a bare `with` followed by clauses on subsequent lines parses each
+    // clause as a standalone `<-` expression (invalid outside `with`),
+    // which manifests as "syntax error before: do" at the chain tail.
     const allLines = [...exprLines, ...withClauses];
-    const withBody = allLines.map((l) => l.text).join(",\n");
-    txBody = `      with\n${withBody} do\n        {:ok, ${returnVal}}\n      end`;
+    const trimmed = allLines.map((l) => l.text.trimStart());
+    const indent = "      ";
+    const cont = `${indent}     `;
+    const firstLine = `${indent}with ${trimmed[0]}`;
+    const restLines = trimmed.slice(1).map((t) => `${cont}${t}`);
+    const withBody = [firstLine, ...restLines].join(",\n");
+    txBody = `${withBody} do\n${indent}  {:ok, ${returnVal}}\n${indent}end`;
   }
 
   const emitSection =
@@ -420,9 +354,15 @@ function renderSequentialBody(lines: WorkflowBodyLine[], wf: WorkflowIR): string
   if (withClauses.length === 0 && exprLines.length === 0) {
     bodySection = `    ${completedCall}\n    :ok`;
   } else {
+    // See renderTransactionalBody — `with` must hug its first clause.
     const allLines = [...exprLines, ...withClauses];
-    const withBody = allLines.map((l) => l.text).join(",\n");
-    bodySection = `    with\n${withBody} do\n      ${completedCall}\n      {:ok, ${returnVal}}\n    end`;
+    const trimmed = allLines.map((l) => l.text.trimStart());
+    const indent = "    ";
+    const cont = `${indent}     `;
+    const firstLine = `${indent}with ${trimmed[0]}`;
+    const restLines = trimmed.slice(1).map((t) => `${cont}${t}`);
+    const withBody = [firstLine, ...restLines].join(",\n");
+    bodySection = `${withBody} do\n${indent}  ${completedCall}\n${indent}  {:ok, ${returnVal}}\n${indent}end`;
   }
 
   const emitSection =

@@ -52,6 +52,11 @@ export function prepareAppShellVM(
    *  Routes are appended after the per-aggregate / -workflow /
    *  -view block so React Router matches conventional first. */
   extraRoutes?: ExtraPageRoute[],
+  /** Whether the ui's scaffold expander produced a synthesised
+   *  `Home` page.  When false the import is skipped to avoid a
+   *  dangling reference (explicit-page-only uis emit no Home file).
+   *  Default true preserves legacy behaviour for callers without a ui. */
+  hasScaffoldHome: boolean = true,
 ): AppShellVM {
   const imports: ImportVM[] = [];
   const routes: RouteVM[] = [];
@@ -59,9 +64,10 @@ export function prepareAppShellVM(
   // Home page — generator-synthesised landing, mounted at "/".
   // Skipped when an explicit `page` already claims route "/" (the
   // user's page wins; no synthesised Home file is emitted either,
-  // so referencing one here would dangle).
+  // so referencing one here would dangle), OR when the ui declared
+  // no scaffold so the scaffold expander never synthesised Home.
   const userHasRootRoute = extraRoutes?.some((r) => r.route === "/") ?? false;
-  if (!userHasRootRoute) {
+  if (!userHasRootRoute && hasScaffoldHome) {
     imports.push({ specifier: "Home", from: "./pages/home" });
     routes.push({ path: "/", elementJsx: "<Home />" });
   }

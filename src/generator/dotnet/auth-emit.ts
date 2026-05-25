@@ -1,4 +1,4 @@
-import type { SystemIR, UserIR } from "../../ir/loom-ir.js";
+import type { SystemIR, TypeIR, UserIR } from "../../ir/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { renderCsType } from "./render-expr.js";
 
@@ -27,6 +27,72 @@ export function emitAuthFiles(sys: SystemIR, ns: string, out: Map<string, string
   out.set("Auth/ICurrentUserAccessor.cs", renderAccessorInterface(ns));
   out.set("Auth/HttpContextCurrentUserAccessor.cs", renderAccessorImpl(ns));
   out.set("Auth/UserMiddleware.cs", renderMiddleware(ns));
+  out.set("Auth/DevStubUserVerifier.cs", renderDevStubVerifier(sys.user, ns));
+}
+
+/** Permissive dev stub registered in Program.cs so a generated stack
+ *  boots end-to-end without the caller having to wire a JWT decoder
+ *  first.  Replace by registering your own IUserVerifier (the last DI
+ *  registration wins for new scope resolutions). */
+function renderDevStubVerifier(user: UserIR, ns: string): string {
+  const args = user.fields
+    .map((f) => `${upperFirst(f.name)}: ${stubCsharpValueFor(f)}`)
+    .join(",\n            ");
+  return `// Auto-generated.
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+
+namespace ${ns}.Auth;
+
+/// <summary>Dev-stub verifier — accepts every request as a built-in user.
+/// REPLACE for production by registering your own IUserVerifier (e.g.
+/// builder.Services.AddScoped&lt;IUserVerifier, MyJwtVerifier&gt;()).</summary>
+public sealed class DevStubUserVerifier : IUserVerifier
+{
+    public Task<User?> VerifyAsync(HttpContext httpContext, CancellationToken ct)
+    {
+        return Task.FromResult<User?>(new User(
+            ${args}));
+    }
+}
+`;
+}
+
+function stubCsharpValueFor(f: { name: string; type: TypeIR; optional: boolean }): string {
+  if (f.optional) return "null";
+  return stubCsharpValueForType(f.type);
+}
+
+function stubCsharpValueForType(t: TypeIR): string {
+  switch (t.kind) {
+    case "primitive":
+      switch (t.name) {
+        case "string":
+          return `"admin"`;
+        case "int":
+          return "0";
+        case "long":
+          return "0L";
+        case "decimal":
+        case "money":
+          return "0m";
+        case "bool":
+          return "false";
+        case "datetime":
+          return "System.DateTime.UnixEpoch";
+        case "guid":
+          return "System.Guid.Empty";
+        default:
+          return `""`;
+      }
+    case "id":
+      return "System.Guid.Empty";
+    case "array":
+      return `new System.Collections.Generic.List<${renderCsType(t.element)}>()`;
+    default:
+      return "null!";
+  }
 }
 
 function renderUserRecord(user: UserIR, ns: string): string {

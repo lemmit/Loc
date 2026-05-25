@@ -88,29 +88,60 @@ defmodule ${webModule}.Auth do
 
   @impl Plug
   def call(conn, _opts) do
-    case get_req_header(conn, "authorization") do
-      ["Bearer " <> token | _] ->
-        case verify_token(token) do
-          {:ok, claims} -> assign(conn, :current_user, build_user(claims))
-          _ -> conn |> put_status(:unauthorized) |> halt()
-        end
+    if bypass_path?(conn.request_path) do
+      conn
+    else
+      case get_req_header(conn, "authorization") do
+        ["Bearer " <> token | _] ->
+          case verify_token(token) do
+            {:ok, claims} ->
+              assign(conn, :current_user, build_user(claims))
 
-      _ ->
-        conn |> put_status(:unauthorized) |> halt()
+            _ ->
+              send_unauthorized(conn)
+          end
+
+        _ ->
+          send_unauthorized(conn)
+      end
     end
+  end
+
+  # Bypass list — the openapi spec endpoint must serve without a token
+  # so the cross-platform parity check (and any unauth'd scraping of the
+  # contract) works.  /health is also routed outside the :api pipeline
+  # but listed here as a belt-and-suspenders against future router moves.
+  defp bypass_path?("/api/openapi.json"), do: true
+  defp bypass_path?("/health"), do: true
+  defp bypass_path?("/ready"), do: true
+  defp bypass_path?(_), do: false
+
+  # Sends a proper 401 body + halts — without send_resp/3 the underlying
+  # cowboy adapter raises Plug.Conn.NotSentError and the response surfaces
+  # as a 500.  Halting after the send stops downstream plugs from running
+  # but keeps the response intact.
+  defp send_unauthorized(conn) do
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(401, ~s({"error":"unauthorized"}))
+    |> halt()
   end
 
   # ---------------------------------------------------------------------------
   # User-supplied JWT verifier hook — the user implements this.
-  # Default stub returns {:error, :unimplemented} so the app fails fast
-  # (a 401 on every request) rather than silently passing bad tokens.
+  # Default stub returns a built-in admin user so a generated stack boots
+  # end-to-end and the parity OpenAPI fetch works.  REPLACE for production
+  # with a real JWT decoder (e.g. JOSE / joken) — return {:ok, claims_map}
+  # or {:error, reason}.
   # ---------------------------------------------------------------------------
 
   defp verify_token(token) do
-    # TODO: implement with your JWT library (e.g. JOSE / joken).
-    # Return {:ok, claims_map} on success or {:error, reason} to reject.
     _ = token
-    {:error, :unimplemented}
+    {:ok, %{
+      "id" => "00000000-0000-0000-0000-000000000000",
+      "role" => "admin",
+      "permissions" => []
+    }}
   end
 
   # ---------------------------------------------------------------------------

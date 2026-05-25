@@ -38,6 +38,11 @@ const ENABLED = process.env.LOOM_REACT_BUILD === "1" || SHARD !== undefined;
 
 const examples = [
   { ddd: "examples/acme.ddd", reactDir: "web_app" },
+  // Conformance fixture: console_web is the richest React deployable
+  // (exercises every walker primitive).  injectDesign rewrites its
+  // `design:` slot — the first in the source — so this cell tests the
+  // full primitive surface compiling under each pack.
+  { ddd: "examples/showcase.ddd", reactDir: "console_web" },
   { ddd: "web/src/examples/banking-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/inventory-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/provenance-system.ddd", reactDir: "web_app" },
