@@ -98,7 +98,7 @@ Module:
 // in one module merge their declarations.
 PermissionsBlock:
     'permissions' '{'
-        (decls+=PermissionDecl (',' decls+=PermissionDecl)* ','?)?
+        (decls+=PermissionDecl (','? decls+=PermissionDecl)* ','?)?
     '}';
 
 PermissionDecl:
@@ -339,7 +339,7 @@ LayoutProp:
 // `hidden` in domain aggregates (e.g. `event LineAdded { order: Id<Order> }`).
 PageMenuMeta:
     'menu' '{'
-        (entries+=MenuMetaEntry (',' entries+=MenuMetaEntry)* ','?)?
+        (entries+=MenuMetaEntry (','? entries+=MenuMetaEntry)* ','?)?
     '}';
 
 MenuMetaEntry:
@@ -395,7 +395,7 @@ MenuBlock:
 
 MenuSection:
     'section' label=STRING '{'
-        (links+=MenuLink (',' links+=MenuLink)* ','?)?
+        (links+=MenuLink (','? links+=MenuLink)* ','?)?
     '}';
 
 // Page links use a real Langium cross-reference now that scaffold
@@ -406,7 +406,7 @@ MenuSection:
 // IDE affordances (autocomplete, go-to-def, find-refs, rename)
 // follow.
 MenuLink:
-      'link' page=[Page:LooseName] ('{' (props+=MenuLinkProp (',' props+=MenuLinkProp)* ','?)? '}')?
+      'link' page=[Page:LooseName] ('{' (props+=MenuLinkProp (','? props+=MenuLinkProp)* ','?)? '}')?
     | 'link' externalLabel=STRING '->' externalUrl=STRING;
 
 // Same approach as MenuMetaEntry — `LooseName` + validator-side
@@ -511,7 +511,7 @@ ContextMember:
 
 EnumDecl:
     'enum' name=ID '{'
-        values+=EnumValue (',' values+=EnumValue)* ','?
+        values+=EnumValue (','? values+=EnumValue)* ','?
     '}';
 
 EnumValue:
@@ -645,7 +645,7 @@ EntityPartMember:
 
 EventDecl:
     'event' name=ID '{'
-        (fields+=Property (',' fields+=Property)* ','?)?
+        (fields+=Property (','? fields+=Property)* ','?)?
     '}';
 
 Repository:
@@ -989,7 +989,7 @@ Lambda:
 
 PrimaryExpr infers Expression:
       Lambda
-    | NewExpr
+    | BuilderCall
     | ObjectLit
     | ParenExpr
     | LiteralExpr
@@ -1000,16 +1000,31 @@ PrimaryExpr infers Expression:
     | IdRef
     | NameRef;
 
-NewExpr:
-    'new' partType=[EntityPart:ID] '{'
-        (fields+=ObjectFieldInit (',' fields+=ObjectFieldInit)* ','?)?
+// Universal construction form (Loom v2).  Replaces `new Part { ... }`
+// and the walker-call form (`Form(state: ..., body: ...)`).  The type
+// name resolves at lowering time:
+//   - ValueObject / EntityPart  → value construction, runs invariants
+//   - EventDecl                 → event construction (only as `emit` operand)
+//   - Component (stdlib walker primitive or user component) → UI element
+// Entries are `(name ':')? expr` so named slots and bare positional
+// children (Stack { Heading{...}, Button{...} }) coexist.  Explicit
+// alternation (not optional `(name ':')?`) is required for stable
+// LL(*) selection on bare-positional entries whose token is a soft
+// keyword (e.g. `Card { title, Slot {} }`).
+BuilderCall:
+    type=ID '{'
+        (entries+=BuilderEntry (',' entries+=BuilderEntry)* ','?)?
     '}';
+
+BuilderEntry:
+      name=LooseName ':' value=Expression
+    | value=Expression;
 
 // Bare object literal — used inside e2e test bodies to build request
 // payloads (`api.orders.create({ customerId: "..." })`).  Distinct
-// from `new PartName {…}`: no aggregate / part type binding, no
-// invariant checks; it is a structural literal that the e2e renderer
-// hands straight to JSON.stringify.
+// from a typed `BuilderCall`: no type binding, no invariant checks; it
+// is a structural literal that the e2e renderer hands straight to
+// JSON.stringify.
 ObjectLit:
     '{' (fields+=ObjectFieldInit (',' fields+=ObjectFieldInit)* ','?)? '}';
 
@@ -1092,12 +1107,28 @@ NameRefIdent returns string:
     // form.  MoneyLit comes before NameRef in PrimaryExpr, so the
     // parser picks the literal form whenever `(` follows and falls
     // back to NameRef otherwise.
+    // v2 expanded set: every soft keyword that LooseName admits is also
+    // admissible as a bare NameRef in expression position.  This lets a
+    // BuilderCall's bare-positional entry (`Card { title, Slot {} }`) parse
+    // when the entry happens to be a NameRef whose token is a soft keyword
+    // — without this, the parser commits to the named-slot alternative
+    // (`name=LooseName ':'`) and fails on the missing `:`.
+    //
     // Field-access modifier keywords (`FieldAccess` rule) are admitted
     // here so `let s = secret`, `currentUser.token`, etc. keep working
     // even though `secret`/`token`/etc. are reserved in the access slot
     // of a `Property` declaration.  Same soft-keyword treatment `money`
     // gets above.
+    //
+    // `id` is intentionally excluded: it's the magic identifier handled by
+    // IdRef and would create an ambiguity with IdRef inside PrimaryExpr.
     ID | 'permissions' | 'ui' | 'api' | 'money'
+       | 'contains' | 'page' | 'component' | 'state' | 'menu'
+       | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
+       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
+       | 'design' | 'targets' | 'bind'
+       | 'primary' | 'cache' | 'search' | 'events' | 'bi'
+       | 'filter' | 'stamp' | 'implements'
        | 'immutable' | 'managed' | 'token' | 'internal' | 'secret';
 
 // ---------------------------------------------------------------------------
