@@ -1,19 +1,26 @@
 // Wire-projection filters — the canonical per-boundary semantics for
 // `FieldAccess`.  Backends import these helpers instead of reinventing
-// the modifier matrix.  Each helper is a pure filter over the existing
-// `wireShape: readonly WireField[]`; no pre-split IR shape, no
-// duplicated lists.  See `FieldAccess` in `src/ir/loom-ir.ts` for the
-// canonical role semantics this layer implements.
+// the modifier matrix.  Generic over anything carrying `access`:
+// works on `WireField[]` (where the synthetic id row participates) and
+// on `FieldIR[]` (where only declared properties participate) without
+// duplicating the rules.  See `FieldAccess` in `src/ir/loom-ir.ts`
+// for the canonical role semantics this layer implements.
 
-import type { WireField } from "./loom-ir.js";
+import type { FieldAccess } from "./loom-ir.js";
+
+/** Any structure carrying a resolved access role.  Both `WireField`
+ * and `FieldIR` satisfy this — backends choose the shape that suits
+ * the call site (wire shape includes the synthetic id row; field list
+ * is property-only). */
+type WithAccess = { access?: FieldAccess };
 
 /** Fields visible in an **API read** response (HTTP/OpenAPI surfaces).
  * Excludes:
  *   - `internal` — never exposed via API; views may still render it.
  *   - `secret`   — write-only, never disclosed in any read.
  * Everything else (editable, immutable, managed, token) is included. */
-export function forApiRead(wire: readonly WireField[]): WireField[] {
-  return wire.filter((f) => f.access !== "internal" && f.access !== "secret");
+export function forApiRead<T extends WithAccess>(items: readonly T[]): T[] {
+  return items.filter((f) => f.access !== "internal" && f.access !== "secret");
 }
 
 /** Fields visible in a **UI read** projection (in-system view; admin
@@ -21,8 +28,8 @@ export function forApiRead(wire: readonly WireField[]): WireField[] {
  *   - `secret`   — never disclosed anywhere.
  * `internal` is INCLUDED — admin UIs are exactly the audience the
  * modifier was designed for. */
-export function forUiRead(wire: readonly WireField[]): WireField[] {
-  return wire.filter((f) => f.access !== "secret");
+export function forUiRead<T extends WithAccess>(items: readonly T[]): T[] {
+  return items.filter((f) => f.access !== "secret");
 }
 
 /** Fields clients supply on a **create** request.  Excludes:
@@ -32,8 +39,8 @@ export function forUiRead(wire: readonly WireField[]): WireField[] {
  *   - `internal` — domain-only state.
  * `immutable` is INCLUDED — this is when it's settable.
  * `secret` is INCLUDED — clients supply password hashes / API keys. */
-export function forCreateInput(wire: readonly WireField[]): WireField[] {
-  return wire.filter(
+export function forCreateInput<T extends WithAccess>(items: readonly T[]): T[] {
+  return items.filter(
     (f) => f.access !== "managed" && f.access !== "token" && f.access !== "internal",
   );
 }
@@ -46,8 +53,8 @@ export function forCreateInput(wire: readonly WireField[]): WireField[] {
  *   - `internal` — domain-only.
  *   - `immutable`— frozen after create.
  * Only editable + `secret` remain. */
-export function forUpdateInput(wire: readonly WireField[]): WireField[] {
-  return wire.filter(
+export function forUpdateInput<T extends WithAccess>(items: readonly T[]): T[] {
+  return items.filter(
     (f) =>
       f.access !== "managed" &&
       f.access !== "token" &&
@@ -62,6 +69,6 @@ export function forUpdateInput(wire: readonly WireField[]): WireField[] {
  * by the request.  Backends emit these separately from the editable
  * payload — route param for identity, ETag/header or body field for
  * concurrency, depending on transport. */
-export function updatePreconditions(wire: readonly WireField[]): WireField[] {
-  return wire.filter((f) => f.access === "token");
+export function updatePreconditions<T extends WithAccess>(items: readonly T[]): T[] {
+  return items.filter((f) => f.access === "token");
 }
