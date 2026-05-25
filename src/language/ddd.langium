@@ -98,7 +98,7 @@ Module:
 // in one module merge their declarations.
 PermissionsBlock:
     'permissions' '{'
-        (decls+=PermissionDecl (',' decls+=PermissionDecl)* ','?)?
+        (decls+=PermissionDecl (','? decls+=PermissionDecl)* ','?)?
     '}';
 
 PermissionDecl:
@@ -330,7 +330,7 @@ BodyProp:
 // `hidden` in domain aggregates (e.g. `event LineAdded { order: Id<Order> }`).
 PageMenuMeta:
     'menu' '{'
-        (entries+=MenuMetaEntry (',' entries+=MenuMetaEntry)* ','?)?
+        (entries+=MenuMetaEntry (','? entries+=MenuMetaEntry)* ','?)?
     '}';
 
 MenuMetaEntry:
@@ -386,7 +386,7 @@ MenuBlock:
 
 MenuSection:
     'section' label=STRING '{'
-        (links+=MenuLink (',' links+=MenuLink)* ','?)?
+        (links+=MenuLink (','? links+=MenuLink)* ','?)?
     '}';
 
 // Page links use a real Langium cross-reference now that scaffold
@@ -397,7 +397,7 @@ MenuSection:
 // IDE affordances (autocomplete, go-to-def, find-refs, rename)
 // follow.
 MenuLink:
-      'link' page=[Page:LooseName] ('{' (props+=MenuLinkProp (',' props+=MenuLinkProp)* ','?)? '}')?
+      'link' page=[Page:LooseName] ('{' (props+=MenuLinkProp (','? props+=MenuLinkProp)* ','?)? '}')?
     | 'link' externalLabel=STRING '->' externalUrl=STRING;
 
 // Same approach as MenuMetaEntry — `LooseName` + validator-side
@@ -502,7 +502,7 @@ ContextMember:
 
 EnumDecl:
     'enum' name=ID '{'
-        values+=EnumValue (',' values+=EnumValue)* ','?
+        values+=EnumValue (','? values+=EnumValue)* ','?
     '}';
 
 EnumValue:
@@ -636,7 +636,7 @@ EntityPartMember:
 
 EventDecl:
     'event' name=ID '{'
-        (fields+=Property (',' fields+=Property)* ','?)?
+        (fields+=Property (','? fields+=Property)* ','?)?
     '}';
 
 Repository:

@@ -691,7 +691,8 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "elements": [
                   {
                     "$type": "Keyword",
-                    "value": ","
+                    "value": ",",
+                    "cardinality": "?"
                   },
                   {
                     "$type": "Assignment",
@@ -2418,7 +2419,8 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "elements": [
                   {
                     "$type": "Keyword",
-                    "value": ","
+                    "value": ",",
+                    "cardinality": "?"
                   },
                   {
                     "$type": "Assignment",
@@ -2862,7 +2864,8 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "elements": [
                   {
                     "$type": "Keyword",
-                    "value": ","
+                    "value": ",",
+                    "cardinality": "?"
                   },
                   {
                     "$type": "Assignment",
@@ -2959,7 +2962,8 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "elements": [
                           {
                             "$type": "Keyword",
-                            "value": ","
+                            "value": ",",
+                            "cardinality": "?"
                           },
                           {
                             "$type": "Assignment",
@@ -3830,7 +3834,8 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "elements": [
               {
                 "$type": "Keyword",
-                "value": ","
+                "value": ",",
+                "cardinality": "?"
               },
               {
                 "$type": "Assignment",
@@ -5077,7 +5082,8 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "elements": [
                   {
                     "$type": "Keyword",
-                    "value": ","
+                    "value": ",",
+                    "cardinality": "?"
                   },
                   {
                     "$type": "Assignment",
