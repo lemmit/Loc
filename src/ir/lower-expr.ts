@@ -589,7 +589,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
 /** Lower a v2 BuilderCall (`Type { slot: value, ... }`).  The type name
  *  resolves at lowering time against the in-scope declarations:
  *    - ValueObject       → "call" IR (callKind "value-object-ctor")
- *    - EntityPart        → "new" IR (part construction)
+ *    - EntityPart        → "construct" IR (part construction)
  *    - Anything else     → "call" IR (callKind "free") — walker
  *      primitives, user components, unknown names.  The walker
  *      dispatches by name on the resulting CallIR.

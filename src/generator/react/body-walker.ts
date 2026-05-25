@@ -58,6 +58,7 @@ import type {
   UiHelperImportIR,
   WorkflowIR,
 } from "../../ir/loom-ir.js";
+import { WALKER_LAYOUT_PRIMITIVES } from "../../language/walker-stdlib.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { registerApiHook, tryDetectApiHook } from "./walker/api-hooks.js";
 import {
@@ -231,47 +232,11 @@ export interface ApiHookUse {
   argsRendered: string[];
 }
 
-/** Component names the walker recognises.  Used by the page
- *  emitter to fast-fail dispatch when a body is neither a scaffold
- *  archetype nor a layout primitive — those pages stay silent. */
-const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
-  "Stack",
-  "Group",
-  "Grid",
-  "Container",
-  "Tabs",
-  "Toolbar",
-  "Empty",
-  "Field",
-  "NumberField",
-  "PasswordField",
-  "Toggle",
-  "Loader",
-  "Anchor",
-  "Image",
-  "Avatar",
-  "Slot",
-  "Heading",
-  "Text",
-  "Button",
-  "Card",
-  "Stat",
-  "Badge",
-  "Divider",
-  "Table",
-  "Money",
-  "DateDisplay",
-  "EnumBadge",
-  "IdLink",
-  "Form",
-  "Breadcrumbs",
-  "Paper",
-  "Skeleton",
-  "Alert",
-  "QueryView",
-  "KeyValueRow",
-  "Modal",
-]);
+/** Component names the walker recognises.  Re-exports the shared
+ *  language-level registry (`src/language/walker-stdlib.ts`) so the
+ *  validator and the body-walker dispatch agree on the v0 closed set —
+ *  adding a primitive in one place auto-propagates. */
+const STDLIB_LAYOUT_COMPONENTS = WALKER_LAYOUT_PRIMITIVES;
 
 export function isWalkableLayoutBody(
   body: ExprIR | undefined,
