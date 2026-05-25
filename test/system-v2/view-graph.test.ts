@@ -280,9 +280,7 @@ describe("Model v2 — view-graph per level", () => {
     const g = buildViewGraph(parse(WF_SRC), [{ kind: "workflow", name: "place" }]);
     expect(g.title).toBe("workflow place()");
     expect(childNodes(g).map((n) => n.id)).toEqual(["stmt:0", "stmt:1", "stmt:2"]);
-    expect(
-      g.edges.filter((e) => e.kind === "next").map((e) => [e.source, e.target]),
-    ).toEqual([
+    expect(g.edges.filter((e) => e.kind === "next").map((e) => [e.source, e.target])).toEqual([
       ["stmt:0", "stmt:1"],
       ["stmt:1", "stmt:2"],
     ]);
