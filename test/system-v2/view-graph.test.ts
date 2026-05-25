@@ -71,6 +71,52 @@ describe("Model v2 — view-graph per level", () => {
     expect(g.nodes.find((n) => n.id === "field:status")?.drillable).toBe(false);
   });
 
+  it("aggregate view exposes derived props as nodes and emits read edges into the fields they reference", () => {
+    const D = `context C {
+  aggregate Order {
+    amount: decimal
+    qty: int
+    derived total: decimal = amount * qty
+  }
+}`;
+    const g = buildViewGraph(parse(D), [{ kind: "aggregate", name: "Order" }]);
+    expect(ids(g).sort()).toEqual(["derived:total", "field:amount", "field:qty"].sort());
+    const reads = g.edges.filter((e) => e.kind === "reads");
+    expect(reads.map((e) => `${e.source}->${e.target}`).sort()).toEqual(
+      ["derived:total->field:amount", "derived:total->field:qty"].sort(),
+    );
+  });
+
+  it("aggregate view emits a `writes` edge per assigned field and a `reads` edge per accessed field on operations", () => {
+    const D = `context C {
+  aggregate Order {
+    status: string
+    note: string
+    operation confirm() {
+      status := note
+    }
+  }
+}`;
+    const g = buildViewGraph(parse(D), [{ kind: "aggregate", name: "Order" }]);
+    const writes = g.edges.filter((e) => e.kind === "writes").map((e) => `${e.source}->${e.target}`);
+    const reads = g.edges.filter((e) => e.kind === "reads").map((e) => `${e.source}->${e.target}`);
+    expect(writes).toEqual(["operation:confirm->field:status"]);
+    expect(reads).toEqual(["operation:confirm->field:note"]);
+  });
+
+  it("aggregate view emits `constrains` edges from invariants to the fields they reference", () => {
+    const D = `context C {
+  aggregate Money {
+    amount: decimal
+    currency: string
+    invariant amount >= 0
+  }
+}`;
+    const g = buildViewGraph(parse(D), [{ kind: "aggregate", name: "Money" }]);
+    const constrains = g.edges.filter((e) => e.kind === "constrains");
+    expect(constrains.map((e) => `${e.source}->${e.target}`)).toEqual(["invariant:0->field:amount"]);
+  });
+
   it("aggregate view surfaces invariants as indexed nodes carrying a preview", () => {
     const INV = `context C {
   aggregate Money {

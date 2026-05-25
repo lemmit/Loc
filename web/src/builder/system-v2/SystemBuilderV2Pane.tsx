@@ -77,6 +77,7 @@ const KIND_COLOR: Record<ViewKind, string> = {
   invariant: "var(--mantine-color-yellow-8)",
   view: "var(--mantine-color-lime-8)",
   function: "var(--mantine-color-yellow-8)",
+  derived: "var(--mantine-color-cyan-7)",
   field: "var(--mantine-color-gray-7)",
   containment: "var(--mantine-color-teal-8)",
   api: "var(--mantine-color-pink-7)",
@@ -149,6 +150,7 @@ const AST_TYPE_BY_VIEW: Partial<Record<ViewKind, string>> = {
   aggregate: "Aggregate",
   operation: "Operation",
   function: "FunctionDecl",
+  derived: "DerivedProp",
   workflow: "Workflow",
   valueobject: "ValueObject",
   event: "EventDecl",
@@ -176,17 +178,35 @@ function leafBodyLocator(path: ViewPath): BodyLocator | null {
   return null;
 }
 
+/** Per-edge-kind stroke + dashing. Keeps the visual language consistent across
+ *  views: bindings & writes are solid (commit-shaped), reads & constraints are
+ *  dashed (observation-shaped), event emissions get their own accent. */
+const EDGE_STYLE: Record<string, { stroke: string; dash?: string; labelFill?: string }> = {
+  binding:    { stroke: "var(--mantine-color-dark-2)" },
+  next:       { stroke: "var(--mantine-color-dark-2)" },
+  writes:     { stroke: "var(--mantine-color-teal-4)" },
+  reads:      { stroke: "var(--mantine-color-gray-5)", dash: "4 3", labelFill: "var(--mantine-color-gray-5)" },
+  constrains: { stroke: "var(--mantine-color-yellow-5)", dash: "2 3", labelFill: "var(--mantine-color-yellow-5)" },
+  emits:      { stroke: "var(--mantine-color-grape-5)" },
+};
+
 function toRfEdges(g: ViewGraph): Edge[] {
   return g.edges.map((e) => {
     const reconnectable: "target" | false = isRebindableDeployableEdge(e.label ?? "") ? "target" : false;
+    const styleSpec = EDGE_STYLE[e.kind ?? "binding"] ?? EDGE_STYLE.binding;
     return {
       id: e.id,
       source: e.source,
       target: e.target,
       label: e.label,
       reconnectable,
-      labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
-      style: { stroke: "var(--mantine-color-dark-2)" },
+      // Only deployable bindings carry visible labels — reads/writes/constrains
+      // use stroke styling instead, which keeps the aggregate view legible
+      // even at zoom-out (label text would crowd the field column).
+      ...(e.kind === "binding" ? {} : { label: undefined }),
+      labelStyle: { fontSize: 9, fill: styleSpec.labelFill ?? "var(--mantine-color-dimmed)" },
+      style: { stroke: styleSpec.stroke, strokeDasharray: styleSpec.dash },
+      data: { edgeKind: e.kind ?? "binding" },
     };
   });
 }
