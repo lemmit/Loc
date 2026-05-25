@@ -353,6 +353,15 @@ function isStringType(e: ExprIR): boolean {
     const mt = e.memberType;
     return mt.kind === "primitive" && mt.name === "string";
   }
+  if (e.kind === "binary") {
+    // Chained string concats: the outer binary's left is an inner
+    // binary whose `resultType` is string.  Inspect the IR-level
+    // type rather than re-running the shape check on the inner.
+    const rt = e.resultType;
+    if (rt?.kind === "primitive" && rt.name === "string") return true;
+  }
+  if (e.kind === "convert") return e.target === "string";
+  if (e.kind === "paren") return isStringType(e.inner);
   return false;
 }
 
@@ -374,7 +383,12 @@ function renderBinary(
   if (leftType?.kind === "primitive" && leftType.name === "money") {
     return renderMoneyBinary(op, l, r);
   }
-  const elOp = elixirOp(op, isStringType(left));
+  // Prefer the IR-level `leftType` over the AST-shape check: chained
+  // string concats (`a + b + c`) carry `leftType: string` on the outer
+  // binary even when the left operand is itself a binary.
+  const leftIsString =
+    (leftType?.kind === "primitive" && leftType.name === "string") || isStringType(left);
+  const elOp = elixirOp(op, leftIsString);
   if (op === "%") {
     // `rem` is a function in Elixir.
     return `rem(${l}, ${r})`;

@@ -30,7 +30,8 @@ const ordersListBody = (queryViewBody: string) => `
     module Sales {
       context C {
         aggregate Order {
-          customerId: string display
+          customerId: string
+          derived display: string = customerId
           status:     string
         }
         repository Orders for Order { }

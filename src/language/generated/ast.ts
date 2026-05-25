@@ -76,7 +76,6 @@ export type DddKeywordNames =
     | "deployable"
     | "derived"
     | "design"
-    | "display"
     | "dotnet"
     | "e2e"
     | "elastic"
@@ -1376,7 +1375,6 @@ export interface Property extends AstNode {
     readonly $container: Aggregate | EntityPart | EventDecl | ValueObject | View;
     readonly $type: 'Property';
     check?: Expression;
-    display: boolean;
     name: 'money' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
@@ -2856,7 +2854,6 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: Property,
                     properties: [
                         { name: 'check' },
-                        { name: 'display', defaultValue: false },
                         { name: 'name' },
                         { name: 'provenanced', defaultValue: false },
                         { name: 'sensitivity' },

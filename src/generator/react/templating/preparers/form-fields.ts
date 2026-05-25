@@ -50,11 +50,11 @@ export function prepareFormFieldVM(
 
   if (inner.kind === "id") {
     const target = aggregatesByName.get(inner.targetName);
-    const display = target?.fields.find((f) => f.display);
-    if (!target || !display) {
+    const displayFieldName = target ? simpleDisplayFieldName(target) : undefined;
+    if (!target || !displayFieldName) {
       const reason = !target
         ? `${inner.targetName} id: target aggregate not found`
-        : `Aggregate '${inner.targetName}' has no 'display' field — declare one (e.g. 'sku: string display') to enable a Select picker for ${inner.targetName} id.`;
+        : `Aggregate '${inner.targetName}' has no 'derived display' or its display is not a single-field reference — declare 'derived display: string = <field>' to enable a Select picker for ${inner.targetName} id.`;
       return {
         template: "field-input-id-text",
         path,
@@ -71,7 +71,7 @@ export function prepareFormFieldVM(
       testId,
       errorExpr,
       hookVar: idTargetHookVar(target),
-      displayField: display.name,
+      displayField: displayFieldName,
     };
   }
 
@@ -126,4 +126,18 @@ export function prepareFormFieldVM(
 function errorAccess(path: string): string {
   const parts = path.split(".");
   return `errors.${parts.join("?.")}?.message`;
+}
+
+/** Resolve the underlying wire field name for a target aggregate's
+ * `derived display: string` — but only when the display expression is a
+ * single bare property reference (`derived display: string = name`).
+ * Compound displays (`= firstName + " " + lastName`) need a function-
+ * shape rendering on the React side; that's a follow-up.  Returns
+ * `undefined` when no display is declared or it's compound. */
+function simpleDisplayFieldName(agg: AggregateIR): string | undefined {
+  const d = agg.displayDerived;
+  if (!d) return undefined;
+  const e = d.expr;
+  if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
+  return undefined;
 }

@@ -143,18 +143,13 @@ export function namedType(
 /** A property declaration on an aggregate, entity part, value
  * object, etc.  Lives inside the aggregate body once the expander
  * splices it in. */
-export function field(
-  name: string,
-  type: TypeRef,
-  opts: { display?: boolean; provenanced?: boolean } = {},
-): Property {
+export function field(name: string, type: TypeRef, opts: { provenanced?: boolean } = {}): Property {
   const origin = currentOrigin();
   const prop: Property = tag(
     {
       $type: "Property",
       name,
       type,
-      display: opts.display ?? false,
       provenanced: opts.provenanced ?? false,
     } as unknown as Property,
     origin,

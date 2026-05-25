@@ -37,7 +37,8 @@ system S {
   module M {
     context C {
       aggregate Cart ids guid {
-        label: string display
+        label: string
+        derived display: string = label
         total: int provenanced
         discount: int
 ${body}
@@ -63,12 +64,14 @@ describe("provenanced — grammar", () => {
     expect(findProperty(model, "Cart", "discount").provenanced).toBeFalsy();
   });
 
-  it("coexists with `display`", async () => {
-    const src = SYSTEM("").replace("label: string display", "label: string display provenanced");
+  it("provenanced property in an aggregate with a `derived display` parses cleanly", async () => {
+    // Display is now a `derived display: string = ...` clause on the
+    // aggregate, not a property annotation; it is structurally
+    // orthogonal to `provenanced`, which stays on the property.
+    const src = SYSTEM("").replace("label: string\n", "label: string provenanced\n");
     const { model, errors } = await parseModel(src);
     expect(errors).toEqual([]);
     const label = findProperty(model, "Cart", "label");
-    expect(label.display).toBe(true);
     expect(label.provenanced).toBe(true);
   });
 
@@ -85,7 +88,8 @@ describe("provenanced — validation", () => {
     const src = `
 system S { module M { context C {
   aggregate Cart ids guid {
-    label: string display
+    label: string
+    derived display: string = label
     total: int provenanced
     operation noop(x: int) { precondition x > 0 }
   }

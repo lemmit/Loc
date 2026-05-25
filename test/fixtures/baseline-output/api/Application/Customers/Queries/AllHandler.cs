@@ -22,6 +22,6 @@ public sealed class AllHandler : IQueryHandler<AllQuery, IReadOnlyList<CustomerR
     public async ValueTask<IReadOnlyList<CustomerResponse>> Handle(AllQuery q, CancellationToken ct)
     {
         var domain = await _repo.All(ct);
-        return domain.Select(d => new CustomerResponse(d.Id.Value, d.Username, d.Email, d.Age)).ToList();
+        return domain.Select(d => new CustomerResponse(d.Id.Value, d.Username, d.Email, d.Age, d.Display)).ToList();
     }
 }

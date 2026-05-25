@@ -27,15 +27,17 @@ system SalesBackend {
       event OrderConfirmed { order: Order id, at: datetime }
 
       aggregate Customer {
-        name: string display
+        name: string
         email: string
         invariant email.length > 0
+        derived display: string = name
       }
 
       aggregate Product {
-        sku: string display
+        sku: string
         price: Money
         invariant sku.length > 0
+        derived display: string = sku
       }
 
       aggregate Order {

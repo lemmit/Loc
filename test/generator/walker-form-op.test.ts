@@ -19,7 +19,8 @@ const SRC = `
     module Sales {
       context Sales {
         aggregate Order {
-          customerId: string display
+          customerId: string
+          derived display: string = customerId
           quantity:   int
           operation confirm() { }
           operation addLine(qty: int) { }
@@ -100,7 +101,8 @@ const COMPONENT_SRC = `
     module Sales {
       context Sales {
         aggregate Order {
-          customerId: string display
+          customerId: string
+          derived display: string = customerId
           operation confirm() { }
         }
         repository Orders for Order { }

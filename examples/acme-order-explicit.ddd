@@ -32,9 +32,10 @@ system AcmeOrderExplicit {
             enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
 
             aggregate Order {
-                customerId: string display
+                customerId: string
                 status:     OrderStatus
                 placedAt:   datetime
+                derived display: string = customerId
             }
 
             repository Orders for Order { }

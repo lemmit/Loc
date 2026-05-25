@@ -29,7 +29,7 @@ system PokemonWorld {
             event PokemonEvolved   { pokemon: Pokemon id, fromSpecies: string, into: string }
 
             aggregate Pokemon {
-                species: string display
+                species: string
                 nickname: string
                 element: PokemonType
                 level: int
@@ -81,6 +81,7 @@ system PokemonWorld {
                     maxHp := maxHp + 25
                     attack := attack + 10
                 }
+                derived display: string = species
             }
 
             repository Pokedex for Pokemon {
@@ -97,7 +98,7 @@ system PokemonWorld {
             event BadgeEarned   { trainer: Trainer id, badge: string }
 
             aggregate Trainer {
-                name: string display
+                name: string
                 hometown: string
                 rank: TrainerRank
                 money: int
@@ -137,6 +138,7 @@ system PokemonWorld {
                     precondition amount <= money
                     money := money - amount
                 }
+                derived display: string = name
             }
 
             repository Trainers for Trainer {
@@ -209,7 +211,7 @@ system PokemonWorld {
             event GymBadgeAwarded { gym: Gym id, trainer: Trainer id, badge: string }
 
             aggregate Gym {
-                name: string display
+                name: string
                 city: string
                 leader: string
                 badge: string
@@ -222,6 +224,7 @@ system PokemonWorld {
                     victories := victories + 1
                     emit GymBadgeAwarded { gym: id, trainer: trainer, badge: badge }
                 }
+                derived display: string = name
             }
 
             repository Gyms for Gym {

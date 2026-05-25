@@ -252,6 +252,17 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
   for (const d of e.derived) {
     getters.push(`  get ${d.name}(): ${renderTsType(d.type)} { return ${renderTsExpr(d.expr)}; }`);
   }
+  // Host-language debug-string hooks delegate to the `inspect` getter
+  // emitted by the loop above.  Two slots: `toString()` for
+  // `String(x)` / `${x}` interpolation, and `util.inspect.custom` for
+  // `console.log` + Node debugger inspection.  Both return the same
+  // structural form so library consumers see a consistent debug
+  // representation regardless of the call shape.  See plan
+  // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+  if (e.derived.some((d) => d.name === "inspect")) {
+    getters.push(`  toString(): string { return this.inspect; }`);
+    getters.push(`  [Symbol.for("nodejs.util.inspect.custom")](): string { return this.inspect; }`);
+  }
 
   const fns = e.functions.map((fn) => {
     const params = fn.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");

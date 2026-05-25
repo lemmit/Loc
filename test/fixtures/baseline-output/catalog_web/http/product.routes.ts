@@ -25,6 +25,7 @@ export const ProductResponse = z.object({
   id: z.string(),
   sku: z.string(),
   price: MoneySchema,
+  display: z.string(),
 }).openapi("ProductResponse");
 export const ProductListResponse = z.array(ProductResponse).openapi("ProductListResponse");
 const ErrorResponse = z.object({ error: z.string() }).openapi("ErrorResponse");

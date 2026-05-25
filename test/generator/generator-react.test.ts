@@ -274,7 +274,7 @@ describe("react generator", () => {
         system Plain {
           module M {
             context C {
-              aggregate Thing { name: string display }
+              aggregate Thing { name: string  derived display: string = name }
               repository Things for Thing { }
             }
           }
@@ -343,7 +343,7 @@ describe("react generator", () => {
         system Untheme {
           module M {
             context C {
-              aggregate A { name: string display }
+              aggregate A { name: string  derived display: string = name }
               repository As for A { }
             }
           }
@@ -639,7 +639,7 @@ describe("react generator", () => {
         system Demo {
           module M {
             context C {
-              aggregate A { name: string display }
+              aggregate A { name: string  derived display: string = name }
               repository As for A { }
             }
           }
@@ -675,7 +675,7 @@ describe("react generator", () => {
         system Demo {
           module M {
             context C {
-              aggregate A { name: string display }
+              aggregate A { name: string  derived display: string = name }
               repository As for A { }
             }
           }
@@ -781,7 +781,8 @@ describe("react generator", () => {
             module M {
               context Auth {
                 aggregate User {
-                  email: string display
+                  email: string
+                  derived display: string = email
                   invariant email.matches("^[^@]+@.+$")
                 }
                 repository Users for User { }
@@ -808,7 +809,8 @@ describe("react generator", () => {
             module M {
               context Catalog {
                 aggregate Product {
-                  sku:  string display check sku.length >= 1 && sku.length <= 32
+                  sku:  string check sku.length >= 1 && sku.length <= 32
+                  derived display: string = sku
                   name: string check name.length <= 120
                 }
                 repository Products for Product { }
@@ -837,7 +839,8 @@ describe("react generator", () => {
             module M {
               context Acct {
                 aggregate User {
-                  username: string display
+                  username: string
+                  derived display: string = username
                   private invariant username.length >= 3
                 }
                 repository Users for User { }

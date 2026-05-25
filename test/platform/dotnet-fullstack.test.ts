@@ -43,7 +43,8 @@ const FULLSTACK_SOURCE = `
 system FullstackDemo {
   module Sales { context T {
     aggregate Order {
-      name: string display
+      name: string
+      derived display: string = name
     }
     repository Orders for Order { }
   } }
@@ -56,7 +57,8 @@ const BACKEND_ONLY_SOURCE = `system BackendOnly {
   module Sales {
     context T {
       aggregate Order {
-        name: string display
+        name: string
+        derived display: string = name
       }
       repository Orders for Order { }
     }

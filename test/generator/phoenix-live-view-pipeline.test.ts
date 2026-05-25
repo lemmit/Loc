@@ -35,7 +35,8 @@ const FIXTURE_SOURCE = `system MiniLiveView {
         currency: string
       }
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         email: string
         creditLimit: Money
         invariant email.length > 0
@@ -301,7 +302,7 @@ describe("phoenixLiveView pipeline", () => {
     const src = `system MiniBad {
   module Sales {
     context Sales {
-      aggregate Customer { name: string display }
+      aggregate Customer { name: string  derived display: string = name }
       repository Customers for Customer { }
     }
   }
@@ -905,7 +906,8 @@ describe("router wiring (orchestrator integration)", () => {
   module Sales {
     context Sales {
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         email: string
       }
       repository Customers for Customer { }
@@ -1105,7 +1107,8 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
       }
       event OrderConfirmed { order: Order id, at: datetime }
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         email: string
         invariant email.length > 0
       }
@@ -1667,7 +1670,8 @@ const ACME_UI_E2E_SOURCE = `system AcmeUI {
   module Sales {
     context Sales {
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         email: string
       }
       repository Customers for Customer { }
@@ -1754,7 +1758,8 @@ const FORM_FIXTURE = `system AcmeForm {
   module Sales {
     context Sales {
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         email: string
       }
       repository Customers for Customer { }
@@ -2351,9 +2356,10 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
   const ROSTER_SOURCE = `system Roster {
   module Roster {
     context Roster {
-      aggregate Pokemon { species: string display  level: int }
+      aggregate Pokemon { species: string  level: int  derived display: string = species }
       aggregate Trainer {
-        name: string display
+        name: string
+        derived display: string = name
         party: Pokemon id[]
         caught: Pokemon id[]
         operation addToParty(pokemon: Pokemon id) {

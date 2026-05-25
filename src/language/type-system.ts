@@ -490,7 +490,15 @@ function isImplicitlyStringifiable(t: DddType): boolean {
   }
   if (t.kind === "enum") return true;
   if (t.kind === "id") return true;
+  if (t.kind === "aggregate") return aggregateHasDisplay(t.ref);
   return false;
+}
+
+/** True iff the aggregate declares a `derived display: string = ...`.
+ * Anchors `string(aggregate)` and implicit `"x " + aggregate` to a
+ * concrete expression; absence makes both compile errors. */
+function aggregateHasDisplay(agg: Aggregate): boolean {
+  return agg.members.some((m) => isDerivedProp(m) && m.name === "display");
 }
 
 function moneyArithmetic(

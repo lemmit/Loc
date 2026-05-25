@@ -80,7 +80,7 @@ export class ProductRepository {
   }
 
   toWire(root: Product): unknown {
-    return { id: root.id as string, sku: root.sku, price: { amount: root.price.amount, currency: root.price.currency } };
+    return { id: root.id as string, sku: root.sku, price: { amount: root.price.amount, currency: root.price.currency }, display: root.display };
   }
 
 }

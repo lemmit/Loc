@@ -26,7 +26,8 @@ const FIXTURE_SOURCE = `system PhoenixShop {
   module Store {
     context Store {
       aggregate Item {
-        name: string display
+        name: string
+        derived display: string = name
         price: decimal
         invariant price > 0
         operation archive() {

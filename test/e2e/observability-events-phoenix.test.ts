@@ -98,7 +98,8 @@ const FIXTURE_DDD = `system PhxObs {
   module Sales {
     context Sales {
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         email: string
       }
       repository Customers for Customer { }

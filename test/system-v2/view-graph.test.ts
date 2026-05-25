@@ -65,7 +65,9 @@ describe("Model v2 — view-graph per level", () => {
 }`;
     const g = buildViewGraph(parse(D), [{ kind: "context", name: "Sales" }]);
     const repoEdges = g.edges.filter((e) => e.id.startsWith("repo-for:"));
-    expect(repoEdges.map((e) => `${e.source}->${e.target}`)).toEqual(["repository:Orders->aggregate:Order"]);
+    expect(repoEdges.map((e) => `${e.source}->${e.target}`)).toEqual([
+      "repository:Orders->aggregate:Order",
+    ]);
     expect(repoEdges[0]?.kind).toBe("reads");
   });
 
@@ -131,7 +133,9 @@ describe("Model v2 — view-graph per level", () => {
   }
 }`;
     const g = buildViewGraph(parse(D), [{ kind: "aggregate", name: "Order" }]);
-    const writes = g.edges.filter((e) => e.kind === "writes").map((e) => `${e.source}->${e.target}`);
+    const writes = g.edges
+      .filter((e) => e.kind === "writes")
+      .map((e) => `${e.source}->${e.target}`);
     const reads = g.edges.filter((e) => e.kind === "reads").map((e) => `${e.source}->${e.target}`);
     expect(writes).toEqual(["operation:confirm->field:status"]);
     expect(reads).toEqual(["operation:confirm->field:note"]);
@@ -147,7 +151,9 @@ describe("Model v2 — view-graph per level", () => {
 }`;
     const g = buildViewGraph(parse(D), [{ kind: "aggregate", name: "Money" }]);
     const constrains = g.edges.filter((e) => e.kind === "constrains");
-    expect(constrains.map((e) => `${e.source}->${e.target}`)).toEqual(["invariant:0->field:amount"]);
+    expect(constrains.map((e) => `${e.source}->${e.target}`)).toEqual([
+      "invariant:0->field:amount",
+    ]);
   });
 
   it("aggregate view surfaces invariants as indexed nodes carrying a preview", () => {

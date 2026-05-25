@@ -13,12 +13,16 @@
         },
         "price": {
           "$ref": "#/valueObjects/Money"
+        },
+        "display": {
+          "type": "string"
         }
       },
       "required": [
         "id",
         "sku",
-        "price"
+        "price",
+        "display"
       ],
       "additionalProperties": false
     },
@@ -70,13 +74,17 @@
         },
         "age": {
           "type": "integer"
+        },
+        "display": {
+          "type": "string"
         }
       },
       "required": [
         "id",
         "username",
         "email",
-        "age"
+        "age",
+        "display"
       ],
       "additionalProperties": false
     }

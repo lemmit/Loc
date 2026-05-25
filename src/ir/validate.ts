@@ -480,14 +480,14 @@ function checkIdReference(
     });
     return;
   }
-  // 3. Target aggregate must declare a `display` field (so the
+  // 3. Target aggregate must declare a `derived display: string` (so the
   //    Select picker has a sensible option label).
-  if (!agg.fields.some((f) => f.display)) {
+  if (!agg.displayDerived) {
     diags.push({
       severity: "error",
       message:
-        `UI-mounting deployable '${deployableName}': '${source}' references ${target} id, but '${target}' has no 'display' field.  ` +
-        `Add 'string display' to one of '${target}''s string fields (e.g. 'name: string display') so the form's <Select> picker can label options.`,
+        `UI-mounting deployable '${deployableName}': '${source}' references ${target} id, but '${target}' has no 'derived display' clause.  ` +
+        `Add 'derived display: string = <field>' to '${target}' so the form's <Select> picker can label options.`,
       source: `${deployableName}/${source}`,
     });
   }

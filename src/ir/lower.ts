@@ -1561,7 +1561,6 @@ function lowerField(p: Property): FieldIR {
     // generators) can read sensitivity off the type uniformly.
     type: sensitivity ? { ...baseType, sensitivity } : baseType,
     optional: !!p.type?.optional,
-    display: !!p.display,
     provenanced: !!p.provenanced,
     ...(sensitivity ? { sensitivity } : {}),
   };

@@ -384,6 +384,23 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (isMoneyLit(expr)) return lit("money", expr.value ?? "0");
   if (isPrimitiveConversion(expr)) {
     const fromType = inferExprType(expr.value, env);
+    // Aggregate → string lowers to `aggregate.display` member access.
+    // The validator has already ensured `display` exists; if it
+    // didn't, lowering still produces a member access that backends
+    // would emit but the validator's diagnostic blocks the build.
+    if (
+      expr.target === "string" &&
+      fromType.kind === "entity" &&
+      entityHasDisplay(fromType.name, env)
+    ) {
+      return {
+        kind: "member",
+        receiver: lowerExpr(expr.value, env),
+        member: "display",
+        receiverType: fromType,
+        memberType: { kind: "primitive", name: "string" },
+      };
+    }
     const from = fromType.kind === "primitive" ? (fromType.name as PrimitiveName) : undefined;
     return {
       kind: "convert",
@@ -451,11 +468,11 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     if (expr.op === "+") {
       const lStr = leftType.kind === "primitive" && leftType.name === "string";
       const rStr = rightType.kind === "primitive" && rightType.name === "string";
-      if (lStr && !rStr && isImplicitlyStringifiableIR(rightType)) {
-        right = wrapInStringConvert(right, rightType);
+      if (lStr && !rStr && isImplicitlyStringifiableIR(rightType, env)) {
+        right = wrapForStringConcat(right, rightType);
         rightType = { kind: "primitive", name: "string" };
-      } else if (rStr && !lStr && isImplicitlyStringifiableIR(leftType)) {
-        left = wrapInStringConvert(left, leftType);
+      } else if (rStr && !lStr && isImplicitlyStringifiableIR(leftType, env)) {
+        left = wrapForStringConcat(left, leftType);
         leftType = { kind: "primitive", name: "string" };
       }
     }
@@ -971,12 +988,45 @@ function wrapInStringConvert(value: ExprIR, fromType: TypeIR): ExprIR {
   return { kind: "convert", target: "string", from, value };
 }
 
+/** Lowering hook for the implicit `string + X` concat rule when X is
+ *  one of the admitted sources.  Primitives / enum / id wrap in a
+ *  `convert` IR (backend-dispatched stringification).  Aggregates
+ *  rewrite to a `member(aggregate, "display")` access — `display` is
+ *  already string-typed, so no convert wrap is needed.  Both shapes
+ *  produce a string-typed result; downstream binary lowering doesn't
+ *  need to distinguish. */
+function wrapForStringConcat(value: ExprIR, fromType: TypeIR): ExprIR {
+  if (fromType.kind === "entity") {
+    return {
+      kind: "member",
+      receiver: value,
+      member: "display",
+      receiverType: fromType,
+      memberType: { kind: "primitive", name: "string" },
+    };
+  }
+  return wrapInStringConvert(value, fromType);
+}
+
 /** Mirror of `type-system.ts`'s `isImplicitlyStringifiable`, on
  *  `TypeIR` instead of `DddType`.  Same set: numeric primitives,
- *  bool, enum, `X id`.  Used by the lowering binary handler to
- *  decide whether to inject a `convert` node when one side of `+`
- *  is string. */
-function isImplicitlyStringifiableIR(t: TypeIR): boolean {
+ *  bool, enum, `X id`, plus aggregates that declare a
+ *  `derived display: string`.  Used by the lowering binary handler
+ *  to decide whether to inject a `convert` node (primitives / enum /
+ *  id) or rewrite the operand to `aggregate.display` (aggregates). */
+function isImplicitlyStringifiableIR(t: TypeIR, env: Env): boolean {
+  if (isImplicitlyStringifiablePrimitiveOrEnum(t)) return true;
+  if (t.kind === "entity") return entityHasDisplay(t.name, env);
+  return false;
+}
+
+/** Env-free subset of `isImplicitlyStringifiableIR` — admits the
+ *  primitives / enum / X id that don't need an aggregate lookup.
+ *  Used by `binaryResultType` (which has no env) to decide the
+ *  result type of `string + X` without re-doing the aggregate
+ *  display lookup; aggregate operands fall through to the
+ *  type-system-level rule when env-aware code runs. */
+function isImplicitlyStringifiablePrimitiveOrEnum(t: TypeIR): boolean {
   if (t.kind === "primitive") {
     return (
       t.name === "int" ||
@@ -989,6 +1039,16 @@ function isImplicitlyStringifiableIR(t: TypeIR): boolean {
   if (t.kind === "enum") return true;
   if (t.kind === "id") return true;
   return false;
+}
+
+/** True iff `name` resolves to an aggregate (in the current bounded
+ *  context) that declares a `derived display: string`.  Entity parts
+ *  don't participate; the validator's check on reserved derived names
+ *  is aggregate-only. */
+function entityHasDisplay(name: string, env: Env): boolean {
+  const agg = env.ctx?.members.find((m): m is Aggregate => isAggregate(m) && m.name === name);
+  if (!agg) return false;
+  return agg.members.some((m) => isDerivedProp(m) && m.name === "display");
 }
 
 function binaryResultType(op: string, a: TypeIR, b: TypeIR): TypeIR {
@@ -1006,7 +1066,15 @@ function binaryResultType(op: string, a: TypeIR, b: TypeIR): TypeIR {
     const bStr = b.kind === "primitive" && b.name === "string";
     if (aStr || bStr) {
       const other = aStr ? b : a;
-      if ((aStr && bStr) || isImplicitlyStringifiableIR(other)) {
+      // Note: `binaryResultType` lives outside of lowering's env-aware
+      // path; for aggregate-with-display admission we'd need the env,
+      // which the caller has but doesn't thread here.  The lowering
+      // binary handler computes the result type itself afterwards via
+      // `binaryResultType(op, leftType, rightType)`; if we miss
+      // admission here for an `entity` operand, the result type just
+      // falls through to the type-system rule (string + aggregate
+      // already admitted at AST-level via `arithmeticResult`).
+      if ((aStr && bStr) || isImplicitlyStringifiablePrimitiveOrEnum(other)) {
         return { kind: "primitive", name: "string" };
       }
     }
