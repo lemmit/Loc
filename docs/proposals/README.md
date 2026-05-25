@@ -30,6 +30,27 @@ requirements-tracing one.
 | [`encrypted-at-rest.md`](./encrypted-at-rest.md) | Column-level encryption | Reserved sibling of `sensitive` — governs *persistence*, not flow; deferred (see doc) |
 | [`load-specifications.md`](./load-specifications.md) | Aggregate load specs | `loads` clause + compiler-inferred load plans + shape (loadedness) typing |
 | [`optional-and-partial-update.md`](./optional-and-partial-update.md) | Optional / partial update | `Optional<T>` to distinguish "field absent" from "field null" |
+| [`payload-transport-layer.md`](./payload-transport-layer.md) | Structural transport layer | `payload` keyword, carrier-bounded generics, discriminated unions, auto-synthesized aggregate wire payloads |
+| [`exception-less.md`](./exception-less.md) | Exception-less flow | Native `Option<T>` / `Result<T, E>` as payload unions, `?` propagation operator, `on wire { ... }` status mapping, find-variant re-shape, two-regime split (aggregate-invariant throws vs boundary-returns-carrier) |
+
+## Type-system family — payloads and exception-less flow
+
+Two stacked proposals split the type system into a **state layer**
+(aggregates, nominal, no generics) and a **transport layer**
+(payloads, structural records + tagged unions, carrier-bounded
+generics).
+[`payload-transport-layer.md`](./payload-transport-layer.md) defines
+the transport layer; [`exception-less.md`](./exception-less.md) uses
+it to introduce `Option`/`Result`, a `?` propagation operator, and a
+wire-edge status mapping that together remove exceptions from every
+flow except aggregate-invariant violations. The
+[`aggregate-inheritance.md`](./aggregate-inheritance.md) proposal
+(sister proposal, currently on PR #509) defines the state layer.
+Implementing agents: read the transport layer doc first, then
+exception-less. The two share a load-bearing rule set (carrier bound,
+aggregate-as-carrier projection, variant-name-tagged union identity)
+which is pinned in the transport-layer doc precisely because
+exception-less depends on it.
 
 ## Relationship to the policies work
 
