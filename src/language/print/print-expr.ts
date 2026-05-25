@@ -96,9 +96,7 @@ function printObjectFields(fields: { name: string; value: Expression }[]): strin
   return ` ${inner} `;
 }
 
-function printBuilderEntries(
-  entries: { name?: string; value: Expression }[],
-): string {
+function printBuilderEntries(entries: { name?: string; value: Expression }[]): string {
   if (entries.length === 0) return "";
   const inner = entries
     .map((e) => (e.name ? `${e.name}: ${printExpr(e.value)}` : printExpr(e.value)))

@@ -23,6 +23,7 @@ import {
   isBinaryExpr,
   isBoolLit,
   isBoundedContext,
+  isBuilderCall,
   isCallExpr,
   isContainment,
   isDecLit,
@@ -40,7 +41,6 @@ import {
   isMoneyLit,
   isNamedType,
   isNameRef,
-  isBuilderCall,
   isNowExpr,
   isNullLit,
   isOperation,
@@ -694,10 +694,7 @@ function lookupFunctionInScope(
 /** v2 BuilderCall typing.  The type name resolves against the enclosing
  *  bounded context (value objects + aggregates + parts).  Unknown names
  *  type as `unknown` — the validator surfaces the diagnostic. */
-function typeOfBuilderCall(
-  expr: import("./generated/ast.js").BuilderCall,
-  env: Env,
-): DddType {
+function typeOfBuilderCall(expr: import("./generated/ast.js").BuilderCall, env: Env): DddType {
   const name = expr.type;
   const vo = lookupValueObjectByName(name, env);
   if (vo) return { kind: "valueobject", ref: vo };
@@ -710,10 +707,7 @@ function typeOfBuilderCall(
   return T.unknown;
 }
 
-function lookupEntityByName(
-  name: string,
-  env: Env,
-): Aggregate | EntityPart | undefined {
+function lookupEntityByName(name: string, env: Env): Aggregate | EntityPart | undefined {
   let cur: AstNode | undefined = (env.aggregate ?? env.part ?? env.valueObject) as
     | AstNode
     | undefined;
@@ -1193,9 +1187,7 @@ export function calleeSignature(
 ): CalleeSignature | undefined {
   if (call.$type === "BuilderCall") {
     const ctx = AstUtils.getContainerOfType(call, isBoundedContext);
-    const vo = ctx?.members.find(
-      (m): m is ValueObject => isValueObject(m) && m.name === call.type,
-    );
+    const vo = ctx?.members.find((m): m is ValueObject => isValueObject(m) && m.name === call.type);
     if (vo) {
       return {
         name: vo.name,

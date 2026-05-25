@@ -68,7 +68,9 @@ describe("structured expression editor — model", () => {
     expect(tree.entries).toHaveLength(2);
     expect(tree.entries[0].value).toMatchObject({ kind: "member", member: "sum", call: true });
     expect(tree.entries[1].value).toMatchObject({ kind: "lit", lit: "string", value: "USD" });
-    expect(emitExpr(tree)).toBe('Money { amount: lines.sum(l => l.subtotal.amount), currency: "USD" }');
+    expect(emitExpr(tree)).toBe(
+      'Money { amount: lines.sum(l => l.subtotal.amount), currency: "USD" }',
+    );
   });
 
   it("structures expression-body lambdas (param + body)", () => {
@@ -83,7 +85,9 @@ describe("structured expression editor — model", () => {
     expect(lam).toMatchObject({ kind: "lambda", param: "l" });
     if (lam.kind !== "lambda") throw new Error("expected a lambda");
     expect(lam.body).toMatchObject({ kind: "member", member: "amount" });
-    expect(emitExpr(tree)).toBe('Money { amount: lines.sum(l => l.subtotal.amount), currency: "USD" }');
+    expect(emitExpr(tree)).toBe(
+      'Money { amount: lines.sum(l => l.subtotal.amount), currency: "USD" }',
+    );
   });
 
   it("structures ternary expressions (cond / then / else)", () => {
