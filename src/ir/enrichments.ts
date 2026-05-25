@@ -391,18 +391,21 @@ function enrichValueObject(vo: ValueObjectIR): ValueObjectIR {
 
 /** Resolve a field's access role.  Precedence:
  *   1. Declared modifier in the source (`lowerField` carried it through).
- *   2. Type-driven inference — `Id<X>` is always a `token` because it
- *      identifies an aggregate; clients echo it on update but never
- *      assign it directly.
- *   3. Default — `editable`.
+ *   2. Default — `editable`.
+ *
+ * NOTE: there is intentionally no type-driven inference for `X id`
+ * fields.  A declared `X id` is a foreign-key reference — the client
+ * supplies it (e.g. `holder: Customer id` on `Account.create(holder)`)
+ * so it must default to editable, not `token`.  The aggregate's own
+ * synthetic identity is added separately by `wireFieldsForAggregate`
+ * with `access: "token"` hardcoded.  Explicit token semantics for a
+ * declared field (e.g. `version: int token` for optimistic concurrency)
+ * are opt-in via the `token` modifier in source.
  *
  * Idempotent: a field that already carries `access` (set on a previous
  * enrichment pass or by a declared modifier) is returned unchanged. */
 function resolveFieldAccess(f: FieldIR): FieldIR {
   if (f.access) return f;
-  if (f.type.kind === "id") {
-    return { ...f, access: "token", accessSource: "inferred-type" };
-  }
   return { ...f, access: "editable", accessSource: "default" };
 }
 

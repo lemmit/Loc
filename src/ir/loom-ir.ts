@@ -107,13 +107,13 @@ export interface FieldIR {
   sensitivity?: SensitivityTags;
   /** Resolved access role.  Populated by `enrichLoomModel`; lowering
    * leaves this undefined when the source declared no modifier so
-   * enrichment can apply its precedence (declared > inferred-type >
-   * default).  After enrichment every `FieldIR` carries a value. */
+   * enrichment can apply its precedence (declared > default).
+   * After enrichment every `FieldIR` carries a value. */
   access?: FieldAccess;
   /** Where `access` came from.  Diagnostic-only: used by the validator
    * to phrase conflict messages and by the wire-spec diff to explain
-   * "why is this field token?".  Same nullability as `access`. */
-  accessSource?: "declared" | "inferred-type" | "default";
+   * the field's role.  Same nullability as `access`. */
+  accessSource?: "declared" | "default";
 }
 
 export interface ContainmentIR {

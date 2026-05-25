@@ -70,12 +70,14 @@ describe("sensitivity — printer round-trip", () => {
     expect(payloadProp(re.value as Model).sensitivity?.tags).toEqual(["pii", "phi", "regulated"]);
   });
 
-  it("composes with display, provenanced, and access modifier", () => {
+  it("composes with provenanced and access modifier", () => {
     // Verifies the clause-emission order matches the grammar slot
-    // order: display → provenanced → sensitivity → access → check.
+    // order: provenanced → sensitivity → access → check.
+    // (`display` moved to `derived display: string = expr` in PR #524
+    // and is no longer a Property modifier.)
     const src = `context T {
   aggregate A {
-    label: string display provenanced sensitive(pii) immutable
+    label: string provenanced sensitive(pii) immutable
   }
   repository As for A { }
 }`;
@@ -83,7 +85,7 @@ describe("sensitivity — printer round-trip", () => {
     expect(orig.parserErrors).toEqual([]);
     const ctx = (orig.value as Model).members[0]!;
     const printed = printStructural(ctx);
-    expect(printed).toContain("label: string display provenanced sensitive(pii) immutable");
+    expect(printed).toContain("label: string provenanced sensitive(pii) immutable");
 
     const cst = ctx.$cstNode!;
     const text = src.slice(0, cst.offset) + printed + src.slice(cst.end);

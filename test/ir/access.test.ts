@@ -99,17 +99,22 @@ describe("field access — enrichment defaults", () => {
     expect(label.accessSource).toBe("default");
   });
 
-  it("infers token for a declared X id field", async () => {
+  it("defaults a declared X id (foreign-key reference) to editable", async () => {
+    // Declared `X id` is a foreign-key reference (the client supplies
+    // it on create, e.g. `holder: Customer id`).  It is NOT a token —
+    // tokens are the aggregate's synthetic identity (added separately
+    // in `wireFieldsForAggregate`) and explicit concurrency tokens
+    // (opt-in via the `token` modifier in source).
     const src = SYSTEM(`        author: Post id
 `);
     const { model } = await parseModel(src);
     const agg = aggregateFrom(model, "Post");
     const author = agg.fields.find((f) => f.name === "author")!;
-    expect(author.access).toBe("token");
-    expect(author.accessSource).toBe("inferred-type");
+    expect(author.access).toBe("editable");
+    expect(author.accessSource).toBe("default");
   });
 
-  it("declared modifier wins over type inference", async () => {
+  it("declared modifier wins over default", async () => {
     const src = SYSTEM(`        author: Post id internal
 `);
     const { model } = await parseModel(src);
