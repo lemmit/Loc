@@ -8,15 +8,19 @@ import { useEffect, useMemo, useState, Fragment, type ReactNode } from "react";
 import { Box, Button, Group, Text } from "@mantine/core";
 import {
   Background,
+  BaseEdge,
   Controls,
+  Position,
   ReactFlow,
   ReactFlowProvider,
+  getSmoothStepPath,
   useEdgesState,
   useNodesInitialized,
   useNodesState,
   useReactFlow,
   type Connection,
   type Edge,
+  type EdgeProps,
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -138,6 +142,44 @@ function toRfNodes(
 
 const NODE_TYPES = { stmt: StmtNode, construct: ConstructNode } as const;
 
+/** Pixel offset below the root banner where the `contains` fork's horizontal
+ *  segment lands. React Flow's default smoothstep places the bend at the
+ *  vertical midpoint between source and target — for a tall layout that
+ *  midpoint falls into the workflow row and the fork bar visually overlaps
+ *  the orchestrator tier. Pinning the bend to a small offset just below
+ *  the banner keeps the fork in its own empty horizontal lane, above every
+ *  tier of children. */
+const CONTAINS_FORK_OFFSET = 50;
+
+/** Custom edge component for `contains`. Forces the smoothstep bend to a
+ *  fixed Y offset below the source (when leaving the bottom handle), or X
+ *  offset right/left of the source (when leaving a side handle). Other
+ *  React Flow edges fall back to the built-in routing. */
+function ContainsEdge(props: EdgeProps): JSX.Element {
+  const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style } = props;
+  const centerY =
+    sourcePosition === Position.Bottom ? sourceY + CONTAINS_FORK_OFFSET : undefined;
+  const centerX =
+    sourcePosition === Position.Left
+      ? sourceX - CONTAINS_FORK_OFFSET
+      : sourcePosition === Position.Right
+        ? sourceX + CONTAINS_FORK_OFFSET
+        : undefined;
+  const [edgePath] = getSmoothStepPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    centerX,
+    centerY,
+  });
+  return <BaseEdge path={edgePath} style={style} />;
+}
+
+const EDGE_TYPES = { contains: ContainsEdge } as const;
+
 // ViewKind → AST `$type`. Drives both the on-node delete (splice the matching
 // AST node out of source) and the on-node rename (rewrite the declared name +
 // every reference via Langium's NameProvider). Field and containment aren't
@@ -214,12 +256,12 @@ function toRfEdges(g: ViewGraph): Edge[] {
       // down the periphery instead of crossing every tier through the centre.
       // Smoothstep gives them an L-shape that hugs the canvas edge.
       ...(e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}),
-      // All contains edges use smoothstep so the line clearly *leaves* the
-      // root's bottom (or side) handle going perpendicular to it before
-      // bending toward the target. Default bezier swept off-centre pivot
-      // edges sideways at the source, making them look like they exited the
-      // banner's flank rather than its underside.
-      ...(e.kind === "contains" ? { type: "smoothstep" } : {}),
+      // Containment edges use a custom edge component that pins the smoothstep
+      // bend to a small offset below the banner (instead of the default
+      // midpoint between source and target). That keeps the fork's horizontal
+      // segment in its own empty lane between the banner and the first child
+      // row, so workflows / operations don't end up sitting on the fork bar.
+      ...(e.kind === "contains" ? { type: "contains" } : {}),
       label: e.label,
       reconnectable,
       // Only deployable bindings carry visible labels — reads/writes/constrains
@@ -680,6 +722,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           nodes={nodes}
           edges={edges}
           nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onReconnect={onReconnect}
