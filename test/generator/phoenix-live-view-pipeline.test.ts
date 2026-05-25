@@ -2203,6 +2203,27 @@ describe("Ash 3.x compile-correctness regressions", () => {
     expect(domain).not.toMatch(/define :all_customer/);
     expect(domain).not.toMatch(/action: :all\b/);
   });
+
+  it("inspect derived emits `defimpl Inspect`, NOT an Ash `calculate :inspect, ..., expr(...)`", async () => {
+    // Ash's `expr()` DSL doesn't admit string concat (`<>`) or
+    // `to_string/1`, both of which the auto-synthesised inspect body
+    // uses.  The emitter must route inspect through a `defimpl Inspect`
+    // block (native Elixir) rather than the calculations block.
+    // Regression for PR #524's Phoenix CI failure.
+    const files = await buildFormFixture();
+    const customer = files.get("phoenix_app/lib/phoenix_app/sales/customer.ex")!;
+    // Must not have a `calculate :inspect, ...` line — that would put
+    // string-concat operators inside `expr()`, which won't compile.
+    expect(customer).not.toMatch(/calculate :inspect/);
+    // Must have a `defimpl Inspect, for: ..., do def inspect(record, _opts) do <body> end end` block.
+    expect(customer).toMatch(
+      /defimpl Inspect, for: PhoenixApp\.Sales\.Customer do\s+def inspect\(record, _opts\) do/,
+    );
+    // The body must reference the struct's stored attributes via
+    // `record.<field>` and use native Elixir string concat (`<>`).
+    expect(customer).toMatch(/record\.id/);
+    expect(customer).toMatch(/<>/);
+  });
 });
 
 // ---------------------------------------------------------------------------
