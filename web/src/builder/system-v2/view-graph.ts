@@ -23,6 +23,7 @@ import type {
 } from "../../../../src/language/generated/ast.js";
 import { deployableModules, deployableServes, deployableTargets, deployableUi } from "../system/deployable-bindings";
 import { computeAggregateRelations } from "./aggregate-edges";
+import { computeContextRelations } from "./context-edges";
 
 export type ViewKind =
   // containers (drillable)
@@ -225,13 +226,18 @@ function moduleView(ast: Model, name: string): ViewGraph {
   return { title: `module ${name}`, nodes: layout(items, ["context"]), edges: [] };
 }
 
+// Column order for the context view: consumers (repository / view /
+// workflow) on the left, aggregates in the centre, value-objects + events
+// on the right. Edges flow LEFT-TO-RIGHT consistently — repo→aggregate,
+// view→aggregate, workflow→aggregate, aggregate→event — which matches the
+// downstream direction of each relationship.
 const CONTEXT_ORDER: readonly ViewKind[] = [
-  "aggregate",
-  "valueobject",
-  "event",
   "repository",
   "view",
   "workflow",
+  "aggregate",
+  "valueobject",
+  "event",
 ];
 
 const CONTEXT_KIND: Partial<Record<string, ViewKind>> = {
@@ -242,6 +248,63 @@ const CONTEXT_KIND: Partial<Record<string, ViewKind>> = {
   View: "view",
   Workflow: "workflow",
 };
+
+const CTX_COL_W = 220;
+const CTX_ROW_H = 90;
+
+/** Per-column layout where consumers (left of aggregate) and outcomes
+ *  (right of aggregate, currently events) align to the row of the
+ *  aggregate they connect to. Mirrors aggregateLayout's read-row alignment
+ *  trick — works for any column-against-pivot pattern. */
+function contextLayout(
+  items: { id: string; kind: ViewKind; name: string; anchor?: string }[],
+): VNode[] {
+  const byCol = new Map<number, typeof items>();
+  for (const it of items) {
+    const col = CONTEXT_ORDER.indexOf(it.kind);
+    const list = byCol.get(col >= 0 ? col : CONTEXT_ORDER.length);
+    if (list) list.push(it);
+    else byCol.set(col >= 0 ? col : CONTEXT_ORDER.length, [it]);
+  }
+  // Pass 1: place aggregates (the pivot column).
+  const aggCol = CONTEXT_ORDER.indexOf("aggregate");
+  const aggregateRow = new Map<string, number>();
+  const placed = new Map<string, { x: number; y: number }>();
+  const aggs = byCol.get(aggCol) ?? [];
+  for (let i = 0; i < aggs.length; i++) {
+    const a = aggs[i]!;
+    placed.set(a.id, { x: aggCol * CTX_COL_W, y: i * CTX_ROW_H });
+    aggregateRow.set(a.name, i);
+  }
+  // Pass 2: place every other column, aligning to its anchor's row when set.
+  for (const [col, bucket] of byCol) {
+    if (col === aggCol) continue;
+    const taken = new Set<number>();
+    let nextRow = 0;
+    for (const it of bucket) {
+      const anchorRow = it.anchor ? aggregateRow.get(it.anchor) : undefined;
+      let row: number;
+      if (anchorRow !== undefined) {
+        row = anchorRow;
+        while (taken.has(row)) row++;
+      } else {
+        row = nextRow;
+        while (taken.has(row)) row++;
+      }
+      taken.add(row);
+      nextRow = Math.max(nextRow, row + 1);
+      placed.set(it.id, { x: col * CTX_COL_W, y: row * CTX_ROW_H });
+    }
+  }
+  return items.map((it) => ({
+    id: it.id,
+    kind: it.kind,
+    name: it.name,
+    x: placed.get(it.id)!.x,
+    y: placed.get(it.id)!.y,
+    drillable: DRILLABLE.has(it.kind),
+  }));
+}
 
 function contextView(ast: Model, name: string): ViewGraph {
   // Find by walking; contexts can live at Model level (legacy) or in a Module.
@@ -259,14 +322,83 @@ function contextView(ast: Model, name: string): ViewGraph {
     }
   }
   if (!ctx) return { title: name, nodes: [], edges: [] };
-  const items: { id: string; kind: ViewKind; name: string }[] = [];
+  const rel = computeContextRelations(ctx);
+  // Build the raw item list with optional `anchor` so non-aggregate nodes can
+  // align to the aggregate row they reference (repo→agg, view→agg, agg→event).
+  const items: { id: string; kind: ViewKind; name: string; anchor?: string }[] = [];
   for (const m of ctx.members as ContextMember[]) {
     const kind = CONTEXT_KIND[m.$type];
     const childName = (m as { name?: string }).name;
     if (!kind || !childName) continue;
-    items.push({ id: nid(kind, childName), kind, name: childName });
+    let anchor: string | undefined;
+    if (kind === "repository") anchor = rel.repoFor.get(childName);
+    else if (kind === "view") anchor = rel.viewSource.get(childName);
+    // events anchor to the FIRST aggregate that emits them (when any) — picks
+    // the source row so the edge from agg→event is roughly horizontal.
+    if (kind === "event") {
+      for (const [aggName, set] of rel.emits) {
+        if (set.has(childName)) {
+          anchor = aggName;
+          break;
+        }
+      }
+    }
+    items.push({ id: nid(kind, childName), kind, name: childName, anchor });
   }
-  return { title: `context ${name}`, nodes: layout(items, CONTEXT_ORDER), edges: [] };
+
+  const edges: VEdge[] = [];
+  for (const [repo, agg] of rel.repoFor) {
+    edges.push({
+      id: `repo-for:${repo}->${agg}`,
+      source: nid("repository", repo),
+      target: nid("aggregate", agg),
+      kind: "reads",
+      label: "for",
+    });
+  }
+  for (const [view, agg] of rel.viewSource) {
+    edges.push({
+      id: `view-src:${view}->${agg}`,
+      source: nid("view", view),
+      target: nid("aggregate", agg),
+      kind: "reads",
+      label: "of",
+    });
+  }
+  for (const [agg, set] of rel.emits) {
+    for (const ev of set) {
+      edges.push({
+        id: `emits:${agg}->${ev}`,
+        source: nid("aggregate", agg),
+        target: nid("event", ev),
+        kind: "emits",
+        label: "emits",
+      });
+    }
+  }
+  for (const [wf, set] of rel.workflowUses) {
+    for (const agg of set) {
+      edges.push({
+        id: `wf-uses:${wf}->${agg}`,
+        source: nid("workflow", wf),
+        target: nid("aggregate", agg),
+        kind: "reads",
+        label: "uses",
+      });
+    }
+  }
+  for (const [wf, set] of rel.workflowEmits) {
+    for (const ev of set) {
+      edges.push({
+        id: `wf-emits:${wf}->${ev}`,
+        source: nid("workflow", wf),
+        target: nid("event", ev),
+        kind: "emits",
+        label: "emits",
+      });
+    }
+  }
+  return { title: `context ${name}`, nodes: contextLayout(items), edges };
 }
 
 // Layered column order for the aggregate view. State (fields + containments)

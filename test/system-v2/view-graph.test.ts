@@ -54,6 +54,39 @@ describe("Model v2 — view-graph per level", () => {
     expect(ids(g)).toEqual(["context:Orders"]);
   });
 
+  it("context view emits a `reads` edge from each repository to its aggregate", () => {
+    const D = `context Sales {
+  aggregate Order {
+    sku: string
+  }
+  repository Orders for Order {
+    find byId(id: int): Order? where this.id == id
+  }
+}`;
+    const g = buildViewGraph(parse(D), [{ kind: "context", name: "Sales" }]);
+    const repoEdges = g.edges.filter((e) => e.id.startsWith("repo-for:"));
+    expect(repoEdges.map((e) => `${e.source}->${e.target}`)).toEqual(["repository:Orders->aggregate:Order"]);
+    expect(repoEdges[0]?.kind).toBe("reads");
+  });
+
+  it("context view emits an `emits` edge for each aggregate→event pair", () => {
+    const D = `context Sales {
+  event Placed {
+  }
+  aggregate Order {
+    status: string
+    operation confirm() {
+      status := "ok"
+      emit Placed {
+      }
+    }
+  }
+}`;
+    const g = buildViewGraph(parse(D), [{ kind: "context", name: "Sales" }]);
+    const emits = g.edges.filter((e) => e.kind === "emits");
+    expect(emits.map((e) => `${e.source}->${e.target}`)).toEqual(["aggregate:Order->event:Placed"]);
+  });
+
   it("context view lists aggregates / events / etc.", () => {
     const g = buildViewGraph(parse(SRC), [{ kind: "context", name: "Orders" }]);
     expect(g.title).toBe("context Orders");
