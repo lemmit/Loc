@@ -155,11 +155,13 @@ const nid = (kind: ViewKind, name: string): string => `${kind}:${name}`;
 const TITLE_Y_OFFSET = 110;
 
 /** ViewKinds that act as the *structural pivot* of their containing view —
- *  the "core" children of the root (context → aggregates, aggregate → state
- *  fields, module → contexts, repository → finds, system → modules). These
- *  get centre-routed `contains` edges so the root↔pivot link stays the
- *  visually dominant structural cue; everything else side-routes around. */
+ *  the "core" children of the root (context → workflows + aggregates,
+ *  aggregate → state fields, module → contexts, repository → finds,
+ *  system → modules). These get centre-routed `contains` edges so the
+ *  root↔pivot link forms the visible structural backbone; the supporting /
+ *  infrastructure tiers (repos, views, events) side-route around. */
 const PIVOT_CONTAINS_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
+  "workflow",
   "aggregate",
   "valueobject",
   "field",
