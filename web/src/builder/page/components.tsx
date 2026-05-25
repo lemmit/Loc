@@ -68,8 +68,6 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
       return <a style={{ color: "var(--mantine-color-blue-4)" }}>{disp(p.text) || "Anchor"}{p.to ? ` →${disp(p.to)}` : ""}</a>;
     case "List":
       return <span style={{ color: "var(--mantine-color-teal-4)" }}>⊟ List{p.of ? ` of ${p.of}` : ""}</span>;
-    case "Form":
-      return <span style={{ color: "var(--mantine-color-teal-4)" }}>▤ Form{p.of ? ` of ${p.of}` : p.creates ? ` creates ${p.creates}` : ""}</span>;
     case "Stat":
       return <span><b>{disp(p.label) || "Stat"}</b>: {disp(p.value)}</span>;
     case "Money":
