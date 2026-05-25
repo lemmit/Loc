@@ -425,9 +425,9 @@ function saveTxBody(agg: AggregateIR, ctx: BoundedContextIR, emitTrace: boolean)
   });
   // Diff-sync each reference collection's join table: delete pairs the
   // aggregate no longer holds, insert the new ones (idempotent via the
-  // composite PK).  Ordered: keep the field's array order so the
-  // round-trip is stable; the ordinal column carries the position and
-  // is updated on reorder.
+  // composite PK).  Set semantics — the wire contract for `Id<T>[]`
+  // doesn't promise order — but we still write the ordinal column from
+  // the field's index so it's something deterministic per backend.
   const assocBlocks = associationsOf(agg).flatMap((assoc) => {
     const joinConst = joinTableConstName(assoc);
     const ownerCol = joinColumnName(assoc.ownerFk);

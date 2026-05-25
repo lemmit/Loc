@@ -307,8 +307,11 @@ function buildLoadManyByIdsLines(
  * detached-check Add and before `SaveChangesAsync`.  For every
  * reference collection on the aggregate: load existing join rows,
  * compare against the current `aggregate.<Prop>` set, delete pairs
- * that are no longer present, and insert / update-ordinal the
- * pairs that are.  Mirrors the TS Drizzle save diff-sync. */
+ * that are no longer present, and insert new ones.  Set semantics —
+ * the wire contract for `Id<T>[]` doesn't promise order — but we
+ * still write the ordinal column from the list index for a
+ * deterministic per-backend value.  Mirrors the TS Drizzle save
+ * diff-sync. */
 function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
   if (associations.length === 0) return [];
   const out: string[] = [];

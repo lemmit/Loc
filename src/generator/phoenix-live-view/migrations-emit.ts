@@ -132,9 +132,11 @@ end
 }
 
 /** Render a many-to-many join-table migration.  Composite PK on the
- *  two FK columns, both `primary_key: true`; an `ordinal :integer`
- *  preserves owner-side list order; no `timestamps()` (join rows are
- *  pure relationship records). */
+ *  two FK columns, both `primary_key: true` (this is what enforces the
+ *  set-semantics contract for `Id<T>[]`); an `ordinal :integer` column
+ *  is included for cross-backend schema parity even though the wire
+ *  contract is unordered; no `timestamps()` (join rows are pure
+ *  relationship records). */
 function renderInitialJoinFile(
   table: TableShape,
   migrationName: string,

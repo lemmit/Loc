@@ -29,7 +29,10 @@ describe("reference-collection join tables (TS/Hono)", () => {
     expect(schema).toMatch(/pgTable\("trainer_party"/);
     expect(schema).toMatch(/pgTable\("trainer_caught"/);
     expect(schema).toMatch(/primaryKey\(\{ columns: \[table\.trainerId, table\.pokemonId\] \}\)/);
-    // ordinal column carries the collection's order across a round-trip
+    // Ordinal column lives in the TS schema as a notNull integer; the
+    // wire contract for `Id<T>[]` is unordered (see docs/language.md),
+    // but TS persists & reads back in field order as a backend-local
+    // implementation detail.
     expect(schema).toMatch(/ordinal: integer\("ordinal"\)\.notNull\(\)/);
     // The owner table must NOT carry the reference-collection columns.
     const trainersTable = schema.slice(

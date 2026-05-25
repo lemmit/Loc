@@ -309,11 +309,12 @@ function tableForAssociation(assoc: AssociationIR, ownerModule: string): TableSh
     columns: [
       { name: assoc.ownerFk, type: idType, nullable: false },
       { name: assoc.targetFk, type: idType, nullable: false },
-      // Ordinal is nullable + defaulted so the Phoenix/Ash emitted
-      // `manage_relationship` writes succeed without per-row ordinal
-      // injection.  TS/.NET write ordinal explicitly per `+=`; matching
-      // that on Phoenix is a follow-up.  Keep the column so the future
-      // ordinal-injecting `change fn` has a place to write.
+      // The wire contract for `Id<T>[]` is a set (composite PK above
+      // enforces uniqueness, iteration order is not promised).  Ordinal
+      // stays in the schema as a cross-backend column so TS/.NET can
+      // write it as a diff-sync byproduct; Phoenix leaves it at the
+      // default 0.  Nullable + defaulted so all three backends can
+      // INSERT without it.
       { name: "ordinal", type: { kind: "int" }, nullable: true, default: "0" },
     ],
     primaryKey: [assoc.ownerFk, assoc.targetFk],
