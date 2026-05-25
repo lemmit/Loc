@@ -443,6 +443,11 @@ function contextLayout(
   }
   // Pass 2: place each non-pivot tier in order of distance from pivot so an
   // outer-tier anchor (e.g. workflow → repository) lands on already-placed X.
+  // Tiers ABOVE the pivot snap their X into HALF-COLUMN slots offset from the
+  // aggregate grid (so a workflow centred over Account doesn't sit on the
+  // same column the pivot's `contains` edge needs to drop through to reach
+  // Account). Tiers BELOW the pivot (events) align to the same column grid
+  // as their anchor — the agg→event edge then comes straight down.
   const otherTiers = [...byTier.keys()]
     .filter((t) => t !== aggregateTier)
     .sort((a, b) => Math.abs(a - aggregateTier) - Math.abs(b - aggregateTier));
@@ -450,6 +455,8 @@ function contextLayout(
     const bucket = byTier.get(tier)!;
     const taken = new Set<number>();
     let nextCol = 0;
+    const useHalfOffset = tier < aggregateTier;
+    const snapOffset = useHalfOffset ? CTX_COL_W / 2 : 0;
     // Anchored first so they grab their preferred X; free nodes fill gaps.
     const ordered = [...bucket].sort((a, b) =>
       Number(Boolean(b.anchors?.length)) - Number(Boolean(a.anchors?.length)),
@@ -459,15 +466,16 @@ function contextLayout(
       const anchored = it.anchors?.map((n) => placedX.get(n)).filter((v): v is number => v !== undefined) ?? [];
       if (anchored.length > 0) {
         const avg = Math.round(anchored.reduce((a, b) => a + b, 0) / anchored.length);
-        x = avg;
-        // Snap to an unused column slot near `x`.
-        let slot = Math.round(x / CTX_COL_W);
+        // Snap to an unused slot near `avg`. For above-pivot tiers the slots
+        // sit at (n + 0.5) × CTX_COL_W so workflow centres land BETWEEN
+        // aggregate columns instead of on top of them.
+        let slot = Math.round((avg - snapOffset) / CTX_COL_W);
         while (taken.has(slot)) slot++;
-        x = slot * CTX_COL_W;
+        x = slot * CTX_COL_W + snapOffset;
         taken.add(slot);
       } else {
         while (taken.has(nextCol)) nextCol++;
-        x = nextCol * CTX_COL_W;
+        x = nextCol * CTX_COL_W + snapOffset;
         taken.add(nextCol);
         nextCol++;
       }
