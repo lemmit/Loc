@@ -70,6 +70,26 @@ describe("v2 — context-edges", () => {
     expect(rel.emits.get("Order")).toEqual(SET(["Placed", "Cancelled"]));
   });
 
+  it("workflows record `usesRepo` for repository receivers anywhere in the body (let RHS, call args, …)", () => {
+    const ast = parse(`context Sales {
+  aggregate Order {
+    status: string
+    operation confirm() {
+      status := "ok"
+    }
+  }
+  repository Orders for Order {
+    find byId(id: int): Order? where this.id == id
+  }
+  workflow place(x: int) {
+    let o = Orders.byId(x)
+    o.confirm()
+  }
+}`);
+    const rel = computeContextRelations(findContext(ast, "Sales"));
+    expect(rel.workflowUsesRepo.get("place")).toEqual(SET(["Orders"]));
+  });
+
   it("workflows record uses + emits when bodies touch aggregates / events", () => {
     const ast = parse(`context Sales {
   event Placed {
