@@ -119,7 +119,7 @@ invent a new application-layer concept.
 | Layer | Existing role | Failure model after this proposal |
 |---|---|---|
 | **Aggregate operation** | Pure domain. Mutates own state; invariants + preconditions throw `DomainException`. **Cannot load other aggregates, cannot call externs.** | Throws stay for invariants and "this must be true" preconditions (bug-shaped). Operations *may* additionally return `T or BusinessError` for **designed-in own-domain outcomes** (e.g., `InsufficientCredit` from `Account.debit`). `?` propagation is allowed but limited — only against sibling-aggregate operations' `or`-returns and parse intrinsics on params. |
-| **Workflow** | Cross-aggregate orchestration. Loads via `Repo.getById` (throws `AggregateNotFound`), calls operations, saves. `precondition` throws `DomainException`. Optionally `transactional` with an isolation level. | `?` propagation lives here as the workhorse. `Repo.getById` returns `T or NotFound` (was: throw). Workflow `precondition` becomes typed (`PreconditionFailed` `error`) — see decision pin below. Aggregate-op `or`-returns thread through. Workflow signature is the union of every typed failure it can produce. |
+| **Workflow** | Cross-aggregate orchestration. Loads via `Repo.getById` (throws `AggregateNotFound`), calls operations, saves. `precondition` throws `DomainException`. Optionally `transactional` with an isolation level. | `?` propagation lives here as the workhorse. `Repo.getById` returns `T or NotFound` (was: throw). Workflow `precondition` keeps throwing — route translates to 400 ProblemDetails (see "Preconditions throw — at both layers" below). Aggregate-op `or`-returns thread through. Workflow signature is the union of every typed failure it can produce. |
 | **API auto-exposure** | `api X from M` derives operations from the module: `byId`/`create`/`update`/`delete` per aggregate + named finds + workflows. Route handlers per-backend catch DomainException / AggregateNotFound and map to status codes. | Each route returns the corresponding `or`-union. Per-backend auto-generated **ProblemDetails translator** emits status + body from the api's `status` mapping + stdlib defaults. Aggregate-invariant throws hit the env-aware 500 fallback. |
 
 The **"every operation needs some application layer" answer**: yes,
@@ -130,43 +130,46 @@ aggregate or needs `transactional` semantics. The exception-less
 proposal does not change this; it just changes the *failure shape*
 at each layer.
 
-### Workflow `precondition` — pinned: typed
+### Preconditions throw — at both layers
 
-In today's `workflow.md`, `precondition Expr` throws
-`DomainException` → 400. With this proposal, workflow preconditions
-become typed:
+`precondition Expr` is a **guard**, not a designed-in business
+outcome. If it fails, the caller violated the call's contract.
+That's bug-shaped, not user-recoverable; it doesn't belong in the
+typed-return channel.
 
-```
-workflow placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or PreconditionFailed or InsufficientCredit {
-  precondition cmd.amount > 0
-  let customer = Customers.getById(cmd.customerId)?       # NotFound
-  let order = Order.create(customer)
-  customer.deductCredit(cmd.amount)?                       # InsufficientCredit (aggregate-op or-return)
-  return order.id
-}
-```
+Both layers' preconditions throw, with different status codes at
+the route:
 
-The workflow's `precondition Expr` lowers to `if !Expr { return
-PreconditionFailed { ... } }`. The signature widens to include
-`PreconditionFailed` (stdlib `error` payload, default status 400).
-The author can use a custom error type via `precondition Expr else
-<ErrorVariant>` if a more specific shape is desired.
+| Where the precondition fires | Throw class | Route translation |
+|---|---|---|
+| Aggregate operation body (`precondition amount > 0`) | `PreconditionViolation` (aggregate-internal) | **500** ProblemDetails. Env-aware exposure (dev shows aggregate state, prod redacts). The HTTP caller — the api client — shouldn't see internal contracts between workflow and aggregate; from their perspective, the workflow didn't validate properly = a bug. |
+| Workflow body (`precondition cmd.amount > 0`) | `PreconditionViolation` (workflow-level) | **400** ProblemDetails. The precondition's source text is safe to put in `detail` regardless of env — the caller needs to know what contract they violated. |
 
-Aggregate-op `precondition` clauses **stay throw-based** (bug-shaped
-correctness rules). Use an `or`-typed return on the operation
-signature for designed-in business outcomes:
+The translator distinguishes by where the throw originated, not by
+exception class. The catalog logs full context regardless of env.
+
+What does *not* go through `precondition`: **designed-in business
+outcomes that the caller might want to handle differently**. Those
+use typed `or` returns instead. The author chooses by intent:
 
 ```
 aggregate Customer {
   operation deductCredit(amount: decimal): or InsufficientCredit {
-    precondition amount > 0                          # throws if violated (bug)
+    # Bug-shaped guards (caller should have validated):
+    precondition amount > 0
+
+    # Designed business outcome (caller may want to react):
     if creditLimit < amount {
       return InsufficientCredit { requested: amount, available: creditLimit }
     }
+
     creditLimit := creditLimit - amount
   }
 }
 ```
+
+The split lets `?` propagation work uniformly on typed errors while
+keeping preconditions out of every workflow's signature noise.
 
 ### Two-regime split — by failure type, per layer
 
@@ -175,7 +178,8 @@ aggregate Customer {
 | Aggregate invariant or aggregate-op precondition fails | Aggregate operation | **Throws.** Hits env-aware 500 ProblemDetails fallback at the route. Catalog `invariant_violated` event always logged. |
 | Aggregate operation returns its `or`-typed business error | Aggregate operation | `?`-propagated by caller (workflow or sibling op). |
 | `Repo.getById(id)` returns `NotFound` | Workflow | `?`-propagated; widens workflow signature. Translates to 404 ProblemDetails. |
-| Workflow `precondition` fails | Workflow | Typed `PreconditionFailed` return; `?`-propagated. 400 ProblemDetails. |
+| Workflow `precondition` fails | Workflow | **Throws** `PreconditionViolation` (workflow-level). Route translates to 400 ProblemDetails with rule text in `detail`. Not in workflow signature. |
+| Aggregate-op `precondition` fails | Aggregate operation | **Throws** `PreconditionViolation` (aggregate-internal). Route translates to 500 ProblemDetails with env-aware exposure (api client shouldn't see internal contracts). |
 | Validator returns `ValidationError[]` | Workflow / api | `?`-propagated. 422 ProblemDetails with `errors` extension. |
 | External API call (`call api ...`) fails | Workflow | `?`-propagated as `ApiError` variant. 502 ProblemDetails. |
 | Any throw in any layer not caught explicitly | Any | Hits the env-aware 500 ProblemDetails fallback. |
@@ -233,11 +237,10 @@ aggregate Order {
 error NotFound       { what: string, id: string }                  # stdlib (404)
 error InsufficientCredit { requested: decimal, available: decimal } # domain
 error OutOfStock     { sku: string, requested: int }                # domain
-error PreconditionFailed { rule: string, detail: string? }          # stdlib (400)
 
 # === Workflow (application layer) ===
-workflow placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or InsufficientCredit or OutOfStock or PreconditionFailed transactional {
-  precondition cmd.lines.length > 0          # typed PreconditionFailed
+workflow placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or InsufficientCredit or OutOfStock transactional {
+  precondition cmd.lines.length > 0                        # throws → 400 (not in signature)
   let customer = Customers.getById(cmd.customerId)?       # NotFound
   customer.deductCredit(cmd.totalAmount)?                  # InsufficientCredit
   let order = Order.create({ customerId: customer.id, status: Draft })

@@ -303,8 +303,10 @@ declare returns as `T or <Error>...` or `T option` directly.
     `T or none`).
   - `src/stdlib/payloads/errors.ddd` — `NotFound`, `ParseError`,
     `TransportFailure`, `UnexpectedStatus`, `DeserializeError`,
-    `ValidationError`, `Forbidden`, `PreconditionFailed` declared
-    as `error` payloads. No status annotations.
+    `ValidationError`, `Forbidden` declared as `error` payloads. No
+    status annotations. (No `PreconditionFailed` — preconditions
+    throw; route maps `PreconditionViolation` exception class to
+    400/500 per layer.)
   - `src/stdlib/payloads/api_error.ddd` — convenience named union
     `payload ApiError = TransportFailure | UnexpectedStatus |
     DeserializeError`.
@@ -314,9 +316,12 @@ declare returns as `T or <Error>...` or `T option` directly.
 - Generator-side stdlib status table:
   `src/system/error-defaults.ts` (new). Hardcoded
   `{ NotFound: 404, ValidationError: 422, ParseError: 400,
-  Forbidden: 403, PreconditionFailed: 400, TransportFailure: 502,
-  UnexpectedStatus: 502, DeserializeError: 502, none: 404 }`.
-  Not in any `.ddd`.
+  Forbidden: 403, TransportFailure: 502, UnexpectedStatus: 502,
+  DeserializeError: 502, none: 404 }`. Plus exception-class → status
+  mappings: `{ PreconditionViolation (workflow-level): 400,
+  PreconditionViolation (aggregate-op): 500 with env-aware exposure,
+  InvariantViolation: 500 with env-aware exposure }`. Not in any
+  `.ddd`.
 - Toolchain bootstrap: parse stdlib at startup; expose pre-declared
   types to user programs without explicit imports.
 - Validator — layer-specific rules:
@@ -328,12 +333,14 @@ declare returns as `T or <Error>...` or `T option` directly.
     informational in A1-A3, suggested in A4+): workflow bodies
     should prefer typed `or` returns over throws for expected
     failures.
-- Workflow `precondition` lowering: `precondition Expr` lowers to
-  `if !Expr { return PreconditionFailed { rule: "<expr-source>" } }`
-  with `PreconditionFailed` added to the workflow's `or`-signature
-  automatically. Authors can use `precondition Expr else
-  <ErrorVariant>` for a custom error shape (see exception-less.md
-  §"Workflow precondition").
+- Workflow `precondition` lowering: `precondition Expr` stays
+  throw-based (today's behaviour); throws `PreconditionViolation`
+  tagged with workflow-level origin. The route's ProblemDetails
+  translator (A3) maps workflow-level `PreconditionViolation` → 400
+  with rule text in `detail`; aggregate-op-level
+  `PreconditionViolation` → 500 with env-aware exposure (the api
+  client shouldn't see internal contracts between workflow and
+  aggregate; that's a bug from their perspective).
 - Backends:
   - TS: stdlib payloads emit as plain types in a generated
     `__loom_stdlib__.ts`. `some(T)` / `none` lower to tagged
@@ -350,8 +357,9 @@ declare returns as `T or <Error>...` or `T option` directly.
   `: X or NotFound` as workflow / operation return types;
   `loom.aggregate-cannot-orchestrate` negative test (aggregate
   body using `Repo.getById` rejected); workflow `precondition`
-  lowering test asserting auto-widened signature with
-  `PreconditionFailed`; `string option` desugar to `string or
+  test asserting throw + 400 ProblemDetails translation;
+  aggregate-op `precondition` test asserting throw + 500 with
+  env-aware exposure; `string option` desugar to `string or
   none`.
 
 #### A2 — `?` propagation operator (~2 weeks)
@@ -636,7 +644,7 @@ priority order.
 | D19 | Per-error customisation of ProblemDetails `type` URI / `title` / `detail` template | **Deferred to v2**. v1 auto-derives all fields except `status` (which comes from the api mapping). | A3 | exception-less.md |
 | D20 | Per-surface mappings beyond the api layer (UI / queue / CLI) | **Out of scope.** UI consumes ProblemDetails like any HTTP client; no language-level UI error-mapping surface. Queue / CLI deferred to v2 when those surfaces become real. | — | — |
 | D21 | Env-aware 500-ProblemDetails body (dev shows internals, prod redacts) | **`LOOM_EXPOSE_INTERNAL_ERRORS` env var; defaults from each backend's native dev/prod check** (TS `NODE_ENV !== "production"`, .NET `IHostEnvironment.IsDevelopment()`, Phoenix `:dev`/`:test`). Catalog event always carries full context; sensitive fields stay redacted even in dev. | A3 | exception-less.md |
-| D22 | Workflow `precondition` — typed return vs throw | **Typed (`PreconditionFailed`)** (pinned). Aligns with exception-less vision; workflow signature auto-widens; `?` propagation uniform. Aggregate-op preconditions stay throw-based (bug-shaped correctness). | A1 | exception-less.md |
+| D22 | Workflow `precondition` — typed return vs throw | **Throws** (pinned, flipped from earlier draft). Preconditions are *guards*, not designed business outcomes — bug-shaped, not user-recoverable. Route translates: aggregate-op `PreconditionViolation` → 500 (env-aware); workflow-level `PreconditionViolation` → 400 (rule text safe to surface). Designed-in business outcomes use typed `or` returns, not `precondition`. | A1 | exception-less.md |
 | D23 | Auto-derivation of more application-layer behaviour (uniqueness, FK checks, …) from aggregate annotations | **Open — needs design work**. Trivial CRUD already covered by api auto-exposure. Discussion below in §"Auto-generated application layer". | (later) | (TBD) |
 
 **Workflow**: before starting each phase the implementing agent
