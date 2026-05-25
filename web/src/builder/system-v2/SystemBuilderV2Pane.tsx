@@ -214,11 +214,12 @@ function toRfEdges(g: ViewGraph): Edge[] {
       // down the periphery instead of crossing every tier through the centre.
       // Smoothstep gives them an L-shape that hugs the canvas edge.
       ...(e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}),
-      // Side-routed contains edges use smoothstep so they trace L-shapes
-      // along the periphery; pivot (centre-routed) ones keep the default
-      // bezier so they read as direct diagonal links to off-centre aggregates
-      // instead of curling around right angles.
-      ...(e.kind === "contains" && e.sourceHandle ? { type: "smoothstep" } : {}),
+      // All contains edges use smoothstep so the line clearly *leaves* the
+      // root's bottom (or side) handle going perpendicular to it before
+      // bending toward the target. Default bezier swept off-centre pivot
+      // edges sideways at the source, making them look like they exited the
+      // banner's flank rather than its underside.
+      ...(e.kind === "contains" ? { type: "smoothstep" } : {}),
       label: e.label,
       reconnectable,
       // Only deployable bindings carry visible labels — reads/writes/constrains
