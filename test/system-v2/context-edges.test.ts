@@ -1,17 +1,19 @@
 // Context-level relations: repository→aggregate, view→aggregate, aggregate→
 // event (lifted from per-aggregate emits), workflow→aggregate/event.
 
-import type { BoundedContext, Model, System } from "../../src/language/generated/ast.js";
 import { describe, expect, it } from "vitest";
+import type { BoundedContext, Model, System } from "../../src/language/generated/ast.js";
 import { computeContextRelations } from "../../web/src/builder/system-v2/context-edges.js";
 import { parseRaw as parse } from "../_helpers/index.js";
 
 function findContext(ast: Model, name: string): BoundedContext {
   for (const m of ast.members) {
-    if (m.$type === "BoundedContext" && (m as BoundedContext).name === name) return m as BoundedContext;
+    if (m.$type === "BoundedContext" && (m as BoundedContext).name === name)
+      return m as BoundedContext;
     if (m.$type === "System") {
       for (const sm of (m as System).members) {
-        if (sm.$type === "BoundedContext" && (sm as BoundedContext).name === name) return sm as BoundedContext;
+        if (sm.$type === "BoundedContext" && (sm as BoundedContext).name === name)
+          return sm as BoundedContext;
       }
     }
   }

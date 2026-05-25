@@ -195,29 +195,27 @@ export function generateReactForContexts(
   const scaffoldedAggregates = ui
     ? aggregates.filter(({ agg }) =>
         ui.pages.some(
-          (p) => p.archetype?.kind === "aggregate-list" && p.archetype.aggregateName === agg.name,
+          (p) => p.origin?.kind === "aggregate-list" && p.origin.aggregateName === agg.name,
         ),
       )
     : aggregates;
   const scaffoldedWorkflows = ui
     ? workflows.filter(({ wf }) =>
         ui.pages.some(
-          (p) => p.archetype?.kind === "workflow-form" && p.archetype.workflowName === wf.name,
+          (p) => p.origin?.kind === "workflow-form" && p.origin.workflowName === wf.name,
         ),
       )
     : workflows;
   const scaffoldedViews = ui
     ? views.filter(({ view }) =>
-        ui.pages.some(
-          (p) => p.archetype?.kind === "view-list" && p.archetype.viewName === view.name,
-        ),
+        ui.pages.some((p) => p.origin?.kind === "view-list" && p.origin.viewName === view.name),
       )
     : views;
 
   // Whether the scaffold expander synthesised a `Home` page (only
   // happens when the ui declared at least one scaffold).  Default true
   // when no ui (legacy non-page-IR path always emits Home).
-  const hasScaffoldHome = ui ? ui.pages.some((p) => p.archetype?.kind === "home") : true;
+  const hasScaffoldHome = ui ? ui.pages.some((p) => p.origin?.kind === "home") : true;
 
   out.set(
     "src/App.tsx",
