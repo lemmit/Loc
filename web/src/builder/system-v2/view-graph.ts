@@ -171,6 +171,17 @@ const PIVOT_CONTAINS_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
   "find",
 ]);
 
+/** ViewKinds for which we skip the `contains` backdrop entirely. These
+ *  children belong to the container, but their position in the layout (left
+ *  sidebar for repos/views) or their downstream relationship to another tree
+ *  node (events are emitted by aggregates already) makes the root→child link
+ *  visually redundant — drawing it just crowds the view. */
+const NO_CONTAINS_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
+  "event",
+  "repository",
+  "view",
+]);
+
 /** Synthesize a "title" VNode for the current path leaf AND a backdrop of
  *  `contains` edges from it to its children — the structural cue that
  *  everything below is "inside" the current container. Children at the top
@@ -215,24 +226,30 @@ function withRoot(
   const targets = opts.connectAll
     ? shifted
     : shifted.filter((n) => n.y === Math.min(...shifted.map((s) => s.y)));
-  // Two routing styles for the `contains` backdrop:
-  //   - PIVOT children (aggregates / valueobjects in the context view; fields /
-  //     containments in the aggregate view; modules in the system view; …)
-  //     get a straight-down edge from the root's BOTTOM handle. This keeps the
-  //     primary "root contains aggregate" / "aggregate contains state"
-  //     structural link visually prominent in the centre column.
-  //   - Everyone else (the orchestrators / outcomes / sibling-tier nodes) exits
-  //     the root's LEFT/RIGHT handle and traces the periphery via smoothstep
-  //     so they don't crowd the central spine.
-  const containsEdges: VEdge[] = targets.map((n) => ({
-    id: `contains:${rootId}->${n.id}`,
-    source: rootId,
-    target: n.id,
-    kind: "contains",
-    ...(PIVOT_CONTAINS_KINDS.has(n.kind)
-      ? {}
-      : { sourceHandle: n.x < rootNode.x ? "left" : "right" as const }),
-  }));
+  // Two routing styles for the `contains` backdrop, plus a skip list for the
+  // ones that would just add noise:
+  //   - PIVOT children (workflow + aggregate + valueobject in the context view;
+  //     fields / containments in the aggregate view; modules / contexts in the
+  //     system view; finds in the repository view) get a straight-down edge
+  //     from the root's BOTTOM handle. This keeps the primary structural link
+  //     visually prominent in the centre column.
+  //   - Anything else gets routed via the root's LEFT/RIGHT handle as a faint
+  //     smoothstep tracing the periphery.
+  //   - NO_CONTAINS kinds (events emitted by aggregates, repositories living
+  //     in the side support column) are omitted entirely — their containment
+  //     is already obvious from the layout / from the semantic edges
+  //     converging on them.
+  const containsEdges: VEdge[] = targets
+    .filter((n) => !NO_CONTAINS_KINDS.has(n.kind))
+    .map((n) => ({
+      id: `contains:${rootId}->${n.id}`,
+      source: rootId,
+      target: n.id,
+      kind: "contains",
+      ...(PIVOT_CONTAINS_KINDS.has(n.kind)
+        ? {}
+        : { sourceHandle: n.x < rootNode.x ? "left" : ("right" as const) }),
+    }));
   return { ...g, nodes: [rootNode, ...shifted], edges: [...containsEdges, ...g.edges] };
 }
 
