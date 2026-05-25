@@ -43,6 +43,11 @@ export interface ConstructNodeData {
    *  rename/delete affordances. Used for the synthesised root node that
    *  re-states the current view container above its children. */
   isRoot?: boolean;
+  /** Advisory marker — the construct exists in source but isn't actually
+   *  wired up (e.g. an event declared but never emitted). Dims the
+   *  background, switches the border to dashed, and pins a small ⚠ next
+   *  to the name so the user can spot the dead reference at a glance. */
+  unused?: boolean;
 }
 
 export default function ConstructNode({ data }: NodeProps): JSX.Element {
@@ -74,7 +79,13 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
         color: "white",
         // The root banner gets a chunkier outline + extra padding so it
         // reads as a "this is the container you're in", not a sibling node.
-        border: d.isRoot ? "2px solid rgba(255,255,255,0.55)" : "1px solid rgba(255,255,255,0.25)",
+        // Unused nodes drop to 50% opacity + dashed border as an advisory.
+        opacity: d.unused ? 0.55 : undefined,
+        border: d.isRoot
+          ? "2px solid rgba(255,255,255,0.55)"
+          : d.unused
+            ? "1px dashed rgba(255,255,255,0.4)"
+            : "1px solid rgba(255,255,255,0.25)",
         borderRadius: d.isRoot ? 10 : 6,
         padding: d.isRoot ? "10px 16px" : "6px 8px",
         boxShadow: d.isRoot ? "0 2px 12px rgba(0,0,0,0.35)" : undefined,
@@ -132,7 +143,7 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
         tt="uppercase"
         style={{ opacity: d.isRoot ? 0.85 : 0.65, fontSize: d.isRoot ? 10 : 9, letterSpacing: d.isRoot ? 1 : undefined }}
       >
-        {d.kind}{d.drillable ? "  ↳" : ""}
+        {d.kind}{d.drillable ? "  ↳" : ""}{d.unused ? "  ⚠ unused" : ""}
       </Text>
       {editing ? (
         <TextInput

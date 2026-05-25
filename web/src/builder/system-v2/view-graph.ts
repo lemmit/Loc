@@ -75,6 +75,11 @@ export interface VNode {
    *  fields). Not drillable, not editable — the pane renders it as a
    *  banner-styled construct with no rename/delete affordances. */
   isRoot?: boolean;
+  /** Optional advisory marker rendered as a dimmed/dashed style + a small
+   *  ⚠ icon, used to flag nodes whose presence in the model isn't actually
+   *  wired up — e.g. an event that is declared but never emitted, a value
+   *  object never referenced by any aggregate, etc. */
+  unused?: boolean;
 }
 
 /** Visual + semantic discriminator on an edge:
@@ -166,7 +171,6 @@ const TITLE_Y_OFFSET = 200;
 const PIVOT_CONTAINS_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
   "workflow",
   "aggregate",
-  "valueobject",
   "field",
   "containment",
   "module",
@@ -183,6 +187,7 @@ const NO_CONTAINS_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
   "event",
   "repository",
   "view",
+  "valueobject",
 ]);
 
 /** Synthesize a "title" VNode for the current path leaf AND a backdrop of
@@ -365,25 +370,33 @@ function moduleView(ast: Model, name: string): ViewGraph {
 // SIDEBAR_KINDS) — they're DDD infrastructure, not the centre of business
 // behaviour, so the tree focuses on workflows → aggregates → events.
 //
-// Row 0: workflow                      (orchestrators)
-// Row 1: aggregate | valueobject       (the core model)
-// Row 2: event                          (outcomes)
+// Row 0: workflow      (orchestrators)
+// Row 1: aggregate     (the core model — value objects float in the right side column)
+// Row 2: event          (outcomes)
 const CONTEXT_TIER: Partial<Record<ViewKind, number>> = {
   workflow: 0,
   aggregate: 1,
-  valueobject: 1,
   event: 2,
 };
 
-/** ViewKinds rendered as a left-side "supporting infrastructure" column
- *  instead of a tier of the main tree. Repositories (and views) provide
- *  data-access plumbing for the domain; surfacing them as a sidebar keeps
- *  the tree focused on the business core. Semantic edges (workflow→repo,
- *  repo→aggregate) then cross from this sidebar into the tree, visibly
- *  showing the support relationship. */
-const SIDEBAR_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
+/** ViewKinds rendered as side support columns instead of a tier of the main
+ *  tree. The LEFT column holds infrastructure (repositories / views) that
+ *  feeds the domain. The RIGHT column holds auxiliary domain types
+ *  (value objects) — they tend to be widely re-used by aggregates, so
+ *  inlining them into the tree would spray edges everywhere; parking them
+ *  in a side column keeps the central tree readable. Semantic edges still
+ *  cross from these sidebars into the tree, visibly showing what supports
+ *  which aggregate. */
+const LEFT_SIDEBAR_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
   "repository",
   "view",
+]);
+const RIGHT_SIDEBAR_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
+  "valueobject",
+]);
+const SIDEBAR_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
+  ...LEFT_SIDEBAR_KINDS,
+  ...RIGHT_SIDEBAR_KINDS,
 ]);
 
 const CONTEXT_KIND: Partial<Record<string, ViewKind>> = {
@@ -403,7 +416,7 @@ const CTX_ROW_H = 160;
  *  and outcomes (tier 2) align their X to the average X of the aggregates
  *  they reference. Same row-alignment trick as before, just rotated 90°. */
 function contextLayout(
-  items: { id: string; kind: ViewKind; name: string; anchors?: string[] }[],
+  items: { id: string; kind: ViewKind; name: string; anchors?: string[]; unused?: boolean }[],
 ): VNode[] {
   // Split the children into the main tree vs the left-side support column.
   // Sidebar items (repositories / views) sit OUTSIDE the tree at a fixed X
@@ -483,26 +496,39 @@ function contextLayout(
       placedX.set(it.name, x);
     }
   }
-  // Pass 3: the supporting sidebar column. Stack repositories / views
-  // vertically at a fixed offset left of the tree, centred over the tree's
-  // vertical mid-line so they read as "support beside the model". Their X
-  // becomes available to anchors (e.g. workflow→repo semantic edges), but
-  // we DID NOT include them when placing tree items above, so workflows
-  // stay centred over the aggregates they touch instead of being pulled
-  // sideways toward the sidebar.
-  if (sidebarItems.length > 0) {
-    const treeYs = [...placed.values()].map((p) => p.y);
-    const treeMidY = treeYs.length > 0 ? (Math.min(...treeYs) + Math.max(...treeYs)) / 2 : 0;
-    const sidebarHeight = (sidebarItems.length - 1) * CTX_ROW_H;
-    const sidebarStartY = Math.round(treeMidY - sidebarHeight / 2);
-    const SIDEBAR_X = -Math.round(CTX_COL_W * 1.4);
-    for (let i = 0; i < sidebarItems.length; i++) {
-      const it = sidebarItems[i]!;
-      const y = sidebarStartY + i * CTX_ROW_H;
-      placed.set(it.id, { x: SIDEBAR_X, y });
-      placedX.set(it.name, SIDEBAR_X);
+  // Pass 3: the supporting sidebar columns. Left holds infrastructure (repos
+  // / views) feeding the domain; right holds widely-reused auxiliary domain
+  // types (value objects). Both stack vertically at a fixed offset from the
+  // tree, centred over the tree's vertical mid-line. Their X becomes
+  // available to anchors (e.g. workflow→repo semantic edges), but they
+  // weren't included in tree placement so workflows stay centred over the
+  // aggregates they touch rather than being pulled toward a sidebar.
+  const treeXs = [...placed.values()].map((p) => p.x);
+  const treeYs = [...placed.values()].map((p) => p.y);
+  const treeMidY = treeYs.length > 0 ? (Math.min(...treeYs) + Math.max(...treeYs)) / 2 : 0;
+  const treeMaxX = treeXs.length > 0 ? Math.max(...treeXs) : 0;
+  const placeSidebar = (
+    bucket: { id: string; name: string }[],
+    sideX: number,
+  ): void => {
+    if (bucket.length === 0) return;
+    const height = (bucket.length - 1) * CTX_ROW_H;
+    const startY = Math.round(treeMidY - height / 2);
+    for (let i = 0; i < bucket.length; i++) {
+      const it = bucket[i]!;
+      const y = startY + i * CTX_ROW_H;
+      placed.set(it.id, { x: sideX, y });
+      placedX.set(it.name, sideX);
     }
-  }
+  };
+  placeSidebar(
+    sidebarItems.filter((i) => LEFT_SIDEBAR_KINDS.has(i.kind)),
+    -Math.round(CTX_COL_W * 1.4),
+  );
+  placeSidebar(
+    sidebarItems.filter((i) => RIGHT_SIDEBAR_KINDS.has(i.kind)),
+    treeMaxX + Math.round(CTX_COL_W * 1.4),
+  );
   return items.map((it) => ({
     id: it.id,
     kind: it.kind,
@@ -510,6 +536,7 @@ function contextLayout(
     x: placed.get(it.id)!.x,
     y: placed.get(it.id)!.y,
     drillable: DRILLABLE.has(it.kind),
+    ...(it.unused ? { unused: true } : {}),
   }));
 }
 
@@ -534,12 +561,20 @@ function contextView(ast: Model, name: string): ViewGraph {
   // aggregate nodes can centre over the aggregate(s) they reference: repos /
   // views to their single source aggregate, workflows to every aggregate they
   // touch, events to every aggregate that emits them.
-  const items: { id: string; kind: ViewKind; name: string; anchors?: string[] }[] = [];
+  // Set of every event name reached by an `emits` edge — either from an
+  // aggregate operation or from a workflow body. Anything declared but absent
+  // here is "unused" and gets a dimmed/dashed style in the layout below.
+  const emittedEvents = new Set<string>();
+  for (const set of rel.emits.values()) for (const ev of set) emittedEvents.add(ev);
+  for (const set of rel.workflowEmits.values()) for (const ev of set) emittedEvents.add(ev);
+
+  const items: { id: string; kind: ViewKind; name: string; anchors?: string[]; unused?: boolean }[] = [];
   for (const m of ctx.members as ContextMember[]) {
     const kind = CONTEXT_KIND[m.$type];
     const childName = (m as { name?: string }).name;
     if (!kind || !childName) continue;
     let anchors: string[] | undefined;
+    let unused: boolean | undefined;
     if (kind === "repository") {
       const a = rel.repoFor.get(childName);
       if (a) anchors = [a];
@@ -566,8 +601,11 @@ function contextView(ast: Model, name: string): ViewGraph {
       const emitters: string[] = [];
       for (const [aggName, set] of rel.emits) if (set.has(childName)) emitters.push(aggName);
       if (emitters.length > 0) anchors = emitters;
+      // Mark events that are declared but never emitted by any aggregate
+      // operation or workflow. Surfaces dead-event holes in the model.
+      if (!emittedEvents.has(childName)) unused = true;
     }
-    items.push({ id: nid(kind, childName), kind, name: childName, anchors });
+    items.push({ id: nid(kind, childName), kind, name: childName, anchors, unused });
   }
 
   const edges: VEdge[] = [];

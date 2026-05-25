@@ -678,6 +678,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         expressionEditor,
         onToggleExpression,
         compact,
+        unused: n.unused,
       });
     }
     return m;
