@@ -12,6 +12,8 @@ import type {
   BoundedContext,
   ContextMember,
   Deployable,
+  EntityPart,
+  EntityPartMember,
   Model,
   Module,
   Operation,
@@ -22,7 +24,7 @@ import type {
   Workflow,
 } from "../../../../src/language/generated/ast.js";
 import { deployableModules, deployableServes, deployableTargets, deployableUi } from "../system/deployable-bindings";
-import { computeAggregateRelations } from "./aggregate-edges";
+import { computeAggregateRelations, computeEntityPartRelations } from "./aggregate-edges";
 import { computeContextRelations } from "./context-edges";
 
 export type ViewKind =
@@ -31,6 +33,7 @@ export type ViewKind =
   | "module"
   | "context"
   | "aggregate"
+  | "entity"
   | "operation"
   | "workflow"
   | "repository"
@@ -80,6 +83,12 @@ export interface VNode {
    *  wired up — e.g. an event that is declared but never emitted, a value
    *  object never referenced by any aggregate, etc. */
   unused?: boolean;
+  /** Override the drill target for this node. When set, clicking the node
+   *  pushes `drillTo` onto the path instead of `{kind, name}`. Used by
+   *  Containment leaves whose visible name is the field-like identifier
+   *  ("lines") but whose drill target is the entity it references
+   *  (`{kind:"entity", name:"OrderLine"}`). */
+  drillTo?: ViewStep;
 }
 
 /** Visual + semantic discriminator on an edge:
@@ -123,9 +132,12 @@ const DRILLABLE: ReadonlySet<ViewKind> = new Set([
   "module",
   "context",
   "aggregate",
+  "entity",
   "operation",
   "workflow",
   "repository",
+  // Containment leaves drill into the entity they reference (see VNode.drillTo).
+  "containment",
 ]);
 
 const COL_W = 220;
@@ -707,6 +719,9 @@ interface RawAggNode {
   /** field-name set this consumer reads (operations / derived / invariants /
    *  functions). Empty for fields/containments themselves. */
   readsOf: ReadonlySet<string>;
+  /** Override drill target — Containment nodes drill into the entity their
+   *  `partType` references rather than into themselves. */
+  drillTo?: ViewStep;
 }
 
 /** Tier-rowed layout with consumer-to-state X alignment. State (row 1) is
@@ -758,6 +773,7 @@ function aggregateLayout(items: RawAggNode[]): VNode[] {
     x: placed.get(it.id)!.x,
     y: placed.get(it.id)!.y,
     drillable: DRILLABLE.has(it.kind),
+    ...(it.drillTo ? { drillTo: it.drillTo } : {}),
   }));
 }
 
@@ -816,9 +832,21 @@ function aggregateView(ast: Model, name: string): ViewGraph {
       case "Property":
         items.push({ id: nid("field", childName!), kind: "field", name: childName!, readsOf: EMPTY });
         break;
-      case "Containment":
-        items.push({ id: nid("containment", childName!), kind: "containment", name: childName!, readsOf: EMPTY });
+      case "Containment": {
+        // Show the entity type next to the field name so the user can see what
+        // kind of thing the containment composes ("lines : OrderLine"). The
+        // drill target is the entity itself, so clicking the containment
+        // opens that entity's structure.
+        const part = (m as { partType?: { $refText?: string } }).partType?.$refText;
+        items.push({
+          id: nid("containment", childName!),
+          kind: "containment",
+          name: part ? `${childName} : ${part}` : childName!,
+          readsOf: EMPTY,
+          ...(part ? { drillTo: { kind: "entity" as const, name: part } } : {}),
+        });
         break;
+      }
     }
   }
   // Invariants are unnamed (`invariant <expr>`); synthesise nodes carrying a
@@ -842,11 +870,14 @@ function aggregateView(ast: Model, name: string): ViewGraph {
   // Build edges from the relations. A state-name might resolve to a `field:`,
   // `containment:`, or `derived:` id — operations can write to any of those,
   // invariants can constrain any, derived can read any. Map name → id once,
-  // then materialise edges with the correct target id.
+  // then materialise edges with the correct target id. We parse the canonical
+  // identifier out of the node id (after the kind prefix) since some display
+  // names — containments render as `"lines : OrderLine"` — diverge from it.
   const stateIdByName = new Map<string, string>();
   for (const i of items) {
     if (i.kind === "field" || i.kind === "containment" || i.kind === "derived") {
-      stateIdByName.set(i.name, i.id);
+      const canonical = i.id.slice(i.id.indexOf(":") + 1);
+      stateIdByName.set(canonical, i.id);
     }
   }
   const edges: VEdge[] = [];
@@ -884,6 +915,139 @@ function aggregateView(ast: Model, name: string): ViewGraph {
 }
 
 const EMPTY: ReadonlySet<string> = new Set();
+
+/** Walk the model to find an EntityPart by name. Entity parts live directly
+ *  under aggregates; we search every aggregate we can reach. (Names can
+ *  collide across aggregates — the drill path establishes which aggregate
+ *  we're inside, but for v1 we just take the first match, which is right in
+ *  every example we ship.) */
+function findEntityPart(ast: Model, name: string): EntityPart | undefined {
+  for (const m of ast.members) {
+    if (m.$type === "BoundedContext") {
+      for (const cm of m.members) {
+        if (cm.$type === "Aggregate") {
+          for (const am of cm.members) if (am.$type === "EntityPart" && am.name === name) return am;
+        }
+      }
+    } else if (m.$type === "System") {
+      for (const sm of m.members) {
+        if (sm.$type === "BoundedContext") {
+          for (const cm of sm.members) {
+            if (cm.$type === "Aggregate") {
+              for (const am of cm.members) if (am.$type === "EntityPart" && am.name === name) return am;
+            }
+          }
+        } else if (sm.$type === "Module") {
+          for (const c of sm.contexts) {
+            for (const cm of c.members) {
+              if (cm.$type === "Aggregate") {
+                for (const am of cm.members) if (am.$type === "EntityPart" && am.name === name) return am;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Mirror of `aggregateView` for an EntityPart. Entities have no operations
+ *  (no writes / emits), but their `derived` / `invariant` / `function`
+ *  bodies still read fields/containments — those edges are computed by
+ *  `computeEntityPartRelations`. Layout / containment rules are identical
+ *  to aggregateView. */
+function entityView(ast: Model, name: string): ViewGraph {
+  const part = findEntityPart(ast, name);
+  if (!part) return { title: `entity ${name}`, nodes: [], edges: [] };
+  const rel = computeEntityPartRelations(part);
+  const items: RawAggNode[] = [];
+  for (const m of part.members as EntityPartMember[]) {
+    const childName = (m as { name?: string }).name;
+    if (!childName && m.$type !== "Invariant") continue;
+    switch (m.$type) {
+      case "FunctionDecl":
+        items.push({
+          id: nid("function", childName!),
+          kind: "function",
+          name: childName!,
+          readsOf: rel.reads.get(`function:${childName}`) ?? EMPTY,
+        });
+        break;
+      case "DerivedProp":
+        items.push({
+          id: nid("derived", childName!),
+          kind: "derived",
+          name: childName!,
+          readsOf: rel.reads.get(`derived:${childName}`) ?? EMPTY,
+        });
+        break;
+      case "Property":
+        items.push({ id: nid("field", childName!), kind: "field", name: childName!, readsOf: EMPTY });
+        break;
+      case "Containment": {
+        const partType = (m as { partType?: { $refText?: string } }).partType?.$refText;
+        items.push({
+          id: nid("containment", childName!),
+          kind: "containment",
+          name: partType ? `${childName} : ${partType}` : childName!,
+          readsOf: EMPTY,
+          ...(partType ? { drillTo: { kind: "entity" as const, name: partType } } : {}),
+        });
+        break;
+      }
+    }
+  }
+  let invariantIndex = 0;
+  for (const m of part.members as EntityPartMember[]) {
+    if (m.$type === "Invariant") {
+      const preview = m.$cstNode?.text?.replace(/^invariant\s+/, "").trim() ?? `inv ${invariantIndex + 1}`;
+      const invId = `invariant:${invariantIndex}`;
+      items.push({
+        id: invId,
+        kind: "invariant",
+        name: preview,
+        readsOf: rel.reads.get(invId) ?? EMPTY,
+      });
+      invariantIndex++;
+    }
+  }
+
+  const stateIdByName = new Map<string, string>();
+  for (const i of items) {
+    if (i.kind === "field" || i.kind === "containment" || i.kind === "derived") {
+      const canonical = i.id.slice(i.id.indexOf(":") + 1);
+      stateIdByName.set(canonical, i.id);
+    }
+  }
+  const edges: VEdge[] = [];
+  const pushFieldEdges = (
+    rel: ReadonlyMap<string, Set<string>>,
+    kind: "reads" | "constrains",
+  ): void => {
+    for (const [src, set] of rel) {
+      for (const f of set) {
+        const target = stateIdByName.get(f);
+        if (!target) continue;
+        edges.push({ id: `${kind}:${src}->${target}`, source: src, target, label: kind, kind });
+      }
+    }
+  };
+  const invariantReads = new Map<string, Set<string>>();
+  const consumerReads = new Map<string, Set<string>>();
+  for (const [src, set] of rel.reads) {
+    (src.startsWith("invariant:") ? invariantReads : consumerReads).set(src, set);
+  }
+  pushFieldEdges(invariantReads, "constrains");
+  pushFieldEdges(consumerReads, "reads");
+
+  return withRoot(
+    { title: `entity ${name}`, nodes: aggregateLayout(items), edges },
+    "entity",
+    name,
+    { connectAll: true },
+  );
+}
 
 const STMT_ROW_H = 130;
 
@@ -1032,6 +1196,8 @@ export function buildViewGraph(ast: Model, path: ViewPath): ViewGraph {
       return contextView(ast, last.name);
     case "aggregate":
       return aggregateView(ast, last.name);
+    case "entity":
+      return entityView(ast, last.name);
     case "operation": {
       // An operation only resolves below an aggregate step.
       const agg = path[path.length - 2];

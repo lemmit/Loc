@@ -18,6 +18,8 @@ import type {
   AssignOrCallStmt,
   Containment,
   DerivedProp,
+  EntityPart,
+  EntityPartMember,
   EmitStmt,
   Expression,
   FunctionDecl,
@@ -202,6 +204,54 @@ function invariantIndex(agg: Aggregate, target: Invariant): number {
     }
   }
   return -1;
+}
+
+function entityPartInvariantIndex(part: EntityPart, target: Invariant): number {
+  let i = 0;
+  for (const m of part.members) {
+    if (m.$type === "Invariant") {
+      if (m === target) return i;
+      i++;
+    }
+  }
+  return -1;
+}
+
+/** Entities have the same shape as aggregates minus operations — so reads /
+ *  writes from external behaviour don't apply, but `derived`, `invariant`,
+ *  and `function` bodies still produce read edges into the entity's own
+ *  state. Mirrors `computeAggregateRelations` but loops over
+ *  `EntityPartMember` and ignores operation-shaped members (entities don't
+ *  declare them). */
+export function computeEntityPartRelations(part: EntityPart): AggregateRelations {
+  const rel: AggregateRelations = { reads: new Map(), writes: new Map(), emits: new Map() };
+  const stateNames = new Set<string>();
+  for (const m of part.members as EntityPartMember[]) {
+    if (m.$type === "Property") stateNames.add((m as Property).name);
+    else if (m.$type === "Containment") stateNames.add((m as Containment).name);
+    else if (m.$type === "DerivedProp") stateNames.add((m as DerivedProp).name);
+  }
+  for (const m of part.members as EntityPartMember[]) {
+    if (m.$type === "FunctionDecl") {
+      const fn = m as FunctionDecl;
+      const reads = new Set<string>();
+      collectReads(fn.body, stateNames, reads);
+      for (const r of reads) addEdge(rel.reads, `function:${fn.name}`, r);
+    } else if (m.$type === "DerivedProp") {
+      const d = m as DerivedProp;
+      const reads = new Set<string>();
+      collectReads(d.expr, stateNames, reads);
+      for (const r of reads) addEdge(rel.reads, `derived:${d.name}`, r);
+    } else if (m.$type === "Invariant") {
+      const inv = m as Invariant;
+      const idx = entityPartInvariantIndex(part, inv);
+      const reads = new Set<string>();
+      collectReads(inv.expr, stateNames, reads);
+      if (inv.guard) collectReads(inv.guard, stateNames, reads);
+      for (const r of reads) addEdge(rel.reads, `invariant:${idx}`, r);
+    }
+  }
+  return rel;
 }
 
 // Re-export for callers that don't want to import the AST types just to type
