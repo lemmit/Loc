@@ -73,7 +73,7 @@ system DevPlatform {
             event ProjectArchived { project: Project id, at: datetime }
 
             aggregate Project ids guid {
-                name: string display
+                name: string
                 description: string?
                 visibility: Visibility
                 active: bool
@@ -151,6 +151,7 @@ system DevPlatform {
                     })
                     expectThrows p.rename("")
                 }
+                derived display: string = name
             }
 
             repository Projects for Project {
@@ -206,7 +207,7 @@ system DevPlatform {
             event BuildPromoted { build: Build id, env: string, at: datetime }
 
             aggregate Build {
-                commitSha: string display
+                commitSha: string
                 buildState: BuildState
                 total: int provenanced
                 startedAt: datetime
@@ -221,6 +222,7 @@ system DevPlatform {
                     total := total + 1
                     emit BuildPromoted { build: id, env: env, at: now() }
                 }
+                derived display: string = commitSha
             }
 
             repository Builds for Build {
@@ -243,7 +245,7 @@ system DevPlatform {
         context People {
 
             aggregate Engineer {
-                handle: string display
+                handle: string
                   check handle.length >= 3 && handle.length <= 32
                 email: string
                   check email.matches("^[^@]+@[^@]+\\.[^@]+$") && email.length <= 120
@@ -252,6 +254,7 @@ system DevPlatform {
 
                 invariant handle != email
                 private invariant handle.matches("^[a-z][a-z0-9_]*$")
+                derived display: string = handle
             }
 
             repository Engineers for Engineer {
