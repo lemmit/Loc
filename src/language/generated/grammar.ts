@@ -9112,10 +9112,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "id"
-          },
-          {
-            "$type": "Keyword",
             "value": "contains"
           },
           {

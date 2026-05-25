@@ -1048,8 +1048,11 @@ NameRefIdent returns string:
     // when the entry happens to be a NameRef whose token is a soft keyword
     // — without this, the parser commits to the named-slot alternative
     // (`name=LooseName ':'`) and fails on the missing `:`.
+    //
+    // `id` is intentionally excluded: it's the magic identifier handled by
+    // IdRef and would create an ambiguity with IdRef inside PrimaryExpr.
     ID | 'permissions' | 'ui' | 'api' | 'money'
-       | 'id' | 'contains' | 'page' | 'component' | 'state' | 'menu'
+       | 'contains' | 'page' | 'component' | 'state' | 'menu'
        | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
        | 'design' | 'targets' | 'bind'
