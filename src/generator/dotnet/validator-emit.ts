@@ -230,6 +230,7 @@ function renderFluentPredicate(e: ExprIR, usings?: Set<string>): string {
     case "id":
     case "call":
     case "new":
+    case "convert":
     case "match":
       // `classifyForWire` excludes these — reaching the renderer is a
       // bug upstream.  Emit a syntactically-valid placeholder so a

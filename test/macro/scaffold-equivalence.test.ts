@@ -91,11 +91,15 @@ describe("scaffold macro: aggregate selector", () => {
     expect(pageRoute(model, "OrderDetail")).toBe("/orders/:id");
   });
 
-  it("body calls are List/Form/Detail", async () => {
+  it("body calls are the canonical scaffold primitives", async () => {
     const { model } = await parseString(wrapWith("aggregates: [Order]"));
-    expect(pageBodyCallee(model, "OrderList")).toBe("List");
-    expect(pageBodyCallee(model, "OrderNew")).toBe("Form");
-    // Detail page now emits the explicit Stack(scaffoldDetails,
+    // List / New / Workflow / View now emit the canonical
+    // `scaffold<X>(of:|runs:)` body primitive, one per page.  The
+    // expander rewrites it inline at lowering to the same Stack /
+    // QueryView / Form trees the legacy archetype path produced.
+    expect(pageBodyCallee(model, "OrderList")).toBe("scaffoldList");
+    expect(pageBodyCallee(model, "OrderNew")).toBe("scaffoldNewForm");
+    // Detail page emits the explicit Stack(scaffoldDetails,
     // scaffoldOperations) shape so users can unfold into per-slot
     // customisation while leaving auto-op-modal generation intact.
     expect(pageBodyCallee(model, "OrderDetail")).toBe("Stack");
@@ -107,7 +111,9 @@ describe("scaffold macro: workflow / view / module selectors", () => {
     const { model, errors } = await parseString(wrapWith("workflows: [placeOrder]"));
     expect(errors).toEqual([]);
     expect(pageNames(model)).toContain("PlaceOrderWorkflow");
-    expect(pageBodyCallee(model, "PlaceOrderWorkflow")).toBe("Form");
+    // Canonical body primitive — expands inline to Stack(Breadcrumbs,
+    // Heading, Card(WorkflowForm(runs:))) at lowering.
+    expect(pageBodyCallee(model, "PlaceOrderWorkflow")).toBe("scaffoldWorkflowForm");
     expect(pageNames(model)).toContain("WorkflowsIndex");
   });
 

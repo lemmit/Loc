@@ -22,6 +22,8 @@ import type {
   Workflow,
 } from "../../../../src/language/generated/ast.js";
 import { deployableModules, deployableServes, deployableTargets, deployableUi } from "../system/deployable-bindings";
+import { computeAggregateRelations } from "./aggregate-edges";
+import { computeContextRelations } from "./context-edges";
 
 export type ViewKind =
   // containers (drillable)
@@ -39,6 +41,8 @@ export type ViewKind =
   // aggregate-level invariant — a synthetic node (Invariant has no name; the
   // node carries a preview of its expression as `name`)
   | "invariant"
+  // aggregate-level derived property — has a name + an expression.
+  | "derived"
   // leaves (still no drill below)
   | "valueobject"
   | "event"
@@ -68,11 +72,25 @@ export interface VNode {
   drillable: boolean;
 }
 
+/** Visual + semantic discriminator on an edge:
+ *
+ *   - "binding"    : a deployable's modules/serves/ui/targets ref (system view)
+ *   - "next"       : statement → next statement (operation/workflow flow view)
+ *   - "reads"      : an operation/derived/invariant/function references a field
+ *   - "writes"     : an operation assigns a field
+ *   - "constrains" : an invariant references a field
+ *   - "emits"      : an operation emits an event
+ *
+ *  The pane renders different stroke/colour/dashing per kind. Defaulting to
+ *  `undefined` keeps backwards compatibility with pre-aggregate-edges callers. */
+export type EdgeKind = "binding" | "next" | "reads" | "writes" | "constrains" | "emits";
+
 export interface VEdge {
   id: string;
   source: string;
   target: string;
   label?: string;
+  kind?: EdgeKind;
 }
 
 export interface ViewGraph {
@@ -183,13 +201,13 @@ function systemView(ast: Model, name: string): ViewGraph {
   for (const d of deployables) {
     const src = nid("deployable", d.name);
     for (const mod of deployableModules(d))
-      edges.push({ id: `bind:${src}->module:${mod}`, source: src, target: nid("module", mod), label: "modules" });
+      edges.push({ id: `bind:${src}->module:${mod}`, source: src, target: nid("module", mod), label: "modules", kind: "binding" });
     for (const api of deployableServes(d))
-      edges.push({ id: `bind:${src}->api:${api}`, source: src, target: nid("api", api), label: "serves" });
+      edges.push({ id: `bind:${src}->api:${api}`, source: src, target: nid("api", api), label: "serves", kind: "binding" });
     const ui = deployableUi(d);
-    if (ui) edges.push({ id: `bind:${src}->ui:${ui}`, source: src, target: nid("ui", ui), label: "ui" });
+    if (ui) edges.push({ id: `bind:${src}->ui:${ui}`, source: src, target: nid("ui", ui), label: "ui", kind: "binding" });
     const tgt = deployableTargets(d);
-    if (tgt) edges.push({ id: `bind:${src}->deployable:${tgt}`, source: src, target: nid("deployable", tgt), label: "targets" });
+    if (tgt) edges.push({ id: `bind:${src}->deployable:${tgt}`, source: src, target: nid("deployable", tgt), label: "targets", kind: "binding" });
   }
   return { title: `system ${name}`, nodes: layout(items, SYSTEM_ORDER), edges };
 }
@@ -208,13 +226,18 @@ function moduleView(ast: Model, name: string): ViewGraph {
   return { title: `module ${name}`, nodes: layout(items, ["context"]), edges: [] };
 }
 
+// Column order for the context view: consumers (repository / view /
+// workflow) on the left, aggregates in the centre, value-objects + events
+// on the right. Edges flow LEFT-TO-RIGHT consistently — repo→aggregate,
+// view→aggregate, workflow→aggregate, aggregate→event — which matches the
+// downstream direction of each relationship.
 const CONTEXT_ORDER: readonly ViewKind[] = [
-  "aggregate",
-  "valueobject",
-  "event",
   "repository",
   "view",
   "workflow",
+  "aggregate",
+  "valueobject",
+  "event",
 ];
 
 const CONTEXT_KIND: Partial<Record<string, ViewKind>> = {
@@ -225,6 +248,63 @@ const CONTEXT_KIND: Partial<Record<string, ViewKind>> = {
   View: "view",
   Workflow: "workflow",
 };
+
+const CTX_COL_W = 220;
+const CTX_ROW_H = 90;
+
+/** Per-column layout where consumers (left of aggregate) and outcomes
+ *  (right of aggregate, currently events) align to the row of the
+ *  aggregate they connect to. Mirrors aggregateLayout's read-row alignment
+ *  trick — works for any column-against-pivot pattern. */
+function contextLayout(
+  items: { id: string; kind: ViewKind; name: string; anchor?: string }[],
+): VNode[] {
+  const byCol = new Map<number, typeof items>();
+  for (const it of items) {
+    const col = CONTEXT_ORDER.indexOf(it.kind);
+    const list = byCol.get(col >= 0 ? col : CONTEXT_ORDER.length);
+    if (list) list.push(it);
+    else byCol.set(col >= 0 ? col : CONTEXT_ORDER.length, [it]);
+  }
+  // Pass 1: place aggregates (the pivot column).
+  const aggCol = CONTEXT_ORDER.indexOf("aggregate");
+  const aggregateRow = new Map<string, number>();
+  const placed = new Map<string, { x: number; y: number }>();
+  const aggs = byCol.get(aggCol) ?? [];
+  for (let i = 0; i < aggs.length; i++) {
+    const a = aggs[i]!;
+    placed.set(a.id, { x: aggCol * CTX_COL_W, y: i * CTX_ROW_H });
+    aggregateRow.set(a.name, i);
+  }
+  // Pass 2: place every other column, aligning to its anchor's row when set.
+  for (const [col, bucket] of byCol) {
+    if (col === aggCol) continue;
+    const taken = new Set<number>();
+    let nextRow = 0;
+    for (const it of bucket) {
+      const anchorRow = it.anchor ? aggregateRow.get(it.anchor) : undefined;
+      let row: number;
+      if (anchorRow !== undefined) {
+        row = anchorRow;
+        while (taken.has(row)) row++;
+      } else {
+        row = nextRow;
+        while (taken.has(row)) row++;
+      }
+      taken.add(row);
+      nextRow = Math.max(nextRow, row + 1);
+      placed.set(it.id, { x: col * CTX_COL_W, y: row * CTX_ROW_H });
+    }
+  }
+  return items.map((it) => ({
+    id: it.id,
+    kind: it.kind,
+    name: it.name,
+    x: placed.get(it.id)!.x,
+    y: placed.get(it.id)!.y,
+    drillable: DRILLABLE.has(it.kind),
+  }));
+}
 
 function contextView(ast: Model, name: string): ViewGraph {
   // Find by walking; contexts can live at Model level (legacy) or in a Module.
@@ -242,17 +322,176 @@ function contextView(ast: Model, name: string): ViewGraph {
     }
   }
   if (!ctx) return { title: name, nodes: [], edges: [] };
-  const items: { id: string; kind: ViewKind; name: string }[] = [];
+  const rel = computeContextRelations(ctx);
+  // Build the raw item list with optional `anchor` so non-aggregate nodes can
+  // align to the aggregate row they reference (repo→agg, view→agg, agg→event).
+  const items: { id: string; kind: ViewKind; name: string; anchor?: string }[] = [];
   for (const m of ctx.members as ContextMember[]) {
     const kind = CONTEXT_KIND[m.$type];
     const childName = (m as { name?: string }).name;
     if (!kind || !childName) continue;
-    items.push({ id: nid(kind, childName), kind, name: childName });
+    let anchor: string | undefined;
+    if (kind === "repository") anchor = rel.repoFor.get(childName);
+    else if (kind === "view") anchor = rel.viewSource.get(childName);
+    // events anchor to the FIRST aggregate that emits them (when any) — picks
+    // the source row so the edge from agg→event is roughly horizontal.
+    if (kind === "event") {
+      for (const [aggName, set] of rel.emits) {
+        if (set.has(childName)) {
+          anchor = aggName;
+          break;
+        }
+      }
+    }
+    items.push({ id: nid(kind, childName), kind, name: childName, anchor });
   }
-  return { title: `context ${name}`, nodes: layout(items, CONTEXT_ORDER), edges: [] };
+
+  const edges: VEdge[] = [];
+  for (const [repo, agg] of rel.repoFor) {
+    edges.push({
+      id: `repo-for:${repo}->${agg}`,
+      source: nid("repository", repo),
+      target: nid("aggregate", agg),
+      kind: "reads",
+      label: "for",
+    });
+  }
+  for (const [view, agg] of rel.viewSource) {
+    edges.push({
+      id: `view-src:${view}->${agg}`,
+      source: nid("view", view),
+      target: nid("aggregate", agg),
+      kind: "reads",
+      label: "of",
+    });
+  }
+  for (const [agg, set] of rel.emits) {
+    for (const ev of set) {
+      edges.push({
+        id: `emits:${agg}->${ev}`,
+        source: nid("aggregate", agg),
+        target: nid("event", ev),
+        kind: "emits",
+        label: "emits",
+      });
+    }
+  }
+  for (const [wf, set] of rel.workflowUses) {
+    for (const agg of set) {
+      edges.push({
+        id: `wf-uses:${wf}->${agg}`,
+        source: nid("workflow", wf),
+        target: nid("aggregate", agg),
+        kind: "reads",
+        label: "uses",
+      });
+    }
+  }
+  for (const [wf, set] of rel.workflowEmits) {
+    for (const ev of set) {
+      edges.push({
+        id: `wf-emits:${wf}->${ev}`,
+        source: nid("workflow", wf),
+        target: nid("event", ev),
+        kind: "emits",
+        label: "emits",
+      });
+    }
+  }
+  return { title: `context ${name}`, nodes: contextLayout(items), edges };
 }
 
-const AGGREGATE_ORDER: readonly ViewKind[] = ["operation", "function", "invariant", "field", "containment"];
+// Layered column order for the aggregate view. State (fields + containments)
+// is the centre of gravity; invariants sit to its LEFT (constraints flow
+// rightward into state), derived sits to its RIGHT (computed from state) and
+// operations/functions sit further right (consumers of state). Read/write
+// edges then visibly converge on the state column instead of crisscrossing.
+const AGGREGATE_ORDER: readonly ViewKind[] = [
+  "invariant",
+  "field",
+  "containment",
+  "derived",
+  "operation",
+  "function",
+];
+
+const AGG_COL_W = 240;
+const AGG_ROW_H = 80;
+
+interface RawAggNode {
+  id: string;
+  kind: ViewKind;
+  name: string;
+  /** field-name set this consumer reads (operations / derived / invariants /
+   *  functions). Empty for fields/containments themselves. */
+  readsOf: ReadonlySet<string>;
+}
+
+/** Per-column placement, with consumers vertically aligned to the average row
+ *  of the fields they read. Drastically reduces edge crossings vs. naive
+ *  column-stack ordering — and the alignment itself acts as a visual cue
+ *  ("this operation touches *those* fields"). */
+function aggregateLayout(items: RawAggNode[]): VNode[] {
+  // Pass 1: fields + containments + invariants get plain stacked rows so the
+  // state column is the visual baseline.
+  const byCol = new Map<number, RawAggNode[]>();
+  for (const it of items) {
+    const col = AGGREGATE_ORDER.indexOf(it.kind);
+    const list = byCol.get(col >= 0 ? col : AGGREGATE_ORDER.length);
+    if (list) list.push(it);
+    else byCol.set(col >= 0 ? col : AGGREGATE_ORDER.length, [it]);
+  }
+  const fieldRow = new Map<string, number>(); // field name → row index
+  const placed = new Map<string, { x: number; y: number }>();
+  // Place state first so consumers can align to it.
+  const stateCol = AGGREGATE_ORDER.indexOf("field");
+  const contCol = AGGREGATE_ORDER.indexOf("containment");
+  const stateBuckets: Array<{ col: number; items: RawAggNode[] }> = [];
+  if (byCol.get(stateCol)) stateBuckets.push({ col: stateCol, items: byCol.get(stateCol)! });
+  if (byCol.get(contCol)) stateBuckets.push({ col: contCol, items: byCol.get(contCol)! });
+  let stateRow = 0;
+  for (const b of stateBuckets) {
+    for (const it of b.items) {
+      placed.set(it.id, { x: b.col * AGG_COL_W, y: stateRow * AGG_ROW_H });
+      fieldRow.set(it.name, stateRow);
+      stateRow++;
+    }
+  }
+  // Place every other column. Consumers (with readsOf) align to the average
+  // row of the fields they touch; nodes with no reads (or no matching field)
+  // stack at the next free row in their column.
+  for (const [col, bucket] of byCol) {
+    if (col === stateCol || col === contCol) continue;
+    let nextRow = 0;
+    const taken = new Set<number>();
+    for (const it of bucket) {
+      const rows: number[] = [];
+      for (const r of it.readsOf) {
+        const idx = fieldRow.get(r);
+        if (idx !== undefined) rows.push(idx);
+      }
+      let row: number;
+      if (rows.length > 0) {
+        row = Math.round(rows.reduce((a, b) => a + b, 0) / rows.length);
+        while (taken.has(row)) row++;
+      } else {
+        row = nextRow;
+        while (taken.has(row)) row++;
+      }
+      taken.add(row);
+      nextRow = Math.max(nextRow, row + 1);
+      placed.set(it.id, { x: col * AGG_COL_W, y: row * AGG_ROW_H });
+    }
+  }
+  return items.map((it) => ({
+    id: it.id,
+    kind: it.kind,
+    name: it.name,
+    x: placed.get(it.id)!.x,
+    y: placed.get(it.id)!.y,
+    drillable: DRILLABLE.has(it.kind),
+  }));
+}
 
 function aggregateView(ast: Model, name: string): ViewGraph {
   let agg: Aggregate | undefined;
@@ -276,22 +515,41 @@ function aggregateView(ast: Model, name: string): ViewGraph {
     }
   }
   if (!agg) return { title: name, nodes: [], edges: [] };
-  const items: { id: string; kind: ViewKind; name: string }[] = [];
+  const rel = computeAggregateRelations(agg);
+  const items: RawAggNode[] = [];
   for (const m of agg.members as AggregateMember[]) {
     const childName = (m as { name?: string }).name;
-    if (!childName) continue;
+    if (!childName && m.$type !== "Invariant") continue;
     switch (m.$type) {
       case "Operation":
-        items.push({ id: nid("operation", childName), kind: "operation", name: childName });
+        items.push({
+          id: nid("operation", childName!),
+          kind: "operation",
+          name: childName!,
+          readsOf: rel.reads.get(`operation:${childName}`) ?? EMPTY,
+        });
         break;
       case "FunctionDecl":
-        items.push({ id: nid("function", childName), kind: "function", name: childName });
+        items.push({
+          id: nid("function", childName!),
+          kind: "function",
+          name: childName!,
+          readsOf: rel.reads.get(`function:${childName}`) ?? EMPTY,
+        });
+        break;
+      case "DerivedProp":
+        items.push({
+          id: nid("derived", childName!),
+          kind: "derived",
+          name: childName!,
+          readsOf: rel.reads.get(`derived:${childName}`) ?? EMPTY,
+        });
         break;
       case "Property":
-        items.push({ id: nid("field", childName), kind: "field", name: childName });
+        items.push({ id: nid("field", childName!), kind: "field", name: childName!, readsOf: EMPTY });
         break;
       case "Containment":
-        items.push({ id: nid("containment", childName), kind: "containment", name: childName });
+        items.push({ id: nid("containment", childName!), kind: "containment", name: childName!, readsOf: EMPTY });
         break;
     }
   }
@@ -302,12 +560,57 @@ function aggregateView(ast: Model, name: string): ViewGraph {
   for (const m of agg.members as AggregateMember[]) {
     if (m.$type === "Invariant") {
       const preview = m.$cstNode?.text?.replace(/^invariant\s+/, "").trim() ?? `inv ${invariantIndex + 1}`;
-      items.push({ id: `invariant:${invariantIndex}`, kind: "invariant", name: preview });
+      const invId = `invariant:${invariantIndex}`;
+      items.push({
+        id: invId,
+        kind: "invariant",
+        name: preview,
+        readsOf: rel.reads.get(invId) ?? EMPTY,
+      });
       invariantIndex++;
     }
   }
-  return { title: `aggregate ${name}`, nodes: layout(items, AGGREGATE_ORDER), edges: [] };
+
+  // Build edges from the relations. A state-name might resolve to a `field:`,
+  // `containment:`, or `derived:` id — operations can write to any of those,
+  // invariants can constrain any, derived can read any. Map name → id once,
+  // then materialise edges with the correct target id.
+  const stateIdByName = new Map<string, string>();
+  for (const i of items) {
+    if (i.kind === "field" || i.kind === "containment" || i.kind === "derived") {
+      stateIdByName.set(i.name, i.id);
+    }
+  }
+  const edges: VEdge[] = [];
+  const pushFieldEdges = (
+    rel: ReadonlyMap<string, Set<string>>,
+    kind: "reads" | "writes" | "constrains",
+  ): void => {
+    for (const [src, set] of rel) {
+      for (const f of set) {
+        const target = stateIdByName.get(f);
+        if (!target) continue;
+        // Constraint edges are dashed-yellow ("invariant constrains field");
+        // reads are dashed-gray, writes are solid-teal. Direction is consumer →
+        // field, so the arrowhead lands on the state being touched.
+        edges.push({ id: `${kind}:${src}->${target}`, source: src, target, label: kind, kind });
+      }
+    }
+  };
+  // Invariants emit `constrains` edges; everything else emits `reads`.
+  const invariantReads = new Map<string, Set<string>>();
+  const consumerReads = new Map<string, Set<string>>();
+  for (const [src, set] of rel.reads) {
+    (src.startsWith("invariant:") ? invariantReads : consumerReads).set(src, set);
+  }
+  pushFieldEdges(invariantReads, "constrains");
+  pushFieldEdges(consumerReads, "reads");
+  pushFieldEdges(rel.writes, "writes");
+
+  return { title: `aggregate ${name}`, nodes: aggregateLayout(items), edges };
 }
+
+const EMPTY: ReadonlySet<string> = new Set();
 
 const STMT_ROW_H = 130;
 
@@ -380,6 +683,7 @@ function stmtFlow(title: string, body: Statement[]): ViewGraph {
     id: `next:${i}`,
     source: `stmt:${i}`,
     target: `stmt:${i + 1}`,
+    kind: "next",
   }));
   return { title, nodes, edges };
 }

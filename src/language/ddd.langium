@@ -955,6 +955,7 @@ PrimaryExpr infers Expression:
     | ParenExpr
     | LiteralExpr
     | MoneyLit
+    | PrimitiveConversion
     | NowExpr
     | ThisRef
     | IdRef
@@ -993,6 +994,29 @@ LiteralExpr:
 // string without loss.
 MoneyLit:
     {infer MoneyLit} 'money' '(' value=STRING ')';
+
+// Loom-style explicit conversion vocabulary — `<target>(value)` where
+// `target` is a primitive type and `value` is the expression to
+// convert.  Used for things the strict binary validator now requires
+// to be explicit: `"Hello " + string(age)` instead of bare
+// `"Hello " + age`, `money(decimalField)` to bridge a typed decimal
+// into money, `decimal(moneyValue)` for the lossy projection.
+//
+// Targets in this PR (infallible only):
+//   string  ← {int, long, decimal, money, bool}
+//   long    ← int
+//   decimal ← {int, long, money}
+//   money   ← {int, long, decimal}
+//
+// Notably missing — fallible parses (`int("42")`, `decimal("3.14")`,
+// `datetime("...")`, …) need a `T?`-or-throw decision before the
+// vocabulary settles; deferred.
+//
+// MoneyLit comes first in PrimaryExpr's alternative list so
+// `money("10.50")` (string-arg literal) wins the parse; PrimitiveConversion
+// catches the expression-arg form `money(someDecimal)`.
+PrimitiveConversion:
+    {infer PrimitiveConversion} target=('string' | 'long' | 'decimal' | 'money') '(' value=Expression ')';
 
 NowExpr:
     {infer NowExpr} 'now' '(' ')';

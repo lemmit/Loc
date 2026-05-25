@@ -611,6 +611,13 @@ function collectExprRefs(expr: ExprIR, out: Set<string>): void {
     case "call":
       for (const a of expr.args) collectExprRefs(a, out);
       return;
+    case "convert":
+      // The wrapped value carries the original ref(s) — without
+      // recursing here the useEffect deps-array would miss refs
+      // wrapped by implicit string-concat (`document.title = "n: "
+      // + n` lowers the `n` ref inside a convert).
+      collectExprRefs(expr.value, out);
+      return;
     default:
       return;
   }

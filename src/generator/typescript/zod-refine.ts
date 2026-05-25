@@ -125,6 +125,7 @@ function renderRefineExpr(e: ExprIR): string {
     case "id":
     case "call":
     case "new":
+    case "convert":
     case "match":
       // `classifyForWire` excludes these; reaching the renderer
       // means a bug upstream — emit a placeholder so a failing

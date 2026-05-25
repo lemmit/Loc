@@ -64,6 +64,13 @@ export function printExpr(node: Expression): string {
       return `{${printObjectFields(node.fields)}}`;
     case "MatchExpr":
       return printMatch(node);
+    case "PrimitiveConversion":
+      // value is `Expression | undefined` in the generated AST (the
+      // grammar's `value=Expression` doesn't force presence — a
+      // parser error mid-construction yields undefined).  Render an
+      // empty paren in that case; the validator will have surfaced
+      // the parse error elsewhere.
+      return node.value ? `${node.target}(${printExpr(node.value)})` : `${node.target}()`;
     default: {
       // Exhaustiveness guard — a new Expression node kind must be handled.
       const exhaustive: never = node;

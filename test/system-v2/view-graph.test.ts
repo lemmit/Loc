@@ -54,6 +54,39 @@ describe("Model v2 — view-graph per level", () => {
     expect(ids(g)).toEqual(["context:Orders"]);
   });
 
+  it("context view emits a `reads` edge from each repository to its aggregate", () => {
+    const D = `context Sales {
+  aggregate Order {
+    sku: string
+  }
+  repository Orders for Order {
+    find byId(id: int): Order? where this.id == id
+  }
+}`;
+    const g = buildViewGraph(parse(D), [{ kind: "context", name: "Sales" }]);
+    const repoEdges = g.edges.filter((e) => e.id.startsWith("repo-for:"));
+    expect(repoEdges.map((e) => `${e.source}->${e.target}`)).toEqual(["repository:Orders->aggregate:Order"]);
+    expect(repoEdges[0]?.kind).toBe("reads");
+  });
+
+  it("context view emits an `emits` edge for each aggregate→event pair", () => {
+    const D = `context Sales {
+  event Placed {
+  }
+  aggregate Order {
+    status: string
+    operation confirm() {
+      status := "ok"
+      emit Placed {
+      }
+    }
+  }
+}`;
+    const g = buildViewGraph(parse(D), [{ kind: "context", name: "Sales" }]);
+    const emits = g.edges.filter((e) => e.kind === "emits");
+    expect(emits.map((e) => `${e.source}->${e.target}`)).toEqual(["aggregate:Order->event:Placed"]);
+  });
+
   it("context view lists aggregates / events / etc.", () => {
     const g = buildViewGraph(parse(SRC), [{ kind: "context", name: "Orders" }]);
     expect(g.title).toBe("context Orders");
@@ -69,6 +102,52 @@ describe("Model v2 — view-graph per level", () => {
     expect(ids(g).sort()).toEqual(["field:status", "operation:confirm"].sort());
     expect(g.nodes.find((n) => n.id === "operation:confirm")?.drillable).toBe(true);
     expect(g.nodes.find((n) => n.id === "field:status")?.drillable).toBe(false);
+  });
+
+  it("aggregate view exposes derived props as nodes and emits read edges into the fields they reference", () => {
+    const D = `context C {
+  aggregate Order {
+    amount: decimal
+    qty: int
+    derived total: decimal = amount * qty
+  }
+}`;
+    const g = buildViewGraph(parse(D), [{ kind: "aggregate", name: "Order" }]);
+    expect(ids(g).sort()).toEqual(["derived:total", "field:amount", "field:qty"].sort());
+    const reads = g.edges.filter((e) => e.kind === "reads");
+    expect(reads.map((e) => `${e.source}->${e.target}`).sort()).toEqual(
+      ["derived:total->field:amount", "derived:total->field:qty"].sort(),
+    );
+  });
+
+  it("aggregate view emits a `writes` edge per assigned field and a `reads` edge per accessed field on operations", () => {
+    const D = `context C {
+  aggregate Order {
+    status: string
+    note: string
+    operation confirm() {
+      status := note
+    }
+  }
+}`;
+    const g = buildViewGraph(parse(D), [{ kind: "aggregate", name: "Order" }]);
+    const writes = g.edges.filter((e) => e.kind === "writes").map((e) => `${e.source}->${e.target}`);
+    const reads = g.edges.filter((e) => e.kind === "reads").map((e) => `${e.source}->${e.target}`);
+    expect(writes).toEqual(["operation:confirm->field:status"]);
+    expect(reads).toEqual(["operation:confirm->field:note"]);
+  });
+
+  it("aggregate view emits `constrains` edges from invariants to the fields they reference", () => {
+    const D = `context C {
+  aggregate Money {
+    amount: decimal
+    currency: string
+    invariant amount >= 0
+  }
+}`;
+    const g = buildViewGraph(parse(D), [{ kind: "aggregate", name: "Money" }]);
+    const constrains = g.edges.filter((e) => e.kind === "constrains");
+    expect(constrains.map((e) => `${e.source}->${e.target}`)).toEqual(["invariant:0->field:amount"]);
   });
 
   it("aggregate view surfaces invariants as indexed nodes carrying a preview", () => {

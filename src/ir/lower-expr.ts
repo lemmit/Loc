@@ -45,6 +45,7 @@ import {
   isOperation,
   isParenExpr,
   isPreconditionStmt,
+  isPrimitiveConversion,
   isPrimitiveType,
   isProperty,
   isRequiresStmt,
@@ -60,6 +61,7 @@ import type {
   IdValueType,
   PathIR,
   PermissionDeclIR,
+  PrimitiveName,
   ProvSite,
   StmtIR,
   TypeIR,
@@ -380,6 +382,16 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (isIntLit(expr)) return lit("int", String(expr.value));
   if (isDecLit(expr)) return lit("decimal", expr.value);
   if (isMoneyLit(expr)) return lit("money", expr.value ?? "0");
+  if (isPrimitiveConversion(expr)) {
+    const fromType = inferExprType(expr.value, env);
+    const from = fromType.kind === "primitive" ? (fromType.name as PrimitiveName) : undefined;
+    return {
+      kind: "convert",
+      target: expr.target as PrimitiveName,
+      from,
+      value: lowerExpr(expr.value, env),
+    };
+  }
   if (isBoolLit(expr)) return lit("bool", expr.value);
   if (isNullLit(expr)) return lit("null", "null");
   if (isNowExpr(expr)) return lit("now", "now");
@@ -426,6 +438,25 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
       if (promoted) {
         left = promoted;
         leftType = { kind: "primitive", name: rAnchor };
+      }
+    }
+    // Implicit `string + X` concat: wrap the non-string operand in a
+    // `convert` IR so backends emit `String(x)` / `x.ToString()` /
+    // `to_string(x)` per their existing renderConvert dispatch —
+    // identical to what the explicit `string(x)` form would produce.
+    // `arithmeticResult` / `binaryResultType` have already accepted
+    // this combination above; the convert wrap is the lowering's
+    // payback.  Same shape both ways means the validator's strict
+    // gate never fires, and backends don't need a separate code path.
+    if (expr.op === "+") {
+      const lStr = leftType.kind === "primitive" && leftType.name === "string";
+      const rStr = rightType.kind === "primitive" && rightType.name === "string";
+      if (lStr && !rStr && isImplicitlyStringifiableIR(rightType)) {
+        right = wrapInStringConvert(right, rightType);
+        rightType = { kind: "primitive", name: "string" };
+      } else if (rStr && !lStr && isImplicitlyStringifiableIR(leftType)) {
+        left = wrapInStringConvert(left, leftType);
+        leftType = { kind: "primitive", name: "string" };
       }
     }
     return {
@@ -708,6 +739,9 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
   if (isIntLit(expr)) return { kind: "primitive", name: "int" };
   if (isDecLit(expr)) return { kind: "primitive", name: "decimal" };
   if (isMoneyLit(expr)) return { kind: "primitive", name: "money" };
+  if (isPrimitiveConversion(expr)) {
+    return { kind: "primitive", name: expr.target as PrimitiveName };
+  }
   if (isBoolLit(expr)) return { kind: "primitive", name: "bool" };
   if (isNullLit(expr)) return { kind: "primitive", name: "string" };
   if (isNowExpr(expr)) return { kind: "primitive", name: "datetime" };
@@ -915,10 +949,67 @@ function tryPromoteNumericLit(
   return null;
 }
 
+/** Wrap a value-IR in a `convert` IR with target=string so backends
+ *  emit the same to-string form they'd produce for an explicit
+ *  `string(x)` source-level call.  Used by the lowering binary
+ *  handler for implicit `string + X` concat — the validator has
+ *  already accepted the combination via `arithmeticResult`.
+ *
+ *  `from` is derived from the operand's source type — same primitive
+ *  name for primitives, `"enum"`/`"id"` sentinels for the non-
+ *  primitive admitted sources so backend `renderConvert` dispatches
+ *  consistently. */
+function wrapInStringConvert(value: ExprIR, fromType: TypeIR): ExprIR {
+  let from: PrimitiveName | undefined;
+  if (fromType.kind === "primitive") from = fromType.name;
+  // enum and `X id` are admitted as stringifiable but aren't
+  // primitives; backends inspect the wrapped value's runtime shape
+  // (enum value, id newtype) and pick the right host call.  Leaving
+  // `from` undefined here is the signal to the backend `convert`
+  // renderer to use the source operand's shape via the value
+  // itself (rather than the typed-primitive switch).
+  return { kind: "convert", target: "string", from, value };
+}
+
+/** Mirror of `type-system.ts`'s `isImplicitlyStringifiable`, on
+ *  `TypeIR` instead of `DddType`.  Same set: numeric primitives,
+ *  bool, enum, `X id`.  Used by the lowering binary handler to
+ *  decide whether to inject a `convert` node when one side of `+`
+ *  is string. */
+function isImplicitlyStringifiableIR(t: TypeIR): boolean {
+  if (t.kind === "primitive") {
+    return (
+      t.name === "int" ||
+      t.name === "long" ||
+      t.name === "decimal" ||
+      t.name === "money" ||
+      t.name === "bool"
+    );
+  }
+  if (t.kind === "enum") return true;
+  if (t.kind === "id") return true;
+  return false;
+}
+
 function binaryResultType(op: string, a: TypeIR, b: TypeIR): TypeIR {
   if (op === "&&" || op === "||") return { kind: "primitive", name: "bool" };
   if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
     return { kind: "primitive", name: "bool" };
+  }
+  // Implicit string concatenation: `string + X` where X is
+  // stringifiable returns string.  Mirrors `arithmeticResult` in
+  // `type-system.ts` — the lowering wraps the non-string operand in
+  // a `convert` IR node so backends emit identical code to the
+  // explicit `string(x)` form.
+  if (op === "+") {
+    const aStr = a.kind === "primitive" && a.name === "string";
+    const bStr = b.kind === "primitive" && b.name === "string";
+    if (aStr || bStr) {
+      const other = aStr ? b : a;
+      if ((aStr && bStr) || isImplicitlyStringifiableIR(other)) {
+        return { kind: "primitive", name: "string" };
+      }
+    }
   }
   const aIsMoney = a.kind === "primitive" && a.name === "money";
   const bIsMoney = b.kind === "primitive" && b.name === "money";

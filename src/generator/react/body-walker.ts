@@ -77,7 +77,12 @@ import {
   emitSlot,
   emitStat,
 } from "./walker/primitives/display.js";
-import { emitFormOf, emitModal } from "./walker/primitives/forms.js";
+import {
+  emitCreateForm,
+  emitModal,
+  emitOperationForm,
+  emitWorkflowForm,
+} from "./walker/primitives/forms.js";
 import {
   emitField,
   emitNumberField,
@@ -266,7 +271,9 @@ export const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "DateDisplay",
   "EnumBadge",
   "IdLink",
-  "Form",
+  "CreateForm",
+  "OperationForm",
+  "WorkflowForm",
   "Breadcrumbs",
   "Paper",
   "Skeleton",
@@ -686,8 +693,12 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
       return emitEnumBadge(call, ctx, depth);
     case "IdLink":
       return emitIdLink(call, ctx, depth);
-    case "Form":
-      return emitFormOf(call, ctx, depth);
+    case "CreateForm":
+      return emitCreateForm(call, ctx, depth);
+    case "OperationForm":
+      return emitOperationForm(call, ctx, depth);
+    case "WorkflowForm":
+      return emitWorkflowForm(call, ctx, depth);
     case "Breadcrumbs":
       return emitBreadcrumbs(call, ctx, depth);
     case "Paper":
@@ -933,6 +944,27 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       return `/* unresolved: ${expr.name} */ undefined`;
     case "binary":
       return `(${emitExpr(expr.left, ctx)} ${expr.op} ${emitExpr(expr.right, ctx)})`;
+    case "convert": {
+      // Mirrors `generator/typescript/render-expr.ts`'s renderTsConvert.
+      // Implicit-string-concat in page bodies (`"Active: " + count`)
+      // injects a `convert` IR node around the non-string operand;
+      // the walker emits the same `String(x)` / `x.toString()` form
+      // the domain renderer does.
+      const v = emitExpr(expr.value, ctx);
+      if (expr.target === "string") {
+        if (expr.from === "money") return `${v}.toString()`;
+        return `String(${v})`;
+      }
+      if (expr.target === "long" || expr.target === "decimal") {
+        if (expr.from === "money") return `${v}.toNumber()`;
+        return v;
+      }
+      if (expr.target === "money") {
+        if (expr.from === "money") return v;
+        return `new Decimal(${v})`;
+      }
+      return v;
+    }
     case "unary":
       return `(${expr.op}${emitExpr(expr.operand, ctx)})`;
     case "call": {
