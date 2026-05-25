@@ -89,7 +89,7 @@ function stubCsharpValueForType(t: TypeIR): string {
     case "id":
       return "System.Guid.Empty";
     case "array":
-      return `System.Array.Empty<${renderCsType(t.element)}>()`;
+      return `new System.Collections.Generic.List<${renderCsType(t.element)}>()`;
     default:
       return "null!";
   }
