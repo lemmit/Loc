@@ -144,9 +144,9 @@ function testIdAndActive(page: PageIR): {
   activeArgs: string;
 } {
   const route = page.route ?? "";
-  switch (page.archetype?.kind) {
+  switch (page.origin?.kind) {
     case "aggregate-list": {
-      const slug = snake(plural(page.archetype.aggregateName));
+      const slug = snake(plural(page.origin.aggregateName));
       return {
         testId: `nav-${slug}`,
         activeArgs: JSON.stringify(`/${slug}`),
@@ -154,21 +154,21 @@ function testIdAndActive(page: PageIR): {
     }
     case "aggregate-new":
     case "aggregate-detail": {
-      const slug = snake(plural(page.archetype.aggregateName));
+      const slug = snake(plural(page.origin.aggregateName));
       return {
-        testId: `nav-${slug}-${page.archetype.kind === "aggregate-new" ? "new" : "detail"}`,
+        testId: `nav-${slug}-${page.origin.kind === "aggregate-new" ? "new" : "detail"}`,
         activeArgs: JSON.stringify(route),
       };
     }
     case "workflow-form": {
-      const slug = snake(page.archetype.workflowName);
+      const slug = snake(page.origin.workflowName);
       return {
         testId: `nav-workflow-${slug}`,
         activeArgs: JSON.stringify(`/workflows/${slug}`),
       };
     }
     case "view-list": {
-      const slug = snake(page.archetype.viewName);
+      const slug = snake(page.origin.viewName);
       return {
         testId: `nav-view-${slug}`,
         activeArgs: JSON.stringify(`/views/${slug}`),

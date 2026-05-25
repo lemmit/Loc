@@ -79,7 +79,6 @@ import {
 } from "./walker/primitives/display.js";
 import {
   emitCreateForm,
-  emitFormOf,
   emitModal,
   emitOperationForm,
   emitWorkflowForm,
@@ -269,7 +268,6 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "DateDisplay",
   "EnumBadge",
   "IdLink",
-  "Form",
   "CreateForm",
   "OperationForm",
   "WorkflowForm",
@@ -692,8 +690,6 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
       return emitEnumBadge(call, ctx, depth);
     case "IdLink":
       return emitIdLink(call, ctx, depth);
-    case "Form":
-      return emitFormOf(call, ctx, depth);
     case "CreateForm":
       return emitCreateForm(call, ctx, depth);
     case "OperationForm":

@@ -95,11 +95,14 @@ const SPECS = {
   Empty: { kind: "leaf", positional: [{ key: "message", kind: "text" }] },
   Divider: { kind: "leaf" },
   List: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
-  // Operation form: `Form(<instance>.<operation>)` — the operation is a
-  // positional ref (a member access through an in-scope aggregate
-  // instance, like Action). Create/workflow forms use the named args:
-  // `of:`/`creates:` bind an aggregate, `runs:` binds a workflow.
-  Form: { kind: "leaf", positional: [{ key: "operation", kind: "ref", options: "operation" }], named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "creates", kind: "ref", options: "aggregate" }, { key: "runs", kind: "ref", options: "workflow" }, { key: "testid", kind: "string" }] },
+  // Named-leaf form primitives — one entry per shape, no
+  // argument-introspection dispatch:
+  //   * CreateForm(of:)       — create-form for the aggregate
+  //   * OperationForm(of:,op:) or OperationForm(<inst>.<op>) — op form
+  //   * WorkflowForm(runs:)   — workflow-run form
+  CreateForm: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
+  OperationForm: { kind: "leaf", positional: [{ key: "operation", kind: "ref", options: "operation" }], named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "op", kind: "ref", options: "operation" }, { key: "testid", kind: "string" }] },
+  WorkflowForm: { kind: "leaf", named: [{ key: "runs", kind: "ref", options: "workflow" }, { key: "testid", kind: "string" }] },
   // Layout / no-arg primitives.
   Breadcrumbs: { kind: "container" },
   KeyValueRow: { kind: "container", positional: ["label"] },

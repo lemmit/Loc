@@ -184,7 +184,7 @@ ui SalesAdmin with scaffold(modules: [Catalog], aggregates: [Customer, Product],
 //   page CatalogProductList   { route: "/catalog/products",
 //                               body:  List(of: Product) }
 //   page CatalogProductNew    { route: "/catalog/products/new",
-//                               body:  Form(creates: Product) }
+//                               body:  CreateForm(of: Product) }
 //   page CatalogProductDetail(id: Product id) {
 //                               route: "/catalog/products/:id",
 //                               body:  Detail(of: Product, by: id) }

@@ -89,44 +89,6 @@ export function emitWorkflowForm(
   return emitFormRuns(call, ctx, depth, runsArg);
 }
 
-export function emitFormOf(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // `Form` dispatches on which named arg is present:
-  //   `of:  <Aggregate>` → create-form for the aggregate
-  //   `runs: <workflow>` → workflow-run form
-  // The two share rendering (same per-field preparer + same outer
-  // <form> JSX) but differ in shell wiring (request type, mutation
-  // hook, default redirect).  We branch here, build the matching
-  // FormOfState variant, and let the shell + template handle the
-  // rest.
-  const runsArg = namedArgValue(call, "runs");
-  if (runsArg) return emitFormRuns(call, ctx, depth, runsArg);
-  // `Form(of: <Agg>, op: <opName>)` → operation form bound by
-  // aggregate name + op name, without needing an in-scope instance.
-  // Used by `scaffoldOperations(of: …)`: the modals live at top
-  // level (no enclosing QueryView lambda), so there's no `data` to
-  // dot into.  The mutation hook resolves the id from the route.
-  const ofArg = namedArgValue(call, "of");
-  const opArg = namedArgValue(call, "op");
-  if (ofArg && opArg && ofArg.kind === "ref" && opArg.kind === "ref") {
-    return emitFormOfOperationByName(call, ctx, ofArg.name, opArg.name);
-  }
-  // `Form(<instance>.<operation>)` → operation-invocation form.
-  // The operation is referenced through an in-scope aggregate
-  // instance (a `member` node with a `ref` receiver), mirroring the
-  // `Action` primitive.  Hosted inside a `Modal`; rendered as a
-  // module-scope component (own `useForm`) so multiple op-forms on one
-  // detail page don't collide on RHF locals.
-  const opRef = positionalArgs(call)[0];
-  if (opRef && opRef.kind === "member" && opRef.receiver.kind === "ref") {
-    return emitFormOfOperation(call, ctx, opRef);
-  }
-  return emitFormOfAggregate(call, ctx, depth);
-}
-
 /** Like `emitFormOfOperation` but addressed by aggregate name +
  *  op name (`Form(of: <Agg>, op: <opName>)`) instead of an
  *  instance-qualified member.  No in-scope record needed — the
@@ -529,8 +491,7 @@ export function emitModal(
 ): string {
   const positionals = positionalArgs(call);
   const formChild = positionals.find(
-    (a): a is ExprIR & { kind: "call" } =>
-      a.kind === "call" && (a.name === "Form" || a.name === "OperationForm"),
+    (a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "OperationForm",
   );
   const triggerArg = namedArgValue(call, "trigger");
   if (!formChild || !triggerArg || triggerArg.kind !== "call") {

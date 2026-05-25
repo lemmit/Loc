@@ -5,7 +5,7 @@
 //     instance-qualified `Action(order.confirm, then: navigate(...))`
 //     buttons, mounted inside a QueryView that loads the record;
 //   - the scaffold-generated Detail page, whose operation forms lower
-//     to the instance-qualified `Form(data.<op>)` surface.
+//     to the instance-qualified `OperationForm(data.<op>)` surface.
 //
 // Pack-neutral: the matrix injects `design: <pack>` per shard.
 
@@ -39,7 +39,7 @@ system ActionShowcase {
     }
 
     // Scaffold gives List / New / Detail.  The Detail page hosts the
-    // instance-qualified operation forms (`Form(data.<op>)`).
+    // instance-qualified operation forms (`OperationForm(data.<op>)`).
 
     // Explicit console page: load one order, mount the action panel.
     page OrderConsole {

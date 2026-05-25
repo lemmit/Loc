@@ -29,7 +29,7 @@ const stateBlock = (page: Page): StateBlock | undefined =>
 
 const WITH_STATE = `system S { ui U { page P {
   state { step: int = 0 }
-  body: Form(of: Order)
+  body: CreateForm(of: Order)
 } } }`;
 const NO_STATE = `system S { ui U { page Q {
   body: Text("hi")
