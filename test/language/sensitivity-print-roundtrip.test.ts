@@ -7,7 +7,12 @@
 // Parallel to `test/language/field-access-print-roundtrip.test.ts`.
 
 import { describe, expect, it } from "vitest";
-import type { Aggregate, BoundedContext, Model, Property } from "../../src/language/generated/ast.js";
+import type {
+  Aggregate,
+  BoundedContext,
+  Model,
+  Property,
+} from "../../src/language/generated/ast.js";
 import { isProperty } from "../../src/language/generated/ast.js";
 import { printStructural } from "../../src/language/print/index.js";
 import { parseRawResult } from "../_helpers/index.js";
@@ -52,11 +57,7 @@ describe("sensitivity — printer round-trip", () => {
 }`;
     const orig = parseRawResult(src);
     expect(orig.parserErrors).toEqual([]);
-    expect(payloadProp(orig.value as Model).sensitivity?.tags).toEqual([
-      "pii",
-      "phi",
-      "regulated",
-    ]);
+    expect(payloadProp(orig.value as Model).sensitivity?.tags).toEqual(["pii", "phi", "regulated"]);
 
     const ctx = (orig.value as Model).members[0]!;
     const printed = printStructural(ctx);
@@ -66,11 +67,7 @@ describe("sensitivity — printer round-trip", () => {
     const text = src.slice(0, cst.offset) + printed + src.slice(cst.end);
     const re = parseRawResult(text);
     expect(re.parserErrors).toEqual([]);
-    expect(payloadProp(re.value as Model).sensitivity?.tags).toEqual([
-      "pii",
-      "phi",
-      "regulated",
-    ]);
+    expect(payloadProp(re.value as Model).sensitivity?.tags).toEqual(["pii", "phi", "regulated"]);
   });
 
   it("composes with display, provenanced, and access modifier", () => {
@@ -86,9 +83,7 @@ describe("sensitivity — printer round-trip", () => {
     expect(orig.parserErrors).toEqual([]);
     const ctx = (orig.value as Model).members[0]!;
     const printed = printStructural(ctx);
-    expect(printed).toContain(
-      "label: string display provenanced sensitive(pii) immutable",
-    );
+    expect(printed).toContain("label: string display provenanced sensitive(pii) immutable");
 
     const cst = ctx.$cstNode!;
     const text = src.slice(0, cst.offset) + printed + src.slice(cst.end);

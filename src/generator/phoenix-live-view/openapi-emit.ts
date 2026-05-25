@@ -1,5 +1,4 @@
 import { wireShapeFor } from "../../ir/enrichments.js";
-import { forApiRead, forCreateInput } from "../../ir/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -12,6 +11,7 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../ir/loom-ir.js";
+import { forApiRead, forCreateInput } from "../../ir/wire-projection.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { ApiRoute } from "./api-emit.js";
 

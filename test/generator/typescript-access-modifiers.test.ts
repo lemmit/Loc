@@ -47,7 +47,9 @@ describe("TS/Hono generator — field access modifiers", () => {
     // Locate the CreateAccountRequest schema block specifically —
     // ends at the closing call to .openapi("CreateAccountRequest").
     const createReq =
-      (routes ?? "").match(/const CreateAccountRequest[\s\S]*?\.openapi\("CreateAccountRequest"\)/)?.[0] ?? "";
+      (routes ?? "").match(
+        /const CreateAccountRequest[\s\S]*?\.openapi\("CreateAccountRequest"\)/,
+      )?.[0] ?? "";
     expect(createReq, "block must be located").not.toEqual("");
     // Required client input remains:
     expect(createReq, "handle in Create request").toMatch(/handle/);

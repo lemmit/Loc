@@ -1,5 +1,4 @@
 import { wireShapeFor } from "../../ir/enrichments.js";
-import { forApiRead, forCreateInput } from "../../ir/wire-projection.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/invariant-classify.js";
 import {
   type AggregateIR,
@@ -13,6 +12,7 @@ import {
   type TypeIR,
   type ValueObjectIR,
 } from "../../ir/loom-ir.js";
+import { forApiRead, forCreateInput } from "../../ir/wire-projection.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   chainSingleFieldNative,

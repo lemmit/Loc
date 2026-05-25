@@ -1,5 +1,4 @@
 import { wireShapeFor } from "../../ir/enrichments.js";
-import { forApiRead } from "../../ir/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -8,6 +7,7 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
+import { forApiRead } from "../../ir/wire-projection.js";
 import { upperFirst } from "../../util/naming.js";
 import { renderCsType } from "./render-expr.js";
 

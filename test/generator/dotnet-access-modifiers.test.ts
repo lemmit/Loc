@@ -60,15 +60,11 @@ describe(".NET generator — field access modifiers", () => {
     // Server-controlled fields removed from create request.  The
     // matcher is anchored so we don't trip on the (unrelated) `Version`
     // file/header line or on any non-record mention.
-    const createReq = (req ?? "").match(
-      /record\s+CreateAccountRequest\s*\(([^)]*)\)/,
-    )?.[1] ?? "";
+    const createReq = (req ?? "").match(/record\s+CreateAccountRequest\s*\(([^)]*)\)/)?.[1] ?? "";
     expect(createReq, "managed field must not be in CreateAccountRequest").not.toMatch(
       /LoginCount/,
     );
-    expect(createReq, "token field must not be in CreateAccountRequest").not.toMatch(
-      /Version/,
-    );
+    expect(createReq, "token field must not be in CreateAccountRequest").not.toMatch(/Version/);
     expect(createReq, "internal field must not be in CreateAccountRequest").not.toMatch(
       /AdminNotes/,
     );

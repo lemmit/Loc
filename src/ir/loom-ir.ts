@@ -89,13 +89,7 @@ export interface ParamIR {
  *   internal  — views may read; never exposed via API; no client input
  *   secret    — client may write (create + update); never disclosed
  *               in any read */
-export type FieldAccess =
-  | "editable"
-  | "immutable"
-  | "managed"
-  | "token"
-  | "internal"
-  | "secret";
+export type FieldAccess = "editable" | "immutable" | "managed" | "token" | "internal" | "secret";
 
 export interface FieldIR {
   name: string;

@@ -5,7 +5,6 @@ import {
   takeSingleFieldChain,
 } from "../../../generator/typescript/zod-refine.js";
 import { wireShapeFor } from "../../../ir/enrichments.js";
-import { forCreateInput } from "../../../ir/wire-projection.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../../ir/invariant-classify.js";
 import type {
   AggregateIR,
@@ -25,6 +24,7 @@ import {
   operationUsesCurrentUser,
 } from "../../../ir/loom-ir.js";
 import { opHasProvSite } from "../../../ir/prov-id.js";
+import { forCreateInput } from "../../../ir/wire-projection.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------

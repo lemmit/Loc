@@ -8,7 +8,12 @@
 // `printProperty`) is intentionally out of scope for this PR.
 
 import { describe, expect, it } from "vitest";
-import type { Aggregate, BoundedContext, Model, Property } from "../../src/language/generated/ast.js";
+import type {
+  Aggregate,
+  BoundedContext,
+  Model,
+  Property,
+} from "../../src/language/generated/ast.js";
 import { isProperty } from "../../src/language/generated/ast.js";
 import { printStructural } from "../../src/language/print/index.js";
 import { parseRawResult } from "../_helpers/index.js";
@@ -40,7 +45,9 @@ describe("field access — printer round-trip", () => {
     // printProperty via the aggregate's member loop).
     const ctx = (orig.value as Model).members[0]!;
     const printed = printStructural(ctx);
-    expect(printed, `printed source should contain the modifier`).toContain(`payload: string ${modifier}`);
+    expect(printed, `printed source should contain the modifier`).toContain(
+      `payload: string ${modifier}`,
+    );
 
     // Splice the printed text back over the context's range and re-parse.
     const cst = ctx.$cstNode!;

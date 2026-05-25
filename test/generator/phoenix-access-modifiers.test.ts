@@ -44,10 +44,7 @@ describe("Phoenix generator — field access modifiers", () => {
   it("AccountResponse OpenAPI schema excludes `internal` and `secret`", async () => {
     const files = await gen(FIXTURE);
     // Locate the per-aggregate response schema Elixir module.
-    const resp = findFile(
-      files,
-      /api\/schemas\/account_response\.ex$|AccountResponse\.ex$/i,
-    );
+    const resp = findFile(files, /api\/schemas\/account_response\.ex$|AccountResponse\.ex$/i);
     expect(resp, "AccountResponse module should be emitted").toBeDefined();
     expect(resp, "handle (editable) in response schema").toMatch(/handle/);
     expect(resp, "slug (immutable) in response schema").toMatch(/slug/);
@@ -71,13 +68,9 @@ describe("Phoenix generator — field access modifiers", () => {
     // Required client input remains:
     expect(req, "handle in Create request").toMatch(/handle/);
     expect(req, "slug (immutable) in Create request").toMatch(/slug/);
-    expect(req, "passwordHash (secret) in Create request").toMatch(
-      /password_hash|passwordHash/,
-    );
+    expect(req, "passwordHash (secret) in Create request").toMatch(/password_hash|passwordHash/);
     // Server-controlled fields removed:
-    expect(req, "loginCount (managed) NOT in Create request").not.toMatch(
-      /login_count|loginCount/,
-    );
+    expect(req, "loginCount (managed) NOT in Create request").not.toMatch(/login_count|loginCount/);
     expect(req, "version (token) NOT in Create request").not.toMatch(/version/);
     expect(req, "adminNotes (internal) NOT in Create request").not.toMatch(
       /admin_notes|adminNotes/,
