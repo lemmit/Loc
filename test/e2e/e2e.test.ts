@@ -257,11 +257,46 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     // All three backends serve the same modules from showcase.ddd, so
     // their OpenAPI specs should describe the same contract.  Hono via
     // @hono/zod-openapi, .NET via Swashbuckle, Phoenix via OpenApiSpex.
-    const specs: Record<string, OpenApiSpec> = {
-      hono: await fetchSpec("http://localhost:3000/openapi.json"),
-      dotnet: await fetchSpec("http://localhost:8080/swagger/v1/swagger.json"),
-      phoenix: await fetchSpec("http://localhost:4000/api/openapi.json"),
-    };
+    let specs: Record<string, OpenApiSpec>;
+    try {
+      specs = {
+        hono: await fetchSpec("http://localhost:3000/openapi.json"),
+        dotnet: await fetchSpec("http://localhost:8080/swagger/v1/swagger.json"),
+        phoenix: await fetchSpec("http://localhost:4000/api/openapi.json"),
+      };
+    } catch (err) {
+      // /health succeeded but a spec endpoint didn't.  Most likely cause is
+      // a server-side rendering exception (e.g. an OpenApiSpex schema error
+      // in Phoenix).  Dump the same diagnostic surface as the up -d and
+      // /health catches so the next round shows the actual stack trace.
+      const capture = (cmd: string): string => {
+        try {
+          return execSync(cmd, {
+            stdio: ["ignore", "pipe", "pipe"],
+            encoding: "utf8",
+            timeout: 30_000,
+          });
+        } catch (e: unknown) {
+          const ex = e as { stdout?: string; stderr?: string; message?: string };
+          return `[capture failed] ${ex.message ?? "unknown"}\nstdout: ${ex.stdout ?? ""}\nstderr: ${ex.stderr ?? ""}`;
+        }
+      };
+      const sections = [
+        "===== compose ps -a (post-spec-fetch) =====",
+        capture(`docker compose -f ${outDir}/docker-compose.yml ps -a`),
+        "===== compose logs --tail=400 (post-spec-fetch) =====",
+        capture(`docker compose -f ${outDir}/docker-compose.yml logs --tail=400`),
+        "===== end compose diagnostics =====",
+      ];
+      const body = sections.join("\n");
+      console.error("\n" + body + "\n");
+      try {
+        fs.writeFileSync("/tmp/loom-e2e-diagnostics.log", body);
+      } catch {
+        /* ignore */
+      }
+      throw err;
+    }
 
     // Sanity: every backend must publish a non-empty contract.
     for (const [name, spec] of Object.entries(specs)) {
