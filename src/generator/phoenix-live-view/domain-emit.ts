@@ -89,19 +89,29 @@ function renderAggregateResource(
     ":updated_at",
   ].join(", ");
 
-  // Inspect protocol implementation: delegates to the resource's
-  // `:inspect` calculation when one is declared.  Gives a useful debug
-  // form in IEx, Logger, and exceptions — the Phoenix/Elixir equivalent
-  // of the TS `util.inspect.custom` / C# `ToString()` hook.  See plan
-  // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
-  const inspectImpl = agg.derived.some((d) => d.name === "inspect")
+  // Inspect protocol implementation: inlines the `inspect` derived's
+  // expression body as native Elixir.  Two reasons we can't go through
+  // an Ash `calculate :inspect, :string, expr(...)`:
+  //   1. Ash's `expr()` DSL doesn't admit `<>` or `to_string/1` — the
+  //      synthesised structural form uses both.
+  //   2. `defimpl Inspect.inspect/2` is invoked synchronously during
+  //      exception serialisation / Logger / IEx; calling `Ash.load/2`
+  //      from inside it is fragile (re-entrant DB access, potential
+  //      Inspect loops on errors).
+  // Inlining renders against the struct's stored attributes directly —
+  // safe because the auto-synthesised inspect references only `id` and
+  // stored fields (both present on the struct without `Ash.load`).
+  // User-written `derived inspect` is the same story so long as the
+  // body sticks to stored fields; references to other calculations
+  // (e.g. `display`) would need explicit loading, which is on the
+  // user — same caveat applies to any Inspect impl in Elixir.
+  // See plan `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+  const inspectDerived = agg.derived.find((d) => d.name === "inspect");
+  const inspectImpl = inspectDerived
     ? `
 defimpl Inspect, for: ${moduleName} do
   def inspect(record, _opts) do
-    case Ash.load(record, :inspect) do
-      {:ok, loaded} -> loaded.inspect
-      _ -> "#${moduleName}<id=" <> to_string(record.id) <> ">"
-    end
+    ${renderExpr(inspectDerived.expr, renderCtx)}
   end
 end
 `
@@ -295,6 +305,11 @@ function renderCalculations(
   for (const d of derived) {
     // Lifted to aggregates (count :rel) above; skip here.
     if (isRelationshipCountDerive(d, agg.contains)) continue;
+    // The reserved `inspect` derived is realised as a `defimpl Inspect`
+    // block outside the resource module — Ash's `expr()` DSL doesn't
+    // admit the `<>` / `to_string/1` shapes the synthesised expression
+    // uses.  See the inspect-impl block in `renderAggregateResource`.
+    if (d.name === "inspect") continue;
     const ashType = renderAshType(d.type, ctx.contextModule);
     const exprStr = renderExpr(d.expr, ctx);
     derivedLines.push(`    calculate :${snake(d.name)}, ${ashType}, expr(${exprStr})`);
