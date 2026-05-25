@@ -1,11 +1,12 @@
-# Exception-less flow — `Result`, `Option`, propagation, wire-edge mapping
+# Exception-less flow — `or` unions, `option`, `?` propagation, `error` payloads
 
 > Status: proposal. **Upstream proposal**:
 > [`payload-transport-layer.md`](./payload-transport-layer.md) — this
 > doc consumes its Phase 3+4 (carrier-bounded generics + tagged
-> unions), its `: carrier` bound widening, its aggregate-as-carrier
-> projection rule, and its variant-name-tagged identity rule. Read
-> that doc first.
+> unions, both named and anonymous-`or`), its `: carrier` bound
+> widening, its aggregate-as-carrier projection rule, its
+> variant-name-tagged identity rule, and the `error` sugar keyword
+> introduced there. Read that doc first.
 
 ## TL;DR
 
@@ -14,21 +15,28 @@ not-found, validation, parse errors, external API failures. This
 proposal removes them everywhere **except** aggregate invariant
 violations, by:
 
-1. Adding native `Option<T>` / `Result<T, E>` as payload unions (falls
-   out of the upstream proposal's Phase 3+4).
-2. Adding a `?` propagation operator so the typed flow doesn't
-   become a five-line `match` at every call site.
-3. Adding a declarative wire-edge status mapping (`on wire { ... }`
-   clause) on `Err` variants, so `Err<NotFound>` → 404 without
-   per-route boilerplate.
-4. Re-shaping find variants so `find one` returns `Result<T,
-   NotFound>` and `find first` returns `Option<T>` natively.
-5. Re-shaping parse / validate / external API call lowerings to
-   return Result, never throw.
+1. **No `Result<T, E>` wrapper.** Operations return anonymous `or`
+   unions directly: `operation placeOrder(...): OrderId or NotFound
+   or OutOfStock`. The `error` sugar keyword (from upstream proposal)
+   marks variants that participate in `?` propagation.
+2. **`option` as ML-postfix sugar** for `T or none` — the common
+   nullable-return case. `string option` reads as "an optional
+   string"; the `find` re-shape lowers `: X?` returns to this.
+3. **`?` propagation operator** — short-circuits any value of an
+   `error`-marked variant, threads non-error values onward.
+4. **`on wire <Status>` clause** lives on the `error` payload itself
+   (per-error, not per-union). At the wire edge, errors lift their
+   status code; the body becomes the variant data directly — no
+   `kind`-tagged envelope for success responses.
+5. **Find re-shape**: a find declared `: X` returns `X or NotFound`;
+   declared `: X?` returns `X option`; declared `: X[]` stays an
+   array.
+6. **Parse / external API / validators** return `T or <Error>` shapes
+   instead of throwing.
 
-The two-regime line is **explicit**: aggregate invariants (`requires`
-/ `ensures`) may throw; everything else returns a carrier. The
-validator enforces this.
+The two-regime line is **explicit and validator-enforced**: aggregate
+invariants (`requires` / `ensures`) may throw; everything else returns
+a carrier shape.
 
 ## Why this matters
 
@@ -42,15 +50,16 @@ consequences:
    The signature says "returns OrderId"; only by reading the body do
    you learn it might throw `NotFound`, `OutOfStock`, or
    `ValidationFailed`. Worse, the *set* isn't enumerated anywhere.
-2. **Every backend route emitter is a try/catch tower.** `src/generator/ts/...routes`,
-   the .NET controller emission, and the Phoenix action handlers all
-   carry parallel implementations of "if this exception class, return
-   that status code". They drift; they have to.
+2. **Every backend route emitter is a try/catch tower.**
+   `src/generator/ts/...routes`, the .NET controller emission, and
+   the Phoenix action handlers all carry parallel implementations of
+   "if this exception class, return that status code". They drift;
+   they have to.
 3. **Composition is awful.** Calling three operations in sequence
-   today means either three try/catch blocks or letting all exceptions
-   bubble to the route layer where the mapping is uniform but
-   imprecise. Typed Result + propagation operator collapses both
-   options into one ergonomic call.
+   today means either three try/catch blocks or letting all
+   exceptions bubble to the route layer where the mapping is uniform
+   but imprecise. Typed `or` unions + propagation operator collapse
+   both options into one ergonomic call.
 
 The user-facing pitch: **standard flows shouldn't go through the
 exception channel.** Exceptions belong in domain invariants — places
@@ -60,16 +69,19 @@ where reaching the code is itself a bug.
 
 **In scope (v1)**:
 
-- `Option<T>`, `Result<T, E>` as native payload unions.
+- `error` payloads with per-payload `on wire <Status>` clauses
+  (declared in upstream proposal §"Subtypes"; semantics here).
+- Anonymous `or` unions in return types (declared in upstream
+  proposal §"Discriminated unions on payloads"; usage here).
+- `option` ML-postfix carrier as sugar for `T or none` (declared in
+  upstream proposal §"Syntax — ML-postfix for type positions").
 - `?` propagation operator with scoping rules.
-- `on wire { ... }` clause on Err payloads for HTTP status mapping.
-- Find-variant re-shape (`find one` → `Result`, `find first` →
-  `Option`, `find all` unchanged).
-- Parse intrinsics return `Result<T, ParseError>`.
+- Find-variant re-shape (`: X` → `X or NotFound`, `: X?` → `X option`,
+  `: X[]` unchanged).
+- Parse intrinsics return `T or ParseError`.
 - `validate for X { ... }` (from upstream proposal Phase 5) returns
-  `Result<X, ValidationError[]>`.
-- External API calls (`call api Foo.bar(x)`) return `Result<T,
-  ApiError>`.
+  `X or ValidationError[]` (multi-error accumulation).
+- External API calls (`call api Foo.bar(x)`) return `T or ApiError`.
 - Carrier stdlib (`map`, `flatMap`, `orElse`, `orError`, `combine`)
   for the closed builtin set — A7a below.
 - Two-regime enforcement: validator rejects throws outside aggregate
@@ -78,18 +90,16 @@ where reaching the code is itself a bug.
 **Deferred (v2 or later)**:
 
 - User-authored carrier-generic functions (writing your own
-  `MyCarrier.map`) — A7b below. Needs structural rules pinned in
-  upstream proposal but no v1 use case strong enough to justify the
-  type-system work.
-- `Validated<T, NEL<E>>` / applicative error accumulation. Covered
-  for v1 by `Result<T, ValidationError[]>` + `Result.combine` helper.
+  `MyCarrier.map`) — A7b below.
+- Multi-success/multi-error `combine`-style applicative accumulation
+  beyond the simple `X or ValidationError[]` shape.
 - Async / `IO<T>` / `Task<T>` effect types. Loom doesn't expose async
   surface to authors today.
 - Higher-kinded types, type classes (`Functor`, `Monad`). v1 ships
-  monomorphized per-instantiation helpers; no shared abstract
+  monomorphised per-instantiation helpers; no shared abstract
   signature.
-- `?.`-style chained access on Option (e.g. `customer?.address?.city`).
-  Sugar; defer until concrete demand.
+- `?.`-style chained access on `option` (e.g.
+  `customer?.address?.city`). Sugar; defer until concrete demand.
 - `try`/`catch` in user code (it never appears).
 
 ## The two regimes — pinned
@@ -97,15 +107,15 @@ where reaching the code is itself a bug.
 | Regime | What it covers | Failure model |
 |---|---|---|
 | **Domain core** | Aggregate invariants (`requires` / `ensures`), aggregate construction preconditions, internal generator-emitted assertions | **May throw.** A violation is a programmer bug, not a value worth propagating. |
-| **Application / boundary** | Find / lookup, parse, validate, external API call, file IO, type coercion, operation bodies that orchestrate the above | **Never throws.** Returns `Result<T, E>` or `Option<T>`. |
+| **Application / boundary** | Find / lookup, parse, validate, external API call, file IO, type coercion, operation bodies that orchestrate the above | **Never throws.** Returns a carrier — either `T option` (when absence is normal) or `T or <Error>...` (when typed errors are possible). |
 
 The line is **enforced by the validator**:
 
 - Any expression appearing inside an `aggregate { operation { ... }
-  }` body whose return type is `T` (not `Result<T, _>`) may
-  throw via invariant checks — that's the only legal channel.
+  }` body whose return type is `T` (not a carrier) may throw via
+  invariant checks — that's the only legal channel.
 - Any expression elsewhere — operation bodies declared with a
-  Result/Option return, repository methods, parse intrinsics,
+  carrier return type, repository methods, parse intrinsics,
   validator bodies, external API call lowerings — must return a
   carrier. The validator forbids `raise`/`throw`-shaped lowering in
   these contexts.
@@ -114,145 +124,148 @@ Observability mapping (preserves today's catalog):
 
 - `invariant_violated` / `precondition_evaluated` from #480 — fired
   by aggregate-invariant throws (unchanged).
-- `domain_error` — repurposed: fires on `Err<E>` returned at the
-  wire edge with no specific status mapping. Today's catch-all stays
-  as a fallback, not a primary signal.
+- `domain_error` — repurposed: fires on an `error`-marked variant
+  returned at the wire edge with no specific status mapping. Today's
+  catch-all stays as a fallback, not a primary signal.
 
-## Result and Option as native payload unions
+## Surface — `error`, `or`, `option` working together
+
+A worked example showing all four mechanisms at once:
 
 ```
-payload Option<T: carrier> = Some<T> | None
-payload Some<T: carrier> { value: T }
-payload None { }
+# Declare typed errors (sugar keyword from upstream proposal).
+# Each error owns its HTTP status via `on wire <Status>`.
+error NotFound   { what: string, id: string }   on wire 404
+error OutOfStock { sku: string, requested: int } on wire 409
+error Forbidden  { actor: string }              on wire 403
 
-payload Result<T: carrier, E: carrier> = Ok<T> | Err<E>
-payload Ok<T: carrier> { value: T }
-payload Err<E: carrier> { error: E }
+# Operation returns an anonymous `or` union of one success + three errors.
+# No Result wrapper, no Ok/Err variants — the type IS the union.
+operation placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or OutOfStock or Forbidden {
+  ensureAuthorised(cmd.actor)?              # if Err-variant, short-circuit
+  let customer = customers.findById(cmd.customerId)?   # ? propagates NotFound
+  let prices   = pricing.compute(cmd.items)?           # ? propagates OutOfStock
+  let order    = Order.create(customer, prices)        # may throw — invariant
+  return order.id                            # the OrderId variant (success)
+}
+
+# Find with optional return — `: X?` → `X option`
+find findById(id: Customer id): Customer? { ... }
+# Lowering type: customer option
+
+# Find with required return — `: X` → `X or NotFound`
+find findByEmail(email: string): Customer { ... }
+# Lowering type: Customer or NotFound
 ```
 
-These are declared in the **carrier stdlib** (a new
-`src/stdlib/payloads.ddd` or equivalent embedded source), not as
-keywords. They're regular payload unions; nothing special about them
-at the type-system level beyond being blessed members of the carrier
-universe.
+In the operation body:
+- `?` on `customer or NotFound` short-circuits if `NotFound`,
+  otherwise unwraps to `Customer`.
+- `?` on `prices or OutOfStock` propagates `OutOfStock` to the
+  caller because the caller's return type already lists it.
+- Returning `order.id` (an `OrderId`) is the non-error variant — no
+  `Ok` wrapper needed; the value's type matches one of the union's
+  arms.
 
-### Wire encoding
+Wire encoding for the response:
+- Success → HTTP 200, body is the `OrderId` data (just `"ord_abc"`
+  or `{"value": "ord_abc"}` depending on primitive vs payload). No
+  `{"kind": "OrderId"}` envelope.
+- `NotFound` → HTTP 404, body is `{"what": "Customer", "id": "..."}`.
+- `OutOfStock` → HTTP 409, body is `{"sku": "...", "requested": 5}`.
+- `Forbidden` → HTTP 403, body is `{"actor": "..."}`.
 
-Per upstream proposal §"Discriminated unions": the `kind`
-discriminator carries the variant name.
+The HTTP status carries the discriminator at the route boundary; no
+`kind` envelope needed for success. For non-HTTP carriers (queue
+messages, persisted snapshots) the tagged `kind` form is used —
+because there's no out-of-band discriminator there.
 
-```json
-// Result<OrderId, PlaceError>
-{ "kind": "Ok",  "value": "ord_abc123" }
-{ "kind": "Err", "error": { "kind": "NotFound", "what": "Customer", "id": "..." } }
+### Why no `Result<T, E>` wrapper
 
-// Option<CustomerWire>
-{ "kind": "Some", "value": { "id": "...", "name": "...", "email": "..." } }
-{ "kind": "None" }
+Compare the two encodings of the same return:
+
+| Form | Type expression | Success wire | Error wire |
+|---|---|---|---|
+| Old (with Result wrapper) | `Result<OrderId, NotFound>` | `{"kind":"Ok","value":"ord_abc"}` | `{"kind":"Err","error":{"kind":"NotFound",...}}` |
+| New (`or` union) | `OrderId or NotFound` | `"ord_abc"` (HTTP 200) | `{"what":"Customer","id":"..."}` (HTTP 404) |
+
+The Result wrapper double-tags every value on the wire and forces
+authors to write `Ok { value: ... }` / `Err { error: ... }`
+constructors where the type itself already carries the variant. The
+`or` form drops a layer of ceremony and matches what every
+hand-rolled REST API does — return the data on success, return an
+error body with the appropriate status on failure.
+
+### What about `option`?
+
+`option` is sugar for `T or none`, where `none` is a stdlib unit
+type. So `string option` is exactly `string or none` — same wire
+shape, same propagation rules, just more readable.
+
+```
+operation findActiveSession(userId: User id): Session option {
+  let session = sessions.findActiveFor(userId)?    # ? propagates `none`
+  return session
+}
 ```
 
-The wire encoding is uniform across all four backends; per upstream
-proposal that's the whole point of the structural transport layer.
-
-### Per-backend lowering
-
-| Backend | Encoding |
-|---|---|
-| TS / Hono / React | Discriminated union of plain objects; narrowing on `kind` is native TS. |
-| .NET / Mediator | Sealed-record hierarchy with `[JsonDerivedType]` polymorphic JSON. One record per variant. |
-| Phoenix / Ash | `Result` → `{:ok, _} \| {:error, _}` (idiomatic; `with` collapses propagation for free). `Option` lowering — see decision below. |
-
-**Phoenix `Option` lowering — pinned decision.** Elixir has two
-idiomatic options: `nil | value` (bare nullable) or `{:some, _} |
-:none` (tagged tuple). Pinned to **`nil | value` for the inner
-runtime representation**, with the `Option`-tagged shape only at
-the wire boundary. Reasons:
-
-- Every Elixir / Ash function returning "maybe a value" today uses
-  `nil` — pattern matching, `case`, guards, `with` all idiomatic.
-- `Enum.map` / `Map.get` / nearly every stdlib function returns
-  `nil`; mixing tagged tuples breaks composition.
-- The runtime cost is one shape (a nullable); the wire encoding is
-  still tagged (`{"kind": "Some", "value": ...}` or `{"kind":
-  "None"}`) for cross-backend uniformity.
-
-The Phoenix `render-expr.ts`/`render-stmt.ts` emitter applies the
-encoding/decoding at the wire boundary (HTTP route handler, queue
-publish/consume). Inside Elixir domain code, `Option<T>` is a `T |
-nil` typespec.
-
-**TS and .NET keep tagged-object representation** (their idiom for
-discriminated unions). The wire encoding is uniform across all three.
-
-### Carrier composition
-
-Carriers compose. `Result<Option<T>, E>`, `Page<Option<T>>`,
-`Option<Result<T, E>>` are all legal and have unambiguous wire
-shapes. The propagation operator threads one carrier layer:
-
-- `result?` on `Result<Option<T>, E>` inside `Result<_, E>`-returning
-  fn → unwraps to `Option<T>`.
-- `optResult?` on `Option<Result<T, E>>` inside `Option<_>`-returning
-  fn → unwraps to `Result<T, E>` (still wrapped); a second `?`
-  unwraps the inner Result.
-
-The carrier stdlib also covers cross-carrier helpers:
-`Option.transpose(Option<Result<T, E>>) -> Result<Option<T>, E>` etc.
-Limited to the closed builtin set in A7a; user-declared
-cross-carrier helpers are A7b.
-
-### The `Customer` vs `CustomerWire` question (resolved)
-
-Per the upstream proposal's **aggregate-as-carrier projection rule**:
-
-- Inside a function body, `Option<Customer>`'s `Some.value` is typed
-  as `Customer` (the aggregate handle, with methods).
-- At the wire edge, the encoder projects `Customer` to `CustomerWire`
-  automatically. The serialised form is `Option<CustomerWire>`.
-
-The two types are distinct — aggregate ≠ wire — but the carrier
-mechanism bridges them via the existing `wireShape` enrichment. No
-new IR concept; just a hook in the union-arm lowering pass.
-
-Authors who want to be explicit about transport (e.g., a field whose
-static type *is* the wire form) write `Option<CustomerWire>`
-directly. Both forms coexist; on the wire they're equivalent.
+Wire encoding for `option` returns: at HTTP boundaries, `none`
+defaults to 404 (no body), `some(value)` is 200 with the value's
+wire shape. `none` has a built-in `on wire 404` default; no
+explicit clause needed.
 
 ## The `?` propagation operator
 
 ### Motivation
 
-```
-# Without ?:
-operation placeOrder(cmd: PlaceOrderCommand): Result<OrderId, PlaceError> {
-  let customerResult = customers.find one cmd.customerId
-  match customerResult {
-    Err -> return customerResult
-    Ok -> { }
-  }
-  let customer = customerResult.value
-  let totalResult = pricing.compute(cmd.items)
-  match totalResult {
-    Err -> return totalResult
-    Ok -> { }
-  }
-  let total = totalResult.value
-  let order = Order.create(customer, total)
-  return Ok { value: order.id }
-}
+Without the operator, every `or`-union-returning call costs five
+lines of `match`. Authors revert to throwing. With it, the typed
+flow reads like sequential code (see the worked example above).
 
-# With ?:
-operation placeOrder(cmd: PlaceOrderCommand): Result<OrderId, PlaceError> {
-  let customer = customers.find one cmd.customerId?
-  let total    = pricing.compute(cmd.items)?
-  let order    = Order.create(customer, total)
-  return Ok { value: order.id }
-}
-```
+### Propagation rule
 
-Without the operator, every Result-returning call costs five lines
-and a nested `match`. Authors revert to throwing. With it, the typed
-flow reads like sequential code.
+`expr?` where `expr: T1 or T2 or … or Tn` short-circuits if the
+runtime value is an `error`-marked variant, returning that variant
+from the enclosing function. Otherwise it unwraps to the
+non-error type union (typically a single non-error variant; if
+multiple, the result type is the `or`-union of just the non-error
+variants).
+
+Formally:
+
+- For each `Ti` in the operand's type, check `isErrorMarked(Ti)`
+  (via the `error` keyword declaration, or `none`'s implicit
+  error-marking for `?` purposes).
+- Partition variants: `errors = { Ti | isErrorMarked(Ti) }`,
+  `successes = { Ti | !isErrorMarked(Ti) }`.
+- The propagation requires `errors ⊆ enclosingReturnErrors`. If
+  any error variant in the operand isn't a variant of the enclosing
+  function's return type, validator emits
+  `loom.propagate-incompatible-error`.
+- The unwrapped type is `successes` joined via `or` (or just the
+  single success type if `|successes|=1`).
+- At runtime: if the value is an error variant, return it from the
+  enclosing function (short-circuit); otherwise, the expression
+  evaluates to the non-error value.
+
+### Examples
+
+```
+# Enclosing return: OrderId or NotFound or OutOfStock
+let customer = customers.findById(id)?   # operand: Customer or NotFound
+                                         # NotFound is error-marked, listed in enclosing return → propagates
+                                         # customer: Customer (the unwrapped success type)
+
+# Enclosing return: OrderId or NotFound
+let prices = pricing.compute(items)?     # operand: Prices or OutOfStock
+                                         # OutOfStock NOT in enclosing return → ERROR
+                                         # author must .mapErr(...) or change enclosing signature
+
+# Enclosing return: Session option (= Session or none)
+let session = sessions.findActiveFor(uid)?   # operand: Session or none
+                                              # none is propagable → propagates
+                                              # session: Session
+```
 
 ### Grammar — `?` disambiguation
 
@@ -267,153 +280,123 @@ Loom's grammar already uses `?` in three positions:
 The propagation operator adds a **fourth position**: postfix `?`
 on an **expression** in a statement / let-binding context, where it
 is **not followed by `:`**. The parser disambiguates by lookahead —
-`?` immediately followed by `:` parses as ternary; `?` followed by a
-statement separator / line end / non-ternary token parses as
+`?` immediately followed by `:` parses as ternary; `?` followed by
+a statement separator / line end / non-ternary token parses as
 propagation. No grammar ambiguity, but the LSP and Monaco
 highlighting need updates to render the four uses distinctly. Flag
 this for the grammar work in A2.
-
-### Scoping rules
-
-- `?` is a postfix operator on an expression of type `Result<T, E>`
-  or `Option<T>`.
-- Legal **only inside a function body whose declared return type is**
-  `Result<_, E'>` (for `?` on Result) or `Option<_>` (for `?` on
-  Option, OR for `?` on Result when the enclosing return is Result
-  via the coercion in the next bullet).
-- For `Result<T, E>?` inside a `Result<_, E'>`-returning function:
-  `E` must be **coercible** to `E'`. Coercion paths:
-  - `E ≡ E'` — trivial.
-  - `E'` is a union that includes `E` as a variant — automatic widen.
-  - `E` is not a variant of `E'` — validator error. Author must
-    `.mapErr(...)` first.
-- `Option<T>?` inside a `Result<_, E>`-returning function — validator
-  error. Author must `.orError(MyNotFoundError)` first to convert.
-- `Option<T>?` inside an `Option<_>`-returning function — short-circuits
-  with `None`.
 
 ### Lowering per backend
 
 | Backend | Lowering of `let x = expr?` |
 |---|---|
-| TS | `const __r = expr; if (__r.kind === "Err") return __r; const x = __r.value;` (variable name mangled, scope-local). |
-| .NET | Per-project generated `Result.Bind` helper, or a source-generator that emits the same `if (r.IsErr) return r; var x = r.Value;` shape. |
-| Phoenix | Collapses into native `with {:ok, x} <- expr, ... do ... else err -> err end` at the function level. Multiple `?` uses in one body coalesce into one `with` block. |
+| TS | `const __r = expr; if (isErrorVariant(__r)) return __r; const x = __r;` — `isErrorVariant` is a small generated helper checking `kind` against the error-variant set. `__r` is the unwrapped non-error value when the check passes. |
+| .NET | Per-project generated propagation helper: `var __r = expr; if (__r is IDomainError) return __r; var x = __r;`. The `IDomainError` marker interface is generated on every `error` payload's record class. |
+| Phoenix | Collapses multiple `?` in one body into a single `with` block: `with %{kind: "ok"} <- expr1, %{kind: "ok"} <- expr2 do ... else err -> err end`. Idiomatic Elixir. |
 
-### Alternative: `try` keyword instead of `?`
+### Alternative: `try` keyword
 
 Considered. `?` is terser, lifts directly from Rust/Swift idioms
-authors will recognise. `try` reads more domain-y but eats a keyword.
-**Pinned to `?`**; revisit if user testing shows the symbol is
-surprising. Listed in open questions below for explicit human
-review.
+authors will recognise. `try` reads more domain-y but eats a
+keyword. **Pinned to `?`**; revisit if user testing shows the
+symbol is surprising.
 
-## Wire-edge status mapping — `on wire { ... }`
+## Wire-edge status mapping
 
-### Motivation
+### Per-`error` declaration, not per-union
 
-Without this, the exception-less model leaks at the boundary: an
-`Err<NotFound>` returned from an operation has to become a 404
-*somewhere*. Today every backend's route emitter has a parallel
-"exception class → status code" table. We replace those with one
-declarative table per error payload.
-
-### Syntax
+Each `error` payload owns its HTTP status via its declaration:
 
 ```
-payload PlaceError = NotFound | OutOfStock | Forbidden | ValidationFailed
-  on wire {
-    NotFound          -> 404
-    OutOfStock        -> 409
-    Forbidden         -> 403
-    ValidationFailed  -> 422
-  }
+error NotFound       { what: string, id: string }    on wire 404
+error OutOfStock     { sku: string }                 on wire 409
+error Forbidden      { actor: string }               on wire 403
+error ValidationFailed { errors: ValidationError[] } on wire 422
 ```
 
-Each variant maps to an HTTP status. The clause is optional; defaults
-apply when missing:
+When an operation returns `OrderId or NotFound or OutOfStock`, the
+status dispatch is *derived* from each variant's `on wire`. No
+per-operation, per-union status mapping table — the error declares
+its own status once.
 
-- `Option<T>` returned from an HTTP operation: `Some` → 200, `None`
-  → 404. **No `on wire` clause needed for `Option`** — its
-  defaults are universal.
-- `Err<E>` with no explicit mapping for variant `V` — fallback to
-  500 + emit `domain_error` event (today's catch-all behaviour,
-  preserved). Validator emits a `loom.unmapped-err-variant` **warning**
-  (not an error — authors may legitimately want the 500 default for
-  truly unexpected errors).
+### Default mappings
+
+- `none` (the option's empty variant): `on wire 404` (implicit; no
+  declaration needed).
+- An `error` declared without an `on wire` clause: defaults to 500
+  + emits `domain_error` event. Validator emits
+  `loom.unmapped-err-variant` **warning** (not error — authors may
+  legitimately want the 500 default for "truly unexpected" errors).
 
 ### IR + lowering
 
-- New IR enrichment pass: `errorStatusMap` per payload union, sibling
-  to `wireShape` in `src/ir/enrichments.ts`. Pure pass; computes the
-  variant → status table from the AST clause.
-- Each backend's route emitter consumes the map:
+- New IR enrichment pass: each `error` payload IR carries
+  `wireStatus: HttpStatus`. Pure pass; computes from the AST
+  clause.
+- Each backend's route emitter consumes per-variant:
 
 | Backend | Route-edge shape |
 |---|---|
-| TS Hono | `match (result) { Ok -> c.json(value, 200); Err -> c.json(error, statusFor(error.kind)); }` |
-| .NET | Controller action returns `ActionResult<T>`; switches on `Err.kind` to pick `NotFound()` / `Conflict()` / etc. |
-| Phoenix | LiveView action returns the tuple; the route handler maps `:error, %{kind: ...}` to a `conn |> put_status(...) |> json(...)`. |
+| TS Hono | `if (isErrorVariant(result)) return c.json(result, statusFor(result.kind)); return c.json(result, 200);` |
+| .NET | Controller returns `ActionResult<T>`; switches on `result.kind` to pick `NotFound()` / `Conflict()` / `Ok(result)`. |
+| Phoenix | Action returns the tuple; route handler maps `%{kind: ...}` to `conn |> put_status(...) |> json(...)`. |
 
 ### Multi-error responses
 
-Some endpoints return `Result<T, E[]>` (e.g., from a multi-field
-validator). The wire-edge mapping uses the **highest-priority**
-status from the error array, with priority defined by status-code
-order (4xx beats 5xx, lower codes win ties). Authors can override
-with an explicit `on wire combine { ... }` clause (deferred to v2 if
-the default isn't sufficient).
+Operations that accumulate errors (typically from validators) return
+`T or ValidationError[]`. The wire-edge mapping uses the
+**highest-priority** status from the error array, with priority
+defined by status-code order (4xx beats 5xx, lower codes win ties).
+Authors can override with an explicit `on wire combine { ... }`
+clause on the operation if the default isn't sufficient.
 
 ## Find-variant alignment
 
-Biggest practical win — re-shape find variants so they participate in
-the carrier system natively. **Mechanic correction**: today's grammar
-doesn't have `find one` / `find first` / `find all` as kind keywords
-— a find is `find <name>(<params>): <returnType>`, and the *return
-type declaration* drives the shape. The re-shape is therefore at the
-return-type level, not a keyword change:
+Today's grammar doesn't have `find one` / `find first` / `find all`
+as kind keywords — a find is `find <name>(<params>): <returnType>`,
+and the *return type declaration* drives the shape. The re-shape is
+therefore at the return-type level, not a keyword change:
 
 | Author-declared return type | Lowers to | Semantics |
 |---|---|---|
-| `: X` | `Result<X, NotFound>` | The find must return an X; absence is an `Err<NotFound>` |
-| `: X?` | `Option<X>` | The find may or may not return an X; absence is `None` |
+| `: X` | `X or NotFound` | The find must return an X; absence is `NotFound` |
+| `: X?` | `X option` (= `X or none`) | The find may or may not return an X; absence is `none` |
 | `: X[]` | `X[]` (unchanged) | Multi-result; empty array is the absence signal |
-| `: Page<X>` | `Page<X>` (unchanged; Page itself is a carrier) | Multi-result paginated |
+| `: X page` | `X page` (unchanged; page itself is a carrier) | Multi-result paginated |
 
 The lowering site is `src/ir/lower.ts` find-decl lowering plus each
 backend's repository builder. The route emitter dispatches on the
-result carrier (Result → variant-mapped status; Option → 200/404)
-exactly as A3 specifies.
+result carrier exactly as the wire-edge section specifies (each
+error variant lifts its `on wire` status; `none` lifts to 404).
 
 **Backwards compatibility**: today's `: X` finds that throw on
-missing are existing behaviour. Authors who want the old throwing
-shape can `.unwrap()` at the call site (a carrier-stdlib helper that
-panics on `Err`/`None`). Migration is mechanical — most existing find
-call sites become `find(...)?` or `find(...).orElse(default)`.
+missing become Result-shaped. Existing call sites need migration —
+most become `find(...)?` inside operation bodies (the `?`
+propagates `NotFound` to the caller). Authors who want the old
+throwing shape can `.unwrap()` (a carrier-stdlib helper that
+panics on error variants).
 
-Example migration of an existing find call site:
+Example migration:
 
 ```
 # Before (throws):
 let customer = customers.findById(cmd.customerId)
 
-# After (typed; ? threads Err to caller):
+# After (typed; ? threads NotFound to caller):
 let customer = customers.findById(cmd.customerId)?
 ```
 
-### `find one`'s default error type
+### `NotFound`'s default status
 
-Pinned to `NotFound` for v1:
+`NotFound` is a stdlib `error` payload with `on wire 404`:
 
 ```
-payload NotFound { what: string, id: string }
-  on wire { NotFound -> 404 }
+# In src/stdlib/payloads/errors.ddd:
+error NotFound { what: string, id: string } on wire 404
 ```
 
-`find one` lowers to `Result<X, NotFound>` automatically. Per-aggregate
-override (`find one X where ... or Err<MyLookupError>`) is a v2
-extension if real use shows that authors want different error shapes
-per aggregate.
+Per-aggregate override (a find declaring `: X` but mapping absence
+to a custom error type) is a v2 extension if demand surfaces.
 
 ### Migration impact
 
@@ -422,9 +405,10 @@ This is the **big coordinated change** in the phasing. Every:
 - Repository implementation in every backend's emitter
   (`*Repository.ts`, `*Repository.cs`, `*_repository.ex`).
 - Route handler that today catches `NotFoundException` and emits
-  404 — those try/catches go away; the union dispatch replaces them.
-- Existing `.ddd` example file that uses `find one` (which is most
-  of them).
+  404 — those try/catches go away; the variant dispatch replaces
+  them.
+- Existing `.ddd` example file using a find with non-array return
+  (which is most of them).
 
 The fixture-byte-identical regression bar (per CLAUDE.md's
 `test/fixtures/`) needs a coordinated re-baseline. Plan a single
@@ -440,12 +424,16 @@ re-shaped:
 ```
 # Today: parse Money from "10.50 USD" throws on malformed input.
 # Proposed:
-parse Money from "10.50 USD"  : Result<Money, ParseError>
-parse int  from someString    : Result<int, ParseError>
-parse uuid from userInput     : Result<uuid, ParseError>
+parse Money from "10.50 USD"  : Money or ParseError
+parse int   from someString   : int   or ParseError
+parse uuid  from userInput    : uuid  or ParseError
 ```
 
-`ParseError` is a stdlib payload with `on wire { ParseError -> 400 }`.
+`ParseError` is a stdlib `error` payload:
+
+```
+error ParseError { input: string, expected: string, message: string } on wire 400
+```
 
 ### Validators (upstream Phase 5)
 
@@ -456,45 +444,52 @@ validate for OrderItem {
 }
 ```
 
-Lowers to a function `validate(x: OrderItem): Result<OrderItem,
-ValidationError[]>` that **accumulates** all field errors (not
-short-circuiting on the first). `ValidationError` is a stdlib payload
-with `{ field: string, code: string, message: string }`.
+Lowers to a function `validate(x: OrderItem): OrderItem or
+ValidationError[]` that **accumulates** all field errors (not
+short-circuiting on the first). `ValidationError` is a stdlib
+`error` payload:
 
-Multi-error accumulation is handled by `Result.combine` (carrier
-stdlib, A7a) — no need for a separate `Validated<T, NEL<E>>` type
-for v1.
+```
+error ValidationError { field: string, code: string, message: string }
+  on wire 422
+```
+
+Multi-error accumulation is handled by the carrier stdlib's
+`combine` helper. No separate `Validated<T, NEL<E>>` carrier needed
+for v1 — `T or ValidationError[]` + `combine` covers the common
+form-validation case.
 
 ### External API calls
 
 ```
-# call api Foo.bar(x) lowers to a Result-returning fetch
+# call api Foo.bar(x) lowers to an or-returning fetch:
 let result = call api Foo.bar({ id: 123 })?
 # result: ResponseDTO
 
-# Today's macro-wrapped throwing call becomes typed:
-# Result<ResponseDTO, ApiError>
+# Type: ResponseDTO or ApiError
 ```
 
-`ApiError` is a stdlib payload:
+`ApiError` is a stdlib `error` payload union:
 
 ```
+error TransportFailure  { message: string }                     on wire 502
+error UnexpectedStatus  { status: int, body: string }           on wire 502
+error DeserializeError  { expected: string, raw: string }       on wire 502
+
+# Convenience named union for external API call sites:
 payload ApiError = TransportFailure | UnexpectedStatus | DeserializeError
-  on wire {
-    # Note: these statuses are for *re-emission* to the caller, when
-    # an ApiError surfaces from a server-side operation. Inbound API
-    # call failures don't go on the wire; they're consumed by the
-    # caller in the operation body.
-    TransportFailure   -> 502
-    UnexpectedStatus   -> 502
-    DeserializeError   -> 502
-  }
 ```
+
+Each error variant has its own `on wire` clause; the named union
+just groups them for convenience. Inbound `call api` failures
+*usually* aren't re-emitted to the caller verbatim — the caller's
+operation typically does `.mapErr(...)` or pattern-matches —
+but the statuses are there for re-emission cases.
 
 ### File IO
 
-If/when Loom exposes file IO to authors, same shape: `read file ... :
-Result<bytes, IoError>`. Out of scope for v1 (Loom has no file IO
+If/when Loom exposes file IO to authors, same shape: `read file ...
+: bytes or IoError`. Out of scope for v1 (Loom has no file IO
 surface today).
 
 ## Carrier stdlib — A7a and A7b
@@ -505,28 +500,28 @@ Generator-emitted, per-instantiation. No DSL surface for declaring
 new helpers; the generator stamps these for every used instantiation.
 
 ```
-Option<T>.map      : (Option<T>, T -> U) -> Option<U>
-Option<T>.flatMap  : (Option<T>, T -> Option<U>) -> Option<U>
-Option<T>.orElse   : (Option<T>, T) -> T
-Option<T>.orError  : (Option<T>, E) -> Result<T, E>
-Result<T,E>.map    : (Result<T,E>, T -> U) -> Result<U, E>
-Result<T,E>.flatMap: (Result<T,E>, T -> Result<U, E>) -> Result<U, E>
-Result<T,E>.mapErr : (Result<T,E>, E -> F) -> Result<T, F>
-Result<T,E>.combine: Result<T, E>[] -> Result<T[], E[]>
+# (signatures here are sketches; surface-DSL function types are A7b)
+(T option).map      : ((T option), T -> U) -> U option
+(T option).flatMap  : ((T option), T -> U option) -> U option
+(T option).orElse   : ((T option), T) -> T
+(T option).orError  : ((T option), E) -> T or E
+(T or E).map        : ((T or E), T -> U) -> U or E      # map success type
+(T or E).mapErr     : ((T or E), E -> F) -> T or F      # map error type
+(T or E).combine    : (T or E)[] -> T[] or E[]          # accumulate
 ```
 
 Per-backend, these are one helper per used instantiation. TS gets
-generic functions (free). .NET gets a per-instantiation static class
-method. Phoenix gets a module function per instantiation, though in
-practice most of these collapse into Elixir stdlib calls
+generic functions (free). .NET gets a per-instantiation static
+class method. Phoenix gets a module function per instantiation,
+though in practice most of these collapse into Elixir stdlib calls
 (`Enum.map`, `with`-chains).
 
-**A7a needs first-class function types in the IR** (`T -> U`) for the
-helper signatures — but **not in the surface DSL** for v1. Authors
-can't pass arbitrary lambdas to `.map` yet; they invoke the helpers
-via blessed call sites that the lowering layer recognises (e.g.,
-`opt.map(field)` for projecting a single field). A future A7b extends
-this.
+**A7a needs first-class function types in the IR** (`T -> U`) for
+the helper signatures — but **not in the surface DSL** for v1.
+Authors can't pass arbitrary lambdas to `.map` yet; they invoke the
+helpers via blessed call sites that the lowering layer recognises
+(e.g., `opt.map(field)` for projecting a single field). A future
+A7b extends this.
 
 ### A7b: user-declarable carrier-generic functions
 
@@ -540,15 +535,15 @@ Deferred. Requires:
 
 ```
 # A7b — not in v1:
-fn map<T: carrier, U: carrier>(opt: Option<T>, f: T -> U): Option<U> {
+fn map(T: carrier, U: carrier)(opt: T option, f: T -> U): U option {
   match opt {
-    Some -> Some { value: f(opt.value) }
-    None -> None { }
+    some -> some(f(opt.value))
+    none -> none
   }
 }
 ```
 
-A7b ships when there's a concrete demand from real DSL programs. v1
+A7b ships when there's concrete demand from real DSL programs. v1
 covers the 95% case with A7a.
 
 ## Migration phases — A1 through A7
@@ -557,22 +552,24 @@ Layered on top of upstream proposal's Phase 1–5:
 
 | Phase | Scope | Dependency |
 |---|---|---|
-| **A1** | `Option<T>` and `Result<T, E>` as stdlib payload unions. Type-checks; can be declared as operation return types. Validator enforces no-throw outside aggregate bodies (regime separation). | Upstream Phase 1+3+4 (payload + generics + unions) |
-| **A2** | `?` propagation operator. Scoping rules. Per-backend lowering. | A1 |
-| **A3** | Wire-edge status mapping (`on wire { ... }` clause). `errorStatusMap` IR enrichment. Each backend's route emitter consumes the map. | A1 |
-| **A4** | Re-shape find variants. `find one` → `Result<T, NotFound>`, `find first` → `Option<T>`. Migrate every example .ddd + every backend's route/repository emitter. **Single coordinated PR.** | A1, A3 |
-| **A5** | Parse intrinsics return `Result<T, ParseError>`. External API calls return `Result<T, ApiError>`. Macro-wrapped throwing helpers retired. | A1, A2 |
-| **A6** | `validate for X` (upstream Phase 5) returns `Result<X, ValidationError[]>`. Multi-error accumulation via `Result.combine`. | A1, A2, upstream Phase 5 |
-| **A7a** | Generator-emitted carrier stdlib (`.map`, `.flatMap`, `.orElse`, `.orError`, `.mapErr`, `.combine`) for `Option` and `Result`. Per-instantiation monomorphic helpers per backend. | A1 |
+| **A1** | `error` payload sugar keyword with `on wire <Status>` clause. `none` unit type + `option` postfix sugar. Stdlib error payloads (`NotFound`, `ParseError`, `ApiError` variants, `ValidationError`). Validator enforces no-throw outside aggregate bodies (regime separation). | Upstream Phase 1+3+4 |
+| **A2** | `?` propagation operator with error-marker dispatch. Scoping rules. Per-backend lowering. | A1 |
+| **A3** | Per-error `on wire` enrichment + each backend's route emitter consuming it (variant → status, body becomes variant data; success body has no `kind` envelope). | A1 |
+| **A4** | Re-shape find variants. `: X` → `X or NotFound`, `: X?` → `X option`. Migrate every example .ddd + every backend's route/repository emitter. **Single coordinated PR.** | A1, A3 |
+| **A5** | Parse intrinsics return `T or ParseError`. External API calls return `T or ApiError`. Macro-wrapped throwing helpers retired. | A1, A2 |
+| **A6** | `validate for X` (upstream Phase 5) returns `X or ValidationError[]`. Multi-error accumulation via `combine`. | A1, A2, upstream Phase 5 |
+| **A7a** | Generator-emitted carrier stdlib (`.map`, `.flatMap`, `.orElse`, `.orError`, `.mapErr`, `.combine`) for `option` and `or` unions. Per-instantiation monomorphic helpers per backend. | A1 |
 | **A7b** | (Deferred to v2.) User-declarable carrier-generic functions. First-class function types in surface DSL. | A7a, plus surface-DSL extensions |
 
 **A1 + A2 + A3 are the minimum coherent ship.** Without all three,
-authors either can't express Result, can't compose Result calls
-ergonomically, or can't return Result to HTTP. Ship them together.
+authors either can't declare typed errors, can't compose
+error-returning calls ergonomically, or can't return errors to
+HTTP. Ship them together.
 
 **A4 is the user-visible turning point.** After A4 the standard
 generated route layer has no try/catch for not-found; the catalog's
-`not_found` event sources from `Err` encoding, not exception capture.
+`not_found` event sources from `NotFound`-variant encoding, not
+exception capture.
 
 A5 and A6 chase the long tail. A7a polishes ergonomics.
 
@@ -590,8 +587,12 @@ A5 and A6 chase the long tail. A7a polishes ergonomics.
   classes for `Functor`/`Monad`. v2 conversations.
 - **Replace today's observability story.** The catalog stays. Some
   events (`not_found`, `domain_error`, `validation_failed`) shift
-  from "exception captured" to "Err encoded at wire" but the on-wire
-  events look the same to operators.
+  from "exception captured" to "error variant encoded at wire" but
+  the on-wire events look the same to operators.
+- **Bring back `Result<T, E>` or `Option<T>` as named wrapper
+  types.** Anonymous `or` unions + the `option` postfix sugar cover
+  every case. The Ok/Err/Some/None variant constructors are gone;
+  values carry their own variant identity by their type.
 
 ## Hard parts (honest list)
 
@@ -599,14 +600,14 @@ A5 and A6 chase the long tail. A7a polishes ergonomics.
   inside an aggregate operation vs inside an application-boundary
   operation" needs the IR to know the enclosing context. Likely a
   field on the IR's expression context (`callKind` or similar in
-  `src/ir/loom-ir.ts`). Net change is small but threads through every
-  call lowering.
+  `src/ir/loom-ir.ts`). Net change is small but threads through
+  every call lowering.
 - **A2's `?` scoping.** Validator must propagate "is this enclosing
-  fn Result-returning, what's the `E'` type" through the type-check
-  pass. Coercion rules (`E` is a variant of `E'`) need the union
-  variant lookup to be cheap — straightforward but new.
-- **A3's IR enrichment for `errorStatusMap`.** Pure pass, but the
-  consumers (per-backend route emitters) need updating in lockstep.
+  fn's return an `or` union containing this expression's error
+  variants" through the type-check pass. Variant set membership
+  needs to be cheap — straightforward but new.
+- **A3's per-error enrichment.** Pure pass, but the consumers
+  (per-backend route emitters) need updating in lockstep.
   Manageable; mirrors today's `wireShape` enrichment + consumer
   pattern.
 - **A4 is the coordinated migration.** Every example .ddd, every
@@ -615,164 +616,176 @@ A5 and A6 chase the long tail. A7a polishes ergonomics.
   per backend, plus fixture re-baseline.
 - **Phoenix's `with` collapsing.** Multiple `?` uses in a body
   should lower to a single `with` block, not nested ones. The
-  Phoenix `render-stmt.ts` emitter needs to recognise the propagation
-  pattern at function scope and coalesce.
-- **TS narrowing and the `kind` discriminator.** Authors will
-  inspect `result.kind === "Ok"` in handwritten TS interop code.
-  Make sure the generated types export the variant names as
-  discriminated string literals so TS narrows correctly.
-- **Two-regime line at the validator boundary.** A `validate for X`
-  body that calls a Result-returning helper and then `?`-propagates
-  it is fine. A `validate for X` body that tries to `raise
-  ValidationFailed { ... }` directly should fail validation — but
-  there's a natural author confusion ("isn't this an exceptional
-  case?"). Documentation matters here.
+  Phoenix `render-stmt.ts` emitter needs to recognise the
+  propagation pattern at function scope and coalesce.
+- **HTTP success-body shape**: when an operation returns
+  `OrderId or NotFound`, the success body on HTTP 200 is just the
+  `OrderId` data (no `{"kind": "OrderId"}` envelope, because the
+  status code IS the discriminator). But for non-HTTP carriers
+  (queue messages), the tagged envelope IS needed (no out-of-band
+  status). The wire-encoding pass distinguishes — small but
+  important rule.
+- **`error` keyword adoption.** Authors used to throwing might miss
+  that they need to *declare* their errors as `error` payloads.
+  Validator's `loom.throw-outside-domain` (upgraded to ERROR after
+  A4) catches the regression; documentation needs a "from try/catch
+  to typed errors" migration guide.
 
 ## What this enables, downstream
 
 Once shipped, several follow-ups become small:
 
-- **`Page<T>` as a carrier** (already in upstream proposal) — paginated
-  finds return `Result<Page<X>, FindError>`, propagation operator
-  threads through.
-- **`Envelope<P>` for queues / event bus** — `Result<T, E>` carried
-  inside an `Envelope` for at-least-once delivery, idempotency keys,
-  etc.
-- **`Validated<T, NEL<E>>` as a v2 carrier** if `Result<T, E[]>` +
-  `combine` proves insufficient for complex form validation.
-- **Better error catalogues** — because every operation declares its
-  `Err<E>` shape, the OpenAPI / GraphQL schema generation can emit
-  precise error response types (today: bespoke per-route or absent).
-- **Composable retry / circuit-breaker macros** — wrap a `Result`-returning
-  call once at the macro layer; today's exception-based retry has
-  to live inside the throw/catch dance.
+- **`page` as a carrier for paginated finds** — `find findAll(...):
+  X page` returns `X page` directly; if pagination can fail,
+  `X page or NotFound`. The propagation operator threads through
+  unchanged.
+- **`envelope<P>` for queues / event bus** — `OrderPlaced envelope`
+  carries an event with id/timestamp/correlation metadata. The
+  envelope itself can be wrapped in an `or` union if delivery can
+  fail.
+- **Better error catalogues for OpenAPI** — because every operation
+  declares its full set of error variants in the return type, the
+  OpenAPI emission emits precise per-status response schemas (today:
+  bespoke per-route or absent).
+- **Composable retry / circuit-breaker macros** — wrap an
+  `or`-returning call once at the macro layer; today's
+  exception-based retry has to live inside the throw/catch dance.
 
 ## Open questions (need human input)
 
-1. **Carrier bound name** (also in upstream): `carrier` vs `value` vs
-   `data`. Lean `carrier`. **Recommended answer: `carrier`.**
+1. **Carrier bound name** (also in upstream): `carrier` vs `value`
+   vs `data`. Lean `carrier`. **Recommended: `carrier`.**
 2. **`?` operator vs `try` keyword.** Lean `?`. **Recommended:
-   `?`.** Revisit if user testing shows the symbol surprises domain
-   authors used to verbose languages.
-3. **Default error type for `find one`.** `NotFound` only, or
-   per-aggregate override (`find one X where ... or Err<MyError>`)?
-   **Recommended: `NotFound` only in v1; per-aggregate override is
-   v2 if demand surfaces.**
-4. **`Err<E>` with no explicit `on wire` mapping**: silent default
-   (500 + `domain_error`) vs validator-error-forcing-explicit. **Recommended:
-   warning, not error.** Authors should be able to ship without
-   over-specifying.
-5. **Variant union naming**: `Ok` / `Err` / `Some` / `None` (terse,
-   FP-flavoured) vs `Success` / `Failure` / `Present` / `Absent`
-   (verbose, reads naturally to non-FP authors). **Recommended:
-   terse.** Domain authors learn one set quickly; verbose names
-   make `?`-chained code visually noisy.
-6. **Two-regime enforcement strictness**: validator-error vs
-   warning when a non-aggregate-body throws. **Recommended:
-   warning in early phases (A1-A3), upgrade to error after A4 lands
-   and the find-variant migration has settled.** Avoids blocking
-   adoption on partial migrations.
-7. **Where regime-violation diagnostics surface**: `loom.throw-outside-domain`
-   validator code. Per CLAUDE.md's convention of `loom.<id>` codes.
+   `?`.**
+3. **`NotFound` as the default error type for find `: X` returns.**
+   `NotFound` only, or per-aggregate override (`: X or MyError`)?
+   **Recommended: `NotFound` only in v1.**
+4. **`error` with no explicit `on wire` mapping**: silent default
+   (500 + `domain_error`) vs validator-error-forcing-explicit.
+   **Recommended: warning, not error.**
+5. **Variant naming for `none`**: `none` (lowercase, lean) vs
+   `nothing` / `unit` / `void` / `nil`. **Recommended: `none`.**
+6. **Two-regime enforcement strictness over time**: warning vs
+   error when a non-aggregate body throws. **Recommended: warning
+   in A1-A3, ERROR after A4.**
+7. **Where regime-violation diagnostics surface**:
+   `loom.throw-outside-domain` validator code. Per CLAUDE.md's
+   convention of `loom.<id>` codes.
+8. **Success-body shape on HTTP 200 for `or` unions with primitive
+   success types**: `"ord_abc123"` (bare value), `{"value":
+   "ord_abc123"}` (single-key envelope), or `{"kind": "OrderId",
+   "value": "ord_abc123"}` (tagged)? **Recommended: bare value for
+   primitives, payload-as-object for payload types; never the
+   `kind` envelope on the success path (the HTTP status IS the
+   discriminator).** Open for confirmation.
 
 ## File-level work breakdown (for the implementing agent)
 
-### A1 — Option / Result as stdlib payload unions
+### A1 — `error` keyword + `none`/`option` + stdlib + two-regime validator
 
-- `src/stdlib/` (new dir) or embedded source — declare `Option<T>`,
-  `Result<T, E>`, `Some<T>`, `None`, `Ok<T>`, `Err<E>` as payload
-  unions. Wire into the parser as if they were authored payloads.
-- `src/ir/loom-ir.ts` — no new node kinds needed if upstream Phase
-  3+4 is in. Otherwise add `PayloadGenericIR`, `PayloadUnionIR`.
+- Upstream proposal Phase 1 already adds the `error` keyword as a
+  sugar-payload; this phase consumes it and adds semantics.
+- `src/stdlib/payloads/` (new) — declare `none` unit type,
+  `NotFound`, `ParseError`, `ApiError` variants, `ValidationError`
+  as stdlib `error` payloads. Toolchain bootstrap: parse stdlib at
+  startup; expose pre-declared types to user programs without
+  imports.
+- `src/ir/loom-ir.ts` — `isErrorVariant` derived from the `error`
+  keyword on the payload declaration.
 - `src/language/ddd-validator.ts` — add `loom.throw-outside-domain`
-  check. Walk each operation body's IR; reject `raise`/`throw` shapes
-  unless the enclosing context is an aggregate operation.
-- Tests: one parsing test per builtin carrier; one negative
-  validator test for each regime-violation pattern.
+  diagnostic. Walk operation bodies; reject `raise`/`throw`-shaped
+  lowering unless enclosing context is an aggregate operation body.
+  (Warning in A1-A3, ERROR after A4 — see Open Q6.)
+- Tests: parsing tests for declaring `error` payloads; one
+  negative throw-outside-domain test per regime-violation pattern;
+  one test verifying `string option` desugars to `string or none`.
 
 ### A2 — `?` propagation operator
 
-- `src/language/ddd.langium` — add postfix `?` in the expression
-  rule. Pin grammar to avoid recursive AST types (per CLAUDE.md
-  "use a discriminator field over inferred actions").
-- `src/ir/lower-expr.ts` — lower `expr?` to a `Propagate(expr,
-  enclosing-return-type)` IR node.
-- `src/ir/loom-ir.ts` — `PropagateExprIR { inner: ExprIR, mode:
-  'result' | 'option', errorCoercion?: VariantWiden }`.
-- `src/language/ddd-validator.ts` — typecheck scope rules from
-  §"Scoping rules" above. Reject mis-use.
-- Each backend's `render-expr.ts` / `render-stmt.ts` — lower the IR
-  per §"Lowering per backend" above.
-- Phoenix specifically: the `render-stmt.ts` emitter must coalesce
-  multiple `Propagate` nodes in one function body into a single
-  `with` block.
-- Tests: one parsing test; one scoping test per violation; one
-  lowering test per backend; one e2e test that a real operation
-  round-trips through `?`.
+- `src/language/ddd.langium` — add postfix `?` in `Expression`
+  rule with the disambiguation lookahead from §"Grammar — `?`
+  disambiguation". LSP / Monaco tokeniser updates so the four `?`
+  uses highlight distinctly.
+- `src/ir/lower-expr.ts` — lower `expr?` to a `PropagateExprIR`
+  that records the variant partition (errors to short-circuit,
+  successes to unwrap).
+- `src/ir/loom-ir.ts` — `PropagateExprIR { inner: ExprIR,
+  errorVariants: VariantName[], successVariants: VariantName[] }`.
+- `src/language/ddd-validator.ts` — enclosing-fn return-type check;
+  variant-set subset rule; `loom.propagate-bad-scope`,
+  `loom.propagate-incompatible-error`.
+- Each backend's `render-expr.ts` / `render-stmt.ts` — lower per
+  §"Lowering per backend" above.
+- Phoenix: the `render-stmt.ts` emitter coalesces multiple
+  `Propagate` nodes in one body into a single `with` block.
+- Tests: parsing test; one scoping test per violation; per-backend
+  lowering tests; one end-to-end test threading three `?` calls.
 
-### A3 — `on wire { ... }` clause
+### A3 — Per-error `on wire <Status>` enrichment
 
-- `src/language/ddd.langium` — add `OnWireClause` rule attaching to
-  `PayloadUnionDecl`.
-- `src/ir/loom-ir.ts` — `errorStatusMap?: Map<VariantName, HttpStatus>`
-  on `PayloadUnionIR`.
-- `src/ir/enrichments.ts` — new pure pass: walk every `Err`-shaped
-  payload union, compute the map.
-- Each backend's route emitter (`emit/routes.ts` for TS,
-  `Controller.cs` builder for .NET, action handler for Phoenix) —
-  consume `errorStatusMap` to emit per-variant status dispatch.
-- Tests: one parsing test for the clause; one validator test for
-  missing mappings (warning, not error); one per-backend emission
-  test asserting the status dispatch.
+- Upstream proposal Phase 1 already adds the `on wire <Status>`
+  syntactic clause to the `error` declaration; this phase consumes
+  it.
+- `src/ir/loom-ir.ts` — `wireStatus?: HttpStatus` on the `error`
+  payload IR.
+- `src/ir/enrichments.ts` — pure pass: walk every `error` payload,
+  capture `wireStatus`. Sibling to `wireShape`.
+- Each backend's route emitter — consume per-variant `wireStatus`;
+  emit dispatch as described.
+- Validator: `loom.unmapped-err-variant` warning if an `error` has
+  no `on wire` clause.
+- Tests: parsing test for the clause; per-backend emission tests
+  asserting the status dispatch; one end-to-end test with an error
+  variant returning a 4xx.
 
 ### A4 — Find-variant re-shape
 
-- `src/ir/lower.ts` — update find lowering: `find one` → emit
-  `Result<X, NotFound>`-typed result; `find first` → emit `Option<X>`.
-- Each backend's repository builder — return `Result`/`Option`
-  shapes from repo methods. Eliminate the today's-throwing path.
-- Each backend's route emitter — delete the try/catch for
-  `NotFoundException`. The Err-encoding path already covers it via
-  A3.
-- Every `examples/*.ddd` and `web/src/examples/*.ddd` — audit for
-  `find one` usage. Update operation bodies to use `?` (now that
-  A2 is in).
-- `test/fixtures/` — coordinated re-baseline. One PR, every
-  fixture.
-- Single PR. Don't split.
+- `src/ir/lower.ts` — find-decl lowering wraps declared return
+  type into the carrier per the find-variant table.
+- Backends: each repository builder returns `or` shapes; each
+  route emitter deletes the try/catch for `NotFoundException` (A3
+  now covers it via variant dispatch).
+- Examples: every `examples/*.ddd` and `web/src/examples/*.ddd`
+  audited; finds updated to use `?` at call sites where needed.
+- Fixtures: **coordinated re-baseline** of `test/fixtures/`.
+  Capture script: `scripts/capture-baseline-fixture.mjs`. Single
+  PR.
+- Validator upgrade: `loom.throw-outside-domain` becomes ERROR
+  (was warning in A1).
+- Tests: one e2e per backend asserting a `: X` find returns 404 on
+  missing.
 
-### A5 — Parse / external API
+**Risk**: this is the big coordinated migration. **One PR**, no
+splits. Block A5–A7 until A4 lands.
 
-- `src/stdlib/` — declare `ParseError`, `ApiError` as stdlib
-  payloads with `on wire` clauses.
+### A5 — parse intrinsics + external API as `or`
+
 - `src/ir/lower-expr.ts` — `parse X from Y` expression lowers to
-  `Result<X, ParseError>`.
-- `src/generator/ts/api-client.ts` (and equivalents) — `call api
-  Foo.bar(x)` lowers to a `Result<T, ApiError>`-returning fetch.
-  Eliminate the today's macro-wrapped throwing path.
-- Tests: parsing tests for the new return types; per-backend
-  emission tests.
+  `X or ParseError`.
+- API client lowering — `call api Foo.bar(x)` lowers to a fetch
+  returning `T or ApiError`. Macro-wrapped throwing helpers
+  retired.
+- Per-backend updates.
+- Tests: per-backend.
 
-### A6 — Validators
+### A6 — `validate for X` returns `or`
 
-- Depends on upstream Phase 5. Once `validate for X { ... }` is in,
-  its lowering emits `Result<X, ValidationError[]>`. Combine multiple
-  rules via `Result.combine`.
-- Tests: validator semantics on multi-rule accumulation.
+- Lowering: `validate for X { ... }` emits a function returning
+  `X or ValidationError[]`.
+- Per-backend: invocation sites use `?` to propagate.
+- Tests: multi-rule accumulation tests.
 
-### A7a — Carrier stdlib
+### A7a — Carrier stdlib helpers
 
-- Per-backend: generate the helpers per used instantiation.
-- TS: a generic function in `src/generator/ts/emit/payloads.ts` —
-  trivial.
-- .NET: a per-instantiation static class — one emitted file per
-  `(carrier, T, U)` triple. Or a single source-generator that emits
-  on demand.
-- Phoenix: a module function per instantiation; many collapse into
+- Per-backend code-gen for the helper set per used instantiation.
+- TS: generic functions in `src/generator/ts/emit/payloads.ts`
+  (trivial).
+- .NET: per-instantiation static class.
+- Phoenix: module function per instantiation; many collapse into
   Elixir stdlib calls. Module: `<App>.Carriers`.
-- Recognise the call sites at the IR level — `opt.map(field)` lowers
-  to a `CarrierMapIR { inner: opt, projection: field }` rather than
-  a general function call.
+- IR recognition: `opt.map(field)` lowers to `CarrierMapIR` rather
+  than a general function call.
+- Tests: per-helper, per-backend.
 
 ## Wire-spec impact
 
@@ -780,35 +793,42 @@ Today's `<outdir>/.loom/wire-spec.json` artifact (built by
 `src/system/wire-spec.ts` from `wireShape`) captures aggregate wire
 contracts for diff-based change detection. With this proposal:
 
-- Every `Option<T>` / `Result<T, E>` instantiation used in an
-  operation return adds a new entry to the spec (the carrier
-  envelope is part of the contract).
-- The `errorStatusMap` from A3 is captured per `Err` payload so
-  status-code drift surfaces in the diff.
-- Stdlib carrier types appear once globally in the spec (not per
-  use); per-instantiation `T` references the corresponding payload
-  entry.
+- Every named or anonymous `or` union used in an operation return
+  adds an entry to the spec.
+- Each `error` payload's `wireStatus` is captured so status-code
+  drift surfaces in the diff.
+- Stdlib `error` payloads (`NotFound`, `ParseError`, etc.) appear
+  once globally in the spec.
 
 `src/system/wire-spec.ts` needs a small extension in A1/A3 to emit
-the carrier entries. The diff-detection consumers (CI gate, OpenAPI
-parity check) work unchanged because the spec stays JSON-shaped.
+the error-payload and `or`-union entries. The diff-detection
+consumers (CI gate, OpenAPI parity check) work unchanged because
+the spec stays JSON-shaped.
 
 ## Cross-references
 
 - [`payload-transport-layer.md`](./payload-transport-layer.md) —
-  **upstream**. Required reading before this doc. The carrier bound
-  widening, aggregate-as-carrier projection rule, and
-  variant-name-tagged identity rule are all pinned there because
-  this doc depends on them.
+  **upstream**. Required reading before this doc. The carrier
+  bound widening, aggregate-as-carrier projection rule,
+  variant-name-tagged identity rule, `error` sugar keyword, and
+  anonymous-`or`-unions construct are all pinned there because this
+  doc depends on them.
 - [`aggregate-inheritance.md`](./aggregate-inheritance.md) — sister
   proposal to the upstream. Unaffected by this doc; aggregates stay
   nominal and concrete.
+- [`partial-update.md`](./partial-update.md) — PATCH-style command
+  pattern using `command` + `option`-typed fields. Wire-encoding
+  rule (field-omit vs explicit null) is driven by the `command`
+  keyword + position-driven encoding.
+- [`implementation-plan.md`](./implementation-plan.md) — overall
+  delivery plan covering this proposal alongside the upstream and
+  the aggregate-inheritance proposal.
 - `docs/observability.md` — catalog of standard events. `not_found`,
   `domain_error`, `validation_failed` shift sources after A4–A6 but
   on-wire shape preserved.
 - `src/ir/enrichments.ts` — `wireShape` enrichment is reused for
-  aggregate-as-carrier projection in A1. Sibling enrichment
-  `errorStatusMap` added in A3.
+  aggregate-as-carrier projection in A1. Sibling `wireStatus`
+  enrichment added in A3.
 - `src/language/ddd-validator.ts` — new diagnostics:
   `loom.throw-outside-domain`, `loom.unmapped-err-variant`,
   `loom.propagate-bad-scope`, `loom.propagate-incompatible-error`.

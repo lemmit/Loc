@@ -29,28 +29,45 @@ requirements-tracing one.
 | [`sensitivity-and-compliance.md`](./sensitivity-and-compliance.md) | Sensitivity tagging | `sensitive(<tag>)` as a type-system property; sensitivity propagates through expressions; `authorized(...)` declassification; sinks (log/error/trace/metric) reject sensitive values |
 | [`encrypted-at-rest.md`](./encrypted-at-rest.md) | Column-level encryption | Reserved sibling of `sensitive` — governs *persistence*, not flow; deferred (see doc) |
 | [`load-specifications.md`](./load-specifications.md) | Aggregate load specs | `loads` clause + compiler-inferred load plans + shape (loadedness) typing |
-| [`optional-and-partial-update.md`](./optional-and-partial-update.md) | Optional / partial update | `Optional<T>` to distinguish "field absent" from "field null" |
-| [`payload-transport-layer.md`](./payload-transport-layer.md) | Structural transport layer | `payload` keyword, carrier-bounded generics, discriminated unions, auto-synthesized aggregate wire payloads |
-| [`exception-less.md`](./exception-less.md) | Exception-less flow | Native `Option<T>` / `Result<T, E>` as payload unions, `?` propagation operator, `on wire { ... }` status mapping, find-variant re-shape, two-regime split (aggregate-invariant throws vs boundary-returns-carrier) |
+| [`partial-update.md`](./partial-update.md) | Partial-update pattern | `command` + `T option` fields for PATCH semantics; supersedes the v0 `Optional<T>` proposal |
+| [`payload-transport-layer.md`](./payload-transport-layer.md) | Structural transport layer | `payload` keyword + five sugar keywords (`event`/`command`/`query`/`response`/`error`); carrier-bounded generics with ML-postfix syntax (`customer page`); both named unions (`payload Foo = A \| B`) and anonymous `or` unions (`A or B`); auto-synthesised aggregate wire payloads |
+| [`exception-less.md`](./exception-less.md) | Exception-less flow | `error` payloads with per-payload `on wire <Status>`; `option` ML-postfix sugar for `T or none`; `?` propagation operator dispatching on `error`-marked variants; find-variant re-shape; two-regime split (aggregate-invariant throws vs boundary-returns-carrier); no `Result<T, E>` / `Ok` / `Err` wrappers — `T or E` direct |
+| [`implementation-plan.md`](./implementation-plan.md) | Implementation plan | Stacked delivery plan covering all three type-system proposals (state layer + transport layer + exception-less). Phases, dependencies, coordinated migration moments, decisions to pin per phase, risk management |
 
-## Type-system family — payloads and exception-less flow
+## Type-system family — state, transport, exception-less
 
-Two stacked proposals split the type system into a **state layer**
-(aggregates, nominal, no generics) and a **transport layer**
-(payloads, structural records + tagged unions, carrier-bounded
-generics).
-[`payload-transport-layer.md`](./payload-transport-layer.md) defines
-the transport layer; [`exception-less.md`](./exception-less.md) uses
-it to introduce `Option`/`Result`, a `?` propagation operator, and a
-wire-edge status mapping that together remove exceptions from every
-flow except aggregate-invariant violations. The
-[`aggregate-inheritance.md`](./aggregate-inheritance.md) proposal
-(sister proposal, currently on PR #509) defines the state layer.
-Implementing agents: read the transport layer doc first, then
-exception-less. The two share a load-bearing rule set (carrier bound,
-aggregate-as-carrier projection, variant-name-tagged union identity)
-which is pinned in the transport-layer doc precisely because
-exception-less depends on it.
+Three stacked proposals reshape Loom's type system:
+
+- **State layer** —
+  [`aggregate-inheritance.md`](./aggregate-inheritance.md). Abstract
+  aggregates with single inheritance and storage strategies
+  (`shared` / `own`). Nominal, no generics. Sister to the transport
+  layer.
+- **Transport layer** —
+  [`payload-transport-layer.md`](./payload-transport-layer.md).
+  `payload` umbrella over events/commands/queries/responses/errors;
+  carrier-bounded generics (ML-postfix `T option`, `T page`);
+  discriminated unions in both named (`payload Foo = A | B`) and
+  anonymous-inline (`A or B`) forms.
+- **Exception-less flow** —
+  [`exception-less.md`](./exception-less.md). Uses the transport
+  layer's primitives. `error` payloads with their own status codes;
+  anonymous `or` unions replace the `Result<T, E>` wrapper; `?`
+  propagates `error` variants. Two-regime split enforced by the
+  validator.
+- **Delivery plan** —
+  [`implementation-plan.md`](./implementation-plan.md). Stacks the
+  three above into one work stream with phases, coordinated
+  migration moments, and risk gates.
+
+Implementing agents: read the docs in order — aggregate-inheritance
+(independent), payload-transport-layer (foundation),
+exception-less (consumer), implementation-plan (delivery). The
+three share a load-bearing rule set (carrier bound,
+aggregate-as-carrier projection, variant-name-tagged union identity,
+`error` sugar keyword, anonymous-`or` unions) which is pinned in
+the transport-layer doc precisely because exception-less depends on
+it.
 
 ## Relationship to the policies work
 

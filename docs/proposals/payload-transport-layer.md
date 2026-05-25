@@ -16,30 +16,45 @@
 
 Today Loom conflates five concepts under "aggregate": state, identity,
 wire shape, events, and (implicitly) commands/queries. Generic
-patterns like `Envelope<T>` or `Page<T>` aren't expressible. Each new
+patterns like `envelope<T>` or `T page` aren't expressible. Each new
 cross-cutting pattern needs another TS-authored macro.
 
 **Proposed**: lift "structured data crossing a boundary" into a
-first-class concept `payload`. Events, commands, queries, and
-responses become payload subtypes. Generics are added, **bounded by
-`: carrier`** (a closed set: primitive | value object | payload |
-aggregate-via-wire-projection). Discriminated unions on payloads
-enable tagged event streams, CQRS modeling, and Result/Option (see
-[`exception-less.md`](./exception-less.md)).
+first-class concept `payload`. Events, commands, queries, responses,
+and errors become payload subtypes (sugar keywords). Generics are
+added, **bounded by `: carrier`** (a closed set: primitive | value
+object | payload | aggregate-via-wire-projection). Two type-level
+constructs sit on top:
+- **Named unions**: `payload OrderEvent = OrderPlaced | OrderCancelled`
+  (per-decl, reusable, identity by name).
+- **Anonymous `or` unions inline in type positions**:
+  `OrderId or NotFound or OutOfStock` (no separate declaration; same
+  tagged-wire semantics).
 
-| Today (per-aggregate, per-site) | Proposed (payload + generics) |
+ML-style postfix syntax for the carrier types: `string option`,
+`customer page`, `event envelope`. Generic instantiation never uses
+angle brackets — Loom is ML-flavoured for type positions
+(consistent with `Customer id` from #477).
+
+For the exception-less flow that builds on these primitives, see
+[`exception-less.md`](./exception-less.md).
+
+| Today (per-aggregate, per-site) | Proposed (payload + generics + `or`) |
 |---|---|
 | Wire shape implicit in aggregate | `payload <AggName>Wire extends payload` (explicit) |
 | `event OrderPlaced { ... }` | `event OrderPlaced extends payload { ... }` (auto-upgrade) |
 | Commands implicit in operations | `command PlaceOrder extends payload { ... }` |
 | Queries implicit in finds | `query OrderSummary extends payload { ... }` |
-| No success/error wrappers | `payload Result<T: carrier, E: carrier> = Ok<T> \| Err<E>` |
-| No pagination type | `payload Page<T: carrier> { items: T[], total: int, cursor: string? }` |
-| No envelope | `payload Envelope<P: carrier> { id: string, ts: datetime, body: P }` |
-| Event streams as ad-hoc types | `payload OrderEvent = OrderPlaced \| OrderCancelled \| ...` |
+| Errors implicit (throws) | `error NotFound { ... } on wire 404` (sugar keyword, see exception-less.md) |
+| No success/error wrappers | `OrderId or NotFound or OutOfStock` (anonymous `or` union; see exception-less.md) |
+| No pagination type | `customer page` (postfix; payload `page<T: carrier> { items: T[], total: int, cursor: string? }`) |
+| No envelope | `event envelope` (postfix; payload `envelope<P: carrier> { id: string, ts: datetime, body: P }`) |
+| No "option" type | `string option` (postfix; sugar for `string or none`) |
+| Event streams as ad-hoc types | `payload OrderEvent = OrderPlaced \| OrderCancelled \| ...` (named) OR `OrderPlaced or OrderCancelled or ...` (inline) |
 
 Aggregates stay nominal + concrete (no generics). Payloads add
-generics + unions. **Two parallel ladders, by design.**
+generics + unions + anonymous-or-unions. **Two parallel ladders, by
+design.**
 
 ## Why this matters (the problem)
 
@@ -169,18 +184,33 @@ payload OrderSummaryQuery {
 ### Subtypes (existing keywords become sugar)
 
 Existing event/command/query/response concepts become payload
-subtypes:
+subtypes; the new `error` keyword joins the family:
 
 ```
-event OrderPlaced extends payload { ... }
-command PlaceOrder extends payload { ... }
-query OrderSummary extends payload { ... }
+event   OrderPlaced extends payload { ... }
+command PlaceOrder  extends payload { ... }
+query   OrderSummary extends payload { ... }
+response CustomerResponse extends payload { ... }
+error   NotFound { what: string, id: string } on wire 404
+error   OutOfStock { sku: string } on wire 409
 ```
 
 The `extends payload` is intent — they share the structural shape and
 the wire contract. **Migration**: existing code (`event Foo { ... }`)
 auto-upgrades to `event Foo extends payload { ... }` in the IR
 enrichment pass. No syntactic change required in user .ddd files.
+
+`error` is the new keyword. Beyond being a payload, it carries two
+extra signals:
+- The `on wire <Status>` clause maps the error to its HTTP status at
+  the wire edge (consumed by [`exception-less.md`](./exception-less.md)'s
+  status-mapping enrichment).
+- The error variant participates in `?` propagation (the operator
+  short-circuits on values of `error`-marked types).
+
+See `exception-less.md` for the full semantics of `error` payloads
+and propagation; the keyword itself lives at this layer because
+errors are payloads.
 
 ### Wire shape becomes an explicit payload
 
@@ -229,12 +259,14 @@ carrier := primitive
          | aggregate (via its auto-synthesized wire projection)
 ```
 
-What this buys, concretely:
+What this buys, concretely (in ML-postfix syntax — see §"Syntax —
+ML-postfix for type positions" below):
 
-- `Page<int>` — primitive carrier.
-- `Option<Money>` — value-object carrier.
-- `Result<CustomerWire, NotFound>` — payload carrier.
-- `Option<Customer>` — aggregate carrier, via the projection rule
+- `int page` — primitive carrier.
+- `money option` — value-object carrier.
+- `CustomerWire or NotFound` — anonymous `or`-union with a payload
+  and an error variant.
+- `customer option` — aggregate carrier, via the projection rule
   below.
 
 **Aggregates as carriers — the projection rule.** When an aggregate
@@ -247,14 +279,14 @@ projection today's `wireShape` enrichment already performs for
 top-level operation returns — we name the rule and let it apply
 through generics.
 
-So `Option<Customer>`:
+So `customer option`:
 - Inside a function body where the value originated from
-  `customers.find one ...`, `Some.value` is typed as `Customer` (the
-  aggregate handle; you may call its methods).
-- Crossing the wire it serializes as if it were `Option<CustomerWire>`.
+  `customers.findOne(...)`, the `Some`-side value is typed as
+  `Customer` (the aggregate handle; you may call its methods).
+- Crossing the wire it serializes as if it were `CustomerWire option`.
 - An author who wants to be explicit about transport (e.g., a payload
   field whose static type *is* the wire form) writes
-  `Option<CustomerWire>` directly. Both forms coexist; on the wire
+  `CustomerWire option` directly. Both forms coexist; on the wire
   they're equivalent.
 
 The two views are connected by the carrier projection — they don't
@@ -270,65 +302,111 @@ union just as they consume any payload union.
 [`aggregate-inheritance.md`](./aggregate-inheritance.md)): an abstract
 aggregate `Party` with concretes `Customer` / `Supplier` projects to
 a union of concrete wire shapes when used as a carrier argument.
-`Option<Party>` on the wire is `None | Some<CustomerWire> |
-Some<SupplierWire>` — i.e., the discriminator carries the concrete
-type alongside the carrier's `kind`. Implementation note: the
-projection enriches at lowering time using each concrete's
+`party option` on the wire is `CustomerWire or SupplierWire or none`
+— i.e., the discriminator carries the concrete type. Implementation
+note: the projection enriches at lowering time using each concrete's
 `wireShape`; no new IR needed beyond a small change to the carrier
 arm-stamping pass to detect abstract aggregates and expand them.
 `Party id` (the polymorphic id reference type) is itself a primitive
-carrier — `Option<Party id>` works unmodified.
+carrier — `Party id option` works unmodified.
 
-### Relationship to `T?` (nullable suffix) and `Optional<T>`
+### Syntax — ML-postfix for type positions
 
-Loom has three "absence" concepts after this proposal lands. They are
-**not unified** — each has a distinct purpose:
+Carrier types in Loom use **ML-style postfix syntax** in type
+positions, consistent with `Customer id` from #477. No angle
+brackets anywhere in the language:
+
+| Form | Reads as |
+|---|---|
+| `string option` | "optional string" — sugar for `string or none` |
+| `customer option` | "optional customer" — carrier holding an aggregate (handle inside process, wire projection at boundary) |
+| `customer page` | "page of customers" — paginated result |
+| `event envelope` | "envelope around an event" |
+| `string option page` | nested: "page of optional strings" (postfix associates left) |
+| `(string or int)` (in type positions) | anonymous union; grouping parens only when ambiguous |
+
+`option`, `page`, `envelope` are single-arg postfix type
+constructors. Anonymous unions use the **`or` connective** (see
+§"Discriminated unions on payloads" below) and can chain associatively:
+`A or B or C or D`. No special multi-arg-generics syntax is needed
+because `or` already gives compositional sum types — and the
+historically two-arg `Result<T, E>` is just `T or E` in this model.
+
+For named generic declarations (declaring a new payload that takes
+type parameters), the parameter list at the **declaration site**
+uses parens:
+
+```
+payload page(T: carrier) {       # declares the page payload taking one carrier T
+  items: T[]
+  total: int
+  cursor: string?
+}
+
+payload envelope(P: carrier) {
+  id: string
+  ts: datetime
+  body: P
+}
+```
+
+The instantiation site uses ML-postfix (`customer page`, not
+`page(customer)`). Declarations face the type-system author;
+instantiations face every author. The asymmetric syntax mirrors
+OCaml's `'a list` / `type 'a list = ...`.
+
+### Relationship to `T?` (nullable suffix)
+
+Loom has **two** absence concepts after this proposal lands:
 
 | Concept | Form | States | Purpose | Lives in |
 |---|---|---|---|---|
 | `T?` (nullable suffix) | Type-level annotation | value \| null | Field nullability — "this column may hold null" | Today's grammar (kept) |
-| `Option<T>` | Payload carrier | `Some<T>` \| `None` | Function/expression-level optional return — "this call may have no result" | This proposal (new) |
-| `Optional<T>` | Generic record (see [`optional-and-partial-update.md`](./optional-and-partial-update.md)) | absent \| present-with-`T?` | Partial-update command fields — "was this field supplied at all" | Existing proposal |
+| `T option` (carrier) | ML-postfix sugar for `T or none` | None \| Some<T> | Optional values that may be absent | This proposal (new) |
 
-The three concepts coexist because they answer different questions:
-- `T?` is a storage / wire concern (nullable column / nullable JSON value).
-- `Option<T>` is a control-flow / return-type concern (function may have no result).
-- `Optional<T>` is a partial-update concern (distinguishing "not supplied" from "supplied as null").
+The two coexist because they answer different questions:
+- `T?` is a storage / wire concern (nullable column / nullable JSON
+  value at the field level).
+- `T option` is a control-flow / type-level concern (a function may
+  have no result; a command field may not have been supplied).
 
-**Cross-conversion at boundaries**:
-- `T?` ↔ `Option<T>` — explicit helpers in the carrier stdlib
-  (`Option.fromNullable(x)` / `option.orNull()`). Not implicit; the
-  author makes the conversion intentional because the two concepts
-  carry different semantics.
-- `Optional<T>` could be re-expressed as a payload union once
-  generics land (`Optional<T> = Absent | Present<T?>`), unifying it
-  with `Option<T?>` semantically. Whether to migrate the existing
-  Optional proposal onto the payload-union foundation is an
-  implementation-plan decision; the partial-update use case is
-  important enough to keep `Optional<T>` as a named type even if
-  it's internally a payload union.
+They **compose**: `string? option` is "an optional value whose inner
+type allows null" — three states (absent / cleared / value). Used in
+PATCH-style commands; see [`partial-update.md`](./partial-update.md).
+
+The previously-proposed `Optional<T>` named type **is subsumed** by
+`T option` plus the `command`-keyword PATCH semantic. The
+`partial-update.md` proposal replaces the old `optional-and-partial-update.md`
+and describes the pattern, not a new type.
 
 **`find` returns**: see [`exception-less.md`](./exception-less.md)
 §"Find-variant alignment". The return-type *declaration* determines
-which absence concept is in play: `: X` becomes `Result<X, NotFound>`
-(no implicit nullability); `: X?` becomes `Option<X>` (carrier).
+which absence shape applies: `: X` becomes `X or NotFound` (no
+implicit nullability); `: X?` becomes `X option` (carrier).
 `: X[]` stays an array (empty is the absence signal).
 
 ### Stdlib payload home
 
-The blessed carrier types (`Option<T>`, `Result<T, E>`, `Page<T>`,
-`Envelope<P>`, plus stdlib error payloads like `NotFound`,
+The blessed carrier types (`option`, `page`, `envelope`, plus the
+`none` unit type, plus stdlib `error` payloads like `NotFound`,
 `ParseError`, `ApiError`, `ValidationError`) live in
-**`src/stdlib/payloads/`** as embedded `.ddd` source bundled with the
-toolchain, parsed once at startup and made available to every user
-program without an import. They are not user-visible source files
-(no addition to `examples/` or playground); they're a compile-time
-preamble, the way primitive type names are pre-known to the parser.
+**`src/stdlib/payloads/`** as embedded `.ddd` source bundled with
+the toolchain, parsed once at startup and made available to every
+user program without an import. They are not user-visible source
+files (no addition to `examples/` or playground); they're a
+compile-time preamble, the way primitive type names are pre-known
+to the parser.
 
-Authors **can** declare their own carrier-compatible payload unions
-(e.g., `payload Maybe<T: carrier> = Just<T> | Nothing` per the
-variant-name-tagged identity rule, those are distinct from Option).
-The stdlib types are special only in being pre-declared.
+Authors **can** declare their own generic payloads (e.g., a custom
+`payload wrapper(T: carrier) { ... }`), use them postfix
+(`customer wrapper`), and use `or` unions inline as well as named
+unions. The stdlib types are special only in being pre-declared.
+
+There is no separate `Result<T, E>` type in the stdlib. Its job is
+done by the inline `T or E` union form: any function returning
+`OrderId or NotFound` participates in `?` propagation through the
+`error`-marker mechanism. See [`exception-less.md`](./exception-less.md)
+for the full propagation semantics.
 
 ### Identity of payload types (structural vs nominal — pinned)
 
@@ -345,11 +423,11 @@ phase, so it is pinned here:
 Concretely:
 
 ```
-payload Option<T: carrier> = Some<T> | None
-payload Maybe<T: carrier>  = Just<T> | Nothing
+payload option(T: carrier) = some(T) | none
+payload maybe(T: carrier)  = just(T) | nothing
 
-# Option<int> ≠ Maybe<int>  (different variant names)
-# Option.map cannot be called on a Maybe<int> value.
+# int option ≠ int maybe  (different variant names)
+# option.map cannot be called on an int maybe value.
 ```
 
 Three positions were considered:
@@ -369,47 +447,81 @@ Three positions were considered:
 This means **payload typing is "structural for records, nominal for
 unions"** — a coherent hybrid. The structural-ness still earns its
 keep: two declarations of `payload Address { street: string, city:
-string }` *are* the same type (no nominal registry); but
-`Option<T>` and a user-declared `Maybe<T>` are distinct (the union
-tag is part of the identity).
+string }` *are* the same type (no nominal registry); but `option`
+and a user-declared `maybe` are distinct (the variant tag is part
+of the identity).
 
 ### Generics on payloads
 
+Generic payloads are declared with a parenthesised type-parameter
+list at the declaration site, instantiated with ML-postfix at use
+sites:
+
 ```
-payload Envelope<P: carrier> {
+payload envelope(P: carrier) {
   id: string
   ts: datetime
   body: P
 }
 
-payload Page<T: carrier> {
+payload page(T: carrier) {
   items: T[]
   total: int
   cursor: string?
 }
 
-payload Result<T: carrier, E: carrier> = Ok<T> | Err<E>
-payload Ok<T: carrier> { value: T }
-payload Err<E: carrier> { error: E }
+# Use sites — ML-postfix:
+let env: order_placed envelope = ...
+let p:   customer page         = ...
 ```
 
 **Bounded by `: carrier` only.** The universe is closed — every type
 parameter is itself a carrier. This avoids the "what is a value type?"
 question that opens up full structural subtyping.
 
+There is **no built-in `Result<T, E>`** type. The role of Result is
+covered by anonymous `or` unions; see below.
+
 ### Discriminated unions on payloads
+
+Two forms, both compile to the same IR shape:
+
+**Named unions** — declared up-front, identity by name, reusable:
 
 ```
 payload OrderEvent = OrderPlaced | OrderCancelled | OrderShipped
 ```
 
-**Tagged unions.** The discriminator is the variant's name
-(serialized as a `kind` field on the wire by default). Frontend
-TypeScript narrows on the discriminator naturally. C# emits using
-`JsonDerivedType` polymorphic JSON. Phoenix/Ash uses Ash's
-`tagged_unions` feature.
+**Anonymous `or` unions** — inline in type positions, no declaration
+needed, identity structural-on-variants (associative-commutative):
 
-Case-matching on a tagged union:
+```
+operation placeOrder(...): OrderId or NotFound or OutOfStock {
+  ...
+}
+```
+
+`A or B or C` is exactly equivalent to a named union
+`payload Foo = A | B | C` at the type-system level — same tagged
+wire encoding, same exhaustiveness checking. The choice is
+ergonomic: named for reuse and documentation; anonymous when the
+union appears once in a return type and naming it would be
+ceremony.
+
+**Tagged wire.** The discriminator is the variant's name
+(serialized as a `kind` field on the wire by default — see open
+question on discriminator field name). Frontend TypeScript narrows
+on the discriminator naturally. C# emits using `JsonDerivedType`
+polymorphic JSON. Phoenix/Ash uses Ash's `tagged_unions` feature.
+
+For HTTP operation returns specifically, the variant's `on wire
+<Status>` clause (on `error`-marked variants) lifts the
+discriminator to the status code, and the body becomes the variant
+data directly — no `kind` envelope on success responses. See
+[`exception-less.md`](./exception-less.md) §"Wire-edge status
+mapping" for the lowering.
+
+Case-matching on a union (named or anonymous):
 ```
 match event {
   OrderPlaced -> { ... }
@@ -419,6 +531,16 @@ match event {
 ```
 Validator enforces exhaustiveness (every variant must be matched
 unless `_` fallback used).
+
+**Constraint on variants**: each variant must be a distinct type.
+`string or string` is rejected (`loom.union-duplicate-variant`).
+This keeps the discriminator unambiguous on the wire.
+
+**Associativity / commutativity of `or`**: `(A or B) or C` ≡
+`A or (B or C)` ≡ `A or B or C`. Order is significant for *reading*
+(authors typically list success variants first, error variants last,
+just as a convention) but not for *typing*. The variant set is what
+matters; `A or B` and `B or A` are the same type.
 
 ### Cross-cutting concerns target payloads
 
@@ -442,16 +564,17 @@ GraphQL mutation, queue consumer, internal call).
 For each of today's pain points (above), how payload + generics fixes
 it:
 
-| Today's pain | With payload + generics |
+| Today's pain | With payload + generics + `or` |
 |---|---|
-| Pagination is per-aggregate | `payload Page<T: carrier>` once; every find returns `Page<XWire>` |
-| No success/error wrapper | `payload Result<T, E>` once; operations declared as returning Result (see exception-less.md) |
-| Event streams aren't typed | `payload OrderEvent = OrderPlaced \| OrderCancelled` with exhaustive matching |
+| Pagination is per-aggregate | `payload page(T: carrier) { ... }` once; every find returns `XWire page` |
+| No success/error wrapper | Operations return `OrderId or NotFound or OutOfStock` directly; no Result envelope. See exception-less.md |
+| Event streams aren't typed | `payload OrderEvent = OrderPlaced \| OrderCancelled` (named) OR `OrderPlaced or OrderCancelled` (inline) |
 | Cross-cutting validation per-op | `validate for X` once; applies wherever X flows |
-| GraphQL union types not expressible | Falls out of discriminated unions |
-| Per-aggregate macros for envelope shapes | `Envelope<XWire>` instantiated where needed |
+| GraphQL union types not expressible | Falls out of discriminated unions (named or inline) |
+| Per-aggregate macros for envelope shapes | `XWire envelope` instantiated where needed |
 | Event sourcing requires hand-rolled types | `payload <Agg>Event = <variant list>` first-class |
-| Multi-aggregate response shapes | Compose with generic payloads, no per-site DTO |
+| Multi-aggregate response shapes | Compose with generic payloads + `or`, no per-site DTO |
+| `Optional<T>` as a separate type | Subsumed by `T option` + `command`-keyword PATCH semantic (see partial-update.md) |
 
 ## Alternatives considered (and why they're worse)
 
@@ -498,41 +621,64 @@ This proposal is the "ship the abstraction" answer to the
 
 ### Alt 5: Use `: payload` as the generic bound (v0 of this proposal)
 
-Reject. Locks out the most ergonomic instantiations — `Option<int>`,
-`Result<Money, ParseError>`, `Page<int>`. Forces authors to wrap
-primitives in payload boxes (`payload IntBox { value: int }`) just
-to satisfy the bound. The widening to `: carrier` covers every
-ergonomic case without opening the type universe up to full
-structural subtyping (the bound is still a closed set; "any value
-type" / row-poly bounds remain deferred to v2).
+Reject. Locks out the most ergonomic instantiations — `int option`,
+`money option`, `int page`. Forces authors to wrap primitives in
+payload boxes (`payload IntBox { value: int }`) just to satisfy
+the bound. The widening to `: carrier` covers every ergonomic case
+without opening the type universe up to full structural subtyping
+(the bound is still a closed set; "any value type" / row-poly bounds
+remain deferred to v2).
+
+### Alt 6: Keep `Result<T, E>` as a named carrier in the stdlib (v1 of this proposal)
+
+Reject. With anonymous `or` unions in the language, `Result<T, E>`
+is just `T or E` directly. The Ok/Err variant wrapping is pure
+ceremony — it double-tags values on the wire and forces authors
+to write `Ok { value: ... }` / `Err { error: ... }` constructors
+when the type itself already carries the variant. Dropping the
+Result envelope:
+
+- Removes one stdlib type and two helper variants (`Ok<T>`, `Err<E>`).
+- Drops wire weight (no `{ "kind": "Ok", "value": ... }` wrapping;
+  just the variant directly).
+- Generalises trivially to multi-error returns
+  (`OrderId or NotFound or OutOfStock or Forbidden`) without
+  Either-style nesting.
+
+The cost is dropping a familiar name. Worth it.
 
 ## Migration path
 
 Step-by-step compatibility:
 
-1. **Phase 1**: introduce `payload` keyword + the four sugar
-   keywords (`event`, `command`, `query`, `response`) all becoming
-   `extends payload` automatically in IR enrichment. **No user .ddd
-   file changes required.**
+1. **Phase 1**: introduce `payload` keyword + the **five** sugar
+   keywords (`event`, `command`, `query`, `response`, `error`) all
+   becoming `extends payload` automatically in IR enrichment. **No
+   user .ddd file changes required** for the first four; `error`
+   is new.
 2. **Phase 2**: introduce explicit named wire shapes
    (`payload <Agg>Wire extends payload`) auto-synthesized per
    aggregate. **No user code change**; backend emission unchanged.
 3. **Phase 3**: introduce generics on payloads, bounded by
-   `: carrier`. Authors can now declare `Page<T: carrier>`,
-   `Envelope<P: carrier>`, etc. **Opt-in**; existing code doesn't use
-   generics, unchanged. Includes the variant-name-tagged identity
-   rule (see §"Identity of payload types").
-4. **Phase 4**: introduce discriminated unions. **Opt-in**.
-   Validator enforces exhaustive matching (or `_` fallback).
+   `: carrier`. Authors can declare `payload page(T: carrier)`,
+   `payload envelope(P: carrier)`, etc. ML-postfix at use sites
+   (`customer page`, `event envelope`). **Opt-in**; existing code
+   doesn't use generics, unchanged. Includes the variant-name-tagged
+   identity rule (see §"Identity of payload types").
+4. **Phase 4**: introduce discriminated unions — both **named**
+   (`payload Foo = A | B`) AND **anonymous `or` unions** (`A or B`
+   inline in type positions). Validator enforces exhaustive
+   matching (or `_` fallback) for both forms. **Opt-in**.
 5. **Phase 5**: introduce `validate for X` / `authorize for X`
    targeting payload types. **Opt-in**; existing operation-level
    rules continue to work.
 
 Each phase is independently shippable. Phase 1+2 deliver naming
-(immediate clarity win); Phase 3 is the type-system lift; Phase 4+5
-add the surface for cross-cutting. **Phase 3 + 4 are the prerequisites
-for [`exception-less.md`](./exception-less.md)**, which defines
-phases A1–A7 on top.
+(immediate clarity win); Phase 3 is the type-system lift; Phase 4
+adds the union surface (both forms); Phase 5 adds cross-cutting.
+**Phase 3 + 4 are the prerequisites for
+[`exception-less.md`](./exception-less.md)**, which defines phases
+A1–A7 on top.
 
 ## Hard parts (honest list)
 
@@ -563,32 +709,46 @@ phases A1–A7 on top.
   transport). Risk of user confusion — mitigated by clear examples
   in `docs/language.md`.
 - **Macro stdlib overlap.** Some current macros become obsolete
-  once `Page<T>` etc. are first-class. Migration story for existing
+  once `page` etc. are first-class. Migration story for existing
   user-authored macros that emit payload-like shapes.
+- **`or` precedence with `option`.** `string option` (postfix) must
+  bind tighter than `or` (sum), so `string option or none` parses
+  as `(string option) or none` — but that's just `string option`
+  with redundancy. The real ambiguity is `string or int option`:
+  parses as `string or (int option)`, NOT `(string or int) option`.
+  Pin: postfix type constructors bind tighter than `or`. Author
+  uses parens for the rare other reading.
 
 ## What's deferred
 
 - **Aggregates with generics.** Out of scope. Narrow surface stays.
 - **Row polymorphism / structural subtyping over payloads.** v2
-  conversation. Bounded params (`<T: carrier>`) cover common cases.
+  conversation. Bounded params (`(T: carrier)`) cover common cases.
 - **Type-class-like abstractions (`payload with Serializable`).**
   v2 conversation. Capabilities-as-marker (`implements`) handles
   cross-cutting today.
 - **Bounds beyond `: carrier`.** Just `: carrier` for v1 to keep the
   type system closed. Generalising to "any value type" bounds is v2.
 - **Carrier-generic user-authored functions** (writing your own
-  `Page.map`). Tracked as A7b in
+  `page` helpers). Tracked as A7b in
   [`exception-less.md`](./exception-less.md). v1 ships only the
   blessed closed set of carrier helpers (A7a there).
+- **Multi-parameter postfix type constructors.** ML-postfix scales
+  trivially for one parameter (`T option`); multi-parameter cases
+  (a hypothetical `(K, V) map`) would require either tuple-prefix
+  syntax or named-args. v1 has no multi-parameter carriers (since
+  `or` covers the `Result<T, E>` two-arg case directly). Defer.
 
 ## Open questions (need human input)
 
-- **Single `payload` concept vs four keywords?** Current proposal:
-  keep `event` / `command` / `query` / `response` keywords for
-  clarity, treat `extends payload` as compiler-inferred. Alternative:
-  drop the sugar keywords; force authors to write `payload Foo {
-  ... }` and use a `kind: 'event' | 'command' | ...` discriminator.
-  Lean toward keeping sugar — keyword semantics carry intent.
+- **Single `payload` concept vs five keywords?** Current proposal:
+  keep `event` / `command` / `query` / `response` / `error` keywords
+  for clarity, treat `extends payload` as compiler-inferred.
+  Alternative: drop the sugar keywords; force authors to write
+  `payload Foo { ... }` and use a `kind: 'event' | 'command' | ...`
+  discriminator. Lean toward keeping sugar — keyword semantics carry
+  intent, and `error`'s additional behaviour (`?` propagation +
+  `on wire`) earns its keyword.
 - **Naming**: `payload` vs `message` vs `dto`. `payload`
   transport-neutral; `message` carries Akka/Erlang baggage; `dto`
   reads Java-y. Open.
@@ -598,16 +758,21 @@ phases A1–A7 on top.
   bikeshedding.
 - **Aggregate-in-carrier semantics**: handle-inside-process,
   wire-across-boundary (this proposal's pinned choice), vs
-  always-wire (simpler, but every domain-code consumer of
-  `Some.value: Customer` must re-hydrate via `repo.load`). Pinned to
-  the former here; revisit if the projection rule turns out to be
-  ambiguous at non-HTTP boundaries (queues, persisted snapshots).
+  always-wire (simpler, but every domain-code consumer of `some`
+  must re-hydrate via `repo.load`). Pinned to the former here;
+  revisit if the projection rule turns out to be ambiguous at
+  non-HTTP boundaries (queues, persisted snapshots).
 - **Discriminator field name for tagged unions**: default `kind`?
   `type`? `_type`? Default `kind`; allow override.
-- **Inline generics vs named instantiations**:
-  `Envelope<OrderPlacedEvent>` inline vs
-  `payload OrderPlacedEnvelope = Envelope<OrderPlacedEvent>` named.
-  Probably both, with named as the canonical form for wire shapes.
+- **Anonymous `or` vs named unions**: when should authors reach
+  for which? Recommendation: anonymous `or` for one-off return
+  types (the common case in exception-less flow); named unions for
+  reusable event/command catalogues that appear in multiple
+  positions. Document as a guidance section, not a rule.
+- **Naming `none`** — is `none` the right name for the unit type
+  used in `T option = T or none`? Alternatives: `unit`, `nothing`,
+  `void`, `null` (collides with nullable). Lean `none` because it
+  reads naturally in `string option = string or none`. Open.
 - **Bounds beyond `: carrier`** for v2 — what's the next bound that
   matters? Likely `: carrier with id` (anything with an id field) to
   support generic CRUD wrappers.
@@ -630,13 +795,22 @@ phases A1–A7 on top.
 
 - [`exception-less.md`](./exception-less.md) — **downstream
   proposal**. Uses Phase 3+4 of this proposal (carrier-bounded
-  generics + tagged unions) plus the `: carrier` bound widening
-  pinned here, to introduce native `Result<T, E>` / `Option<T>`, a
-  `?` propagation operator, wire-edge status mapping, and re-shaped
-  find variants. The carrier-bound widening, the aggregate-as-carrier
-  projection rule, and the variant-name-tagged identity rule are all
-  load-bearing for exception-less; this is why they're pinned in this
-  doc rather than left open.
+  generics + tagged unions, both named and `or`-anonymous) plus the
+  `: carrier` bound widening pinned here, plus the `error` sugar
+  keyword introduced here, to deliver the exception-less flow: `?`
+  propagation operator, wire-edge status mapping, and re-shaped find
+  variants. The carrier-bound widening, the aggregate-as-carrier
+  projection rule, the variant-name-tagged identity rule, and the
+  anonymous-`or`-unions construct are all load-bearing for
+  exception-less; this is why they're pinned in this doc rather than
+  left open.
+
+- [`partial-update.md`](./partial-update.md) — **adjacent**.
+  Documents the PATCH-style command pattern using `command` +
+  `option`-typed fields. Replaces the old `optional-and-partial-update.md`
+  which proposed a separate `Optional<T>` type. With this proposal's
+  `option` + position-driven wire encoding, `Optional<T>` is
+  subsumed; no new type is needed.
 
 - #466 — macro system. Macros remain the answer for cross-cutting
   concerns that don't fit the payload model (e.g. injecting fields
@@ -650,5 +824,5 @@ phases A1–A7 on top.
 
 - `src/ir/loom-ir.ts` — `wireShape` enrichment. This is the
   bridge: today's `wireShape` becomes Phase 2's auto-synthesized
-  `<Agg>Wire payload`, and the projection rule for `Option<Customer>`
-  → `Option<CustomerWire>` at the wire reuses it directly.
+  `<Agg>Wire payload`, and the projection rule for `customer option`
+  → `CustomerWire option` at the wire reuses it directly.
