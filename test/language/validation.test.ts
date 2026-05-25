@@ -159,6 +159,49 @@ describe("validation", () => {
     expect(errors.some((e) => /frontend/i.test(e) && /target/i.test(e))).toBe(true);
   });
 
+  describe("v2 hard cut: legacy constructor call forms", () => {
+    it("rejects positional VO call (Money(10, \"USD\")) — must use BuilderCall", async () => {
+      const { errors } = await parse(`
+        context Sales {
+          valueobject Money { amount: decimal  currency: string }
+          aggregate Order {
+            derived total: Money = Money(0.0, "USD")
+          }
+        }
+      `);
+      expect(errors.some((e) => /v2 syntax.*construct 'Money' with builder-call/.test(e))).toBe(true);
+    });
+
+    it("rejects entity-part call (LineItem(...)) — must use BuilderCall", async () => {
+      const { errors } = await parse(`
+        context Sales {
+          aggregate Order {
+            entity LineItem { qty: int }
+            contains lines: LineItem[]
+            operation addLine(qty: int) {
+              lines += LineItem(qty)
+            }
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /v2 syntax.*entity part 'LineItem'.*builder-call/.test(e)),
+      ).toBe(true);
+    });
+
+    it("accepts the BuilderCall form", async () => {
+      const { errors } = await parse(`
+        context Sales {
+          valueobject Money { amount: decimal  currency: string }
+          aggregate Order {
+            derived total: Money = Money { amount: 0.0, currency: "USD" }
+          }
+        }
+      `);
+      expect(errors.some((e) => /v2 syntax/.test(e))).toBe(false);
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Page metamodel validator obligations.
   // ---------------------------------------------------------------------------

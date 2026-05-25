@@ -156,8 +156,12 @@ export function buildWorkflowsFile(
   ].filter(hasRef);
   const usesEvents = /\bEvents\.\w/.test(bodyStr);
   const usesIds = /\bIds\.\w/.test(bodyStr);
-  const usesSchema = /\bschema\.\w/.test(bodyStr);
   const usesDb = /\bNodePgDatabase\b/.test(bodyStr);
+  // The `workflowsRoutes(db: NodePgDatabase<typeof schema>, ...)` signature
+  // always references `schema` as a type when `db` is present, even if no
+  // workflow body touches `schema.<name>` directly.  Tie the import to
+  // `usesDb` so the emitted file always compiles.
+  const usesSchema = usesDb || /\bschema\.\w/.test(bodyStr);
   const usesDispatcher = /\bDomainEventDispatcher\b/.test(bodyStr);
   const aggsReferenced = [...aggsTouched].filter((n) =>
     new RegExp(`\\bnew\\s+${n}\\(|\\b${n}\\.\\w`).test(bodyStr),

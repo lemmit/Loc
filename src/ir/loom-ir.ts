@@ -1260,7 +1260,7 @@ export type ExprIR =
       block?: StmtIR[];
     }
   | {
-      kind: "new";
+      kind: "construct";
       partName: string;
       fields: { name: string; value: ExprIR }[];
     }
@@ -1377,7 +1377,7 @@ export function exprUsesCurrentUser(e: ExprIR | undefined): boolean {
       return e.args.some(exprUsesCurrentUser);
     case "lambda":
       return exprUsesCurrentUser(e.body);
-    case "new":
+    case "construct":
     case "object":
       return e.fields.some((f) => exprUsesCurrentUser(f.value));
   }
@@ -1466,7 +1466,7 @@ export function exprUsesMoney(e: ExprIR | undefined): boolean {
   if (e.kind === "paren") return exprUsesMoney(e.inner);
   if (e.kind === "call") return e.args.some(exprUsesMoney);
   if (e.kind === "lambda") return exprUsesMoney(e.body);
-  if (e.kind === "new" || e.kind === "object") return e.fields.some((f) => exprUsesMoney(f.value));
+  if (e.kind === "construct" || e.kind === "object") return e.fields.some((f) => exprUsesMoney(f.value));
   if (e.kind === "match")
     return (
       e.arms.some((a) => exprUsesMoney(a.cond) || exprUsesMoney(a.value)) ||

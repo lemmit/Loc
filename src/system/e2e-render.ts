@@ -140,7 +140,7 @@ function collectUsedLetNames(statements: readonly TestStmtIR[]): Set<string> {
       for (const a of e.args) visit(a);
     } else if (e.kind === "lambda") {
       if (e.body) visit(e.body);
-    } else if (e.kind === "new" || e.kind === "object") {
+    } else if (e.kind === "construct" || e.kind === "object") {
       for (const f of e.fields) visit(f.value);
     } else if (e.kind === "paren") visit(e.inner);
     else if (e.kind === "unary") visit(e.operand);
@@ -245,7 +245,7 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
     }
     case "call":
       return `${e.name}(${e.args.map((a) => renderE2EExpr(a, ctx)).join(", ")})`;
-    case "new":
+    case "construct":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderE2EExpr(f.value, ctx)}`).join(", ")} })`;
     case "object":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderE2EExpr(f.value, ctx)}`).join(", ")} })`;

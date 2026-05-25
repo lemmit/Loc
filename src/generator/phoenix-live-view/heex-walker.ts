@@ -271,7 +271,7 @@ function renderExpr(expr: ExprIR, ctx: WalkContext): string {
       return hoistLambdaToHandler(expr, ctx);
     case "object":
       return renderObjectLiteral(expr, ctx);
-    case "new":
+    case "construct":
       // `new Part { … }` only appears in operation bodies; pages
       // shouldn't reach here.  Emit a comment marker.
       return `<%-- TODO: new ${expr.partName} unsupported in page body --%>`;

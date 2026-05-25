@@ -52,7 +52,7 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
       // total to keep the build happy.
       if (e.body) return `(${e.param}) => ${renderTsExpr(e.body, ctx)}`;
       return `(${e.param}) => { /* block-body lambda — page metamodel territory, not TS-renderable */ }`;
-    case "new":
+    case "construct":
       return renderNew(e, ctx);
     case "object":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderTsExpr(f.value, ctx)}`).join(", ")} })`;
@@ -202,7 +202,7 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: TsRenderContext):
   }
 }
 
-function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: TsRenderContext): string {
+function renderNew(e: Extract<ExprIR, { kind: "construct" }>, ctx: TsRenderContext): string {
   const parentRef = ctx.thisName === "this" ? "this._id" : `${ctx.thisName}.id`;
   const inits = [
     `id: Ids.new${e.partName}Id()`,

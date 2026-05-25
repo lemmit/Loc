@@ -390,7 +390,7 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
         </Box>
       );
     }
-    case "new":
+    case "construct":
       return (
         <Group gap={2} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }}>
           <Text size="xs" c="dimmed">new</Text>

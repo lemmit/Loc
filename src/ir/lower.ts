@@ -1559,7 +1559,7 @@ function collectIdFollows(
     case "paren":
       collectIdFollows(expr.inner, out);
       return;
-    case "new":
+    case "construct":
     case "object":
       for (const f of expr.fields) collectIdFollows(f.value, out);
       return;

@@ -608,7 +608,7 @@ function lowerBuilderCall(expr: BuilderCall, env: Env): ExprIR {
         name: e.name as string,
         value: lowerExpr(e.value, env),
       }));
-    return { kind: "new", partName: name, fields };
+    return { kind: "construct", partName: name, fields };
   }
   return lowerBuilderCallAsCall(expr, env, name, "free");
 }

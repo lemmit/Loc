@@ -68,7 +68,7 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
       // Block-body lambdas are not renderable as an inline expression.
       if (e.body) return `fn ${e.param} -> ${renderExpr(e.body, ctx)} end`;
       return `fn ${e.param} -> # block-body-lambda end`;
-    case "new":
+    case "construct":
       return renderNew(e, ctx);
     case "object":
       // Bare object literals appear in e2e contexts; not expected in
@@ -255,7 +255,7 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): strin
 // New (entity part constructor)
 // ---------------------------------------------------------------------------
 
-function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: RenderCtx): string {
+function renderNew(e: Extract<ExprIR, { kind: "construct" }>, ctx: RenderCtx): string {
   const fields = e.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`).join(", ");
   return `%${ctx.contextModule}.${upperFirst(e.partName)}{${fields}}`;
 }

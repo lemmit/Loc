@@ -179,7 +179,7 @@ function collectReferencedAggregates(
     if (e.kind === "unary") walkExpr(e.operand);
     if (e.kind === "paren") walkExpr(e.inner);
     if (e.kind === "call") for (const a of e.args) walkExpr(a);
-    if (e.kind === "new" || e.kind === "object") {
+    if (e.kind === "construct" || e.kind === "object") {
       for (const f of e.fields) walkExpr(f.value);
     }
   }
@@ -241,7 +241,7 @@ function walkAllExprs(tests: TestE2EIR[], visit: (e: ExprIR) => void): void {
     if (e.kind === "unary") walk(e.operand);
     if (e.kind === "paren") walk(e.inner);
     if (e.kind === "call") for (const a of e.args) walk(a);
-    if (e.kind === "new" || e.kind === "object") {
+    if (e.kind === "construct" || e.kind === "object") {
       for (const f of e.fields) walk(f.value);
     }
   };
@@ -437,7 +437,7 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
     }
     case "call":
       return `${e.name}(${e.args.map((a) => renderUIExpr(a, ctx)).join(", ")})`;
-    case "new":
+    case "construct":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderUIExpr(f.value, ctx)}`).join(", ")} })`;
     case "object":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderUIExpr(f.value, ctx)}`).join(", ")} })`;

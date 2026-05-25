@@ -760,7 +760,7 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       return "lambda";
     case "call":
       return `call to '${e.name}' (${e.callKind})`;
-    case "new":
+    case "construct":
       return `'new ${e.partName}' construction`;
     case "object":
       return "object literal";
@@ -879,7 +879,7 @@ function walkExpr(e: ExprIR | undefined, visit: (e: ExprIR) => void): void {
     case "call":
       for (const a of e.args) walkExpr(a, visit);
       break;
-    case "new":
+    case "construct":
     case "object":
       for (const f of e.fields) walkExpr(f.value, visit);
       break;

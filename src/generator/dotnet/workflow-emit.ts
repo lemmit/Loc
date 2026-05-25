@@ -418,7 +418,7 @@ function renderExprWithCmdParams(
       };
     }
     if (e.kind === "paren") return { ...e, inner: rewrite(e.inner) };
-    if (e.kind === "new") {
+    if (e.kind === "construct") {
       return {
         ...e,
         fields: e.fields.map((f) => ({ name: f.name, value: rewrite(f.value) })),

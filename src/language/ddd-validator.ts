@@ -30,6 +30,7 @@ import {
   isAggregate,
   isAssignOrCallStmt,
   isBinaryExpr,
+  isBoundedContext,
   isContainment,
   isDecLit,
   isDerivedProp,
@@ -112,6 +113,10 @@ export class DddValidator {
     // type system is the source of truth); structural checks run
     // unconditionally.
     this.checkMatchExpressions(model, accept);
+    // v2 hard cut: reject pre-v2 surfaces that have a builder-call replacement.
+    // `Money(10, "USD")` → `Money { amount: 10, currency: "USD" }`,
+    // `OrderLine(...)` (entity part) → `OrderLine { ... }`.
+    this.checkLegacyConstructorCalls(model, accept);
     // `import helper <name> from "..."` declarations.
     // Reject names that shadow walker stdlib primitives so a typo
     // never silently overrides Stack / Form / etc.  Also flag
@@ -1198,6 +1203,44 @@ export class DddValidator {
             `Entity part '${target.name}' belongs to aggregate '${owner.name}'; cross-aggregate references must go through the root: use '${owner.name} id'.`,
             { node, property: "target" },
           );
+        }
+      }
+    }
+  }
+
+  /** v2 hard cut: reject CallExpr forms that v2 replaces with BuilderCall.
+   *  Specifically, any `Name(args)` where `Name` resolves to a ValueObject
+   *  or EntityPart inside the enclosing context — those constructions must
+   *  use `Name { slot: value, ... }` syntax now. */
+  private checkLegacyConstructorCalls(model: Model, accept: ValidationAcceptor): void {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (node.$type !== "CallExpr") continue;
+      const call = node as import("./generated/ast.js").CallExpr;
+      const callee = call.callee;
+      if (callee.$type !== "NameRef") continue;
+      const name = (callee as import("./generated/ast.js").NameRef).name;
+      const ctx = AstUtils.getContainerOfType(call, isBoundedContext);
+      if (!ctx) continue;
+      for (const m of ctx.members) {
+        if (isValueObject(m) && m.name === name) {
+          accept(
+            "error",
+            `v2 syntax: construct '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
+            { node: call, code: "loom.legacy-vo-call" },
+          );
+          break;
+        }
+        if (isAggregate(m)) {
+          for (const inner of m.members) {
+            if (inner.$type === "EntityPart" && (inner as import("./generated/ast.js").EntityPart).name === name) {
+              accept(
+                "error",
+                `v2 syntax: construct entity part '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
+                { node: call, code: "loom.legacy-part-call" },
+              );
+              break;
+            }
+          }
         }
       }
     }

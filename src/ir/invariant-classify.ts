@@ -127,7 +127,7 @@ function exprIsTranslatable(
       if (!e.body) return false;
       return exprIsTranslatable(e.body, ctx, inner);
     }
-    case "new":
+    case "construct":
     case "object":
       return e.fields.every((f) => exprIsTranslatable(f.value, ctx, scope));
     case "paren":
@@ -389,7 +389,7 @@ function firstFieldRef(e: ExprIR): string | null {
       // wire-validating predicate bodies — fall through to null.
       if (e.body) return firstFieldRef(e.body);
       return null;
-    case "new":
+    case "construct":
     case "object":
       return e.fields.reduce<string | null>((acc, f) => acc ?? firstFieldRef(f.value), null);
     case "match":

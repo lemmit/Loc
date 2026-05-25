@@ -68,7 +68,7 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
       // — but stay total to keep the build happy.
       if (e.body) return `${e.param} => ${renderCsExpr(e.body, ctx)}`;
       return `${e.param} => { /* block-body lambda — not C#-renderable */ }`;
-    case "new":
+    case "construct":
       return renderNew(e, ctx);
     case "object":
       // Bare object literals only appear in e2e contexts; in operation
@@ -256,7 +256,7 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: CsRenderContext):
   }
 }
 
-function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: CsRenderContext): string {
+function renderNew(e: Extract<ExprIR, { kind: "construct" }>, ctx: CsRenderContext): string {
   const inits = [
     `Id = ${e.partName}Id.New()`,
     `ParentId = ${ctx.thisName}.Id`,

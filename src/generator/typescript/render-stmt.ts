@@ -184,7 +184,7 @@ function collectLeaves(
       });
       if (e.otherwise) collectLeaves(e.otherwise, out);
       break;
-    case "new":
+    case "construct":
     case "object":
       e.fields.forEach((f) => collectLeaves(f.value, out));
       break;

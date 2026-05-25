@@ -70,8 +70,8 @@ describe("lowering — name resolution metadata", () => {
     expect(add.kind).toBe("add");
     const stmt = add as Extract<typeof add, { kind: "add" }>;
     expect(stmt.target.segments).toEqual(["lines"]);
-    const value = stmt.value as Extract<ExprIR, { kind: "new" }>;
-    expect(value.kind).toBe("new");
+    const value = stmt.value as Extract<ExprIR, { kind: "construct" }>;
+    expect(value.kind).toBe("construct");
     expect(value.partName).toBe("OrderLine");
     const qty = value.fields.find((f) => f.name === "quantity")!;
     expect(asRef(qty.value).refKind).toBe("param");
