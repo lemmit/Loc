@@ -1,4 +1,4 @@
-// `CreateForm(of: <Aggregate>)` walker-side auto-dispatch.
+// `CreateForm { of: <Aggregate> }` walker-side auto-dispatch.
 //
 // Walker introspects an aggregate's IR field list and emits one
 // RHF-bound input per non-optional field, dispatching by type
@@ -53,9 +53,9 @@ const baseOrderSystem = (body: string) => `
   }
 `;
 
-describe("CreateForm(of: <Aggregate>) auto-dispatch", () => {
+describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
   it("emits useForm + zodResolver + useCreate<Agg> mutation hook", async () => {
-    const files = await buildAndGenerate(baseOrderSystem(`CreateForm(of: Order)`));
+    const files = await buildAndGenerate(baseOrderSystem(`CreateForm { of: Order }`));
     const tsx = files.get("web/src/pages/create_order.tsx")!;
     expect(tsx).toBeDefined();
     expect(tsx).toMatch(/import \{[^}]*useForm[^}]*\} from "react-hook-form"/);
@@ -67,7 +67,7 @@ describe("CreateForm(of: <Aggregate>) auto-dispatch", () => {
   });
 
   it("emits one input per non-optional aggregate field", async () => {
-    const files = await buildAndGenerate(baseOrderSystem(`CreateForm(of: Order)`));
+    const files = await buildAndGenerate(baseOrderSystem(`CreateForm { of: Order }`));
     const tsx = files.get("web/src/pages/create_order.tsx")!;
     // string → TextInput with register("customerId")
     expect(tsx).toMatch(/<TextInput[^>]*\{\.\.\.register\("customerId"\)\}/);
@@ -90,7 +90,7 @@ describe("CreateForm(of: <Aggregate>) auto-dispatch", () => {
           }
         }
         ui WebApp {
-          page CreateOrder { route: "/orders/new"  body: CreateForm(of: Order) }
+          page CreateOrder { route: "/orders/new"  body: CreateForm { of: Order } }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
@@ -122,7 +122,7 @@ describe("CreateForm(of: <Aggregate>) auto-dispatch", () => {
           }
         }
         ui WebApp {
-          page CreateOrder { route: "/orders/new"  body: CreateForm(of: Order) }
+          page CreateOrder { route: "/orders/new"  body: CreateForm { of: Order } }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
@@ -137,7 +137,7 @@ describe("CreateForm(of: <Aggregate>) auto-dispatch", () => {
   });
 
   it("default submit handler emits the scaffold's create + notify + navigate flow", async () => {
-    const files = await buildAndGenerate(baseOrderSystem(`CreateForm(of: Order)`));
+    const files = await buildAndGenerate(baseOrderSystem(`CreateForm { of: Order }`));
     const tsx = files.get("web/src/pages/create_order.tsx")!;
     expect(tsx).toMatch(/await create\.mutateAsync\(vals\)/);
     expect(tsx).toMatch(/notifications\.show\(\{ color: "green", message: "Order created" \}\)/);
@@ -148,7 +148,7 @@ describe("CreateForm(of: <Aggregate>) auto-dispatch", () => {
 
   it("explicit onSubmit: lambda overrides the default flow and skips the notify import", async () => {
     const files = await buildAndGenerate(
-      baseOrderSystem(`CreateForm(of: Order, onSubmit: v => create.mutateAsync(v))`),
+      baseOrderSystem(`CreateForm { of: Order, onSubmit: v => create.mutateAsync(v) }`),
     );
     const tsx = files.get("web/src/pages/create_order.tsx")!;
     expect(tsx).toBeDefined();
@@ -159,7 +159,7 @@ describe("CreateForm(of: <Aggregate>) auto-dispatch", () => {
 
   it("testid: on the Form replaces the auto-derived per-field testid namespace", async () => {
     const files = await buildAndGenerate(
-      baseOrderSystem(`CreateForm(of: Order, testid: "place-order")`),
+      baseOrderSystem(`CreateForm { of: Order, testid: "place-order" }`),
     );
     const tsx = files.get("web/src/pages/create_order.tsx")!;
     expect(tsx).toBeDefined();
@@ -173,7 +173,7 @@ describe("CreateForm(of: <Aggregate>) auto-dispatch", () => {
       system S {
         module M { context C { } }
         ui WebApp {
-          page Broken { route: "/x"  body: CreateForm() }
+          page Broken { route: "/x"  body: CreateForm {} }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }

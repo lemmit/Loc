@@ -1,9 +1,9 @@
 // Toolbar + Empty primitives in walker stdlib.
 //
-//   Toolbar(Heading("Orders"), Button("Add", to: "/orders/new"))
+//   Toolbar { Heading { "Orders" }, Button { "Add", to: "/orders/new" } }
 //     → Mantine <Group justify="space-between"> push apart layout
 //
-//   Empty("No orders yet")
+//   Empty { "No orders yet" }
 //     → centered dimmed-text empty-state placeholder
 
 import { describe, expect, it } from "vitest";
@@ -12,17 +12,17 @@ import { generateSystemFiles } from "../_helpers/index.js";
 const buildAndGenerate = generateSystemFiles;
 
 describe("Toolbar + Empty in walker stdlib", () => {
-  it('Toolbar(...) emits Mantine <Group justify="space-between">', async () => {
+  it('Toolbar { ... } emits Mantine <Group justify="space-between">', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Orders {
             route: "/orders"
-            body:  Toolbar(
-              Heading("Orders"),
-              Button("Add", to: "/orders/new")
-            )
+            body:  Toolbar {
+              Heading { "Orders" },
+              Button { "Add", to: "/orders/new" }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -45,14 +45,14 @@ describe("Toolbar + Empty in walker stdlib", () => {
     );
   });
 
-  it("empty Toolbar() self-closes with the same justify attr", async () => {
+  it("empty Toolbar {} self-closes with the same justify attr", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
-            body:  Toolbar()
+            body:  Toolbar {}
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -68,14 +68,14 @@ describe("Toolbar + Empty in walker stdlib", () => {
     expect(content).toMatch(/<Group justify="space-between" \/>/);
   });
 
-  it('Empty("No orders yet") emits centered dimmed-text placeholder', async () => {
+  it('Empty { "No orders yet" } emits centered dimmed-text placeholder', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page List {
             route: "/list"
-            body:  Empty("No orders yet")
+            body:  Empty { "No orders yet" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -92,14 +92,14 @@ describe("Toolbar + Empty in walker stdlib", () => {
     expect(content).toMatch(/<Center mih=\{200\}><Text c="dimmed">No orders yet<\/Text><\/Center>/);
   });
 
-  it("Empty() with no message falls back to default", async () => {
+  it("Empty {} with no message falls back to default", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
-            body:  Empty()
+            body:  Empty {}
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -123,7 +123,7 @@ describe("Toolbar + Empty in walker stdlib", () => {
           page X {
             route: "/x"
             state { kind: string = "items" }
-            body:  Empty("No " + kind + " here")
+            body:  Empty { "No " + kind + " here" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

@@ -23,10 +23,10 @@ describe("+= / -= in onClick mutations", () => {
           page Counter {
             route: "/c"
             state { count: int = 0 }
-            body:  Stack(
-              Text(count),
-              Button("+", onClick: e => { count += 1 })
-            )
+            body:  Stack {
+              Text { count },
+              Button { "+", onClick: e => { count += 1 } }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -51,7 +51,7 @@ describe("+= / -= in onClick mutations", () => {
           page Counter {
             route: "/c"
             state { count: int = 0 }
-            body:  Button("-", onClick: e => { count -= 1 })
+            body:  Button { "-", onClick: e => { count -= 1 } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -78,7 +78,7 @@ describe("+= / -= in onClick mutations", () => {
               count: int = 0
               step: int = 5
             }
-            body:  Button("Bump", onClick: e => { count += step * 2 })
+            body:  Button { "Bump", onClick: e => { count += step * 2 } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -107,11 +107,11 @@ describe("+= / -= in onClick mutations", () => {
               b: int = 10
               c: int = 0
             }
-            body:  Button("Mix", onClick: e => {
+            body:  Button {"Mix", onClick: e => {
               a += 1
               b -= 1
               c := 99
-            })
+            }}
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -140,7 +140,7 @@ describe("+= / -= in onClick mutations", () => {
           page P {
             route: "/p"
             state { draft: int = 0 }
-            body:  Button("x", onClick: e => { draft.note := 1 })
+            body:  Button { "x", onClick: e => { draft.note := 1 } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

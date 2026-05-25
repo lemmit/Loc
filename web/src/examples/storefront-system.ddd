@@ -100,7 +100,7 @@ system StorefrontSystem {
         operation topUp(amount: Money) {
           precondition isMutable()
           precondition amount.amount > 0
-          balance := Money(balance.amount + amount.amount, balance.currency)
+          balance := Money { amount: balance.amount + amount.amount, currency: balance.currency }
           emit WalletToppedUp { wallet: id, amount: amount, at: now() }
         }
 
@@ -108,7 +108,7 @@ system StorefrontSystem {
           precondition isMutable()
           precondition amount.amount > 0
           precondition balance.amount >= amount.amount
-          balance := Money(balance.amount - amount.amount, balance.currency)
+          balance := Money { amount: balance.amount - amount.amount, currency: balance.currency }
           emit WalletDebited { wallet: id, amount: amount, at: now() }
         }
 
@@ -134,7 +134,7 @@ system StorefrontSystem {
         operation addLine(productId: Product id, unitPrice: Money, qty: int) {
           precondition isMutable()
           precondition qty > 0
-          lines += new OrderLine {
+          lines += OrderLine {
             productId: productId,
             unitPrice: unitPrice,
             quantity: qty
@@ -161,7 +161,7 @@ system StorefrontSystem {
             status: Draft,
             placedAt: "2024-01-01T00:00:00Z"
           })
-          order.addLine("00000000-0000-0000-0000-000000000002", Money(5.00, "USD"), 2)
+          order.addLine("00000000-0000-0000-0000-000000000002", Money { amount: 5.00, currency: "USD" }, 2)
           order.confirm()
           expect(order.status).toBe(Confirmed)
           expect(order.lines.count).toBe(1)
@@ -173,9 +173,9 @@ system StorefrontSystem {
             status: Draft,
             placedAt: "2024-01-01T00:00:00Z"
           })
-          order.addLine("00000000-0000-0000-0000-000000000002", Money(5.00, "USD"), 2)
+          order.addLine("00000000-0000-0000-0000-000000000002", Money { amount: 5.00, currency: "USD" }, 2)
           order.confirm()
-          expectThrows order.addLine("00000000-0000-0000-0000-000000000002", Money(5.00, "USD"), 1)
+          expectThrows order.addLine("00000000-0000-0000-0000-000000000002", Money { amount: 5.00, currency: "USD" }, 1)
         }
       }
 

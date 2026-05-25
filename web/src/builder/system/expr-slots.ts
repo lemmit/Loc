@@ -20,7 +20,7 @@ import {
   type Lambda,
   type MatchExpr,
   type MemberAccess,
-  type NewExpr,
+  type BuilderCall,
   type ObjectLit,
   type ParenExpr,
   type Statement,
@@ -476,8 +476,8 @@ function collectHints(node: Expression, path: string, h: ExprHints): void {
       if (m.elseExpr) collectHints(m.elseExpr, `${path}me`, h);
       break;
     }
-    case "NewExpr":
-      (node as NewExpr).fields.forEach((f, i) => collectHints(f.value, `${path}f${i}`, h));
+    case "BuilderCall":
+      (node as BuilderCall).entries.forEach((e, i) => collectHints(e.value, `${path}f${i}`, h));
       break;
     case "ObjectLit":
       (node as ObjectLit).fields.forEach((f, i) => collectHints(f.value, `${path}f${i}`, h));

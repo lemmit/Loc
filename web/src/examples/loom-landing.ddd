@@ -42,71 +42,71 @@ system LoomLanding {
       layout: none
       title:  "Loom — DDD as code"
 
-      body: Stack(
+      body: Stack {
 
         // ── Hero ────────────────────────────────────────────────
-        Container(
-          Stack(
-            Heading("Loom", level: 1),
-            Heading("Domain-driven design, as code.", level: 2),
-            Text("Describe your system once in a tiny .ddd source — aggregates, value-objects, events, repositories, workflows, views, APIs, UIs.  Loom generates a runnable multi-deployable tree: TypeScript + Hono, .NET + ASP.NET Core, React + Vite + Mantine, Phoenix LiveView + Ash — all wired together as one docker-compose stack."),
-            Group(
-              Button("Open the app", to: "/app"),
-              Anchor("View on GitHub", to: "https://github.com/lemmit/Loc")
-            )
-          ),
+        Container {
+          Stack {
+            Heading { "Loom", level: 1 },
+            Heading { "Domain-driven design, as code.", level: 2 },
+            Text { "Describe your system once in a tiny .ddd source — aggregates, value-objects, events, repositories, workflows, views, APIs, UIs.  Loom generates a runnable multi-deployable tree: TypeScript + Hono, .NET + ASP.NET Core, React + Vite + Mantine, Phoenix LiveView + Ash — all wired together as one docker-compose stack." },
+            Group {
+              Button { "Open the app", to: "/app" },
+              Anchor { "View on GitHub", to: "https://github.com/lemmit/Loc" }
+            }
+          },
           size: "md"
-        ),
+        },
 
-        Divider(),
+        Divider {},
 
         // ── Three feature cards ─────────────────────────────────
-        Container(
-          Stack(
-            Heading("One source of truth", level: 3),
-            Grid(
-              Card("One DSL",
-                Text("Aggregates, value-objects, events, repositories, workflows, views, APIs, UIs — all expressed in a single .ddd source.")
-              ),
-              Card("Four platforms",
-                Text("TypeScript + Hono, .NET + ASP.NET Core, React + Vite + Mantine, Phoenix LiveView + Ash.  Same wire shape across all four.")
-              ),
-              Card("Browser playground",
-                Text("Edit, generate, preview — without leaving the tab.  Backed by the same compiler the CLI uses.")
-              )
-            )
-          ),
+        Container {
+          Stack {
+            Heading { "One source of truth", level: 3 },
+            Grid {
+              Card {"One DSL",
+                Text { "Aggregates, value-objects, events, repositories, workflows, views, APIs, UIs — all expressed in a single .ddd source." }
+              },
+              Card {"Four platforms",
+                Text { "TypeScript + Hono, .NET + ASP.NET Core, React + Vite + Mantine, Phoenix LiveView + Ash.  Same wire shape across all four." }
+              },
+              Card {"Browser playground",
+                Text { "Edit, generate, preview — without leaving the tab.  Backed by the same compiler the CLI uses." }
+              }
+            }
+          },
           size: "lg"
-        ),
+        },
 
-        Divider(),
+        Divider {},
 
         // ── Why-it-matters strip ────────────────────────────────
-        Container(
-          Stack(
-            Heading("Why bother?", level: 3),
-            Stack(
-              Stat("Backends generated",  "3"),
-              Stat("Frontends generated", "1"),
-              Stat("Hand-written glue",   "0")
-            ),
-            Text("Change a field once, propagate to every layer — schema, DTO, repository, form, table, e2e test.  No more out-of-sync clients.")
-          ),
+        Container {
+          Stack {
+            Heading { "Why bother?", level: 3 },
+            Stack {
+              Stat { "Backends generated",  "3" },
+              Stat { "Frontends generated", "1" },
+              Stat { "Hand-written glue",   "0" }
+            },
+            Text { "Change a field once, propagate to every layer — schema, DTO, repository, form, table, e2e test.  No more out-of-sync clients." }
+          },
           size: "lg"
-        ),
+        },
 
-        Divider(),
+        Divider {},
 
         // ── Footer ──────────────────────────────────────────────
-        Container(
-          Group(
-            Anchor("Playground", to: "/app"),
-            Anchor("GitHub",     to: "https://github.com/lemmit/Loc"),
-            Anchor("Docs",       to: "https://github.com/lemmit/Loc/tree/main/docs")
-          ),
+        Container {
+          Group {
+            Anchor { "Playground", to: "/app" },
+            Anchor { "GitHub",     to: "https://github.com/lemmit/Loc" },
+            Anchor { "Docs",       to: "https://github.com/lemmit/Loc/tree/main/docs" }
+          },
           size: "lg"
-        )
-      )
+        }
+      }
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -116,12 +116,12 @@ system LoomLanding {
       route: "/app"
       title: "Loom"
 
-      body: Stack(
-        Heading("You're in the app", level: 1),
-        Text("Notice the header up top and the navbar on the left?  This page uses the default layout (chrome on), so it picks up the AppShell wrapper the deployable's design pack emits."),
-        Text("The landing page at \"/\" sets `layout: none` and mounts outside that wrapper — no chrome at all, just the page body."),
-        Anchor("← Back to the landing", to: "/")
-      )
+      body: Stack {
+        Heading { "You're in the app", level: 1 },
+        Text { "Notice the header up top and the navbar on the left?  This page uses the default layout (chrome on), so it picks up the AppShell wrapper the deployable's design pack emits." },
+        Text { "The landing page at \"/\" sets `layout: none` and mounts outside that wrapper — no chrome at all, just the page body." },
+        Anchor { "← Back to the landing", to: "/" }
+      }
     }
 
     // Sidebar — only the in-app page appears.  The landing intentionally

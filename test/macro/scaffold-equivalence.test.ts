@@ -99,8 +99,8 @@ describe("scaffold macro: aggregate selector", () => {
     // QueryView / Form trees the legacy archetype path produced.
     expect(pageBodyCallee(model, "OrderList")).toBe("scaffoldList");
     expect(pageBodyCallee(model, "OrderNew")).toBe("scaffoldNewForm");
-    // Detail page emits the explicit Stack(scaffoldDetails,
-    // scaffoldOperations) shape so users can unfold into per-slot
+    // Detail page emits the explicit Stack {scaffoldDetails,
+    // scaffoldOperations} shape so users can unfold into per-slot
     // customisation while leaving auto-op-modal generation intact.
     expect(pageBodyCallee(model, "OrderDetail")).toBe("Stack");
   });
@@ -111,8 +111,8 @@ describe("scaffold macro: workflow / view / module selectors", () => {
     const { model, errors } = await parseString(wrapWith("workflows: [placeOrder]"));
     expect(errors).toEqual([]);
     expect(pageNames(model)).toContain("PlaceOrderWorkflow");
-    // Canonical body primitive — expands inline to Stack(Breadcrumbs,
-    // Heading, Card(WorkflowForm(runs:))) at lowering.
+    // Canonical body primitive — expands inline to Stack {Breadcrumbs,
+    // Heading, Card { WorkflowForm { runs: } }} at lowering.
     expect(pageBodyCallee(model, "PlaceOrderWorkflow")).toBe("scaffoldWorkflowForm");
     expect(pageNames(model)).toContain("WorkflowsIndex");
   });
@@ -163,7 +163,7 @@ describe("scaffold macro: composition rules", () => {
           }
         }
         ui App with scaffold(aggregates: [Order]) {
-          page OrderList { route: "/custom"  body: List(of: Order) }
+          page OrderList { route: "/custom"  body: List { of: Order } }
         }
       }
     `);

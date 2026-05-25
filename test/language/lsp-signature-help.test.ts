@@ -52,10 +52,10 @@ describe("SignatureHelpProvider", () => {
       context Sales {
         valueobject Money { amount: decimal currency: string }
         aggregate Order {
-          derived total: Money = Money(0.0, <|>"USD")
+          derived total: Money = Money { amount: 0.0, currency: <|>"USD" }
         }
       }`);
-    expect(help?.signatures[0].label).toBe("Money(amount: decimal, currency: string)");
+    expect(help?.signatures[0].label).toBe("Money { amount: decimal, currency: string }");
     expect(help?.activeParameter).toBe(1);
   });
 });

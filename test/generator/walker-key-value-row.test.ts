@@ -26,27 +26,27 @@ async function emit(body: string): Promise<string> {
 
 describe("KeyValueRow primitive", () => {
   it('emits <KeyValueRow label="…">child</KeyValueRow> with the runtime helper imported', async () => {
-    const tsx = await emit(`KeyValueRow("Status", Text("active"))`);
+    const tsx = await emit(`KeyValueRow { "Status", Text { "active" } }`);
     expect(tsx).toMatch(/import \{[^}]*\bKeyValueRow\b[^}]*\} from "\.\.\/lib\/format"/);
     expect(tsx).toMatch(/<KeyValueRow label="Status"><Text>active<\/Text><\/KeyValueRow>/);
   });
 
   it("testid: lands on the root <KeyValueRow>", async () => {
-    const tsx = await emit(`KeyValueRow("Status", Text("active"), testid: "row-status")`);
+    const tsx = await emit(`KeyValueRow { "Status", Text { "active" }, testid: "row-status" }`);
     expect(tsx).toMatch(/<KeyValueRow [^>]*\bdata-testid="row-status"/);
   });
 
   it("missing value emits a visible placeholder, no crash", async () => {
-    const tsx = await emit(`KeyValueRow("Status")`);
+    const tsx = await emit(`KeyValueRow { "Status" }`);
     expect(tsx).toMatch(/<KeyValueRow label="Status">\{\/\* missing value \*\/\}<\/KeyValueRow>/);
   });
 
   it("composes inside a Stack of detail rows", async () => {
-    const tsx = await emit(`Stack(
-      KeyValueRow("Customer", Text("Acme")),
-      KeyValueRow("Status",   Badge("active")),
-      KeyValueRow("Placed",   DateDisplay("2026-01-01"))
-    )`);
+    const tsx = await emit(`Stack {
+      KeyValueRow { "Customer", Text { "Acme" } },
+      KeyValueRow { "Status",   Badge { "active" } },
+      KeyValueRow { "Placed",   DateDisplay { "2026-01-01" } }
+    }`);
     expect(tsx).toMatch(/<KeyValueRow label="Customer">/);
     expect(tsx).toMatch(/<KeyValueRow label="Status">/);
     expect(tsx).toMatch(/<KeyValueRow label="Placed">/);

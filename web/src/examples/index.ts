@@ -93,7 +93,7 @@ export const examples: LoomExample[] = [
     label: "Action showcase (operation buttons + forms)",
     source: actionShowcaseSource,
     blurb:
-      "Hand-authored Action(order.confirm) buttons in a component, plus scaffold operation forms — the instance-qualified operation surface end-to-end.",
+      "Hand-authored Action { order.confirm } buttons in a component, plus scaffold operation forms — the instance-qualified operation surface end-to-end.",
   },
   {
     id: "storybook-mantine",

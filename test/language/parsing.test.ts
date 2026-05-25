@@ -394,7 +394,7 @@ describe("page metamodel — grammar smoke tests", () => {
             state {
               filter: string = ""
             }
-            body: List(of: Order)
+            body: List { of: Order }
             menu { section: "Sales", label: "Orders" }
           }
         }
@@ -408,7 +408,7 @@ describe("page metamodel — grammar smoke tests", () => {
       system Acme {
         ui WebApp {
           component OrderPanel(order: Order) {
-            body: Stack(items: [order.id, order.status])
+            body: Stack { items: [order.id, order.status] }
           }
         }
       }
@@ -453,7 +453,7 @@ describe("page metamodel — grammar smoke tests", () => {
     const { errors } = await parseSnippet(`
       system Acme {
         ui WebApp {
-          page Home { route: "/", body: Heading("hi") }
+          page Home { route: "/", body: Heading { "hi" } }
           menu {
             section "Main" {
               link Home { label: "Home" }
@@ -473,8 +473,8 @@ describe("page metamodel — grammar smoke tests", () => {
           page X {
             route: "/x"
             body: match {
-              true => List(of: Order)
-              else => Empty()
+              true => List { of: Order }
+              else => Empty {}
             }
           }
         }

@@ -1,5 +1,5 @@
-// Slot() + children prop for user components.
-// Components with `Slot()` in their body get a typed `children`
+// Slot {} + children prop for user components.
+// Components with `Slot {}` in their body get a typed `children`
 // prop and accept extra positional args from the caller as JSX
 // children.  Closes the composition loop: components can wrap
 // arbitrary content the parent declares.
@@ -10,17 +10,17 @@ import { generateSystemFiles } from "../_helpers/index.js";
 const buildAndGenerate = generateSystemFiles;
 
 describe("Slot + children prop", () => {
-  it("component with Slot() emits children prop in Props interface", async () => {
+  it("component with Slot {} emits children prop in Props interface", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           component PageBox(title: string) {
-            body: Card(title, Slot())
+            body: Card { title, Slot {} }
           }
           page Home {
             route: "/"
-            body:  Heading("home")
+            body:  Heading { "home" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -51,11 +51,11 @@ describe("Slot + children prop", () => {
         module M { context C { } }
         ui WebApp {
           component PageBox(title: string) {
-            body: Card(title, Slot())
+            body: Card { title, Slot {} }
           }
           page Home {
             route: "/"
-            body:  PageBox("Welcome", Text("hi"), Text("world"))
+            body:  PageBox { "Welcome", Text { "hi" }, Text { "world" } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -75,17 +75,17 @@ describe("Slot + children prop", () => {
     expect(content).toMatch(/<\/PageBox>/);
   });
 
-  it("component without Slot() doesn't get a children prop", async () => {
+  it("component without Slot {} doesn't get a children prop", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           component Plain(s: string) {
-            body: Text(s)
+            body: Text { s }
           }
           page X {
             route: "/x"
-            body:  Plain("hi")
+            body:  Plain { "hi" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -108,11 +108,11 @@ describe("Slot + children prop", () => {
         module M { context C { } }
         ui WebApp {
           component Box(title: string, color: string) {
-            body: Card(title, Slot())
+            body: Card { title, Slot {} }
           }
           page X {
             route: "/x"
-            body:  Box("Title", color: "red", Text("body"))
+            body:  Box { "Title", color: "red", Text { "body" } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -136,7 +136,7 @@ describe("Slot + children prop", () => {
         module M { context C { } }
         ui WebApp {
           component Ghost() {
-            body: Card("ghost", Slot())
+            body: Card { "ghost", Slot {} }
           }
           page X {
             route: "/x"

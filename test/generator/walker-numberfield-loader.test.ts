@@ -1,10 +1,10 @@
 // NumberField + Loader primitives.
 //
-//   NumberField("Quantity", bind: qty)
+//   NumberField { "Quantity", bind: qty }
 //     → <NumberInput value={qty} onChange={(v) => setQty(...)} />
 //
-//   Loader()        → <Loader />
-//   Loader(size: "lg")  → <Loader size="lg" />
+//   Loader {}        → <Loader />
+//   Loader { size: "lg" }  → <Loader size="lg" />
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../_helpers/index.js";
@@ -12,7 +12,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 const buildAndGenerate = generateSystemFiles;
 
 describe("NumberField + Loader primitives", () => {
-  it("NumberField('Qty', bind: qty) wires controlled NumberInput", async () => {
+  it("NumberField { 'Qty', bind: qty } wires controlled NumberInput", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -20,7 +20,7 @@ describe("NumberField + Loader primitives", () => {
           page Form {
             route: "/form"
             state { qty: int = 1 }
-            body:  NumberField("Quantity", bind: qty)
+            body:  NumberField { "Quantity", bind: qty }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -49,7 +49,7 @@ describe("NumberField + Loader primitives", () => {
           page Form {
             route: "/form"
             state { price: decimal = 9.99 }
-            body:  NumberField("Price", bind: price)
+            body:  NumberField { "Price", bind: price }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -73,7 +73,7 @@ describe("NumberField + Loader primitives", () => {
         ui WebApp {
           page X {
             route: "/x"
-            body:  NumberField("Bare")
+            body:  NumberField { "Bare" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -90,7 +90,7 @@ describe("NumberField + Loader primitives", () => {
     expect(content).not.toMatch(/onChange=/);
   });
 
-  it("Loader() emits a default Mantine spinner", async () => {
+  it("Loader {} emits a default Mantine spinner", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -98,7 +98,7 @@ describe("NumberField + Loader primitives", () => {
           page X {
             route: "/x"
             state { loading: bool = true }
-            body:  loading ? Loader() : Heading("Done")
+            body:  loading ? Loader {} : Heading { "Done" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -115,14 +115,14 @@ describe("NumberField + Loader primitives", () => {
     expect(content).toMatch(/<Loader \/>/);
   });
 
-  it("Loader(size: 'lg') emits the size attr", async () => {
+  it("Loader { size: 'lg' } emits the size attr", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
-            body:  Loader(size: "lg")
+            body:  Loader { size: "lg" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

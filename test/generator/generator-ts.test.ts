@@ -87,7 +87,7 @@ describe("typescript generator", () => {
           function isMutable(): bool = status == Draft
           operation addLine(qty: int) {
             precondition isMutable()
-            lines += new OrderLine { quantity: qty }
+            lines += OrderLine { quantity: qty }
           }
           entity OrderLine { quantity: int  invariant quantity > 0 }
           test "count on a local lowers to length" {
@@ -1247,11 +1247,11 @@ describe("typescript generator", () => {
           balance: Money
           operation deposit(amount: Money) {
             precondition amount.amount > 0
-            balance := Money(balance.amount + amount.amount, balance.currency)
+            balance := Money { amount: balance.amount + amount.amount, currency: balance.currency }
           }
           operation withdraw(amount: Money) {
             precondition amount.amount > 0
-            balance := Money(balance.amount - amount.amount, balance.currency)
+            balance := Money { amount: balance.amount - amount.amount, currency: balance.currency }
           }
         }
         repository Accounts for Account { }

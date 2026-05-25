@@ -15,14 +15,14 @@ import { generateSystemFiles } from "../_helpers/index.js";
 const buildAndGenerate = generateSystemFiles;
 
 describe("expressions in text positions", () => {
-  it('Heading("Hello, " + name) emits the binary op as a JSX expr', async () => {
+  it('Heading { "Hello, " + name } emits the binary op as a JSX expr', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Greet(name: string) {
             route: "/greet/:name"
-            body:  Heading("Hello, " + name)
+            body:  Heading { "Hello, " + name }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -42,7 +42,7 @@ describe("expressions in text positions", () => {
     expect(content).toMatch(/const \{ name \} = useParams/);
   });
 
-  it("Text(count + 1) emits state arithmetic", async () => {
+  it("Text { count + 1 } emits state arithmetic", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -50,10 +50,10 @@ describe("expressions in text positions", () => {
           page Counter {
             route: "/c"
             state { count: int = 0 }
-            body:  Stack(
-              Text(count + 1),
-              Button("+", onClick: e => { count += 1 })
-            )
+            body:  Stack {
+              Text { count + 1 },
+              Button { "+", onClick: e => { count += 1 } }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -82,7 +82,7 @@ describe("expressions in text positions", () => {
               total: int = 100
               count: int = 47
             }
-            body:  Stat("Active: " + count, total - count)
+            body:  Stat { "Active: " + count, total - count }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -112,7 +112,7 @@ describe("expressions in text positions", () => {
         ui WebApp {
           page UserCard(name: string) {
             route: "/users/:name"
-            body:  Card("Profile: " + name, Text("hello"))
+            body:  Card { "Profile: " + name, Text { "hello" } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -139,7 +139,7 @@ describe("expressions in text positions", () => {
           page S {
             route: "/s"
             state { label: string = "Section" }
-            body:  Card(label, Text("body"))
+            body:  Card { label, Text { "body" } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -158,14 +158,14 @@ describe("expressions in text positions", () => {
     expect(content).toMatch(/const \[label, setLabel\]/);
   });
 
-  it("Card(child-only) — call in first slot stays as content, no title", async () => {
+  it("Card { child-only } — call in first slot stays as content, no title", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Plain {
             route: "/plain"
-            body:  Card(Text("just content"))
+            body:  Card { Text { "just content" } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -183,14 +183,14 @@ describe("expressions in text positions", () => {
     expect(content).toMatch(/<Text>just content<\/Text>/);
   });
 
-  it("Text(42) emits the int literal as a JSX expr", async () => {
+  it("Text { 42 } emits the int literal as a JSX expr", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page N {
             route: "/n"
-            body:  Text(42)
+            body:  Text { 42 }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

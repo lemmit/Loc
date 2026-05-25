@@ -1,6 +1,6 @@
 // Anchor (text-style link) primitive.
 //
-//   Anchor("View orders", to: "/orders")
+//   Anchor { "View orders", to: "/orders" }
 //     → Mantine <Anchor component={RouterLink} to="/orders">…</Anchor>
 //       (`Link as RouterLink` from react-router — aliased so packs
 //        whose own primitive is named `Link` don't collide.)
@@ -23,17 +23,17 @@ async function buildAndGenerate(src: string): Promise<Map<string, string>> {
 }
 
 describe("Anchor primitive", () => {
-  it('Anchor("label", to: "/path") emits <Anchor component={RouterLink} to=...>', async () => {
+  it('Anchor { "label", to: "/path" } emits <Anchor component={RouterLink} to=...>', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
-            body:  Stack(
-              Heading("Welcome"),
-              Anchor("View orders", to: "/orders")
-            )
+            body:  Stack {
+              Heading { "Welcome" },
+              Anchor { "View orders", to: "/orders" }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -59,7 +59,7 @@ describe("Anchor primitive", () => {
         ui WebApp {
           page Plain {
             route: "/plain"
-            body:  Anchor("Bare link")
+            body:  Anchor { "Bare link" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -83,7 +83,7 @@ describe("Anchor primitive", () => {
         ui WebApp {
           page User(slug: string) {
             route: "/users/:slug"
-            body:  Anchor("Profile", to: slug)
+            body:  Anchor { "Profile", to: slug }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -96,7 +96,7 @@ describe("Anchor primitive", () => {
       }
     `);
     const content = files.get("web/src/pages/user.tsx")!;
-    // Same shape as Button(to: <param-ref>) — template literal at render time.
+    // Same shape as Button { to: <param-ref> } — template literal at render time.
     expect(content).toMatch(/<Anchor component=\{RouterLink\} to=`\$\{slug\}`>/);
   });
 
@@ -107,10 +107,10 @@ describe("Anchor primitive", () => {
         ui WebApp {
           page Home {
             route: "/"
-            body:  Stack(
-              Anchor("Settings", to: "/settings"),
-              Button("Logout", to: "/logout")
-            )
+            body:  Stack {
+              Anchor { "Settings", to: "/settings" },
+              Button { "Logout", to: "/logout" }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

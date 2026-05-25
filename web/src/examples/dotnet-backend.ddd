@@ -59,7 +59,7 @@ system SalesBackend {
         operation addLine(productId: Product id, qty: int) {
           precondition isMutable()
           precondition qty > 0
-          lines += new OrderLine { productId: productId, quantity: qty }
+          lines += OrderLine { productId: productId, quantity: qty }
         }
 
         operation confirm() {

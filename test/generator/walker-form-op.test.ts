@@ -5,7 +5,7 @@
 // aggregate becomes a Modal whose trigger button opens an auto-
 // generated form bound to the `use<Op><Agg>` mutation hook.  This
 // exercises the full pipeline — scaffold AST expander → IR
-// scaffold-expander (`Modal(trigger: Button, CreateForm(of: , op:))`) →
+// scaffold-expander (`Modal { trigger: Button, CreateForm { of: , op: } }`) →
 // body-walker `emitModal`/`emitFormOfOperation` → mantine pack
 // templates.
 
@@ -112,9 +112,9 @@ const COMPONENT_SRC = `
     ui WebApp {
       api Sales: SalesApi
       component OrderPanel(order: Order) {
-        body: Modal(OperationForm(order.confirm), trigger: Button("Confirm"), title: "Confirm")
+        body: Modal { OperationForm { order.confirm }, trigger: Button { "Confirm" }, title: "Confirm" }
       }
-      page Home { route: "/" body: Text("hi") }
+      page Home { route: "/" body: Text { "hi" } }
     }
     deployable api { platform: hono modules: Sales serves: SalesApi port: 3000 }
     deployable web {

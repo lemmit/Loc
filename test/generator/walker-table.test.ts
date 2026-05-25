@@ -2,13 +2,13 @@
 //
 // Surface:
 //
-//   Table(
+//   Table {
 //     rows: Sales.Order.all,
-//     Column("ID", o => o.id),
-//     Column("Status", o => Badge(o.status)),
+//     Column { "ID", o => o.id },
+//     Column { "Status", o => Badge { o.status } },
 //     onRowClick: o => /* … */,
 //     testid: "orders-table"
-//   )
+//   }
 //
 // Lowers to a packed-table TSX block: a header row driven by the
 // Column headers, a body produced by `<rowsExpr>.map((row) => …)`
@@ -16,8 +16,8 @@
 // with the lambda param bound to the JS identifier `row`.
 //
 // What this pins:
-//   1. Header strings come from `Column(…)`'s first positional.
-//   2. Accessor lambdas with primitive-call bodies (`o => Badge(…)`)
+//   1. Header strings come from `Column { … }`'s first positional.
+//   2. Accessor lambdas with primitive-call bodies (`o => Badge { … }`)
 //      emit JSX in the cell.
 //   3. Accessor lambdas with member-access bodies (`o => o.id`)
 //      emit `{row.id}` in the cell.
@@ -46,11 +46,11 @@ describe("Table primitive", () => {
           api Sales: SalesApi
           page Orders {
             route: "/orders"
-            body:  Table(
+            body:  Table {
               rows:  Sales.Order.all,
-              Column("ID",     o => o.id),
-              Column("Status", o => o.customerId)
-            )
+              Column { "ID",     o => o.id },
+              Column { "Status", o => o.customerId }
+            }
           }
         }
         deployable api { platform: hono, modules: Sales, serves: SalesApi, port: 3000 }
@@ -92,11 +92,11 @@ describe("Table primitive", () => {
           api Sales: SalesApi
           page Orders {
             route: "/orders"
-            body:  Table(
+            body:  Table {
               rows:  Sales.Order.all,
               keyExpr: "idx",
-              Column("Customer", o => o.customerId)
-            )
+              Column { "Customer", o => o.customerId }
+            }
           }
         }
         deployable api { platform: hono, modules: Sales, serves: SalesApi, port: 3000 }
@@ -122,10 +122,10 @@ describe("Table primitive", () => {
           api Sales: SalesApi
           page Orders {
             route: "/orders"
-            body:  Table(
+            body:  Table {
               rows:  Sales.Order.all,
-              Column("Status", o => Badge(o.status))
-            )
+              Column { "Status", o => Badge { o.status } }
+            }
           }
         }
         deployable api { platform: hono, modules: Sales, serves: SalesApi, port: 3000 }
@@ -157,11 +157,11 @@ describe("Table primitive", () => {
           api Sales: SalesApi
           page Orders {
             route: "/orders"
-            body:  Table(
+            body:  Table {
               rows:  Sales.Order.all,
-              Column("ID", o => o.id),
+              Column { "ID", o => o.id },
               testid: "orders-table"
-            )
+            }
           }
         }
         deployable api { platform: hono, modules: Sales, serves: SalesApi, port: 3000 }
@@ -192,7 +192,7 @@ describe("Table primitive", () => {
           api Sales: SalesApi
           page Orders {
             route: "/orders"
-            body:  Table(rows: Sales.Order.all)
+            body:  Table { rows: Sales.Order.all }
           }
         }
         deployable api { platform: hono, modules: Sales, serves: SalesApi, port: 3000 }

@@ -16,11 +16,11 @@ describe("user-defined components", () => {
         module M { context C { } }
         ui WebApp {
           component WelcomeBox(name: string) {
-            body: Card("Hello, " + name, Stack(Text("Welcome!")))
+            body: Card { "Hello, " + name, Stack { Text { "Welcome!" } } }
           }
           page Home {
             route: "/"
-            body:  Heading("home")
+            body:  Heading { "home" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -50,7 +50,7 @@ describe("user-defined components", () => {
         module M { context C { } }
         ui WebApp {
           component WelcomeBox(name: string) {
-            body: Card("Hi, " + name, Text("welcome"))
+            body: Card { "Hi, " + name, Text { "welcome" } }
           }
           page Home {
             route: "/"
@@ -79,7 +79,7 @@ describe("user-defined components", () => {
         module M { context C { } }
         ui WebApp {
           component CounterBadge(n: int) {
-            body: Badge("Count: " + n)
+            body: Badge { "Count: " + n }
           }
           page Home {
             route: "/"
@@ -109,7 +109,7 @@ describe("user-defined components", () => {
         module M { context C { } }
         ui WebApp {
           component LabeledIcon(icon: string, label: string) {
-            body: Stack(Text(icon), Text(label))
+            body: Stack { Text { icon }, Text { label } }
           }
           page Home {
             route: "/"
@@ -136,14 +136,14 @@ describe("user-defined components", () => {
         module M { context C { } }
         ui WebApp {
           component Foo(s: string) {
-            body: Text(s)
+            body: Text { s }
           }
           component Bar(s: string) {
-            body: Heading(s)
+            body: Heading { s }
           }
           page Home {
             route: "/"
-            body:  Stack(Foo("a"), Bar("b"), Foo("c"))
+            body:  Stack { Foo("a"), Bar("b"), Foo("c") }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -171,10 +171,10 @@ describe("user-defined components", () => {
         module M { context C { } }
         ui WebApp {
           component Inner(n: string) {
-            body: Text(n)
+            body: Text { n }
           }
           component Outer(name: string) {
-            body: Card("Outer", Inner(name))
+            body: Card { "Outer", Inner(name) }
           }
           page Home {
             route: "/"
@@ -203,7 +203,7 @@ describe("user-defined components", () => {
         ui WebApp {
           page Home {
             route: "/"
-            body:  Heading("hi")
+            body:  Heading { "hi" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
