@@ -850,7 +850,10 @@ describe("JWT auth emission (auth-emit unit)", () => {
     expect(authEx).toMatch(/def call\(conn, _opts\)/);
     expect(authEx).toMatch(/"Bearer " <> token/);
     expect(authEx).toMatch(/assign\(conn, :current_user, build_user\(claims\)\)/);
-    expect(authEx).toMatch(/put_status\(:unauthorized\)/);
+    // 401 must be sent with send_resp/3 — put_status + halt without a
+    // send raises Plug.Conn.NotSentError at the cowboy adapter and
+    // surfaces as a 500.  See send_unauthorized/1.
+    expect(authEx).toMatch(/send_resp\(401/);
     expect(authEx).toMatch(/halt\(\)/);
   });
 

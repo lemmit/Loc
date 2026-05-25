@@ -88,16 +88,43 @@ defmodule ${webModule}.Auth do
 
   @impl Plug
   def call(conn, _opts) do
-    case get_req_header(conn, "authorization") do
-      ["Bearer " <> token | _] ->
-        case verify_token(token) do
-          {:ok, claims} -> assign(conn, :current_user, build_user(claims))
-          _ -> conn |> put_status(:unauthorized) |> halt()
-        end
+    if bypass_path?(conn.request_path) do
+      conn
+    else
+      case get_req_header(conn, "authorization") do
+        ["Bearer " <> token | _] ->
+          case verify_token(token) do
+            {:ok, claims} ->
+              assign(conn, :current_user, build_user(claims))
 
-      _ ->
-        conn |> put_status(:unauthorized) |> halt()
+            _ ->
+              send_unauthorized(conn)
+          end
+
+        _ ->
+          send_unauthorized(conn)
+      end
     end
+  end
+
+  # Bypass list — the openapi spec endpoint must serve without a token
+  # so the cross-platform parity check (and any unauth'd scraping of the
+  # contract) works.  /health is also routed outside the :api pipeline
+  # but listed here as a belt-and-suspenders against future router moves.
+  defp bypass_path?("/api/openapi.json"), do: true
+  defp bypass_path?("/health"), do: true
+  defp bypass_path?("/ready"), do: true
+  defp bypass_path?(_), do: false
+
+  # Sends a proper 401 body + halts — without send_resp/3 the underlying
+  # cowboy adapter raises Plug.Conn.NotSentError and the response surfaces
+  # as a 500.  Halting after the send stops downstream plugs from running
+  # but keeps the response intact.
+  defp send_unauthorized(conn) do
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(401, ~s({"error":"unauthorized"}))
+    |> halt()
   end
 
   # ---------------------------------------------------------------------------
