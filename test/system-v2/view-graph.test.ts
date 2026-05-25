@@ -36,7 +36,7 @@ const ids = (g: ReturnType<typeof buildViewGraph>): string[] =>
 const childNodes = (g: ReturnType<typeof buildViewGraph>) => g.nodes.filter((n) => !n.isRoot);
 
 describe("Model v2 — view-graph per level", () => {
-  it("the root node is structurally connected to every child via `contains` edges", () => {
+  it("root containment skips redundant children — events (already pointed to by their emitting aggregate) and repositories (already in the support column) get no `contains` edge", () => {
     const D = `context Sales {
   aggregate Order {
     status: string
@@ -51,10 +51,10 @@ describe("Model v2 — view-graph per level", () => {
     const rootId = "root:context:Sales";
     const contains = g.edges
       .filter((e) => e.kind === "contains" && e.source === rootId)
-      .map((e) => e.target)
-      .sort();
-    // The root fans out to every member it owns (aggregate / repository / event).
-    expect(contains).toEqual(["aggregate:Order", "event:Placed", "repository:Orders"]);
+      .map((e) => e.target);
+    // Only the aggregate carries a root-contains edge — the event is reached
+    // via its `emits` source, and the repo sits in the side column.
+    expect(contains).toEqual(["aggregate:Order"]);
   });
 
   it("non-root views prepend a synthesised `isRoot` title node restating the current container", () => {
