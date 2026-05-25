@@ -612,6 +612,11 @@ WORKDIR /app
 RUN chown nobody /app
 ENV MIX_ENV="prod"
 COPY --from=build --chown=nobody:root /app/_build/\${MIX_ENV}/rel/${appName} ./
+# mix release preserves overlay file perms verbatim, and the generator
+# writes scripts with the default 0644 — chmod +x here so the entrypoint
+# is actually executable (without this the container is stuck in
+# "Created" state because docker's exec fails with EACCES).
+RUN chmod +x /app/bin/server
 USER nobody
 CMD ["/app/bin/server"]
 `;
@@ -1619,11 +1624,16 @@ function renderRelEnv(appName: string): string {
 }
 
 function renderRelServer(appName: string): string {
+  // `#!/bin/sh` here is dash on Debian, which doesn't support
+  // `pipefail`.  Drop that flag — `set -eu` is enough for a one-line
+  // exec, and the path is rooted relative to the release directory
+  // (which the Dockerfile copies into `/app/`, so the binary lives
+  // at `/app/bin/<app>`, NOT `/app/<app>/bin/<app>`).
   return `#!/bin/sh
 # Auto-generated.
-set -euo pipefail
+set -eu
 
-exec "./${appName}/bin/${appName}" start
+exec "./bin/${appName}" start
 `;
 }
 
