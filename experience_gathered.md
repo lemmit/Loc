@@ -780,3 +780,66 @@ or not.
   from `src/ir/loom-ir.ts` removes the failure mode entirely — the
   playground's type picker now picks up new primitives without an
   additional code change.
+
+- Two string forms, not one: `derived display` vs `derived inspect`.
+
+  The original `display` was a property-suffix annotation
+  (`name: string display`) consumed only by the React form layer.
+  Stretching it to cover "what `string(aggregate)` should render"
+  surfaced a hidden conflation: UI labels ("John Smith", short,
+  pretty, sensitive-aware) and developer-facing debug forms
+  ("User(id: 42, ssn: <redacted>)", structural, includes
+  IDs) are different concerns with different audiences.  Every
+  mature stdlib already separates them (Ruby `to_s` vs `inspect`,
+  Elixir `String.Chars` vs `Inspect`, Python `__str__` vs
+  `__repr__`); Loom had one annotation pretending to be both.
+
+  Resolution: two reserved-name derived clauses on aggregates.
+  - `derived display: string = ...` — opt-in.  Anchors
+    `string(aggregate)` and implicit `"x " + aggregate` (lowering
+    rewrites both to `aggregate.display` member access).  Without
+    it, both expressions are compile errors — forces an explicit
+    decision rather than silent stringification.
+  - `derived inspect: string = ...` — auto-synthesized at IR
+    enrichment time when omitted.  Structural shape; `sensitive(...)`
+    fields render as `<redacted>` literals; VO / array / entity
+    fields use `[Type]` placeholders (calling host-language
+    `.ToString()` on a VO surfaces the namespace-qualified type
+    name, rarely useful).  Backends emit it as `ToString()` (.NET),
+    `toString()` + `[util.inspect.custom]` (TS), `defimpl Inspect`
+    (Phoenix).  Wire-shape excludes it — internal structure must
+    not leak to JSON DTOs.
+
+  Two never collide because they're reached via different call
+  paths: `display` only via explicit Loom paths (`string(x)`,
+  implicit `+`, UI walker); `inspect` only via host-language debug
+  hooks (`Console.WriteLine`, exception messages, IEx, Serilog
+  destructuring).  A .NET developer who writes `$"{user}"` gets the
+  inspect form (debug-shaped), never accidentally the display form
+  (UI-shaped).
+
+  Reserved-name precedent: a property literally named `id` IS the
+  aggregate identifier — no annotation, just convention.  `display`
+  and `inspect` follow that pattern.  No new grammar primitive;
+  `derived <name>: <type> = <expr>` already exists.
+
+  Synthesis lives in `src/ir/enrichments.ts:synthesizeInspect`
+  rather than as a stdlib macro.  Two reasons: (a) the macro
+  factory layer has no binary-expression / convert-expression
+  factories, so a macro implementation would have needed three
+  new factories before producing a single inspect; (b) sensitivity
+  metadata + wire-shape ordering are both already available at the
+  IR layer, so building the expression directly in IR matched the
+  surrounding code style.  If a future requirement asks for
+  user-replaceable defaults (`derived inspect: string =
+  defaultInspectButSkipPii()`), promoting to a macro is mechanical.
+
+  The trap that bit us during implementation: idempotency.
+  `enrich(enrich(m))` must equal `enrich(m)`.  First implementation
+  added the synthesized inspect to `agg.derived` AFTER computing
+  `wireShape`, so the second enrichment saw a longer `derived`
+  list and produced a longer wireShape.  Fix: compute the
+  post-synthesis aggregate first, then derive wireShape from it
+  (`aggWithDerived` local).  Also: filter `inspect` out of the
+  wire-fields loop so even user-written `derived inspect` doesn't
+  leak to DTOs.

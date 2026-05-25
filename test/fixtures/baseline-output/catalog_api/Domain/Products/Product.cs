@@ -25,6 +25,9 @@ public sealed class Product
         Price = default!;
     }
 
+    public string Display => this.Sku;
+    public string Inspect => "Product(" + "id: " + this.Id.ToString() + ", " + "sku: " + "'" + this.Sku + "'" + ", " + "price: " + "[Money]" + ")";
+    public override string ToString() => Inspect;
 
     public IReadOnlyList<IDomainEvent> PullEvents()
     {

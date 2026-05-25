@@ -909,7 +909,8 @@ export class DddValidator {
   private checkAggregate(agg: Aggregate, accept: ValidationAcceptor) {
     // Ensure unique part names within the aggregate
     const partNames = new Set<string>();
-    let displayField: Property | undefined;
+    let displayDerived: DerivedProp | undefined;
+    let inspectDerived: DerivedProp | undefined;
     for (const m of agg.members) {
       if (isEntityPart(m)) {
         if (partNames.has(m.name)) {
@@ -924,30 +925,38 @@ export class DddValidator {
       if (isContainment(m)) this.checkContainment(m, agg, accept);
       if (isInvariant(m)) this.checkInvariant(m, this.envForAggregate(agg), accept);
       if (isProperty(m) && m.check) this.checkPropertyCheck(m, this.envForAggregate(agg), accept);
-      if (isDerivedProp(m)) this.checkDerived(m, this.envForAggregate(agg), accept);
-      if (isFunctionDecl(m)) this.checkFunction(m, agg, undefined, accept);
-      if (isOperation(m)) this.checkOperation(m, agg, accept);
-      if (isProperty(m) && m.display) {
-        // At most one display field per aggregate.  Type must be `string`
-        // (the React generator uses it as a Mantine <Select> option label).
-        if (displayField) {
-          accept(
-            "error",
-            `Aggregate '${agg.name}' declares multiple 'display' fields ('${displayField.name}' and '${m.name}'); at most one is allowed.`,
-            { node: m, property: "display" },
-          );
-        }
-        displayField = m;
-        const typeText = m.type?.base;
-        const isString = typeText && isPrimitiveType(typeText) && typeText.name === "string";
-        if (!isString) {
-          accept(
-            "error",
-            `Display field '${m.name}' on aggregate '${agg.name}' must have type 'string'.`,
-            { node: m, property: "display", code: "loom.display-not-string" },
-          );
+      if (isDerivedProp(m)) {
+        this.checkDerived(m, this.envForAggregate(agg), accept);
+        // Reserved-name derived fields — `display` (user-facing label) and
+        // `inspect` (developer-facing debug form).  Both must be `string`;
+        // at most one of each per aggregate.  See plan
+        // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+        if (m.name === "display" || m.name === "inspect") {
+          const slot = m.name === "display" ? displayDerived : inspectDerived;
+          if (slot) {
+            accept(
+              "error",
+              `Aggregate '${agg.name}' declares multiple 'derived ${m.name}' fields; at most one is allowed.`,
+              { node: m, property: "name" },
+            );
+          } else if (m.name === "display") {
+            displayDerived = m;
+          } else {
+            inspectDerived = m;
+          }
+          const typeText = m.type?.base;
+          const isString = typeText && isPrimitiveType(typeText) && typeText.name === "string";
+          if (!isString) {
+            accept(
+              "error",
+              `Reserved 'derived ${m.name}' on aggregate '${agg.name}' must have type 'string'.`,
+              { node: m, property: "type", code: `loom.derived-${m.name}-not-string` },
+            );
+          }
         }
       }
+      if (isFunctionDecl(m)) this.checkFunction(m, agg, undefined, accept);
+      if (isOperation(m)) this.checkOperation(m, agg, accept);
       const hasExtern = agg.members.some((x) => isOperation(x) && x.extern);
       if (isProperty(m) && m.provenanced && !hasExtern && !this.fieldIsWritten(agg, m.name)) {
         // A provenanced field that no operation ever assigns produces no
@@ -996,7 +1005,19 @@ export class DddValidator {
       }
       if (isInvariant(m)) this.checkInvariant(m, this.envForValueObject(vo), accept);
       if (isProperty(m) && m.check) this.checkPropertyCheck(m, this.envForValueObject(vo), accept);
-      if (isDerivedProp(m)) this.checkDerived(m, this.envForValueObject(vo), accept);
+      if (isDerivedProp(m)) {
+        this.checkDerived(m, this.envForValueObject(vo), accept);
+        if (m.name === "display" || m.name === "inspect") {
+          // Reserved derived names are aggregate-only — VOs don't
+          // participate in `string(x)` lowering or host-language
+          // `ToString()`/`Inspect` emission.
+          accept(
+            "error",
+            `Reserved 'derived ${m.name}' is only allowed on aggregates, not value objects.`,
+            { node: m, property: "name", code: `loom.reserved-derived-on-vo` },
+          );
+        }
+      }
     }
   }
 
@@ -1200,18 +1221,33 @@ export class DddValidator {
     if (target === "string" && (valueType.kind === "enum" || valueType.kind === "id")) {
       return;
     }
-    // Domain-shaped sources (VO / aggregate / entity / array) need
-    // a separate design — `display:` resolution or a custom toString
-    // function on the type.  Deferred.
+    // Aggregates with a `derived display: string` declared participate
+    // in `string(x)` — lowers to a member access on the display derived.
+    // Without one, the aggregate has no canonical string form and we
+    // reject (forces an explicit `derived display` decision).
+    if (target === "string" && valueType.kind === "aggregate") {
+      if (valueType.ref.members.some((m) => isDerivedProp(m) && m.name === "display")) {
+        return;
+      }
+      accept(
+        "error",
+        `Aggregate '${valueType.ref.name}' has no display form — ` +
+          `declare \`derived display: string = ...\` on '${valueType.ref.name}' ` +
+          `to enable \`string(${valueType.ref.name.toLowerCase()})\` and implicit ` +
+          `string concatenation.`,
+        { node, property: "value" },
+      );
+      return;
+    }
+    // Other domain-shaped sources (VO / entity / array) need a separate
+    // design — VO/entity stringification is deferred.
     if (valueType.kind !== "primitive") {
       accept(
         "error",
         `Cannot convert '${typeToString(valueType)}' to '${target}': ` +
-          `domain types (value objects, aggregates, entities, collections) ` +
-          `have no canonical string form.  ` +
-          `Either annotate a field with \`display\` on the type and ` +
-          `write \`string(value.<displayField>)\` explicitly, or define a ` +
-          `\`toString\` derivation (pending design).`,
+          `value objects, entities, and collections have no canonical string ` +
+          `form.  Reference a specific field (e.g. \`string(value.<field>)\`) ` +
+          `or wait for a future toString derivation.`,
         { node, property: "value" },
       );
       return;

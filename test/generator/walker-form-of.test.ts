@@ -35,7 +35,8 @@ const baseOrderSystem = (body: string) => `
     module M {
       context C {
         aggregate Order {
-          customerId: string display
+          customerId: string
+          derived display: string = customerId
           quantity:   int
         }
         repository Orders for Order { }
@@ -81,7 +82,8 @@ describe("CreateForm(of: <Aggregate>) auto-dispatch", () => {
         module M {
           context C {
             aggregate Order {
-              customerId: string display
+              customerId: string
+              derived display: string = customerId
               note:       string?
             }
             repository Orders for Order { }
@@ -108,7 +110,8 @@ describe("CreateForm(of: <Aggregate>) auto-dispatch", () => {
         module M {
           context C {
             aggregate Customer {
-              name: string display
+              name: string
+              derived display: string = name
             }
             repository Customers for Customer { }
             aggregate Order {

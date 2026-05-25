@@ -5,8 +5,10 @@ import type {
   BoundedContextIR,
   CodeRefKind,
   DeployableIR,
+  DerivedIR,
   EntityPartIR,
   EnumIR,
+  ExprIR,
   FindIR,
   LoomModel,
   ModuleIR,
@@ -175,12 +177,171 @@ function enrichContext(
 
 function enrichAggregate(agg: AggregateIR): AggregateIR {
   const parts = agg.parts.map(enrichPart);
+  // Synthesize a `derived inspect: string = <structural>` when the user
+  // didn't declare one.  Always-present after enrichment so backends
+  // can emit a `ToString()` / `Inspect` / `util.inspect.custom` hook
+  // unconditionally.  See plan
+  // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+  const userInspect = agg.derived.find((d) => d.name === "inspect");
+  const inspectDerived = userInspect ?? synthesizeInspect(agg);
+  const derived = userInspect ? agg.derived : [...agg.derived, inspectDerived];
+  // Compute wireShape on the post-synthesis agg so the wire spec is
+  // idempotent (second enrichment finds the synthesized inspect
+  // already in `derived` and doesn't double-add).
+  const aggWithDerived: AggregateIR = { ...agg, derived };
   return {
-    ...agg,
+    ...aggWithDerived,
     parts,
-    wireShape: wireFieldsForAggregate(agg),
-    associations: associationsForAggregate(agg),
+    wireShape: wireFieldsForAggregate(aggWithDerived),
+    associations: associationsForAggregate(aggWithDerived),
+    displayDerived: derived.find((d) => d.name === "display"),
+    inspectDerived,
   };
+}
+
+/** Build a default `derived inspect: string` expression for an aggregate
+ * that didn't declare one.  Shape: `"User(id: " + id + ", name: '" + name
+ * + "', ssn: <redacted>)"` — structural form with field names + values,
+ * sensitive fields redacted by literal text rather than value reference.
+ *
+ * Built directly in IR (no AST roundtrip) to avoid threading a new
+ * factory through the macro layer.  Composes `binary` nodes with
+ * `lit("string", ...)` left/right ends and `ref`/`id` field accesses
+ * in between; the existing `string + X` implicit-concat rule lowers
+ * non-string operands via `convert` IR for us if needed, but because
+ * we control the structure we emit the conversion explicitly so
+ * downstream backends see a fully-typed tree from the start. */
+function synthesizeInspect(agg: AggregateIR): DerivedIR {
+  const STRING: TypeIR = { kind: "primitive", name: "string" };
+  const lit = (value: string): ExprIR => ({ kind: "literal", lit: "string", value });
+  const concat = (left: ExprIR, right: ExprIR): ExprIR => ({
+    kind: "binary",
+    op: "+",
+    left,
+    right,
+    leftType: STRING,
+    resultType: STRING,
+  });
+  const redacted = lit("<redacted>");
+
+  // Wrap a field-value reference in whatever conversion the implicit-
+  // string-concat rule would have applied, so the tree is fully typed.
+  // Non-stringifiable types (VO, array, optional) fall back to a
+  // structural placeholder — calling host-language `.ToString()` on a
+  // VO would surface the type name (`Domain.ValueObjects.Money`) rather
+  // than the contents, which is rarely useful.  A future iteration can
+  // refine VO inspect via the VO's own derived display.
+  const valueForField = (
+    fieldName: string,
+    fieldType: TypeIR,
+    sensitive: boolean,
+    isQuotedString: boolean,
+  ): ExprIR => {
+    if (sensitive) return redacted;
+    // Plain `ref` to a stored property — same shape `lower-expr` would
+    // produce for a bare property name inside a derived body.
+    const ref: ExprIR = {
+      kind: "ref",
+      name: fieldName,
+      refKind: "this-prop",
+      type: fieldType,
+    };
+    if (isQuotedString) {
+      // Wrap as `'<value>'` — three concats: open quote, value, close.
+      return concat(concat(lit("'"), ref), lit("'"));
+    }
+    if (fieldType.kind === "primitive" && fieldType.name === "string") {
+      return ref;
+    }
+    // Stringifiable primitive / id / enum — emit an explicit `convert`
+    // to string so backends don't have to re-derive the conversion.
+    if (
+      fieldType.kind === "primitive" ||
+      fieldType.kind === "id" ||
+      fieldType.kind === "enum"
+    ) {
+      const fromPrimitive =
+        fieldType.kind === "primitive"
+          ? fieldType.name
+          : fieldType.kind === "id"
+            ? fieldType.valueType
+            : undefined;
+      return { kind: "convert", target: "string", from: fromPrimitive, value: ref };
+    }
+    // VO / entity ref / array / optional — emit a placeholder.  The
+    // type name in brackets gives the developer a structural hint
+    // without depending on a host-language `.ToString()` that often
+    // produces garbage for these shapes.
+    return lit(`[${typeShorthand(fieldType)}]`);
+  };
+
+  const pieces: ExprIR[] = [lit(`${agg.name}(`)];
+  let first = true;
+
+  const pushField = (label: string, value: ExprIR) => {
+    if (!first) pieces.push(lit(", "));
+    pieces.push(lit(`${label}: `));
+    pieces.push(value);
+    first = false;
+  };
+
+  // ID first.
+  pushField("id", {
+    kind: "convert",
+    target: "string",
+    from: agg.idValueType,
+    value: { kind: "id" },
+  });
+
+  // Stored properties.
+  for (const f of agg.fields) {
+    const isString = f.type.kind === "primitive" && f.type.name === "string";
+    const isSensitive = !!f.sensitivity && f.sensitivity.length > 0;
+    pushField(f.name, valueForField(f.name, f.type, isSensitive, isString && !isSensitive));
+  }
+
+  // Containments: short structural placeholder.  Recursing into the
+  // contained inspect is a follow-up — keeps this first cut simple
+  // and avoids cycles for self-containing parts (which are rare but
+  // possible).
+  for (const c of agg.contains) {
+    pushField(c.name, lit(`[${c.partName}${c.collection ? "[]" : ""}]`));
+  }
+
+  pieces.push(lit(")"));
+
+  // Fold the pieces into a left-leaning binary chain: ((((p0 + p1) + p2) + p3) ...)
+  let expr: ExprIR = pieces[0]!;
+  for (let i = 1; i < pieces.length; i++) {
+    expr = concat(expr, pieces[i]!);
+  }
+
+  return {
+    name: "inspect",
+    type: STRING,
+    expr,
+  };
+}
+
+/** Short structural name for a TypeIR — used as the placeholder text
+ * for non-stringifiable field types in the synthesized inspect form. */
+function typeShorthand(t: TypeIR): string {
+  switch (t.kind) {
+    case "primitive":
+      return t.name;
+    case "id":
+      return `${t.targetName} id`;
+    case "enum":
+      return t.name;
+    case "valueobject":
+      return t.name;
+    case "entity":
+      return t.name;
+    case "array":
+      return `${typeShorthand(t.element)}[]`;
+    case "optional":
+      return `${typeShorthand(t.inner)}?`;
+  }
 }
 
 /** Derive a join-table association for every field whose type is a
@@ -295,6 +456,12 @@ function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
     });
   }
   for (const d of agg.derived) {
+    // `inspect` is the host-language debug-string hook (ToString /
+    // util.inspect.custom / Inspect protocol) — emitted as a getter on
+    // the domain class but kept out of JSON DTOs.  Exposing the
+    // structural form on the wire would leak internal field layout to
+    // every API client.
+    if (d.name === "inspect") continue;
     out.push({ name: d.name, type: d.type, optional: false, source: "derived" });
   }
   return out;

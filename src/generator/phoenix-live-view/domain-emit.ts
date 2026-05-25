@@ -89,6 +89,24 @@ function renderAggregateResource(
     ":updated_at",
   ].join(", ");
 
+  // Inspect protocol implementation: delegates to the resource's
+  // `:inspect` calculation when one is declared.  Gives a useful debug
+  // form in IEx, Logger, and exceptions — the Phoenix/Elixir equivalent
+  // of the TS `util.inspect.custom` / C# `ToString()` hook.  See plan
+  // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+  const inspectImpl = agg.derived.some((d) => d.name === "inspect")
+    ? `
+defimpl Inspect, for: ${moduleName} do
+  def inspect(record, _opts) do
+    case Ash.load(record, :inspect) do
+      {:ok, loaded} -> loaded.inspect
+      _ -> "#${moduleName}<id=" <> to_string(record.id) <> ">"
+    end
+  end
+end
+`
+    : "";
+
   return `defmodule ${moduleName} do
   @derive {Jason.Encoder, only: [${deriveFields}]}
   use Ash.Resource,
@@ -107,7 +125,7 @@ function renderAggregateResource(
   end
 ${renderRelationships(agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${renderHelperFunctions(agg.functions, renderCtx)}
 end
-`;
+${inspectImpl}`;
 }
 
 // ---------------------------------------------------------------------------

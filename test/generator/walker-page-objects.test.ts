@@ -108,7 +108,8 @@ describe("walker-side e2e page-object emitter", () => {
         module M {
           context C {
             aggregate Order {
-              customerId: string display
+              customerId: string
+              derived display: string = customerId
               quantity:   int
             }
             repository Orders for Order { }
@@ -138,7 +139,8 @@ describe("walker-side e2e page-object emitter", () => {
         module M {
           context C {
             aggregate Order {
-              customerId: string display
+              customerId: string
+              derived display: string = customerId
             }
             repository Orders for Order { }
           }
@@ -167,7 +169,8 @@ describe("walker-side e2e page-object emitter", () => {
         module M {
           context C {
             aggregate Order {
-              customerId: string display
+              customerId: string
+              derived display: string = customerId
             }
             repository Orders for Order { }
           }

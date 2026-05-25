@@ -44,15 +44,12 @@ function applyEdits(
 }
 
 describe("CodeActionProvider", () => {
-  it("fixes a non-string display field to string", async () => {
-    const result = await fix(
-      `context Sales {
-  aggregate Order {
-    label: int display
-  }
-}`,
-      "Change type to 'string'",
-    );
-    expect(result).toContain("label: string display");
+  it.skip("placeholder — no code actions registered after display-on-Property removal", () => {
+    // The `Change type to 'string'` quick-fix went away with the `display`
+    // property annotation.  Display is now a `derived display: string = ...`
+    // clause on the aggregate; the validator doesn't surface a code-action
+    // for it (the message is enough).
   });
 });
+
+void fix; // keep the helper around for future code-action tests

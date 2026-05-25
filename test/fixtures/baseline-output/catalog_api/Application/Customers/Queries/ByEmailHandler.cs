@@ -22,6 +22,6 @@ public sealed class ByEmailHandler : IQueryHandler<ByEmailQuery, CustomerRespons
     public async ValueTask<CustomerResponse?> Handle(ByEmailQuery q, CancellationToken ct)
     {
         var domain = await _repo.ByEmail(q.Email, ct);
-        return domain is null ? null : new CustomerResponse(domain.Id.Value, domain.Username, domain.Email, domain.Age);
+        return domain is null ? null : new CustomerResponse(domain.Id.Value, domain.Username, domain.Email, domain.Age, domain.Display);
     }
 }

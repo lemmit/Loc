@@ -31,7 +31,7 @@ describe("id-link & optional-containment syntax", () => {
     const doc = await helper(
       `
       context T {
-        aggregate Customer { name: string display }
+        aggregate Customer { name: string  derived display: string = name }
         aggregate Order {
           customerId: Customer id
           relatedIds: Customer id[]
@@ -128,7 +128,7 @@ describe("parsing & validation of examples", () => {
       `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
-        aggregate Customer { name: string display }
+        aggregate Customer { name: string  derived display: string = name }
         aggregate Order {
           customerId: Customer id
           status: OrderStatus

@@ -495,10 +495,9 @@ function printBindEntry(node: BindEntry): string {
 }
 
 function printProperty(node: Property): string {
-  const display = node.display ? " display" : "";
   const provenanced = node.provenanced ? " provenanced" : "";
   const check = node.check ? ` check ${printExpr(node.check)}` : "";
-  return `${node.name}: ${printTypeRef(node.type)}${display}${provenanced}${check}`;
+  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${check}`;
 }
 
 function printContainment(node: Containment): string {

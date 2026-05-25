@@ -80,11 +80,6 @@ export interface FieldIR {
   name: string;
   type: TypeIR;
   optional: boolean;
-  /** True iff the source declared this property with the `display`
-   * modifier.  At most one such field per aggregate (enforced by the
-   * validator).  Used by the React generator to pick the option label
-   * for `X id` Selects pointing at this aggregate. */
-  display?: boolean;
   /** True iff the source declared this property with the `provenanced`
    * modifier.  Every assignment statement (`:=`/`+=`/`-=`) targeting such
    * a field becomes a per-site rule snapshot; see `ProvSite`. */
@@ -261,6 +256,19 @@ export interface AggregateIR {
    * Sorted + deduped at lowering time.  Undefined when the
    * aggregate names no capabilities. */
   implementsCapabilities?: readonly string[];
+  /** Pointer to the `derived display: string` field, if the
+   * aggregate declared one.  Populated by `enrichLoomModel`.
+   * When set, `string(aggregate)` and implicit `string + aggregate`
+   * compile by lowering to a member access on this derived; when
+   * unset, both are validator errors.  See plan
+   * `/root/.claude/plans/i-think-we-have-glittery-lecun.md`. */
+  displayDerived?: DerivedIR;
+  /** Pointer to the `derived inspect: string` field; always populated
+   * after enrichment (auto-injected by the `defaultInspect()` macro
+   * when the user didn't declare one).  Read by the host-language
+   * debug-string emitters (TS `toString()`/`util.inspect.custom`,
+   * C# `ToString()` override, Elixir `defimpl Inspect`). */
+  inspectDerived?: DerivedIR;
 }
 
 /** A single stamping rule attached to an aggregate.  Backends

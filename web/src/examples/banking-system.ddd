@@ -60,10 +60,11 @@ system BankingSystem {
       event MoneyWithdrawn { account: Account id, amount: Money, at: datetime }
 
       aggregate Customer {
-        name: string display
+        name: string
         email: string
         invariant name.length > 0
         invariant email.length > 0
+        derived display: string = name
       }
 
       aggregate Account {

@@ -43,7 +43,8 @@ const FIXTURE_DDD = `system AcmeLV {
         currency: string
       }
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         email: string
         creditLimit: Money
         invariant email.length > 0
@@ -75,13 +76,15 @@ const ROSTER_FIXTURE_DDD = `system Roster {
   module Roster {
     context Roster {
       aggregate Pokemon {
-        species: string display
+        species: string
+        derived display: string = species
         level: int
         invariant level >= 1
         invariant level <= 100
       }
       aggregate Trainer {
-        name: string display
+        name: string
+        derived display: string = name
         party: Pokemon id[]
         caught: Pokemon id[]
         invariant party.count <= 6

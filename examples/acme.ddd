@@ -61,9 +61,10 @@ system Acme {
             }
 
             aggregate Product {
-                sku: string display
+                sku: string
                 price: Money
                 invariant sku.length > 0
+                derived display: string = sku
             }
 
             repository Products for Product {
@@ -196,7 +197,7 @@ system Acme {
                 // idiomatic native chains: this `length >= N && length
                 // <= M` becomes `z.string().min(3).max(32)` /
                 // `RuleFor(x => x.Username).Length(3, 32)`.
-                username: string display
+                username: string
                   check username.length >= 3 && username.length <= 32
 
                 // `string.matches(literal)` — pattern is validated at
@@ -232,6 +233,7 @@ system Acme {
                 // disclosed via OpenAPI (the literal pattern doesn't
                 // appear in the published spec).
                 private invariant username.matches("^[a-z][a-z0-9_]*$")
+                derived display: string = username
             }
 
             repository Customers for Customer {

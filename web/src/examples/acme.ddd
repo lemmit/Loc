@@ -18,7 +18,7 @@ system Acme {
             }
 
             aggregate Product {
-                sku: string display
+                sku: string
                 price: Money
                 invariant sku.length > 0
 
@@ -31,6 +31,7 @@ system Acme {
                 test "money rejects a negative amount" {
                     expectThrows Money(-1.0, "USD")
                 }
+                derived display: string = sku
             }
 
             repository Products for Product {

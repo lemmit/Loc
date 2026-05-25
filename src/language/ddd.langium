@@ -709,7 +709,7 @@ BindEntry:
 // identifier positions everywhere; the only hard-keyword positions
 // remain `PrimitiveType` and `MoneyLit`.
 Property:
-    name=(ID | 'money') ':' type=TypeRef (display?='display')? (provenanced?='provenanced')? sensitivity=SensitivityClause? ('check' check=Expression)?;
+    name=(ID | 'money') ':' type=TypeRef (provenanced?='provenanced')? sensitivity=SensitivityClause? ('check' check=Expression)?;
 
 // Information-flow sensitivity tag(s) on a property.  Tags are bare
 // identifiers, opaque to the compiler — `pii`, `phi`, `cred` are

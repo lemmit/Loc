@@ -113,6 +113,13 @@ export function renderEntity(
     (d) =>
       `    public ${renderCsType(d.type)} ${upperFirst(d.name)} => ${renderCsExpr(d.expr, renderCtx)};`,
   );
+  // Override `ToString()` on aggregate roots to delegate to the
+  // `Inspect` derived — gives a useful debug form in exceptions,
+  // debugger watches, Serilog destructuring, etc.  See plan
+  // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+  if (isRoot && entity.derived.some((d) => d.name === "inspect")) {
+    derivedLines.push("    public override string ToString() => Inspect;");
+  }
   const fnLines = entity.functions.map((fn) => {
     const params = fn.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
     return `    private ${renderCsType(fn.returnType)} ${upperFirst(fn.name)}(${params}) => ${renderCsExpr(fn.body, renderCtx)};`;

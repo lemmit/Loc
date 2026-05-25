@@ -17,7 +17,8 @@ const SOURCE = `system MiniLiveView {
   module Sales {
     context Sales {
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         operation confirm() { }
       }
       repository Customers for Customer { }

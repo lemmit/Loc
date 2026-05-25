@@ -622,7 +622,8 @@ describe("typescript generator", () => {
       `
       context T {
         aggregate Order {
-          sku: string display
+          sku: string
+          derived display: string = sku
           contains shipping: Address
           entity Address { street: string }
         }
@@ -849,7 +850,8 @@ describe("typescript generator", () => {
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
           creditLimit: decimal
           operation deductCredit(amount: decimal) {
             precondition amount > 0
@@ -923,7 +925,8 @@ describe("typescript generator", () => {
       `
       context T {
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
           creditLimit: decimal
           operation addCredit(amount: decimal) {
             precondition amount > 0
@@ -1053,7 +1056,7 @@ describe("typescript generator", () => {
       `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
-        aggregate Customer { name: string display, email: string }
+        aggregate Customer { name: string, email: string  derived display: string = name }
         aggregate Order {
           customerId: Customer id
           status: OrderStatus
@@ -1175,8 +1178,8 @@ describe("typescript generator", () => {
       `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
-        aggregate Region { name: string display, countryCode: string }
-        aggregate Customer { name: string display, regionId: Region id }
+        aggregate Region { name: string, countryCode: string  derived display: string = name }
+        aggregate Customer { name: string, regionId: Region id  derived display: string = name }
         aggregate Order { customerId: Customer id, status: OrderStatus }
         repository Regions for Region { }
         repository Customers for Customer { }
@@ -1238,7 +1241,8 @@ describe("typescript generator", () => {
           invariant currency.length == 3
         }
         aggregate Account {
-          holder: string display
+          holder: string
+          derived display: string = holder
           status: AccountStatus
           balance: Money
           operation deposit(amount: Money) {
@@ -1295,7 +1299,8 @@ describe("typescript generator", () => {
       `
       context T {
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
           creditLimit: decimal
           operation addCredit(amount: decimal) {
             precondition amount > 0
@@ -1661,7 +1666,8 @@ describe("typescript generator", () => {
         `
           context Auth {
             aggregate User {
-              email: string display
+              email: string
+              derived display: string = email
               invariant email.matches("^[^@]+@.+$")
             }
             repository Users for User { }
@@ -1684,7 +1690,8 @@ describe("typescript generator", () => {
         `
           context Auth {
             aggregate User {
-              email: string display
+              email: string
+              derived display: string = email
               invariant email.matches("^[^@]+@.+$")
             }
             repository Users for User { }

@@ -21,6 +21,10 @@ export class Customer {
   get username(): string { return this._username; }
   get email(): string { return this._email; }
   get age(): number { return this._age; }
+  get display(): string { return this._username; }
+  get inspect(): string { return "Customer(" + "id: " + String(this._id) + ", " + "username: " + "'" + this._username + "'" + ", " + "email: " + "'" + this._email + "'" + ", " + "age: " + String(this._age) + ")"; }
+  toString(): string { return this.inspect; }
+  [Symbol.for("nodejs.util.inspect.custom")](): string { return this.inspect; }
   pullEvents(): Events.DomainEvent[] {
     const out = this._events;
     this._events = [];

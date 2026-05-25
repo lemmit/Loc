@@ -16,7 +16,8 @@ const SRC = `
     module Sales {
       context Sales {
         aggregate Order {
-          customerId: string display
+          customerId: string
+          derived display: string = customerId
           operation confirm() { }
           operation cancel() { }
         }

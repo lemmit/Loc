@@ -14,10 +14,11 @@ system ActionShowcase {
   module Sales {
     context Sales {
       aggregate Order {
-        customerId: string display
+        customerId: string
         status: string
         operation confirm() { }
         operation cancel() { }
+        derived display: string = customerId
       }
       repository Orders for Order { }
     }
