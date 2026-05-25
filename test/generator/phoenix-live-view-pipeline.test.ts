@@ -1245,9 +1245,11 @@ describe("cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
     const model = await buildAcmeLiveViewModel();
     const { files } = generateSystems(model);
     const spec = files.get("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex")!;
-    // GET /aggregates/customers (list) + GET /aggregates/customers/:id (read)
-    expect(spec).toMatch(/\/aggregates\/customers/);
-    expect(spec).toMatch(/\/aggregates\/orders/);
+    // GET /customers (list) + GET /customers/:id (read) — Phoenix aggregate
+    // routes are flush to the API base, matching Hono/.NET path conventions
+    // (PR A of the parity-fix series).
+    expect(spec).toMatch(/"\/customers"/);
+    expect(spec).toMatch(/"\/orders"/);
     expect(spec).toMatch(/CreateCustomerRequest/);
     expect(spec).toMatch(/CustomerListResponse/);
   });
@@ -1983,20 +1985,12 @@ describe("AggregatesController emission (api-emit unit)", () => {
       appName: "phoenix_app",
       appModule: "PhoenixApp",
     });
-    const listRoute = apiRoutes.find(
-      (r) => r.path === "/aggregates/customers" && r.method === "get",
-    );
-    const createRoute = apiRoutes.find(
-      (r) => r.path === "/aggregates/customers" && r.method === "post",
-    );
-    const getRoute = apiRoutes.find(
-      (r) => r.path === "/aggregates/customers/:id" && r.method === "get",
-    );
-    const updateRoute = apiRoutes.find(
-      (r) => r.path === "/aggregates/customers/:id" && r.method === "patch",
-    );
+    const listRoute = apiRoutes.find((r) => r.path === "/customers" && r.method === "get");
+    const createRoute = apiRoutes.find((r) => r.path === "/customers" && r.method === "post");
+    const getRoute = apiRoutes.find((r) => r.path === "/customers/:id" && r.method === "get");
+    const updateRoute = apiRoutes.find((r) => r.path === "/customers/:id" && r.method === "patch");
     const destroyRoute = apiRoutes.find(
-      (r) => r.path === "/aggregates/customers/:id" && r.method === "delete",
+      (r) => r.path === "/customers/:id" && r.method === "delete",
     );
 
     expect(listRoute).toBeDefined();
@@ -2027,20 +2021,12 @@ describe("AggregatesController router integration (orchestrator)", () => {
     const { files } = generateSystems(model);
     const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
     // List and create on collection path
-    expect(router).toMatch(/get "\/aggregates\/customers", AggregatesController, :list_customers/);
-    expect(router).toMatch(
-      /post "\/aggregates\/customers", AggregatesController, :create_customer/,
-    );
+    expect(router).toMatch(/get "\/customers", AggregatesController, :list_customers/);
+    expect(router).toMatch(/post "\/customers", AggregatesController, :create_customer/);
     // Get, update, destroy on member path
-    expect(router).toMatch(
-      /get "\/aggregates\/customers\/:id", AggregatesController, :get_customer/,
-    );
-    expect(router).toMatch(
-      /patch "\/aggregates\/customers\/:id", AggregatesController, :update_customer/,
-    );
-    expect(router).toMatch(
-      /delete "\/aggregates\/customers\/:id", AggregatesController, :destroy_customer/,
-    );
+    expect(router).toMatch(/get "\/customers\/:id", AggregatesController, :get_customer/);
+    expect(router).toMatch(/patch "\/customers\/:id", AggregatesController, :update_customer/);
+    expect(router).toMatch(/delete "\/customers\/:id", AggregatesController, :destroy_customer/);
   });
 
   it("aggregates_controller.ex is in the generated file map when deployable serves an api", async () => {

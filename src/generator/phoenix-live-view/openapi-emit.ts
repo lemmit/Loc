@@ -240,14 +240,14 @@ function renderApiSpec(
       }`);
   }
 
-  // Aggregate CRUD paths: GET /aggregates/<plural>, GET /aggregates/<plural>/:id, POST /aggregates/<plural>
+  // Aggregate CRUD paths: GET /<plural>, GET /<plural>/:id, POST /<plural>
   for (const { agg } of allAggregates) {
     const aggSlug = snake(plural(agg.name));
     const respMod = `${schemasModule}.${agg.name}Response`;
     const listRespMod = `${schemasModule}.${agg.name}ListResponse`;
     const createReqMod = `${schemasModule}.Create${agg.name}Request`;
     pathEntries.push(
-      `      "/aggregates/${aggSlug}" => %OpenApiSpex.PathItem{
+      `      "/${aggSlug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "List ${agg.name}",
           operationId: "list_${snake(agg.name)}",
@@ -277,7 +277,7 @@ function renderApiSpec(
           }
         }
       }`,
-      `      "/aggregates/${aggSlug}/:id" => %OpenApiSpex.PathItem{
+      `      "/${aggSlug}/:id" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "Get ${agg.name} by id",
           operationId: "get_${snake(agg.name)}_by_id",

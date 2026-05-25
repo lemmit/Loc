@@ -33,12 +33,11 @@ const example = path.join(repoRoot, "examples", "showcase.ddd");
 
 const ENABLED = process.env.LOOM_E2E === "1";
 
-// Cross-backend OpenAPI parity is REPORT-ONLY by default: the first real
-// runs are expected to surface genuine generator drift (e.g. Phoenix's
-// OpenApiSpex emitter namespaces aggregate CRUD under `/aggregates/<plural>`
-// while Hono/.NET serve `/<plural>`).  Diffs are logged so they can be
-// triaged; set `LOOM_E2E_STRICT_PARITY=1` to turn each diff into a hard
-// assertion once the backends are reconciled.
+// Cross-backend OpenAPI parity is REPORT-ONLY by default: known divergences
+// are still being reconciled in the Phoenix generator (per-op + per-find
+// routes, wire-shape casing).  Diffs are logged so they can be triaged;
+// set `LOOM_E2E_STRICT_PARITY=1` to turn each diff into a hard assertion
+// once the remaining drifts are closed.
 const STRICT_PARITY = process.env.LOOM_E2E_STRICT_PARITY === "1";
 
 // Parity-only mode (per-PR CI tier): build + boot only the three backends
