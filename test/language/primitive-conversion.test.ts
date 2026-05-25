@@ -200,7 +200,7 @@ describe("conversion vocabulary — IR carries (from, target)", () => {
   });
 });
 
-describe("conversion vocabulary — disambiguation from `money(\"…\")` literal", () => {
+describe('conversion vocabulary — disambiguation from `money("…")` literal', () => {
   // `money("10.50")` is a MoneyLit (string-arg → compile-time literal).
   // `money(decimalField)` is a PrimitiveConversion.  MoneyLit comes
   // first in PrimaryExpr so the string-arg form wins the parse;

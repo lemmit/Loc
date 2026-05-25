@@ -143,7 +143,9 @@ describe("literal promotion — narrowing is NOT admitted", () => {
         repository Foos for Foo { }
       }
     `);
-    expect(errors.join("\n")).toMatch(/Derived 'n' has expression of type 'decimal' but declared type is 'int'/);
+    expect(errors.join("\n")).toMatch(
+      /Derived 'n' has expression of type 'decimal' but declared type is 'int'/,
+    );
   });
 
   it("`derived n: long = 5.0` errors (same reason)", async () => {
@@ -155,6 +157,8 @@ describe("literal promotion — narrowing is NOT admitted", () => {
         repository Foos for Foo { }
       }
     `);
-    expect(errors.join("\n")).toMatch(/Derived 'n' has expression of type 'decimal' but declared type is 'long'/);
+    expect(errors.join("\n")).toMatch(
+      /Derived 'n' has expression of type 'decimal' but declared type is 'long'/,
+    );
   });
 });

@@ -384,8 +384,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (isMoneyLit(expr)) return lit("money", expr.value ?? "0");
   if (isPrimitiveConversion(expr)) {
     const fromType = inferExprType(expr.value, env);
-    const from =
-      fromType.kind === "primitive" ? (fromType.name as PrimitiveName) : undefined;
+    const from = fromType.kind === "primitive" ? (fromType.name as PrimitiveName) : undefined;
     return {
       kind: "convert",
       target: expr.target as PrimitiveName,
@@ -908,9 +907,7 @@ export function lowerExprInContext(
  *  promotes against (the binary handler in `lowerExpr`).  Returns
  *  null for non-anchor types (int, string, bool, etc.) — int doesn't
  *  anchor anything because every IntLit already types as int. */
-function literalPromotionAnchor(
-  t: TypeIR,
-): "long" | "decimal" | "money" | null {
+function literalPromotionAnchor(t: TypeIR): "long" | "decimal" | "money" | null {
   if (t.kind !== "primitive") return null;
   if (t.name === "long" || t.name === "decimal" || t.name === "money") return t.name;
   return null;
