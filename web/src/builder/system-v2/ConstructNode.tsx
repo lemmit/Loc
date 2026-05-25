@@ -108,6 +108,25 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
         position={Position.Top}
         style={{ background: "var(--mantine-color-dark-3)", visibility: d.isRoot ? "hidden" : undefined }}
       />
+      {/* Left/right side handles on the root let `contains` edges leave the
+       *  banner's sides and trace down the periphery, keeping the centre of
+       *  the canvas free for semantic edges. Non-root nodes don't need these. */}
+      {d.isRoot && (
+        <>
+          <Handle
+            type="source"
+            id="left"
+            position={Position.Left}
+            style={{ background: "var(--mantine-color-dark-3)", visibility: "hidden" }}
+          />
+          <Handle
+            type="source"
+            id="right"
+            position={Position.Right}
+            style={{ background: "var(--mantine-color-dark-3)", visibility: "hidden" }}
+          />
+        </>
+      )}
       <Text
         size="xs"
         tt="uppercase"
