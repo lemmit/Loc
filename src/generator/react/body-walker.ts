@@ -945,6 +945,27 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       return `/* unresolved: ${expr.name} */ undefined`;
     case "binary":
       return `(${emitExpr(expr.left, ctx)} ${expr.op} ${emitExpr(expr.right, ctx)})`;
+    case "convert": {
+      // Mirrors `generator/typescript/render-expr.ts`'s renderTsConvert.
+      // Implicit-string-concat in page bodies (`"Active: " + count`)
+      // injects a `convert` IR node around the non-string operand;
+      // the walker emits the same `String(x)` / `x.toString()` form
+      // the domain renderer does.
+      const v = emitExpr(expr.value, ctx);
+      if (expr.target === "string") {
+        if (expr.from === "money") return `${v}.toString()`;
+        return `String(${v})`;
+      }
+      if (expr.target === "long" || expr.target === "decimal") {
+        if (expr.from === "money") return `${v}.toNumber()`;
+        return v;
+      }
+      if (expr.target === "money") {
+        if (expr.from === "money") return v;
+        return `new Decimal(${v})`;
+      }
+      return v;
+    }
     case "unary":
       return `(${expr.op}${emitExpr(expr.operand, ctx)})`;
     case "call": {

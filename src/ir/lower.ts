@@ -905,10 +905,25 @@ function lowerPage(p: Page): PageIR {
   let body: ExprIR | undefined;
   let menuMeta: MenuMetaIR | undefined;
   const state: StateFieldIR[] = [];
-  // A neutral env is fine here — the page-IR expression nodes
-  // will get richer when the validator and emitter
-  // wire in the page-scoped scope.
-  const env: Env = { locals: new Map(), user: undefined };
+  // Page-scoped env: route params + state fields bind as locals so
+  // `inferExprType` resolves their refs to their declared types
+  // (otherwise NameRef refs would fall through to the string-typed
+  // default — wrong for `count + 1` arithmetic in a page primitive).
+  // The page emitter does its own walker-side scope resolution at
+  // emit time; this addition makes the IR's type info accurate enough
+  // that contextual lowering tricks (literal promotion, implicit
+  // string-concat convert injection) don't mis-fire on page bodies.
+  let env: Env = { locals: new Map(), user: undefined };
+  for (const param of p.params ?? []) {
+    env = withLocal(env, param.name, "param", lowerType(param.type));
+  }
+  for (const prop of p.props) {
+    if (prop.$type === "StateBlock") {
+      for (const f of prop.fields) {
+        env = withLocal(env, f.name, "let", lowerType(f.type));
+      }
+    }
+  }
   for (const prop of p.props) {
     if (prop.$type === "RouteProp") route = prop.value;
     else if (prop.$type === "TitleProp") title = lowerExpr(prop.value, env);
@@ -1070,11 +1085,20 @@ function lowerComponent(c: Component): ComponentIR {
     name: param.name,
     type: lowerType(param.type),
   }));
-  const env: Env = { locals: new Map(), user: undefined };
+  // Component-scoped env: params + state bind so `inferExprType`
+  // resolves refs to their declared types (same reason as
+  // `lowerPage`; see comment there).
+  let env: Env = { locals: new Map(), user: undefined };
+  for (const param of c.params) {
+    env = withLocal(env, param.name, "param", lowerType(param.type));
+  }
   const state: StateFieldIR[] = [];
   for (const decl of c.decls ?? []) {
     if (decl.$type === "StateBlock") {
-      for (const f of decl.fields) state.push(lowerStateField(f, env));
+      for (const f of decl.fields) {
+        env = withLocal(env, f.name, "let", lowerType(f.type));
+        state.push(lowerStateField(f, env));
+      }
     }
   }
   const body = lowerExpr(c.body, env);
