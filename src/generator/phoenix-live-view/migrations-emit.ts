@@ -151,7 +151,9 @@ function renderInitialJoinFile(
       lines.push(`      add :${c.name}, ${ref}, null: ${c.nullable}${pk}${defaultClause}`);
     } else {
       const pk = pkSet.has(c.name) ? ", primary_key: true" : "";
-      lines.push(`      add :${c.name}, ${ectoColumnType(c.type)}, null: ${c.nullable}${pk}${defaultClause}`);
+      lines.push(
+        `      add :${c.name}, ${ectoColumnType(c.type)}, null: ${c.nullable}${pk}${defaultClause}`,
+      );
     }
   }
   const indexLines = table.indexes.map((i) => {

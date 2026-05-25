@@ -45,6 +45,7 @@ import {
   isOperation,
   isParenExpr,
   isPreconditionStmt,
+  isPrimitiveConversion,
   isPrimitiveType,
   isProperty,
   isRequiresStmt,
@@ -60,6 +61,7 @@ import type {
   IdValueType,
   PathIR,
   PermissionDeclIR,
+  PrimitiveName,
   ProvSite,
   StmtIR,
   TypeIR,
@@ -380,6 +382,16 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (isIntLit(expr)) return lit("int", String(expr.value));
   if (isDecLit(expr)) return lit("decimal", expr.value);
   if (isMoneyLit(expr)) return lit("money", expr.value ?? "0");
+  if (isPrimitiveConversion(expr)) {
+    const fromType = inferExprType(expr.value, env);
+    const from = fromType.kind === "primitive" ? (fromType.name as PrimitiveName) : undefined;
+    return {
+      kind: "convert",
+      target: expr.target as PrimitiveName,
+      from,
+      value: lowerExpr(expr.value, env),
+    };
+  }
   if (isBoolLit(expr)) return lit("bool", expr.value);
   if (isNullLit(expr)) return lit("null", "null");
   if (isNowExpr(expr)) return lit("now", "now");
@@ -708,6 +720,9 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
   if (isIntLit(expr)) return { kind: "primitive", name: "int" };
   if (isDecLit(expr)) return { kind: "primitive", name: "decimal" };
   if (isMoneyLit(expr)) return { kind: "primitive", name: "money" };
+  if (isPrimitiveConversion(expr)) {
+    return { kind: "primitive", name: expr.target as PrimitiveName };
+  }
   if (isBoolLit(expr)) return { kind: "primitive", name: "bool" };
   if (isNullLit(expr)) return { kind: "primitive", name: "string" };
   if (isNowExpr(expr)) return { kind: "primitive", name: "datetime" };
@@ -892,9 +907,7 @@ export function lowerExprInContext(
  *  promotes against (the binary handler in `lowerExpr`).  Returns
  *  null for non-anchor types (int, string, bool, etc.) — int doesn't
  *  anchor anything because every IntLit already types as int. */
-function literalPromotionAnchor(
-  t: TypeIR,
-): "long" | "decimal" | "money" | null {
+function literalPromotionAnchor(t: TypeIR): "long" | "decimal" | "money" | null {
   if (t.kind !== "primitive") return null;
   if (t.name === "long" || t.name === "decimal" || t.name === "money") return t.name;
   return null;

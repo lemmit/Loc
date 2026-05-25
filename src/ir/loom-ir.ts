@@ -1158,15 +1158,7 @@ export interface ProvSite {
 // Expressions — fully resolved, every name has a kind tag.
 // ---------------------------------------------------------------------------
 
-export type LiteralKind =
-  | "string"
-  | "int"
-  | "long"
-  | "decimal"
-  | "money"
-  | "bool"
-  | "null"
-  | "now";
+export type LiteralKind = "string" | "int" | "long" | "decimal" | "money" | "bool" | "null" | "now";
 
 export type RefKind =
   | "param"
@@ -1291,6 +1283,22 @@ export type ExprIR =
       resultType?: TypeIR;
     }
   | { kind: "ternary"; cond: ExprIR; then: ExprIR; otherwise: ExprIR }
+  /**
+   * Explicit primitive conversion — `<target>(<value>)`.  Source-
+   * level form: `string(age)`, `money(decimalField)`,
+   * `decimal(moneyValue)`.  Distinct from `MoneyLit`'s `money("…")`
+   * literal form (which lowers to `lit("money", …)`); this is for
+   * converting a TYPED VALUE between primitives.
+   *
+   * `from` carries the source operand's inferred primitive type so
+   * backends can dispatch the right emit form per (from, target)
+   * pair (TS `String(x)` vs `x.toString()`, .NET `(decimal)x` vs
+   * `x` no-op, Phoenix `to_string(x)` vs `Decimal.to_string(x)`).
+   * Populated by lowering — may be `undefined` if the source's type
+   * couldn't be inferred (broken upstream; validator will already be
+   * reporting it).
+   */
+  | { kind: "convert"; target: PrimitiveName; from: PrimitiveName | undefined; value: ExprIR }
   /**
    * Predicate-arms expression — first arm whose
    * `cond` evaluates to `true` returns its `value`; if no arm

@@ -284,6 +284,27 @@ function renderExpr(expr: ExprIR, ctx: WalkContext): string {
       return renderBinary(expr, ctx);
     case "ternary":
       return `if ${renderExpr(expr.cond, ctx)}, do: ${renderExpr(expr.then, ctx)}, else: ${renderExpr(expr.otherwise, ctx)}`;
+    case "convert": {
+      // Phoenix HEEx conversion — mirror the renderExpr emit in
+      // `phoenix-live-view/render-expr.ts`.  HEEx pages embed Elixir
+      // expressions verbatim inside `<%= … %>`, so the same Elixir
+      // idioms apply (Decimal.to_string for money, to_string for
+      // primitives, Decimal.new for the inverse).
+      const v = renderExpr(expr.value, ctx);
+      if (expr.target === "string") {
+        if (expr.from === "money") return `Decimal.to_string(${v})`;
+        return `to_string(${v})`;
+      }
+      if (expr.target === "long" || expr.target === "decimal") {
+        if (expr.from === "money") return `Decimal.to_float(${v})`;
+        return v;
+      }
+      if (expr.target === "money") {
+        if (expr.from === "money") return v;
+        return `Decimal.new(${v})`;
+      }
+      return v;
+    }
     case "match":
       return renderMatch(expr, ctx);
   }

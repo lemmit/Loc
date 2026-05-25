@@ -45,6 +45,7 @@ import {
   isNullLit,
   isOperation,
   isParenExpr,
+  isPrimitiveConversion,
   isPrimitiveType,
   isProperty,
   isStringLit,
@@ -346,6 +347,7 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
   if (isIntLit(expr)) return T.prim("int");
   if (isDecLit(expr)) return T.prim("decimal");
   if (isMoneyLit(expr)) return T.prim("money");
+  if (isPrimitiveConversion(expr)) return T.prim(expr.target as PrimitiveName);
   if (isBoolLit(expr)) return T.prim("bool");
   if (isNullLit(expr)) return T.opt(T.never);
   if (isNowExpr(expr)) return T.prim("datetime");

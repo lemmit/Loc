@@ -83,9 +83,48 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
     case "ternary":
       // Lower to `if … do … else … end`
       return `if ${renderExpr(e.cond, ctx)}, do: ${renderExpr(e.then, ctx)}, else: ${renderExpr(e.otherwise, ctx)}`;
+    case "convert":
+      return renderElixirConvert(e.target, e.from, e.value, ctx);
     case "match":
       return renderMatch(e.arms, e.otherwise, ctx);
   }
+}
+
+/**
+ * Render an explicit conversion expression for the Phoenix/Ash
+ * backend.  Per-(from, target) pair, using Elixir idioms:
+ *   string(x: int|long|decimal|bool) → `to_string(x)`
+ *   string(x: money)                 → `Decimal.to_string(x)`
+ *   long(x: int)                     → `x`           (Elixir has only
+ *                                                     integer)
+ *   decimal(x: int|long)             → `x`           (Loom's `decimal`
+ *                                                     is a plain number
+ *                                                     on Phoenix —
+ *                                                     no boxing needed)
+ *   decimal(x: money)                → `Decimal.to_float(x)` (lossy)
+ *   money(x: int|long|decimal)       → `Decimal.new(x)`
+ *   money(x: money)                  → `x`           (no-op)
+ */
+function renderElixirConvert(
+  target: string,
+  from: string | undefined,
+  value: ExprIR,
+  ctx: RenderCtx,
+): string {
+  const v = renderExpr(value, ctx);
+  if (target === "string") {
+    if (from === "money") return `Decimal.to_string(${v})`;
+    return `to_string(${v})`;
+  }
+  if (target === "long" || target === "decimal") {
+    if (from === "money") return `Decimal.to_float(${v})`;
+    return v;
+  }
+  if (target === "money") {
+    if (from === "money") return v;
+    return `Decimal.new(${v})`;
+  }
+  return v;
 }
 
 // ---------------------------------------------------------------------------

@@ -441,6 +441,25 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
       return `({ ${e.fields.map((f) => `${f.name}: ${renderUIExpr(f.value, ctx)}`).join(", ")} })`;
     case "object":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderUIExpr(f.value, ctx)}`).join(", ")} })`;
+    case "convert": {
+      // Same TS coercion shape as `e2e-render.ts` and the domain
+      // renderer — UI tests build payloads the same way the e2e
+      // suite does, so the per-(from, target) emit stays uniform.
+      const v = renderUIExpr(e.value, ctx);
+      if (e.target === "string") {
+        if (e.from === "money") return `${v}.toString()`;
+        return `String(${v})`;
+      }
+      if (e.target === "long" || e.target === "decimal") {
+        if (e.from === "money") return `${v}.toNumber()`;
+        return v;
+      }
+      if (e.target === "money") {
+        if (e.from === "money") return v;
+        return `new Decimal(${v})`;
+      }
+      return v;
+    }
     case "match": {
       // Lower match to chained ternary.  Same approach as
       // e2e-render.ts; UI tests are unlikely to evaluate match
