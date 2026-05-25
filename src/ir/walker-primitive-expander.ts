@@ -28,14 +28,7 @@
 //   - `home` / index pages — needs domain navigation primitives
 
 import { humanize, plural, snake } from "../util/naming.js";
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  ExprIR,
-  PageArchetypeIR,
-  SystemIR,
-  UiIR,
-} from "./loom-ir.js";
+import type { AggregateIR, BoundedContextIR, ExprIR, SystemIR, UiIR } from "./loom-ir.js";
 
 /** Inputs for the expander.  Carried as a struct so callers don't
  *  have to thread through the same handful of derived maps every
@@ -86,33 +79,6 @@ export function buildExpandContext(sys: SystemIR, ui: UiIR): WalkerExpandContext
     workflowsByName,
     viewsByName,
   };
-}
-
-/** Public entry point.  Returns the expanded body `ExprIR` for an
- *  origin we know how to handle, or `null` to fall back to the
- *  legacy archetype path. */
-export function expandWalkerPrimitive(
-  origin: PageArchetypeIR,
-  ctx: WalkerExpandContext,
-): ExprIR | null {
-  switch (origin.kind) {
-    case "aggregate-list":
-      return expandAggregateList(origin.aggregateName, ctx);
-    case "aggregate-new":
-      return expandAggregateNew(origin.aggregateName, ctx);
-    case "aggregate-detail":
-      return expandAggregateDetail(origin.aggregateName, ctx);
-    case "workflow-form":
-      return expandWorkflowForm(origin.workflowName, ctx);
-    case "view-list":
-      return expandViewList(origin.viewName, ctx);
-    case "workflows-index":
-      return expandWorkflowsIndex(ctx);
-    case "views-index":
-      return expandViewsIndex(ctx);
-    case "home":
-      return expandHome(ctx);
-  }
 }
 
 /** Recursively walk a page body and rewrite the two scaffold-family
@@ -172,6 +138,19 @@ export function expandInlineScaffoldPrimitives(body: ExprIR, ctx: WalkerExpandCo
       const view = viewRef ? ctx.viewsByName.get(viewRef) : undefined;
       if (!view) return body;
       return expandScaffoldViewList(view, ctx);
+    }
+    // Singleton sentinel bodies — Home / WorkflowsIndex / ViewsIndex.
+    // Emitted by scaffold for the per-UI index pages; expand inline
+    // to the same Stack/Card trees the archetype path used to
+    // produce.
+    if (body.name === "Home" && body.args.length === 0) {
+      return expandScaffoldHome(ctx);
+    }
+    if (body.name === "WorkflowsIndex" && body.args.length === 0) {
+      return expandScaffoldWorkflowsIndex(ctx);
+    }
+    if (body.name === "ViewsIndex" && body.args.length === 0) {
+      return expandScaffoldViewsIndex(ctx);
     }
     // Recurse into args — they may themselves contain the primitives.
     // Flatten Stack-returning scaffold expansions when their parent
@@ -240,174 +219,8 @@ export function expandInlineScaffoldPrimitives(body: ExprIR, ctx: WalkerExpandCo
 }
 
 // ---------------------------------------------------------------------------
-// Aggregate-list expansion
-// ---------------------------------------------------------------------------
-
-function expandAggregateList(aggregateName: string, ctx: WalkerExpandContext): ExprIR | null {
-  const agg = ctx.aggregatesByName.get(aggregateName);
-  if (!agg) return null;
-  // When the UI has an api parameter, route hook
-  // detection through `<handle>.<agg>.all` (Pattern A).  When
-  // not, drop the handle prefix → `<agg>.all` (Pattern D) so
-  // legacy `scaffold modules: M` deployables without explicit
-  // api params still get auto-injected hooks.
-  const apiHandle = findApiHandleFor(agg, ctx);
-  const queryRoot = apiHandle ? member(ref(apiHandle), agg.name) : ref(agg.name);
-  const slug = snake(plural(agg.name));
-  const humanPlural = humanize(plural(agg.name));
-  const humanLower = humanPlural.toLowerCase();
-  const rowVar = "r";
-  const cellVar = "o";
-
-  // One Column per non-collection aggregate field.  Collection
-  // fields (`contains lines: OrderLine[]`) belong on the detail
-  // page, not in a list table — we skip them here to match the
-  // scaffold builder's behaviour.
-  const cols: ExprIR[] = [];
-  cols.push(
-    call("Column", [
-      lit("ID"),
-      lambda(cellVar, call("IdLink", [member(ref(cellVar), "id")], [["of", ref(agg.name)]])),
-    ]),
-  );
-  for (const f of agg.fields) {
-    // Value-object fields don't render cleanly as a
-    // single cell (they're a struct, not a scalar).  Scaffold's
-    // archetype renderer flattens them into one column per leaf
-    // field; replicating that here needs more primitive surface
-    // (FlatColumns?) than the current primitives provide.  Skip for
-    // now — the column
-    // surface is a v0 superset of what's strictly required for
-    // tsc-clean output.
-    const inner = f.type.kind === "optional" ? f.type.inner : f.type;
-    if (inner.kind === "valueobject" || inner.kind === "array") continue;
-    cols.push(
-      call("Column", [
-        lit(humanize(f.name)),
-        lambda(cellVar, columnAccessorFor(f.name, f.type, cellVar)),
-      ]),
-    );
-  }
-
-  // Stack(...children, testid: "<slug>-list")
-  return call(
-    "Stack",
-    [
-      // Breadcrumbs
-      call("Breadcrumbs", [
-        call("Anchor", [lit("Home")], [["to", lit("/")]]),
-        call("Text", [lit(humanPlural)]),
-      ]),
-      // Toolbar(Heading, Button)
-      call("Toolbar", [
-        call("Heading", [lit(humanPlural)], [["level", intLit(2)]]),
-        call(
-          "Button",
-          [lit(`New ${singular(humanLower)}`)],
-          [
-            ["to", lit(`/${slug}/new`)],
-            ["testid", lit(`${slug}-list-create`)],
-          ],
-        ),
-      ]),
-      // QueryView(of: api.Agg.all, loading, error, empty, data: rows => Paper(Table(...)))
-      call(
-        "QueryView",
-        [],
-        [
-          ["of", member(queryRoot, "all")],
-          ["loading", call("Skeleton", [], [["count", intLit(5)]])],
-          ["error", call("Alert", [lit(`Couldn't load ${humanLower}`)])],
-          ["empty", call("Empty", [lit(`No ${humanLower} yet.`)])],
-          [
-            "data",
-            lambda(
-              "rows",
-              call("Paper", [
-                call(
-                  "Table",
-                  [...cols],
-                  [
-                    ["rows", ref("rows")],
-                    ["striped", boolLit(true)],
-                    ["highlight", boolLit(true)],
-                    ["sticky", boolLit(true)],
-                    [
-                      "rowTestid",
-                      lambda(rowVar, binary(lit(`${slug}-row-`), "+", member(ref(rowVar), "id"))),
-                    ],
-                  ],
-                ),
-              ]),
-            ),
-          ],
-        ],
-      ),
-    ],
-    [["testid", lit(`${slug}-list`)]],
-  );
-}
 
 // ---------------------------------------------------------------------------
-// Aggregate-detail expansion
-// ---------------------------------------------------------------------------
-
-function expandAggregateDetail(aggregateName: string, ctx: WalkerExpandContext): ExprIR | null {
-  const agg = ctx.aggregatesByName.get(aggregateName);
-  if (!agg) return null;
-  const apiHandle = findApiHandleFor(agg, ctx);
-  const queryRoot = apiHandle ? member(ref(apiHandle), agg.name) : ref(agg.name);
-  const slug = snake(plural(agg.name));
-  const humanPlural = humanize(plural(agg.name));
-  const humanAgg = humanize(agg.name);
-  const cellVar = "data";
-
-  // Compose the loaded-record body from the two reusable sections —
-  // the data card / related lists, then the operation modals.  Keep
-  // the section ordering FLAT (card → group → related₁ → relatedₙ),
-  // matching the pre-refactor shape so fixture bytes stay stable.
-  // The standalone `scaffoldDetails(of:)` body primitive bundles
-  // card + related into one nested Stack — that's the right shape
-  // for a single body slot but not for inline composition here.
-  const { card, related } = buildDataCardParts(agg, ctx, cellVar);
-  const opGroup = buildOperationsSection(agg, cellVar);
-  const dataSections: ExprIR[] = [card];
-  if (opGroup) dataSections.push(opGroup);
-  dataSections.push(...related);
-  const dataBody = dataSections.length > 1 ? call("Stack", dataSections) : dataSections[0]!;
-
-  return call(
-    "Stack",
-    [
-      call("Breadcrumbs", [
-        call("Anchor", [lit("Home")], [["to", lit("/")]]),
-        call("Anchor", [lit(humanPlural)], [["to", lit(`/${slug}`)]]),
-        call("Text", [lit("Detail")]),
-      ]),
-      call("Heading", [lit(`${humanAgg} detail`)], [["level", intLit(2)]]),
-      call(
-        "QueryView",
-        [],
-        [
-          ["of", methodCall(queryRoot, "byId", [ref("id")])],
-          ["single", boolLit(true)],
-          ["loading", call("Skeleton", [], [["count", intLit(3)]])],
-          ["error", call("Alert", [lit(`Couldn't load ${humanAgg.toLowerCase()}`)])],
-          [
-            "empty",
-            call(
-              "Alert",
-              [lit(`No ${humanAgg.toLowerCase()} matches that id.`)],
-              [["color", lit("yellow")]],
-            ),
-          ],
-          ["data", lambda(cellVar, dataBody)],
-        ],
-      ),
-    ],
-    [["testid", lit(`${slug}-detail`)]],
-  );
-}
 
 /** Expand `scaffoldDetails(of: <Agg>)`: the full read-side detail
  * section — Breadcrumbs, Heading, QueryView wrapping the field
@@ -454,10 +267,10 @@ function expandScaffoldDetails(agg: AggregateIR, ctx: WalkerExpandContext): Expr
 }
 
 /** Expand `scaffoldOperations(of: <Agg>)`: one Modal per public
- * operation, each holding a `Form(of: <Agg>, op: <opName>)`.  The
- * new flat Form shape avoids needing a loaded-record reference —
- * the mutation hook resolves the aggregate id from the route, so
- * the modals can live at top level rather than inside a QueryView
+ * operation, each holding an `OperationForm(of: <Agg>, op: <opName>)`.
+ * The flat shape avoids needing a loaded-record reference — the
+ * mutation hook resolves the aggregate id from the route, so the
+ * modals can live at top level rather than inside a QueryView
  * lambda. */
 function expandScaffoldOperations(agg: AggregateIR): ExprIR {
   const slug = snake(plural(agg.name));
@@ -468,7 +281,7 @@ function expandScaffoldOperations(agg: AggregateIR): ExprIR {
       "Modal",
       [
         call(
-          "Form",
+          "OperationForm",
           [],
           [
             ["of", ref(agg.name)],
@@ -714,6 +527,136 @@ function expandScaffoldViewList(
   );
 }
 
+/** Expand the `Home()` sentinel body into the welcome page Stack
+ *  with one summary Card per reachable section (aggregates,
+ *  workflows, views).  Emitted by scaffold for the singleton Home
+ *  page; recognised inline by `expandInlineScaffoldPrimitives`. */
+function expandScaffoldHome(ctx: WalkerExpandContext): ExprIR {
+  const aggCount = ctx.aggregatesByName.size;
+  const wfCount = ctx.workflowsByName.size;
+  const viewCount = ctx.viewsByName.size;
+  const cards: ExprIR[] = [];
+  if (aggCount > 0) {
+    cards.push(
+      call("Card", [
+        call(
+          "Heading",
+          [lit(pluralize(aggCount, "aggregate", "aggregates"))],
+          [["level", intLit(4)]],
+        ),
+        call("Text", [lit("Manage records of each kind from the sidebar.")]),
+      ]),
+    );
+  }
+  if (wfCount > 0) {
+    cards.push(
+      call("Card", [
+        call("Heading", [lit(pluralize(wfCount, "workflow", "workflows"))], [["level", intLit(4)]]),
+        call("Anchor", [lit("Open workflows →")], [["to", lit("/workflows")]]),
+      ]),
+    );
+  }
+  if (viewCount > 0) {
+    cards.push(
+      call("Card", [
+        call("Heading", [lit(pluralize(viewCount, "view", "views"))], [["level", intLit(4)]]),
+        call("Anchor", [lit("Open views →")], [["to", lit("/views")]]),
+      ]),
+    );
+  }
+  return call(
+    "Stack",
+    [
+      call("Heading", [lit("Welcome")], [["level", intLit(2)]]),
+      call("Text", [lit("Pick a section from the sidebar to start, or jump straight in below.")]),
+      call("Stack", cards),
+    ],
+    [["testid", lit("home")]],
+  );
+}
+
+/** Expand the `WorkflowsIndex()` sentinel body into the index page —
+ *  Breadcrumbs + Heading + one Card per registered workflow. */
+function expandScaffoldWorkflowsIndex(ctx: WalkerExpandContext): ExprIR {
+  const cards: ExprIR[] = [];
+  for (const wf of ctx.workflowsByName.values()) {
+    const slug = snake(wf.name);
+    cards.push(
+      call(
+        "Card",
+        [
+          call("Heading", [lit(humanize(wf.name))], [["level", intLit(4)]]),
+          call(
+            "Anchor",
+            [lit("Run →")],
+            [
+              ["to", lit(`/workflows/${slug}`)],
+              ["testid", lit(`workflow-${slug}-run`)],
+            ],
+          ),
+        ],
+        [["testid", lit(`workflow-card-${slug}`)]],
+      ),
+    );
+  }
+  return call(
+    "Stack",
+    [
+      call("Breadcrumbs", [
+        call("Anchor", [lit("Home")], [["to", lit("/")]]),
+        call("Text", [lit("Workflows")]),
+      ]),
+      call("Heading", [lit("Workflows")], [["level", intLit(2)]]),
+      call("Text", [lit("System-level orchestrations.  Pick one to run.")]),
+      call("Stack", cards),
+    ],
+    [["testid", lit("workflows-index")]],
+  );
+}
+
+/** Expand the `ViewsIndex()` sentinel body — Breadcrumbs + Heading
+ *  + one Card per registered view. */
+function expandScaffoldViewsIndex(ctx: WalkerExpandContext): ExprIR {
+  const cards: ExprIR[] = [];
+  for (const view of ctx.viewsByName.values()) {
+    const slug = snake(view.name);
+    cards.push(
+      call(
+        "Card",
+        [
+          call("Heading", [lit(humanize(view.name))], [["level", intLit(4)]]),
+          call(
+            "Anchor",
+            [lit("Open →")],
+            [
+              ["to", lit(`/views/${slug}`)],
+              ["testid", lit(`view-${slug}-open`)],
+            ],
+          ),
+        ],
+        [["testid", lit(`view-card-${slug}`)]],
+      ),
+    );
+  }
+  return call(
+    "Stack",
+    [
+      call("Breadcrumbs", [
+        call("Anchor", [lit("Home")], [["to", lit("/")]]),
+        call("Text", [lit("Views")]),
+      ]),
+      call("Heading", [lit("Views")], [["level", intLit(2)]]),
+      call("Text", [lit("Saved queries.  Open one to inspect rows.")]),
+      call("Stack", cards),
+    ],
+    [["testid", lit("views-index")]],
+  );
+}
+
+function pluralize(n: number, singular: string, plural: string): string {
+  return `${n} ${n === 1 ? singular : plural}`;
+}
+
 /** Bundled form of the read-side data section: the main field
  * card folded together with all related-entity cards in a single
  * nested Stack.  Returns a bare Card when there are no relations.
@@ -854,7 +797,13 @@ export function buildOperationsSection(agg: AggregateIR, cellVar: string): ExprI
   const opModals: ExprIR[] = publicOps.map((op, i) =>
     call(
       "Modal",
-      [call("Form", [member(ref(cellVar), op.name)], [["testid", lit(`${slug}-op-${op.name}`)]])],
+      [
+        call(
+          "OperationForm",
+          [member(ref(cellVar), op.name)],
+          [["testid", lit(`${slug}-op-${op.name}`)]],
+        ),
+      ],
       [
         ["title", lit(humanize(op.name))],
         [
@@ -968,279 +917,10 @@ function methodCall(receiver: ExprIR, member: string, args: ExprIR[]): ExprIR {
 }
 
 // ---------------------------------------------------------------------------
-// Aggregate-new expansion
-// ---------------------------------------------------------------------------
-
-function expandAggregateNew(aggregateName: string, ctx: WalkerExpandContext): ExprIR | null {
-  const agg = ctx.aggregatesByName.get(aggregateName);
-  if (!agg) return null;
-  const slug = snake(plural(agg.name));
-  const humanPlural = humanize(plural(agg.name));
-  const humanAgg = humanize(agg.name);
-  return call(
-    "Stack",
-    [
-      call("Breadcrumbs", [
-        call("Anchor", [lit("Home")], [["to", lit("/")]]),
-        call("Anchor", [lit(humanPlural)], [["to", lit(`/${slug}`)]]),
-        call("Text", [lit("New")]),
-      ]),
-      call("Heading", [lit(`Create ${humanAgg.toLowerCase()}`)], [["level", intLit(2)]]),
-      call("Card", [
-        call(
-          "Form",
-          [],
-          [
-            ["of", ref(agg.name)],
-            ["testid", lit(`${slug}-new`)],
-          ],
-        ),
-      ]),
-    ],
-    [["testid", lit(`${slug}-new-page`)]],
-  );
-}
 
 // ---------------------------------------------------------------------------
-// Workflow-form expansion
-// ---------------------------------------------------------------------------
-
-function expandWorkflowForm(workflowName: string, ctx: WalkerExpandContext): ExprIR | null {
-  const wf = ctx.workflowsByName.get(workflowName);
-  if (!wf) return null;
-  const wfSlug = snake(wf.name);
-  const humanWf = humanize(wf.name);
-  return call(
-    "Stack",
-    [
-      call("Breadcrumbs", [
-        call("Anchor", [lit("Home")], [["to", lit("/")]]),
-        call("Anchor", [lit("Workflows")], [["to", lit("/workflows")]]),
-        call("Text", [lit(humanWf)]),
-      ]),
-      call("Heading", [lit(humanWf)], [["level", intLit(2)]]),
-      call("Card", [
-        call(
-          "Form",
-          [],
-          [
-            ["runs", ref(wf.name)],
-            ["testid", lit(`workflow-${wfSlug}`)],
-          ],
-        ),
-      ]),
-    ],
-    [["testid", lit(`workflow-${wfSlug}-page`)]],
-  );
-}
 
 // ---------------------------------------------------------------------------
-// View-list expansion
-// ---------------------------------------------------------------------------
-
-function expandViewList(viewName: string, ctx: WalkerExpandContext): ExprIR | null {
-  const view = ctx.viewsByName.get(viewName);
-  if (!view) return null;
-  const humanView = humanize(view.name);
-  const viewSlug = snake(view.name);
-
-  // Row fields come from one of two sources:
-  //   - Custom output (full-form view): `view.output.fields`
-  //   - Shorthand:                       source aggregate's fields
-  // Either way, we project them as Column accessors using the
-  // same type-driven dispatch the list expander uses.
-  let fields: Array<{ name: string; type: import("./loom-ir.js").TypeIR }> = [];
-  if (view.output) {
-    fields = view.output.fields;
-  } else {
-    const sourceAgg = ctx.aggregatesByName.get(view.aggregateName);
-    if (sourceAgg) fields = sourceAgg.fields;
-  }
-  const cellVar = "o";
-  const cols: ExprIR[] = [];
-  for (const f of fields) {
-    const inner = f.type.kind === "optional" ? f.type.inner : f.type;
-    if (inner.kind === "valueobject" || inner.kind === "array") continue;
-    cols.push(
-      call("Column", [
-        lit(humanize(f.name)),
-        lambda(cellVar, columnAccessorFor(f.name, f.type, cellVar)),
-      ]),
-    );
-  }
-
-  return call(
-    "Stack",
-    [
-      call("Heading", [lit(humanView)], [["level", intLit(2)]]),
-      call(
-        "QueryView",
-        [],
-        [
-          // `Views.<name>` is the view-hook reference — walker
-          // detects this Pattern C and lifts to `useXxxView()`.
-          ["of", member(ref("Views"), view.name)],
-          ["loading", call("Skeleton", [], [["count", intLit(5)]])],
-          ["error", call("Alert", [lit(`Couldn't load ${humanView.toLowerCase()}`)])],
-          ["empty", call("Empty", [lit("No rows.")])],
-          [
-            "data",
-            lambda(
-              "rows",
-              call("Paper", [
-                call(
-                  "Table",
-                  [...cols],
-                  [
-                    ["rows", ref("rows")],
-                    ["striped", boolLit(true)],
-                    ["highlight", boolLit(true)],
-                    ["sticky", boolLit(true)],
-                    // Custom-output views don't have a stable `id`
-                    // field on row, so key by index.  Shorthand views
-                    // do have `id` (rows are aggregate responses) but
-                    // index-by-key still works correctly there.
-                    ["keyExpr", lit("idx")],
-                  ],
-                ),
-              ]),
-            ),
-          ],
-        ],
-      ),
-    ],
-    [["testid", lit(`view-${viewSlug}`)]],
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Home + index expansions
-// ---------------------------------------------------------------------------
-
-function expandHome(ctx: WalkerExpandContext): ExprIR {
-  // Walker stdlib doesn't ship `SimpleGrid` (Mantine-specific
-  // responsive grid) yet; use a plain Stack of summary cards.
-  // Counts come from the expander's reachable-context maps.
-  const aggCount = ctx.aggregatesByName.size;
-  const wfCount = ctx.workflowsByName.size;
-  const viewCount = ctx.viewsByName.size;
-  const cards: ExprIR[] = [];
-  if (aggCount > 0) {
-    cards.push(
-      call("Card", [
-        call(
-          "Heading",
-          [lit(pluralize(aggCount, "aggregate", "aggregates"))],
-          [["level", intLit(4)]],
-        ),
-        call("Text", [lit("Manage records of each kind from the sidebar.")]),
-      ]),
-    );
-  }
-  if (wfCount > 0) {
-    cards.push(
-      call("Card", [
-        call("Heading", [lit(pluralize(wfCount, "workflow", "workflows"))], [["level", intLit(4)]]),
-        call("Anchor", [lit("Open workflows →")], [["to", lit("/workflows")]]),
-      ]),
-    );
-  }
-  if (viewCount > 0) {
-    cards.push(
-      call("Card", [
-        call("Heading", [lit(pluralize(viewCount, "view", "views"))], [["level", intLit(4)]]),
-        call("Anchor", [lit("Open views →")], [["to", lit("/views")]]),
-      ]),
-    );
-  }
-  return call(
-    "Stack",
-    [
-      call("Heading", [lit("Welcome")], [["level", intLit(2)]]),
-      call("Text", [lit("Pick a section from the sidebar to start, or jump straight in below.")]),
-      call("Stack", cards),
-    ],
-    [["testid", lit("home")]],
-  );
-}
-
-function expandWorkflowsIndex(ctx: WalkerExpandContext): ExprIR {
-  const cards: ExprIR[] = [];
-  for (const wf of ctx.workflowsByName.values()) {
-    const slug = snake(wf.name);
-    cards.push(
-      call(
-        "Card",
-        [
-          call("Heading", [lit(humanize(wf.name))], [["level", intLit(4)]]),
-          call(
-            "Anchor",
-            [lit("Run →")],
-            [
-              ["to", lit(`/workflows/${slug}`)],
-              ["testid", lit(`workflow-${slug}-run`)],
-            ],
-          ),
-        ],
-        [["testid", lit(`workflow-card-${slug}`)]],
-      ),
-    );
-  }
-  return call(
-    "Stack",
-    [
-      call("Breadcrumbs", [
-        call("Anchor", [lit("Home")], [["to", lit("/")]]),
-        call("Text", [lit("Workflows")]),
-      ]),
-      call("Heading", [lit("Workflows")], [["level", intLit(2)]]),
-      call("Text", [lit("System-level orchestrations.  Pick one to run.")]),
-      call("Stack", cards),
-    ],
-    [["testid", lit("workflows-index")]],
-  );
-}
-
-function expandViewsIndex(ctx: WalkerExpandContext): ExprIR {
-  const cards: ExprIR[] = [];
-  for (const view of ctx.viewsByName.values()) {
-    const slug = snake(view.name);
-    cards.push(
-      call(
-        "Card",
-        [
-          call("Heading", [lit(humanize(view.name))], [["level", intLit(4)]]),
-          call(
-            "Anchor",
-            [lit("Open →")],
-            [
-              ["to", lit(`/views/${slug}`)],
-              ["testid", lit(`view-${slug}-open`)],
-            ],
-          ),
-        ],
-        [["testid", lit(`view-card-${slug}`)]],
-      ),
-    );
-  }
-  return call(
-    "Stack",
-    [
-      call("Breadcrumbs", [
-        call("Anchor", [lit("Home")], [["to", lit("/")]]),
-        call("Text", [lit("Views")]),
-      ]),
-      call("Heading", [lit("Views")], [["level", intLit(2)]]),
-      call("Text", [lit("Saved queries.  Open one to inspect rows.")]),
-      call("Stack", cards),
-    ],
-    [["testid", lit("views-index")]],
-  );
-}
-
-function pluralize(n: number, singular: string, plural: string): string {
-  return `${n} ${n === 1 ? singular : plural}`;
-}
 
 // ---------------------------------------------------------------------------
 // IR constructors

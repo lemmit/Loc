@@ -90,7 +90,7 @@ system AcmeOrderExplicit {
         }
 
         // OrderNew — replaces scaffold's `aggregate-new` archetype.
-        // Form(of: Order) handles all the RHF + zodResolver +
+        // CreateForm(of: Order) handles all the RHF + zodResolver +
         // useCreate<Aggregate> wiring; the page chrome (breadcrumbs,
         // title, card wrapper) is composed by hand.
         page OrderNew {
@@ -102,7 +102,7 @@ system AcmeOrderExplicit {
                     Text("New")
                 ),
                 Heading("Create order", level: 2),
-                Card(Form(of: Order, testid: "orders-new")),
+                Card(CreateForm(of: Order, testid: "orders-new")),
                 testid: "orders-new-page"
             )
         }

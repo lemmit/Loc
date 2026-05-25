@@ -848,30 +848,24 @@ export interface PageIR {
    *  re-parsing the body expression.  Same source context the legacy
    *  generator's per-aggregate / per-workflow / per-view loop
    *  received. */
-  archetype?: PageArchetypeIR;
+  origin?: PageOriginIR;
   /** Explicit emit path override for walker-rendered
    *  pages.  When set, the page-emitter writes the rendered TSX to
    *  this path instead of the default `src/pages/<page-snake>.tsx`.
-   *  Populated by `expandWalkerPrimitive` so a scaffold-
-   *  expanded page lands at the conventional archetype path
-   *  (`src/pages/<plural>/list.tsx` for `aggregate-list`, etc.) —
-   *  preserves URL/file shape when scaffold expansion becomes the
-   *  default. */
+   *  Populated during lowering so a scaffold-emitted page lands at
+   *  its conventional path (`src/pages/<plural>/list.tsx` for an
+   *  `aggregate-list` origin, etc.) — preserves URL/file shape. */
   emitPath?: string;
-  /** True when the scaffold expander rewrote `body`
-   *  from the original archetype call (e.g. `List(of: …)`) to a
-   *  walker-stdlib composition.  `archetype` is intentionally
-   *  preserved on these pages so the per-aggregate page-object
-   *  emitter still fires; `expandedFromScaffold` tells the
-   *  page-emitter to dispatch the rewritten body through the
-   *  walker instead of the archetype renderer. */
-  expandedFromScaffold?: boolean;
 }
 
-/** Provenance for a scaffold-synthesised page.  Each kind names the
- *  domain-IR target plus the page archetype within that target's
- *  generated set. */
-export type PageArchetypeIR =
+/** Provenance for a page's body shape.  Scaffold-emitted pages carry
+ *  a non-`custom` origin so downstream generators (pages-emitter,
+ *  menu-emitter, page-objects-emit) can pick the right emit path,
+ *  nav-link metadata, and Playwright page-object class without
+ *  re-introspecting the body.  User-written explicit pages get
+ *  `{ kind: "custom" }` — they emit at `src/pages/<page-snake>.tsx`
+ *  and contribute no auto-nav entry. */
+export type PageOriginIR =
   | { kind: "aggregate-list"; aggregateName: string; contextName: string }
   | { kind: "aggregate-new"; aggregateName: string; contextName: string }
   | { kind: "aggregate-detail"; aggregateName: string; contextName: string }
@@ -879,7 +873,8 @@ export type PageArchetypeIR =
   | { kind: "view-list"; viewName: string; contextName: string }
   | { kind: "workflows-index" }
   | { kind: "views-index" }
-  | { kind: "home" };
+  | { kind: "home" }
+  | { kind: "custom" };
 
 /** A user-defined component: typed function from params (and optional
  *  local state) to a body expression.  Components compose other
