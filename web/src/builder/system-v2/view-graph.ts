@@ -226,19 +226,22 @@ function moduleView(ast: Model, name: string): ViewGraph {
   return { title: `module ${name}`, nodes: layout(items, ["context"]), edges: [] };
 }
 
-// Column order for the context view: consumers (repository / view /
-// workflow) on the left, aggregates in the centre, value-objects + events
-// on the right. Edges flow LEFT-TO-RIGHT consistently — repo→aggregate,
-// view→aggregate, workflow→aggregate, aggregate→event — which matches the
-// downstream direction of each relationship.
-const CONTEXT_ORDER: readonly ViewKind[] = [
-  "repository",
-  "view",
-  "workflow",
-  "aggregate",
-  "valueobject",
-  "event",
-];
+// Vertical (top→bottom) tier order for the context view. Consumers feed
+// *down* into aggregates which fan *down* into events — every relationship
+// reads top-to-bottom, which matches the React Flow nodes' Top/Bottom
+// handles and avoids edges curling around the sides of nodes.
+//
+// Row 0: repository | view | workflow  (consumers / entry points)
+// Row 1: aggregate | valueobject       (the core model)
+// Row 2: event                          (outcomes)
+const CONTEXT_TIER: Partial<Record<ViewKind, number>> = {
+  repository: 0,
+  view: 0,
+  workflow: 0,
+  aggregate: 1,
+  valueobject: 1,
+  event: 2,
+};
 
 const CONTEXT_KIND: Partial<Record<string, ViewKind>> = {
   Aggregate: "aggregate",
@@ -250,50 +253,68 @@ const CONTEXT_KIND: Partial<Record<string, ViewKind>> = {
 };
 
 const CTX_COL_W = 220;
-const CTX_ROW_H = 90;
+const CTX_ROW_H = 160;
 
-/** Per-column layout where consumers (left of aggregate) and outcomes
- *  (right of aggregate, currently events) align to the row of the
- *  aggregate they connect to. Mirrors aggregateLayout's read-row alignment
- *  trick — works for any column-against-pivot pattern. */
+/** Tier-rowed layout: nodes group into horizontal rows by `CONTEXT_TIER` and
+ *  are spread along X. Pivot column is `aggregate` (tier 1); consumers (tier 0)
+ *  and outcomes (tier 2) align their X to the average X of the aggregates
+ *  they reference. Same row-alignment trick as before, just rotated 90°. */
 function contextLayout(
-  items: { id: string; kind: ViewKind; name: string; anchor?: string }[],
+  items: { id: string; kind: ViewKind; name: string; anchors?: string[] }[],
 ): VNode[] {
-  const byCol = new Map<number, typeof items>();
+  const byTier = new Map<number, typeof items>();
   for (const it of items) {
-    const col = CONTEXT_ORDER.indexOf(it.kind);
-    const list = byCol.get(col >= 0 ? col : CONTEXT_ORDER.length);
+    const tier = CONTEXT_TIER[it.kind] ?? 0;
+    const list = byTier.get(tier);
     if (list) list.push(it);
-    else byCol.set(col >= 0 ? col : CONTEXT_ORDER.length, [it]);
+    else byTier.set(tier, [it]);
   }
-  // Pass 1: place aggregates (the pivot column).
-  const aggCol = CONTEXT_ORDER.indexOf("aggregate");
-  const aggregateRow = new Map<string, number>();
+  // Pass 1: place tier 1 (aggregates + value objects) first — they define the
+  // X coordinates everyone else aligns to. Aggregates come first so they
+  // sit to the left of any value objects in the same tier.
+  const aggregates = (byTier.get(1) ?? []).filter((i) => i.kind === "aggregate");
+  const peers = (byTier.get(1) ?? []).filter((i) => i.kind !== "aggregate");
   const placed = new Map<string, { x: number; y: number }>();
-  const aggs = byCol.get(aggCol) ?? [];
-  for (let i = 0; i < aggs.length; i++) {
-    const a = aggs[i]!;
-    placed.set(a.id, { x: aggCol * CTX_COL_W, y: i * CTX_ROW_H });
-    aggregateRow.set(a.name, i);
+  const aggregateX = new Map<string, number>();
+  let col = 0;
+  for (const a of aggregates) {
+    placed.set(a.id, { x: col * CTX_COL_W, y: 1 * CTX_ROW_H });
+    aggregateX.set(a.name, col * CTX_COL_W);
+    col++;
   }
-  // Pass 2: place every other column, aligning to its anchor's row when set.
-  for (const [col, bucket] of byCol) {
-    if (col === aggCol) continue;
+  for (const p of peers) {
+    placed.set(p.id, { x: col * CTX_COL_W, y: 1 * CTX_ROW_H });
+    col++;
+  }
+  // Pass 2: place each non-pivot tier. Anchored nodes get the X of their
+  // anchor (preferring the average of multiple anchors); free nodes fall into
+  // the next available column. X collisions get bumped to the right.
+  for (const [tier, bucket] of byTier) {
+    if (tier === 1) continue;
     const taken = new Set<number>();
-    let nextRow = 0;
-    for (const it of bucket) {
-      const anchorRow = it.anchor ? aggregateRow.get(it.anchor) : undefined;
-      let row: number;
-      if (anchorRow !== undefined) {
-        row = anchorRow;
-        while (taken.has(row)) row++;
+    let nextCol = 0;
+    // Anchored first so they grab their preferred X; free nodes fill gaps.
+    const ordered = [...bucket].sort((a, b) =>
+      Number(Boolean(b.anchors?.length)) - Number(Boolean(a.anchors?.length)),
+    );
+    for (const it of ordered) {
+      let x: number;
+      const anchored = it.anchors?.map((n) => aggregateX.get(n)).filter((v): v is number => v !== undefined) ?? [];
+      if (anchored.length > 0) {
+        const avg = Math.round(anchored.reduce((a, b) => a + b, 0) / anchored.length);
+        x = avg;
+        // Snap to an unused column slot near `x`.
+        let slot = Math.round(x / CTX_COL_W);
+        while (taken.has(slot)) slot++;
+        x = slot * CTX_COL_W;
+        taken.add(slot);
       } else {
-        row = nextRow;
-        while (taken.has(row)) row++;
+        while (taken.has(nextCol)) nextCol++;
+        x = nextCol * CTX_COL_W;
+        taken.add(nextCol);
+        nextCol++;
       }
-      taken.add(row);
-      nextRow = Math.max(nextRow, row + 1);
-      placed.set(it.id, { x: col * CTX_COL_W, y: row * CTX_ROW_H });
+      placed.set(it.id, { x, y: tier * CTX_ROW_H });
     }
   }
   return items.map((it) => ({
@@ -323,27 +344,33 @@ function contextView(ast: Model, name: string): ViewGraph {
   }
   if (!ctx) return { title: name, nodes: [], edges: [] };
   const rel = computeContextRelations(ctx);
-  // Build the raw item list with optional `anchor` so non-aggregate nodes can
-  // align to the aggregate row they reference (repo→agg, view→agg, agg→event).
-  const items: { id: string; kind: ViewKind; name: string; anchor?: string }[] = [];
+  // Build the raw item list with optional `anchors` (multi-valued) so non-
+  // aggregate nodes can centre over the aggregate(s) they reference: repos /
+  // views to their single source aggregate, workflows to every aggregate they
+  // touch, events to every aggregate that emits them.
+  const items: { id: string; kind: ViewKind; name: string; anchors?: string[] }[] = [];
   for (const m of ctx.members as ContextMember[]) {
     const kind = CONTEXT_KIND[m.$type];
     const childName = (m as { name?: string }).name;
     if (!kind || !childName) continue;
-    let anchor: string | undefined;
-    if (kind === "repository") anchor = rel.repoFor.get(childName);
-    else if (kind === "view") anchor = rel.viewSource.get(childName);
-    // events anchor to the FIRST aggregate that emits them (when any) — picks
-    // the source row so the edge from agg→event is roughly horizontal.
-    if (kind === "event") {
-      for (const [aggName, set] of rel.emits) {
-        if (set.has(childName)) {
-          anchor = aggName;
-          break;
-        }
-      }
+    let anchors: string[] | undefined;
+    if (kind === "repository") {
+      const a = rel.repoFor.get(childName);
+      if (a) anchors = [a];
+    } else if (kind === "view") {
+      const a = rel.viewSource.get(childName);
+      if (a) anchors = [a];
+    } else if (kind === "workflow") {
+      const set = rel.workflowUses.get(childName);
+      if (set && set.size > 0) anchors = [...set];
+    } else if (kind === "event") {
+      // Anchor an event to every aggregate that emits it — the layout
+      // averages their X so the event sits between its sources.
+      const emitters: string[] = [];
+      for (const [aggName, set] of rel.emits) if (set.has(childName)) emitters.push(aggName);
+      if (emitters.length > 0) anchors = emitters;
     }
-    items.push({ id: nid(kind, childName), kind, name: childName, anchor });
+    items.push({ id: nid(kind, childName), kind, name: childName, anchors });
   }
 
   const edges: VEdge[] = [];
@@ -401,22 +428,26 @@ function contextView(ast: Model, name: string): ViewGraph {
   return { title: `context ${name}`, nodes: contextLayout(items), edges };
 }
 
-// Layered column order for the aggregate view. State (fields + containments)
-// is the centre of gravity; invariants sit to its LEFT (constraints flow
-// rightward into state), derived sits to its RIGHT (computed from state) and
-// operations/functions sit further right (consumers of state). Read/write
-// edges then visibly converge on the state column instead of crisscrossing.
-const AGGREGATE_ORDER: readonly ViewKind[] = [
-  "invariant",
-  "field",
-  "containment",
-  "derived",
-  "operation",
-  "function",
-];
+// Vertical (top→bottom) tier order for the aggregate view. Consumers feed
+// *down* into state; the React Flow nodes' Top/Bottom handles produce
+// natural vertical edges with no curl.
+//
+//   Row 0:  invariant | operation | function | derived  (consumers / constraints)
+//   Row 1:  field | containment                          (state — the leaf of every edge)
+//
+// Consumers' X aligns to the average X of the fields they touch — same
+// row-alignment trick as the context view, rotated to use X instead of Y.
+const AGGREGATE_TIER: Partial<Record<ViewKind, number>> = {
+  invariant: 0,
+  operation: 0,
+  function: 0,
+  derived: 0,
+  field: 1,
+  containment: 1,
+};
 
-const AGG_COL_W = 240;
-const AGG_ROW_H = 80;
+const AGG_COL_W = 200;
+const AGG_ROW_H = 200;
 
 interface RawAggNode {
   id: string;
@@ -427,61 +458,47 @@ interface RawAggNode {
   readsOf: ReadonlySet<string>;
 }
 
-/** Per-column placement, with consumers vertically aligned to the average row
- *  of the fields they read. Drastically reduces edge crossings vs. naive
- *  column-stack ordering — and the alignment itself acts as a visual cue
- *  ("this operation touches *those* fields"). */
+/** Tier-rowed layout with consumer-to-state X alignment. State (row 1) is
+ *  placed first to fix the X grid; consumers (row 0) centre over the average
+ *  X of the fields they read, with column collisions bumped to the next free
+ *  slot. */
 function aggregateLayout(items: RawAggNode[]): VNode[] {
-  // Pass 1: fields + containments + invariants get plain stacked rows so the
-  // state column is the visual baseline.
-  const byCol = new Map<number, RawAggNode[]>();
-  for (const it of items) {
-    const col = AGGREGATE_ORDER.indexOf(it.kind);
-    const list = byCol.get(col >= 0 ? col : AGGREGATE_ORDER.length);
-    if (list) list.push(it);
-    else byCol.set(col >= 0 ? col : AGGREGATE_ORDER.length, [it]);
-  }
-  const fieldRow = new Map<string, number>(); // field name → row index
   const placed = new Map<string, { x: number; y: number }>();
-  // Place state first so consumers can align to it.
-  const stateCol = AGGREGATE_ORDER.indexOf("field");
-  const contCol = AGGREGATE_ORDER.indexOf("containment");
-  const stateBuckets: Array<{ col: number; items: RawAggNode[] }> = [];
-  if (byCol.get(stateCol)) stateBuckets.push({ col: stateCol, items: byCol.get(stateCol)! });
-  if (byCol.get(contCol)) stateBuckets.push({ col: contCol, items: byCol.get(contCol)! });
-  let stateRow = 0;
-  for (const b of stateBuckets) {
-    for (const it of b.items) {
-      placed.set(it.id, { x: b.col * AGG_COL_W, y: stateRow * AGG_ROW_H });
-      fieldRow.set(it.name, stateRow);
-      stateRow++;
-    }
+  const fieldX = new Map<string, number>();
+  // Pass 1: state tier (fields then containments) along the bottom row.
+  const stateNodes = items.filter((i) => AGGREGATE_TIER[i.kind] === 1);
+  let col = 0;
+  for (const s of stateNodes) {
+    const x = col * AGG_COL_W;
+    placed.set(s.id, { x, y: 1 * AGG_ROW_H });
+    fieldX.set(s.name, x);
+    col++;
   }
-  // Place every other column. Consumers (with readsOf) align to the average
-  // row of the fields they touch; nodes with no reads (or no matching field)
-  // stack at the next free row in their column.
-  for (const [col, bucket] of byCol) {
-    if (col === stateCol || col === contCol) continue;
-    let nextRow = 0;
-    const taken = new Set<number>();
-    for (const it of bucket) {
-      const rows: number[] = [];
-      for (const r of it.readsOf) {
-        const idx = fieldRow.get(r);
-        if (idx !== undefined) rows.push(idx);
-      }
-      let row: number;
-      if (rows.length > 0) {
-        row = Math.round(rows.reduce((a, b) => a + b, 0) / rows.length);
-        while (taken.has(row)) row++;
-      } else {
-        row = nextRow;
-        while (taken.has(row)) row++;
-      }
-      taken.add(row);
-      nextRow = Math.max(nextRow, row + 1);
-      placed.set(it.id, { x: col * AGG_COL_W, y: row * AGG_ROW_H });
+  // Pass 2: consumer tier (top row), aligned to fields they touch.
+  const consumers = items.filter((i) => AGGREGATE_TIER[i.kind] === 0);
+  const taken = new Set<number>();
+  // Anchored consumers first so they grab their preferred X; free consumers
+  // fill the remaining slots from the left.
+  const ordered = [...consumers].sort((a, b) => b.readsOf.size - a.readsOf.size);
+  let nextCol = 0;
+  for (const c of ordered) {
+    const xs: number[] = [];
+    for (const r of c.readsOf) {
+      const x = fieldX.get(r);
+      if (x !== undefined) xs.push(x);
     }
+    let slot: number;
+    if (xs.length > 0) {
+      const avg = xs.reduce((a, b) => a + b, 0) / xs.length;
+      slot = Math.round(avg / AGG_COL_W);
+      while (taken.has(slot)) slot++;
+    } else {
+      while (taken.has(nextCol)) nextCol++;
+      slot = nextCol;
+      nextCol++;
+    }
+    taken.add(slot);
+    placed.set(c.id, { x: slot * AGG_COL_W, y: 0 });
   }
   return items.map((it) => ({
     id: it.id,
