@@ -8,12 +8,17 @@
 > - [`payload-transport-layer.md`](./payload-transport-layer.md) —
 >   transport layer; `payload` keyword, carrier-bounded generics,
 >   tagged unions.
-> - [`exception-less.md`](./exception-less.md) — `Option<T>` /
->   `Result<T, E>` as native carriers, `?` propagation, API-edge
->   ProblemDetails translation (per-api `status` mapping + stdlib
->   defaults), find-variant re-shape.
+> - [`exception-less.md`](./exception-less.md) — `error` payloads,
+>   `option` carrier, anonymous `or` unions (no `Result<T, E>`
+>   wrapper), `?` propagation, API-edge ProblemDetails translation
+>   (per-api `status` mapping + stdlib defaults), find-variant
+>   re-shape.
+> - [`domain-service.md`](./domain-service.md) — `validator`
+>   (pure cross-aggregate domain rule check) + `service` (mutating
+>   cross-aggregate domain logic); `pre <validator>(args)` clauses
+>   on aggregate operations.
 >
-> Read all three before starting. This doc covers ordering,
+> Read all of these before starting. This doc covers ordering,
 > coordination points, risk management, and decision pins.
 
 ## TL;DR — the delivery story
@@ -121,7 +126,7 @@ change in user-facing generated code.
 **Deliverables**:
 - Enrichment: extend the existing `wireShape` enrichment to also
   expose a `PayloadDeclIR` with name `<Agg>Wire`.
-- Validator: allow `response: CustomerWire`, `Page<CustomerWire>` etc. in operation/find return positions.
+- Validator: allow `response: CustomerWire`, `CustomerWire page`, etc. in operation/find return positions (ML-postfix per P3 syntax).
 - Tests: one IR test asserting the auto-derived payload exists; one
   generator test confirming emitted code unchanged.
 

@@ -234,7 +234,7 @@ payload CustomerWire extends payload {
   name: string
   email: string
 }
-# Now referenceable: `response: CustomerWire`, `Page<CustomerWire>`, etc.
+# Now referenceable: `response: CustomerWire`, `CustomerWire page`, etc.
 ```
 
 This is the bridge between today's implicit shape and the explicit
@@ -246,8 +246,9 @@ named payload type.
 
 > **Update from v0 of this proposal** (which used `: payload`).
 > Bounding generic parameters to `: payload` is too narrow: it locks
-> out `Option<int>`, `Result<Money, ParseError>`, `Option<Customer>`,
-> `Page<Money>`, etc. The bound is widened to `: carrier`. The
+> out `int option`, `customer option`, `money page`, anonymous
+> `T or E` unions where `T` / `E` are primitives or value objects,
+> etc. The bound is widened to `: carrier`. The
 > closed-universe argument (every parameter has uniform JSON
 > encoding) still holds — primitives and value objects already have
 > uniform wire encoding via `src/ir/enrichments.ts`' `wireShape`.
@@ -364,7 +365,7 @@ Loom has **two** absence concepts after this proposal lands:
 | Concept | Form | States | Purpose | Lives in |
 |---|---|---|---|---|
 | `T?` (nullable suffix) | Type-level annotation | value \| null | Field nullability — "this column may hold null" | Today's grammar (kept) |
-| `T option` (carrier) | ML-postfix sugar for `T or none` | None \| Some<T> | Optional values that may be absent | This proposal (new) |
+| `T option` (carrier) | ML-postfix sugar for `T or none` | `none` \| `some(T)` | Optional values that may be absent | This proposal (new) |
 
 The two coexist because they answer different questions:
 - `T?` is a storage / wire concern (nullable column / nullable JSON

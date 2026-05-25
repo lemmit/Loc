@@ -37,7 +37,12 @@ requirements-tracing one.
 
 ## Type-system family — state, transport, exception-less
 
-Three stacked proposals reshape Loom's type system:
+> **Start here**:
+> [`type-system-overview.md`](./type-system-overview.md) — 10-minute
+> orientation across the whole family. Read first; the full proposals
+> total ~3000 lines.
+
+Six proposals + an implementation plan reshape Loom's type system:
 
 - **State layer** —
   [`aggregate-inheritance.md`](./aggregate-inheritance.md). Abstract

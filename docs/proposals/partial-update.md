@@ -166,7 +166,8 @@ PATCH-style command.
 - **.NET backend**: System.Text.Json with `DefaultIgnoreCondition =
   WhenWritingNull` or a custom converter for the variant
   representation. The deserialised command record carries the
-  per-field `Some<T>` / `None` discriminated record.
+  per-field discriminated record (`some(T)` / `none` in DSL terms;
+  emitted as PascalCase sealed records per .NET convention).
 - **Phoenix / Ash**: Phoenix params are a plain `map`; absent keys
   are absent in the map (no nil-vs-missing ambiguity per Elixir
   semantics). The action coerces to `{:some, value}` / `:none`

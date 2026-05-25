@@ -72,8 +72,8 @@ via `Party id`." Without giving up:
 - **Cross-cutting concerns that aren't fields-sharing.** `auditable` /
   `softDeletable` stay macros. Inheritance is for shape, not for
   capabilities.
-- **Generic data containers.** `Envelope<T>`, `Page<T>`,
-  `Result<T, E>` — those are payload-layer concerns, see sister
+- **Generic data containers.** `T envelope`, `T page`, anonymous
+  `T or E` unions — those are payload-layer concerns, see sister
   proposal.
 - **Type narrowing in DSL expressions.** `if customer extends Party`
   doesn't introduce a typed binding in operation bodies.
