@@ -102,6 +102,19 @@ export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR)
     lines.push("  }");
   }
   lines.push("}");
+  lines.push("");
+
+  // Dev-stub registrations — accept any request as a no-op so a generated
+  // stack boots end-to-end without the caller having to wire real handlers
+  // first.  Runs at module load (before createApp/verify); call
+  // register<Op><Agg>Handler(...) AFTER importing this module to override
+  // for production.  The framework still runs preconditions + invariants
+  // around the call, so the stub's empty body is safe for parity tests.
+  for (const op of externOps) {
+    lines.push(
+      `register${upperFirst(op.name)}${agg.name}Handler(async () => { /* dev-stub: replace via register${upperFirst(op.name)}${agg.name}Handler(...) */ });`,
+    );
+  }
 
   return lines.join("\n") + "\n";
 }
