@@ -24,10 +24,13 @@ violations, by:
    string"; the `find` re-shape lowers `: X?` returns to this.
 3. **`?` propagation operator** — short-circuits any value of an
    `error`-marked variant, threads non-error values onward.
-4. **`on wire <Status>` clause** lives on the `error` payload itself
-   (per-error, not per-union). At the wire edge, errors lift their
-   status code; the body becomes the variant data directly — no
-   `kind`-tagged envelope for success responses.
+4. **Status mapping lives in the api surface, not on the error.**
+   Domain `error` declarations are HTTP-blind. The api surface
+   carries `status <Error> <Code>` lines for user errors (with
+   stdlib defaults baked into the generator). At runtime the route
+   emitter translates errors to **RFC 7807 ProblemDetails** JSON
+   bodies with the appropriate status code; success bodies carry
+   the variant data directly with HTTP 200.
 5. **Find re-shape**: a find declared `: X` returns `X or NotFound`;
    declared `: X?` returns `X option`; declared `: X[]` stays an
    array.
@@ -69,8 +72,13 @@ where reaching the code is itself a bug.
 
 **In scope (v1)**:
 
-- `error` payloads with per-payload `on wire <Status>` clauses
-  (declared in upstream proposal §"Subtypes"; semantics here).
+- `error` payloads as the marker for `?`-propagation eligibility
+  (declared in upstream proposal §"Subtypes"; HTTP-blind — no
+  status code on the declaration).
+- API-surface `status <Error> <Code>` mapping clause + stdlib
+  default table baked into the generator.
+- Auto-generated **RFC 7807 ProblemDetails** translation at the
+  api route boundary.
 - Anonymous `or` unions in return types (declared in upstream
   proposal §"Discriminated unions on payloads"; usage here).
 - `option` ML-postfix carrier as sugar for `T or none` (declared in
@@ -134,10 +142,18 @@ A worked example showing all four mechanisms at once:
 
 ```
 # Declare typed errors (sugar keyword from upstream proposal).
-# Each error owns its HTTP status via `on wire <Status>`.
-error NotFound   { what: string, id: string }   on wire 404
-error OutOfStock { sku: string, requested: int } on wire 409
-error Forbidden  { actor: string }              on wire 403
+# Domain-side: pure payload declarations. No status codes here —
+# the api surface owns the status mapping.
+error NotFound   { what: string, id: string }
+error OutOfStock { sku: string, requested: int }
+error Forbidden  { actor: string }
+
+# Elsewhere, in the api surface:
+#   api SalesApi for Sales {
+#     status OutOfStock 409    # explicit; default would be 500+warning
+#     status Forbidden  403    # explicit
+#     # NotFound: covered by stdlib default (404), no line needed.
+#   }
 
 # Operation returns an anonymous `or` union of one success + three errors.
 # No Result wrapper, no Ok/Err variants — the type IS the union.
@@ -167,13 +183,24 @@ In the operation body:
   `Ok` wrapper needed; the value's type matches one of the union's
   arms.
 
-Wire encoding for the response:
-- Success → HTTP 200, body is the `OrderId` data (just `"ord_abc"`
-  or `{"value": "ord_abc"}` depending on primitive vs payload). No
-  `{"kind": "OrderId"}` envelope.
-- `NotFound` → HTTP 404, body is `{"what": "Customer", "id": "..."}`.
-- `OutOfStock` → HTTP 409, body is `{"sku": "...", "requested": 5}`.
-- `Forbidden` → HTTP 403, body is `{"actor": "..."}`.
+Wire encoding for the response (api surface auto-generates this from
+the status mapping + ProblemDetails translation):
+
+- Success → HTTP 200, body is the `OrderId` data (`"ord_abc"` for a
+  primitive, or the object shape for a payload). No `{"kind":
+  "OrderId"}` envelope.
+- `NotFound` → HTTP 404, body is a **ProblemDetails** object:
+  ```json
+  { "type": "/errors/not-found", "title": "Not Found", "status": 404,
+    "detail": "Customer cus_abc not found", "instance": "/orders" }
+  ```
+  Status comes from the stdlib default (NotFound → 404). `type`,
+  `title`, `detail` auto-derived. Error fields (`what`, `id`)
+  become ProblemDetails extension members.
+- `OutOfStock` → HTTP 409 (from api-surface `status OutOfStock 409`),
+  ProblemDetails body shaped the same way.
+- `Forbidden` → HTTP 403 (from api-surface `status Forbidden 403`),
+  ProblemDetails body.
 
 The HTTP status carries the discriminator at the route boundary; no
 `kind` envelope needed for success. For non-HTTP carriers (queue
@@ -210,9 +237,10 @@ operation findActiveSession(userId: User id): Session option {
 ```
 
 Wire encoding for `option` returns: at HTTP boundaries, `none`
-defaults to 404 (no body), `some(value)` is 200 with the value's
-wire shape. `none` has a built-in `on wire 404` default; no
-explicit clause needed.
+defaults to 404 (with a ProblemDetails body indicating the missing
+resource), `some(value)` is 200 with the value's wire shape. The
+404 default is baked into the api generator for `none`; no
+declaration needed.
 
 ## The `?` propagation operator
 
@@ -301,54 +329,115 @@ authors will recognise. `try` reads more domain-y but eats a
 keyword. **Pinned to `?`**; revisit if user testing shows the
 symbol is surprising.
 
-## Wire-edge status mapping
+## API-edge ProblemDetails translation
 
-### Per-`error` declaration, not per-union
+The api route boundary is the **only** place where domain errors get
+mapped to HTTP. Domain `error` declarations don't know about HTTP
+at all. The api surface owns the mapping; the generator emits the
+translator.
 
-Each `error` payload owns its HTTP status via its declaration:
+### Three layers, one translator
+
+| Layer | Today (throws) | After (carrier-returning) |
+|---|---|---|
+| Aggregate (domain) | Throws invariant violations | Still throws; caught by global 500 + ProblemDetails fallback |
+| Application / handlers | Throws typed failures | Returns `T or <Errors>...` directly; no throws for typed cases |
+| API route | Hand-written try/catch tower that translates exception classes to status codes | Auto-generated: matches on the `or`-union variant, emits ProblemDetails with the right status |
+
+The N-times-per-backend "translator from exception to ProblemDetails"
+that .NET / Hono / Phoenix authors all hand-write is **generated**
+from the api-surface mapping + stdlib defaults.
+
+### Status mapping lives in the api surface
 
 ```
-error NotFound       { what: string, id: string }    on wire 404
-error OutOfStock     { sku: string }                 on wire 409
-error Forbidden      { actor: string }               on wire 403
-error ValidationFailed { errors: ValidationError[] } on wire 422
+api SalesApi for Sales {
+  # Stdlib defaults apply automatically — no lines needed for these:
+  #   NotFound        -> 404
+  #   ValidationError -> 422
+  #   ParseError      -> 400
+  #   Forbidden       -> 403
+  #   TransportFailure / UnexpectedStatus / DeserializeError -> 502
+  #
+  # Custom statuses for domain-specific errors:
+  status OutOfStock      409
+  status PaymentDeclined 402
+}
 ```
 
-When an operation returns `OrderId or NotFound or OutOfStock`, the
-status dispatch is *derived* from each variant's `on wire`. No
-per-operation, per-union status mapping table — the error declares
-its own status once.
+User-declared errors with **no** `status` line in the api → default
+500 + `loom.unmapped-error-status` warning. Authors who want the
+500 for "unexpected" errors get it silently; the warning prompts
+explicit annotation for the ones they care about.
 
-### Default mappings
+The stdlib default table is hardcoded in
+`src/system/error-defaults.ts` (or per-platform equivalent) — not
+in any `.ddd` file. Stdlib errors don't carry status annotations
+because *no* error declaration does.
 
-- `none` (the option's empty variant): `on wire 404` (implicit; no
-  declaration needed).
-- An `error` declared without an `on wire` clause: defaults to 500
-  + emits `domain_error` event. Validator emits
-  `loom.unmapped-err-variant` **warning** (not error — authors may
-  legitimately want the 500 default for "truly unexpected" errors).
+### ProblemDetails body — auto-derived fields
 
-### IR + lowering
+Every error variant returned from an api operation lowers to a
+ProblemDetails JSON body:
 
-- New IR enrichment pass: each `error` payload IR carries
-  `wireStatus: HttpStatus`. Pure pass; computes from the AST
-  clause.
-- Each backend's route emitter consumes per-variant:
-
-| Backend | Route-edge shape |
+| ProblemDetails field | Derived from |
 |---|---|
-| TS Hono | `if (isErrorVariant(result)) return c.json(result, statusFor(result.kind)); return c.json(result, 200);` |
-| .NET | Controller returns `ActionResult<T>`; switches on `result.kind` to pick `NotFound()` / `Conflict()` / `Ok(result)`. |
-| Phoenix | Action returns the tuple; route handler maps `%{kind: ...}` to `conn |> put_status(...) |> json(...)`. |
+| `status` | api-surface `status` mapping (or stdlib default) |
+| `title` | Error name prettified (`NotFound` → `"Not Found"`, `OutOfStock` → `"Out of Stock"`) |
+| `type` | Auto-generated URI: `/errors/<kebab-case-name>` (e.g., `/errors/out-of-stock`) |
+| `detail` | Auto-interpolation from the error's fields: `"{title}: ${fieldList}"` |
+| `instance` | Current request path, filled by the route handler at runtime |
+| Extension members | Any error fields beyond the standard set surface as ProblemDetails extensions |
+
+Per-error customisation of `type` URIs, `title`, or `detail`
+templates is **deferred to v2**. v1 is auto-derived only.
 
 ### Multi-error responses
 
-Operations that accumulate errors (typically from validators) return
-`T or ValidationError[]`. The wire-edge mapping uses the
-**highest-priority** status from the error array, with priority
-defined by status-code order (4xx beats 5xx, lower codes win ties).
-Authors can override with an explicit `on wire combine { ... }`
-clause on the operation if the default isn't sufficient.
+Operations that accumulate errors (typically validators returning
+`T or ValidationError[]`) become a ProblemDetails with an `errors`
+extension array — RFC 7807 §3.2 form:
+
+```json
+{ "type": "/errors/validation",
+  "title": "Validation Failed",
+  "status": 422,
+  "detail": "2 fields failed validation",
+  "errors": [
+    { "field": "quantity", "code": "must-be-positive", "message": "..." },
+    { "field": "unitPrice", "code": "must-be-positive", "message": "..." }
+  ]}
+```
+
+Status: 422 (stdlib default for `ValidationError`). The
+top-level body shape is one ProblemDetails; the per-field errors
+land in the extension array.
+
+### IR + lowering
+
+- New IR enrichment pass: each `api` declaration carries
+  `errorStatuses: Map<ErrorTypeName, HttpStatus>` populated from
+  the `status` clauses + stdlib defaults.
+- New stdlib payload: `ProblemDetails { type: string?, title:
+  string, status: int, detail: string?, instance: string? }` in
+  `src/stdlib/payloads/`.
+- Each backend's route emitter consumes the `errorStatuses` map
+  and the `ProblemDetails` shape:
+
+| Backend | Route-edge shape |
+|---|---|
+| TS Hono | `if (isErrorVariant(result)) { const pd = toProblemDetails(result, errorStatuses); return c.json(pd, pd.status); } return c.json(result, 200);` |
+| .NET | Controller returns `ActionResult<T>`; the global `IExceptionHandler` + per-route filter use the same `errorStatuses` table to build `ProblemDetails`. Idiomatic ASP.NET Core pipeline; Loom generates the wiring. |
+| Phoenix | Action returns the value; route handler maps non-success variants via `ProblemDetails.from(variant, errorStatuses)` and `conn |> put_status(pd.status) |> json(pd)`. |
+
+### Aggregate-invariant throws
+
+These hit the global error middleware on every backend. Generated:
+500 ProblemDetails with `type: "/errors/internal"`, `title:
+"Internal Server Error"`, structured logging of the underlying
+exception via the catalog's `invariant_violated` event. No
+ProblemDetails leak of internal details (no stack traces in the
+body); the catalog event has the full context for operators.
 
 ## Find-variant alignment
 
@@ -366,8 +455,9 @@ therefore at the return-type level, not a keyword change:
 
 The lowering site is `src/ir/lower.ts` find-decl lowering plus each
 backend's repository builder. The route emitter dispatches on the
-result carrier exactly as the wire-edge section specifies (each
-error variant lifts its `on wire` status; `none` lifts to 404).
+result carrier exactly as the API-edge translation section specifies
+(error variants → ProblemDetails with status from api mapping;
+`none` → 404 default).
 
 **Backwards compatibility**: today's `: X` finds that throw on
 missing become Result-shaped. Existing call sites need migration —
@@ -388,12 +478,18 @@ let customer = customers.findById(cmd.customerId)?
 
 ### `NotFound`'s default status
 
-`NotFound` is a stdlib `error` payload with `on wire 404`:
+`NotFound` is a stdlib `error` payload (HTTP-blind, like every error
+declaration):
 
 ```
 # In src/stdlib/payloads/errors.ddd:
-error NotFound { what: string, id: string } on wire 404
+error NotFound { what: string, id: string }
 ```
+
+Its **404 status** comes from the generator's stdlib defaults table
+(`src/system/error-defaults.ts`), not from the declaration. Any
+api surface that uses `NotFound` gets 404 without writing a `status`
+line; the override path is the same as any other error if needed.
 
 Per-aggregate override (a find declaring `: X` but mapping absence
 to a custom error type) is a v2 extension if demand surfaces.
@@ -429,11 +525,14 @@ parse int   from someString   : int   or ParseError
 parse uuid  from userInput    : uuid  or ParseError
 ```
 
-`ParseError` is a stdlib `error` payload:
+`ParseError` is a stdlib `error` payload (HTTP-blind):
 
 ```
-error ParseError { input: string, expected: string, message: string } on wire 400
+error ParseError { input: string, expected: string, message: string }
 ```
+
+Its 400 status comes from the generator's stdlib defaults table —
+not from the declaration.
 
 ### Validators (upstream Phase 5)
 
@@ -447,12 +546,13 @@ validate for OrderItem {
 Lowers to a function `validate(x: OrderItem): OrderItem or
 ValidationError[]` that **accumulates** all field errors (not
 short-circuiting on the first). `ValidationError` is a stdlib
-`error` payload:
+`error` payload (HTTP-blind, like every error):
 
 ```
 error ValidationError { field: string, code: string, message: string }
-  on wire 422
 ```
+
+Its 422 status comes from the generator's stdlib defaults table.
 
 Multi-error accumulation is handled by the carrier stdlib's
 `combine` helper. No separate `Validated<T, NEL<E>>` carrier needed
@@ -469,22 +569,23 @@ let result = call api Foo.bar({ id: 123 })?
 # Type: ResponseDTO or ApiError
 ```
 
-`ApiError` is a stdlib `error` payload union:
+`ApiError` is a stdlib `error` payload union (each variant
+HTTP-blind):
 
 ```
-error TransportFailure  { message: string }                     on wire 502
-error UnexpectedStatus  { status: int, body: string }           on wire 502
-error DeserializeError  { expected: string, raw: string }       on wire 502
+error TransportFailure  { message: string }
+error UnexpectedStatus  { status: int, body: string }
+error DeserializeError  { expected: string, raw: string }
 
 # Convenience named union for external API call sites:
 payload ApiError = TransportFailure | UnexpectedStatus | DeserializeError
 ```
 
-Each error variant has its own `on wire` clause; the named union
-just groups them for convenience. Inbound `call api` failures
-*usually* aren't re-emitted to the caller verbatim — the caller's
-operation typically does `.mapErr(...)` or pattern-matches —
-but the statuses are there for re-emission cases.
+Default statuses (each → 502) live in the generator's stdlib table.
+Inbound `call api` failures *usually* aren't re-emitted to the
+caller verbatim — the caller's operation typically does
+`.mapErr(...)` or pattern-matches — but the 502 defaults apply when
+they bubble through to an api response.
 
 ### File IO
 
@@ -552,9 +653,9 @@ Layered on top of upstream proposal's Phase 1–5:
 
 | Phase | Scope | Dependency |
 |---|---|---|
-| **A1** | `error` payload sugar keyword with `on wire <Status>` clause. `none` unit type + `option` postfix sugar. Stdlib error payloads (`NotFound`, `ParseError`, `ApiError` variants, `ValidationError`). Validator enforces no-throw outside aggregate bodies (regime separation). | Upstream Phase 1+3+4 |
+| **A1** | `error` payload sugar keyword (no status clause — domain stays HTTP-blind). `none` unit type + `option` postfix sugar. Stdlib error payloads (`NotFound`, `ParseError`, `ApiError` variants, `ValidationError`) and stdlib `ProblemDetails` payload. Generator-side stdlib status defaults table. Validator enforces no-throw outside aggregate bodies. | Upstream Phase 1+3+4 |
 | **A2** | `?` propagation operator with error-marker dispatch. Scoping rules. Per-backend lowering. | A1 |
-| **A3** | Per-error `on wire` enrichment + each backend's route emitter consuming it (variant → status, body becomes variant data; success body has no `kind` envelope). | A1 |
+| **A3** | API-surface `status <Error> <Code>` clause + per-api `errorStatuses` enrichment. Per-backend route emitter auto-generates ProblemDetails translation (status from api mapping or stdlib default; body auto-derived). Aggregate-invariant throws hit a global 500-ProblemDetails fallback per backend. | A1 |
 | **A4** | Re-shape find variants. `: X` → `X or NotFound`, `: X?` → `X option`. Migrate every example .ddd + every backend's route/repository emitter. **Single coordinated PR.** | A1, A3 |
 | **A5** | Parse intrinsics return `T or ParseError`. External API calls return `T or ApiError`. Macro-wrapped throwing helpers retired. | A1, A2 |
 | **A6** | `validate for X` (upstream Phase 5) returns `X or ValidationError[]`. Multi-error accumulation via `combine`. | A1, A2, upstream Phase 5 |
@@ -606,10 +707,11 @@ A5 and A6 chase the long tail. A7a polishes ergonomics.
   fn's return an `or` union containing this expression's error
   variants" through the type-check pass. Variant set membership
   needs to be cheap — straightforward but new.
-- **A3's per-error enrichment.** Pure pass, but the consumers
-  (per-backend route emitters) need updating in lockstep.
-  Manageable; mirrors today's `wireShape` enrichment + consumer
-  pattern.
+- **A3's per-api enrichment.** Per-api `errorStatuses` map is a
+  pure pass merging stdlib defaults with author-declared overrides.
+  The consumers (per-backend route emitters + the generated
+  ProblemDetails translators) need updating in lockstep. Mirrors
+  today's `wireShape` enrichment + consumer pattern.
 - **A4 is the coordinated migration.** Every example .ddd, every
   backend repo emitter, every backend route emitter, every fixture.
   Plan one PR; don't split. Estimate: 2-3 days of mechanical work
@@ -660,9 +762,10 @@ Once shipped, several follow-ups become small:
 3. **`NotFound` as the default error type for find `: X` returns.**
    `NotFound` only, or per-aggregate override (`: X or MyError`)?
    **Recommended: `NotFound` only in v1.**
-4. **`error` with no explicit `on wire` mapping**: silent default
-   (500 + `domain_error`) vs validator-error-forcing-explicit.
-   **Recommended: warning, not error.**
+4. **User error with no explicit `status` line in any api surface**:
+   silent default (500 + `domain_error`) vs
+   validator-error-forcing-explicit. **Recommended: warning
+   (`loom.unmapped-error-status`), 500 default body.**
 5. **Variant naming for `none`**: `none` (lowercase, lean) vs
    `nothing` / `unit` / `void` / `nil`. **Recommended: `none`.**
 6. **Two-regime enforcement strictness over time**: warning vs
@@ -721,22 +824,48 @@ Once shipped, several follow-ups become small:
 - Tests: parsing test; one scoping test per violation; per-backend
   lowering tests; one end-to-end test threading three `?` calls.
 
-### A3 — Per-error `on wire <Status>` enrichment
+### A3 — API-surface `status` mapping + ProblemDetails translation
 
-- Upstream proposal Phase 1 already adds the `on wire <Status>`
-  syntactic clause to the `error` declaration; this phase consumes
-  it.
-- `src/ir/loom-ir.ts` — `wireStatus?: HttpStatus` on the `error`
-  payload IR.
-- `src/ir/enrichments.ts` — pure pass: walk every `error` payload,
-  capture `wireStatus`. Sibling to `wireShape`.
-- Each backend's route emitter — consume per-variant `wireStatus`;
-  emit dispatch as described.
-- Validator: `loom.unmapped-err-variant` warning if an `error` has
-  no `on wire` clause.
-- Tests: parsing test for the clause; per-backend emission tests
-  asserting the status dispatch; one end-to-end test with an error
-  variant returning a 4xx.
+- Grammar (`src/language/ddd.langium`): `status <ErrorTypeRef>
+  <IntegerLit>` clause inside `api Foo for Bar { ... }` blocks.
+  Zero or more lines.
+- IR (`src/ir/loom-ir.ts`): `errorStatuses: Map<ErrorTypeName,
+  HttpStatus>` on `ApiIR`. Populated from the AST clauses.
+- Enrichment (`src/ir/enrichments.ts`): for each api, merge
+  generator-side stdlib defaults (`src/system/error-defaults.ts`)
+  with the per-api overrides. Result: a complete map for every
+  error type the api can encounter.
+- Stdlib payload: `ProblemDetails { type: string?, title: string,
+  status: int, detail: string?, instance: string? }` in
+  `src/stdlib/payloads/`.
+- Generator-side stdlib status table: `src/system/error-defaults.ts`
+  (or equivalent). Hardcoded `{ NotFound: 404, ValidationError:
+  422, ParseError: 400, Forbidden: 403, TransportFailure: 502,
+  UnexpectedStatus: 502, DeserializeError: 502 }`.
+- Each backend's route emitter — generate the ProblemDetails
+  translator + dispatch:
+  - TS Hono: helper `toProblemDetails(value, errorStatuses)`;
+    route handler matches on the variant and emits status + body.
+  - .NET: per-api `IExceptionHandler` + per-route filter; uses
+    the same map. Idiomatic ASP.NET Core wiring; Loom generates
+    it.
+  - Phoenix: action returns value; route handler maps via
+    `ProblemDetails.from/2` and `put_status` + `json`.
+- Global fallback per backend: aggregate-invariant throws hit a
+  500 ProblemDetails handler with `type: "/errors/internal"`.
+  Domain-internal details (stack traces, internal field values)
+  do NOT leak to the body; the catalog `invariant_violated` event
+  has the full context for operators.
+- Validator: `loom.unmapped-error-status` warning when an error
+  variant flows into an api but has no mapping (neither per-api
+  nor stdlib).
+- Tests: parsing test for the api `status` clause; per-backend
+  emission tests asserting the ProblemDetails shape; one
+  end-to-end test with an error returning a 4xx with the full
+  ProblemDetails body; one test asserting success bodies carry NO
+  `kind` envelope and NO ProblemDetails wrapping; one test
+  asserting aggregate-invariant throws yield the 500 ProblemDetails
+  fallback with the catalog event logged.
 
 ### A4 — Find-variant re-shape
 
@@ -795,15 +924,17 @@ contracts for diff-based change detection. With this proposal:
 
 - Every named or anonymous `or` union used in an operation return
   adds an entry to the spec.
-- Each `error` payload's `wireStatus` is captured so status-code
-  drift surfaces in the diff.
+- Each api's resolved `errorStatuses` map (per-api overrides merged
+  with stdlib defaults) is captured per-api in the spec, so
+  status-code drift surfaces in the diff.
 - Stdlib `error` payloads (`NotFound`, `ParseError`, etc.) appear
-  once globally in the spec.
+  once globally in the spec; their default statuses come from the
+  generator-side defaults table.
 
 `src/system/wire-spec.ts` needs a small extension in A1/A3 to emit
-the error-payload and `or`-union entries. The diff-detection
-consumers (CI gate, OpenAPI parity check) work unchanged because
-the spec stays JSON-shaped.
+the error-payload and `or`-union entries plus per-api status
+tables. The diff-detection consumers (CI gate, OpenAPI parity
+check) work unchanged because the spec stays JSON-shaped.
 
 ## Cross-references
 
@@ -827,10 +958,13 @@ the spec stays JSON-shaped.
   `domain_error`, `validation_failed` shift sources after A4–A6 but
   on-wire shape preserved.
 - `src/ir/enrichments.ts` — `wireShape` enrichment is reused for
-  aggregate-as-carrier projection in A1. Sibling `wireStatus`
-  enrichment added in A3.
+  aggregate-as-carrier projection in A1. Sibling `errorStatuses`
+  enrichment (per-api, merged with stdlib defaults) added in A3.
+- `src/system/error-defaults.ts` (new) — generator-side hardcoded
+  stdlib status defaults table. Stdlib `.ddd` files never carry
+  status annotations.
 - `src/language/ddd-validator.ts` — new diagnostics:
-  `loom.throw-outside-domain`, `loom.unmapped-err-variant`,
+  `loom.throw-outside-domain`, `loom.unmapped-error-status`,
   `loom.propagate-bad-scope`, `loom.propagate-incompatible-error`.
 - #480 — Ash domain trace via `:telemetry`. `invariant_violated`
   events stay sourced from aggregate-invariant throws (regime 1);

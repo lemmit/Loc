@@ -9,8 +9,9 @@
 >   transport layer; `payload` keyword, carrier-bounded generics,
 >   tagged unions.
 > - [`exception-less.md`](./exception-less.md) — `Option<T>` /
->   `Result<T, E>` as native carriers, `?` propagation, `on wire`
->   status mapping, find-variant re-shape.
+>   `Result<T, E>` as native carriers, `?` propagation, API-edge
+>   ProblemDetails translation (per-api `status` mapping + stdlib
+>   defaults), find-variant re-shape.
 >
 > Read all three before starting. This doc covers ordering,
 > coordination points, risk management, and decision pins.
@@ -38,8 +39,9 @@ exception-less ─────────────────────�
    ready; no cross-blocking.
 3. **Payload Phase 3+4** (carrier-bounded generics + tagged unions).
    The type-system lift.
-4. **Exception-less A1+A2+A3** (Option/Result + `?` + `on wire`). The
-   minimum coherent ship for the exception-less story.
+4. **Exception-less A1+A2+A3** (`error` keyword + `option` + `?` +
+   ProblemDetails translation at the api edge). The minimum coherent
+   ship for the exception-less story.
 5. **Exception-less A4** (find-variant re-shape + coordinated fixture
    re-baseline). The user-visible turning point.
 6. **Payload Phase 5** (`validate for X` / `authorize for X`) + 
@@ -68,7 +70,7 @@ I3: own storage strategy                | I1                      | (parallel wi
 I4: per-concrete override + TPT pattern | I1, I2, I3              | (none)
 A1: Option/Result + two-regime line     | P3, P4                  | A2, A3, A4, A5, A6, A7
 A2: ? propagation operator              | A1                      | A4, A5 (ergonomically)
-A3: on wire { ... } + errorStatusMap    | A1                      | A4
+A3: api `status` clause + ProblemDetails | A1                     | A4
 A4: find-variant re-shape               | A1, A3                  | A5 (some find call sites)
 A5: parse + external API as Result      | A1, A2                  | (none)
 A6: validate for X returns Result       | A1, A2, P5              | (none)
@@ -89,23 +91,22 @@ label).
 **Scope**: introduce `payload Foo { ... }` keyword. Treat existing
 `event` / `command` / `query` / `response` as sugar that auto-upgrade
 to `extends payload` in IR enrichment. Add new `error` sugar keyword
-with `on wire <Status>` clause. No user .ddd file changes required
-for the existing four; `error` is new surface.
+— pure data shape, no status clause (domain stays HTTP-blind; status
+mapping is the api surface's job, A3).
 
 **Deliverables**:
-- Grammar: `payload` rule + `error` rule + `OnWireClause` (status
-  integer) in `src/language/ddd.langium`.
+- Grammar: `payload` rule + `error` rule in `src/language/ddd.langium`.
+  `error` parses like `payload` with a different `kind` tag.
 - IR: `PayloadDeclIR` node with `kind: 'payload' | 'event' |
-  'command' | 'query' | 'response' | 'error'` and
-  `wireStatus?: HttpStatus` on `error`-kind nodes (in
-  `src/ir/loom-ir.ts`).
+  'command' | 'query' | 'response' | 'error'` (in
+  `src/ir/loom-ir.ts`). No status field on the IR.
 - Enrichment: `src/ir/enrichments.ts` upgrade pass for the existing
   four sugars; pass-through for `error`.
 - Backends: no emission change yet (existing four sugars still emit
-  as today; `error` payloads emit as a sealed record / typed map +
-  the `wireStatus` is captured for P-phase-3 / A-phase-3 consumers).
-- Tests: parsing for `payload`, `error <Name> { ... } on wire 404`;
-  one negative test (`error` without `on wire` → warning).
+  as today; `error` payloads emit as a sealed record / typed map,
+  pending A3 to consume them at the api edge).
+- Tests: parsing for `payload`, `error <Name> { ... }`; verify no
+  status surface at this layer.
 
 **Exit criteria**: `npm test` green; existing examples unchanged
 (no `error` declarations yet in user code).
@@ -289,19 +290,28 @@ types** — operations declare returns as `T or <Error>...` or
 `T option` directly.
 
 **Deliverables**:
-- Stdlib:
-  - `src/stdlib/payloads/none.ddd` — declare `none` unit type
-    (with implicit `on wire 404` for return-position lowering).
+- Stdlib (`.ddd` files — pure shape, no status info):
+  - `src/stdlib/payloads/none.ddd` — declare `none` unit type.
+    The "404 at return position" semantic is in the generator's
+    api-edge translator, not on the declaration.
   - `src/stdlib/payloads/option.ddd` — declare `option` as
     `payload option(T: carrier) = some(T) | none` (sugar for
     `T or none`).
   - `src/stdlib/payloads/errors.ddd` — `NotFound`, `ParseError`,
     `TransportFailure`, `UnexpectedStatus`, `DeserializeError`,
-    `ValidationError` all declared as `error` payloads with their
-    `on wire <Status>` clauses.
+    `ValidationError`, `Forbidden` declared as `error` payloads.
+    No status annotations.
   - `src/stdlib/payloads/api_error.ddd` — convenience named union
     `payload ApiError = TransportFailure | UnexpectedStatus |
     DeserializeError`.
+  - `src/stdlib/payloads/problem_details.ddd` — RFC 7807
+    `ProblemDetails { type: string?, title: string, status: int,
+    detail: string?, instance: string? }`.
+- Generator-side stdlib status table:
+  `src/system/error-defaults.ts` (new). Hardcoded
+  `{ NotFound: 404, ValidationError: 422, ParseError: 400,
+  Forbidden: 403, TransportFailure: 502, UnexpectedStatus: 502,
+  DeserializeError: 502, none: 404 }`. Not in any `.ddd`.
 - Toolchain bootstrap: parse stdlib at startup; expose pre-declared
   types to user programs without explicit imports.
 - Validator: `loom.throw-outside-domain` diagnostic. Walk operation
@@ -317,7 +327,9 @@ types** — operations declare returns as `T or <Error>...` or
   - Phoenix: typespec module + position-driven lowering — `option`
     is `T | nil` inside Elixir runtime, tagged on the wire (see
     exception-less.md "Per-backend lowering" decision).
-- Wire spec: stdlib payload entries; each `error`'s `wireStatus`.
+- Wire spec: stdlib payload entries. Per-api `errorStatuses`
+  (added in A3) are also captured but emitted from a separate
+  enrichment.
 - Tests: parsing tests for declaring `: int option`, `: X or NotFound`
   as return types; negative throw-outside-domain test;
   `string option` desugar to `string or none`.
@@ -350,35 +362,52 @@ type. Error-variant dispatch. Per-backend lowering.
 - Tests: per-violation scope tests; per-backend lowering tests;
   one end-to-end test threading three `?` calls.
 
-#### A3 — per-`error` `wireStatus` enrichment + route emitters (~1.5 weeks)
+#### A3 — API-surface `status` clause + ProblemDetails translation (~2 weeks)
 
 **Dependencies**: A1.
 
-**Scope**: per-error wire-status enrichment (the `on wire <Status>`
-clause is parsed in P1; this phase consumes it). Each backend's
-route emitter dispatches success vs error variants and emits the
-appropriate status / body shape.
+**Scope**: status mapping lives in the api surface (NOT on error
+declarations). Per-api `errorStatuses` enrichment merges stdlib
+defaults with author-declared overrides. Each backend's route
+emitter auto-generates the ProblemDetails translator.
 
 **Deliverables**:
-- IR: `wireStatus: HttpStatus` on `error`-kind `PayloadDeclIR`
-  (populated in P1; consumed here).
-- Enrichment: pure pass; computes effective status for every
-  `error` payload (default 500 if `on wire` clause absent).
+- Grammar (`src/language/ddd.langium`): `status <ErrorTypeRef>
+  <IntegerLit>` clause inside `api Foo for Bar { ... }` blocks.
+  Zero or more lines.
+- IR (`src/ir/loom-ir.ts`): `errorStatuses: Map<ErrorTypeName,
+  HttpStatus>` on `ApiIR`. Populated from the AST clauses.
+- Enrichment (`src/ir/enrichments.ts`): per-api, merge generator-side
+  stdlib defaults (`src/system/error-defaults.ts`) with the per-api
+  `status` overrides. Result: a complete map for every error type
+  the api can encounter.
 - Backends:
-  - TS Hono: route handler emits `if (isErrorVariant(result))
-    return c.json(result, statusFor(result.kind)); return c.json(result, 200);`.
-    Success body is the variant data directly (no `kind`
-    envelope); error body is the variant data with the lifted
-    status.
-  - .NET: controller returns `ActionResult<T>`; switches on
-    `result.kind` to pick `NotFound()` / `Conflict()` / `Ok(result)`.
-  - Phoenix: action returns the value; route handler maps
-    `%{kind: ...}` to `conn |> put_status(...) |> json(...)`.
-- Validator: `loom.unmapped-err-variant` warning when an `error`
-  payload has no `on wire`.
-- Tests: per-backend emission tests asserting the status dispatch;
-  one end-to-end test with an `error` variant returning a 4xx; one
-  test asserting success bodies have NO `kind` envelope.
+  - TS Hono: helper `toProblemDetails(value, errorStatuses, instance)`
+    that builds the RFC 7807 JSON object (status from map; title
+    prettified; type as `/errors/<kebab>`; detail interpolated;
+    extension members from error fields). Route handler matches
+    on the variant: success → `c.json(value, 200)`; error variant
+    → `c.json(toProblemDetails(...), pd.status)`.
+  - .NET: per-api `IExceptionHandler` + per-route filter using
+    the same map. Idiomatic ASP.NET Core wiring; Loom generates
+    it. Aggregate-invariant throws hit the global handler →
+    500 ProblemDetails with `type: "/errors/internal"`.
+  - Phoenix: action returns the value; route handler dispatches
+    via `ProblemDetails.from/2` and `conn |> put_status(pd.status)
+    |> json(pd)`. Aggregate exceptions hit a Plug.ErrorHandler
+    fallback that emits the same 500 ProblemDetails shape.
+- Validator: `loom.unmapped-error-status` warning when an error
+  type flows into an api but is in neither the per-api `status`
+  list nor the stdlib defaults.
+- Wire spec: per-api `errorStatuses` captured in
+  `<outdir>/.loom/wire-spec.json` so status drift surfaces in CI
+  diffs.
+- Tests: parsing test for the api `status` clause; per-backend
+  emission test for the ProblemDetails shape; one end-to-end test
+  with a 4xx ProblemDetails body; one test asserting success
+  bodies carry NO `kind` envelope and NO ProblemDetails wrapping;
+  one test asserting aggregate-invariant throws yield the 500
+  ProblemDetails fallback with the catalog event logged.
 
 #### A4 — find-variant re-shape (~1 week, +2-3 days fixture re-baseline)
 
@@ -558,16 +587,19 @@ priority order.
 | D5 | Should `Optional<T>` merge with `T option`? | **Yes; drop Optional entirely; PATCH semantics from `command` keyword + position-driven encoding** (pinned) | A1 | partial-update.md |
 | D6 | `?` vs `try` propagation operator | **`?`** | A2 | exception-less.md |
 | D7 | Default error type when `find: X` (no `?`) | **`NotFound` only in v1; per-aggregate override is v2** | A4 | exception-less.md |
-| D8 | Default for an `error` payload with no `on wire` clause | **Warning, 500 fallback** (not error) | P1 / A3 | exception-less.md |
+| D8 | Default for a user `error` with no `status` line in any api surface | **Warning (`loom.unmapped-error-status`), 500 ProblemDetails fallback** | A3 | exception-less.md |
 | D9 | Naming for `option`'s empty variant | **`none` (lowercase, lean)** vs `nothing`/`unit`/`void`/`nil` | A1 | exception-less.md |
 | D10 | Two-regime enforcement strictness over time | **Warning A1–A3, ERROR after A4** | A1 → A4 | exception-less.md |
-| D11 | Phoenix `option` runtime lowering (`T \| nil` vs `{:some, _} \| :none`) | **`T \| nil` runtime, tagged on wire** (pinned) | A1 | exception-less.md |
+| D11 | Phoenix `option` runtime lowering (`T \| nil` vs `{:some, _} \| :none`) | **`T \| nil` runtime, tagged JSON at the wire** (pinned) | A1 | exception-less.md |
 | D12 | Anonymous `or` vs named union — which to use where | **Anonymous for one-off return types; named for reusable catalogues. Guidance, not rule.** | P4 | payload-transport-layer.md |
 | D13 | Aggregate-inheritance storage strategy default (`shared` vs `own`) | (held by aggregate-inheritance.md) | I2/I3 | aggregate-inheritance.md |
 | D14 | Use-site syntax for parameterised payloads (postfix `customer page` vs prefix `page customer`) | **Postfix (ML)** (pinned; consistent with `Customer id` from #477; no angle brackets anywhere) | P3 | payload-transport-layer.md |
 | D15 | Anonymous `or` precedence relative to postfix type constructors | **Postfix binds tighter than `or`** so `string or int option` parses as `string or (int option)`. Parens for the other reading. | P4 | payload-transport-layer.md |
 | D16 | Success-body shape on HTTP 200 for `or` unions returning a primitive | **Bare value for primitives, payload-as-object for payloads; never the `kind` envelope on success path (status IS the discriminator)** | A3 | exception-less.md |
-| D17 | Should `error` be a sugar keyword or `payload Foo extends error`? | **Sugar keyword (`error Foo { ... } on wire <Status>`)** (pinned) | P1 | payload-transport-layer.md |
+| D17 | Should `error` be a sugar keyword or `payload Foo extends error`? | **Sugar keyword (`error Foo { ... }`, no status clause — domain stays HTTP-blind)** (pinned) | P1 | payload-transport-layer.md |
+| D18 | Where status mapping lives | **In the api surface as `status <Error> <Code>` lines; stdlib defaults in the generator's `src/system/error-defaults.ts`; domain `error` declarations carry no status** (pinned) | A3 | exception-less.md |
+| D19 | Per-error customisation of ProblemDetails `type` URI / `title` / `detail` template | **Deferred to v2**. v1 auto-derives all fields except `status` (which comes from the api mapping). | A3 | exception-less.md |
+| D20 | Per-surface mappings beyond the api layer (UI / queue / CLI) | **Out of scope.** UI consumes ProblemDetails like any HTTP client; no language-level UI error-mapping surface. Queue / CLI deferred to v2 when those surfaces become real. | — | — |
 
 **Workflow**: before starting each phase the implementing agent
 should explicitly confirm the relevant decisions with the
@@ -611,7 +643,8 @@ For the implementing agent:
 | Phoenix backend | `src/generator/phoenix/index.ts`, `*-emit.ts`, `*-builder.ts`, render files |
 | React backend | `src/generator/react/index.ts`, `body-walker.ts`, walker tests |
 | System orchestrator | `src/system/wire-spec.ts` (carrier instantiation entries), `src/system/index.ts` |
-| Stdlib | New: `src/stdlib/payloads/none.ddd`, `option.ddd`, `errors.ddd`, `api_error.ddd`, `page.ddd`, `envelope.ddd` |
+| Stdlib | New: `src/stdlib/payloads/none.ddd`, `option.ddd`, `errors.ddd`, `api_error.ddd`, `problem_details.ddd`, `page.ddd`, `envelope.ddd`. All HTTP-blind — no status info on declarations. |
+| Generator | New: `src/system/error-defaults.ts` — hardcoded stdlib status table consumed by every backend's api-edge translator. |
 | Examples | `examples/*.ddd`, `web/src/examples/*.ddd` (audit after A4) |
 | Fixtures | `test/fixtures/*` (full re-baseline at A4) |
 | CI | `.github/workflows/*.yml` (add carrier-stdlib gates) |
@@ -648,7 +681,8 @@ The three proposals are "done" when:
       updated for the new surface.
 - [ ] At least one fully-worked end-to-end example in `examples/`
       using `option`, anonymous `or` unions, `?`, `error` payloads
-      with `on wire`, and an inheriting aggregate hierarchy.
+      with api-surface `status` mappings (showing ProblemDetails
+      responses), and an inheriting aggregate hierarchy.
 - [ ] Catalog event sourcing updated: `not_found` events sourced
       from `NotFound`-variant encoding (not exception capture);
       `domain_error` sourced only from aggregate-invariant throws.

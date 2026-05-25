@@ -45,7 +45,7 @@ For the exception-less flow that builds on these primitives, see
 | `event OrderPlaced { ... }` | `event OrderPlaced extends payload { ... }` (auto-upgrade) |
 | Commands implicit in operations | `command PlaceOrder extends payload { ... }` |
 | Queries implicit in finds | `query OrderSummary extends payload { ... }` |
-| Errors implicit (throws) | `error NotFound { ... } on wire 404` (sugar keyword, see exception-less.md) |
+| Errors implicit (throws) | `error NotFound { ... }` (sugar keyword; status mapping lives in the api surface, see exception-less.md) |
 | No success/error wrappers | `OrderId or NotFound or OutOfStock` (anonymous `or` union; see exception-less.md) |
 | No pagination type | `customer page` (postfix; payload `page<T: carrier> { items: T[], total: int, cursor: string? }`) |
 | No envelope | `event envelope` (postfix; payload `envelope<P: carrier> { id: string, ts: datetime, body: P }`) |
@@ -191,8 +191,8 @@ event   OrderPlaced extends payload { ... }
 command PlaceOrder  extends payload { ... }
 query   OrderSummary extends payload { ... }
 response CustomerResponse extends payload { ... }
-error   NotFound { what: string, id: string } on wire 404
-error   OutOfStock { sku: string } on wire 409
+error   NotFound { what: string, id: string }
+error   OutOfStock { sku: string }
 ```
 
 The `extends payload` is intent — they share the structural shape and
@@ -200,13 +200,15 @@ the wire contract. **Migration**: existing code (`event Foo { ... }`)
 auto-upgrades to `event Foo extends payload { ... }` in the IR
 enrichment pass. No syntactic change required in user .ddd files.
 
-`error` is the new keyword. Beyond being a payload, it carries two
-extra signals:
-- The `on wire <Status>` clause maps the error to its HTTP status at
-  the wire edge (consumed by [`exception-less.md`](./exception-less.md)'s
-  status-mapping enrichment).
-- The error variant participates in `?` propagation (the operator
-  short-circuits on values of `error`-marked types).
+`error` is the new keyword. Beyond being a payload, it carries one
+extra signal: **the variant participates in `?` propagation** (the
+operator short-circuits on values of `error`-marked types).
+
+`error` declarations are HTTP-blind — they carry no status code, no
+URI, no transport-layer information at all. Status mapping is the
+api surface's job (see [`exception-less.md`](./exception-less.md)
+§"API-edge ProblemDetails translation"). The domain layer just
+declares the failure types and their data.
 
 See `exception-less.md` for the full semantics of `error` payloads
 and propagation; the keyword itself lives at this layer because
@@ -514,12 +516,13 @@ question on discriminator field name). Frontend TypeScript narrows
 on the discriminator naturally. C# emits using `JsonDerivedType`
 polymorphic JSON. Phoenix/Ash uses Ash's `tagged_unions` feature.
 
-For HTTP operation returns specifically, the variant's `on wire
-<Status>` clause (on `error`-marked variants) lifts the
-discriminator to the status code, and the body becomes the variant
-data directly — no `kind` envelope on success responses. See
-[`exception-less.md`](./exception-less.md) §"Wire-edge status
-mapping" for the lowering.
+For HTTP operation returns specifically, the api surface translates
+error variants into RFC 7807 ProblemDetails responses (status code
+from the per-api status mapping or stdlib defaults; body is a
+ProblemDetails JSON object). Success responses carry the success
+variant's data directly with HTTP 200 — no `kind` envelope. See
+[`exception-less.md`](./exception-less.md) §"API-edge
+ProblemDetails translation" for the lowering.
 
 Case-matching on a union (named or anonymous):
 ```
@@ -747,8 +750,8 @@ A1–A7 on top.
   Alternative: drop the sugar keywords; force authors to write
   `payload Foo { ... }` and use a `kind: 'event' | 'command' | ...`
   discriminator. Lean toward keeping sugar — keyword semantics carry
-  intent, and `error`'s additional behaviour (`?` propagation +
-  `on wire`) earns its keyword.
+  intent, and `error`'s additional behaviour (`?` propagation
+  participation) earns its keyword.
 - **Naming**: `payload` vs `message` vs `dto`. `payload`
   transport-neutral; `message` carries Akka/Erlang baggage; `dto`
   reads Java-y. Open.
