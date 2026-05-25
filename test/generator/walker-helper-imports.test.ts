@@ -6,7 +6,7 @@
 //     import helper formatPrice from "./helpers/price"
 //     page X {
 //       route: "/x"
-//       body:  Text(formatPrice(99))
+//       body:  Text { formatPrice(99) }
 //     }
 //   }
 //
@@ -41,7 +41,7 @@ describe("UI-level helper imports", () => {
           import helper formatPrice from "./helpers/price"
           page X {
             route: "/x"
-            body:  Text(formatPrice(99))
+            body:  Text { formatPrice(99) }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -65,7 +65,7 @@ describe("UI-level helper imports", () => {
           import helper formatDate  from "./helpers/date"
           page X {
             route: "/x"
-            body:  Text(formatPrice(99))
+            body:  Text { formatPrice(99) }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -87,10 +87,10 @@ describe("UI-level helper imports", () => {
           import helper formatQuantity from "./helpers/format"
           page X {
             route: "/x"
-            body:  Stack(
-              Text(formatPrice(99)),
-              Text(formatQuantity(3))
-            )
+            body:  Stack {
+              Text { formatPrice(99) },
+              Text { formatQuantity(3) }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -131,7 +131,7 @@ describe("UI-level helper imports", () => {
         module M { context C { } }
         ui WebApp {
           import helper Stack from "./helpers/stack"
-          page X { route: "/x"  body: Heading("hi") }
+          page X { route: "/x"  body: Heading { "hi" } }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
@@ -148,7 +148,7 @@ describe("UI-level helper imports", () => {
         ui WebApp {
           import helper formatPrice from "./helpers/a"
           import helper formatPrice from "./helpers/b"
-          page X { route: "/x"  body: Heading("hi") }
+          page X { route: "/x"  body: Heading { "hi" } }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }

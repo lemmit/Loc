@@ -124,7 +124,7 @@ function findCall(node: ExprIR | undefined, name: string): ExprIR | null {
 describe("scaffold expander dispatch", () => {
   const ctx = buildExpandContext(makeSystem(), makeUi());
 
-  it("aggregate-list expands to Stack(Breadcrumbs, Toolbar, QueryView, …)", async () => {
+  it("aggregate-list expands to Stack { Breadcrumbs, Toolbar, QueryView, … }", async () => {
     const origin: PageArchetypeIR = {
       kind: "aggregate-list",
       aggregateName: "Order",
@@ -138,10 +138,10 @@ describe("scaffold expander dispatch", () => {
     expect(findCall(body!, "Breadcrumbs")).not.toBeNull();
     expect(findCall(body!, "Toolbar")).not.toBeNull();
     expect(findCall(body!, "QueryView")).not.toBeNull();
-    // QueryView's data: branch contains a Paper(Table) tree.
+    // QueryView's data: branch contains a Paper { Table } tree.
     expect(findCall(body!, "Paper")).not.toBeNull();
     expect(findCall(body!, "Table")).not.toBeNull();
-    // Per-column accessors land via Column(...).
+    // Per-column accessors land via Column { ... }.
     expect(findCall(body!, "Column")).not.toBeNull();
   });
 
@@ -160,7 +160,7 @@ describe("scaffold expander dispatch", () => {
     expect(findCall(body!, "DateDisplay")).not.toBeNull();
   });
 
-  it("aggregate-new expands to Stack(Breadcrumbs, Heading, Card(Form(of: …)))", async () => {
+  it("aggregate-new expands to Stack { Breadcrumbs, Heading, Card { Form { of: … } } }", async () => {
     const origin: PageArchetypeIR = {
       kind: "aggregate-new",
       aggregateName: "Order",
@@ -193,7 +193,7 @@ describe("scaffold expander dispatch", () => {
     expect(ofArg.name).toBe("Order");
   });
 
-  it("aggregate-detail expands to Stack(Breadcrumbs, Heading, QueryView(single: true))", () => {
+  it("aggregate-detail expands to Stack { Breadcrumbs, Heading, QueryView { single: true } }", () => {
     const origin: PageArchetypeIR = {
       kind: "aggregate-detail",
       aggregateName: "Order",
@@ -218,7 +218,7 @@ describe("scaffold expander dispatch", () => {
     expect(singleIdx).toBeGreaterThanOrEqual(0);
   });
 
-  it("aggregate-detail emits a Modal + Form(data.<op>) per public operation", () => {
+  it("aggregate-detail emits a Modal + Form { data.<op> } per public operation", () => {
     const sysWithOps = makeSystem();
     const order = sysWithOps.modules[0]!.contexts[0]!.aggregates[0]!;
     order.operations = [
@@ -264,7 +264,7 @@ describe("scaffold expander dispatch", () => {
     })(body!);
     expect(modals.length).toBe(2);
     // Each Modal hosts an instance-qualified op-form
-    // (`Form(data.<op>)`) + a trigger Button.
+    // (`Form { data.<op> }`) + a trigger Button.
     const modal = modals[0]!;
     if (modal.kind !== "call") return;
     const innerForm = findCall(modal, "Form")!;
@@ -282,7 +282,7 @@ describe("scaffold expander dispatch", () => {
     expect(findCall(modal, "Button")).not.toBeNull();
   });
 
-  it("workflow-form expands to Stack(Breadcrumbs, Heading, Card(Form(runs:)))", () => {
+  it("workflow-form expands to Stack { Breadcrumbs, Heading, Card { Form { runs: } } }", () => {
     // Augment the test ctx with a synthetic workflow.
     const sysWithWf = makeSystem();
     sysWithWf.modules[0]!.contexts[0]!.workflows.push({
@@ -312,7 +312,7 @@ describe("scaffold expander dispatch", () => {
     expect((form.args[runsIdx] as { name: string }).name).toBe("placeOrder");
   });
 
-  it("view-list expands to Stack(Heading, QueryView(Views.<name>, …))", () => {
+  it("view-list expands to Stack { Heading, QueryView { Views.<name>, … } }", () => {
     const sysWithView = makeSystem();
     sysWithView.modules[0]!.contexts[0]!.views.push({
       name: "ActiveOrders",
@@ -341,7 +341,7 @@ describe("scaffold expander dispatch", () => {
     expect(ofArg.member).toBe("ActiveOrders");
   });
 
-  it("workflows-index / views-index / home all expand to Stack(...) bodies", () => {
+  it("workflows-index / views-index / home all expand to Stack { ... } bodies", () => {
     expect(expandWalkerPrimitive({ kind: "workflows-index" }, ctx)?.kind).toBe("call");
     expect(expandWalkerPrimitive({ kind: "views-index" }, ctx)?.kind).toBe("call");
     expect(expandWalkerPrimitive({ kind: "home" }, ctx)?.kind).toBe("call");

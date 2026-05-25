@@ -5,11 +5,11 @@
 //   page Counter {
 //     route: "/counter"
 //     state { count: int = 0 }
-//     body: Stack(
-//       Heading("Counter"),
-//       Text(count),
-//       Button("Increment", onClick: e => { count := count + 1 })
-//     )
+//     body: Stack {
+//       Heading { "Counter" },
+//       Text { count },
+//       Button { "Increment", onClick: e => { count := count + 1 } }
+//     }
 //   }
 //
 // becomes a fully-wired React component with `useState`, the body
@@ -30,11 +30,11 @@ describe("state + onClick mutations in walker pages", () => {
           page Counter {
             route: "/counter"
             state { count: int = 0 }
-            body:  Stack(
-              Heading("Counter"),
-              Text(count),
-              Button("Increment", onClick: e => { count := count + 1 })
-            )
+            body:  Stack {
+              Heading { "Counter" },
+              Text { count },
+              Button { "Increment", onClick: e => { count := count + 1 } }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -69,7 +69,7 @@ describe("state + onClick mutations in walker pages", () => {
           page Stale {
             route: "/stale"
             state { unused: int = 7 }
-            body:  Heading("No state in sight")
+            body:  Heading { "No state in sight" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -96,10 +96,10 @@ describe("state + onClick mutations in walker pages", () => {
           page Greet {
             route: "/greet"
             state { who: string }
-            body:  Stack(
-              Text(who),
-              Button("Set", onClick: e => { who := "world" })
-            )
+            body:  Stack {
+              Text { who },
+              Button { "Set", onClick: e => { who := "world" } }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -124,10 +124,10 @@ describe("state + onClick mutations in walker pages", () => {
           page Toggle {
             route: "/toggle"
             state { open: bool = true }
-            body:  Stack(
-              Text(open),
-              Button("Close", onClick: e => { open := false })
-            )
+            body:  Stack {
+              Text { open },
+              Button { "Close", onClick: e => { open := false } }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -155,10 +155,10 @@ describe("state + onClick mutations in walker pages", () => {
               a: int = 0
               b: int = 0
             }
-            body:  Button("Bump", onClick: e => {
+            body:  Button {"Bump", onClick: e => {
               a := a + 1
               b := b + 2
-            })
+            }}
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -188,10 +188,10 @@ describe("state + onClick mutations in walker pages", () => {
           page Confused {
             route: "/x"
             state { n: int = 0 }
-            body:  Button("Do",
+            body:  Button {"Do",
               to: "/elsewhere",
               onClick: e => { n := n + 1 }
-            )
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

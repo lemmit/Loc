@@ -3,10 +3,10 @@
 //
 //   page Hello(name: string) {
 //     route: "/hello/:name"
-//     body:  Heading(name)
+//     body:  Heading { name }
 //   }
 //
-// the walker now resolves `Heading(name)` to `<Title>{name}</Title>`,
+// the walker now resolves `Heading { name }` to `<Title>{name}</Title>`,
 // the page shell adds `useParams<{ name: string }>()` + destructuring,
 // and the React component is fully wired to its route param at
 // render time.
@@ -24,7 +24,7 @@ describe("typed page parameters in walker-rendered pages", () => {
         ui WebApp {
           page Hello(name: string) {
             route: "/hello/:name"
-            body:  Heading(name)
+            body:  Heading { name }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -41,7 +41,7 @@ describe("typed page parameters in walker-rendered pages", () => {
     // useParams import + typed generic + destructure of `name`.
     expect(content).toMatch(/import \{ useParams \} from "react-router";/);
     expect(content).toMatch(/const \{ name \} = useParams<\{ name: string \}>\(\);/);
-    // Heading(name) → <Title order={2}>{name}</Title> (JSX expr, not text).
+    // Heading { name } → <Title order={2}>{name}</Title> (JSX expr, not text).
     expect(content).toMatch(/<Title order=\{2\}>\{name\}<\/Title>/);
   });
 
@@ -57,7 +57,7 @@ describe("typed page parameters in walker-rendered pages", () => {
         ui WebApp {
           page Greet(name: string, customerId: Customer id) {
             route: "/greet/:name/:customerId"
-            body:  Stack(Heading(name), Text("Welcome."))
+            body:  Stack { Heading { name }, Text { "Welcome." } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -86,7 +86,7 @@ describe("typed page parameters in walker-rendered pages", () => {
         ui WebApp {
           page X(id: string) {
             route: "/x/:id"
-            body:  Heading("static title")
+            body:  Heading { "static title" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -113,7 +113,7 @@ describe("typed page parameters in walker-rendered pages", () => {
         ui WebApp {
           page Welcome {
             route: "/welcome"
-            body:  Heading("Welcome")
+            body:  Heading { "Welcome" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -131,14 +131,14 @@ describe("typed page parameters in walker-rendered pages", () => {
     expect(content).toMatch(/<Title order=\{2\}>Welcome<\/Title>/);
   });
 
-  it("Text(name) — ref in Text position resolves to {name}", async () => {
+  it("Text { name } — ref in Text position resolves to {name}", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page User(name: string) {
             route: "/users/:name"
-            body:  Text(name)
+            body:  Text { name }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -161,7 +161,7 @@ describe("typed page parameters in walker-rendered pages", () => {
         ui WebApp {
           page Page(realParam: string) {
             route: "/p/:realParam"
-            body:  Heading(unknownThing)
+            body:  Heading { unknownThing }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -179,14 +179,14 @@ describe("typed page parameters in walker-rendered pages", () => {
     expect(content).toMatch(/ref: unknownThing/);
   });
 
-  it("Card(name, Stack(...)) — param ref resolves in Card title position", async () => {
+  it("Card { name, Stack { ... } } — param ref resolves in Card title position", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Profile(userName: string) {
             route: "/profile/:userName"
-            body:  Card(userName, Stack(Text("hello")))
+            body:  Card { userName, Stack { Text { "hello" } } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

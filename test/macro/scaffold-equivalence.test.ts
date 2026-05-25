@@ -95,8 +95,8 @@ describe("scaffold macro: aggregate selector", () => {
     const { model } = await parseString(wrapWith("aggregates: [Order]"));
     expect(pageBodyCallee(model, "OrderList")).toBe("List");
     expect(pageBodyCallee(model, "OrderNew")).toBe("Form");
-    // Detail page now emits the explicit Stack(scaffoldDetails,
-    // scaffoldOperations) shape so users can unfold into per-slot
+    // Detail page now emits the explicit Stack {scaffoldDetails,
+    // scaffoldOperations} shape so users can unfold into per-slot
     // customisation while leaving auto-op-modal generation intact.
     expect(pageBodyCallee(model, "OrderDetail")).toBe("Stack");
   });
@@ -157,7 +157,7 @@ describe("scaffold macro: composition rules", () => {
           }
         }
         ui App with scaffold(aggregates: [Order]) {
-          page OrderList { route: "/custom"  body: List(of: Order) }
+          page OrderList { route: "/custom"  body: List { of: Order } }
         }
       }
     `);

@@ -46,7 +46,7 @@ const ordersTableBody = (tableBody: string) => `
 describe("Table polish props", () => {
   it("striped: true adds `striped` to the <Table> opening tag", async () => {
     const files = await buildAndGenerate(
-      ordersTableBody(`Table(rows: Sales.Order.all, striped: true, Column("ID", o => o.id))`),
+      ordersTableBody(`Table { rows: Sales.Order.all, striped: true, Column { "ID", o => o.id } }`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     expect(tsx).toMatch(/<Table[^>]*\bstriped\b/);
@@ -56,7 +56,7 @@ describe("Table polish props", () => {
 
   it("highlight: true adds `highlightOnHover`", async () => {
     const files = await buildAndGenerate(
-      ordersTableBody(`Table(rows: Sales.Order.all, highlight: true, Column("ID", o => o.id))`),
+      ordersTableBody(`Table { rows: Sales.Order.all, highlight: true, Column { "ID", o => o.id } }`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     expect(tsx).toMatch(/<Table[^>]*\bhighlightOnHover\b/);
@@ -64,7 +64,7 @@ describe("Table polish props", () => {
 
   it("sticky: true adds `stickyHeader`", async () => {
     const files = await buildAndGenerate(
-      ordersTableBody(`Table(rows: Sales.Order.all, sticky: true, Column("ID", o => o.id))`),
+      ordersTableBody(`Table { rows: Sales.Order.all, sticky: true, Column { "ID", o => o.id } }`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     expect(tsx).toMatch(/<Table[^>]*\bstickyHeader\b/);
@@ -73,7 +73,7 @@ describe("Table polish props", () => {
   it("all three style toggles combine without losing ordering", async () => {
     const files = await buildAndGenerate(
       ordersTableBody(
-        `Table(rows: Sales.Order.all, striped: true, highlight: true, sticky: true, Column("ID", o => o.id))`,
+        `Table { rows: Sales.Order.all, striped: true, highlight: true, sticky: true, Column { "ID", o => o.id } }`,
       ),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
@@ -83,11 +83,11 @@ describe("Table polish props", () => {
   it('rowTestid: r => "prefix-" + r.id emits data-testid={…} on each <Table.Tr>', async () => {
     const files = await buildAndGenerate(
       ordersTableBody(
-        `Table(
+        `Table {
           rows: Sales.Order.all,
           rowTestid: r => "orders-row-" + r.id,
-          Column("ID", o => o.id)
-        )`,
+          Column { "ID", o => o.id }
+        }`,
       ),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
@@ -99,12 +99,12 @@ describe("Table polish props", () => {
   it("rowTestid + onRowClick compose on the same <Table.Tr>", async () => {
     const files = await buildAndGenerate(
       ordersTableBody(
-        `Table(
+        `Table {
           rows: Sales.Order.all,
           rowTestid: r => "orders-row-" + r.id,
           onRowClick: r => navigate("/orders"),
-          Column("ID", o => o.id)
-        )`,
+          Column { "ID", o => o.id }
+        }`,
       ),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
@@ -114,7 +114,7 @@ describe("Table polish props", () => {
 
   it("Table without style props still emits the baseline shape", async () => {
     const files = await buildAndGenerate(
-      ordersTableBody(`Table(rows: Sales.Order.all, Column("ID", o => o.id))`),
+      ordersTableBody(`Table { rows: Sales.Order.all, Column { "ID", o => o.id } }`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     // No extra style props on <Table>; just the open tag.

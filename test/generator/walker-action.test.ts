@@ -27,12 +27,12 @@ const SRC = `
     ui WebApp with scaffold(aggregates: [Order]) {
       api Sales: SalesApi
       component OrderPanel(order: Order) {
-        body: Toolbar(
+        body: Toolbar {
           Action(order.confirm, then: navigate(OrderHome, { customerId: order.customerId })),
           Action(order.cancel)
-        )
+        }
       }
-      page OrderHome { route: "/order-home" body: Text("home") }
+      page OrderHome { route: "/order-home" body: Text { "home" } }
     }
     deployable api {
       platform: hono

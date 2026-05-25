@@ -50,28 +50,28 @@ system Acme {
 
     page Home {
       route: "/"
-      body: Stack(
-        Heading("Acme"),
-        Text(Sales.Customer.all.isLoading)
-      )
+      body: Stack {
+        Heading { "Acme" },
+        Text { Sales.Customer.all.isLoading }
+      }
     }
 
     page CustomerNew {
       route: "/customers/new"
       state { name: string = "" }
-      body: Stack(
-        Field("Name", bind: name),
-        Button("Save",
+      body: Stack {
+        Field { "Name", bind: name },
+        Button {"Save",
           disabled: Sales.Customer.create.isPending,
           onClick: e => {
             Sales.Customer.create.mutate({ name: name })
-          })
-      )
+          }}
+      }
     }
 
     page Lookup(email: string) {
       route: "/customers/lookup/:email"
-      body: Text(Sales.Customer.byEmail(email).isLoading)
+      body: Text { Sales.Customer.byEmail(email).isLoading }
     }
   }
 

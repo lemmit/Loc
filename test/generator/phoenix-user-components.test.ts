@@ -29,7 +29,7 @@ const SOURCE = `system MiniLiveView {
 
   ui SalesAdmin {
     component Greeting(label: string) {
-      body: Stack(Heading(label, level: 2), Text("Welcome"))
+      body: Stack { Heading { label, level: 2 }, Text { "Welcome" } }
     }
     page Home {
       route: "/"

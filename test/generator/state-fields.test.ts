@@ -29,10 +29,10 @@ const stateBlock = (page: Page): StateBlock | undefined =>
 
 const WITH_STATE = `system S { ui U { page P {
   state { step: int = 0 }
-  body: Form(of: Order)
+  body: Form { of: Order }
 } } }`;
 const NO_STATE = `system S { ui U { page Q {
-  body: Text("hi")
+  body: Text { "hi" }
 } } }`;
 
 describe("Page builder — state field editing", () => {
@@ -57,7 +57,7 @@ describe("Page builder — state field editing", () => {
     expect(parses(src)).toBe(true);
     const sb = stateBlock(findPage(parse(src), "Q"));
     expect(sb?.fields.map((f) => f.name)).toEqual(["field1"]);
-    expect(src).toMatch(/body:\s*Text\("hi"\)/);
+    expect(src).toMatch(/body:\s*Text \{ "hi" \}/);
   });
 
   it("retypes a state field to an Id<> reference", () => {

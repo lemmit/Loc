@@ -588,40 +588,46 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
 
 /** Lower a v2 BuilderCall (`Type { slot: value, ... }`).  The type name
  *  resolves at lowering time against the in-scope declarations:
- *    - ValueObject  → "call" IR with callKind "value-object-ctor"
- *      (same shape today's `Money(10, "USD")` CallExpr produces, so
- *      every downstream backend keeps working unchanged)
- *    - EntityPart / Aggregate → "new" IR (part/aggregate construction)
- *    - Unknown name → "new" IR; validator surfaces the missing-type
- *      diagnostic.  Events are handled by EmitStmt, not here.
- *  Bare positional entries (no `name:`) are kept in the named-args
- *  list with `undefined` names — the walker-primitive migration in a
- *  later slice uses them. */
+ *    - ValueObject       → "call" IR (callKind "value-object-ctor")
+ *    - EntityPart        → "new" IR (part construction)
+ *    - Anything else     → "call" IR (callKind "free") — walker
+ *      primitives, user components, unknown names.  The walker
+ *      dispatches by name on the resulting CallIR.
+ *  Events are handled by EmitStmt, not here. */
 function lowerBuilderCall(expr: BuilderCall, env: Env): ExprIR {
   const name = expr.type;
   const vo = findValueObjectByName(env, name);
   if (vo) {
-    const args = expr.entries.map((e) => lowerExpr(e.value, env));
-    const argNames = expr.entries.map((e) => e.name || undefined);
-    const named = argNames.some((n) => n !== undefined);
-    return {
-      kind: "call",
-      callKind: "value-object-ctor",
-      name,
-      args,
-      ...(named ? { argNames } : {}),
-    };
+    return lowerBuilderCallAsCall(expr, env, name, "value-object-ctor");
   }
-  const fields = expr.entries
-    .filter((e) => e.name !== undefined)
-    .map((e) => ({
-      name: e.name as string,
-      value: lowerExpr(e.value, env),
-    }));
+  const ent = findEntityByName(env, name);
+  if (ent && isEntityPart(ent)) {
+    const fields = expr.entries
+      .filter((e) => e.name !== undefined)
+      .map((e) => ({
+        name: e.name as string,
+        value: lowerExpr(e.value, env),
+      }));
+    return { kind: "new", partName: name, fields };
+  }
+  return lowerBuilderCallAsCall(expr, env, name, "free");
+}
+
+function lowerBuilderCallAsCall(
+  expr: BuilderCall,
+  env: Env,
+  name: string,
+  callKind: "value-object-ctor" | "free",
+): ExprIR {
+  const args = expr.entries.map((e) => lowerExpr(e.value, env));
+  const argNames = expr.entries.map((e) => e.name || undefined);
+  const named = argNames.some((n) => n !== undefined);
   return {
-    kind: "new",
-    partName: name,
-    fields,
+    kind: "call",
+    callKind,
+    name,
+    args,
+    ...(named ? { argNames } : {}),
   };
 }
 

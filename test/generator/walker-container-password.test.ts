@@ -1,9 +1,9 @@
 // Container + PasswordField primitives.
 //
-//   Container(...children)            → max-width centred wrapper
-//   Container(..., size: "sm")        → constrained max-width
+//   Container { ...children }            → max-width centred wrapper
+//   Container { ..., size: "sm" }        → constrained max-width
 //
-//   PasswordField("Password", bind: pwd)
+//   PasswordField { "Password", bind: pwd }
 //     → <PasswordInput value={pwd} onChange={...} />
 //       (Mantine's toggleable-visibility password input)
 
@@ -13,14 +13,14 @@ import { generateSystemFiles } from "../_helpers/index.js";
 const buildAndGenerate = generateSystemFiles;
 
 describe("Container + PasswordField primitives", () => {
-  it("Container(...children) emits Mantine <Container> wrapper", async () => {
+  it("Container { ...children } emits Mantine <Container> wrapper", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
-            body:  Container(Stack(Heading("Hi"), Text("body")))
+            body:  Container { Stack { Heading { "Hi" }, Text { "body" } } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -40,14 +40,14 @@ describe("Container + PasswordField primitives", () => {
     expect(content).toMatch(/<\/Container>/);
   });
 
-  it("Container(size: 'sm') passes the size attr through", async () => {
+  it("Container { size: 'sm' } passes the size attr through", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
-            body:  Container(Heading("Compact"), size: "sm")
+            body:  Container { Heading { "Compact" }, size: "sm" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -63,14 +63,14 @@ describe("Container + PasswordField primitives", () => {
     expect(content).toMatch(/<Container size="sm">/);
   });
 
-  it("empty Container() self-closes", async () => {
+  it("empty Container {} self-closes", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
-            body:  Container()
+            body:  Container {}
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -86,7 +86,7 @@ describe("Container + PasswordField primitives", () => {
     expect(content).toMatch(/<Container \/>/);
   });
 
-  it("PasswordField('Password', bind: pwd) wires controlled PasswordInput", async () => {
+  it("PasswordField { 'Password', bind: pwd } wires controlled PasswordInput", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -94,7 +94,7 @@ describe("Container + PasswordField primitives", () => {
           page Login {
             route: "/login"
             state { pwd: string = "" }
-            body:  PasswordField("Password", bind: pwd)
+            body:  PasswordField { "Password", bind: pwd }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -121,7 +121,7 @@ describe("Container + PasswordField primitives", () => {
         ui WebApp {
           page X {
             route: "/x"
-            body:  PasswordField("Bare")
+            body:  PasswordField { "Bare" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -149,15 +149,15 @@ describe("Container + PasswordField primitives", () => {
               email: string = ""
               pwd:   string = ""
             }
-            body:  Container(
-              Stack(
-                Heading("Sign in"),
-                Field("Email", bind: email),
-                PasswordField("Password", bind: pwd),
-                Button("Sign in")
-              ),
+            body:  Container {
+              Stack {
+                Heading { "Sign in" },
+                Field { "Email", bind: email },
+                PasswordField { "Password", bind: pwd },
+                Button { "Sign in" }
+              },
               size: "xs"
-            )
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

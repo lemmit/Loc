@@ -7,11 +7,11 @@
 //     name:   string = ""
 //     active: bool   = false
 //   }
-//   body: Stack(
-//     Field("Your name",  bind: name),
-//     Toggle("Active",    bind: active),
-//     Button("Submit",    onClick: e => { … })
-//   )
+//   body: Stack {
+//     Field { "Your name",  bind: name },
+//     Toggle { "Active",    bind: active },
+//     Button { "Submit",    onClick: e => { … } }
+//   }
 //
 //     →
 //
@@ -28,7 +28,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 const buildAndGenerate = generateSystemFiles;
 
 describe("Field + Toggle with bind: state binding", () => {
-  it("Field('Label', bind: name) wires controlled TextInput to state", async () => {
+  it("Field { 'Label', bind: name } wires controlled TextInput to state", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -36,7 +36,7 @@ describe("Field + Toggle with bind: state binding", () => {
           page Form {
             route: "/form"
             state { name: string = "" }
-            body:  Field("Your name", bind: name)
+            body:  Field { "Your name", bind: name }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -58,7 +58,7 @@ describe("Field + Toggle with bind: state binding", () => {
     );
   });
 
-  it("Toggle('Label', bind: active) wires controlled Switch to bool state", async () => {
+  it("Toggle { 'Label', bind: active } wires controlled Switch to bool state", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -66,7 +66,7 @@ describe("Field + Toggle with bind: state binding", () => {
           page Pref {
             route: "/pref"
             state { active: bool = false }
-            body:  Toggle("Active", bind: active)
+            body:  Toggle { "Active", bind: active }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -97,13 +97,13 @@ describe("Field + Toggle with bind: state binding", () => {
               name:    string = ""
               welcome: bool   = false
             }
-            body: Stack(
-              Heading("Profile"),
-              Field("Your name", bind: name),
-              Toggle("Show welcome", bind: welcome),
-              Text("Hello, " + name),
-              Button("Reset", onClick: e => { name := "" })
-            )
+            body: Stack {
+              Heading { "Profile" },
+              Field { "Your name", bind: name },
+              Toggle { "Show welcome", bind: welcome },
+              Text { "Hello, " + name },
+              Button { "Reset", onClick: e => { name := "" } }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -137,7 +137,7 @@ describe("Field + Toggle with bind: state binding", () => {
         ui WebApp {
           page X {
             route: "/x"
-            body:  Field("Bare")
+            body:  Field { "Bare" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -167,7 +167,7 @@ describe("Field + Toggle with bind: state binding", () => {
               kind: string = "Name"
               v:    string = ""
             }
-            body:  Field(kind + ":", bind: v)
+            body:  Field { kind + ":", bind: v }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

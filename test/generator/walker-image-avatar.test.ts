@@ -1,7 +1,7 @@
 // Image + Avatar primitives in walker stdlib.
 //
-//   Image(src: "/logo.png", alt: "Acme")   → Mantine <Image src=… alt=… />
-//   Avatar(src: "/u.png",   alt: "User")   → Mantine <Avatar src=… alt=… />
+//   Image { src: "/logo.png", alt: "Acme" }   → Mantine <Image src=… alt=… />
+//   Avatar { src: "/u.png",   alt: "User" }   → Mantine <Avatar src=… alt=… />
 //
 // Both accept string literals or route-param refs in src/alt
 // slots.  Missing attrs are simply omitted — Mantine renders its
@@ -13,14 +13,14 @@ import { generateSystemFiles } from "../_helpers/index.js";
 const buildAndGenerate = generateSystemFiles;
 
 describe("Image + Avatar in walker stdlib", () => {
-  it("Image(src, alt) emits Mantine <Image> with both attrs", async () => {
+  it("Image { src, alt } emits Mantine <Image> with both attrs", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
-            body:  Image(src: "/logo.png", alt: "Acme")
+            body:  Image { src: "/logo.png", alt: "Acme" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -38,14 +38,14 @@ describe("Image + Avatar in walker stdlib", () => {
     expect(content).toMatch(/<Image src="\/logo\.png" alt="Acme" \/>/);
   });
 
-  it("Avatar(src, alt) emits Mantine <Avatar> with both attrs", async () => {
+  it("Avatar { src, alt } emits Mantine <Avatar> with both attrs", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
-            body:  Avatar(src: "/u.png", alt: "User")
+            body:  Avatar { src: "/u.png", alt: "User" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -69,7 +69,7 @@ describe("Image + Avatar in walker stdlib", () => {
         ui WebApp {
           page Home {
             route: "/"
-            body:  Image()
+            body:  Image {}
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -92,7 +92,7 @@ describe("Image + Avatar in walker stdlib", () => {
         ui WebApp {
           page Profile(slug: string) {
             route: "/profile/:slug"
-            body:  Avatar(src: slug, alt: "User")
+            body:  Avatar { src: slug, alt: "User" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -105,8 +105,8 @@ describe("Image + Avatar in walker stdlib", () => {
       }
     `);
     const content = files.get("web/src/pages/profile.tsx")!;
-    // Template-literal interpolation, same shape Button(to:) and
-    // Anchor(to:) use for param refs.
+    // Template-literal interpolation, same shape Button { to: } and
+    // Anchor { to: } use for param refs.
     expect(content).toMatch(/<Avatar src=`\$\{slug\}` alt="User" \/>/);
     // Param consumed → destructured in shell.
     expect(content).toMatch(/const \{ slug \} = useParams/);
@@ -119,10 +119,10 @@ describe("Image + Avatar in walker stdlib", () => {
         ui WebApp {
           page Header {
             route: "/header"
-            body:  Toolbar(
-              Image(src: "/logo.png", alt: "Acme"),
-              Avatar(src: "/u.png", alt: "Me")
-            )
+            body:  Toolbar {
+              Image { src: "/logo.png", alt: "Acme" },
+              Avatar { src: "/u.png", alt: "Me" }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

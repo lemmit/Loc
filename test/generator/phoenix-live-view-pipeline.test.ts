@@ -1791,7 +1791,7 @@ async function buildFormFixture() {
   return files;
 }
 
-describe("scaffold-form regression — Form(of:Agg) resolves fields + mount assigns @form", () => {
+describe("scaffold-form regression — Form { of:Agg } resolves fields + mount assigns @form", () => {
   it("emits one <.input> per aggregate field (id excluded), not a single _placeholder", async () => {
     const files = await buildFormFixture();
     const customerNew = files.get("phoenix_app/lib/phoenix_app_web/live/customer_new_live.ex")!;

@@ -8538,8 +8538,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "elements": [
                   {
                     "$type": "Keyword",
-                    "value": ",",
-                    "cardinality": "?"
+                    "value": ","
                   },
                   {
                     "$type": "Assignment",
@@ -8581,7 +8580,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
       "$type": "ParserRule",
       "name": "BuilderEntry",
       "definition": {
-        "$type": "Group",
+        "$type": "Alternatives",
         "elements": [
           {
             "$type": "Group",
@@ -8601,9 +8600,20 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
               {
                 "$type": "Keyword",
                 "value": ":"
+              },
+              {
+                "$type": "Assignment",
+                "feature": "value",
+                "operator": "=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@110"
+                  },
+                  "arguments": []
+                }
               }
-            ],
-            "cardinality": "?"
+            ]
           },
           {
             "$type": "Assignment",
@@ -9093,6 +9103,122 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "money"
+          },
+          {
+            "$type": "Keyword",
+            "value": "id"
+          },
+          {
+            "$type": "Keyword",
+            "value": "contains"
+          },
+          {
+            "$type": "Keyword",
+            "value": "page"
+          },
+          {
+            "$type": "Keyword",
+            "value": "component"
+          },
+          {
+            "$type": "Keyword",
+            "value": "state"
+          },
+          {
+            "$type": "Keyword",
+            "value": "menu"
+          },
+          {
+            "$type": "Keyword",
+            "value": "section"
+          },
+          {
+            "$type": "Keyword",
+            "value": "link"
+          },
+          {
+            "$type": "Keyword",
+            "value": "route"
+          },
+          {
+            "$type": "Keyword",
+            "value": "title"
+          },
+          {
+            "$type": "Keyword",
+            "value": "body"
+          },
+          {
+            "$type": "Keyword",
+            "value": "framework"
+          },
+          {
+            "$type": "Keyword",
+            "value": "static"
+          },
+          {
+            "$type": "Keyword",
+            "value": "modules"
+          },
+          {
+            "$type": "Keyword",
+            "value": "contexts"
+          },
+          {
+            "$type": "Keyword",
+            "value": "aggregates"
+          },
+          {
+            "$type": "Keyword",
+            "value": "workflows"
+          },
+          {
+            "$type": "Keyword",
+            "value": "views"
+          },
+          {
+            "$type": "Keyword",
+            "value": "design"
+          },
+          {
+            "$type": "Keyword",
+            "value": "targets"
+          },
+          {
+            "$type": "Keyword",
+            "value": "bind"
+          },
+          {
+            "$type": "Keyword",
+            "value": "primary"
+          },
+          {
+            "$type": "Keyword",
+            "value": "cache"
+          },
+          {
+            "$type": "Keyword",
+            "value": "search"
+          },
+          {
+            "$type": "Keyword",
+            "value": "events"
+          },
+          {
+            "$type": "Keyword",
+            "value": "bi"
+          },
+          {
+            "$type": "Keyword",
+            "value": "filter"
+          },
+          {
+            "$type": "Keyword",
+            "value": "stamp"
+          },
+          {
+            "$type": "Keyword",
+            "value": "implements"
           }
         ]
       },

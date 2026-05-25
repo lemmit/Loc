@@ -7,14 +7,14 @@
 // of a list/detail page.
 //
 // What this test pins:
-//   1. Breadcrumbs(...children, testid?) — wraps each positional
+//   1. Breadcrumbs { ...children, testid? } — wraps each positional
 //      child as a breadcrumb (Mantine renders separators
 //      automatically; shadcn uses a flex row).
-//   2. Paper(...children, padding?, testid?) — surface container
+//   2. Paper { ...children, padding?, testid? } — surface container
 //      with consistent padding + border + subtle shadow.
-//   3. Skeleton(height?, count?, testid?) — loading placeholder.
+//   3. Skeleton { height?, count?, testid? } — loading placeholder.
 //      `count > 1` emits a stacked group of placeholders.
-//   4. Alert(message, color?, title?, testid?) — error / info
+//   4. Alert { message, color?, title?, testid? } — error / info
 //      callout.
 //   5. All four accept the standard `testid:` named arg and
 //      thread it to the rendered root element.
@@ -39,9 +39,9 @@ async function emit(body: string): Promise<string> {
 }
 
 describe("shell primitives", () => {
-  it("Breadcrumbs(Anchor, Anchor, Text) emits a Mantine <Breadcrumbs>", async () => {
+  it("Breadcrumbs { Anchor, Anchor, Text } emits a Mantine <Breadcrumbs>", async () => {
     const tsx = await emit(
-      `Breadcrumbs(Anchor("Home", to: "/"), Anchor("Orders", to: "/orders"), Text("Detail"))`,
+      `Breadcrumbs { Anchor { "Home", to: "/" }, Anchor { "Orders", to: "/orders" }, Text { "Detail" } }`,
     );
     expect(tsx).toMatch(/import \{[^}]*\bBreadcrumbs\b/);
     expect(tsx).toMatch(/<Breadcrumbs>/);
@@ -52,66 +52,66 @@ describe("shell primitives", () => {
   });
 
   it("Breadcrumbs testid lands on the root element", async () => {
-    const tsx = await emit(`Breadcrumbs(Text("X"), testid: "page-crumbs")`);
+    const tsx = await emit(`Breadcrumbs { Text { "X" }, testid: "page-crumbs" }`);
     expect(tsx).toMatch(/<Breadcrumbs[^>]*\bdata-testid="page-crumbs"/);
   });
 
-  it("Paper(...children) wraps in a Mantine <Paper> with default padding", async () => {
-    const tsx = await emit(`Paper(Text("body"))`);
+  it("Paper { ...children } wraps in a Mantine <Paper> with default padding", async () => {
+    const tsx = await emit(`Paper { Text { "body" } }`);
     expect(tsx).toMatch(/import \{[^}]*\bPaper\b/);
     expect(tsx).toMatch(/<Paper p="md">/);
     expect(tsx).toMatch(/<Text>body<\/Text>/);
   });
 
   it("Paper padding: overrides the default", async () => {
-    const tsx = await emit(`Paper(Text("x"), padding: "lg")`);
+    const tsx = await emit(`Paper { Text { "x" }, padding: "lg" }`);
     expect(tsx).toMatch(/<Paper p="lg">/);
   });
 
   it("Paper testid lands on the root", async () => {
-    const tsx = await emit(`Paper(Text("x"), testid: "shell")`);
+    const tsx = await emit(`Paper { Text { "x" }, testid: "shell" }`);
     expect(tsx).toMatch(/<Paper [^>]*\bdata-testid="shell"/);
   });
 
-  it("Skeleton() emits a single Mantine <Skeleton> at default height", async () => {
-    const tsx = await emit(`Skeleton()`);
+  it("Skeleton {} emits a single Mantine <Skeleton> at default height", async () => {
+    const tsx = await emit(`Skeleton {}`);
     expect(tsx).toMatch(/import \{[^}]*\bSkeleton\b/);
     expect(tsx).toMatch(/<Skeleton height=\{ 28 \} radius="sm" \/>/);
   });
 
-  it("Skeleton(count: 5) emits a stacked group of skeleton lines", async () => {
-    const tsx = await emit(`Skeleton(count: 5)`);
+  it("Skeleton { count: 5 } emits a stacked group of skeleton lines", async () => {
+    const tsx = await emit(`Skeleton { count: 5 }`);
     expect(tsx).toMatch(/<Stack gap="xs">/);
     expect(tsx).toMatch(/Array\.from\(\{ length: 5 \}\)\.map/);
     expect(tsx).toMatch(/<Skeleton key=\{i\} height=\{ 28 \} radius="sm" \/>/);
   });
 
-  it("Skeleton(height: 60, count: 3) honours both args", async () => {
-    const tsx = await emit(`Skeleton(height: 60, count: 3)`);
+  it("Skeleton { height: 60, count: 3 } honours both args", async () => {
+    const tsx = await emit(`Skeleton { height: 60, count: 3 }`);
     expect(tsx).toMatch(/Array\.from\(\{ length: 3 \}\)/);
     expect(tsx).toMatch(/<Skeleton key=\{i\} height=\{ 60 \}/);
   });
 
   it("Skeleton testid lands on the root", async () => {
-    const tsx = await emit(`Skeleton(testid: "loading")`);
+    const tsx = await emit(`Skeleton { testid: "loading" }`);
     expect(tsx).toMatch(/<Skeleton[^>]*\bdata-testid="loading"/);
   });
 
-  it("Alert(message) emits a default-color alert", async () => {
-    const tsx = await emit(`Alert("Couldn't load")`);
+  it("Alert { message } emits a default-color alert", async () => {
+    const tsx = await emit(`Alert { "Couldn't load" }`);
     expect(tsx).toMatch(/import \{[^}]*\bAlert\b/);
     expect(tsx).toMatch(/<Alert color="red" variant="light">Couldn't load<\/Alert>/);
   });
 
-  it('Alert(message, color: "yellow", title: "Heads up") threads both', async () => {
-    const tsx = await emit(`Alert("Disk almost full", color: "yellow", title: "Heads up")`);
+  it('Alert { message, color: "yellow", title: "Heads up" } threads both', async () => {
+    const tsx = await emit(`Alert { "Disk almost full", color: "yellow", title: "Heads up" }`);
     expect(tsx).toMatch(
       /<Alert color="yellow"[^>]*title="Heads up"[^>]*>Disk almost full<\/Alert>/,
     );
   });
 
   it("Alert testid lands on the root", async () => {
-    const tsx = await emit(`Alert("err", testid: "load-error")`);
+    const tsx = await emit(`Alert { "err", testid: "load-error" }`);
     expect(tsx).toMatch(/<Alert[^>]*\bdata-testid="load-error"/);
   });
 });

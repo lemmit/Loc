@@ -15,7 +15,7 @@
 //   3. Each static `testid:` literal becomes a typed `Locator`
 //      getter on the class.  Getter names are camel-cased from
 //      the testid (hyphens / snake-case → camelCase).
-//   4. `Form(of: <Agg>)` synthesises per-field + submit testids
+//   4. `Form { of: <Agg> }` synthesises per-field + submit testids
 //      that ALSO surface as Locator getters (round-trip parity
 //      with the scaffold New-page object).
 //   5. Path-collision contract: walker output lives at
@@ -35,10 +35,10 @@ describe("walker-side e2e page-object emitter", () => {
         ui WebApp {
           page Welcome {
             route: "/welcome"
-            body:  Stack(
-              Heading("Welcome", testid: "welcome-h"),
-              Text("Pick a destination.", testid: "welcome-body")
-            )
+            body:  Stack {
+              Heading { "Welcome", testid: "welcome-h" },
+              Text { "Pick a destination.", testid: "welcome-body" }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -61,10 +61,10 @@ describe("walker-side e2e page-object emitter", () => {
         ui WebApp {
           page Welcome {
             route: "/welcome"
-            body:  Stack(
-              Heading("Welcome", testid: "welcome-h"),
-              Text("Body text", testid: "welcome-body")
-            )
+            body:  Stack {
+              Heading { "Welcome", testid: "welcome-h" },
+              Text { "Body text", testid: "welcome-body" }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -87,7 +87,7 @@ describe("walker-side e2e page-object emitter", () => {
         ui WebApp {
           page OrderDetail(orderId: string) {
             route: "/orders/:orderId"
-            body:  Heading("Order", testid: "order-detail-h")
+            body:  Heading { "Order", testid: "order-detail-h" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -102,7 +102,7 @@ describe("walker-side e2e page-object emitter", () => {
     expect(po).toMatch(/this\.page\.goto\(OrderDetailPage\.urlFor\(orderId\)\)/);
   });
 
-  it("Form(of:) synthesised testids surface as Locator getters", async () => {
+  it("Form { of: } synthesised testids surface as Locator getters", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M {
@@ -117,7 +117,7 @@ describe("walker-side e2e page-object emitter", () => {
         ui WebApp {
           page CreateOrder {
             route: "/orders/new"
-            body:  Form(of: Order)
+            body:  Form { of: Order }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -146,7 +146,7 @@ describe("walker-side e2e page-object emitter", () => {
         ui WebApp {
           page PlaceOrder {
             route: "/place-order"
-            body:  Form(of: Order, testid: "place-order")
+            body:  Form { of: Order, testid: "place-order" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

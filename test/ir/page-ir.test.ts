@@ -94,7 +94,7 @@ describe("page metamodel — IR shape", () => {
   });
 
   it("lowers a `page` with route/title/requires/state/body/menu meta", async () => {
-    // CallExpr accepts named-arg syntax (`List(of: Order)`)
+    // CallExpr accepts named-arg syntax (`List { of: Order }`)
     // and PageMenuMeta accepts soft-keyword keys (`section:`,
     // `label:`) — both via the `LooseName` rule.
     const loom = await buildLoom(`
@@ -108,7 +108,7 @@ describe("page metamodel — IR shape", () => {
               filter: string = ""
               selectedId: string
             }
-            body: List(of: Order)
+            body: List { of: Order }
             menu { section: "Sales", label: "Orders" }
           }
         }
@@ -140,7 +140,7 @@ describe("page metamodel — IR shape", () => {
         ui WebApp {
           page CustomerDetail(id: Customer id) {
             route: "/customers/:id"
-            body: Detail(of: Customer, by: id)
+            body: Detail { of: Customer, by: id }
           }
         }
       }
@@ -148,10 +148,10 @@ describe("page metamodel — IR shape", () => {
     const page = uiByName(loom, "WebApp").pages.find(
       (p): p is PageIR => p.name === "CustomerDetail",
     )!;
-    // The scaffold expander rewrites `Detail(of:, by:)`
+    // The scaffold expander rewrites `Detail { of:, by: }`
     // bodies into walker-stdlib compositions.  The page now carries
-    // the expanded `Stack(Breadcrumbs, Heading, QueryView, …)` body
-    // instead of the original `Detail(of:, by:)`.  Params survive
+    // the expanded `Stack { Breadcrumbs, Heading, QueryView, … }` body
+    // instead of the original `Detail { of:, by: }`.  Params survive
     // intact — including `id: Customer id` (and the expander
     // appends an `id: string` synthetic if missing; here the user
     // declared it as `Customer id` so no synthetic append).
@@ -173,7 +173,7 @@ describe("page metamodel — IR shape", () => {
             route: "/x"
             state { a: int = 0 }
             state { b: string }
-            body: Empty()
+            body: Empty {}
           }
         }
       }
@@ -189,7 +189,7 @@ describe("page metamodel — IR shape", () => {
         ui WebApp {
           component OrderPanel(order: Order) {
             state { tab: string = "summary" }
-            body: Stack(items: [order, tab])
+            body: Stack { Heading { tab } }
           }
         }
       }
@@ -207,8 +207,8 @@ describe("page metamodel — IR shape", () => {
     const loom = await buildLoom(`
       system Acme {
         ui WebApp {
-          page Home { route: "/", body: Heading("Hi") }
-          page Reports { route: "/reports", body: List(of: Report) }
+          page Home { route: "/", body: Heading { "Hi" } }
+          page Reports { route: "/reports", body: List { of: Report } }
           menu {
             section "Main" {
               link Home { label: "Start" },
@@ -248,9 +248,9 @@ describe("page metamodel — IR shape", () => {
             route: "/x"
             state { step: int = 0 }
             body: match {
-              step == 0 => List(of: Order)
-              step == 1 => Empty()
-              else      => Heading("done")
+              step == 0 => List { of: Order }
+              step == 1 => Empty {}
+              else      => Heading { "done" }
             }
           }
         }
@@ -426,7 +426,7 @@ describe("page metamodel — IR shape", () => {
         ui WebApp {
           page X {
             route: "/x"
-            body: Form(state: draft, body: editor)
+            body: Form { state: draft, body: editor }
           }
         }
       }
@@ -440,7 +440,7 @@ describe("page metamodel — IR shape", () => {
     const loom = await buildLoom(`
       system Acme {
         ui WebApp {
-          page Home { route: "/", body: Heading("hi") }
+          page Home { route: "/", body: Heading { "hi" } }
           menu {
             section "Main" {
               link Home { label: "Start" }

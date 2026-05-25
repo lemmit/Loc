@@ -194,7 +194,7 @@ describe("storage declarations + module-storage map", () => {
         system S {
           ${SALES_DOMAIN}
           storage pg { type: postgres }
-          ui WebApp { page X { route: "/x" body: Heading("hi") } }
+          ui WebApp { page X { route: "/x" body: Heading { "hi" } } }
           deployable api {
             platform: hono
             modules: Sales { primary: pg }

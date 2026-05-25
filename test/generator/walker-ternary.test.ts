@@ -2,7 +2,7 @@
 //
 // Surface:
 //   state { loading: bool = false }
-//   body: loading ? Empty("Loading…") : Stack(Heading("Done"))
+//   body: loading ? Empty { "Loading…" } : Stack { Heading { "Done" } }
 //
 // Top-level ternary renders directly as the function's return value:
 //   return (
@@ -30,7 +30,7 @@ describe("ternary conditional rendering in walker pages", () => {
           page X {
             route: "/x"
             state { loading: bool = false }
-            body:  loading ? Empty("Loading...") : Stack(Heading("Done"))
+            body:  loading ? Empty { "Loading..." } : Stack { Heading { "Done" } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -63,11 +63,11 @@ describe("ternary conditional rendering in walker pages", () => {
           page X {
             route: "/x"
             state { active: bool = true }
-            body:  Stack(
-              Heading("Status"),
-              active ? Badge("Live") : Badge("Off"),
-              Text("more")
-            )
+            body:  Stack {
+              Heading { "Status" },
+              active ? Badge { "Live" } : Badge { "Off" },
+              Text { "more" }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -97,7 +97,7 @@ describe("ternary conditional rendering in walker pages", () => {
               count: int = 0
               limit: int = 10
             }
-            body:  count > limit ? Heading("Over") : Heading("Under")
+            body:  count > limit ? Heading { "Over" } : Heading { "Under" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -122,7 +122,7 @@ describe("ternary conditional rendering in walker pages", () => {
         ui WebApp {
           page Greet(active: string) {
             route: "/g/:active"
-            body:  active ? Heading("Yes") : Heading("No")
+            body:  active ? Heading { "Yes" } : Heading { "No" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

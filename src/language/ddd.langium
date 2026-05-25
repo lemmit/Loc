@@ -971,11 +971,12 @@ PrimaryExpr infers Expression:
 // optional, newline-separated.
 BuilderCall:
     type=ID '{'
-        (entries+=BuilderEntry (','? entries+=BuilderEntry)* ','?)?
+        (entries+=BuilderEntry (',' entries+=BuilderEntry)* ','?)?
     '}';
 
 BuilderEntry:
-    (name=LooseName ':')? value=Expression;
+      name=LooseName ':' value=Expression
+    | value=Expression;
 
 // Bare object literal — used inside e2e test bodies to build request
 // payloads (`api.orders.create({ customerId: "..." })`).  Distinct
@@ -1041,7 +1042,19 @@ NameRefIdent returns string:
     // form.  MoneyLit comes before NameRef in PrimaryExpr, so the
     // parser picks the literal form whenever `(` follows and falls
     // back to NameRef otherwise.
-    ID | 'permissions' | 'ui' | 'api' | 'money';
+    // v2 expanded set: every soft keyword that LooseName admits is also
+    // admissible as a bare NameRef in expression position.  This lets a
+    // BuilderCall's bare-positional entry (`Card { title, Slot {} }`) parse
+    // when the entry happens to be a NameRef whose token is a soft keyword
+    // — without this, the parser commits to the named-slot alternative
+    // (`name=LooseName ':'`) and fails on the missing `:`.
+    ID | 'permissions' | 'ui' | 'api' | 'money'
+       | 'id' | 'contains' | 'page' | 'component' | 'state' | 'menu'
+       | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
+       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
+       | 'design' | 'targets' | 'bind'
+       | 'primary' | 'cache' | 'search' | 'events' | 'bi'
+       | 'filter' | 'stamp' | 'implements';
 
 // ---------------------------------------------------------------------------
 // Terminals

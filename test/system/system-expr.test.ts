@@ -521,7 +521,7 @@ describe("structured expression editor — type-directed member candidates", () 
     expect(mt.get("m0v")).toEqual(expect.arrayContaining(["qty", "status"]));
   });
 
-  // Positional-call argLabels (used pre-v2 to hint Money(10, "USD") with
+  // Positional-call argLabels (used pre-v2 to hint Money { 10, "USD" } with
   // ["amount", "currency"]) no longer applies once every VO construction
   // is a BuilderCall with named slots written into the source.  Slot-name
   // suggestion for empty BuilderCall entries is a separate feature.
