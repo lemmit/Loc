@@ -335,23 +335,31 @@ function moduleView(ast: Model, name: string): ViewGraph {
   );
 }
 
-// Vertical (top→bottom) tier order for the context view. Workflows sit on
-// the topmost tier so their `uses` edges to repos / aggregates / events all
-// drop straight downward through the React Flow Top/Bottom handles, with no
-// sibling-to-sibling routing.
+// Vertical (top→bottom) tier order for the context view's main tree.
+// Repositories live OUTSIDE this tree in a left-side support column (see
+// SIDEBAR_KINDS) — they're DDD infrastructure, not the centre of business
+// behaviour, so the tree focuses on workflows → aggregates → events.
 //
-// Row 0: workflow                      (orchestrators — feed everything below)
-// Row 1: repository | view             (read/write entry points)
-// Row 2: aggregate | valueobject       (the core model)
-// Row 3: event                          (outcomes)
+// Row 0: workflow                      (orchestrators)
+// Row 1: aggregate | valueobject       (the core model)
+// Row 2: event                          (outcomes)
 const CONTEXT_TIER: Partial<Record<ViewKind, number>> = {
   workflow: 0,
-  repository: 1,
-  view: 1,
-  aggregate: 2,
-  valueobject: 2,
-  event: 3,
+  aggregate: 1,
+  valueobject: 1,
+  event: 2,
 };
+
+/** ViewKinds rendered as a left-side "supporting infrastructure" column
+ *  instead of a tier of the main tree. Repositories (and views) provide
+ *  data-access plumbing for the domain; surfacing them as a sidebar keeps
+ *  the tree focused on the business core. Semantic edges (workflow→repo,
+ *  repo→aggregate) then cross from this sidebar into the tree, visibly
+ *  showing the support relationship. */
+const SIDEBAR_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
+  "repository",
+  "view",
+]);
 
 const CONTEXT_KIND: Partial<Record<string, ViewKind>> = {
   Aggregate: "aggregate",
@@ -372,8 +380,15 @@ const CTX_ROW_H = 160;
 function contextLayout(
   items: { id: string; kind: ViewKind; name: string; anchors?: string[] }[],
 ): VNode[] {
+  // Split the children into the main tree vs the left-side support column.
+  // Sidebar items (repositories / views) sit OUTSIDE the tree at a fixed X
+  // offset; the tier layout below only runs over tree items, so workflows
+  // and aggregates aren't pulled left by anchors pointing into the sidebar.
+  const treeItems = items.filter((i) => !SIDEBAR_KINDS.has(i.kind));
+  const sidebarItems = items.filter((i) => SIDEBAR_KINDS.has(i.kind));
+
   const byTier = new Map<number, typeof items>();
-  for (const it of items) {
+  for (const it of treeItems) {
     const tier = CONTEXT_TIER[it.kind] ?? 0;
     const list = byTier.get(tier);
     if (list) list.push(it);
@@ -435,6 +450,26 @@ function contextLayout(
       placedX.set(it.name, x);
     }
   }
+  // Pass 3: the supporting sidebar column. Stack repositories / views
+  // vertically at a fixed offset left of the tree, centred over the tree's
+  // vertical mid-line so they read as "support beside the model". Their X
+  // becomes available to anchors (e.g. workflow→repo semantic edges), but
+  // we DID NOT include them when placing tree items above, so workflows
+  // stay centred over the aggregates they touch instead of being pulled
+  // sideways toward the sidebar.
+  if (sidebarItems.length > 0) {
+    const treeYs = [...placed.values()].map((p) => p.y);
+    const treeMidY = treeYs.length > 0 ? (Math.min(...treeYs) + Math.max(...treeYs)) / 2 : 0;
+    const sidebarHeight = (sidebarItems.length - 1) * CTX_ROW_H;
+    const sidebarStartY = Math.round(treeMidY - sidebarHeight / 2);
+    const SIDEBAR_X = -Math.round(CTX_COL_W * 1.4);
+    for (let i = 0; i < sidebarItems.length; i++) {
+      const it = sidebarItems[i]!;
+      const y = sidebarStartY + i * CTX_ROW_H;
+      placed.set(it.id, { x: SIDEBAR_X, y });
+      placedX.set(it.name, SIDEBAR_X);
+    }
+  }
   return items.map((it) => ({
     id: it.id,
     kind: it.kind,
@@ -479,11 +514,18 @@ function contextView(ast: Model, name: string): ViewGraph {
       const a = rel.viewSource.get(childName);
       if (a) anchors = [a];
     } else if (kind === "workflow") {
-      // Anchor a workflow over every aggregate AND repository it references —
-      // its column then lands above the cluster of state it actually touches.
+      // Anchor a workflow over the aggregates it touches — directly via
+      // `workflowUses`, and transitively via `workflowUsesRepo` (a repo
+      // `Accounts.getById(x)` resolves to `Account` via `repoFor`). Repos
+      // themselves live in the sidebar; anchoring straight to them would
+      // pull the workflow sideways out of the tree, so we follow the repo
+      // through to the aggregate it serves instead.
       const anchorSet = new Set<string>();
       for (const a of rel.workflowUses.get(childName) ?? []) anchorSet.add(a);
-      for (const r of rel.workflowUsesRepo.get(childName) ?? []) anchorSet.add(r);
+      for (const r of rel.workflowUsesRepo.get(childName) ?? []) {
+        const agg = rel.repoFor.get(r);
+        if (agg) anchorSet.add(agg);
+      }
       if (anchorSet.size > 0) anchors = [...anchorSet];
     } else if (kind === "event") {
       // Anchor an event to every aggregate that emits it — the layout
