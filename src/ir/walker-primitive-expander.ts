@@ -135,17 +135,43 @@ export function expandWalkerPrimitive(
  * caller assigns the result back. */
 export function expandInlineScaffoldPrimitives(body: ExprIR, ctx: WalkerExpandContext): ExprIR {
   if (body.kind === "call") {
-    if (body.name === "scaffoldDetails" || body.name === "scaffoldOperations") {
+    // Aggregate-keyed scaffold primitives (single `of:` arg, ref to an aggregate).
+    if (
+      body.name === "scaffoldDetails" ||
+      body.name === "scaffoldOperations" ||
+      body.name === "scaffoldList" ||
+      body.name === "scaffoldNewForm"
+    ) {
       const argNames = body.argNames ?? [];
-      const ofIdx = argNames.findIndex((n) => n === "of");
+      const ofIdx = argNames.indexOf("of");
       const ofArg = ofIdx >= 0 ? body.args[ofIdx] : undefined;
       const aggRef = ofArg && ofArg.kind === "ref" ? ofArg.name : undefined;
       const agg = aggRef ? ctx.aggregatesByName.get(aggRef) : undefined;
       if (!agg) return body;
-      if (body.name === "scaffoldDetails") {
-        return expandScaffoldDetails(agg, ctx);
-      }
-      return expandScaffoldOperations(agg);
+      if (body.name === "scaffoldDetails") return expandScaffoldDetails(agg, ctx);
+      if (body.name === "scaffoldOperations") return expandScaffoldOperations(agg);
+      if (body.name === "scaffoldList") return expandScaffoldList(agg, ctx);
+      return expandScaffoldNewForm(agg);
+    }
+    // Workflow-keyed scaffold primitive (`runs:` arg, ref to a workflow).
+    if (body.name === "scaffoldWorkflowForm") {
+      const argNames = body.argNames ?? [];
+      const runsIdx = argNames.indexOf("runs");
+      const runsArg = runsIdx >= 0 ? body.args[runsIdx] : undefined;
+      const wfRef = runsArg && runsArg.kind === "ref" ? runsArg.name : undefined;
+      const wf = wfRef ? ctx.workflowsByName.get(wfRef) : undefined;
+      if (!wf) return body;
+      return expandScaffoldWorkflowForm(wf);
+    }
+    // View-keyed scaffold primitive (`of:` arg, ref to a view).
+    if (body.name === "scaffoldViewList") {
+      const argNames = body.argNames ?? [];
+      const ofIdx = argNames.indexOf("of");
+      const ofArg = ofIdx >= 0 ? body.args[ofIdx] : undefined;
+      const viewRef = ofArg && ofArg.kind === "ref" ? ofArg.name : undefined;
+      const view = viewRef ? ctx.viewsByName.get(viewRef) : undefined;
+      if (!view) return body;
+      return expandScaffoldViewList(view, ctx);
     }
     // Recurse into args — they may themselves contain the primitives.
     // Flatten Stack-returning scaffold expansions when their parent
@@ -468,6 +494,224 @@ function expandScaffoldOperations(agg: AggregateIR): ExprIR {
     ),
   );
   return call("Group", opModals);
+}
+
+/** Expand `scaffoldList(of: <Agg>)`: the full list-page body — Breadcrumbs,
+ *  Toolbar with a "New <agg>" button, QueryView wrapping a Paper-framed
+ *  Table.  Mirrors what `expandAggregateList` produced for the
+ *  archetype path; in fact the archetype wrapper delegates here so
+ *  the two stay byte-equivalent. */
+function expandScaffoldList(agg: AggregateIR, ctx: WalkerExpandContext): ExprIR {
+  const apiHandle = findApiHandleFor(agg, ctx);
+  const queryRoot = apiHandle ? member(ref(apiHandle), agg.name) : ref(agg.name);
+  const slug = snake(plural(agg.name));
+  const humanPlural = humanize(plural(agg.name));
+  const humanLower = humanPlural.toLowerCase();
+  const rowVar = "r";
+  const cellVar = "o";
+
+  const cols: ExprIR[] = [];
+  cols.push(
+    call("Column", [
+      lit("ID"),
+      lambda(cellVar, call("IdLink", [member(ref(cellVar), "id")], [["of", ref(agg.name)]])),
+    ]),
+  );
+  for (const f of agg.fields) {
+    const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+    if (inner.kind === "valueobject" || inner.kind === "array") continue;
+    cols.push(
+      call("Column", [
+        lit(humanize(f.name)),
+        lambda(cellVar, columnAccessorFor(f.name, f.type, cellVar)),
+      ]),
+    );
+  }
+
+  return call(
+    "Stack",
+    [
+      call("Breadcrumbs", [
+        call("Anchor", [lit("Home")], [["to", lit("/")]]),
+        call("Text", [lit(humanPlural)]),
+      ]),
+      call("Toolbar", [
+        call("Heading", [lit(humanPlural)], [["level", intLit(2)]]),
+        call(
+          "Button",
+          [lit(`New ${singular(humanLower)}`)],
+          [
+            ["to", lit(`/${slug}/new`)],
+            ["testid", lit(`${slug}-list-create`)],
+          ],
+        ),
+      ]),
+      call(
+        "QueryView",
+        [],
+        [
+          ["of", member(queryRoot, "all")],
+          ["loading", call("Skeleton", [], [["count", intLit(5)]])],
+          ["error", call("Alert", [lit(`Couldn't load ${humanLower}`)])],
+          ["empty", call("Empty", [lit(`No ${humanLower} yet.`)])],
+          [
+            "data",
+            lambda(
+              "rows",
+              call("Paper", [
+                call(
+                  "Table",
+                  [...cols],
+                  [
+                    ["rows", ref("rows")],
+                    ["striped", boolLit(true)],
+                    ["highlight", boolLit(true)],
+                    ["sticky", boolLit(true)],
+                    [
+                      "rowTestid",
+                      lambda(rowVar, binary(lit(`${slug}-row-`), "+", member(ref(rowVar), "id"))),
+                    ],
+                  ],
+                ),
+              ]),
+            ),
+          ],
+        ],
+      ),
+    ],
+    [["testid", lit(`${slug}-list`)]],
+  );
+}
+
+/** Expand `scaffoldNewForm(of: <Agg>)`: Stack(Breadcrumbs, Heading,
+ *  Card(CreateForm(of: <Agg>))) — the wrapping page chrome around the
+ *  named-leaf create form.  Emits `CreateForm` (new) rather than
+ *  `Form(of:)` (legacy); both produce the same JSX through the body
+ *  walker's shared field-preparer. */
+function expandScaffoldNewForm(agg: AggregateIR): ExprIR {
+  const slug = snake(plural(agg.name));
+  const humanPlural = humanize(plural(agg.name));
+  const humanAgg = humanize(agg.name);
+  return call(
+    "Stack",
+    [
+      call("Breadcrumbs", [
+        call("Anchor", [lit("Home")], [["to", lit("/")]]),
+        call("Anchor", [lit(humanPlural)], [["to", lit(`/${slug}`)]]),
+        call("Text", [lit("New")]),
+      ]),
+      call("Heading", [lit(`Create ${humanAgg.toLowerCase()}`)], [["level", intLit(2)]]),
+      call("Card", [
+        call(
+          "CreateForm",
+          [],
+          [
+            ["of", ref(agg.name)],
+            ["testid", lit(`${slug}-new`)],
+          ],
+        ),
+      ]),
+    ],
+    [["testid", lit(`${slug}-new-page`)]],
+  );
+}
+
+/** Expand `scaffoldWorkflowForm(runs: <Wf>)`: Stack(Breadcrumbs,
+ *  Heading, Card(WorkflowForm(runs: <Wf>))).  Emits `WorkflowForm`
+ *  (new named primitive) rather than `Form(runs:)` (legacy). */
+function expandScaffoldWorkflowForm(wf: import("./loom-ir.js").WorkflowIR): ExprIR {
+  const wfSlug = snake(wf.name);
+  const humanWf = humanize(wf.name);
+  return call(
+    "Stack",
+    [
+      call("Breadcrumbs", [
+        call("Anchor", [lit("Home")], [["to", lit("/")]]),
+        call("Anchor", [lit("Workflows")], [["to", lit("/workflows")]]),
+        call("Text", [lit(humanWf)]),
+      ]),
+      call("Heading", [lit(humanWf)], [["level", intLit(2)]]),
+      call("Card", [
+        call(
+          "WorkflowForm",
+          [],
+          [
+            ["runs", ref(wf.name)],
+            ["testid", lit(`workflow-${wfSlug}`)],
+          ],
+        ),
+      ]),
+    ],
+    [["testid", lit(`workflow-${wfSlug}-page`)]],
+  );
+}
+
+/** Expand `scaffoldViewList(of: <View>)`: Heading + QueryView wrapping
+ *  a Paper-framed Table over the view's projected rows.  Mirrors the
+ *  archetype-driven `expandViewList`; the archetype wrapper delegates
+ *  here so the two stay byte-equivalent. */
+function expandScaffoldViewList(
+  view: import("./loom-ir.js").ViewIR,
+  ctx: WalkerExpandContext,
+): ExprIR {
+  const humanView = humanize(view.name);
+
+  let fields: Array<{ name: string; type: import("./loom-ir.js").TypeIR }> = [];
+  if (view.output) {
+    fields = view.output.fields;
+  } else {
+    const sourceAgg = ctx.aggregatesByName.get(view.aggregateName);
+    if (sourceAgg) fields = sourceAgg.fields;
+  }
+  const cellVar = "o";
+  const cols: ExprIR[] = [];
+  for (const f of fields) {
+    const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+    if (inner.kind === "valueobject" || inner.kind === "array") continue;
+    cols.push(
+      call("Column", [
+        lit(humanize(f.name)),
+        lambda(cellVar, columnAccessorFor(f.name, f.type, cellVar)),
+      ]),
+    );
+  }
+
+  return call(
+    "Stack",
+    [
+      call("Heading", [lit(humanView)], [["level", intLit(2)]]),
+      call(
+        "QueryView",
+        [],
+        [
+          ["of", member(ref("Views"), view.name)],
+          ["loading", call("Skeleton", [], [["count", intLit(5)]])],
+          ["error", call("Alert", [lit(`Couldn't load ${humanView.toLowerCase()}`)])],
+          ["empty", call("Empty", [lit("No rows.")])],
+          [
+            "data",
+            lambda(
+              "rows",
+              call("Paper", [
+                call(
+                  "Table",
+                  [...cols],
+                  [
+                    ["rows", ref("rows")],
+                    ["striped", boolLit(true)],
+                    ["highlight", boolLit(true)],
+                    ["sticky", boolLit(true)],
+                    ["keyExpr", lit("idx")],
+                  ],
+                ),
+              ]),
+            ),
+          ],
+        ],
+      ),
+    ],
+    [["testid", lit(`view-${snake(view.name)}`)]],
+  );
 }
 
 /** Bundled form of the read-side data section: the main field
