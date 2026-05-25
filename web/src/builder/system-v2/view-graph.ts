@@ -100,9 +100,10 @@ export interface VEdge {
   label?: string;
   kind?: EdgeKind;
   /** Override the source-side handle. Used by `contains` edges so they leave
-   *  the LEFT/RIGHT of the root banner and trace down the side of the layout
-   *  rather than crossing every intermediate tier through the centre. */
-  sourceHandle?: "left" | "right";
+   *  the LEFT / RIGHT / BOTTOM of the root banner. Defaults to the source's
+   *  unkeyed handle when omitted — but the root banner exposes multiple
+   *  source handles, so callers are explicit. */
+  sourceHandle?: "left" | "right" | "bottom";
 }
 
 export interface ViewGraph {
@@ -246,9 +247,14 @@ function withRoot(
       source: rootId,
       target: n.id,
       kind: "contains",
-      ...(PIVOT_CONTAINS_KINDS.has(n.kind)
-        ? {}
-        : { sourceHandle: n.x < rootNode.x ? "left" : ("right" as const) }),
+      // Pivot children attach to the explicit BOTTOM handle (the structural
+      // spine); the rest exit through LEFT / RIGHT. Being explicit avoids
+      // React Flow guessing when several source handles are exposed.
+      sourceHandle: PIVOT_CONTAINS_KINDS.has(n.kind)
+        ? "bottom"
+        : n.x < rootNode.x
+          ? "left"
+          : "right",
     }));
   return { ...g, nodes: [rootNode, ...shifted], edges: [...containsEdges, ...g.edges] };
 }

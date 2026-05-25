@@ -200,9 +200,9 @@ function toRfEdges(g: ViewGraph): Edge[] {
     const styleSpec = EDGE_STYLE[e.kind ?? "binding"] ?? EDGE_STYLE.binding;
     // Pivot (centre-routed) containment edges form the structural backbone
     // root↔aggregate/workflow/state and deserve more visual weight than the
-    // peripheral containment trace. Side-routed contains carry a sourceHandle
-    // (left/right) — pivot contains don't, so we can branch on that.
-    const isPivotContains = e.kind === "contains" && !e.sourceHandle;
+    // peripheral containment trace. Pivot contains attach to the BOTTOM
+    // handle; peripheral ones attach to LEFT / RIGHT.
+    const isPivotContains = e.kind === "contains" && e.sourceHandle === "bottom";
     const stroke = isPivotContains ? "var(--mantine-color-dark-1)" : styleSpec.stroke;
     const opacity = isPivotContains ? 0.85 : styleSpec.opacity;
     const strokeWidth = isPivotContains ? 1.5 : styleSpec.strokeWidth;
