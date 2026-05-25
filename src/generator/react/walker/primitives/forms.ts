@@ -39,6 +39,56 @@ import {
   unwrapTextLiteral,
 } from "../shared/args.js";
 
+/** `CreateForm(of: <Agg>)` — named-leaf entry for the create-form
+ *  variant.  Same shared codegen as `Form(of:)` / `Form(creates:)`:
+ *  delegates to `emitFormOfAggregate`, which builds the per-field
+ *  view models and pushes a `FormOfState` on the shell sink. */
+export function emitCreateForm(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  return emitFormOfAggregate(call, ctx, depth);
+}
+
+/** `OperationForm(of: <Agg>, op: <opName>)` or
+ *  `OperationForm(<instance>.<op>)` — named-leaf entry for the
+ *  operation-modal form.  Accepts both shapes the legacy
+ *  `Form(<inst>.<op>)` / `Form(of:, op:)` dispatch covered: the
+ *  instance-member form binds to a record in scope (lambda or
+ *  param), the flat-named form resolves the id from the route. */
+export function emitOperationForm(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  _depth: number,
+): string {
+  const ofArg = namedArgValue(call, "of");
+  const opArg = namedArgValue(call, "op");
+  if (ofArg && opArg && ofArg.kind === "ref" && opArg.kind === "ref") {
+    return emitFormOfOperationByName(call, ctx, ofArg.name, opArg.name);
+  }
+  const opRef = positionalArgs(call)[0];
+  if (opRef && opRef.kind === "member" && opRef.receiver.kind === "ref") {
+    return emitFormOfOperation(call, ctx, opRef);
+  }
+  return `{/* OperationForm: expected (of: <Agg>, op: <opName>) or (<instance>.<op>) */}`;
+}
+
+/** `WorkflowForm(runs: <Wf>)` — named-leaf entry for the
+ *  workflow-run form.  Delegates to the same `emitFormRuns` the
+ *  legacy `Form(runs:)` dispatch used. */
+export function emitWorkflowForm(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const runsArg = namedArgValue(call, "runs");
+  if (!runsArg) {
+    return `{/* WorkflowForm: missing 'runs: <Workflow>' */}`;
+  }
+  return emitFormRuns(call, ctx, depth, runsArg);
+}
+
 export function emitFormOf(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -479,7 +529,8 @@ export function emitModal(
 ): string {
   const positionals = positionalArgs(call);
   const formChild = positionals.find(
-    (a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Form",
+    (a): a is ExprIR & { kind: "call" } =>
+      a.kind === "call" && (a.name === "Form" || a.name === "OperationForm"),
   );
   const triggerArg = namedArgValue(call, "trigger");
   if (!formChild || !triggerArg || triggerArg.kind !== "call") {

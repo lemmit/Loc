@@ -536,16 +536,31 @@ function lowerSystem(sys: System): SystemIR {
   return built;
 }
 
-/** True when `body` already carries the explicit
- *  `Stack(scaffoldDetails(of:), scaffoldOperations(of:))` shape —
- *  scaffold's new Detail-page emission.  Used by
- *  `expandWalkerPrimitives` to skip body replacement on
- *  aggregate-detail pages whose body is already a customisable
- *  primitive composition; only the emit-path + auto-`id`-param
- *  side-effects fire. */
+/** True when `body` already uses a canonical scaffold body primitive
+ *  (either a top-level `scaffold<X>(…)` call, or a Stack containing
+ *  one).  Used by `expandWalkerPrimitives` to skip body replacement
+ *  on pages whose body is already a customisable primitive
+ *  composition; only the emit-path + auto-`id`-param side-effects
+ *  fire.  `expandInlineScaffoldPrimitives` (run separately) then
+ *  rewrites those primitives into their full JSX-ready trees. */
 function isExplicitDetailBody(body: ExprIR | undefined): boolean {
-  if (!body || body.kind !== "call" || body.name !== "Stack") return false;
-  return body.args.some((arg) => arg.kind === "call" && arg.name === "scaffoldDetails");
+  if (!body || body.kind !== "call") return false;
+  if (isCanonicalScaffoldCallName(body.name)) return true;
+  if (body.name === "Stack") {
+    return body.args.some((arg) => arg.kind === "call" && isCanonicalScaffoldCallName(arg.name));
+  }
+  return false;
+}
+
+function isCanonicalScaffoldCallName(name: string): boolean {
+  return (
+    name === "scaffoldDetails" ||
+    name === "scaffoldOperations" ||
+    name === "scaffoldList" ||
+    name === "scaffoldNewForm" ||
+    name === "scaffoldWorkflowForm" ||
+    name === "scaffoldViewList"
+  );
 }
 
 /** Rewrite the inline body primitives `scaffoldDetails(of:)` and
@@ -959,10 +974,31 @@ function inferPageArchetype(page: Page, body: ExprIR | undefined): PageArchetype
   if (callName === "Home") return { kind: "home" };
   if (callName === "WorkflowsIndex") return { kind: "workflows-index" };
   if (callName === "ViewsIndex") return { kind: "views-index" };
-  // Aggregate-list / new / detail are distinguished by the body's
-  // call name (`List` / `Form` with `creates:` / `Detail`).  The
-  // first named arg's value names the aggregate; the page name
-  // suffix (`List` / `New` / `Detail`) lets us double-check kind.
+  // Canonical scaffold body primitives — each names its target
+  // explicitly via `of:` / `runs:`, so detection is one call name
+  // → one archetype kind (no shape introspection needed).  These
+  // are emitted by `src/stdlib/scaffold/_pages.ts` and expanded
+  // inline by `expandInlineScaffoldPrimitives`.
+  if (callName === "scaffoldList" && argNames[0] === "of") {
+    const aggName = argRef(0);
+    if (aggName) return { kind: "aggregate-list", aggregateName: aggName, contextName: "" };
+  }
+  if (callName === "scaffoldNewForm" && argNames[0] === "of") {
+    const aggName = argRef(0);
+    if (aggName) return { kind: "aggregate-new", aggregateName: aggName, contextName: "" };
+  }
+  if (callName === "scaffoldWorkflowForm" && argNames[0] === "runs") {
+    const wfName = argRef(0);
+    if (wfName) return { kind: "workflow-form", workflowName: wfName, contextName: "" };
+  }
+  if (callName === "scaffoldViewList" && argNames[0] === "of") {
+    const viewName = argRef(0);
+    if (viewName) return { kind: "view-list", viewName, contextName: "" };
+  }
+  // Legacy archetype body markers — kept for back-compat in PR 1;
+  // dropped in the follow-up cleanup pass.  Two ways to express
+  // the same thing temporarily; the scaffold macro switches to
+  // emitting the canonical names above.
   if (callName === "List" && argNames[0] === "of") {
     const aggName = argRef(0);
     if (!aggName) return undefined;

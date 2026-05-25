@@ -77,7 +77,13 @@ import {
   emitSlot,
   emitStat,
 } from "./walker/primitives/display.js";
-import { emitFormOf, emitModal } from "./walker/primitives/forms.js";
+import {
+  emitCreateForm,
+  emitFormOf,
+  emitModal,
+  emitOperationForm,
+  emitWorkflowForm,
+} from "./walker/primitives/forms.js";
 import {
   emitField,
   emitNumberField,
@@ -264,6 +270,9 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "EnumBadge",
   "IdLink",
   "Form",
+  "CreateForm",
+  "OperationForm",
+  "WorkflowForm",
   "Breadcrumbs",
   "Paper",
   "Skeleton",
@@ -685,6 +694,12 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
       return emitIdLink(call, ctx, depth);
     case "Form":
       return emitFormOf(call, ctx, depth);
+    case "CreateForm":
+      return emitCreateForm(call, ctx, depth);
+    case "OperationForm":
+      return emitOperationForm(call, ctx, depth);
+    case "WorkflowForm":
+      return emitWorkflowForm(call, ctx, depth);
     case "Breadcrumbs":
       return emitBreadcrumbs(call, ctx, depth);
     case "Paper":

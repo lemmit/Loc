@@ -464,7 +464,14 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   if (expr.name === "Breadcrumbs") return renderBreadcrumbs(expr, ctx);
   if (expr.name === "Anchor") return renderAnchor(expr, ctx);
   if (expr.name === "Modal") return renderModal(expr, ctx);
-  if (expr.name === "Form") return renderForm(expr, ctx);
+  if (
+    expr.name === "Form" ||
+    expr.name === "CreateForm" ||
+    expr.name === "OperationForm" ||
+    expr.name === "WorkflowForm"
+  ) {
+    return renderForm(expr, ctx);
+  }
   if (expr.name === "Table") return renderTable(expr, ctx);
   if (expr.name === "QueryView") return renderQueryView(expr, ctx);
   if (expr.name === "KeyValueRow") return renderKeyValueRow(expr, ctx);
@@ -770,7 +777,8 @@ function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
     }
   }
   const formChild = positional.find(
-    (c): c is Extract<ExprIR, { kind: "call" }> => c.kind === "call" && c.name === "Form",
+    (c): c is Extract<ExprIR, { kind: "call" }> =>
+      c.kind === "call" && (c.name === "Form" || c.name === "OperationForm"),
   );
   // The op-form names its operation via one of two shapes:
   //
@@ -1395,6 +1403,9 @@ function isHEExCall(name: string): boolean {
     name === "Anchor" ||
     name === "Modal" ||
     name === "Form" ||
+    name === "CreateForm" ||
+    name === "OperationForm" ||
+    name === "WorkflowForm" ||
     name === "Table" ||
     name === "QueryView" ||
     name === "KeyValueRow" ||
