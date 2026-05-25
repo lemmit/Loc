@@ -72,6 +72,7 @@ const KIND_COLOR: Record<ViewKind, string> = {
   module: "var(--mantine-color-blue-7)",
   context: "var(--mantine-color-cyan-8)",
   aggregate: "var(--mantine-color-teal-7)",
+  entity: "var(--mantine-color-teal-6)",
   operation: "var(--mantine-color-orange-8)",
   workflow: "var(--mantine-color-orange-8)",
   valueobject: "var(--mantine-color-cyan-7)",
@@ -190,6 +191,7 @@ const AST_TYPE_BY_VIEW: Partial<Record<ViewKind, string>> = {
   module: "Module",
   context: "BoundedContext",
   aggregate: "Aggregate",
+  entity: "EntityPart",
   operation: "Operation",
   function: "FunctionDecl",
   derived: "DerivedProp",
@@ -701,7 +703,11 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const drill = (id: string): void => {
     const v = graph.nodes.find((x) => x.id === id);
     if (!v?.drillable) return;
-    setPath((p) => [...p, { kind: v.kind, name: v.name }]);
+    // VNode.drillTo overrides the default `{kind, name}` step — used by
+    // containment leaves whose drill target is the entity they reference,
+    // not the containment node itself.
+    const step = v.drillTo ?? { kind: v.kind, name: v.name };
+    setPath((p) => [...p, step]);
   };
 
   /** Repoint a deployable's `targets` / `ui` binding by dragging the edge's

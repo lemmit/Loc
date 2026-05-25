@@ -207,6 +207,44 @@ describe("Model v2 — view-graph per level", () => {
     expect(reads).toEqual(["operation:confirm->field:note"]);
   });
 
+  it("containments drill into the entity they reference; entity view lists the entity's own members", () => {
+    const D = `context C {
+  aggregate Order {
+    status: string
+    contains lines: OrderLine[]
+    entity OrderLine {
+      qty: int
+      sku: string
+      derived double: int = qty
+    }
+  }
+}`;
+    const ast = parse(D);
+    // From aggregate Order: the containment "lines" is drillable and points
+    // to entity OrderLine.
+    const aggG = buildViewGraph(ast, [{ kind: "aggregate", name: "Order" }]);
+    const lines = aggG.nodes.find((n) => n.id === "containment:lines")!;
+    expect(lines.drillable).toBe(true);
+    expect(lines.drillTo).toEqual({ kind: "entity", name: "OrderLine" });
+    // The displayed label includes the entity type so the user knows what to
+    // drill into.
+    expect(lines.name).toBe("lines : OrderLine");
+
+    // Drilling into OrderLine surfaces its fields, containments, derived,
+    // and emits read edges from derived/invariant.
+    const entG = buildViewGraph(ast, [
+      { kind: "aggregate", name: "Order" },
+      { kind: "entity", name: "OrderLine" },
+    ]);
+    expect(entG.title).toBe("entity OrderLine");
+    const childIds = entG.nodes.filter((n) => !n.isRoot).map((n) => n.id).sort();
+    expect(childIds).toEqual(["derived:double", "field:qty", "field:sku"]);
+    const derivedReads = entG.edges
+      .filter((e) => e.kind === "reads")
+      .map((e) => `${e.source}->${e.target}`);
+    expect(derivedReads).toEqual(["derived:double->field:qty"]);
+  });
+
   it("aggregate view emits `constrains` edges from invariants to the fields they reference", () => {
     const D = `context C {
   aggregate Money {
