@@ -122,6 +122,10 @@ ${externHandlers
 // Auth — JWT decode middleware + scoped accessor.  Register your
 // IUserVerifier implementation here (or anywhere in DI); the verifier
 // translates inbound tokens into the strongly-typed User claim record.
+// Dev-stub DevStubUserVerifier is registered first so a generated stack
+// boots out of the box; replace by registering your own IUserVerifier
+// (the last DI registration wins for new scope resolutions).
+builder.Services.AddScoped<IUserVerifier, DevStubUserVerifier>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>();
 `

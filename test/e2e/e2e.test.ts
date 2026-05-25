@@ -140,9 +140,43 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     // modules so their OpenAPI specs are comparable.  Hono boots in
     // sub-second; .NET takes a few seconds (cold restore + EnsureCreated);
     // Phoenix is slowest (mix release boot + Ecto migrate).
-    await pollHealthy("http://localhost:3000/health", 60_000); // honoApi
-    await pollHealthy("http://localhost:8080/health", 120_000); // dotnetApi
-    await pollHealthy("http://localhost:4000/health", 180_000); // phoenixApi
+    try {
+      await pollHealthy("http://localhost:3000/health", 60_000); // honoApi
+      await pollHealthy("http://localhost:8080/health", 120_000); // dotnetApi
+      await pollHealthy("http://localhost:4000/health", 180_000); // phoenixApi
+    } catch (err) {
+      // Same forensic capture as the up -d catch: containers are up
+      // (up -d succeeded), but one didn't get to "responding on
+      // /health" within its budget.  Dump ps + logs so the next round
+      // shows the actual crash/stall reason.
+      const capture = (cmd: string): string => {
+        try {
+          return execSync(cmd, {
+            stdio: ["ignore", "pipe", "pipe"],
+            encoding: "utf8",
+            timeout: 30_000,
+          });
+        } catch (e: unknown) {
+          const ex = e as { stdout?: string; stderr?: string; message?: string };
+          return `[capture failed] ${ex.message ?? "unknown"}\nstdout: ${ex.stdout ?? ""}\nstderr: ${ex.stderr ?? ""}`;
+        }
+      };
+      const sections = [
+        "===== compose ps -a (post-health-timeout) =====",
+        capture(`docker compose -f ${outDir}/docker-compose.yml ps -a`),
+        "===== compose logs --tail=400 (post-health-timeout) =====",
+        capture(`docker compose -f ${outDir}/docker-compose.yml logs --tail=400`),
+        "===== end compose diagnostics =====",
+      ];
+      const body = sections.join("\n");
+      console.error("\n" + body + "\n");
+      try {
+        fs.writeFileSync("/tmp/loom-e2e-diagnostics.log", body);
+      } catch {
+        /* ignore */
+      }
+      throw err;
+    }
   }, 900_000);
 
   it.skipIf(PARITY_ONLY)(

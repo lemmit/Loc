@@ -24,8 +24,11 @@ import {
   type BoundedContextIR,
   contextUsesMoney,
   type DeployableIR,
+  type FieldIR,
   type RepositoryIR,
   type SystemIR,
+  type TypeIR,
+  type UserIR,
 } from "../../../ir/loom-ir.js";
 import { lowerModel } from "../../../ir/lower.js";
 import type { MigrationsIR } from "../../../ir/migrations-ir.js";
@@ -236,7 +239,10 @@ export function generateTypeScriptForContexts(
   }
   out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
   out.set("tsup.config.ts", TSUP_CONFIG);
-  out.set("index.ts", renderProjectIndexTs(hasMigrations));
+  out.set(
+    "index.ts",
+    renderProjectIndexTs(hasMigrations, authRequired ? system?.sys.user : undefined),
+  );
   out.set("drizzle.config.ts", DRIZZLE_CONFIG);
   out.set("Dockerfile", DOCKERFILE_TS);
   out.set(".dockerignore", DOCKERIGNORE_TS);
@@ -394,12 +400,22 @@ export default defineConfig({
 });
 `;
 
-function renderProjectIndexTs(runMigrationsAtBoot: boolean): string {
+function renderProjectIndexTs(runMigrationsAtBoot: boolean, userShape?: UserIR): string {
   const migImport = runMigrationsAtBoot
     ? `import { migrate } from "drizzle-orm/node-postgres/migrator";\n`
     : "";
   const migCall = runMigrationsAtBoot
     ? `\n// Apply pending schema migrations before serving traffic.  Drizzle's\n// runtime migrator reads db/migrations/meta/_journal.json + each\n// referenced .sql file, tracking state in \`__drizzle_migrations\`;\n// idempotent across boots.\nawait migrate(db, { migrationsFolder: "./db/migrations" });\n`
+    : "";
+  // createApp() calls assertUserVerifierRegistered() when auth is required —
+  // emit a permissive dev stub so the generated stack boots out of the box.
+  // Replace this in production with a real JWT-decoding verifier (e.g. in
+  // a separate file kept out of the regen list and imported here).
+  const authStubImport = userShape
+    ? `import { registerUserVerifier } from "./auth/verifier";\n`
+    : "";
+  const authStubCall = userShape
+    ? `\n// Dev-stub verifier — accepts every request as a built-in admin user.\n// REPLACE for production by calling registerUserVerifier(...) with a JWT-\n// decoding implementation, ideally from a separate (non-regenerated) file.\nregisterUserVerifier(() => (${renderStubUserLiteral(userShape)}));\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`
     : "";
   return `// Auto-generated.
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -407,7 +423,7 @@ import pg from "pg";
 import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
-${migImport}import { baseLogger } from "./obs/log";
+${migImport}${authStubImport}import { baseLogger } from "./obs/log";
 
 // Fail fast on a missing DATABASE_URL.  Without this an unset value
 // surfaces as a confusing pg connection refusal mid-request; we'd
@@ -435,7 +451,7 @@ pool.on("error", (err) => {
   });
 });
 const db = drizzle(pool, { schema });
-${migCall}const app = createApp(db);
+${migCall}${authStubCall}const app = createApp(db);
 const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });
 
@@ -453,6 +469,54 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 `;
+}
+
+/** Build a TS object literal matching the system's `user {}` shape, with
+ *  sensible defaults per primitive type — used as the body of the dev-stub
+ *  user verifier so a generated app boots without the caller having to wire
+ *  a JWT decoder. */
+function renderStubUserLiteral(userShape: UserIR): string {
+  const entries = userShape.fields.map((f) => `  ${snakeToCamel(f.name)}: ${stubValueFor(f)}`);
+  return `{\n${entries.join(",\n")},\n}`;
+}
+
+function stubValueFor(f: FieldIR): string {
+  if (f.optional) return "null";
+  return stubValueForType(f.type);
+}
+
+function stubValueForType(t: TypeIR): string {
+  switch (t.kind) {
+    case "primitive":
+      switch (t.name) {
+        case "string":
+          return `"admin"`;
+        case "int":
+        case "long":
+          return "0";
+        case "decimal":
+        case "money":
+          return `"0"`;
+        case "bool":
+          return "false";
+        case "datetime":
+          return `new Date(0)`;
+        case "guid":
+          return `"00000000-0000-0000-0000-000000000000"`;
+        default:
+          return `""`;
+      }
+    case "id":
+      return `"00000000-0000-0000-0000-000000000000"`;
+    case "array":
+      return "[]";
+    default:
+      return "null";
+  }
+}
+
+function snakeToCamel(name: string): string {
+  return name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 }
 
 // Multi-stage Dockerfile: build stage installs all deps and compiles

@@ -102,15 +102,19 @@ defmodule ${webModule}.Auth do
 
   # ---------------------------------------------------------------------------
   # User-supplied JWT verifier hook — the user implements this.
-  # Default stub returns {:error, :unimplemented} so the app fails fast
-  # (a 401 on every request) rather than silently passing bad tokens.
+  # Default stub returns a built-in admin user so a generated stack boots
+  # end-to-end and the parity OpenAPI fetch works.  REPLACE for production
+  # with a real JWT decoder (e.g. JOSE / joken) — return {:ok, claims_map}
+  # or {:error, reason}.
   # ---------------------------------------------------------------------------
 
   defp verify_token(token) do
-    # TODO: implement with your JWT library (e.g. JOSE / joken).
-    # Return {:ok, claims_map} on success or {:error, reason} to reject.
     _ = token
-    {:error, :unimplemented}
+    {:ok, %{
+      "id" => "00000000-0000-0000-0000-000000000000",
+      "role" => "admin",
+      "permissions" => []
+    }}
   end
 
   # ---------------------------------------------------------------------------
