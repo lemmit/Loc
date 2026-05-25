@@ -56,6 +56,7 @@ export {
   thisRef,
   viewsIn,
   workflowsIn,
+  writableCreateFields,
   writableUpdateFields,
 } from "./factories.js";
 // UI-side factories — separate file because the surfaces don't

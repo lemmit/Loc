@@ -353,6 +353,32 @@ export function writableUpdateFields(target: Aggregate): readonly Property[] {
   });
 }
 
+/** Subset of `targetFields` suitable for use as `create`-operation
+ * parameters.  Same origin-tag filter as `writableUpdateFields` but
+ * the access filter is symmetric:
+ *
+ *   1. **Origin tag** — exclude fields contributed by other macros
+ *      (audit timestamps, soft-delete state, etc.).
+ *   2. **Access modifier** — exclude `managed`, `token`, and
+ *      `internal` (the same three that are excluded on update).
+ *      `immutable` is KEPT — it's the whole point: settable on
+ *      create, frozen after.  `secret` is KEPT — client supplies
+ *      password hashes / API keys at creation time.
+ *
+ * Companion to `writableUpdateFields`.  When `crudish` grows a
+ * `create` operation in a future phase, this is the helper it
+ * iterates to derive the request-body shape. */
+export function writableCreateFields(target: Aggregate): readonly Property[] {
+  return targetFields(target).filter((f) => {
+    if ((f as any)[ORIGIN_PROP] !== undefined) return false;
+    const access = (f as { access?: FieldAccess }).access;
+    if (access === "managed" || access === "token" || access === "internal") {
+      return false;
+    }
+    return true;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Cross-decl accessors — typed views over Module / BoundedContext
 // members, computed on the fly.  Used by ui-targeted macros like

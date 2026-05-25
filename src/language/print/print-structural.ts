@@ -496,9 +496,13 @@ function printBindEntry(node: BindEntry): string {
 
 function printProperty(node: Property): string {
   const provenanced = node.provenanced ? " provenanced" : "";
+  const sensitivity =
+    node.sensitivity && node.sensitivity.tags.length > 0
+      ? ` sensitive(${node.sensitivity.tags.join(", ")})`
+      : "";
   const access = node.access ? ` ${node.access}` : "";
   const check = node.check ? ` check ${printExpr(node.check)}` : "";
-  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${access}${check}`;
+  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${sensitivity}${access}${check}`;
 }
 
 function printContainment(node: Containment): string {
