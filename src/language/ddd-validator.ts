@@ -134,6 +134,12 @@ export class DddValidator {
     // pattern in `checkDerived` etc. — see the function's header
     // for the full rationale.
     this.checkBinaryOperands(model, accept);
+    // Primitive conversion expressions (`string(x)`, `money(d)`):
+    // restrict to the infallible (source, target) pairs.  Fallible
+    // parses (`int("42")`) and narrowing (`int(longValue)`) are
+    // deferred until we settle the failure model (`T?` vs throw);
+    // an explicit error keeps the surface honest in the meantime.
+    this.checkPrimitiveConversions(model, accept);
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
         this.checkContext(m, accept);
@@ -1073,17 +1079,20 @@ export class DddValidator {
     // Cascade suppression — broken upstream already reports.
     if (lt.kind === "unknown" || rt.kind === "unknown") return;
 
-    // Literal promotion to money — mirrors `lowerExpr`'s binary
-    // handler.  When one operand is money and the other is a bare
-    // numeric literal (not a typed value), the literal acts as
-    // money; the validator must accept what the lowering will
-    // elaborate.  Same promotion as `lowerExpr`'s binary handler.
-    const lIsMoney = lt.kind === "primitive" && lt.name === "money";
-    const rIsMoney = rt.kind === "primitive" && rt.name === "money";
-    if (lIsMoney && !rIsMoney && (isIntLit(bin.right) || isDecLit(bin.right))) {
-      rt = T.prim("money");
-    } else if (rIsMoney && !lIsMoney && (isIntLit(bin.left) || isDecLit(bin.left))) {
-      lt = T.prim("money");
+    // Literal promotion — mirrors `lowerExpr`'s binary handler.
+    // When one operand is typed as long / decimal / money (the
+    // "anchor"), the other operand's bare numeric literal acts as
+    // that anchor type.  Both sides may have anchor types
+    // (`subtotal + taxRate` — money + decimal); the per-call
+    // `canPromoteAstLitTo` check rejects typed values, so a typed
+    // VALUE opposite an anchor still rejects per the strict gate.
+    const lAnchor = literalPromotionAnchor(lt);
+    const rAnchor = literalPromotionAnchor(rt);
+    if (lAnchor && canPromoteAstLitTo(bin.right, lAnchor)) {
+      rt = T.prim(lAnchor);
+    }
+    if (rAnchor && canPromoteAstLitTo(bin.left, rAnchor)) {
+      lt = T.prim(rAnchor);
     }
 
     const op = bin.op;
@@ -1137,6 +1146,88 @@ export class DddValidator {
         { node: bin },
       );
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Primitive conversion compatibility check.
+  //
+  // Walks every `PrimitiveConversion` AST node and rejects (source,
+  // target) pairs that aren't in the infallible vocabulary.  See
+  // `docs/language.md` (conversions section) for the full table.
+  //
+  // Infallible, admitted:
+  //   string ← int | long | decimal | money | bool
+  //   long   ← int
+  //   decimal ← int | long | money
+  //   money  ← int | long | decimal
+  // Anything else (string → numeric / datetime / bool; narrowing
+  // long→int / decimal→long; etc.) errors with "not supported yet"
+  // pointing at the source position.
+  //
+  // The same-type identity case (`string(stringValue)`, `money(
+  // moneyValue)`) is admitted as a no-op — useful as an explicit
+  // annotation when reading code.
+  // ---------------------------------------------------------------------------
+  private checkPrimitiveConversions(model: Model, accept: ValidationAcceptor): void {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (node.$type !== "PrimitiveConversion") continue;
+      this.checkSinglePrimitiveConversion(
+        node as import("./generated/ast.js").PrimitiveConversion,
+        accept,
+      );
+    }
+  }
+
+  private checkSinglePrimitiveConversion(
+    node: import("./generated/ast.js").PrimitiveConversion,
+    accept: ValidationAcceptor,
+  ): void {
+    const env = envForNode(node);
+    const valueType = typeOf(node.value, env);
+    // Cascade suppression: upstream resolution failure already
+    // reported elsewhere.
+    if (valueType.kind === "unknown") return;
+    // Grammar guarantees `target` is one of the admitted strings;
+    // null-guard for the langium AST's optional-prop typing.
+    const target = node.target;
+    if (!target) return;
+    // `string(x)` admits enum + `X id` in addition to primitives —
+    // every backend stringifies enum values to their case name and
+    // `X id` to its underlying primitive form.  The conversion
+    // vocabulary calls these "implicitly stringifiable" sources;
+    // they're also the set the `string + X` implicit-concat rule
+    // admits (see `arithmeticResult.isImplicitlyStringifiable`).
+    if (target === "string" && (valueType.kind === "enum" || valueType.kind === "id")) {
+      return;
+    }
+    // Domain-shaped sources (VO / aggregate / entity / array) need
+    // a separate design — `display:` resolution or a custom toString
+    // function on the type.  Deferred.
+    if (valueType.kind !== "primitive") {
+      accept(
+        "error",
+        `Cannot convert '${typeToString(valueType)}' to '${target}': ` +
+          `domain types (value objects, aggregates, entities, collections) ` +
+          `have no canonical string form.  ` +
+          `Either annotate a field with \`display\` on the type and ` +
+          `write \`string(value.<displayField>)\` explicitly, or define a ` +
+          `\`toString\` derivation (pending design).`,
+        { node, property: "value" },
+      );
+      return;
+    }
+    const source = valueType.name;
+    if (source === target) return; // identity no-op
+    if (isInfallibleConversion(source, target)) return;
+    accept(
+      "error",
+      `Cannot convert '${source}' to '${target}': not supported.  ` +
+        `Today's conversion vocabulary admits: string ← any primitive | enum | X id; ` +
+        `long ← int; decimal ← int | long | money; money ← int | long | decimal.  ` +
+        `Fallible parses (string → numeric / datetime / bool) and narrowing ` +
+        `(long → int, decimal → long) are deferred pending a failure-model decision.`,
+      { node },
+    );
   }
 
   private checkTypeReferences(model: Model, accept: ValidationAcceptor): void {
@@ -2016,30 +2107,106 @@ function pathString(lv: LValue): string {
 }
 
 /**
- * Literal-promotion gate.  A bare numeric literal (IntLit or DecLit)
- * may flow into a `money`-typed target context — the lowering layer
- * elaborates the literal to a money IR node so the backend emits a
- * precise constructor (`new Decimal("373.34")`) rather than the raw
- * numeric literal.  Mirrors `lowerExprInContext` in `lower-expr.ts`;
- * the validator MUST stay in lockstep so the strict
- * `isAssignable(decimal, money)=false` rule doesn't reject what the
- * lowering happily accepts.
+ * Allowed (source, target) primitive-conversion pairs.  Each pair is
+ * infallible at runtime — no parse failures, no precision overflow.
+ * Identity (source === target) is admitted separately by the caller
+ * as a no-op.
  *
- * The promotion is one-sided.  A money-typed VALUE (e.g. a
- * `taxRate: decimal` field used in `subtotal := taxRate`) still
- * rejects — the rule fires only on AST forms that are bare numeric
- * literals, not on typed expressions that happen to resolve to a
- * numeric type.  Keeps strict-mode guarantees intact while letting
- * the ergonomic `derived total: money = 373.34` source form
- * typecheck.
+ * Pairs:
+ *   string ← int | long | decimal | money | bool
+ *   long   ← int                              (widening)
+ *   decimal ← int | long                      (widening)
+ *   decimal ← money                           (lossy projection)
+ *   money  ← int | long | decimal             (widening)
+ *
+ * Notably absent:
+ *   - string → anything else (parse-fallible; needs `T?`/throw design)
+ *   - narrowing (long→int, decimal→long, money→{int,long})
+ *   - datetime / guid / enum conversions (separate design — backend-
+ *     specific format choices)
+ */
+function isInfallibleConversion(source: string, target: string): boolean {
+  if (target === "string") {
+    return (
+      source === "int" ||
+      source === "long" ||
+      source === "decimal" ||
+      source === "money" ||
+      source === "bool"
+    );
+  }
+  if (target === "long") return source === "int";
+  if (target === "decimal") {
+    return source === "int" || source === "long" || source === "money";
+  }
+  if (target === "money") {
+    return source === "int" || source === "long" || source === "decimal";
+  }
+  return false;
+}
+
+/**
+ * Literal-promotion gate.  A bare numeric literal (IntLit or DecLit)
+ * may flow into a typed numeric / money target context — the
+ * lowering layer elaborates the literal to the matching IR literal
+ * kind so backends emit the right form (`new Decimal("373.34")` for
+ * money, `5L` for large long literals in C#, `5m` for decimal
+ * literals in C#).  Mirrors `lowerExprInContext` in
+ * `lower-expr.ts`; the validator MUST stay in lockstep so the
+ * strict gates (`isAssignable`, comparable, arithmeticResult) don't
+ * reject what the lowering happily elaborates.
+ *
+ * The promotion is one-sided.  A typed VALUE (e.g. a `taxRate:
+ * decimal` field used opposite money, or a `count: int` field used
+ * opposite long) still rejects — the rule fires only on AST forms
+ * that are bare numeric literals, not on typed expressions that
+ * happen to resolve to a numeric type.  Keeps strict-mode
+ * guarantees intact while letting ergonomic source forms typecheck.
+ *
+ * Promotions admitted:
+ *   IntLit / DecLit → money   (the original #508 case)
+ *   IntLit          → long    (C# `L` suffix — without elaboration,
+ *                              long literals > Int32.MaxValue
+ *                              silently overflow at .NET compile time)
+ *   IntLit          → decimal (C# `m` suffix; IR type-honesty)
+ * DecLit → long / int is intentionally NOT admitted — a fractional
+ * literal in an integer context is almost certainly a typo and the
+ * strict gate should surface it.
  */
 function canPromoteLiteralTo(
   expr: import("./generated/ast.js").Expression | undefined,
   target: import("./type-system.js").DddType,
 ): boolean {
   if (!expr) return false;
-  if (target.kind !== "primitive" || target.name !== "money") return false;
-  return isIntLit(expr) || isDecLit(expr);
+  if (target.kind !== "primitive") return false;
+  return canPromoteAstLitTo(expr, target.name);
+}
+
+/** Inner gate used by both `canPromoteLiteralTo` (top-level checks)
+ *  and `checkSingleBinaryOperands` (per-operand checks).  Takes a
+ *  bare target name (not a wrapped `DddType`) so the caller doesn't
+ *  have to box the type they already have in hand. */
+function canPromoteAstLitTo(
+  expr: import("./generated/ast.js").Expression | undefined,
+  target: string,
+): boolean {
+  if (!expr) return false;
+  if (target === "money") return isIntLit(expr) || isDecLit(expr);
+  if (target === "long" || target === "decimal") return isIntLit(expr);
+  return false;
+}
+
+/** Mirror of `lower-expr.ts`'s `literalPromotionAnchor`: when one
+ *  side of a binary expression is typed as long / decimal / money,
+ *  that type is the "anchor" a bare numeric literal on the other
+ *  side promotes against.  int isn't an anchor — every IntLit
+ *  already types as int. */
+function literalPromotionAnchor(
+  t: import("./type-system.js").DddType,
+): "long" | "decimal" | "money" | null {
+  if (t.kind !== "primitive") return null;
+  if (t.name === "long" || t.name === "decimal" || t.name === "money") return t.name;
+  return null;
 }
 
 // ---------------------------------------------------------------------------

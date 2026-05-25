@@ -89,10 +89,10 @@ describe("page-builder model — primitive coverage", () => {
 
   for (const bodyExpr of [
     "List(of: Order)",
-    'Form(of: Order, testid: "orders-new")',
-    "Form(creates: Product)",
-    "Form(account.withdraw)",
-    "Form(runs: PlaceOrder)",
+    'CreateForm(of: Order, testid: "orders-new")',
+    "CreateForm(of: Product)",
+    "OperationForm(account.withdraw)",
+    "WorkflowForm(runs: PlaceOrder)",
     'Badge("Alpha", color: "blue")',
     // Expression-valued props (the `expr` prop kind): data-bound args must
     // round-trip verbatim, not collapse the whole call to Opaque.
@@ -146,7 +146,7 @@ describe("page-builder model — primitive coverage", () => {
     'QueryView(of: orders, loading: Skeleton(count: 5), empty: Empty("none"), data: List(of: Order))',
     'QueryView(of: orders, data: rows => Table(Column("ID", o => Text(o.id)), rows: rows))',
     'Table(Column("Name", o => Text(o.name)), rows: orders, rowTestid: r => "row-" + r.id)',
-    'Modal(Form(of: Order), trigger: Button("Edit"))',
+    'Modal(CreateForm(of: Order), trigger: Button("Edit"))',
     // Non-canonical arg order (a positional after a named arg) must round-trip
     // by preserving the source ordering, not fall back to Opaque.
     'Badge(color: "blue", order.status)',
@@ -167,7 +167,7 @@ describe("page-builder model — primitive coverage", () => {
     'Button("Save", onClick: e => save())',
     'Button("Increment", onClick: e => { count := count + 1 })',
     // Qualified refs in a `ref` slot.
-    "Form(of: Sales.Order)",
+    "CreateForm(of: Sales.Order)",
     "IdLink(o.id, of: Catalog.Product)",
     // Detail / MasterDetail primitives.
     "Detail(of: Order, by: id)",
@@ -374,15 +374,18 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("recognises a qualified ref binding", () => {
-    const node = seed("Form(of: Sales.Order)");
-    expect(node.name).toBe("Form");
+    const node = seed("CreateForm(of: Sales.Order)");
+    expect(node.name).toBe("CreateForm");
     expect(node.props.of).toBe("Sales.Order");
   });
 
   it("recognises the instance-qualified operation form + runs binding", () => {
-    const op = seed("Form(account.withdraw)");
+    const op = seed("OperationForm(account.withdraw)");
+    expect(op.name).toBe("OperationForm");
     expect(op.props.operation).toBe("account.withdraw");
-    expect(seed("Form(runs: PlaceOrder)").props.runs).toBe("PlaceOrder");
+    const wf = seed("WorkflowForm(runs: PlaceOrder)");
+    expect(wf.name).toBe("WorkflowForm");
+    expect(wf.props.runs).toBe("PlaceOrder");
   });
 
   it("recognises a call with optional positionals omitted", () => {

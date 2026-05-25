@@ -153,6 +153,14 @@ function exprIsTranslatable(
         exprIsTranslatable(e.then, ctx, scope) &&
         exprIsTranslatable(e.otherwise, ctx, scope)
       );
+    case "convert":
+      // Conversion expressions emit through host-language coercions
+      // that aren't faithful in the wire-validator's JS context —
+      // money conversions in particular need Decimal arithmetic.
+      // Same posture as money literals: server-side only.  Server's
+      // `_assertInvariants` renders the conversion correctly via
+      // `renderTsConvert`.
+      return false;
     case "match":
       // A match expression is wire-translatable iff every arm
       // condition + value plus the `else` branch is.  Same posture
@@ -292,7 +300,7 @@ function numericLiteral(e: ExprIR): number | null {
   // (`0`, `0.01`, `1000000`) the JS-number round-trip is exact; for
   // truly money-grade magnitudes the classification will silently
   // skip via the `Number.isFinite` gate below.
-  if (e.lit !== "int" && e.lit !== "decimal" && e.lit !== "money") return null;
+  if (e.lit !== "int" && e.lit !== "long" && e.lit !== "decimal" && e.lit !== "money") return null;
   const n = Number(e.value);
   return Number.isFinite(n) ? n : null;
 }
@@ -386,6 +394,9 @@ function firstFieldRef(e: ExprIR): string | null {
     case "new":
     case "object":
       return e.fields.reduce<string | null>((acc, f) => acc ?? firstFieldRef(f.value), null);
+    case "convert":
+      // The wrapped value may itself be a field reference; walk into it.
+      return firstFieldRef(e.value);
     case "match":
       // First arm (cond, then value), then the `else` branch — same
       // left-to-right walk semantics as `ternary`.

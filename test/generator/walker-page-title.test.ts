@@ -89,8 +89,11 @@ describe("page title via useEffect(document.title)", () => {
     expect(content).toMatch(/import \{ useState, useEffect \} from "react";/);
     expect(content).toMatch(/const \[count, setCount\] = useState<number>\(0\);/);
     // Effect deps include the state field referenced in the title.
+    // `count` (int) → wrapped via `String(count)` per the implicit
+    // `string + X` concat rule; deps tracker recurses into the
+    // `convert` IR's value so `count` still lands in the deps array.
     expect(content).toMatch(
-      /useEffect\(\(\) => \{ document\.title = \("Count: " \+ count\); \}, \[count\]\);/,
+      /useEffect\(\(\) => \{ document\.title = \("Count: " \+ String\(count\)\); \}, \[count\]\);/,
     );
   });
 

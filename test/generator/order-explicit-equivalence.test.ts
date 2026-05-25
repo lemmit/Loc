@@ -109,7 +109,7 @@ describe("explicit Order DSL ↔ scaffold Order equivalence", () => {
     const explicitTestids = extractTestids(explicitTsx);
     // Per-field testids + submit button.  scaffold's namespace is
     // `<plural-snake>-new-input-<field>`; explicit form passes
-    // `testid: "orders-new"` on Form(of:) so its synthesised
+    // `testid: "orders-new"` on CreateForm(of: ) so its synthesised
     // namespace lines up byte-for-byte.
     const required = [
       "orders-new-input-customerId",
@@ -142,7 +142,7 @@ describe("explicit Order DSL ↔ scaffold Order equivalence", () => {
     const newPo = explicit.get("web/e2e/pages/order_new.ts")!;
     expect(newPo).toMatch(/export class OrderNewPage/);
     expect(newPo).toMatch(/static readonly url = "\/orders\/new"/);
-    // The explicit OrderList uses Form(of:)'s synthesised testids
+    // The explicit OrderList uses CreateForm(of: )'s synthesised testids
     // for the input fields — surface them as Locator getters.
     expect(newPo).toMatch(/get ordersNewInputCustomerId\(\): Locator/);
     expect(newPo).toMatch(/get ordersNewSubmit\(\): Locator/);

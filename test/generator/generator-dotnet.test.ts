@@ -762,7 +762,12 @@ describe(".NET generator", () => {
     expect(handler).toMatch(/private readonly ICustomerRepository _customers;/);
     expect(handler).toMatch(/private readonly IOrderRepository _orders;/);
     expect(handler).toMatch(/private readonly IDomainEventDispatcher _events;/);
-    expect(handler).toMatch(/if \(!\(cmd\.Amount > 0\)\) throw new DomainException/);
+    // Literal `0` opposite a decimal-typed `cmd.Amount` is elaborated
+    // to a decimal IR literal (`lit("decimal", "0")`) by the general
+    // literal-promotion seam, so the .NET emitter writes `0m`
+    // (canonical C# decimal literal) — still valid C#, just more
+    // type-honest than the old implicit-conversion form.
+    expect(handler).toMatch(/if \(!\(cmd\.Amount > 0m\)\) throw new DomainException/);
     expect(handler).toMatch(
       /var customer = await _customers\.GetByIdAsync\(cmd\.CustomerId, ct\);/,
     );

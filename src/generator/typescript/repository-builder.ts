@@ -1074,6 +1074,7 @@ function lowerToDrizzle(
         case "string":
           return JSON.stringify(e.value);
         case "int":
+        case "long":
         case "decimal":
           return e.value;
         case "money":

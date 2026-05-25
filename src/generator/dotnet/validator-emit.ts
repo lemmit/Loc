@@ -230,6 +230,7 @@ function renderFluentPredicate(e: ExprIR, usings?: Set<string>): string {
     case "id":
     case "call":
     case "new":
+    case "convert":
     case "match":
       // `classifyForWire` excludes these — reaching the renderer is a
       // bug upstream.  Emit a syntactically-valid placeholder so a
@@ -245,6 +246,7 @@ function renderLit(lit: Lit["lit"], value: string): string {
   if (lit === "now") return "DateTime.UtcNow";
   if (lit === "null") return "null";
   if (lit === "decimal") return `${value}m`;
+  if (lit === "long") return `${value}L`;
   if (lit === "money") return `${value}m`;
   return value;
 }

@@ -15,7 +15,13 @@ import { describe, expect, it } from "vitest";
 import { parseString } from "../_helpers/parse.js";
 
 describe("validator — generic invalid arithmetic operands", () => {
-  it("`string + int` errors", async () => {
+  it("`string + int` is admitted (implicit string-concat — see implicit-string-concat.test.ts)", async () => {
+    // Updated from the original "rejected" expectation: `string + X`
+    // for X in {int, long, decimal, money, bool, enum, X id} is now
+    // an admitted implicit conversion (universal across modern
+    // `+`-for-concat languages).  The other strict-mode invariants
+    // — typed-value coercion across numeric/money boundaries,
+    // comparison cross-type, etc. — stay intact.
     const { errors } = await parseString(`
       context X {
         aggregate Foo {
@@ -26,9 +32,7 @@ describe("validator — generic invalid arithmetic operands", () => {
         repository Foos for Foo { }
       }
     `);
-    expect(errors.join("\n")).toMatch(/incompatible operand types/);
-    expect(errors.join("\n")).toMatch(/'string'/);
-    expect(errors.join("\n")).toMatch(/'int'/);
+    expect(errors).toEqual([]);
   });
 
   it("`bool * decimal` errors", async () => {

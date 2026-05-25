@@ -64,6 +64,8 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
       return renderBinary(e.op, e.left, e.right, e.leftType, ctx);
     case "ternary":
       return `${renderTsExpr(e.cond, ctx)} ? ${renderTsExpr(e.then, ctx)} : ${renderTsExpr(e.otherwise, ctx)}`;
+    case "convert":
+      return renderTsConvert(e.target, e.from, e.value, ctx);
     case "match": {
       // Lower a match expression to a chained ternary so it
       // can appear inside `derived` bodies, view binds, and other
@@ -78,6 +80,49 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
       return out;
     }
   }
+}
+
+/**
+ * Render an explicit conversion expression (`string(age)`,
+ * `money(decimalField)`, etc.) for the TS backend.  Per-(from,
+ * target) pair so each emit matches the host idiom:
+ *   string(x: number|bool)    → `String(x)`
+ *   string(x: Decimal)        → `x.toString()`
+ *   long(x: number)           → `x`                 (no distinction)
+ *   decimal(x: number)        → `x`                 (no distinction)
+ *   decimal(x: Decimal)       → `x.toNumber()`     (lossy, explicit)
+ *   money(x: number)          → `new Decimal(x)`
+ *   money(x: Decimal)         → `x`                 (already Decimal)
+ *
+ * `from` may be undefined when the source's type couldn't be
+ * inferred (broken upstream).  Falls back to the safe TS string-
+ * coercion (`String(x)`) so the output still compiles even when
+ * the validator is already reporting the inferred-type problem.
+ */
+function renderTsConvert(
+  target: string,
+  from: string | undefined,
+  value: ExprIR,
+  ctx: TsRenderContext,
+): string {
+  const v = renderTsExpr(value, ctx);
+  if (target === "string") {
+    if (from === "money") return `${v}.toString()`;
+    return `String(${v})`;
+  }
+  if (target === "long" || target === "decimal") {
+    // TS uses `number` for both int/long/decimal — conversion is a
+    // no-op unless the source is `Decimal` (money), in which case we
+    // narrow with `.toNumber()` (lossy, intentional — only fires
+    // when the user wrote `decimal(moneyValue)` explicitly).
+    if (from === "money") return `${v}.toNumber()`;
+    return v;
+  }
+  if (target === "money") {
+    if (from === "money") return v;
+    return `new Decimal(${v})`;
+  }
+  return v; // unrecognised target — caller has bigger problems
 }
 
 function renderLiteral(lit: LiteralKind, value: string): string {

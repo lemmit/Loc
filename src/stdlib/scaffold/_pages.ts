@@ -17,7 +17,11 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
     page({
       name: `${aggName}List`,
       route: `/${pluralSnake}`,
-      body: callExpr("List", [{ name: "of", value: nameRefExpr(aggName) }]),
+      // Canonical body primitive — expands inline to the full
+      // Breadcrumbs/Toolbar/QueryView/Table tree via
+      // `expandInlineScaffoldPrimitives`.  Replaces the legacy
+      // `List(of:)` archetype marker.
+      body: callExpr("scaffoldList", [{ name: "of", value: nameRefExpr(aggName) }]),
       menu: {
         section: stringLit("Aggregates"),
         label: stringLit(labelPlural),
@@ -26,7 +30,10 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
     page({
       name: `${aggName}New`,
       route: `/${pluralSnake}/new`,
-      body: callExpr("Form", [{ name: "creates", value: nameRefExpr(aggName) }]),
+      // Canonical body primitive — expands to Stack(Breadcrumbs,
+      // Heading, Card(CreateForm(of:))).  Replaces the legacy
+      // `Form(creates:)` archetype marker.
+      body: callExpr("scaffoldNewForm", [{ name: "of", value: nameRefExpr(aggName) }]),
       menu: { hidden: boolLit(true) },
     }),
     page({
@@ -65,7 +72,10 @@ export function pageForWorkflow(wf: Workflow): Page {
   return page({
     name: `${pascal(wf.name)}Workflow`,
     route: `/workflows/${snake(wf.name)}`,
-    body: callExpr("Form", [{ name: "runs", value: nameRefExpr(wf.name) }]),
+    // Canonical body primitive — expands to Stack(Breadcrumbs,
+    // Heading, Card(WorkflowForm(runs:))).  Replaces the legacy
+    // `Form(runs:)` archetype marker.
+    body: callExpr("scaffoldWorkflowForm", [{ name: "runs", value: nameRefExpr(wf.name) }]),
     menu: {
       section: stringLit("Workflows"),
       label: stringLit(humanize(wf.name)),
@@ -77,10 +87,11 @@ export function pageForView(v: View): Page {
   return page({
     name: `${v.name}View`,
     route: `/views/${snake(v.name)}`,
-    // Body uses Loom's `view <Name>` reference form — see the
-    // legacy expander's comment.  The literal name is passed as a
-    // single name-ref token to preserve the parse shape.
-    body: callExpr("List", [{ name: "of", value: nameRefExpr(`view ${v.name}`) }]),
+    // Canonical body primitive — expands to Heading + QueryView
+    // wrapping a Paper-framed Table over the view's projected
+    // rows.  Replaces the legacy `List(of: view <X>)` archetype
+    // marker (the `view ` prefix detection is no longer needed).
+    body: callExpr("scaffoldViewList", [{ name: "of", value: nameRefExpr(v.name) }]),
     menu: {
       section: stringLit("Views"),
       label: stringLit(humanize(v.name)),

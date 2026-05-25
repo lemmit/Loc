@@ -95,7 +95,13 @@ describe("expressions in text positions", () => {
       }
     `);
     const content = files.get("web/src/pages/dashboard.tsx")!;
-    expect(content).toMatch(/<Text size="sm" c="dimmed">\{\("Active: " \+ count\)\}<\/Text>/);
+    // `count` (int) auto-converts to string via the implicit `string + X`
+    // concat — the walker injects `String(count)` so JS doesn't fall
+    // through to silent coercion.  Numeric `total - count` stays a
+    // plain arithmetic expression.
+    expect(content).toMatch(
+      /<Text size="sm" c="dimmed">\{\("Active: " \+ String\(count\)\)\}<\/Text>/,
+    );
     expect(content).toMatch(/<Text fw=\{700\} size="xl">\{\(total - count\)\}<\/Text>/);
   });
 

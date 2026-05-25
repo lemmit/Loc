@@ -82,6 +82,8 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
       return renderBinary(e.op, e.left, e.right, ctx);
     case "ternary":
       return `${renderCsExpr(e.cond, ctx)} ? ${renderCsExpr(e.then, ctx)} : ${renderCsExpr(e.otherwise, ctx)}`;
+    case "convert":
+      return renderCsConvert(e.target, e.from, e.value, ctx);
     case "match": {
       // Lower a match expression to a chained C# ternary so
       // it can appear inside `derived` bodies, view binds, and other
@@ -108,11 +110,61 @@ function refCollectionFieldName(e: ExprIR): string | null {
   return null;
 }
 
+/**
+ * Render an explicit conversion expression (`string(age)`,
+ * `money(decimalField)`, etc.) for the .NET backend.  Per-(from,
+ * target) pair so each emit matches C# idiom:
+ *   string(x: numeric|bool) → `x.ToString()`
+ *   string(x: decimal|money) → `x.ToString(CultureInfo.InvariantCulture)`
+ *                              (locale-independent decimal separator)
+ *   long(x: int)             → `(long)x`
+ *   decimal(x: int|long)     → `(decimal)x`
+ *   decimal(x: money)        → `x`               (money IS decimal in C#)
+ *   money(x: int|long)       → `(decimal)x`
+ *   money(x: decimal)        → `x`               (no-op)
+ */
+function renderCsConvert(
+  target: string,
+  from: string | undefined,
+  value: ExprIR,
+  ctx: CsRenderContext,
+): string {
+  const v = renderCsExpr(value, ctx);
+  if (target === "string") {
+    if (from === "decimal" || from === "money") {
+      return `${v}.ToString(System.Globalization.CultureInfo.InvariantCulture)`;
+    }
+    return `${v}.ToString()`;
+  }
+  if (target === "long") {
+    return `(long)${v}`;
+  }
+  if (target === "decimal") {
+    // money is already C# `decimal` — explicit cast is redundant.
+    if (from === "money" || from === "decimal") return v;
+    return `(decimal)${v}`;
+  }
+  if (target === "money") {
+    // money is C# `decimal` — coerce int/long to decimal; same-type
+    // is a no-op.
+    if (from === "decimal" || from === "money") return v;
+    return `(decimal)${v}`;
+  }
+  return v;
+}
+
 function renderLiteral(lit: string, value: string): string {
   if (lit === "string") return JSON.stringify(value);
   if (lit === "now") return "DateTime.UtcNow";
   if (lit === "null") return "null";
   if (lit === "decimal") return `${value}m`;
+  // long literals emit with the `L` suffix.  Without it, large
+  // values (e.g. `9999999999`) parse as int in C# and overflow at
+  // compile time — `long big = 9999999999;` errors with CS1021.
+  // The `lowerExprInContext` seam elaborates a bare IntLit in a
+  // long context to `lit("long", ...)`; this is the matching emit
+  // side.
+  if (lit === "long") return `${value}L`;
   // money literals carry a precise-decimal source string.  C#'s
   // `decimal` parses precision-preserving from the same source form
   // — `10.50m` — so the suffix is identical to `decimal`'s.  The

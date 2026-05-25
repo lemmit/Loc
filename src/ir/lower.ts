@@ -105,8 +105,8 @@ import type {
   ModuleIR,
   ModuleStorageRole,
   OperationIR,
-  PageArchetypeIR,
   PageIR,
+  PageOriginIR,
   ParamIR,
   PermissionDeclIR,
   Platform,
@@ -153,7 +153,6 @@ import {
 import {
   buildExpandContext,
   expandInlineScaffoldPrimitives,
-  expandWalkerPrimitive,
   type WalkerExpandContext,
 } from "./walker-primitive-expander.js";
 
@@ -525,27 +524,17 @@ function lowerSystem(sys: System): SystemIR {
   // recognised `archetype` gets `body` rewritten to a
   // walker-stdlib composition; the React emitter then routes
   // through the walker.  The legacy archetype path
-  // (renderers/preparers/templates) has been deleted — this
-  // branch is the only generator path now.  `archetype` is
-  // intentionally preserved on each rewritten page so the
-  // per-aggregate page-object emitter still produces the rich
-  // `e2e/pages/<agg>.ts` helper classes (rich domain methods:
-  // fill, submit, expectRow).
-  expandWalkerPrimitives(built);
+  // `page.origin` drives the per-page side effects (emit path,
+  // auto-`id` param for detail pages).  Bodies are left alone —
+  // pages scaffold-emitted with canonical body primitives are
+  // rewritten by `expandInlineScaffoldPrimitiveCalls` below, which
+  // produces the full Stack/QueryView/Table tree the walker
+  // consumes.  The per-aggregate page-object emitter still
+  // dispatches on `page.origin` to produce the rich
+  // `e2e/pages/<agg>.ts` helper classes.
+  applyPageOriginSideEffects(built);
   expandInlineScaffoldPrimitiveCalls(built);
   return built;
-}
-
-/** True when `body` already carries the explicit
- *  `Stack(scaffoldDetails(of:), scaffoldOperations(of:))` shape —
- *  scaffold's new Detail-page emission.  Used by
- *  `expandWalkerPrimitives` to skip body replacement on
- *  aggregate-detail pages whose body is already a customisable
- *  primitive composition; only the emit-path + auto-`id`-param
- *  side-effects fire. */
-function isExplicitDetailBody(body: ExprIR | undefined): boolean {
-  if (!body || body.kind !== "call" || body.name !== "Stack") return false;
-  return body.args.some((arg) => arg.kind === "call" && arg.name === "scaffoldDetails");
 }
 
 /** Rewrite the inline body primitives `scaffoldDetails(of:)` and
@@ -565,61 +554,34 @@ function expandInlineScaffoldPrimitiveCalls(sys: SystemIR): void {
   }
 }
 
-/** In-place rewrite of every UI's pages.  When the
- *  expander handles a page's `archetype`, swap `body` with
- *  the synthesised walker-stdlib expression and clear the
- *  `archetype` discriminator so the React emitter dispatches
- *  through the walker path instead of the archetype path. */
-function expandWalkerPrimitives(sys: SystemIR): void {
+/** Per-page side effects driven by `page.origin`: compute the
+ *  conventional emit path and synthesise the `id` route param on
+ *  aggregate-detail pages.  Body content is left alone — pages
+ *  scaffold-emitted with canonical body primitives
+ *  (`scaffoldList(of:)` etc.) are rewritten in a separate pass by
+ *  `expandInlineScaffoldPrimitiveCalls`. */
+function applyPageOriginSideEffects(sys: SystemIR): void {
   for (const ui of sys.uis) {
     const ctx = buildExpandContext(sys, ui);
     for (const page of ui.pages) {
-      if (!page.archetype) continue;
-      const expanded = expandWalkerPrimitive(page.archetype, ctx);
-      if (!expanded) continue;
-      // Compute the conventional emit path so the rewritten page
-      // lands at `src/pages/<plural>/<arch>.tsx` (matches what the
-      // scaffold renderer would have used).  Preserves URL/file
-      // shape when scaffold expansion becomes the default.
-      page.emitPath = conventionalEmitPath(page.archetype, ctx);
-      // Skip body replacement when the page already carries the
-      // explicit Stack(scaffoldDetails, scaffoldOperations) form
-      // — the inline-primitive pass handles those.  Without this
-      // check we'd clobber the user's explicit body with the
-      // archetype-driven shape.
-      if (!isExplicitDetailBody(page.body)) {
-        page.body = expanded;
-      }
-      // Detail-page expansion references `id` as a
-      // route param (`Sales.Order.byId(id)`).  The scaffold AST
-      // expander synthesises detail pages with `route:
-      // "/<plural>/:id"` but no declarative `params` block, so
-      // the walker has no way to resolve `id` as a typed route
-      // param.  Synthesise it here so the walker emits
-      // `useParams<{id: string}>()` correctly.
-      if (page.archetype.kind === "aggregate-detail" && !page.params.some((p) => p.name === "id")) {
+      if (!page.origin || page.origin.kind === "custom") continue;
+      page.emitPath = conventionalEmitPath(page.origin, ctx);
+      // Detail page bodies reference `id` as a route param
+      // (`api.Order.byId(id)`).  Scaffold emits the detail page with
+      // route `/<plural>/:id` but no declarative `params` block, so
+      // synthesise the typed param here for the walker to consume
+      // when it emits `useParams<{id: string}>()`.
+      if (page.origin.kind === "aggregate-detail" && !page.params.some((p) => p.name === "id")) {
         page.params.push({
           name: "id",
           type: { kind: "primitive", name: "string" },
         });
       }
-      // INTENTIONALLY leave `page.archetype` set — the page-
-      // object emitter dispatches on it to keep producing the
-      // per-aggregate `e2e/pages/<agg>.ts` classes (with their
-      // rich domain methods: fill, submit, expectRow…) while the
-      // page-emitter detects `expandedFromScaffold` and routes
-      // through the walker instead of the archetype renderer.
-      // Without this, the default flip would lose ~80 lines of e2e
-      // helper code per aggregate.
-      page.expandedFromScaffold = true;
     }
   }
 }
 
-function conventionalEmitPath(
-  origin: PageArchetypeIR,
-  ctx: WalkerExpandContext,
-): string | undefined {
+function conventionalEmitPath(origin: PageOriginIR, ctx: WalkerExpandContext): string | undefined {
   if (
     origin.kind === "aggregate-list" ||
     origin.kind === "aggregate-new" ||
@@ -647,6 +609,9 @@ function conventionalEmitPath(
   if (origin.kind === "home") return "src/pages/home.tsx";
   if (origin.kind === "workflows-index") return "src/pages/workflows/index.tsx";
   if (origin.kind === "views-index") return "src/pages/views/index.tsx";
+  // `custom` pages emit at the default `src/pages/<page-snake>.tsx`
+  // path — return undefined so the page-emitter falls back to its
+  // default.
   return undefined;
 }
 
@@ -890,10 +855,25 @@ function lowerPage(p: Page): PageIR {
   let body: ExprIR | undefined;
   let menuMeta: MenuMetaIR | undefined;
   const state: StateFieldIR[] = [];
-  // A neutral env is fine here — the page-IR expression nodes
-  // will get richer when the validator and emitter
-  // wire in the page-scoped scope.
-  const env: Env = { locals: new Map(), user: undefined };
+  // Page-scoped env: route params + state fields bind as locals so
+  // `inferExprType` resolves their refs to their declared types
+  // (otherwise NameRef refs would fall through to the string-typed
+  // default — wrong for `count + 1` arithmetic in a page primitive).
+  // The page emitter does its own walker-side scope resolution at
+  // emit time; this addition makes the IR's type info accurate enough
+  // that contextual lowering tricks (literal promotion, implicit
+  // string-concat convert injection) don't mis-fire on page bodies.
+  let env: Env = { locals: new Map(), user: undefined };
+  for (const param of p.params ?? []) {
+    env = withLocal(env, param.name, "param", lowerType(param.type));
+  }
+  for (const prop of p.props) {
+    if (prop.$type === "StateBlock") {
+      for (const f of prop.fields) {
+        env = withLocal(env, f.name, "let", lowerType(f.type));
+      }
+    }
+  }
   for (const prop of p.props) {
     if (prop.$type === "RouteProp") route = prop.value;
     else if (prop.$type === "TitleProp") title = lowerExpr(prop.value, env);
@@ -918,7 +898,7 @@ function lowerPage(p: Page): PageIR {
   // page's `archetype` discriminator and `source` from the
   // body shape so the React emitter dispatches identically
   // whether the page came from source or from the AST expander.
-  const inferred = inferPageArchetype(p, body);
+  const inferred = inferPageOrigin(body);
   return {
     name: p.name,
     params,
@@ -928,105 +908,63 @@ function lowerPage(p: Page): PageIR {
     state,
     body,
     menuMeta,
-    source: inferred ? "scaffold" : "explicit",
-    archetype: inferred,
+    source: inferred.kind === "custom" ? "explicit" : "scaffold",
+    origin: inferred,
   };
 }
 
-/** Inspect a synthesised page's body to recover the
- *  `archetype` discriminator the legacy IR-level expander
- *  used to set.  When the body matches the synthesiser's
- *  characteristic shape (`List(of: <Agg>)`, `Form(creates: <Agg>)`,
- *  `Detail(of: <Agg>, by: id)`, `Form(runs: <wf>)`, `List(of: view
- *  <View>)`, the standalone Home / WorkflowsIndex / ViewsIndex
- *  sentinels), returns the matching origin.  Otherwise returns
- *  `undefined` — the page is treated as user-explicit. */
-function inferPageArchetype(page: Page, body: ExprIR | undefined): PageArchetypeIR | undefined {
-  if (!body || body.kind !== "call") return undefined;
+/** Infer a page's `origin` from its body shape.  The scaffold macro
+ *  emits canonical body primitives (`scaffoldList(of:)`,
+ *  `scaffoldNewForm(of:)`, `scaffoldWorkflowForm(runs:)`,
+ *  `scaffoldViewList(of:)`, `Stack(scaffoldDetails(of:), …)`,
+ *  `Home()` / `WorkflowsIndex()` / `ViewsIndex()`) — each call name
+ *  maps one-to-one to an origin kind.  Anything else is a
+ *  user-written page → `{ kind: "custom" }`. */
+function inferPageOrigin(body: ExprIR | undefined): PageOriginIR {
+  if (!body || body.kind !== "call") return { kind: "custom" };
   const callName = body.name;
   const argNames = body.argNames ?? [];
-  const argRef = (i: number): string | undefined => {
+  const refArg = (i: number): string | undefined => {
     const arg = body.args[i];
-    if (!arg) return undefined;
-    if (arg.kind === "ref") return arg.name;
-    if (arg.kind === "literal" && arg.lit === "string") return arg.value;
-    return undefined;
+    return arg && arg.kind === "ref" ? arg.name : undefined;
   };
-  // Sentinel page names — Home / WorkflowsIndex / ViewsIndex
-  // synthesised by the AST expander.  Match on the body call's
-  // function name (which the synthesiser sets to the same string
-  // by convention).
+  // Singleton index pages — synthesised by the scaffold macro with
+  // sentinel-call bodies whose name matches the page's role.
   if (callName === "Home") return { kind: "home" };
   if (callName === "WorkflowsIndex") return { kind: "workflows-index" };
   if (callName === "ViewsIndex") return { kind: "views-index" };
-  // Aggregate-list / new / detail are distinguished by the body's
-  // call name (`List` / `Form` with `creates:` / `Detail`).  The
-  // first named arg's value names the aggregate; the page name
-  // suffix (`List` / `New` / `Detail`) lets us double-check kind.
-  if (callName === "List" && argNames[0] === "of") {
-    const aggName = argRef(0);
-    if (!aggName) return undefined;
-    if (aggName.startsWith("view ")) {
-      // `List(of: view <ViewName>)` — view-list page.
-      return { kind: "view-list", viewName: aggName.slice(5), contextName: "" };
-    }
-    return {
-      kind: "aggregate-list",
-      aggregateName: aggName,
-      contextName: "",
-    };
+  // Canonical scaffold body primitives — one call name per origin
+  // kind.  Each names its target explicitly via `of:` / `runs:`.
+  if (callName === "scaffoldList" && argNames[0] === "of") {
+    const aggName = refArg(0);
+    if (aggName) return { kind: "aggregate-list", aggregateName: aggName, contextName: "" };
   }
-  if (callName === "Form" && argNames[0] === "creates") {
-    const aggName = argRef(0);
-    if (!aggName) return undefined;
-    return {
-      kind: "aggregate-new",
-      aggregateName: aggName,
-      contextName: "",
-    };
+  if (callName === "scaffoldNewForm" && argNames[0] === "of") {
+    const aggName = refArg(0);
+    if (aggName) return { kind: "aggregate-new", aggregateName: aggName, contextName: "" };
   }
-  // Explicit-body detail shape emitted by `scaffold` (and any
-  // user-written page that follows the same pattern):
-  // `Stack(scaffoldDetails(of: <Agg>), scaffoldOperations(of: <Agg>))`.
-  // Recognised so the page still gets the conventional emit path
-  // + auto-`id` route param, even though the archetype-driven
-  // body expansion is short-circuited (the body is already
-  // explicit — `expandWalkerPrimitives` keeps it as-is).
+  if (callName === "scaffoldWorkflowForm" && argNames[0] === "runs") {
+    const wfName = refArg(0);
+    if (wfName) return { kind: "workflow-form", workflowName: wfName, contextName: "" };
+  }
+  if (callName === "scaffoldViewList" && argNames[0] === "of") {
+    const viewName = refArg(0);
+    if (viewName) return { kind: "view-list", viewName, contextName: "" };
+  }
+  // Detail pages emit `Stack(scaffoldDetails(of:),
+  // scaffoldOperations(of:), testid:)` — recognised by scanning for
+  // a `scaffoldDetails` child at the top of the Stack.
   if (callName === "Stack") {
     for (const arg of body.args) {
       if (arg.kind !== "call") continue;
       if (arg.name !== "scaffoldDetails") continue;
-      const ofIdx = (arg.argNames ?? []).findIndex((n) => n === "of");
+      const ofIdx = (arg.argNames ?? []).indexOf("of");
       const ofArg = ofIdx >= 0 ? arg.args[ofIdx] : undefined;
       if (!ofArg || ofArg.kind !== "ref") continue;
-      return {
-        kind: "aggregate-detail",
-        aggregateName: ofArg.name,
-        contextName: "",
-      };
+      return { kind: "aggregate-detail", aggregateName: ofArg.name, contextName: "" };
     }
   }
-  if (callName === "Detail" && argNames[0] === "of") {
-    const aggName = argRef(0);
-    if (!aggName) return undefined;
-    return {
-      kind: "aggregate-detail",
-      aggregateName: aggName,
-      contextName: "",
-    };
-  }
-  if (callName === "Form" && argNames[0] === "runs") {
-    const wfName = argRef(0);
-    if (!wfName) return undefined;
-    return {
-      kind: "workflow-form",
-      workflowName: wfName,
-      contextName: "",
-    };
-  }
-  // Doesn't match any synthesiser shape — page is user-explicit.
-  void page;
-  return undefined;
+  return { kind: "custom" };
 }
 
 function lowerComponent(c: Component): ComponentIR {
@@ -1034,11 +972,20 @@ function lowerComponent(c: Component): ComponentIR {
     name: param.name,
     type: lowerType(param.type),
   }));
-  const env: Env = { locals: new Map(), user: undefined };
+  // Component-scoped env: params + state bind so `inferExprType`
+  // resolves refs to their declared types (same reason as
+  // `lowerPage`; see comment there).
+  let env: Env = { locals: new Map(), user: undefined };
+  for (const param of c.params) {
+    env = withLocal(env, param.name, "param", lowerType(param.type));
+  }
   const state: StateFieldIR[] = [];
   for (const decl of c.decls ?? []) {
     if (decl.$type === "StateBlock") {
-      for (const f of decl.fields) state.push(lowerStateField(f, env));
+      for (const f of decl.fields) {
+        env = withLocal(env, f.name, "let", lowerType(f.type));
+        state.push(lowerStateField(f, env));
+      }
     }
   }
   const body = lowerExpr(c.body, env);
