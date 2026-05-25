@@ -766,6 +766,13 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       return "object literal";
     case "ternary":
       return "ternary";
+    case "convert":
+      // Primitive conversions don't lower to SQL — they're per-
+      // host coercions (`String(x)`, `Decimal.to_string`, etc.).
+      // Reject in queryable contexts; the user should restructure
+      // the query to avoid the conversion (e.g. cast on the DB
+      // side via a `derived` projection if needed).
+      return `conversion to '${e.target}'`;
     case "match":
       // `match { ... }` is a value-producing expression but contains
       // arbitrary arm conditions / values; it doesn't translate to a
