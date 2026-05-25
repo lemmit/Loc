@@ -957,6 +957,17 @@ export class DddValidator {
       }
       if (isFunctionDecl(m)) this.checkFunction(m, agg, undefined, accept);
       if (isOperation(m)) this.checkOperation(m, agg, accept);
+      if (isProperty(m) && m.access === "token" && m.type?.optional) {
+        // A `token` field is echoed by the client on every update so the
+        // server can identify the target / detect concurrency conflicts.
+        // A nullable token cannot serve that role — the wire contract
+        // would accept `null` and silently disable the check.
+        accept(
+          "error",
+          `Token field '${m.name}' on aggregate '${agg.name}' cannot be nullable; \`token\` requires a non-optional type.`,
+          { node: m, property: "access", code: "loom.token-nullable" },
+        );
+      }
       const hasExtern = agg.members.some((x) => isOperation(x) && x.extern);
       if (isProperty(m) && m.provenanced && !hasExtern && !this.fieldIsWritten(agg, m.name)) {
         // A provenanced field that no operation ever assigns produces no

@@ -24,6 +24,7 @@ import {
   operationUsesCurrentUser,
 } from "../../../ir/loom-ir.js";
 import { opHasProvSite } from "../../../ir/prov-id.js";
+import { forCreateInput } from "../../../ir/wire-projection.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -148,7 +149,11 @@ export function buildRoutesFile(
   lines.push("");
 
   // Request schemas — Create, per-public-operation, per-find query.
-  const requiredFields = agg.fields.filter((f) => !f.optional);
+  // `forCreateInput` excludes server-controlled fields (`managed`,
+  // `token`, `internal`) from the client-supplied payload, keeping
+  // `immutable` (settable on create) and `secret` (client provides
+  // password hashes / API keys).  Matches the .NET CreateRequest shape.
+  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
   lines.push(
     ...emitWireSchema(
       `const Create${agg.name}Request`,

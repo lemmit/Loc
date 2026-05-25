@@ -702,14 +702,38 @@ BindEntry:
 // Members
 // ---------------------------------------------------------------------------
 
-// `money` admitted as a property name so pre-existing files that
-// named a field `money` (e.g. `pokemon-world.ddd`) keep parsing —
-// adding `money` to the grammar in #498 made it a hard keyword
-// which `name=ID` couldn't admit.  Treat it as a soft keyword in
-// identifier positions everywhere; the only hard-keyword positions
-// remain `PrimitiveType` and `MoneyLit`.
+// Field access modifier — single optional keyword controlling the
+// field's role in input DTOs, update wire shape, and view/API read
+// exposure.  See `src/ir/enrichments.ts` for resolution rules and
+// `FieldIR.access` in `src/ir/loom-ir.ts` for downstream semantics.
+//
+//   editable (default) — client read+write
+//   immutable          — client write on create only
+//   managed            — server-managed; client read-only
+//   token              — server-managed; echoed by client on update (id, version)
+//   internal           — views may read; not exposed via API; no client input
+//   secret             — client write-only; never disclosed in any read
+//
+// All five names are also admitted as identifiers in property/parameter
+// /name-ref positions via `Property.name`, `LooseName`, `NameRefIdent`
+// (same soft-keyword treatment as `money`) so this addition does not
+// break user code that already uses `secret` etc. as a field name.
+FieldAccess returns string:
+    'immutable' | 'managed' | 'token' | 'internal' | 'secret';
+
+// `money` and the five field-access keywords are admitted as property
+// names so pre-existing files that named a field `money` / `secret` /
+// etc. keep parsing.  Hard-keyword positions for `money` remain
+// `PrimitiveType` and `MoneyLit`; for the access modifiers they remain
+// the `FieldAccess` slot below.  See `LooseName` and `NameRefIdent`
+// for the same admission in parameter / expression positions.
 Property:
-    name=(ID | 'money') ':' type=TypeRef (provenanced?='provenanced')? sensitivity=SensitivityClause? ('check' check=Expression)?;
+    name=(ID | 'money' | 'immutable' | 'managed' | 'token' | 'internal' | 'secret')
+    ':' type=TypeRef
+    (provenanced?='provenanced')?
+    sensitivity=SensitivityClause?
+    (access=FieldAccess)?
+    ('check' check=Expression)?;
 
 // Information-flow sensitivity tag(s) on a property.  Tags are bare
 // identifiers, opaque to the compiler — `pii`, `phi`, `cred` are
@@ -772,7 +796,13 @@ LooseName returns string:
     // identifier in field / parameter / property positions; without
     // this, adding `money` to the grammar (#498) silently broke any
     // file that named a field `money` (e.g. `pokemon-world.ddd`).
-    | 'money';
+    | 'money'
+    // Field-access modifier keywords (`FieldAccess` rule) are likewise
+    // soft.  They only act as hard keywords in the optional `access`
+    // slot of `Property`; everywhere else (parameter names, field
+    // names, property bindings) they're admitted as identifiers so
+    // adding them in this PR does not break any user code.
+    | 'immutable' | 'managed' | 'token' | 'internal' | 'secret';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1053,7 +1083,13 @@ NameRefIdent returns string:
     // form.  MoneyLit comes before NameRef in PrimaryExpr, so the
     // parser picks the literal form whenever `(` follows and falls
     // back to NameRef otherwise.
-    ID | 'permissions' | 'ui' | 'api' | 'money';
+    // Field-access modifier keywords (`FieldAccess` rule) are admitted
+    // here so `let s = secret`, `currentUser.token`, etc. keep working
+    // even though `secret`/`token`/etc. are reserved in the access slot
+    // of a `Property` declaration.  Same soft-keyword treatment `money`
+    // gets above.
+    ID | 'permissions' | 'ui' | 'api' | 'money'
+       | 'immutable' | 'managed' | 'token' | 'internal' | 'secret';
 
 // ---------------------------------------------------------------------------
 // Terminals

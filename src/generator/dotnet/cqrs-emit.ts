@@ -6,6 +6,7 @@ import type {
   TypeIR,
 } from "../../ir/loom-ir.js";
 import { findUsesCurrentUser, operationUsesCurrentUser } from "../../ir/loom-ir.js";
+import { forCreateInput } from "../../ir/wire-projection.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import {
   aggregateResponseParams,
@@ -54,7 +55,11 @@ export function emitCqrs(
   options?: { routePrefix?: string; emitTrace?: boolean },
 ): void {
   const aggFolder = plural(agg.name);
-  const requiredFields = agg.fields.filter((f) => !f.optional);
+  // Create-request payload: required + access-permitted client input.
+  // `forCreateInput` excludes `managed` / `token` / `internal` (server-
+  // owned or domain-only), keeps `immutable` (settable at creation) and
+  // `secret` (client supplies password hashes / API keys).
+  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
 
   emitResponseDtos(agg, ctx, ns, aggFolder, out);
   emitRequestDtos(agg, ctx, ns, aggFolder, out);
@@ -126,7 +131,11 @@ function emitRequestDtos(
         .join(", "),
     });
   }
-  const requiredFields = agg.fields.filter((f) => !f.optional);
+  // Create-request payload: required + access-permitted client input.
+  // `forCreateInput` excludes `managed` / `token` / `internal` (server-
+  // owned or domain-only), keeps `immutable` (settable at creation) and
+  // `secret` (client supplies password hashes / API keys).
+  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
   records.push({
     name: `Create${agg.name}Request`,
     params: requiredFields

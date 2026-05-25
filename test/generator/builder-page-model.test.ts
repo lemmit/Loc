@@ -122,7 +122,7 @@ describe("page-builder model — primitive coverage", () => {
     "IdLink(order.id, of: Order)",
     'Field("Your name", bind: userName)',
     'NumberField("Quantity", bind: qty)',
-    'PasswordField("Password", bind: secret)',
+    'PasswordField("Password", bind: passphrase)',
     'Toggle("Notifications", bind: notifications)',
     'Image(src: "/logo.png", alt: "Logo")',
     'Avatar(alt: "User")',

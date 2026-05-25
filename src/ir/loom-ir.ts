@@ -76,6 +76,21 @@ export interface ParamIR {
   type: TypeIR;
 }
 
+/** Resolved access role for a stored field.  Controls the field's
+ * presence in create/update inputs, the update wire envelope, and
+ * view/API read exposure.  See `src/ir/enrichments.ts` for resolution
+ * rules.
+ *
+ *   editable  — default; client may read and write freely
+ *   immutable — client may write on create only; read otherwise
+ *   managed   — server lifecycle owns the value; client read-only
+ *   token     — server-managed but echoed by the client on update
+ *               (identity, concurrency); always non-nullable
+ *   internal  — views may read; never exposed via API; no client input
+ *   secret    — client may write (create + update); never disclosed
+ *               in any read */
+export type FieldAccess = "editable" | "immutable" | "managed" | "token" | "internal" | "secret";
+
 export interface FieldIR {
   name: string;
   type: TypeIR;
@@ -90,6 +105,15 @@ export interface FieldIR {
    * phases wire it through the wire-shape, DTO emitters, and sink
    * type-checking.  See `docs/proposals/sensitivity-and-compliance.md`. */
   sensitivity?: SensitivityTags;
+  /** Resolved access role.  Populated by `enrichLoomModel`; lowering
+   * leaves this undefined when the source declared no modifier so
+   * enrichment can apply its precedence (declared > default).
+   * After enrichment every `FieldIR` carries a value. */
+  access?: FieldAccess;
+  /** Where `access` came from.  Diagnostic-only: used by the validator
+   * to phrase conflict messages and by the wire-spec diff to explain
+   * the field's role.  Same nullability as `access`. */
+  accessSource?: "declared" | "default";
 }
 
 export interface ContainmentIR {
@@ -205,6 +229,12 @@ export interface WireField {
   optional: boolean;
   /** Where the wire field came from in the IR. */
   source: WireFieldSource;
+  /** Resolved access role.  Always set after enrichment.  For
+   * `source: "id"` this is always `"token"`; for `source: "property"`
+   * it mirrors the originating `FieldIR.access`; for `"containment"`
+   * and `"derived"` it is `"editable"` until a real case demands
+   * otherwise. */
+  access: FieldAccess;
 }
 
 export interface AggregateIR {

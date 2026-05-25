@@ -11,6 +11,7 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../ir/loom-ir.js";
+import { forApiRead, forCreateInput } from "../../ir/wire-projection.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { ApiRoute } from "./api-emit.js";
 
@@ -458,13 +459,17 @@ function renderValueObjectSchema(vo: ValueObjectIR, webModule: string): string {
 
 function renderPartResponseSchema(part: EntityPartIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.${part.name}Response`;
-  const wireFields = wireShapeFor(part);
+  // `forApiRead` drops `internal` and `secret` fields from the OpenAPI
+  // response schema so it matches what the Phoenix LiveView controller
+  // actually serves — same contract the .NET / Hono / React backends
+  // follow.
+  const wireFields = forApiRead(wireShapeFor(part));
   return renderSchemaModule(moduleName, `${part.name}Response`, wireFieldsToProps(wireFields));
 }
 
 function renderAggregateResponseSchema(agg: AggregateIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.${agg.name}Response`;
-  const wireFields = wireShapeFor(agg);
+  const wireFields = forApiRead(wireShapeFor(agg));
   return renderSchemaModule(moduleName, `${agg.name}Response`, wireFieldsToProps(wireFields));
 }
 
@@ -488,8 +493,13 @@ end
 
 function renderCreateRequestSchema(agg: AggregateIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.Create${agg.name}Request`;
-  // Create request carries required (non-optional) fields only, matching Hono
-  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = agg.fields
+  // Create request carries required (non-optional) fields that the
+  // client may supply.  `forCreateInput` drops server-controlled fields
+  // (`managed`, `token`, `internal`); keeps `immutable` and `secret`.
+  // Matches the .NET / Hono / React CreateRequest shapes.
+  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = forCreateInput(
+    agg.fields,
+  )
     .filter((f: FieldIR) => !f.optional)
     .map((f: FieldIR) => ({ name: f.name, type: f.type, optional: false }));
   return renderSchemaModule(moduleName, `Create${agg.name}Request`, fields);
@@ -547,10 +557,11 @@ function renderViewResponseSchema(
       optional: f.optional,
     }));
   } else {
-    // Shorthand view: use source aggregate's wire shape
+    // Shorthand view: use source aggregate's wire shape, filtered
+    // for API exposure — drops `internal` and `secret` fields.
     const sourceAgg = ctx.aggregates.find((a) => a.name === view.aggregateName);
     if (sourceAgg) {
-      const wireFields = wireShapeFor(sourceAgg);
+      const wireFields = forApiRead(wireShapeFor(sourceAgg));
       fields = wireFieldsToProps(wireFields);
     } else {
       fields = [];

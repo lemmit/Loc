@@ -101,15 +101,18 @@ export type DddKeywordNames =
     | "hono"
     | "id"
     | "ids"
+    | "immutable"
     | "implements"
     | "import"
     | "inMemory"
     | "int"
+    | "internal"
     | "invariant"
     | "kafka"
     | "let"
     | "link"
     | "long"
+    | "managed"
     | "mantine"
     | "match"
     | "meilisearch"
@@ -147,6 +150,7 @@ export type DddKeywordNames =
     | "requires"
     | "route"
     | "search"
+    | "secret"
     | "section"
     | "sensitive"
     | "serializable"
@@ -166,6 +170,7 @@ export type DddKeywordNames =
     | "theme"
     | "this"
     | "title"
+    | "token"
     | "transactional"
     | "true"
     | "type"
@@ -246,6 +251,12 @@ export function isExpression(item: unknown): item is Expression {
     return reflection.isInstance(item, Expression);
 }
 
+export type FieldAccess = 'immutable' | 'internal' | 'managed' | 'secret' | 'token';
+
+export function isFieldAccess(item: unknown): item is FieldAccess {
+    return item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret';
+}
+
 export type Framework = 'phoenixLiveView' | 'react';
 
 export function isFramework(item: unknown): item is Framework {
@@ -272,10 +283,10 @@ export function isLiteralExpr(item: unknown): item is LiteralExpr {
     return reflection.isInstance(item, LiteralExpr);
 }
 
-export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'component' | 'contains' | 'contexts' | 'design' | 'events' | 'framework' | 'id' | 'link' | 'menu' | 'modules' | 'money' | 'page' | 'permissions' | 'primary' | 'route' | 'search' | 'section' | 'state' | 'static' | 'targets' | 'title' | 'ui' | 'views' | 'workflows' | string;
+export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'component' | 'contains' | 'contexts' | 'design' | 'events' | 'framework' | 'id' | 'immutable' | 'internal' | 'link' | 'managed' | 'menu' | 'modules' | 'money' | 'page' | 'permissions' | 'primary' | 'route' | 'search' | 'secret' | 'section' | 'state' | 'static' | 'targets' | 'title' | 'token' | 'ui' | 'views' | 'workflows' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'id' | 'modules' | 'permissions' | 'ui' | 'views' | 'workflows' | string;
@@ -320,10 +331,10 @@ export function isNamedDecl(item: unknown): item is NamedDecl {
     return reflection.isInstance(item, NamedDecl);
 }
 
-export type NameRefIdent = 'api' | 'money' | 'permissions' | 'ui' | string;
+export type NameRefIdent = 'api' | 'immutable' | 'internal' | 'managed' | 'money' | 'permissions' | 'secret' | 'token' | 'ui' | string;
 
 export function isNameRefIdent(item: unknown): item is NameRefIdent {
-    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type PageProp = BodyProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
@@ -1374,8 +1385,9 @@ export function isPrimitiveType(item: unknown): item is PrimitiveType {
 export interface Property extends AstNode {
     readonly $container: Aggregate | EntityPart | EventDecl | ValueObject | View;
     readonly $type: 'Property';
+    access?: FieldAccess;
     check?: Expression;
-    name: 'money' | string;
+    name: 'immutable' | 'internal' | 'managed' | 'money' | 'secret' | 'token' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;
@@ -2853,6 +2865,7 @@ export class DddAstReflection extends AbstractAstReflection {
                 return {
                     name: Property,
                     properties: [
+                        { name: 'access' },
                         { name: 'check' },
                         { name: 'name' },
                         { name: 'provenanced', defaultValue: false },

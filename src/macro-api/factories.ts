@@ -18,6 +18,7 @@ import type {
   AggregateMember,
   AssignOrCallStmt,
   Expression,
+  FieldAccess,
   IdType,
   LValue,
   MemberAccess,
@@ -142,8 +143,19 @@ export function namedType(
 
 /** A property declaration on an aggregate, entity part, value
  * object, etc.  Lives inside the aggregate body once the expander
- * splices it in. */
-export function field(name: string, type: TypeRef, opts: { provenanced?: boolean } = {}): Property {
+ * splices it in.
+ *
+ * `opts.access` sets the field's role for input-shaping and view/API
+ * exposure (see `FieldAccess` in `src/language/ddd.langium` and the
+ * resolution rules in `src/ir/enrichments.ts`).  Trait macros that
+ * contribute server-owned fields should set this — e.g. `auditable`
+ * passes `access: "managed"` for `createdAt`/`updatedAt`; `softDeletable`
+ * passes `access: "internal"` for `isDeleted`. */
+export function field(
+  name: string,
+  type: TypeRef,
+  opts: { provenanced?: boolean; access?: FieldAccess } = {},
+): Property {
   const origin = currentOrigin();
   const prop: Property = tag(
     {
@@ -151,6 +163,7 @@ export function field(name: string, type: TypeRef, opts: { provenanced?: boolean
       name,
       type,
       provenanced: opts.provenanced ?? false,
+      ...(opts.access ? { access: opts.access } : {}),
     } as unknown as Property,
     origin,
   );
@@ -302,14 +315,68 @@ export function targetFields(target: Aggregate): readonly Property[] {
   return (target.members ?? []).filter(isProperty);
 }
 
-/** Subset of `targetFields` excluding fields contributed by other
- * macros.  Useful for crudish-style macros that want to expose only
- * the user's own writable surface, ignoring macro-added bookkeeping
- * fields like createdAt/updatedAt/isDeleted.  Detection is by
- * presence of the macro-origin tag — fields without one are
- * user-written. */
-export function writableUserFields(target: Aggregate): readonly Property[] {
-  return targetFields(target).filter((f) => (f as any)[ORIGIN_PROP] === undefined);
+/** Subset of `targetFields` suitable for use as `update`-operation
+ * parameters.  Two filters compose:
+ *
+ *   1. **Origin tag** — exclude fields contributed by other macros.
+ *      Catches macro-added bookkeeping (createdAt, isDeleted, etc.)
+ *      regardless of whether those macros set an access modifier.
+ *   2. **Access modifier** — exclude fields whose `access` puts them
+ *      outside the editable update payload: `immutable` (create-only),
+ *      `managed` (server-owned), `token` (echoed precondition like
+ *      `id`/`version`), `internal` (never client-input).  `secret`
+ *      STAYS — write-only fields belong IN update inputs (password
+ *      changes etc.).
+ *
+ * The two filters cover non-overlapping concerns: a user-declared
+ * `slug: string immutable` is excluded by (2) alone; a macro-added
+ * `createdAt: datetime` is excluded by (1) regardless of whether the
+ * macro thought to set `access: "managed"`.
+ *
+ * Operation-specific name on purpose: a future `writableCreateFields`
+ * will keep `immutable` (assignable on create) and exclude the
+ * server-owned ones differently.  See the access-modifier matrix in
+ * `src/ir/loom-ir.ts` (`FieldAccess`) for the canonical semantics. */
+export function writableUpdateFields(target: Aggregate): readonly Property[] {
+  return targetFields(target).filter((f) => {
+    if ((f as any)[ORIGIN_PROP] !== undefined) return false;
+    const access = (f as { access?: FieldAccess }).access;
+    if (
+      access === "immutable" ||
+      access === "managed" ||
+      access === "token" ||
+      access === "internal"
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
+/** Subset of `targetFields` suitable for use as `create`-operation
+ * parameters.  Same origin-tag filter as `writableUpdateFields` but
+ * the access filter is symmetric:
+ *
+ *   1. **Origin tag** — exclude fields contributed by other macros
+ *      (audit timestamps, soft-delete state, etc.).
+ *   2. **Access modifier** — exclude `managed`, `token`, and
+ *      `internal` (the same three that are excluded on update).
+ *      `immutable` is KEPT — it's the whole point: settable on
+ *      create, frozen after.  `secret` is KEPT — client supplies
+ *      password hashes / API keys at creation time.
+ *
+ * Companion to `writableUpdateFields`.  When `crudish` grows a
+ * `create` operation in a future phase, this is the helper it
+ * iterates to derive the request-body shape. */
+export function writableCreateFields(target: Aggregate): readonly Property[] {
+  return targetFields(target).filter((f) => {
+    if ((f as any)[ORIGIN_PROP] !== undefined) return false;
+    const access = (f as { access?: FieldAccess }).access;
+    if (access === "managed" || access === "token" || access === "internal") {
+      return false;
+    }
+    return true;
+  });
 }
 
 // ---------------------------------------------------------------------------

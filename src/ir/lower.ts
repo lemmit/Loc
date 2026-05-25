@@ -1553,6 +1553,7 @@ function idFollowPath(e: ExprIR): string[] | undefined {
 function lowerField(p: Property): FieldIR {
   const sensitivity = fieldSensitivity(p);
   const baseType = lowerType(p.type);
+  const declared = p.access as FieldIR["access"];
   return {
     name: p.name,
     // The field's `TypeIR` carries the same tag set as the field's
@@ -1563,6 +1564,10 @@ function lowerField(p: Property): FieldIR {
     optional: !!p.type?.optional,
     provenanced: !!p.provenanced,
     ...(sensitivity ? { sensitivity } : {}),
+    // `access` lives on the field, not the type — it's a field role
+    // (input-shaping, view exposure) rather than a type property.
+    // Enrichment fills in the default / inferred-from-type cases.
+    ...(declared ? { access: declared, accessSource: "declared" as const } : {}),
   };
 }
 

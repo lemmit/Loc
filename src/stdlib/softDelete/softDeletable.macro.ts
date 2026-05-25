@@ -29,12 +29,20 @@ import { boolLit, callExpr } from "../../macro-api/ui-factories.js";
  *
  *   aggregate Order {
  *     subject: string
- *     isDeleted: bool
- *     deletedAt: datetime?
+ *     isDeleted: bool internal
+ *     deletedAt: datetime? managed
  *     operation softDelete() { isDeleted := true; deletedAt := now() }
  *     operation restore()    { isDeleted := false; deletedAt := null }
  *     implements "softDeletable"
  *   }
+ *
+ * `isDeleted` is `internal` — never exposed via API (the soft-delete
+ * filter hides deleted rows from reads anyway, and admin UIs that
+ * want to see the flag can still render it from view-side data).
+ * `deletedAt` is `managed` — the `softDelete` operation sets it,
+ * not the client.  Both modifiers feed `crudish`'s
+ * `writableUpdateFields` filter so neither field appears in a
+ * generated update operation's parameters.
  *
  * Compose with `softDelete` at context level for the runtime filter,
  * or use `softDeleteByDefault` to apply both in one go. */
@@ -49,8 +57,8 @@ export default defineMacro({
     'or hand-written `filter for "softDeletable" ...`.',
   expand() {
     return [
-      field("isDeleted", primType("bool")),
-      field("deletedAt", primType("datetime", { optional: true })),
+      field("isDeleted", primType("bool"), { access: "internal" }),
+      field("deletedAt", primType("datetime", { optional: true }), { access: "managed" }),
       operation(
         "softDelete",
         [],
