@@ -603,8 +603,11 @@ COPY rel rel
 RUN mix release
 
 FROM \${RUNNER_IMAGE}
+# wget is here so the compose healthcheck (which shells out to wget) works
+# in the slim Debian runner image — without it the container reports
+# unhealthy even though the Phoenix endpoint is responding.
 RUN apt-get update -y \\
-    && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates \\
+    && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates wget \\
     && apt-get clean && rm -f /var/lib/apt/lists/*_*
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8

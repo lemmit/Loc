@@ -23,5 +23,9 @@ ENV NODE_ENV=production PORT=3000
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/package.json ./package.json
+# Drizzle's runtime migrator reads migration SQL + meta/_journal.json
+# from disk; without these the process crashes on boot with
+# "Can't find meta/_journal.json file".
+COPY --from=build /app/db/migrations ./db/migrations
 EXPOSE 3000
 CMD ["node", "dist/index.js"]

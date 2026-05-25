@@ -267,6 +267,23 @@ function emitOperationCommandsAndHandlers(
           requestName: reqName,
         }),
       );
+      // Dev-stub implementation — decorated with [ExternHandler] so the
+      // Scrutor scan in Program.cs picks it up automatically.  Without it
+      // the boot-time check throws InvalidOperationException("Missing
+      // [ExternHandler] ...").  REPLACE with a real handler in
+      // production by adding your own [ExternHandler] class; multiple
+      // [ExternHandler] registrations for the same interface result in
+      // a DI error, so delete the stub when you ship your own.
+      out.set(
+        `Application/${aggFolder}/Handlers/DevStub${upperFirst(op.name)}${agg.name}Handler.cs`,
+        renderExternHandlerStub({
+          ns,
+          aggName: agg.name,
+          opName: op.name,
+          ifaceName,
+          requestName: reqName,
+        }),
+      );
       out.set(
         `Application/${aggFolder}/Commands/${upperFirst(op.name)}Handler.cs`,
         renderCommandHandler({
@@ -359,6 +376,46 @@ namespace ${args.ns}.Application.${plural(args.aggName)}.Handlers;
 public interface ${args.ifaceName}
 {
     Task HandleAsync(${args.aggName} aggregate, ${args.requestName} request, CancellationToken ct);
+}
+`;
+}
+
+/**
+ * Permissive dev stub for an extern operation handler — emitted alongside
+ * the user-facing interface so a generated app boots end-to-end before the
+ * user has wired their own implementation.  Body is a no-op (yields
+ * `Task.CompletedTask`); the framework still runs preconditions and
+ * invariants around the call.  Replace by deleting the stub file and
+ * adding your own [ExternHandler] class.
+ */
+function renderExternHandlerStub(args: {
+  ns: string;
+  aggName: string;
+  opName: string;
+  ifaceName: string;
+  requestName: string;
+}): string {
+  const stubName = `DevStub${upperFirst(args.opName)}${args.aggName}Handler`;
+  return `// Auto-generated.
+using System.Threading;
+using System.Threading.Tasks;
+using ${args.ns}.Application.${plural(args.aggName)}.Requests;
+using ${args.ns}.Domain.Common;
+using ${args.ns}.Domain.${plural(args.aggName)};
+
+namespace ${args.ns}.Application.${plural(args.aggName)}.Handlers;
+
+/// <summary>Permissive dev stub for the <c>${args.opName}</c> extern op.
+/// Replace by deleting this file and adding your own
+/// <c>[ExternHandler]</c>-decorated class implementing
+/// <see cref="${args.ifaceName}"/>.</summary>
+[ExternHandler]
+public sealed class ${stubName} : ${args.ifaceName}
+{
+    public Task HandleAsync(${args.aggName} aggregate, ${args.requestName} request, CancellationToken ct)
+    {
+        return Task.CompletedTask;
+    }
 }
 `;
 }
