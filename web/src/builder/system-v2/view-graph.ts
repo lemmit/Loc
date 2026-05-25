@@ -302,21 +302,22 @@ function moduleView(ast: Model, name: string): ViewGraph {
   );
 }
 
-// Vertical (top→bottom) tier order for the context view. Consumers feed
-// *down* into aggregates which fan *down* into events — every relationship
-// reads top-to-bottom, which matches the React Flow nodes' Top/Bottom
-// handles and avoids edges curling around the sides of nodes.
+// Vertical (top→bottom) tier order for the context view. Workflows sit on
+// the topmost tier so their `uses` edges to repos / aggregates / events all
+// drop straight downward through the React Flow Top/Bottom handles, with no
+// sibling-to-sibling routing.
 //
-// Row 0: repository | view | workflow  (consumers / entry points)
-// Row 1: aggregate | valueobject       (the core model)
-// Row 2: event                          (outcomes)
+// Row 0: workflow                      (orchestrators — feed everything below)
+// Row 1: repository | view             (read/write entry points)
+// Row 2: aggregate | valueobject       (the core model)
+// Row 3: event                          (outcomes)
 const CONTEXT_TIER: Partial<Record<ViewKind, number>> = {
-  repository: 0,
-  view: 0,
   workflow: 0,
-  aggregate: 1,
-  valueobject: 1,
-  event: 2,
+  repository: 1,
+  view: 1,
+  aggregate: 2,
+  valueobject: 2,
+  event: 3,
 };
 
 const CONTEXT_KIND: Partial<Record<string, ViewKind>> = {
@@ -345,28 +346,35 @@ function contextLayout(
     if (list) list.push(it);
     else byTier.set(tier, [it]);
   }
-  // Pass 1: place tier 1 (aggregates + value objects) first — they define the
-  // X coordinates everyone else aligns to. Aggregates come first so they
-  // sit to the left of any value objects in the same tier.
-  const aggregates = (byTier.get(1) ?? []).filter((i) => i.kind === "aggregate");
-  const peers = (byTier.get(1) ?? []).filter((i) => i.kind !== "aggregate");
+  // Pass 1: place the aggregate-tier first — it defines the X coordinates
+  // everyone else aligns to. Aggregates come first so they sit to the left of
+  // any value objects in the same tier.
+  const aggregateTier = CONTEXT_TIER.aggregate ?? 1;
+  const aggregates = (byTier.get(aggregateTier) ?? []).filter((i) => i.kind === "aggregate");
+  const peers = (byTier.get(aggregateTier) ?? []).filter((i) => i.kind !== "aggregate");
   const placed = new Map<string, { x: number; y: number }>();
-  const aggregateX = new Map<string, number>();
+  // Name → X for every node already placed (not just aggregates). Anchors
+  // resolve against this so a workflow can centre over a repo, an event can
+  // centre over an aggregate, etc.
+  const placedX = new Map<string, number>();
   let col = 0;
   for (const a of aggregates) {
-    placed.set(a.id, { x: col * CTX_COL_W, y: 1 * CTX_ROW_H });
-    aggregateX.set(a.name, col * CTX_COL_W);
+    placed.set(a.id, { x: col * CTX_COL_W, y: aggregateTier * CTX_ROW_H });
+    placedX.set(a.name, col * CTX_COL_W);
     col++;
   }
   for (const p of peers) {
-    placed.set(p.id, { x: col * CTX_COL_W, y: 1 * CTX_ROW_H });
+    placed.set(p.id, { x: col * CTX_COL_W, y: aggregateTier * CTX_ROW_H });
+    placedX.set(p.name, col * CTX_COL_W);
     col++;
   }
-  // Pass 2: place each non-pivot tier. Anchored nodes get the X of their
-  // anchor (preferring the average of multiple anchors); free nodes fall into
-  // the next available column. X collisions get bumped to the right.
-  for (const [tier, bucket] of byTier) {
-    if (tier === 1) continue;
+  // Pass 2: place each non-pivot tier in order of distance from pivot so an
+  // outer-tier anchor (e.g. workflow → repository) lands on already-placed X.
+  const otherTiers = [...byTier.keys()]
+    .filter((t) => t !== aggregateTier)
+    .sort((a, b) => Math.abs(a - aggregateTier) - Math.abs(b - aggregateTier));
+  for (const tier of otherTiers) {
+    const bucket = byTier.get(tier)!;
     const taken = new Set<number>();
     let nextCol = 0;
     // Anchored first so they grab their preferred X; free nodes fill gaps.
@@ -375,7 +383,7 @@ function contextLayout(
     );
     for (const it of ordered) {
       let x: number;
-      const anchored = it.anchors?.map((n) => aggregateX.get(n)).filter((v): v is number => v !== undefined) ?? [];
+      const anchored = it.anchors?.map((n) => placedX.get(n)).filter((v): v is number => v !== undefined) ?? [];
       if (anchored.length > 0) {
         const avg = Math.round(anchored.reduce((a, b) => a + b, 0) / anchored.length);
         x = avg;
@@ -391,6 +399,7 @@ function contextLayout(
         nextCol++;
       }
       placed.set(it.id, { x, y: tier * CTX_ROW_H });
+      placedX.set(it.name, x);
     }
   }
   return items.map((it) => ({
@@ -437,8 +446,12 @@ function contextView(ast: Model, name: string): ViewGraph {
       const a = rel.viewSource.get(childName);
       if (a) anchors = [a];
     } else if (kind === "workflow") {
-      const set = rel.workflowUses.get(childName);
-      if (set && set.size > 0) anchors = [...set];
+      // Anchor a workflow over every aggregate AND repository it references —
+      // its column then lands above the cluster of state it actually touches.
+      const anchorSet = new Set<string>();
+      for (const a of rel.workflowUses.get(childName) ?? []) anchorSet.add(a);
+      for (const r of rel.workflowUsesRepo.get(childName) ?? []) anchorSet.add(r);
+      if (anchorSet.size > 0) anchors = [...anchorSet];
     } else if (kind === "event") {
       // Anchor an event to every aggregate that emits it — the layout
       // averages their X so the event sits between its sources.
@@ -485,6 +498,17 @@ function contextView(ast: Model, name: string): ViewGraph {
         id: `wf-uses:${wf}->${agg}`,
         source: nid("workflow", wf),
         target: nid("aggregate", agg),
+        kind: "reads",
+        label: "uses",
+      });
+    }
+  }
+  for (const [wf, set] of rel.workflowUsesRepo) {
+    for (const repo of set) {
+      edges.push({
+        id: `wf-uses-repo:${wf}->${repo}`,
+        source: nid("workflow", wf),
+        target: nid("repository", repo),
         kind: "reads",
         label: "uses",
       });

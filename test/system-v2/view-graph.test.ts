@@ -113,6 +113,30 @@ describe("Model v2 — view-graph per level", () => {
     expect(repoEdges[0]?.kind).toBe("reads");
   });
 
+  it("context view emits a `reads` edge from a workflow to every repository it uses", () => {
+    const D = `context Sales {
+  aggregate Order {
+    status: string
+    operation confirm() {
+      status := "ok"
+    }
+  }
+  repository Orders for Order {
+    find byId(id: int): Order? where this.id == id
+  }
+  workflow place(x: int) {
+    let o = Orders.byId(x)
+    o.confirm()
+  }
+}`;
+    const g = buildViewGraph(parse(D), [{ kind: "context", name: "Sales" }]);
+    const wfRepo = g.edges.filter((e) => e.id.startsWith("wf-uses-repo:"));
+    expect(wfRepo.map((e) => `${e.source}->${e.target}`)).toEqual([
+      "workflow:place->repository:Orders",
+    ]);
+    expect(wfRepo[0]?.kind).toBe("reads");
+  });
+
   it("context view emits an `emits` edge for each aggregate→event pair", () => {
     const D = `context Sales {
   event Placed {
