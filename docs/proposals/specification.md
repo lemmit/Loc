@@ -326,6 +326,274 @@ generic form is insufficient.
 Validator: `loom.specification-impure` (ERROR) on any forbidden
 form. Specifications are read-only by construction.
 
+## Operation guards — the `when` clause (canCommand pattern)
+
+A very common DDD pattern: every state-changing operation has a
+paired pure predicate answering "can this run *right now* against
+the current aggregate state?" Examples: `approve()` / `canApprove`,
+`cancel()` / `canCancel`, `ship()` / `canShip`. Three consumers:
+
+1. **Server-side guard** — gate the operation; on false, return a
+   typed error instead of running.
+2. **API query** — expose the predicate as a GET endpoint so the
+   UI can ask without invoking the side-effecting operation.
+3. **UI affordance** — the response drives button enabled/disabled
+   state, tooltips ("Cannot approve: already shipped"), conditional
+   rendering.
+
+Today authors duplicate the predicate across the operation body
+(as `precondition`) and a hand-written query method (for the UI).
+They drift; the UI guesses at the rules. NakedObjects pioneered
+the unified surface for this pattern (Pawson's framework was
+generating button states from server-side predicates back in 2004);
+Loom now has a first-class language construct for it.
+
+### Surface — `when <predicate>` on operations
+
+```
+aggregate Order {
+  status: OrderStatus
+  rejected: bool
+
+  # (1) Inline boolean expression — `self.` implicit (like invariants):
+  operation cancel()
+    when status != Shipped && status != Cancelled
+  { status := Cancelled }
+
+  # (2) Aggregate function — pure, reusable:
+  function canApprove(): bool = status == Submitted && !rejected
+  operation approve()
+    when canApprove
+  { status := Approved }
+
+  # (3) Specification — with self auto-passed (see §"How `self`
+  #     resolves in specifications" below):
+  operation forceClose()
+    when canApprove && CanForceClose
+  { status := Closed }
+}
+
+specification CanForceClose of Order {
+  check: self.status != Closed && currentUser.role == "manager"
+}
+```
+
+The `when <expr>` clause sits after the operation's parameter list,
+before the body. The compiler uses it in three places: the
+synthesised api wrapper's server-side gate, the auto-exposed
+can-query endpoint, and the UI form-generator's button-state hook.
+
+### How `self` resolves in specifications
+
+Specifications come in two declaration shapes, distinguished by
+what `of <T>` names:
+
+**Form A — spec over an aggregate type** (`of <Aggregate>`).
+Inside the `check:` body, `self` is the aggregate instance being
+checked. This mirrors how `invariant` / `function` / `derived` on
+an aggregate see `self`:
+
+```
+specification CanForceClose of Order {
+  check: self.status != Closed && currentUser.role == "manager"
+}
+```
+
+At the `when` callsite, `self` is auto-passed — no parens needed
+when the spec is used directly:
+
+```
+operation forceClose() when CanForceClose { ... }
+```
+
+For Form A specs that need additional explicit args, they sit
+after `self` in the parameter list:
+
+```
+specification CanForceCloseBy(role: string) of Order {
+  check: self.status != Closed && currentUser.role == role
+}
+
+operation forceClose()
+  when CanForceCloseBy("manager")    # self implicit; "manager" explicit
+{ ... }
+```
+
+**Form B — spec over a value type** (`of bool`, `of <Primitive>`,
+`of <ValueObject>`). No implicit `self`; all args explicit:
+
+```
+specification HasManagerRole of bool {
+  check: currentUser.role == "manager"
+}
+
+operation forceClose() when canApprove && HasManagerRole { ... }
+```
+
+Or with explicit args:
+
+```
+specification HasPermission(perm: Permission) of bool {
+  check: currentUser.permissions.contains(perm)
+}
+
+operation forceClose()
+  when canApprove && HasPermission(permissions.ordersForceClose)
+{ ... }
+```
+
+**Value-specs with explicit `check(x: T)`** (the existing `from
+<Spec>(args)` use case) use whatever parameter name the author
+gives — no `self` involved, since those specs aren't bound to an
+aggregate:
+
+```
+specification ValidOrderAmount(customerId: Customer id) of decimal {
+  check(amount: decimal): 0 < amount && amount <= Customers.getById(customerId).creditLimit
+}
+```
+
+### What can appear in a `when` expression
+
+| Source | Example | Notes |
+|---|---|---|
+| Aggregate fields via `self` | `status == Submitted` | Bare names resolve to `self.<field>` (same as in `invariant`). |
+| Aggregate functions | `canApprove` | Parameterless `function` on the same aggregate. |
+| Aggregate `derived` fields | `isActive` | Same as field access. |
+| Ambient context | `currentUser.role == "manager"` | Per `docs/auth.md`. |
+| Form A specification | `CanForceClose` | `self` auto-passed. |
+| Form B specification | `HasManagerRole` | No `self` arg. |
+| Spec with extra args | `CanForceCloseBy("manager")` | Args supplied at callsite. |
+| Composition | `canApprove && HasManagerRole` | `&&`, `\|\|`, `!` over any of the above. |
+
+**Not allowed** in a `when` expression:
+
+- ✗ Operation parameters (`when amount > 0` where `amount` is an op param). For arg-aware checks, use `from <Spec>(args)` on the parameter.
+- ✗ Inline `Repo.getById(...)` calls. Keep cross-aggregate loads inside named functions or specs so the `when` expression stays declarative.
+- ✗ Mutating expressions or side effects.
+
+Validator: `loom.when-references-op-param` (ERROR);
+`loom.when-inline-repo-load` (WARNING — discouraged but not banned).
+
+### Auto-derived API endpoints
+
+For each operation with a `when` clause, the api auto-exposes
+two endpoints (in addition to today's `POST /aggregates/<agg>/{id}/<op>`):
+
+| Endpoint | Behaviour |
+|---|---|
+| `POST /aggregates/<agg>/{id}/<op>` | (existing — augmented) Loads aggregate; evaluates `when` predicate; on false → 409 ProblemDetails (`NotAllowed`); on true → runs op + saves + returns result. |
+| `GET /aggregates/<agg>/{id}/can-<op>` | (new) Loads aggregate; evaluates `when` predicate; returns `{ allowed: bool, reason?: string }`. No mutation. Same authorisation as the op. |
+
+The kebab-case derivation: `approve` → `can-approve`, `forceClose`
+→ `can-force-close`. Predictable.
+
+### Response shape for `can-X`
+
+```json
+{ "allowed": true }
+```
+
+```json
+{ "allowed": false, "reason": "CanForceClose" }
+```
+
+The `reason` field (when `allowed: false`) carries the **name of
+the failing predicate sub-expression** — function name (`canApprove`),
+spec name (`CanForceClose`), or `"inline"` for an inline expression.
+For composed predicates (`canApprove && HasManagerRole`), reason is
+the name of the first failing operand.
+
+v1 keeps reason as a short identifier (string). UI consumers map it
+to localised messages via their own catalogue. Richer per-predicate
+reasons (e.g., explicit "rejected by manager" instead of
+"HasManagerRole") deferred to v2 — author returns a structured
+type instead of bool.
+
+### Server-side error when the guard fails
+
+When the operation is invoked and the `when` predicate is false,
+the wrapper returns a typed error instead of running:
+
+```
+# Stdlib payload — src/stdlib/payloads/errors.ddd
+error NotAllowed {
+  operation: string         # e.g., "approve"
+  aggregate: string         # e.g., "Order"
+  id: string                # the aggregate id
+  reason: string?
+}
+```
+
+Default status: **409 Conflict** (resource state mismatch — REST
+canonical for "system understood your request but the current
+state doesn't allow it"). Authors override at the api surface as
+usual:
+
+```
+api SalesApi from Sales {
+  status NotAllowed 422   # if 422 reads better in this context
+}
+```
+
+`NotAllowed` is distinct from:
+- `precondition` violations → 500 (bug-shaped, env-aware exposure).
+- `from <Spec>` mismatches → 422 (`InvalidSpecMember`, per-input).
+- `requires` authorization failure → 403 (per `docs/auth.md`).
+
+Different layers, different concerns. `NotAllowed` is "the
+aggregate state doesn't allow this transition right now".
+
+### UI form-generator integration
+
+The React form-generator (and other UI generators) consume the
+operation's `when` declaration:
+
+- On render: fetch `GET /aggregates/<agg>/{id}/can-<op>`; bind the
+  action button's `disabled` to `!allowed`; show `reason` as
+  tooltip when disabled.
+- On state change: re-fetch (optionally) to reflect updated
+  aggregate state; e.g., after another field changes that the
+  predicate depends on.
+- For list views (table of N orders, each with action buttons):
+  the can-query is parameterless w.r.t. op params, so one GET per
+  row gives the button state. No per-cell form-filling needed.
+
+This is the "list view of actions with greyed-out buttons" UX
+that NakedObjects taught the field. Loom inherits the pattern
+for free from one `when` declaration.
+
+### What it composes with elsewhere
+
+Mapping NakedObjects' canonical action-companion patterns to Loom:
+
+| NakedObjects | Loom |
+|---|---|
+| `hide<Action>()` — should action appear? | v2 — defer (v1 UI defaults to render+disable); will likely be `when shown: <predicate>` if added |
+| `disable<Action>()` — is action available right now? | **`when <predicate>`** (this section) |
+| `validate<Action>(args)` — are these args valid? | `from <Spec>(args)` on each parameter (existing) |
+| `default<Action>(args)` — what value pre-fills this arg? | `default:` clause on the bound spec (existing) |
+| `choices<Action>(args)` — what values are allowed for this arg? | `query:` / `enumerate:` clause on the bound spec (existing) |
+
+Action-level gate is new (`when`); per-arg facets were already
+covered by spec bindings. The `when` clause is the missing piece
+that completes the NakedObjects-style action affordance story.
+
+### Constraints summary
+
+- `when` runs *before* the operation body, *after* `validate for X`
+  and per-arg spec checks, in the api wrapper's pipeline.
+- `when` is **parameterless** w.r.t. op parameters — per
+  NakedObjects' split. Per-arg checks use `from <Spec>(args)` on
+  the parameters themselves.
+- `when` reads `self` (aggregate fields/functions), `currentUser`
+  (ambient), and any spec/function in scope.
+- Form A specs (`of <Aggregate>`) auto-pass `self` at the `when`
+  callsite; Form B specs (`of bool`) need explicit args.
+- The auto-exposed `can-<op>` endpoint uses the same predicate —
+  single source of truth across server-side gate, UI affordance,
+  and OpenAPI documentation.
+
 ## Workflow-calls-workflow (related extension)
 
 For reusable cross-aggregate orchestration that *mutates*,
