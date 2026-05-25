@@ -36,6 +36,27 @@ const ids = (g: ReturnType<typeof buildViewGraph>): string[] =>
 const childNodes = (g: ReturnType<typeof buildViewGraph>) => g.nodes.filter((n) => !n.isRoot);
 
 describe("Model v2 — view-graph per level", () => {
+  it("the root node is structurally connected to every child via `contains` edges", () => {
+    const D = `context Sales {
+  aggregate Order {
+    status: string
+  }
+  repository Orders for Order {
+    find byId(id: int): Order? where this.id == id
+  }
+  event Placed {
+  }
+}`;
+    const g = buildViewGraph(parse(D), [{ kind: "context", name: "Sales" }]);
+    const rootId = "root:context:Sales";
+    const contains = g.edges
+      .filter((e) => e.kind === "contains" && e.source === rootId)
+      .map((e) => e.target)
+      .sort();
+    // The root fans out to every member it owns (aggregate / repository / event).
+    expect(contains).toEqual(["aggregate:Order", "event:Placed", "repository:Orders"]);
+  });
+
   it("non-root views prepend a synthesised `isRoot` title node restating the current container", () => {
     const aggG = buildViewGraph(parse(SRC), [{ kind: "aggregate", name: "Order" }]);
     const aggRoot = aggG.nodes.find((n) => n.isRoot);
@@ -214,7 +235,9 @@ describe("Model v2 — view-graph per level", () => {
     const stmts = childNodes(g);
     expect(stmts).toHaveLength(1);
     expect(stmts[0]).toMatchObject({ id: "stmt:0", kind: "stmt" });
-    expect(g.edges).toEqual([]);
+    // Only edge at this level is the root-contains edge to the first stmt;
+    // there's no `next` edge with a single statement.
+    expect(g.edges.filter((e) => e.kind !== "contains")).toEqual([]);
   });
 
   it("operation view without an aggregate step above returns empty", () => {
@@ -233,7 +256,9 @@ describe("Model v2 — view-graph per level", () => {
     const g = buildViewGraph(parse(WF_SRC), [{ kind: "workflow", name: "place" }]);
     expect(g.title).toBe("workflow place()");
     expect(childNodes(g).map((n) => n.id)).toEqual(["stmt:0", "stmt:1", "stmt:2"]);
-    expect(g.edges.map((e) => [e.source, e.target])).toEqual([
+    expect(
+      g.edges.filter((e) => e.kind === "next").map((e) => [e.source, e.target]),
+    ).toEqual([
       ["stmt:0", "stmt:1"],
       ["stmt:1", "stmt:2"],
     ]);

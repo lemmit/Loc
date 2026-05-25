@@ -221,7 +221,7 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
       <Handle
         type="source"
         position={Position.Bottom}
-        style={{ background: "var(--mantine-color-dark-3)", visibility: d.isRoot ? "hidden" : undefined }}
+        style={{ background: "var(--mantine-color-dark-3)" }}
       />
     </Box>
   );
