@@ -160,7 +160,46 @@ proposal that's the whole point of the structural transport layer.
 |---|---|
 | TS / Hono / React | Discriminated union of plain objects; narrowing on `kind` is native TS. |
 | .NET / Mediator | Sealed-record hierarchy with `[JsonDerivedType]` polymorphic JSON. One record per variant. |
-| Phoenix / Ash | `{:ok, _} \| {:error, _}` for `Result`, `{:some, _} \| :none` for `Option` — idiomatic Elixir tuples. `with` syntax provides propagation for free (see §"`?` propagation operator"). |
+| Phoenix / Ash | `Result` → `{:ok, _} \| {:error, _}` (idiomatic; `with` collapses propagation for free). `Option` lowering — see decision below. |
+
+**Phoenix `Option` lowering — pinned decision.** Elixir has two
+idiomatic options: `nil | value` (bare nullable) or `{:some, _} |
+:none` (tagged tuple). Pinned to **`nil | value` for the inner
+runtime representation**, with the `Option`-tagged shape only at
+the wire boundary. Reasons:
+
+- Every Elixir / Ash function returning "maybe a value" today uses
+  `nil` — pattern matching, `case`, guards, `with` all idiomatic.
+- `Enum.map` / `Map.get` / nearly every stdlib function returns
+  `nil`; mixing tagged tuples breaks composition.
+- The runtime cost is one shape (a nullable); the wire encoding is
+  still tagged (`{"kind": "Some", "value": ...}` or `{"kind":
+  "None"}`) for cross-backend uniformity.
+
+The Phoenix `render-expr.ts`/`render-stmt.ts` emitter applies the
+encoding/decoding at the wire boundary (HTTP route handler, queue
+publish/consume). Inside Elixir domain code, `Option<T>` is a `T |
+nil` typespec.
+
+**TS and .NET keep tagged-object representation** (their idiom for
+discriminated unions). The wire encoding is uniform across all three.
+
+### Carrier composition
+
+Carriers compose. `Result<Option<T>, E>`, `Page<Option<T>>`,
+`Option<Result<T, E>>` are all legal and have unambiguous wire
+shapes. The propagation operator threads one carrier layer:
+
+- `result?` on `Result<Option<T>, E>` inside `Result<_, E>`-returning
+  fn → unwraps to `Option<T>`.
+- `optResult?` on `Option<Result<T, E>>` inside `Option<_>`-returning
+  fn → unwraps to `Result<T, E>` (still wrapped); a second `?`
+  unwraps the inner Result.
+
+The carrier stdlib also covers cross-carrier helpers:
+`Option.transpose(Option<Result<T, E>>) -> Result<Option<T>, E>` etc.
+Limited to the closed builtin set in A7a; user-declared
+cross-carrier helpers are A7b.
 
 ### The `Customer` vs `CustomerWire` question (resolved)
 
@@ -214,6 +253,25 @@ operation placeOrder(cmd: PlaceOrderCommand): Result<OrderId, PlaceError> {
 Without the operator, every Result-returning call costs five lines
 and a nested `match`. Authors revert to throwing. With it, the typed
 flow reads like sequential code.
+
+### Grammar — `?` disambiguation
+
+Loom's grammar already uses `?` in three positions:
+
+| Position | Meaning | Example |
+|---|---|---|
+| `contains X?` (declaration) | Optional containment (from #477) | `aggregate Order { contains note? }` |
+| `T?` (type suffix) | Nullable type | `phone: string?` |
+| `expr ? thenExpr : elseExpr` | Ternary | `x > 0 ? "pos" : "neg"` |
+
+The propagation operator adds a **fourth position**: postfix `?`
+on an **expression** in a statement / let-binding context, where it
+is **not followed by `:`**. The parser disambiguates by lookahead —
+`?` immediately followed by `:` parses as ternary; `?` followed by a
+statement separator / line end / non-ternary token parses as
+propagation. No grammar ambiguity, but the LSP and Monaco
+highlighting need updates to render the four uses distinctly. Flag
+this for the grammar work in A2.
 
 ### Scoping rules
 
@@ -308,14 +366,40 @@ the default isn't sufficient).
 
 ## Find-variant alignment
 
-Biggest practical win — re-shape the find variants so they participate
-in the carrier system natively:
+Biggest practical win — re-shape find variants so they participate in
+the carrier system natively. **Mechanic correction**: today's grammar
+doesn't have `find one` / `find first` / `find all` as kind keywords
+— a find is `find <name>(<params>): <returnType>`, and the *return
+type declaration* drives the shape. The re-shape is therefore at the
+return-type level, not a keyword change:
 
-| Today | Proposed | Lowering site |
+| Author-declared return type | Lowers to | Semantics |
 |---|---|---|
-| `find first X where ...` (returns nullable / `X?`) | `Option<X>` | `src/ir/lower.ts` find lowering + each backend's repository builder |
-| `find one X where ...` (throws on missing) | `Result<X, NotFound>` | Same |
-| `find all X where ...` (returns array) | `X[]` (unchanged; empty array is the absence signal) | Same |
+| `: X` | `Result<X, NotFound>` | The find must return an X; absence is an `Err<NotFound>` |
+| `: X?` | `Option<X>` | The find may or may not return an X; absence is `None` |
+| `: X[]` | `X[]` (unchanged) | Multi-result; empty array is the absence signal |
+| `: Page<X>` | `Page<X>` (unchanged; Page itself is a carrier) | Multi-result paginated |
+
+The lowering site is `src/ir/lower.ts` find-decl lowering plus each
+backend's repository builder. The route emitter dispatches on the
+result carrier (Result → variant-mapped status; Option → 200/404)
+exactly as A3 specifies.
+
+**Backwards compatibility**: today's `: X` finds that throw on
+missing are existing behaviour. Authors who want the old throwing
+shape can `.unwrap()` at the call site (a carrier-stdlib helper that
+panics on `Err`/`None`). Migration is mechanical — most existing find
+call sites become `find(...)?` or `find(...).orElse(default)`.
+
+Example migration of an existing find call site:
+
+```
+# Before (throws):
+let customer = customers.findById(cmd.customerId)
+
+# After (typed; ? threads Err to caller):
+let customer = customers.findById(cmd.customerId)?
+```
 
 ### `find one`'s default error type
 
@@ -689,6 +773,25 @@ Once shipped, several follow-ups become small:
 - Recognise the call sites at the IR level — `opt.map(field)` lowers
   to a `CarrierMapIR { inner: opt, projection: field }` rather than
   a general function call.
+
+## Wire-spec impact
+
+Today's `<outdir>/.loom/wire-spec.json` artifact (built by
+`src/system/wire-spec.ts` from `wireShape`) captures aggregate wire
+contracts for diff-based change detection. With this proposal:
+
+- Every `Option<T>` / `Result<T, E>` instantiation used in an
+  operation return adds a new entry to the spec (the carrier
+  envelope is part of the contract).
+- The `errorStatusMap` from A3 is captured per `Err` payload so
+  status-code drift surfaces in the diff.
+- Stdlib carrier types appear once globally in the spec (not per
+  use); per-instantiation `T` references the corresponding payload
+  entry.
+
+`src/system/wire-spec.ts` needs a small extension in A1/A3 to emit
+the carrier entries. The diff-detection consumers (CI gate, OpenAPI
+parity check) work unchanged because the spec stays JSON-shaped.
 
 ## Cross-references
 

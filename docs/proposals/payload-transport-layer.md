@@ -266,6 +266,70 @@ aggregate. Generic instantiation for carrier types stamps the
 projection into the union arms at lowering time. Backends consume the
 union just as they consume any payload union.
 
+**Inheriting aggregates as carriers** (see
+[`aggregate-inheritance.md`](./aggregate-inheritance.md)): an abstract
+aggregate `Party` with concretes `Customer` / `Supplier` projects to
+a union of concrete wire shapes when used as a carrier argument.
+`Option<Party>` on the wire is `None | Some<CustomerWire> |
+Some<SupplierWire>` — i.e., the discriminator carries the concrete
+type alongside the carrier's `kind`. Implementation note: the
+projection enriches at lowering time using each concrete's
+`wireShape`; no new IR needed beyond a small change to the carrier
+arm-stamping pass to detect abstract aggregates and expand them.
+`Party id` (the polymorphic id reference type) is itself a primitive
+carrier — `Option<Party id>` works unmodified.
+
+### Relationship to `T?` (nullable suffix) and `Optional<T>`
+
+Loom has three "absence" concepts after this proposal lands. They are
+**not unified** — each has a distinct purpose:
+
+| Concept | Form | States | Purpose | Lives in |
+|---|---|---|---|---|
+| `T?` (nullable suffix) | Type-level annotation | value \| null | Field nullability — "this column may hold null" | Today's grammar (kept) |
+| `Option<T>` | Payload carrier | `Some<T>` \| `None` | Function/expression-level optional return — "this call may have no result" | This proposal (new) |
+| `Optional<T>` | Generic record (see [`optional-and-partial-update.md`](./optional-and-partial-update.md)) | absent \| present-with-`T?` | Partial-update command fields — "was this field supplied at all" | Existing proposal |
+
+The three concepts coexist because they answer different questions:
+- `T?` is a storage / wire concern (nullable column / nullable JSON value).
+- `Option<T>` is a control-flow / return-type concern (function may have no result).
+- `Optional<T>` is a partial-update concern (distinguishing "not supplied" from "supplied as null").
+
+**Cross-conversion at boundaries**:
+- `T?` ↔ `Option<T>` — explicit helpers in the carrier stdlib
+  (`Option.fromNullable(x)` / `option.orNull()`). Not implicit; the
+  author makes the conversion intentional because the two concepts
+  carry different semantics.
+- `Optional<T>` could be re-expressed as a payload union once
+  generics land (`Optional<T> = Absent | Present<T?>`), unifying it
+  with `Option<T?>` semantically. Whether to migrate the existing
+  Optional proposal onto the payload-union foundation is an
+  implementation-plan decision; the partial-update use case is
+  important enough to keep `Optional<T>` as a named type even if
+  it's internally a payload union.
+
+**`find` returns**: see [`exception-less.md`](./exception-less.md)
+§"Find-variant alignment". The return-type *declaration* determines
+which absence concept is in play: `: X` becomes `Result<X, NotFound>`
+(no implicit nullability); `: X?` becomes `Option<X>` (carrier).
+`: X[]` stays an array (empty is the absence signal).
+
+### Stdlib payload home
+
+The blessed carrier types (`Option<T>`, `Result<T, E>`, `Page<T>`,
+`Envelope<P>`, plus stdlib error payloads like `NotFound`,
+`ParseError`, `ApiError`, `ValidationError`) live in
+**`src/stdlib/payloads/`** as embedded `.ddd` source bundled with the
+toolchain, parsed once at startup and made available to every user
+program without an import. They are not user-visible source files
+(no addition to `examples/` or playground); they're a compile-time
+preamble, the way primitive type names are pre-known to the parser.
+
+Authors **can** declare their own carrier-compatible payload unions
+(e.g., `payload Maybe<T: carrier> = Just<T> | Nothing` per the
+variant-name-tagged identity rule, those are distinct from Option).
+The stdlib types are special only in being pre-declared.
+
 ### Identity of payload types (structural vs nominal — pinned)
 
 This is the rule the v0 proposal left implicit. It is **load-bearing**
