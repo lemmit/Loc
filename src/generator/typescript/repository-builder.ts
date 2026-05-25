@@ -1,4 +1,5 @@
 import { wireShapeFor } from "../../ir/enrichments.js";
+import { forApiRead } from "../../ir/wire-projection.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -228,8 +229,10 @@ function wireProjectionEntity(
   // src/ir/enrichments.ts).  This
   // serializer feeds repo.toWire(); its output's keys must line up
   // with the route's response Zod schema and the .NET DTO.  Single
-  // canonical walk populated by `enrichLoomModel`.
-  const fields = wireShapeFor(ent);
+  // canonical walk populated by `enrichLoomModel`.  `forApiRead`
+  // strips `internal` and `secret` fields so the wire output matches
+  // the response schema's field set.
+  const fields = forApiRead(wireShapeFor(ent));
   const parts: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {

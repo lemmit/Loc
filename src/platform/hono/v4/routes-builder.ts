@@ -5,6 +5,7 @@ import {
   takeSingleFieldChain,
 } from "../../../generator/typescript/zod-refine.js";
 import { wireShapeFor } from "../../../ir/enrichments.js";
+import { forCreateInput } from "../../../ir/wire-projection.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../../ir/invariant-classify.js";
 import type {
   AggregateIR,
@@ -148,7 +149,11 @@ export function buildRoutesFile(
   lines.push("");
 
   // Request schemas — Create, per-public-operation, per-find query.
-  const requiredFields = agg.fields.filter((f) => !f.optional);
+  // `forCreateInput` excludes server-controlled fields (`managed`,
+  // `token`, `internal`) from the client-supplied payload, keeping
+  // `immutable` (settable on create) and `secret` (client provides
+  // password hashes / API keys).  Matches the .NET CreateRequest shape.
+  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
   lines.push(
     ...emitWireSchema(
       `const Create${agg.name}Request`,
