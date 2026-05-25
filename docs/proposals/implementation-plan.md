@@ -283,11 +283,15 @@ No new IR.
 
 **Scope**: declare the `none` unit type and `option` carrier sugar
 in `src/stdlib/payloads/`. Declare stdlib `error` payloads
-(`NotFound`, `ParseError`, `ApiError` variants, `ValidationError`).
-Validator enforces no-throw outside aggregate operation bodies (the
-two-regime line). **No `Result<T, E>` or `Option<T>` named wrapper
-types** — operations declare returns as `T or <Error>...` or
-`T option` directly.
+(`NotFound`, `ParseError`, `ApiError` variants, `ValidationError`,
+`PreconditionFailed`). Validator enforces the layer-specific
+failure model: aggregate operation bodies can throw on
+invariant/precondition; workflow bodies prefer typed `or` returns;
+aggregate operation bodies **cannot** call `Repo.<find>` /
+`Repo.<getById>` / externs / `call api` (loading other aggregates
+is workflow business per `docs/workflow.md`). **No `Result<T, E>`
+or `Option<T>` named wrapper types** — operations / workflows
+declare returns as `T or <Error>...` or `T option` directly.
 
 **Deliverables**:
 - Stdlib (`.ddd` files — pure shape, no status info):
@@ -299,8 +303,8 @@ types** — operations declare returns as `T or <Error>...` or
     `T or none`).
   - `src/stdlib/payloads/errors.ddd` — `NotFound`, `ParseError`,
     `TransportFailure`, `UnexpectedStatus`, `DeserializeError`,
-    `ValidationError`, `Forbidden` declared as `error` payloads.
-    No status annotations.
+    `ValidationError`, `Forbidden`, `PreconditionFailed` declared
+    as `error` payloads. No status annotations.
   - `src/stdlib/payloads/api_error.ddd` — convenience named union
     `payload ApiError = TransportFailure | UnexpectedStatus |
     DeserializeError`.
@@ -310,14 +314,26 @@ types** — operations declare returns as `T or <Error>...` or
 - Generator-side stdlib status table:
   `src/system/error-defaults.ts` (new). Hardcoded
   `{ NotFound: 404, ValidationError: 422, ParseError: 400,
-  Forbidden: 403, TransportFailure: 502, UnexpectedStatus: 502,
-  DeserializeError: 502, none: 404 }`. Not in any `.ddd`.
+  Forbidden: 403, PreconditionFailed: 400, TransportFailure: 502,
+  UnexpectedStatus: 502, DeserializeError: 502, none: 404 }`.
+  Not in any `.ddd`.
 - Toolchain bootstrap: parse stdlib at startup; expose pre-declared
   types to user programs without explicit imports.
-- Validator: `loom.throw-outside-domain` diagnostic. Walk operation
-  bodies; reject `raise` / `throw`-shaped lowering unless enclosing
-  context is an aggregate operation. (Phase-controlled: warning in
-  A1, error after A4.)
+- Validator — layer-specific rules:
+  - `loom.aggregate-cannot-orchestrate` (ERROR): aggregate
+    operation bodies cannot contain `Repo.<find>` / `Repo.<getById>` /
+    extern / `call api` expressions. Loading other aggregates is
+    workflow-only.
+  - `loom.workflow-prefers-error` (WARNING; phase-controlled —
+    informational in A1-A3, suggested in A4+): workflow bodies
+    should prefer typed `or` returns over throws for expected
+    failures.
+- Workflow `precondition` lowering: `precondition Expr` lowers to
+  `if !Expr { return PreconditionFailed { rule: "<expr-source>" } }`
+  with `PreconditionFailed` added to the workflow's `or`-signature
+  automatically. Authors can use `precondition Expr else
+  <ErrorVariant>` for a custom error shape (see exception-less.md
+  §"Workflow precondition").
 - Backends:
   - TS: stdlib payloads emit as plain types in a generated
     `__loom_stdlib__.ts`. `some(T)` / `none` lower to tagged
@@ -330,9 +346,13 @@ types** — operations declare returns as `T or <Error>...` or
 - Wire spec: stdlib payload entries. Per-api `errorStatuses`
   (added in A3) are also captured but emitted from a separate
   enrichment.
-- Tests: parsing tests for declaring `: int option`, `: X or NotFound`
-  as return types; negative throw-outside-domain test;
-  `string option` desugar to `string or none`.
+- Tests: parsing tests for declaring `: int option`,
+  `: X or NotFound` as workflow / operation return types;
+  `loom.aggregate-cannot-orchestrate` negative test (aggregate
+  body using `Repo.getById` rejected); workflow `precondition`
+  lowering test asserting auto-widened signature with
+  `PreconditionFailed`; `string option` desugar to `string or
+  none`.
 
 #### A2 — `?` propagation operator (~2 weeks)
 
@@ -616,6 +636,8 @@ priority order.
 | D19 | Per-error customisation of ProblemDetails `type` URI / `title` / `detail` template | **Deferred to v2**. v1 auto-derives all fields except `status` (which comes from the api mapping). | A3 | exception-less.md |
 | D20 | Per-surface mappings beyond the api layer (UI / queue / CLI) | **Out of scope.** UI consumes ProblemDetails like any HTTP client; no language-level UI error-mapping surface. Queue / CLI deferred to v2 when those surfaces become real. | — | — |
 | D21 | Env-aware 500-ProblemDetails body (dev shows internals, prod redacts) | **`LOOM_EXPOSE_INTERNAL_ERRORS` env var; defaults from each backend's native dev/prod check** (TS `NODE_ENV !== "production"`, .NET `IHostEnvironment.IsDevelopment()`, Phoenix `:dev`/`:test`). Catalog event always carries full context; sensitive fields stay redacted even in dev. | A3 | exception-less.md |
+| D22 | Workflow `precondition` — typed return vs throw | **Typed (`PreconditionFailed`)** (pinned). Aligns with exception-less vision; workflow signature auto-widens; `?` propagation uniform. Aggregate-op preconditions stay throw-based (bug-shaped correctness). | A1 | exception-less.md |
+| D23 | Auto-derivation of more application-layer behaviour (uniqueness, FK checks, …) from aggregate annotations | **Open — needs design work**. Trivial CRUD already covered by api auto-exposure. Discussion below in §"Auto-generated application layer". | (later) | (TBD) |
 
 **Workflow**: before starting each phase the implementing agent
 should explicitly confirm the relevant decisions with the

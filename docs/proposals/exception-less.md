@@ -110,102 +110,168 @@ where reaching the code is itself a bug.
   `customer?.address?.city`). Sugar; defer until concrete demand.
 - `try`/`catch` in user code (it never appears).
 
-## The two regimes — pinned
+## Three layers — where things live
 
-| Regime | What it covers | Failure model |
+Loom already has three layers (see `docs/architecture.md` and
+`docs/workflow.md`). This proposal aligns with them; it doesn't
+invent a new application-layer concept.
+
+| Layer | Existing role | Failure model after this proposal |
 |---|---|---|
-| **Domain core** | Aggregate invariants (`requires` / `ensures`), aggregate construction preconditions, internal generator-emitted assertions | **May throw.** A violation is a programmer bug, not a value worth propagating. |
-| **Application / boundary** | Find / lookup, parse, validate, external API call, file IO, type coercion, operation bodies that orchestrate the above | **Never throws.** Returns a carrier — either `T option` (when absence is normal) or `T or <Error>...` (when typed errors are possible). |
+| **Aggregate operation** | Pure domain. Mutates own state; invariants + preconditions throw `DomainException`. **Cannot load other aggregates, cannot call externs.** | Throws stay for invariants and "this must be true" preconditions (bug-shaped). Operations *may* additionally return `T or BusinessError` for **designed-in own-domain outcomes** (e.g., `InsufficientCredit` from `Account.debit`). `?` propagation is allowed but limited — only against sibling-aggregate operations' `or`-returns and parse intrinsics on params. |
+| **Workflow** | Cross-aggregate orchestration. Loads via `Repo.getById` (throws `AggregateNotFound`), calls operations, saves. `precondition` throws `DomainException`. Optionally `transactional` with an isolation level. | `?` propagation lives here as the workhorse. `Repo.getById` returns `T or NotFound` (was: throw). Workflow `precondition` becomes typed (`PreconditionFailed` `error`) — see decision pin below. Aggregate-op `or`-returns thread through. Workflow signature is the union of every typed failure it can produce. |
+| **API auto-exposure** | `api X from M` derives operations from the module: `byId`/`create`/`update`/`delete` per aggregate + named finds + workflows. Route handlers per-backend catch DomainException / AggregateNotFound and map to status codes. | Each route returns the corresponding `or`-union. Per-backend auto-generated **ProblemDetails translator** emits status + body from the api's `status` mapping + stdlib defaults. Aggregate-invariant throws hit the env-aware 500 fallback. |
+
+The **"every operation needs some application layer" answer**: yes,
+and it's already there via the api's CRUD auto-exposure for the
+trivial case (load → mutate → save). Authors only write an
+explicit `workflow` when the orchestration touches more than one
+aggregate or needs `transactional` semantics. The exception-less
+proposal does not change this; it just changes the *failure shape*
+at each layer.
+
+### Workflow `precondition` — pinned: typed
+
+In today's `workflow.md`, `precondition Expr` throws
+`DomainException` → 400. With this proposal, workflow preconditions
+become typed:
+
+```
+workflow placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or PreconditionFailed or InsufficientCredit {
+  precondition cmd.amount > 0
+  let customer = Customers.getById(cmd.customerId)?       # NotFound
+  let order = Order.create(customer)
+  customer.deductCredit(cmd.amount)?                       # InsufficientCredit (aggregate-op or-return)
+  return order.id
+}
+```
+
+The workflow's `precondition Expr` lowers to `if !Expr { return
+PreconditionFailed { ... } }`. The signature widens to include
+`PreconditionFailed` (stdlib `error` payload, default status 400).
+The author can use a custom error type via `precondition Expr else
+<ErrorVariant>` if a more specific shape is desired.
+
+Aggregate-op `precondition` clauses **stay throw-based** (bug-shaped
+correctness rules). Use an `or`-typed return on the operation
+signature for designed-in business outcomes:
+
+```
+aggregate Customer {
+  operation deductCredit(amount: decimal): or InsufficientCredit {
+    precondition amount > 0                          # throws if violated (bug)
+    if creditLimit < amount {
+      return InsufficientCredit { requested: amount, available: creditLimit }
+    }
+    creditLimit := creditLimit - amount
+  }
+}
+```
+
+### Two-regime split — by failure type, per layer
+
+| Failure | Layer | What happens |
+|---|---|---|
+| Aggregate invariant or aggregate-op precondition fails | Aggregate operation | **Throws.** Hits env-aware 500 ProblemDetails fallback at the route. Catalog `invariant_violated` event always logged. |
+| Aggregate operation returns its `or`-typed business error | Aggregate operation | `?`-propagated by caller (workflow or sibling op). |
+| `Repo.getById(id)` returns `NotFound` | Workflow | `?`-propagated; widens workflow signature. Translates to 404 ProblemDetails. |
+| Workflow `precondition` fails | Workflow | Typed `PreconditionFailed` return; `?`-propagated. 400 ProblemDetails. |
+| Validator returns `ValidationError[]` | Workflow / api | `?`-propagated. 422 ProblemDetails with `errors` extension. |
+| External API call (`call api ...`) fails | Workflow | `?`-propagated as `ApiError` variant. 502 ProblemDetails. |
+| Any throw in any layer not caught explicitly | Any | Hits the env-aware 500 ProblemDetails fallback. |
 
 The line is **enforced by the validator**:
 
-- Any expression appearing inside an `aggregate { operation { ... }
-  }` body whose return type is `T` (not a carrier) may throw via
-  invariant checks — that's the only legal channel.
-- Any expression elsewhere — operation bodies declared with a
-  carrier return type, repository methods, parse intrinsics,
-  validator bodies, external API call lowerings — must return a
-  carrier. The validator forbids `raise`/`throw`-shaped lowering in
-  these contexts.
+- Aggregate operation body: cannot call `Repo.<find>` / `Repo.<getById>` /
+  externs / `call api` (loading other aggregates is workflow business).
+  Validator: `loom.aggregate-cannot-orchestrate` (ERROR).
+- Workflow body: throws are allowed but typed-return is preferred
+  (`loom.workflow-prefers-error` warning). `getById` / external
+  calls always typed-return.
+- API route bodies (generated): no user-written throws; auto-translator
+  catches everything and emits ProblemDetails.
 
 Observability mapping (preserves today's catalog):
 
 - `invariant_violated` / `precondition_evaluated` from #480 — fired
-  by aggregate-invariant throws (unchanged).
-- `domain_error` — repurposed: fires on an `error`-marked variant
-  returned at the wire edge with no specific status mapping. Today's
-  catch-all stays as a fallback, not a primary signal.
+  by aggregate-invariant and aggregate-op-precondition throws
+  (unchanged).
+- `domain_error` — fires on any uncaught throw bubbling to the 500
+  fallback. Today's catch-all stays.
 
 ## Surface — `error`, `or`, `option` working together
 
-A worked example showing all four mechanisms at once:
+A worked example showing the layering end-to-end. Domain →
+workflow → api:
 
 ```
-# Declare typed errors (sugar keyword from upstream proposal).
-# Domain-side: pure payload declarations. No status codes here —
-# the api surface owns the status mapping.
-error NotFound   { what: string, id: string }
-error OutOfStock { sku: string, requested: int }
-error Forbidden  { actor: string }
+# === Domain (aggregate) — pure, no orchestration ===
+aggregate Customer {
+  creditLimit: decimal
+  invariant creditLimit >= 0
 
-# Elsewhere, in the api surface:
-#   api SalesApi for Sales {
-#     status OutOfStock 409    # explicit; default would be 500+warning
-#     status Forbidden  403    # explicit
-#     # NotFound: covered by stdlib default (404), no line needed.
-#   }
-
-# Operation returns an anonymous `or` union of one success + three errors.
-# No Result wrapper, no Ok/Err variants — the type IS the union.
-operation placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or OutOfStock or Forbidden {
-  ensureAuthorised(cmd.actor)?              # if Err-variant, short-circuit
-  let customer = customers.findById(cmd.customerId)?   # ? propagates NotFound
-  let prices   = pricing.compute(cmd.items)?           # ? propagates OutOfStock
-  let order    = Order.create(customer, prices)        # may throw — invariant
-  return order.id                            # the OrderId variant (success)
+  operation deductCredit(amount: decimal): or InsufficientCredit {
+    precondition amount > 0                  # throws on violation (bug)
+    if creditLimit < amount {
+      return InsufficientCredit { requested: amount, available: creditLimit }
+    }
+    creditLimit := creditLimit - amount
+  }
 }
 
-# Find with optional return — `: X?` → `X option`
-find findById(id: Customer id): Customer? { ... }
-# Lowering type: customer option
+aggregate Order {
+  customerId: Customer id
+  status: OrderStatus
 
-# Find with required return — `: X` → `X or NotFound`
-find findByEmail(email: string): Customer { ... }
-# Lowering type: Customer or NotFound
+  operation place(customer: Customer, lines: OrderLine[]): or OutOfStock {
+    requires lines.length > 0                # throws (bug — workflow should validate)
+    # ... domain logic; returns OutOfStock if any line is unavailable
+  }
+}
+
+# === Stdlib errors (HTTP-blind) — declared once, reused ===
+error NotFound       { what: string, id: string }                  # stdlib (404)
+error InsufficientCredit { requested: decimal, available: decimal } # domain
+error OutOfStock     { sku: string, requested: int }                # domain
+error PreconditionFailed { rule: string, detail: string? }          # stdlib (400)
+
+# === Workflow (application layer) ===
+workflow placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or InsufficientCredit or OutOfStock or PreconditionFailed transactional {
+  precondition cmd.lines.length > 0          # typed PreconditionFailed
+  let customer = Customers.getById(cmd.customerId)?       # NotFound
+  customer.deductCredit(cmd.totalAmount)?                  # InsufficientCredit
+  let order = Order.create({ customerId: customer.id, status: Draft })
+  order.place(customer, cmd.lines)?                        # OutOfStock
+  return order.id
+}
+
+# === API surface (status mapping) ===
+api SalesApi from Sales {
+  status InsufficientCredit 409
+  status OutOfStock         409
+  # NotFound, PreconditionFailed: stdlib defaults (404, 400) — no lines needed
+}
 ```
 
-In the operation body:
-- `?` on `customer or NotFound` short-circuits if `NotFound`,
-  otherwise unwraps to `Customer`.
-- `?` on `prices or OutOfStock` propagates `OutOfStock` to the
-  caller because the caller's return type already lists it.
-- Returning `order.id` (an `OrderId`) is the non-error variant — no
-  `Ok` wrapper needed; the value's type matches one of the union's
-  arms.
+What flows where:
 
-Wire encoding for the response (api surface auto-generates this from
-the status mapping + ProblemDetails translation):
+- Aggregate `Customer.deductCredit` returns `or InsufficientCredit`.
+  The workflow `?`-propagates it.
+- `Customers.getById(...)?` is the re-shape of today's throwing
+  `getById` — returns `Customer or NotFound`; `?` widens the
+  workflow signature.
+- `precondition cmd.lines.length > 0` becomes `PreconditionFailed`
+  typed return.
+- Workflow `?` operator unifies all error sources into one signature
+  union.
+- API auto-exposes `POST /workflows/place_order`; the generated
+  route handler translates each variant to ProblemDetails (status
+  from api map + stdlib defaults).
 
-- Success → HTTP 200, body is the `OrderId` data (`"ord_abc"` for a
-  primitive, or the object shape for a payload). No `{"kind":
-  "OrderId"}` envelope.
-- `NotFound` → HTTP 404, body is a **ProblemDetails** object:
-  ```json
-  { "type": "/errors/not-found", "title": "Not Found", "status": 404,
-    "detail": "Customer cus_abc not found", "instance": "/orders" }
-  ```
-  Status comes from the stdlib default (NotFound → 404). `type`,
-  `title`, `detail` auto-derived. Error fields (`what`, `id`)
-  become ProblemDetails extension members.
-- `OutOfStock` → HTTP 409 (from api-surface `status OutOfStock 409`),
-  ProblemDetails body shaped the same way.
-- `Forbidden` → HTTP 403 (from api-surface `status Forbidden 403`),
-  ProblemDetails body.
-
-The HTTP status carries the discriminator at the route boundary; no
-`kind` envelope needed for success. For non-HTTP carriers (queue
-messages, persisted snapshots) the tagged `kind` form is used —
-because there's no out-of-band discriminator there.
+Aggregate operations never see `NotFound` or `Forbidden` in their
+signatures — those concepts don't exist inside the domain. The
+domain knows `InsufficientCredit` and `OutOfStock` because they're
+its own business outcomes.
 
 ### Why no `Result<T, E>` wrapper
 
@@ -522,19 +588,21 @@ ProblemDetails body carries author-declared fields only; the
 author's sensitivity annotations on those fields are honoured at
 every status code, in every environment.
 
-## Find-variant alignment
+## Repository-access re-shape — `getById` / `findById`
 
-Today's grammar doesn't have `find one` / `find first` / `find all`
-as kind keywords — a find is `find <name>(<params>): <returnType>`,
-and the *return type declaration* drives the shape. The re-shape is
-therefore at the return-type level, not a keyword change:
+These calls live in workflows (per `docs/workflow.md`'s body
+vocabulary) and in the auto-exposed `byId` CRUD operation. They're
+the entry points for "load an aggregate by id"; today both throw on
+absence. The re-shape:
 
-| Author-declared return type | Lowers to | Semantics |
-|---|---|---|
-| `: X` | `X or NotFound` | The find must return an X; absence is `NotFound` |
-| `: X?` | `X option` (= `X or none`) | The find may or may not return an X; absence is `none` |
-| `: X[]` | `X[]` (unchanged) | Multi-result; empty array is the absence signal |
-| `: X page` | `X page` (unchanged; page itself is a carrier) | Multi-result paginated |
+| Call (today) | Today's behaviour | After this proposal | Lowering |
+|---|---|---|---|
+| `Repo.getById(id)` | Throws `AggregateNotFound` if missing | Returns `T or NotFound` | `?`-propagable in workflows / aggregate-op-sibling-call contexts |
+| `Repo.findById(id)` | Returns nullable (not yet legal in workflows) | Returns `T option` | Legal in workflows; `?` propagates `none` if the enclosing return is option-shaped, else use `.orError(...)` |
+| `Repo.<find>(...)` returning a single non-nullable aggregate (declared `: X`) | Throws on absence | Returns `X or NotFound` | Same as `getById` |
+| `Repo.<find>(...)` returning a list (declared `: X[]`) | Returns array | Returns `X[]` (unchanged) | — |
+| `Repo.<find>(...)` returning a page (declared `: X page`) | Returns page | Returns `X page` (unchanged) | — |
+| Named find declared with optional return (`: X?`) | (Today: not yet supported in workflows) | Returns `X option`; legal in workflows | — |
 
 The lowering site is `src/ir/lower.ts` find-decl lowering plus each
 backend's repository builder. The route emitter dispatches on the
@@ -542,22 +610,35 @@ result carrier exactly as the API-edge translation section specifies
 (error variants → ProblemDetails with status from api mapping;
 `none` → 404 default).
 
-**Backwards compatibility**: today's `: X` finds that throw on
-missing become Result-shaped. Existing call sites need migration —
-most become `find(...)?` inside operation bodies (the `?`
-propagates `NotFound` to the caller). Authors who want the old
-throwing shape can `.unwrap()` (a carrier-stdlib helper that
-panics on error variants).
+**Backwards compatibility**: today's `Repo.getById(id)` call inside
+a workflow body becomes `Repo.getById(id)?` after the migration.
+The `?` propagates `NotFound` to the workflow's return signature.
+Authors who specifically want the throwing shape (rare; usually a
+mistake under this model) can use `.unwrap()` (a carrier-stdlib
+helper that panics on error variants — equivalent to today's throw
+behaviour).
 
-Example migration:
+Example migration in a workflow body:
 
 ```
-# Before (throws):
-let customer = customers.findById(cmd.customerId)
+# Before:
+workflow placeOrder(customerId: Customer id, ...) {
+  let customer = Customers.getById(customerId)   # throws on missing → 404
+  ...
+}
 
-# After (typed; ? threads NotFound to caller):
-let customer = customers.findById(cmd.customerId)?
+# After:
+workflow placeOrder(customerId: Customer id, ...): OrderId or NotFound or ... {
+  let customer = Customers.getById(customerId)?  # NotFound propagated
+  ...
+}
 ```
+
+The workflow's return-type union widens to include `NotFound` (and
+any other variants its body can produce). The api auto-exposes the
+workflow as `POST /workflows/place_order`; the route handler
+translates `NotFound` → 404 ProblemDetails (stdlib default), success
+variant → 200 with body data.
 
 ### `NotFound`'s default status
 
@@ -583,11 +664,13 @@ This is the **big coordinated change** in the phasing. Every:
 
 - Repository implementation in every backend's emitter
   (`*Repository.ts`, `*Repository.cs`, `*_repository.ex`).
-- Route handler that today catches `NotFoundException` and emits
-  404 — those try/catches go away; the variant dispatch replaces
-  them.
-- Existing `.ddd` example file using a find with non-array return
-  (which is most of them).
+- Workflow body that uses `Repo.getById(...)` or a `: X`-returning
+  find — `?` added at every call site.
+- Auto-exposed api CRUD route (`byId`, `update`, `delete`) — today's
+  try/catch for `NotFoundException` gone; variant dispatch replaces
+  it. Generated, no user code touched.
+- Existing `.ddd` example file using these patterns (which is most
+  of them).
 
 The fixture-byte-identical regression bar (per CLAUDE.md's
 `test/fixtures/`) needs a coordinated re-baseline. Plan a single
