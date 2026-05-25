@@ -242,7 +242,9 @@ function renderApiSpec(
   }
 
   // Aggregate CRUD paths: GET /<plural>, GET /<plural>/:id, POST /<plural>
-  for (const { agg } of allAggregates) {
+  // Plus per-op and per-find paths derived from the aggregate's
+  // public operations and repository finds.
+  for (const { ctx, agg } of allAggregates) {
     const aggSlug = snake(plural(agg.name));
     const respMod = `${schemasModule}.${agg.name}Response`;
     const listRespMod = `${schemasModule}.${agg.name}ListResponse`;
@@ -296,6 +298,61 @@ function renderApiSpec(
         }
       }`,
     );
+
+    // Per-operation paths: POST /<plural>/{id}/<op>
+    for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+      const opSnake = snake(op.name);
+      const opReqMod = `${schemasModule}.${upperFirst(op.name)}Request`;
+      pathEntries.push(
+        `      "/${aggSlug}/{id}/${opSnake}" => %OpenApiSpex.PathItem{
+        post: %OpenApiSpex.Operation{
+          summary: "${op.name} on ${agg.name}",
+          operationId: "${opSnake}_${snake(agg.name)}",
+          tags: ["${aggSlug}"],
+          parameters: [
+            %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: %OpenApiSpex.Schema{type: :string}}
+          ],
+          requestBody: %OpenApiSpex.RequestBody{
+            required: true,
+            content: %{
+              "application/json" => %OpenApiSpex.MediaType{schema: ${opReqMod}}
+            }
+          },
+          responses: %{
+            204 => %OpenApiSpex.Response{description: "No Content"}
+          }
+        }
+      }`,
+      );
+    }
+
+    // Per-find paths: GET /<plural>/<find>.  Skip auto-`all` (already served
+    // by the CRUD `GET /<plural>` above).  Response cardinality follows the
+    // declared find return type: array → list response; otherwise single.
+    const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+    if (repo) {
+      for (const find of repo.finds) {
+        if (find.name === "all") continue;
+        const findSnake = snake(find.name);
+        const isArrayReturn = find.returnType.kind === "array";
+        const findRespMod = isArrayReturn ? listRespMod : respMod;
+        pathEntries.push(
+          `      "/${aggSlug}/${findSnake}" => %OpenApiSpex.PathItem{
+        get: %OpenApiSpex.Operation{
+          summary: "${find.name} on ${agg.name}",
+          operationId: "${findSnake}_${snake(agg.name)}",
+          tags: ["${aggSlug}"],
+          responses: %{
+            200 => %OpenApiSpex.Response{
+              description: "OK",
+              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${findRespMod}}}
+            }
+          }
+        }
+      }`,
+        );
+      }
+    }
   }
 
   const pathsBlock =
