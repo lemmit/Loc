@@ -437,6 +437,21 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     for (const n of graph.nodes) {
       if (n.kind === "stmt") continue;
 
+      // The synthesised "title" node re-states the current container at the
+      // top of the canvas. Read-only — no rename/delete/expr affordances, no
+      // drill (you're already inside it).
+      if (n.isRoot) {
+        m.set(n.id, {
+          kind: n.kind,
+          name: n.name,
+          color: KIND_COLOR[n.kind],
+          drillable: false,
+          isRoot: true,
+          compact,
+        });
+        continue;
+      }
+
       // Invariants are unnamed, so view-graph keys them by index. Delete
       // requires finding the right Invariant member by index in the aggregate.
       if (n.kind === "invariant" && aggOwner?.kind === "aggregate") {

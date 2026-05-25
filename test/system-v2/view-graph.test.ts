@@ -27,9 +27,30 @@ const SRC = `system Sales {
   }
 }`;
 
-const ids = (g: ReturnType<typeof buildViewGraph>): string[] => g.nodes.map((n) => n.id);
+// Filter out the synthesised "title" root node — it re-states the current
+// container above its children for visual framing, but isn't part of the
+// content the per-level snapshots assert against.
+const ids = (g: ReturnType<typeof buildViewGraph>): string[] =>
+  g.nodes.filter((n) => !n.isRoot).map((n) => n.id);
+
+const childNodes = (g: ReturnType<typeof buildViewGraph>) => g.nodes.filter((n) => !n.isRoot);
 
 describe("Model v2 — view-graph per level", () => {
+  it("non-root views prepend a synthesised `isRoot` title node restating the current container", () => {
+    const aggG = buildViewGraph(parse(SRC), [{ kind: "aggregate", name: "Order" }]);
+    const aggRoot = aggG.nodes.find((n) => n.isRoot);
+    expect(aggRoot).toMatchObject({ kind: "aggregate", name: "Order", drillable: false });
+
+    const ctxG = buildViewGraph(parse(SRC), [{ kind: "context", name: "Orders" }]);
+    const ctxRoot = ctxG.nodes.find((n) => n.isRoot);
+    expect(ctxRoot).toMatchObject({ kind: "context", name: "Orders", drillable: false });
+
+    // The root view itself has no parent to re-state, so it doesn't carry a
+    // synthesised title.
+    const rootG = buildViewGraph(parse(SRC), []);
+    expect(rootG.nodes.some((n) => n.isRoot)).toBe(false);
+  });
+
   it("root view lists each top-level system (and standalone contexts)", () => {
     const g = buildViewGraph(parse(SRC), []);
     expect(g.title).toBe("Model");
@@ -184,8 +205,9 @@ describe("Model v2 — view-graph per level", () => {
     ]);
     expect(g.title).toBe("Order.confirm()");
     // `confirm` body: `status := "Confirmed"` — one statement.
-    expect(g.nodes).toHaveLength(1);
-    expect(g.nodes[0]).toMatchObject({ id: "stmt:0", kind: "stmt" });
+    const stmts = childNodes(g);
+    expect(stmts).toHaveLength(1);
+    expect(stmts[0]).toMatchObject({ id: "stmt:0", kind: "stmt" });
     expect(g.edges).toEqual([]);
   });
 
@@ -204,7 +226,7 @@ describe("Model v2 — view-graph per level", () => {
   it("workflow view returns one stmt node per statement and chains them with next edges", () => {
     const g = buildViewGraph(parse(WF_SRC), [{ kind: "workflow", name: "place" }]);
     expect(g.title).toBe("workflow place()");
-    expect(g.nodes.map((n) => n.id)).toEqual(["stmt:0", "stmt:1", "stmt:2"]);
+    expect(childNodes(g).map((n) => n.id)).toEqual(["stmt:0", "stmt:1", "stmt:2"]);
     expect(g.edges.map((e) => [e.source, e.target])).toEqual([
       ["stmt:0", "stmt:1"],
       ["stmt:1", "stmt:2"],
@@ -223,8 +245,9 @@ describe("Model v2 — view-graph per level", () => {
 }`;
     const g = buildViewGraph(parse(REPO_SRC), [{ kind: "repository", name: "Orders" }]);
     expect(g.title).toBe("repository Orders");
-    expect(g.nodes.map((n) => n.id)).toEqual(["find:bySku", "find:allActive"]);
-    expect(g.nodes.every((n) => n.kind === "find")).toBe(true);
+    const finds = childNodes(g);
+    expect(finds.map((n) => n.id)).toEqual(["find:bySku", "find:allActive"]);
+    expect(finds.every((n) => n.kind === "find")).toBe(true);
   });
 
   it("system view surfaces deployable bindings as edges", () => {

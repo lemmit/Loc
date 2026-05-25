@@ -70,6 +70,11 @@ export interface VNode {
   /** Whether double-clicking / clicking the drill-in handle on this node
    *  pushes a new step onto the path (i.e. it has a meaningful sub-view). */
   drillable: boolean;
+  /** True for the synthesised "title" node that re-states the current view
+   *  root at the top of the canvas (e.g. the aggregate node above its own
+   *  fields). Not drillable, not editable — the pane renders it as a
+   *  banner-styled construct with no rename/delete affordances. */
+  isRoot?: boolean;
 }
 
 /** Visual + semantic discriminator on an edge:
@@ -136,6 +141,47 @@ function layout(
 }
 
 const nid = (kind: ViewKind, name: string): string => `${kind}:${name}`;
+
+/** Pixel gap above row-0 where the title node sits — far enough to read as a
+ *  separate banner, close enough that the dropped-down children still feel
+ *  attached. Used by every view that surfaces a title. */
+const TITLE_Y_OFFSET = 110;
+
+/** Synthesize a "title" VNode for the current path leaf. Centred over the
+ *  given `nodes`' bounding-box X centre and parked above row 0. The id is
+ *  prefixed with `root:` so it can never collide with a real child id. */
+function withRootTitle(nodes: VNode[], kind: ViewKind, name: string): VNode[] {
+  if (nodes.length === 0) {
+    return [{
+      id: `root:${kind}:${name}`,
+      kind,
+      name,
+      x: 0,
+      y: 0,
+      drillable: false,
+      isRoot: true,
+    }];
+  }
+  const xs = nodes.map((n) => n.x);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...nodes.map((n) => n.y));
+  // Shift every child down by TITLE_Y_OFFSET so the banner has space above
+  // row 0, and (if minY is non-zero) normalise so the banner anchors at y=0.
+  const shifted = nodes.map((n) => ({ ...n, y: n.y - minY + TITLE_Y_OFFSET }));
+  return [
+    {
+      id: `root:${kind}:${name}`,
+      kind,
+      name,
+      x: Math.round((minX + maxX) / 2),
+      y: 0,
+      drillable: false,
+      isRoot: true,
+    },
+    ...shifted,
+  ];
+}
 
 const ROOT_ORDER: readonly ViewKind[] = ["system", "context"];
 
@@ -209,7 +255,7 @@ function systemView(ast: Model, name: string): ViewGraph {
     const tgt = deployableTargets(d);
     if (tgt) edges.push({ id: `bind:${src}->deployable:${tgt}`, source: src, target: nid("deployable", tgt), label: "targets", kind: "binding" });
   }
-  return { title: `system ${name}`, nodes: layout(items, SYSTEM_ORDER), edges };
+  return { title: `system ${name}`, nodes: withRootTitle(layout(items, SYSTEM_ORDER), "system", name), edges };
 }
 
 function moduleView(ast: Model, name: string): ViewGraph {
@@ -223,7 +269,7 @@ function moduleView(ast: Model, name: string): ViewGraph {
   }
   if (!mod) return { title: name, nodes: [], edges: [] };
   const items = mod.contexts.map((c) => ({ id: nid("context", c.name), kind: "context" as const, name: c.name }));
-  return { title: `module ${name}`, nodes: layout(items, ["context"]), edges: [] };
+  return { title: `module ${name}`, nodes: withRootTitle(layout(items, ["context"]), "module", name), edges: [] };
 }
 
 // Vertical (top→bottom) tier order for the context view. Consumers feed
@@ -425,7 +471,7 @@ function contextView(ast: Model, name: string): ViewGraph {
       });
     }
   }
-  return { title: `context ${name}`, nodes: contextLayout(items), edges };
+  return { title: `context ${name}`, nodes: withRootTitle(contextLayout(items), "context", name), edges };
 }
 
 // Vertical (top→bottom) tier order for the aggregate view. Consumers feed
@@ -624,7 +670,7 @@ function aggregateView(ast: Model, name: string): ViewGraph {
   pushFieldEdges(consumerReads, "reads");
   pushFieldEdges(rel.writes, "writes");
 
-  return { title: `aggregate ${name}`, nodes: aggregateLayout(items), edges };
+  return { title: `aggregate ${name}`, nodes: withRootTitle(aggregateLayout(items), "aggregate", name), edges };
 }
 
 const EMPTY: ReadonlySet<string> = new Set();
@@ -687,7 +733,7 @@ function findWorkflow(ast: Model, name: string): Workflow | undefined {
 /** Lay out a statement body as a vertical column of `stmt` nodes connected by
  *  implicit "next" edges. The custom React Flow `stmt` node type (in the pane)
  *  renders each node's content; the view-graph just owns positions + topology. */
-function stmtFlow(title: string, body: Statement[]): ViewGraph {
+function stmtFlow(title: string, body: Statement[], rootKind: ViewKind, rootName: string): ViewGraph {
   const nodes: VNode[] = body.map((_, i) => ({
     id: `stmt:${i}`,
     kind: "stmt",
@@ -702,7 +748,7 @@ function stmtFlow(title: string, body: Statement[]): ViewGraph {
     target: `stmt:${i + 1}`,
     kind: "next",
   }));
-  return { title, nodes, edges };
+  return { title, nodes: withRootTitle(nodes, rootKind, rootName), edges };
 }
 
 function operationView(ast: Model, aggName: string, opName: string): ViewGraph {
@@ -711,13 +757,13 @@ function operationView(ast: Model, aggName: string, opName: string): ViewGraph {
     (m): m is Operation => m.$type === "Operation" && (m as Operation).name === opName,
   );
   if (!op) return { title: `${aggName}.${opName}`, nodes: [], edges: [] };
-  return stmtFlow(`${aggName}.${opName}()`, op.body);
+  return stmtFlow(`${aggName}.${opName}()`, op.body, "operation", `${aggName}.${opName}()`);
 }
 
 function workflowView(ast: Model, name: string): ViewGraph {
   const wf = findWorkflow(ast, name);
   if (!wf) return { title: `workflow ${name}`, nodes: [], edges: [] };
-  return stmtFlow(`workflow ${name}()`, wf.body);
+  return stmtFlow(`workflow ${name}()`, wf.body, "workflow", `${name}()`);
 }
 
 function findRepository(ast: Model, name: string): Repository | undefined {
@@ -753,7 +799,7 @@ function repositoryView(ast: Model, name: string): ViewGraph {
   const repo = findRepository(ast, name);
   if (!repo) return { title: `repository ${name}`, nodes: [], edges: [] };
   const items = repo.finds.map((f) => ({ id: nid("find", f.name), kind: "find" as const, name: f.name }));
-  return { title: `repository ${name}`, nodes: layout(items, ["find"]), edges: [] };
+  return { title: `repository ${name}`, nodes: withRootTitle(layout(items, ["find"]), "repository", name), edges: [] };
 }
 
 /** Dispatch on the last step of `path` to the per-level builder; empty path

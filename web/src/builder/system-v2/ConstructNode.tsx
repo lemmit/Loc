@@ -39,6 +39,10 @@ export interface ConstructNodeData {
   onToggleExpression?: () => void;
   /** Narrow the node for a phone-width canvas (~390px viewport). */
   compact?: boolean;
+  /** Render the node as a banner-style "title" — wider, larger text, no
+   *  rename/delete affordances. Used for the synthesised root node that
+   *  re-states the current view container above its children. */
+  isRoot?: boolean;
 }
 
 export default function ConstructNode({ data }: NodeProps): JSX.Element {
@@ -68,31 +72,47 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
       style={{
         background: d.color,
         color: "white",
-        border: "1px solid rgba(255,255,255,0.25)",
-        borderRadius: 6,
-        padding: "6px 8px",
+        // The root banner gets a chunkier outline + extra padding so it
+        // reads as a "this is the container you're in", not a sibling node.
+        border: d.isRoot ? "2px solid rgba(255,255,255,0.55)" : "1px solid rgba(255,255,255,0.25)",
+        borderRadius: d.isRoot ? 10 : 6,
+        padding: d.isRoot ? "10px 16px" : "6px 8px",
+        boxShadow: d.isRoot ? "0 2px 12px rgba(0,0,0,0.35)" : undefined,
         // Widen when there are multi-selects (chip pills) or an inline
         // expression editor (the structured tree); narrower on a phone canvas.
-        width: d.expressionEditor
-          ? d.compact
-            ? 320
-            : 360
-          : d.multiSelects && d.multiSelects.length > 0
+        // Title banners auto-size to their text via min/max.
+        width: d.isRoot
+          ? undefined
+          : d.expressionEditor
             ? d.compact
-              ? 210
-              : 240
-            : d.compact
-              ? 150
-              : 170,
+              ? 320
+              : 360
+            : d.multiSelects && d.multiSelects.length > 0
+              ? d.compact
+                ? 210
+                : 240
+              : d.compact
+                ? 150
+                : 170,
+        minWidth: d.isRoot ? (d.compact ? 200 : 280) : undefined,
         position: "relative",
         cursor: d.drillable ? "pointer" : "default",
       }}
       data-testid="c4system-v2-construct"
       data-construct-kind={d.kind}
       data-construct-name={d.name}
+      data-construct-root={d.isRoot ? "true" : undefined}
     >
-      <Handle type="target" position={Position.Top} style={{ background: "var(--mantine-color-dark-3)" }} />
-      <Text size="xs" tt="uppercase" style={{ opacity: 0.65, fontSize: 9 }}>
+      <Handle
+        type="target"
+        position={Position.Top}
+        style={{ background: "var(--mantine-color-dark-3)", visibility: d.isRoot ? "hidden" : undefined }}
+      />
+      <Text
+        size="xs"
+        tt="uppercase"
+        style={{ opacity: d.isRoot ? 0.85 : 0.65, fontSize: d.isRoot ? 10 : 9, letterSpacing: d.isRoot ? 1 : undefined }}
+      >
         {d.kind}{d.drillable ? "  ↳" : ""}
       </Text>
       {editing ? (
@@ -114,7 +134,12 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
           styles={{ input: { fontSize: 12, padding: "2px 4px", minHeight: 22 } }}
         />
       ) : (
-        <Text size="sm" style={{ fontWeight: 500 }}>{d.name}</Text>
+        <Text
+          size={d.isRoot ? "lg" : "sm"}
+          style={{ fontWeight: d.isRoot ? 700 : 500 }}
+        >
+          {d.name}
+        </Text>
       )}
       {(d.onRename || d.onDelete || d.onToggleExpression) && !editing && (
         <Group
@@ -193,7 +218,11 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
           ))}
         </Stack>
       )}
-      <Handle type="source" position={Position.Bottom} style={{ background: "var(--mantine-color-dark-3)" }} />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        style={{ background: "var(--mantine-color-dark-3)", visibility: d.isRoot ? "hidden" : undefined }}
+      />
     </Box>
   );
 }
