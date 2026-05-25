@@ -202,6 +202,11 @@ function toRfEdges(g: ViewGraph): Edge[] {
       id: e.id,
       source: e.source,
       target: e.target,
+      // `contains` edges leave the root's left/right side handle so they trace
+      // down the periphery instead of crossing every tier through the centre.
+      // Smoothstep gives them an L-shape that hugs the canvas edge.
+      ...(e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}),
+      ...(e.kind === "contains" ? { type: "smoothstep" } : {}),
       label: e.label,
       reconnectable,
       // Only deployable bindings carry visible labels — reads/writes/constrains

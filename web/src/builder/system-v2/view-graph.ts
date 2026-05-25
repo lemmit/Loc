@@ -99,6 +99,10 @@ export interface VEdge {
   target: string;
   label?: string;
   kind?: EdgeKind;
+  /** Override the source-side handle. Used by `contains` edges so they leave
+   *  the LEFT/RIGHT of the root banner and trace down the side of the layout
+   *  rather than crossing every intermediate tier through the centre. */
+  sourceHandle?: "left" | "right";
 }
 
 export interface ViewGraph {
@@ -194,11 +198,18 @@ function withRoot(
   const targets = opts.connectAll
     ? shifted
     : shifted.filter((n) => n.y === Math.min(...shifted.map((s) => s.y)));
+  // Route every `contains` edge out the LEFT or RIGHT side of the root banner
+  // so the backdrop traces down the periphery of the layout instead of
+  // cutting through every intermediate tier. Children on the root's left half
+  // exit from the left handle; everyone else from the right. The pane uses a
+  // smoothstep edge for "contains", which then traces an L-path along the
+  // outside of the column it's targeting.
   const containsEdges: VEdge[] = targets.map((n) => ({
     id: `contains:${rootId}->${n.id}`,
     source: rootId,
     target: n.id,
     kind: "contains",
+    sourceHandle: n.x < rootNode.x ? "left" : "right",
   }));
   return { ...g, nodes: [rootNode, ...shifted], edges: [...containsEdges, ...g.edges] };
 }
