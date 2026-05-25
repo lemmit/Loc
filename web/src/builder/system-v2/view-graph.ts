@@ -154,6 +154,21 @@ const nid = (kind: ViewKind, name: string): string => `${kind}:${name}`;
  *  attached. Used by every view that surfaces a title. */
 const TITLE_Y_OFFSET = 110;
 
+/** ViewKinds that act as the *structural pivot* of their containing view —
+ *  the "core" children of the root (context → aggregates, aggregate → state
+ *  fields, module → contexts, repository → finds, system → modules). These
+ *  get centre-routed `contains` edges so the root↔pivot link stays the
+ *  visually dominant structural cue; everything else side-routes around. */
+const PIVOT_CONTAINS_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
+  "aggregate",
+  "valueobject",
+  "field",
+  "containment",
+  "module",
+  "context",
+  "find",
+]);
+
 /** Synthesize a "title" VNode for the current path leaf AND a backdrop of
  *  `contains` edges from it to its children — the structural cue that
  *  everything below is "inside" the current container. Children at the top
@@ -198,18 +213,23 @@ function withRoot(
   const targets = opts.connectAll
     ? shifted
     : shifted.filter((n) => n.y === Math.min(...shifted.map((s) => s.y)));
-  // Route every `contains` edge out the LEFT or RIGHT side of the root banner
-  // so the backdrop traces down the periphery of the layout instead of
-  // cutting through every intermediate tier. Children on the root's left half
-  // exit from the left handle; everyone else from the right. The pane uses a
-  // smoothstep edge for "contains", which then traces an L-path along the
-  // outside of the column it's targeting.
+  // Two routing styles for the `contains` backdrop:
+  //   - PIVOT children (aggregates / valueobjects in the context view; fields /
+  //     containments in the aggregate view; modules in the system view; …)
+  //     get a straight-down edge from the root's BOTTOM handle. This keeps the
+  //     primary "root contains aggregate" / "aggregate contains state"
+  //     structural link visually prominent in the centre column.
+  //   - Everyone else (the orchestrators / outcomes / sibling-tier nodes) exits
+  //     the root's LEFT/RIGHT handle and traces the periphery via smoothstep
+  //     so they don't crowd the central spine.
   const containsEdges: VEdge[] = targets.map((n) => ({
     id: `contains:${rootId}->${n.id}`,
     source: rootId,
     target: n.id,
     kind: "contains",
-    sourceHandle: n.x < rootNode.x ? "left" : "right",
+    ...(PIVOT_CONTAINS_KINDS.has(n.kind)
+      ? {}
+      : { sourceHandle: n.x < rootNode.x ? "left" : "right" as const }),
   }));
   return { ...g, nodes: [rootNode, ...shifted], edges: [...containsEdges, ...g.edges] };
 }
