@@ -50,119 +50,119 @@ async function emit(body: string): Promise<string> {
 
 describe("testid: named-arg convention on every primitive", () => {
   it('Stack: string literal lands as data-testid="…" on the root <Stack>', async () => {
-    const tsx = await emit(`Stack(testid: "main")`);
+    const tsx = await emit(`Stack { testid: "main" }`);
     expect(tsx).toMatch(/<Stack[^>]*\bdata-testid="main"/);
   });
 
   it("Stack: when no testid: is supplied, no data-testid attr is emitted", async () => {
-    const tsx = await emit(`Stack(Heading("Hi"))`);
+    const tsx = await emit(`Stack { Heading { "Hi" } }`);
     expect(tsx).not.toMatch(/<Stack[^>]*data-testid/);
   });
 
   it("Group: testid lands on the root <Group>", async () => {
-    const tsx = await emit(`Group(testid: "g1")`);
+    const tsx = await emit(`Group { testid: "g1" }`);
     expect(tsx).toMatch(/<Group[^>]*\bdata-testid="g1"/);
   });
 
   it("Grid: testid lands on the root <Grid>", async () => {
-    const tsx = await emit(`Grid(testid: "grid")`);
+    const tsx = await emit(`Grid { testid: "grid" }`);
     expect(tsx).toMatch(/<Grid[^>]*\bdata-testid="grid"/);
   });
 
   it("Container: testid lands on the root <Container>", async () => {
-    const tsx = await emit(`Container(testid: "ct")`);
+    const tsx = await emit(`Container { testid: "ct" }`);
     expect(tsx).toMatch(/<Container[^>]*\bdata-testid="ct"/);
   });
 
   it('Toolbar: testid lands on the root <Group justify="space-between">', async () => {
-    const tsx = await emit(`Toolbar(testid: "tb")`);
+    const tsx = await emit(`Toolbar { testid: "tb" }`);
     expect(tsx).toMatch(/<Group [^>]*\bdata-testid="tb"/);
   });
 
   it("Card: testid lands on the root <Card>", async () => {
-    const tsx = await emit(`Card("title", testid: "card1")`);
+    const tsx = await emit(`Card { "title", testid: "card1" }`);
     expect(tsx).toMatch(/<Card[^>]*\bdata-testid="card1"/);
   });
 
   it("Heading: testid lands on the root <Title>", async () => {
-    const tsx = await emit(`Heading("Hi", testid: "h")`);
+    const tsx = await emit(`Heading { "Hi", testid: "h" }`);
     expect(tsx).toMatch(/<Title[^>]*\bdata-testid="h"/);
   });
 
   it("Text: testid lands on the root <Text>", async () => {
-    const tsx = await emit(`Text("hi", testid: "t")`);
+    const tsx = await emit(`Text { "hi", testid: "t" }`);
     expect(tsx).toMatch(/<Text[^>]*\bdata-testid="t"/);
   });
 
   it("Anchor: testid lands on the root <Anchor>", async () => {
-    const tsx = await emit(`Anchor("Link", to: "/x", testid: "a")`);
+    const tsx = await emit(`Anchor { "Link", to: "/x", testid: "a" }`);
     expect(tsx).toMatch(/<Anchor[^>]*\bdata-testid="a"/);
   });
 
   it("Button: testid lands on the root <Button>", async () => {
-    const tsx = await emit(`Button("Go", testid: "btn")`);
+    const tsx = await emit(`Button { "Go", testid: "btn" }`);
     expect(tsx).toMatch(/<Button[^>]*\bdata-testid="btn"/);
   });
 
   it("Badge: testid lands on the root <Badge>", async () => {
-    const tsx = await emit(`Badge("active", testid: "bdg")`);
+    const tsx = await emit(`Badge { "active", testid: "bdg" }`);
     expect(tsx).toMatch(/<Badge[^>]*\bdata-testid="bdg"/);
   });
 
   it("Divider: testid lands on the root <Divider>", async () => {
-    const tsx = await emit(`Divider(testid: "div")`);
+    const tsx = await emit(`Divider { testid: "div" }`);
     expect(tsx).toMatch(/<Divider[^>]*\bdata-testid="div"/);
   });
 
   it("Empty: testid lands on the root <Center>", async () => {
-    const tsx = await emit(`Empty("Nothing", testid: "empty")`);
+    const tsx = await emit(`Empty { "Nothing", testid: "empty" }`);
     expect(tsx).toMatch(/<Center[^>]*\bdata-testid="empty"/);
   });
 
   it("Loader: testid lands on the root <Loader>", async () => {
-    const tsx = await emit(`Loader(testid: "ldr")`);
+    const tsx = await emit(`Loader { testid: "ldr" }`);
     expect(tsx).toMatch(/<Loader[^>]*\bdata-testid="ldr"/);
   });
 
   it("Image: testid lands on the root <Image>", async () => {
-    const tsx = await emit(`Image(src: "/x.png", testid: "img")`);
+    const tsx = await emit(`Image { src: "/x.png", testid: "img" }`);
     expect(tsx).toMatch(/<Image[^>]*\bdata-testid="img"/);
   });
 
   it("Avatar: testid lands on the root <Avatar>", async () => {
-    const tsx = await emit(`Avatar(src: "/x.png", testid: "av")`);
+    const tsx = await emit(`Avatar { src: "/x.png", testid: "av" }`);
     expect(tsx).toMatch(/<Avatar[^>]*\bdata-testid="av"/);
   });
 
   it("Stat: testid lands on the root <Stack>", async () => {
-    const tsx = await emit(`Stat(label: "Users", value: "10", testid: "s1")`);
+    const tsx = await emit(`Stat { label: "Users", value: "10", testid: "s1" }`);
     expect(tsx).toMatch(/<Stack [^>]*\bdata-testid="s1"/);
   });
 
   it("Tabs: testid lands on the root <Tabs>", async () => {
     const tsx = await emit(
-      `Tabs(Tab("Overview", Text("a")), Tab("Settings", Text("b")), testid: "tabs1")`,
+      `Tabs { Tab { "Overview", Text { "a" } }, Tab { "Settings", Text { "b" } }, testid: "tabs1" }`,
     );
     expect(tsx).toMatch(/<Tabs[^>]*\bdata-testid="tabs1"/);
   });
 
   it("Field: testid lands on the underlying <TextInput>, not a surrounding wrapper", async () => {
-    const tsx = await emit(`Field(label: "Name", testid: "name")`);
+    const tsx = await emit(`Field { label: "Name", testid: "name" }`);
     expect(tsx).toMatch(/<TextInput[^>]*\bdata-testid="name"/);
   });
 
   it("NumberField: testid lands on the underlying <NumberInput>", async () => {
-    const tsx = await emit(`NumberField(label: "Qty", testid: "qty")`);
+    const tsx = await emit(`NumberField { label: "Qty", testid: "qty" }`);
     expect(tsx).toMatch(/<NumberInput[^>]*\bdata-testid="qty"/);
   });
 
   it("PasswordField: testid lands on the underlying <PasswordInput>", async () => {
-    const tsx = await emit(`PasswordField(label: "Password", testid: "pw")`);
+    const tsx = await emit(`PasswordField { label: "Password", testid: "pw" }`);
     expect(tsx).toMatch(/<PasswordInput[^>]*\bdata-testid="pw"/);
   });
 
   it("Toggle: testid lands on the underlying <Switch>", async () => {
-    const tsx = await emit(`Toggle(label: "On", testid: "tgl")`);
+    const tsx = await emit(`Toggle { label: "On", testid: "tgl" }`);
     expect(tsx).toMatch(/<Switch[^>]*\bdata-testid="tgl"/);
   });
 });

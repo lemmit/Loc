@@ -4,7 +4,7 @@
 //   page Reports {
 //     route: "/reports"
 //     menu { section: "Reports", label: "Daily Stats" }
-//     body: Heading("Reports")
+//     body: Heading { "Reports" }
 //   }
 //
 // Without a `ui.menu` block, the sidebar emits with a "Reports"
@@ -24,7 +24,7 @@ describe("per-page menuMeta drives the sidebar", () => {
           page Reports {
             route: "/reports"
             menu { section: "Reports", label: "Daily Stats" }
-            body: Heading("Reports")
+            body: Heading { "Reports" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -51,17 +51,17 @@ describe("per-page menuMeta drives the sidebar", () => {
           page Daily {
             route: "/daily"
             menu { section: "Reports", label: "Daily" }
-            body: Heading("Daily")
+            body: Heading { "Daily" }
           }
           page Weekly {
             route: "/weekly"
             menu { section: "Reports", label: "Weekly" }
-            body: Heading("Weekly")
+            body: Heading { "Weekly" }
           }
           page Settings {
             route: "/settings"
             menu { section: "Admin", label: "Settings" }
-            body: Heading("Settings")
+            body: Heading { "Settings" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -91,12 +91,12 @@ describe("per-page menuMeta drives the sidebar", () => {
           page Public {
             route: "/p"
             menu { section: "Pages", label: "Public" }
-            body: Heading("Public")
+            body: Heading { "Public" }
           }
           page Secret {
             route: "/s"
             menu { section: "Pages", label: "Secret", hidden: true }
-            body: Heading("Secret")
+            body: Heading { "Secret" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -125,12 +125,12 @@ describe("per-page menuMeta drives the sidebar", () => {
           page Z {
             route: "/z"
             menu { section: "S", label: "Z", order: 1 }
-            body: Heading("Z")
+            body: Heading { "Z" }
           }
           page A {
             route: "/a"
             menu { section: "S", label: "A", order: 2 }
-            body: Heading("A")
+            body: Heading { "A" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -159,7 +159,7 @@ describe("per-page menuMeta drives the sidebar", () => {
           page X {
             route: "/x"
             menu { section: "PerPage", label: "Per-page" }
-            body: Heading("X")
+            body: Heading { "X" }
           }
           menu {
             section "Explicit" {

@@ -1,4 +1,4 @@
-import type { CallArg, Expression, ObjectFieldInit, Statement } from "../../../../src/language/generated/ast.js";
+import type { BuilderEntry, CallArg, Expression, ObjectFieldInit, Statement } from "../../../../src/language/generated/ast.js";
 import { printExpr } from "../../../../src/language/print/index.js";
 
 // ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ export type EExpr =
   | { kind: "blockLambda"; param: string; stmts: EStmt[] }
   | { kind: "ternary"; cond: EExpr; then: EExpr; else: EExpr }
   | { kind: "match"; arms: EMatchArm[]; else?: EExpr }
-  | { kind: "new"; partType: string; fields: EObjField[] }
+  | { kind: "builder"; type: string; entries: ECallArg[] }
   | { kind: "object"; fields: EObjField[] }
   | { kind: "raw"; text: string };
 
@@ -107,8 +107,8 @@ export function seedExpr(node: Expression): EExpr {
         arms: node.arms.map((a) => ({ cond: seedExpr(a.cond), value: seedExpr(a.value) })),
         else: node.elseExpr ? seedExpr(node.elseExpr) : undefined,
       };
-    case "NewExpr":
-      return { kind: "new", partType: node.partType.$refText, fields: node.fields.map(seedField) };
+    case "BuilderCall":
+      return { kind: "builder", type: node.type, entries: node.entries.map(seedEntry) };
     case "ObjectLit":
       return { kind: "object", fields: node.fields.map(seedField) };
     default:
@@ -140,6 +140,15 @@ function emitArg(a: ECallArg): string {
 
 function seedField(f: ObjectFieldInit): EObjField {
   return { name: f.name, value: seedExpr(f.value) };
+}
+
+function seedEntry(e: BuilderEntry): ECallArg {
+  return { name: e.name || undefined, value: seedExpr(e.value) };
+}
+
+function emitEntries(entries: ECallArg[]): string {
+  if (entries.length === 0) return "";
+  return ` ${entries.map(emitArg).join(", ")} `;
 }
 
 // Matches `printObjectFields`: empty → "", else surrounded by single spaces.
@@ -179,8 +188,8 @@ export function emitExpr(e: EExpr): string {
       if (e.else !== undefined) arms.push(`else => ${emitExpr(e.else)}`);
       return `match {\n${arms.join("\n")}\n}`;
     }
-    case "new":
-      return `new ${e.partType} {${emitFields(e.fields)}}`;
+    case "builder":
+      return `${e.type} {${emitEntries(e.entries)}}`;
     case "object":
       return `{${emitFields(e.fields)}}`;
     case "raw":

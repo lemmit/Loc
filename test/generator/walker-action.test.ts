@@ -1,4 +1,4 @@
-// `Action(<instance>.<operation>, then?)` — a button bound to an
+// `Action { <instance>.<operation>, then? }` — a button bound to an
 // aggregate operation invoked on an in-scope instance.  The operation
 // is referenced through the instance (`order.confirm`), so the walker
 // resolves the aggregate + the id to mutate (`order.id`) from the
@@ -28,12 +28,12 @@ const SRC = `
     ui WebApp with scaffold(aggregates: [Order]) {
       api Sales: SalesApi
       component OrderPanel(order: Order) {
-        body: Toolbar(
-          Action(order.confirm, then: navigate(OrderHome, { customerId: order.customerId })),
-          Action(order.cancel)
-        )
+        body: Toolbar {
+          Action { order.confirm, then: navigate(OrderHome, { customerId: order.customerId }) },
+          Action { order.cancel }
+        }
       }
-      page OrderHome { route: "/order-home" body: Text("home") }
+      page OrderHome { route: "/order-home" body: Text { "home" } }
     }
     deployable api {
       platform: hono

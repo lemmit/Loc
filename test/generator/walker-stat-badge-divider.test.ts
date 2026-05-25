@@ -12,14 +12,14 @@ import { generateSystemFiles } from "../_helpers/index.js";
 const buildAndGenerate = generateSystemFiles;
 
 describe("Stat / Badge / Divider in walker stdlib", () => {
-  it("Stat(label, value) emits a two-line stack with dimmed label + bold value", async () => {
+  it("Stat { label, value } emits a two-line stack with dimmed label + bold value", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Dashboard {
             route: "/dashboard"
-            body:  Stat("Active orders", "47")
+            body:  Stat { "Active orders", "47" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -45,7 +45,7 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
         ui WebApp {
           page Stats(label: string, value: string) {
             route: "/stats/:label/:value"
-            body:  Stat(label, value)
+            body:  Stat { label, value }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -64,14 +64,14 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
     expect(content).toMatch(/const \{ label, value \} = useParams/);
   });
 
-  it('Badge("label") emits Mantine Badge', async () => {
+  it('Badge { "label" } emits Mantine Badge', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
-            body:  Stack(Heading("Status"), Badge("Live"))
+            body:  Stack { Heading { "Status" }, Badge { "Live" } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -88,14 +88,14 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
     expect(content).toMatch(/<Badge>Live<\/Badge>/);
   });
 
-  it("Divider() emits a self-closing Divider", async () => {
+  it("Divider {} emits a self-closing Divider", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
-            body:  Stack(Heading("A"), Divider(), Heading("B"))
+            body:  Stack { Heading { "A" }, Divider {}, Heading { "B" } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -112,14 +112,14 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
     expect(content).toMatch(/<Divider \/>/);
   });
 
-  it('Divider(label: "Section") emits labelled inline divider', async () => {
+  it('Divider { label: "Section" } emits labelled inline divider', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
-            body:  Divider(label: "Section break")
+            body:  Divider { label: "Section break" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -142,12 +142,12 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
         ui WebApp {
           page Dashboard {
             route: "/dashboard"
-            body:  Stack(
-              Heading("Dashboard"),
-              Stat("Revenue", "$12.5k"),
-              Divider(),
-              Badge("Live")
-            )
+            body:  Stack {
+              Heading { "Dashboard" },
+              Stat { "Revenue", "$12.5k" },
+              Divider {},
+              Badge { "Live" }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

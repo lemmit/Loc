@@ -42,10 +42,10 @@ describe("api binding + walker hook injection", () => {
           api Sales: SalesApi
           page List {
             route: "/customers"
-            body: Stack(
-              Heading("Customers"),
-              Text(Sales.Customer.all.isLoading)
-            )
+            body: Stack {
+              Heading { "Customers" },
+              Text { Sales.Customer.all.isLoading }
+            }
           }
         }
         deployable api { platform: hono, modules: Sales, port: 3000 }
@@ -76,12 +76,12 @@ describe("api binding + walker hook injection", () => {
           page New {
             route: "/customers/new"
             state { name: string = "" }
-            body: Stack(
-              Field("Name", bind: name),
-              Button("Save", onClick: e => {
+            body: Stack {
+              Field { "Name", bind: name },
+              Button {"Save", onClick: e => {
                 Sales.Customer.create.mutate({ name: name })
-              })
-            )
+              }}
+            }
           }
         }
         deployable api { platform: hono, modules: Sales, port: 3000 }
@@ -109,10 +109,10 @@ describe("api binding + walker hook injection", () => {
           api Sales: SalesApi
           page Detail(slug: string) {
             route: "/customers/:slug"
-            body: Stack(
-              Heading("Customer"),
-              Text(Sales.Customer.byId(slug).isLoading)
-            )
+            body: Stack {
+              Heading { "Customer" },
+              Text { Sales.Customer.byId(slug).isLoading }
+            }
           }
         }
         deployable api { platform: hono, modules: Sales, port: 3000 }
@@ -142,11 +142,11 @@ describe("api binding + walker hook injection", () => {
           api Sales: SalesApi
           page X {
             route: "/x"
-            body: Stack(
-              Text(Sales.Customer.all.data),
-              Text(Sales.Customer.all.isLoading),
-              Text(Sales.Customer.all.error)
-            )
+            body: Stack {
+              Text { Sales.Customer.all.data },
+              Text { Sales.Customer.all.isLoading },
+              Text { Sales.Customer.all.error }
+            }
           }
         }
         deployable api { platform: hono, modules: Sales, port: 3000 }
@@ -178,12 +178,12 @@ describe("api binding + walker hook injection", () => {
           page X {
             route: "/x"
             state { name: string = "" }
-            body: Stack(
-              Text(Sales.Customer.all.isLoading),
-              Button("New", onClick: e => {
+            body: Stack {
+              Text { Sales.Customer.all.isLoading },
+              Button {"New", onClick: e => {
                 Sales.Customer.create.mutate({ name: name })
-              })
-            )
+              }}
+            }
           }
         }
         deployable api { platform: hono, modules: Sales, port: 3000 }
@@ -214,7 +214,7 @@ describe("api binding + walker hook injection", () => {
           api Sales: SalesApi
           page Lookup(email: string) {
             route: "/lookup/:email"
-            body: Text(Sales.Customer.byEmail(email).isLoading)
+            body: Text { Sales.Customer.byEmail(email).isLoading }
           }
         }
         deployable api { platform: hono, modules: Sales, port: 3000 }
@@ -233,7 +233,7 @@ describe("api binding + walker hook injection", () => {
         ui WebApp {
           page X {
             route: "/x"
-            body: Heading("hi")
+            body: Heading { "hi" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

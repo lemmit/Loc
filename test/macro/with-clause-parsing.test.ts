@@ -60,7 +60,7 @@ describe("with-clause grammar", () => {
       parseRawOk(
         wrap(`
           ui App with someMacro {
-            page Home { route: "/" body: List(of: x) }
+            page Home { route: "/" body: List { of: x } }
           }
         `),
       ),

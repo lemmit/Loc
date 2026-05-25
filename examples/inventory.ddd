@@ -29,7 +29,7 @@ context Inventory {
       sku: string
       onHand: Quantity
       reserved: Quantity
-      derived available: Quantity = Quantity(onHand.value - reserved.value)
+      derived available: Quantity = Quantity { value: onHand.value - reserved.value }
       invariant onHand.value >= reserved.value
     }
   }

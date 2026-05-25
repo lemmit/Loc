@@ -57,7 +57,7 @@ describe("deployable composition (serves + ui-compose)", () => {
       const { errors } = await parse(`
         system S {
           ${SALES_DOMAIN}
-          ui WebApp { page X { route: "/x" body: Heading("hi") } }
+          ui WebApp { page X { route: "/x" body: Heading { "hi" } } }
           deployable api { platform: hono, modules: Sales, port: 3000 }
           deployable webApp {
             platform: static
@@ -96,7 +96,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           ${SALES_DOMAIN}
           ui WebApp {
             api Sales: SalesApi
-            page X { route: "/x" body: Heading("hi") }
+            page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
             platform: hono
@@ -121,7 +121,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           ${SALES_DOMAIN}
           ui WebApp {
             api Sales: SalesApi
-            page X { route: "/x" body: Heading("hi") }
+            page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
             platform: hono
@@ -145,7 +145,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           ${SALES_DOMAIN}
           ui WebApp {
             api Sales: SalesApi
-            page X { route: "/x" body: Heading("hi") }
+            page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
             platform: hono
@@ -176,7 +176,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           ${SALES_DOMAIN}
           ui WebApp {
             api Sales: SalesApi
-            page X { route: "/x" body: Heading("hi") }
+            page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
             platform: hono
@@ -212,7 +212,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           ui WebApp {
             api Sales: SalesApi
             api Mktg:  MktgApi
-            page X { route: "/x" body: Heading("hi") }
+            page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
             platform: hono
@@ -247,7 +247,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           ${SALES_DOMAIN}
           ui WebApp {
             api Sales: SalesApi
-            page X { route: "/x" body: Heading("hi") }
+            page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
             platform: hono
@@ -276,7 +276,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           ui WebApp {
             api Sales: SalesApi
             api Mktg:  MktgApi
-            page X { route: "/x" body: Heading("hi") }
+            page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
             platform: hono
@@ -305,7 +305,7 @@ describe("deployable composition (serves + ui-compose)", () => {
       const { errors } = await parse(`
         system S {
           module M { context C { } }
-          ui WebApp { page X { route: "/x" body: Heading("hi") } }
+          ui WebApp { page X { route: "/x" body: Heading { "hi" } } }
           deployable api { platform: hono, modules: M, port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }

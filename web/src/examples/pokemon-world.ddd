@@ -177,7 +177,7 @@ system PokemonWorld {
                 operation recordRound(attacker: Pokemon id, damage: int) {
                     precondition isOngoing()
                     precondition damage > 0
-                    rounds += new BattleRound { attacker: attacker, damage: damage }
+                    rounds += BattleRound { attacker: attacker, damage: damage }
                 }
 
                 operation declareChallengerWinner() {

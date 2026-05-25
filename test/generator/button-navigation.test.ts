@@ -1,4 +1,4 @@
-// `Button("label", to: "/path")` wires the rendered
+// `Button { "label", to: "/path" }` wires the rendered
 // Mantine button to a React-Router navigate call.  The page shell
 // pulls `useNavigate` from `react-router` and declares
 // `const navigate = useNavigate()` so the generated onClick lambda
@@ -9,7 +9,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Button(to:) navigation in walker-rendered pages", () => {
+describe("Button { to: } navigation in walker-rendered pages", () => {
   it("emits useNavigate hook + onClick when to: is a string literal", async () => {
     const files = await buildAndGenerate(`
       system S {
@@ -17,7 +17,7 @@ describe("Button(to:) navigation in walker-rendered pages", () => {
         ui WebApp {
           page Home {
             route: "/"
-            body:  Stack(Heading("Welcome"), Button("Go to orders", to: "/orders"))
+            body:  Stack { Heading { "Welcome" }, Button { "Go to orders", to: "/orders" } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -47,10 +47,10 @@ describe("Button(to:) navigation in walker-rendered pages", () => {
         ui WebApp {
           page Home {
             route: "/"
-            body:  Stack(
-              Button("Orders", to: "/orders"),
-              Button("Settings", to: "/settings")
-            )
+            body:  Stack {
+              Button { "Orders", to: "/orders" },
+              Button { "Settings", to: "/settings" }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -80,7 +80,7 @@ describe("Button(to:) navigation in walker-rendered pages", () => {
         ui WebApp {
           page Home {
             route: "/"
-            body:  Button("Click me")
+            body:  Button { "Click me" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -98,14 +98,14 @@ describe("Button(to:) navigation in walker-rendered pages", () => {
     expect(content).not.toMatch(/useNavigate/);
   });
 
-  it("page combining route params + Button(to:) imports both useParams and useNavigate", async () => {
+  it("page combining route params + Button { to: } imports both useParams and useNavigate", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Detail(slug: string) {
             route: "/items/:slug"
-            body:  Stack(Heading(slug), Button("Back", to: "/"))
+            body:  Stack { Heading { slug }, Button { "Back", to: "/" } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -126,14 +126,14 @@ describe("Button(to:) navigation in walker-rendered pages", () => {
     expect(content).toMatch(/<Button onClick=\{\(\) => navigate\("\/"\)\}>Back<\/Button>/);
   });
 
-  it("Button(to: <param-ref>) interpolates the param via template literal", async () => {
+  it("Button { to: <param-ref> } interpolates the param via template literal", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Home(slug: string) {
             route: "/h/:slug"
-            body:  Button("Open", to: slug)
+            body:  Button { "Open", to: slug }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

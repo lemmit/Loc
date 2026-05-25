@@ -4,7 +4,7 @@
 // onClick lambdas can invoke FREE functions that the user
 // expects to import / declare in their app:
 //
-//   Button("Save", onClick: e => { saveOrder() })
+//   Button { "Save", onClick: e => { saveOrder() } }
 //     → <Button onClick={() => { saveOrder(); }}>Save</Button>
 //
 // METHOD calls (`Orders.create(draft)`) need a hooks-binding
@@ -18,7 +18,7 @@
 // functions:
 //
 //   state { count: int = 0 }
-//   body: Text("doubled: " + double(count))
+//   body: Text { "doubled: " + double(count) }
 //     → <Text>{("doubled: " + double(count))}</Text>
 
 import { describe, expect, it } from "vitest";
@@ -34,7 +34,7 @@ describe("function + method calls in walker bodies", () => {
         ui WebApp {
           page X {
             route: "/x"
-            body:  Button("Save", onClick: e => { saveOrder() })
+            body:  Button { "Save", onClick: e => { saveOrder() } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -58,10 +58,10 @@ describe("function + method calls in walker bodies", () => {
           page X {
             route: "/x"
             state { count: int = 0 }
-            body:  Button("Bump", onClick: e => {
+            body:  Button {"Bump", onClick: e => {
               let n = inc(count)
               count := n
-            })
+            }}
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -93,7 +93,7 @@ describe("function + method calls in walker bodies", () => {
           page X {
             route: "/x"
             state { draft: int = 0 }
-            body:  Button("Sync", onClick: e => { Orders.create(draft) })
+            body:  Button { "Sync", onClick: e => { Orders.create(draft) } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -119,7 +119,7 @@ describe("function + method calls in walker bodies", () => {
           page X {
             route: "/x"
             state { count: int = 0 }
-            body:  Text("doubled: " + double(count))
+            body:  Text { "doubled: " + double(count) }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -146,7 +146,7 @@ describe("function + method calls in walker bodies", () => {
               a: int = 1
               b: int = 2
             }
-            body:  Button("Mix", onClick: e => { mixer.combine(a, b, "extra") })
+            body:  Button { "Mix", onClick: e => { mixer.combine(a, b, "extra") } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

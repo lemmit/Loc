@@ -49,13 +49,13 @@ const ordersListBody = (queryViewBody: string) => `
 describe("QueryView macro", () => {
   it("auto-injects the hook for `of:` and references it in all four branches", async () => {
     const files = await buildAndGenerate(
-      ordersListBody(`QueryView(
+      ordersListBody(`QueryView {
         of:      Sales.Order.all,
-        loading: Skeleton(count: 5),
-        error:   Alert("Couldn't load"),
-        empty:   Empty("No orders yet."),
-        data:    rows => Table(rows: rows, Column("ID", o => o.id))
-      )`),
+        loading: Skeleton { count: 5 },
+        error:   Alert { "Couldn't load" },
+        empty:   Empty { "No orders yet." },
+        data:    rows => Table { rows: rows, Column { "ID", o => o.id } }
+      }`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     expect(tsx).toBeDefined();
@@ -69,13 +69,13 @@ describe("QueryView macro", () => {
 
   it("loading branch renders the supplied loading body (Skeleton)", async () => {
     const files = await buildAndGenerate(
-      ordersListBody(`QueryView(
+      ordersListBody(`QueryView {
         of:      Sales.Order.all,
-        loading: Skeleton(count: 5),
-        error:   Alert("err"),
-        empty:   Empty("none"),
-        data:    rows => Empty("placeholder")
-      )`),
+        loading: Skeleton { count: 5 },
+        error:   Alert { "err" },
+        empty:   Empty { "none" },
+        data:    rows => Empty { "placeholder" }
+      }`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     // The loading branch ends up wrapped in the conditional guard;
@@ -85,20 +85,20 @@ describe("QueryView macro", () => {
 
   it("data: lambda rebinds its param to the query's `.data` inside the branch", async () => {
     const files = await buildAndGenerate(
-      ordersListBody(`QueryView(
+      ordersListBody(`QueryView {
         of:      Sales.Order.all,
-        loading: Skeleton(),
-        error:   Alert("err"),
-        empty:   Empty("none"),
-        data:    rows => Table(
+        loading: Skeleton {},
+        error:   Alert { "err" },
+        empty:   Empty { "none" },
+        data:    rows => Table {
           rows: rows,
-          Column("ID",     o => o.id),
-          Column("Status", o => Badge(o.status))
-        )
-      )`),
+          Column { "ID",     o => o.id },
+          Column { "Status", o => Badge { o.status } }
+        }
+      }`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
-    // `rows` in `Table(rows: rows, ...)` resolves to `orderAll.data`.
+    // `rows` in `Table { rows: rows, ... }` resolves to `orderAll.data`.
     expect(tsx).toMatch(
       /orderAll\.data && orderAll\.data\.length > 0 && \([\s\S]*orderAll\.data\.map\(\(row\) => \(/,
     );
@@ -110,16 +110,16 @@ describe("QueryView macro", () => {
 
   it("emits the four branches inside a JSX fragment so they can sit anywhere a single child is expected", async () => {
     const files = await buildAndGenerate(
-      ordersListBody(`Stack(
-        Heading("Orders"),
-        QueryView(
+      ordersListBody(`Stack {
+        Heading { "Orders" },
+        QueryView {
           of:      Sales.Order.all,
-          loading: Skeleton(),
-          error:   Alert("err"),
-          empty:   Empty("none"),
-          data:    rows => Empty("placeholder")
-        )
-      )`),
+          loading: Skeleton {},
+          error:   Alert { "err" },
+          empty:   Empty { "none" },
+          data:    rows => Empty { "placeholder" }
+        }
+      }`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     // Fragment opens immediately after Heading.
@@ -130,12 +130,12 @@ describe("QueryView macro", () => {
 
   it("missing 'of:' surfaces a visible TSX comment, no crash", async () => {
     const files = await buildAndGenerate(
-      ordersListBody(`QueryView(
-        loading: Empty("…"),
-        error:   Empty("…"),
-        empty:   Empty("…"),
-        data:    rows => Empty("…")
-      )`),
+      ordersListBody(`QueryView {
+        loading: Empty { "…" },
+        error:   Empty { "…" },
+        empty:   Empty { "…" },
+        data:    rows => Empty { "…" }
+      }`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     expect(tsx).toMatch(/\{\/\* QueryView: missing 'of:' query expression \*\/\}/);

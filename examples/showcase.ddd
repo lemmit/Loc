@@ -119,7 +119,7 @@ system DevPlatform {
 
                 operation addPipeline(label: string) {
                     precondition isActive()
-                    pipelines += new Pipeline { label: label, runCount: 0 }
+                    pipelines += Pipeline { label: label, runCount: 0 }
                 }
 
                 // extern operation — the user-supplied handler owns the
@@ -288,53 +288,53 @@ system DevPlatform {
             route: "/projects"
             title: "Projects"
             requires currentUser.role == "admin"
-            body: Stack(
-                Breadcrumbs(
-                    Anchor("Home", to: "/"),
-                    Text("Projects")
-                ),
-                Toolbar(
-                    Heading("Projects", level: 2),
-                    Button("New project", to: "/projects/new", testid: "projects-create")
-                ),
-                QueryView(
+            body: Stack {
+                Breadcrumbs {
+                    Anchor { "Home", to: "/" },
+                    Text { "Projects" }
+                },
+                Toolbar {
+                    Heading { "Projects", level: 2 },
+                    Button { "New project", to: "/projects/new", testid: "projects-create" }
+                },
+                QueryView {
                     of: Projects.Project.all,
-                    loading: Skeleton(count: 5),
-                    error: Alert("Couldn't load projects"),
-                    empty: Empty("No projects yet."),
-                    data: rows => Paper(
-                        Table(
+                    loading: Skeleton { count: 5 },
+                    error: Alert { "Couldn't load projects" },
+                    empty: Empty { "No projects yet." },
+                    data: rows => Paper {
+                        Table {
                             rows: rows,
                             striped: true,
                             highlight: true,
                             rowTestid: r => "projects-row-" + r.id,
-                            Column("ID", o => IdLink(o.id, of: Project)),
-                            Column("Name", o => Text(o.name)),
-                            Column("Visibility", o => EnumBadge(o.visibility)),
-                            Column("Created", o => DateDisplay(o.createdAt))
-                        ),
+                            Column { "ID", o => IdLink { o.id, of: Project } },
+                            Column { "Name", o => Text { o.name } },
+                            Column { "Visibility", o => EnumBadge { o.visibility } },
+                            Column { "Created", o => DateDisplay { o.createdAt } }
+                        },
                         padding: "none"
-                    ),
+                    },
                     testid: "projects-query"
-                ),
+                },
                 testid: "projects-list"
-            )
+            }
         }
 
         // Project create — Form.
         page ProjectNew {
             route: "/projects/new"
             title: "New project"
-            body: Stack(
-                Breadcrumbs(
-                    Anchor("Home", to: "/"),
-                    Anchor("Projects", to: "/projects"),
-                    Text("New")
-                ),
-                Heading("Create project", level: 2),
-                Card(Form(of: Project, testid: "projects-new")),
+            body: Stack {
+                Breadcrumbs {
+                    Anchor { "Home", to: "/" },
+                    Anchor { "Projects", to: "/projects" },
+                    Text { "New" }
+                },
+                Heading { "Create project", level: 2 },
+                Card { CreateForm { of: Project, testid: "projects-new" } },
                 testid: "projects-new-page"
-            )
+            }
         }
 
         // Project detail — covers the remaining layout primitives:
@@ -349,54 +349,54 @@ system DevPlatform {
                 draftName: string = ""
                 level: int = 1
             }
-            body: Container(
-                Grid(
-                    Group(
-                        Avatar("P"),
-                        Image("/logo.png"),
-                        Heading("Project detail", level: 2)
-                    ),
-                    Tabs(
-                        Card(
-                            Stack(
-                                Stat("Pipelines", 3),
-                                Badge("active"),
-                                Divider(),
-                                Money(1999, currency: "USD"),
-                                KeyValueRow("Owner", Text("platform-team")),
-                                Loader()
-                            )
-                        ),
-                        Card(
-                            Stack(
-                                Field("Name", value: draftName),
-                                NumberField("Level", value: level),
-                                PasswordField("Token"),
-                                Toggle("Editing", value: editing),
-                                Anchor("Docs", to: "/docs"),
-                                Button("Save", to: "/projects")
-                            )
-                        )
-                    )
-                ),
-                Modal(
-                    Text("Confirm archive?"),
+            body: Container {
+                Grid {
+                    Group {
+                        Avatar { "P" },
+                        Image { "/logo.png" },
+                        Heading { "Project detail", level: 2 }
+                    },
+                    Tabs {
+                        Card {
+                            Stack {
+                                Stat { "Pipelines", 3 },
+                                Badge { "active" },
+                                Divider {},
+                                Money { 1999, currency: "USD" },
+                                KeyValueRow { "Owner", Text { "platform-team" } },
+                                Loader {}
+                            }
+                        },
+                        Card {
+                            Stack {
+                                Field { "Name", value: draftName },
+                                NumberField { "Level", value: level },
+                                PasswordField { "Token" },
+                                Toggle { "Editing", value: editing },
+                                Anchor { "Docs", to: "/docs" },
+                                Button { "Save", to: "/projects" }
+                            }
+                        }
+                    }
+                },
+                Modal {
+                    Text { "Confirm archive?" },
                     open: editing,
                     title: "Archive"
-                ),
+                },
                 testid: "projects-detail"
-            )
+            }
         }
 
         // A reusable component (covers Component + its state block).
-        // `Slot()` belongs in a component body (it emits `{children}`
+        // `Slot {}` belongs in a component body (it emits `{children}`
         // and marks the Props interface with `children?`), so the
         // showcase exercises it here rather than in a page.
         component StatusPill(label: string) {
             state {
                 hovered: bool = false
             }
-            body: Stack(Badge(label), Slot("extra"))
+            body: Stack { Badge { label }, Slot { "extra" } }
         }
 
         // UI-level sidebar menu — internal link + external link.
@@ -416,11 +416,11 @@ system DevPlatform {
             route: "/builds"
             title: "Builds"
             menu { section: "Ops", label: "Builds", order: 0 }
-            body: Stack(
-                Heading("Build board", level: 2),
-                Text("Build status overview"),
+            body: Stack {
+                Heading { "Build board", level: 2 },
+                Text { "Build status overview" },
                 testid: "builds-board"
-            )
+            }
         }
     }
 

@@ -1,4 +1,4 @@
-// Phoenix `Action`: `Action(<instance>.<op>, then?)` inside a
+// Phoenix `Action`: `Action { <instance>.<op>, then? }` inside a
 // (stateless) function component emits a `<.button phx-click=…>` whose
 // handler is hoisted to every host page's LiveView — load the instance
 // via the Ash code interface, invoke the action, flash + navigate.
@@ -30,18 +30,18 @@ const SOURCE = `system MiniLiveView {
   ui SalesAdmin {
     api Sales: SalesApi
     component CustomerPanel(customer: Customer) {
-      body: Toolbar(Action(customer.confirm, then: navigate(Home)))
+      body: Toolbar { Action { customer.confirm, then: navigate(Home) } }
     }
     page Detail {
       route: "/customers/:id"
-      body: QueryView(
+      body: QueryView {
         of: Sales.Customer.byId(id),
         single: true,
-        loading: Loader(),
-        empty: Empty("Not found"),
-        data: c => CustomerPanel(customer: c))
+        loading: Loader {},
+        empty: Empty { "Not found" },
+        data: c => CustomerPanel(customer: c)}
     }
-    page Home { route: "/" body: Text("home") }
+    page Home { route: "/" body: Text { "home" } }
   }
 
   deployable phoenixApp {

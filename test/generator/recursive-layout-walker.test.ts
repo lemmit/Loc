@@ -7,13 +7,13 @@
 // the existing `deriveExtraRoutesFromUi` pipeline.
 //
 // What this test pins:
-//   1. `body: Stack(Heading("X"), Text("Y"))` emits a TSX file
+//   1. `body: Stack { Heading { "X" }, Text { "Y" } }` emits a TSX file
 //      with a Mantine `<Stack>` containing the children.
 //   2. Imports for the Mantine components used are emitted at
 //      the top of the page file.
 //   3. App.tsx imports + routes the custom-layout page.
-//   4. Nested composition works: Card("Title", Stack(Text("a"),
-//      Text("b"))) → nested JSX.
+//   4. Nested composition works: Card {"Title", Stack {Text { "a" },
+//      Text { "b" }}} → nested JSX.
 //   5. Scaffold-archetype bodies (List/Detail/Form) STILL go
 //      through the scaffold dispatch path, not the walker.
 
@@ -23,14 +23,14 @@ import { generateSystemFiles } from "../_helpers/index.js";
 const buildAndGenerate = generateSystemFiles;
 
 describe("recursive layout walker", () => {
-  it("emits Stack(Heading, Text) into a TSX file with Mantine imports", async () => {
+  it("emits Stack { Heading, Text } into a TSX file with Mantine imports", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Welcome {
             route: "/welcome"
-            body:  Stack(Heading("Welcome to Acme"), Text("Pick a destination."))
+            body:  Stack { Heading { "Welcome to Acme" }, Text { "Pick a destination." } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -62,7 +62,7 @@ describe("recursive layout walker", () => {
         ui WebApp {
           page Welcome {
             route: "/"
-            body:  Stack(Heading("Hello"))
+            body:  Stack { Heading { "Hello" } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -86,7 +86,7 @@ describe("recursive layout walker", () => {
         ui WebApp {
           page Welcome {
             route: "/welcome"
-            body:  Heading("Big", level: 1)
+            body:  Heading { "Big", level: 1 }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -102,14 +102,14 @@ describe("recursive layout walker", () => {
     expect(content).toMatch(/<Title order=\{1\}>Big<\/Title>/);
   });
 
-  it('nested composition: Card("Stats", Stack(Text("a"), Text("b")))', async () => {
+  it('nested composition: Card { "Stats", Stack { Text { "a" }, Text { "b" } } }', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Dashboard {
             route: "/dashboard"
-            body:  Card("Stats", Stack(Text("a"), Text("b")))
+            body:  Card { "Stats", Stack { Text { "a" }, Text { "b" } } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -140,7 +140,7 @@ describe("recursive layout walker", () => {
         ui WebApp {
           page Welcome {
             route: "/welcome"
-            body:  Button("Click me")
+            body:  Button { "Click me" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -165,7 +165,7 @@ describe("recursive layout walker", () => {
         ui WebApp {
           page Mixed {
             route: "/mixed"
-            body:  Stack(Heading("Real"), SomeUnknownThing(foo: 42))
+            body:  Stack { Heading { "Real" }, SomeUnknownThing(foo: 42) }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

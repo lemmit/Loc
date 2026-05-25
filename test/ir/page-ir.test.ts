@@ -94,7 +94,7 @@ describe("page metamodel — IR shape", () => {
   });
 
   it("lowers a `page` with route/title/requires/state/body/menu meta", async () => {
-    // CallExpr accepts named-arg syntax (`List(of: Order)`)
+    // CallExpr accepts named-arg syntax (`List { of: Order }`)
     // and PageMenuMeta accepts soft-keyword keys (`section:`,
     // `label:`) — both via the `LooseName` rule.
     const loom = await buildLoom(`
@@ -108,7 +108,7 @@ describe("page metamodel — IR shape", () => {
               filter: string = ""
               selectedId: string
             }
-            body: List(of: Order)
+            body: List { of: Order }
             menu { section: "Sales", label: "Orders" }
           }
         }
@@ -157,7 +157,7 @@ describe("page metamodel — IR shape", () => {
     // `Parameter.name` uses `LooseName`, so `id` no longer collides
     // with the IdRef magic-identifier keyword and can be used as a
     // route-param name.  Uses the canonical Detail-page body shape
-    // (`Stack(scaffoldDetails(of:), scaffoldOperations(of:))`) which
+    // (`Stack { scaffoldDetails(of:), scaffoldOperations(of:) }`) which
     // the inline-primitive expander rewrites at lowering time into
     // the full Breadcrumbs/Heading/QueryView tree.
     const loom = await buildLoom(`
@@ -166,7 +166,7 @@ describe("page metamodel — IR shape", () => {
         ui WebApp {
           page CustomerDetail(id: Customer id) {
             route: "/customers/:id"
-            body: Stack(scaffoldDetails(of: Customer), scaffoldOperations(of: Customer))
+            body: Stack { scaffoldDetails(of: Customer), scaffoldOperations(of: Customer) }
           }
         }
       }
@@ -177,8 +177,8 @@ describe("page metamodel — IR shape", () => {
     expect(page.params.length).toBeGreaterThanOrEqual(1);
     const idParam = page.params.find((p) => p.name === "id")!;
     expect(idParam.name).toBe("id");
-    // Body root is the expanded Stack(Breadcrumbs, Heading,
-    // QueryView, …) call after inline-primitive expansion.
+    // Body root is the expanded Stack {Breadcrumbs, Heading,
+    // QueryView, …} call after inline-primitive expansion.
     expect(page.body?.kind).toBe("call");
     if (page.body?.kind === "call") {
       expect(page.body.name).toBe("Stack");
@@ -193,7 +193,7 @@ describe("page metamodel — IR shape", () => {
             route: "/x"
             state { a: int = 0 }
             state { b: string }
-            body: Empty()
+            body: Empty {}
           }
         }
       }
@@ -209,7 +209,7 @@ describe("page metamodel — IR shape", () => {
         ui WebApp {
           component OrderPanel(order: Order) {
             state { tab: string = "summary" }
-            body: Stack(items: [order, tab])
+            body: Stack { Heading { tab } }
           }
         }
       }
@@ -227,8 +227,8 @@ describe("page metamodel — IR shape", () => {
     const loom = await buildLoom(`
       system Acme {
         ui WebApp {
-          page Home { route: "/", body: Heading("Hi") }
-          page Reports { route: "/reports", body: List(of: Report) }
+          page Home { route: "/", body: Heading { "Hi" } }
+          page Reports { route: "/reports", body: List { of: Report } }
           menu {
             section "Main" {
               link Home { label: "Start" },
@@ -268,9 +268,9 @@ describe("page metamodel — IR shape", () => {
             route: "/x"
             state { step: int = 0 }
             body: match {
-              step == 0 => List(of: Order)
-              step == 1 => Empty()
-              else      => Heading("done")
+              step == 0 => List { of: Order }
+              step == 1 => Empty {}
+              else      => Heading { "done" }
             }
           }
         }
@@ -460,7 +460,7 @@ describe("page metamodel — IR shape", () => {
     const loom = await buildLoom(`
       system Acme {
         ui WebApp {
-          page Home { route: "/", body: Heading("hi") }
+          page Home { route: "/", body: Heading { "hi" } }
           menu {
             section "Main" {
               link Home { label: "Start" }

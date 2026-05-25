@@ -1188,7 +1188,22 @@ export interface CalleeSignature {
  *  (its params) or a value-object constructor (its declared properties,
  *  positional). Shared by the LSP signature-help provider and the Model
  *  builder's structured editor. Undefined when the callee can't be resolved. */
-export function calleeSignature(call: CallExpr | MemberAccess): CalleeSignature | undefined {
+export function calleeSignature(
+  call: CallExpr | MemberAccess | import("./generated/ast.js").BuilderCall,
+): CalleeSignature | undefined {
+  if (call.$type === "BuilderCall") {
+    const ctx = AstUtils.getContainerOfType(call, isBoundedContext);
+    const vo = ctx?.members.find(
+      (m): m is ValueObject => isValueObject(m) && m.name === call.type,
+    );
+    if (vo) {
+      return {
+        name: vo.name,
+        params: vo.members.filter(isProperty).map((p) => ({ name: p.name, type: p.type })),
+      };
+    }
+    return undefined;
+  }
   if (isMemberAccess(call)) {
     if (!call.call) return undefined;
     const decl = stepIntoNode(typeOf(call.receiver, envForNode(call)), call.member);

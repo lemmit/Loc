@@ -56,7 +56,7 @@ describe("platform pin grammar + validation", () => {
     const { errors } = await parse(`
       system S {
         module M { context C { } }
-        ui W { page Home() { route: "/" body: Heading("hi") } }
+        ui W { page Home() { route: "/" body: Heading { "hi" } } }
         deployable api { platform: hono, modules: M, port: 3000 }
         deployable web { platform: "static", targets: api, ui: W, port: 3001 }
       }
@@ -95,7 +95,7 @@ describe("lowering normalises platform + platformRef", () => {
       `
       system S {
         module M { context C { } }
-        ui W { page Home() { route: "/" body: Heading("hi") } }
+        ui W { page Home() { route: "/" body: Heading { "hi" } } }
         deployable api { platform: hono, modules: M, port: 3000 }
         deployable web { platform: static, targets: api, ui: W, port: 3001 }
       }

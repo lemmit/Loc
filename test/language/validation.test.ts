@@ -1041,7 +1041,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           sku: string
           derived display: string = sku
           test "money builds" {
-            let m = Money(1.0, "USD")
+            let m = Money { amount: 1.0, currency: "USD" }
             expect m.amount == 1.0
           }
         }

@@ -85,8 +85,8 @@ system BankingSystem {
         operation deposit(amount: Money) {
           precondition isMutable()
           precondition amount.amount > 0
-          balance := Money(balance.amount + amount.amount, balance.currency)
-          transactions += new AccountTransaction {
+          balance := Money { amount: balance.amount + amount.amount, currency: balance.currency }
+          transactions += AccountTransaction {
             amount: amount,
             kind: "Deposit",
             at: now()
@@ -98,8 +98,8 @@ system BankingSystem {
           precondition isMutable()
           precondition amount.amount > 0
           precondition balance.amount >= amount.amount
-          balance := Money(balance.amount - amount.amount, balance.currency)
-          transactions += new AccountTransaction {
+          balance := Money { amount: balance.amount - amount.amount, currency: balance.currency }
+          transactions += AccountTransaction {
             amount: amount,
             kind: "Withdrawal",
             at: now()
@@ -132,7 +132,7 @@ system BankingSystem {
             balance: { amount: 100.0, currency: "USD" },
             openedAt: "2024-01-01T00:00:00Z"
           })
-          expectThrows acct.withdraw(Money(1000.0, "USD"))
+          expectThrows acct.withdraw(Money { amount: 1000.0, currency: "USD" })
         }
 
         test "a frozen account rejects deposits and withdrawals" verifies TC-002 {
@@ -143,8 +143,8 @@ system BankingSystem {
             openedAt: "2024-01-01T00:00:00Z"
           })
           acct.freeze("fraud review")
-          expectThrows acct.deposit(Money(10.0, "USD"))
-          expectThrows acct.withdraw(Money(10.0, "USD"))
+          expectThrows acct.deposit(Money { amount: 10.0, currency: "USD" })
+          expectThrows acct.withdraw(Money { amount: 10.0, currency: "USD" })
         }
       }
 
