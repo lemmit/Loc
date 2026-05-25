@@ -258,11 +258,7 @@ function synthesizeInspect(agg: AggregateIR): DerivedIR {
     }
     // Stringifiable primitive / id / enum — emit an explicit `convert`
     // to string so backends don't have to re-derive the conversion.
-    if (
-      fieldType.kind === "primitive" ||
-      fieldType.kind === "id" ||
-      fieldType.kind === "enum"
-    ) {
+    if (fieldType.kind === "primitive" || fieldType.kind === "id" || fieldType.kind === "enum") {
       const fromPrimitive =
         fieldType.kind === "primitive"
           ? fieldType.name

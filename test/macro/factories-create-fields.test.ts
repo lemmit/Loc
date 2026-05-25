@@ -7,7 +7,7 @@
 // plus any field carrying a macro-origin tag.
 
 import { describe, expect, it } from "vitest";
-import type { Aggregate, BoundedContext, Model } from "../../src/language/generated/ast.js";
+import type { Aggregate } from "../../src/language/generated/ast.js";
 import { isAggregate } from "../../src/language/generated/ast.js";
 import { writableCreateFields, writableUpdateFields } from "../../src/macro-api/factories.js";
 import { parseString } from "../_helpers/index.js";
