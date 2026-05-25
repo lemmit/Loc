@@ -198,6 +198,14 @@ function toRfEdges(g: ViewGraph): Edge[] {
   return g.edges.map((e) => {
     const reconnectable: "target" | false = isRebindableDeployableEdge(e.label ?? "") ? "target" : false;
     const styleSpec = EDGE_STYLE[e.kind ?? "binding"] ?? EDGE_STYLE.binding;
+    // Pivot (centre-routed) containment edges form the structural backbone
+    // root↔aggregate/workflow/state and deserve more visual weight than the
+    // peripheral containment trace. Side-routed contains carry a sourceHandle
+    // (left/right) — pivot contains don't, so we can branch on that.
+    const isPivotContains = e.kind === "contains" && !e.sourceHandle;
+    const stroke = isPivotContains ? "var(--mantine-color-dark-1)" : styleSpec.stroke;
+    const opacity = isPivotContains ? 0.85 : styleSpec.opacity;
+    const strokeWidth = isPivotContains ? 1.5 : styleSpec.strokeWidth;
     return {
       id: e.id,
       source: e.source,
@@ -206,7 +214,11 @@ function toRfEdges(g: ViewGraph): Edge[] {
       // down the periphery instead of crossing every tier through the centre.
       // Smoothstep gives them an L-shape that hugs the canvas edge.
       ...(e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}),
-      ...(e.kind === "contains" ? { type: "smoothstep" } : {}),
+      // Side-routed contains edges use smoothstep so they trace L-shapes
+      // along the periphery; pivot (centre-routed) ones keep the default
+      // bezier so they read as direct diagonal links to off-centre aggregates
+      // instead of curling around right angles.
+      ...(e.kind === "contains" && e.sourceHandle ? { type: "smoothstep" } : {}),
       label: e.label,
       reconnectable,
       // Only deployable bindings carry visible labels — reads/writes/constrains
@@ -215,10 +227,10 @@ function toRfEdges(g: ViewGraph): Edge[] {
       ...(e.kind === "binding" ? {} : { label: undefined }),
       labelStyle: { fontSize: 9, fill: styleSpec.labelFill ?? "var(--mantine-color-dimmed)" },
       style: {
-        stroke: styleSpec.stroke,
+        stroke,
         strokeDasharray: styleSpec.dash,
-        opacity: styleSpec.opacity,
-        strokeWidth: styleSpec.strokeWidth,
+        opacity,
+        strokeWidth,
       },
       data: { edgeKind: e.kind ?? "binding" },
     };
