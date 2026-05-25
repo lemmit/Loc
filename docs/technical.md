@@ -484,7 +484,7 @@ checker validates every data flow from the IR to the rendered string.
 | `index.ts` | Project shell (Vite, package.json, tsconfig, index.html, Dockerfile, certs/ dir, App.tsx with router, main.tsx with providers, e2e/ suite shell). |
 | `api-builder.ts` | Per-aggregate API module: Zod schemas (request + response, walked via `wireFieldsForAggregate`) + React Query hooks (one per route, plus one `use<Op><Agg>` mutation hook per public operation). |
 | `body-walker.ts` | The **single** page-codegen path.  Walks a page's `body:` `ExprIR` and emits TSX by dispatching every walker-stdlib primitive (`Stack`/`Table`/`QueryView`/`Form`/`Modal`/`KeyValueRow`/…) through the active design pack's `primitive-*` templates.  No archetype renderers — `page <Name> { body: … }` and scaffolded pages share this one walker. |
-| `form-helpers.ts` | Per-type form-input dispatch (`prepareFormFieldVM`/`renderFormField`): text/number/switch/select/fieldset/datetime, RHF `register` vs `Controller`, initial-value generation, `X id` → `useAll<Target>()` picker injection.  Shared by `Form(of:)`, `Form(runs:)`, and operation-modal forms. |
+| `form-helpers.ts` | Per-type form-input dispatch (`prepareFormFieldVM`/`renderFormField`): text/number/switch/select/fieldset/datetime, RHF `register` vs `Controller`, initial-value generation, `X id` → `useAll<Target>()` picker injection.  Shared by `Form { of: }`, `Form { runs: }`, and operation-modal forms. |
 | `pages-emitter.ts` | Page shell: wraps the walker's body TSX with `useForm`/mutation-hook/`useParams`/import declarations the body recorded on the walk context. |
 | `page-objects-builder.ts` / `walker-page-objects.ts` | Per-aggregate Playwright page-object class — keyed off the `data-testid` strings every primitive threads through (`testid:` named arg). |
 
@@ -506,7 +506,7 @@ ui { scaffold modules: Sales }
         │
         ▼  Pass 1 — AST→AST   src/language/ddd-scaffold-ast-expander.ts
    synthesised `Page` AST nodes (name, route, menu, and a
-   high-level body call: List(of:) / Form(of:) / Detail(of:, by:) …)
+   high-level body call: List { of: } / Form { of: } / Detail { of:, by: } …)
    each tagged with a `scaffoldOrigin` discriminator
         │
         ▼  Pass 2 — IR rewrite   src/ir/scaffold-expander.ts
@@ -523,12 +523,12 @@ contains*.  Per archetype:
 
 | Origin | Synthesised body |
 | --- | --- |
-| `aggregate-list` | `Stack(Breadcrumbs, Toolbar(Heading, Button "New"), QueryView(of: api.Agg.all, …, data: Paper(Table(Column per non-collection field))))` |
-| `aggregate-new` | `Stack(Breadcrumbs, Heading, Card(Form(of: Agg)))` |
-| `aggregate-detail` | `Stack(Breadcrumbs, Heading, QueryView(of: api.Agg.byId(id), single: true, data:` → `Card(Stack(KeyValueRow per scalar field))` **+ one `Modal(trigger: Button, Form(data.<op>))` per public operation + one `Card(Heading, Table)` per `contains` collection (related-entity list)** `))` |
-| `workflow-form` | `Stack(Breadcrumbs, Heading, Card(Form(runs: wf)))` |
-| `view-list` | `Stack(Heading, QueryView(of: Views.<name>, data: Paper(Table)))` |
-| `home` / `workflows-index` / `views-index` | `Stack(Heading, Stack(Card per aggregate/workflow/view))` |
+| `aggregate-list` | `Stack { Breadcrumbs, Toolbar { Heading, Button "New" }, QueryView { of: api.Agg.all, …, data: Paper { Table { Column per non-collection field } } } }` |
+| `aggregate-new` | `Stack { Breadcrumbs, Heading, Card { Form { of: Agg } } }` |
+| `aggregate-detail` | `Stack { Breadcrumbs, Heading, QueryView { of: api.Agg.byId(id), single: true, data:` → `Card { Stack { KeyValueRow per scalar field } }` **+ one `Modal { trigger: Button, Form { data.<op> } }` per public operation + one `Card { Heading, Table }` per `contains` collection (related-entity list)** ` } }` |
+| `workflow-form` | `Stack { Breadcrumbs, Heading, Card { Form { runs: wf } } }` |
+| `view-list` | `Stack { Heading, QueryView { of: Views.<name>, data: Paper { Table } } }` |
+| `home` / `workflows-index` / `views-index` | `Stack { Heading, Stack { Card per aggregate/workflow/view } }` |
 
 Because the output is plain walker stdlib, every scaffolded feature
 is reachable from an explicit `page <Name> { body: … }` —

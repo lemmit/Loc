@@ -30,6 +30,7 @@ import {
   isAggregate,
   isAssignOrCallStmt,
   isBinaryExpr,
+  isBoundedContext,
   isContainment,
   isDecLit,
   isDerivedProp,
@@ -88,6 +89,7 @@ import {
   typeToString,
   withTags,
 } from "./type-system.js";
+import { isWalkerPrimitive } from "./walker-stdlib.js";
 
 export class DddValidator {
   // Entry: full model walk
@@ -112,6 +114,16 @@ export class DddValidator {
     // type system is the source of truth); structural checks run
     // unconditionally.
     this.checkMatchExpressions(model, accept);
+    // v2 hard cut: reject pre-v2 surfaces that have a builder-call replacement.
+    // `Money(10, "USD")` → `Money { amount: 10, currency: "USD" }`,
+    // `OrderLine(...)` (entity part) → `OrderLine { ... }`.
+    this.checkLegacyConstructorCalls(model, accept);
+    // BuilderCall.type is a bare string (not a Langium cross-reference),
+    // so typos like `Mony { ... }` pass parsing & linking silently.  The
+    // validator resolves the type name against the available builder
+    // targets (VO / EntityPart / user-component / walker primitive) and
+    // errors on misses.
+    this.checkBuilderCallType(model, accept);
     // `import helper <name> from "..."` declarations.
     // Reject names that shadow walker stdlib primitives so a typo
     // never silently overrides Stack / Form / etc.  Also flag
@@ -1335,6 +1347,97 @@ export class DddValidator {
           );
         }
       }
+    }
+  }
+
+  /** v2 hard cut: reject CallExpr forms that v2 replaces with BuilderCall.
+   *  Specifically, any `Name(args)` where `Name` resolves to a ValueObject
+   *  or EntityPart inside the enclosing context — those constructions must
+   *  use `Name { slot: value, ... }` syntax now. */
+  private checkLegacyConstructorCalls(model: Model, accept: ValidationAcceptor): void {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (node.$type !== "CallExpr") continue;
+      const call = node as import("./generated/ast.js").CallExpr;
+      const callee = call.callee;
+      if (callee.$type !== "NameRef") continue;
+      const name = (callee as import("./generated/ast.js").NameRef).name;
+      const ctx = AstUtils.getContainerOfType(call, isBoundedContext);
+      if (!ctx) continue;
+      for (const m of ctx.members) {
+        if (isValueObject(m) && m.name === name) {
+          accept(
+            "error",
+            `v2 syntax: construct '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
+            { node: call, code: "loom.legacy-vo-call" },
+          );
+          break;
+        }
+        if (isAggregate(m)) {
+          for (const inner of m.members) {
+            if (
+              inner.$type === "EntityPart" &&
+              (inner as import("./generated/ast.js").EntityPart).name === name
+            ) {
+              accept(
+                "error",
+                `v2 syntax: construct entity part '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
+                { node: call, code: "loom.legacy-part-call" },
+              );
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /** v2 BuilderCall type names are bare strings (no cross-reference) —
+   *  resolve them at validation time and reject unknown names with a
+   *  diagnostic listing the four admissible categories. */
+  private checkBuilderCallType(model: Model, accept: ValidationAcceptor): void {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (node.$type !== "BuilderCall") continue;
+      const bc = node as import("./generated/ast.js").BuilderCall;
+      const name = bc.type;
+      // 1. Walker primitive (stdlib).
+      if (isWalkerPrimitive(name)) continue;
+      // 2. VO / EntityPart in enclosing context.
+      const ctx = AstUtils.getContainerOfType(bc, isBoundedContext);
+      if (ctx) {
+        let resolved = false;
+        for (const m of ctx.members) {
+          if (isValueObject(m) && m.name === name) {
+            resolved = true;
+            break;
+          }
+          if (isAggregate(m)) {
+            for (const inner of m.members) {
+              if (
+                inner.$type === "EntityPart" &&
+                (inner as import("./generated/ast.js").EntityPart).name === name
+              ) {
+                resolved = true;
+                break;
+              }
+            }
+            if (resolved) break;
+          }
+        }
+        if (resolved) continue;
+      }
+      // 3. User-defined component in enclosing UI.
+      const ui = AstUtils.getContainerOfType(bc, (n): n is Ui => n.$type === "Ui");
+      if (ui) {
+        const userComp = ui.members.some(
+          (m) => m.$type === "Component" && (m as { name: string }).name === name,
+        );
+        if (userComp) continue;
+      }
+      accept(
+        "error",
+        `Unknown builder type '${name}'. Expected a ValueObject, EntityPart, user-defined component, or stdlib walker primitive (e.g., Stack, Form, Card).`,
+        { node: bc, property: "type", code: "loom.unknown-builder-type" },
+      );
     }
   }
 

@@ -167,6 +167,105 @@ describe("validation", () => {
   // Page metamodel validator obligations.
   // ---------------------------------------------------------------------------
 
+  describe("v2 hard cut: legacy constructor call forms", () => {
+    it('rejects positional VO call (Money(10, "USD")) — must use BuilderCall', async () => {
+      const { errors } = await parse(`
+        context Sales {
+          valueobject Money { amount: decimal  currency: string }
+          aggregate Order {
+            derived total: Money = Money(0.0, "USD")
+          }
+        }
+      `);
+      expect(errors.some((e) => /v2 syntax.*construct 'Money' with builder-call/.test(e))).toBe(
+        true,
+      );
+    });
+
+    it("rejects entity-part call (LineItem(...)) — must use BuilderCall", async () => {
+      const { errors } = await parse(`
+        context Sales {
+          aggregate Order {
+            entity LineItem { qty: int }
+            contains lines: LineItem[]
+            operation addLine(qty: int) {
+              lines += LineItem(qty)
+            }
+          }
+        }
+      `);
+      expect(errors.some((e) => /v2 syntax.*entity part 'LineItem'.*builder-call/.test(e))).toBe(
+        true,
+      );
+    });
+
+    it("accepts the BuilderCall form", async () => {
+      const { errors } = await parse(`
+        context Sales {
+          valueobject Money { amount: decimal  currency: string }
+          aggregate Order {
+            derived total: Money = Money { amount: 0.0, currency: "USD" }
+          }
+        }
+      `);
+      expect(errors.some((e) => /v2 syntax/.test(e))).toBe(false);
+    });
+  });
+
+  describe("v2 BuilderCall — unknown type names", () => {
+    it("rejects a typo on a VO name", async () => {
+      const { errors } = await parse(`
+        context Sales {
+          valueobject Money { amount: decimal  currency: string }
+          aggregate Order {
+            derived total: Money = Mony { amount: 0.0, currency: "USD" }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type 'Mony'/.test(e))).toBe(true);
+    });
+
+    it("rejects a typo on a walker primitive name", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page P {
+              route: "/p"
+              body: Stak { Heading { "hi" } }
+            }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type 'Stak'/.test(e))).toBe(true);
+    });
+
+    it("accepts a known walker primitive", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page P { route: "/p"  body: Stack { Heading { "hi" } } }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type/.test(e))).toBe(false);
+    });
+
+    it("accepts a user-defined component", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            component PageBox(title: string) { body: Card { title } }
+            page P { route: "/p"  body: PageBox { "hi" } }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type/.test(e))).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Page metamodel validator obligations.
+  // ---------------------------------------------------------------------------
   describe("page metamodel", () => {
     it("rejects duplicate ui block names within a system", async () => {
       const { errors } = await parse(`

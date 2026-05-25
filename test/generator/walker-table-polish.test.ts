@@ -57,7 +57,9 @@ describe("Table polish props", () => {
 
   it("highlight: true adds `highlightOnHover`", async () => {
     const files = await buildAndGenerate(
-      ordersTableBody(`Table { rows: Sales.Order.all, highlight: true, Column { "ID", o => o.id } }`),
+      ordersTableBody(
+        `Table { rows: Sales.Order.all, highlight: true, Column { "ID", o => o.id } }`,
+      ),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     expect(tsx).toMatch(/<Table[^>]*\bhighlightOnHover\b/);

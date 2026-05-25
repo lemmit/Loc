@@ -443,7 +443,9 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("recognises Tabs with nested editable Tab children", () => {
-    const node = seed('Tabs { Tab { "Overview", Text { "a" } }, Tab { "Details", List { of: Order } } }');
+    const node = seed(
+      'Tabs { Tab { "Overview", Text { "a" } }, Tab { "Details", List { of: Order } } }',
+    );
     expect(node.name).toBe("Tabs");
     expect(node.children.map((c) => c.name)).toEqual(["Tab", "Tab"]);
     const [tab1, tab2] = node.children;

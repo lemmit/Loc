@@ -248,8 +248,8 @@ namespaces to the **plural** form (`Sales.Domain.Orders`) to avoid the
 clash without changing the grammar.
 
 ### Positional records skip invariant enforcement
-`record Money(decimal Amount, string Currency)` doesn't run a body block
-on `new Money(...)` — only on `new Money()`.  Use **explicit
+`record Money { decimal Amount, string Currency }` doesn't run a body block
+on `new Money { ... }` — only on `new Money {}`.  Use **explicit
 constructors with init-only properties** for value objects so invariants
 fire on every construction.
 
@@ -315,8 +315,8 @@ body validates correctly.
 ### Test DSL: `expectThrows <expression>`, not `<statement>`
 Statements like `:=`, `+=`, `emit` only make sense inside an aggregate
 operation, not in free-standing tests.  Use `expectThrows <expression>`
-so users naturally write `expectThrows Money(-1, "USD")` and the
-expression renderer (`new Money(-1, "USD")`) just works.
+so users naturally write `expectThrows Money { -1, "USD" }` and the
+expression renderer (`new Money { -1, "USD" }`) just works.
 
 ### Templates split → small, single-purpose modules
 Once the scope crossed ~500 lines per template-file, lookups and edits

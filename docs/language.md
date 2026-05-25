@@ -381,8 +381,8 @@ Pragmatic core, similar to a subset of TypeScript / C# expressions.
 | `a && b`, `a \|\| b` | Logical. |
 | `cond ? a : b` | Ternary. |
 | `x => expr` | Lambda (only valid as a collection-op argument). |
-| `new PartName { field: expr, … }` | Construct a contained part; `id` and parent `parentId` are auto-injected. |
-| `Money(amount, currency)` | Value-object constructor. |
+| `PartName { field: expr, … }` | Construct a contained part; `id` and parent `parentId` are auto-injected. |
+| `Money { amount, currency }` | Value-object constructor. |
 
 ### Collection operators
 
@@ -468,13 +468,13 @@ Each aggregate may declare zero or more `test` blocks at the root level:
 
 ```ddd
 test "money literal builds" {
-    let m = Money(10.5, "USD")
+    let m = Money { 10.5, "USD" }
     expect m.amount == 10.5
     expect m.currency == "USD"
 }
 
 test "negative money rejected" {
-    expectThrows Money(-1.0, "USD")
+    expectThrows Money { -1.0, "USD" }
 }
 ```
 
@@ -659,7 +659,7 @@ context Sales {
         contains lines: OrderLine[]
 
         derived total: Money =
-            Money(lines.sum(l => l.subtotal.amount), "USD")
+            Money { lines.sum(l => l.subtotal.amount), "USD" }
 
         invariant lines.count > 0 when status == Confirmed
 
@@ -668,7 +668,7 @@ context Sales {
         operation addLine(productId: Product id, qty: int, price: Money) {
             precondition isMutable()
             precondition qty > 0
-            lines += new OrderLine {
+            lines += OrderLine {
                 productId: productId, quantity: qty, unitPrice: price
             }
         }
@@ -685,12 +685,12 @@ context Sales {
             quantity: int
             unitPrice: Money
             derived subtotal: Money =
-                Money(unitPrice.amount * quantity, unitPrice.currency)
+                Money { unitPrice.amount * quantity, unitPrice.currency }
             invariant quantity > 0
         }
 
         test "money literal builds" {
-            let m = Money(10.5, "USD")
+            let m = Money { 10.5, "USD" }
             expect m.amount == 10.5
             expect m.currency == "USD"
         }
