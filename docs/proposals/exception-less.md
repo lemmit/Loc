@@ -1118,6 +1118,13 @@ check) work unchanged because the spec stays JSON-shaped.
   variant-name-tagged identity rule, `error` sugar keyword, and
   anonymous-`or`-unions construct are all pinned there because this
   doc depends on them.
+- [`domain-service.md`](./domain-service.md) — adds **validators**
+  (pure cross-aggregate domain rule checks) and **services**
+  (cross-aggregate domain logic that may mutate via aggregate ops),
+  plus the `pre <validator>(args)` clause on aggregate operations.
+  Resolves the "cross-aggregate precondition" question this doc
+  doesn't fully address — validators carry that load with `?`
+  propagation across the synthesised application layer.
 - [`aggregate-inheritance.md`](./aggregate-inheritance.md) — sister
   proposal to the upstream. Unaffected by this doc; aggregates stay
   nominal and concrete.

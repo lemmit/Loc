@@ -76,6 +76,7 @@ A5: parse + external API as Result      | A1, A2                  | (none)
 A6: validate for X returns Result       | A1, A2, P5              | (none)
 A7a: carrier stdlib helpers             | A1                      | (none)
 A7b: user-declared carrier generics     | A1, A4 (DEFERRED)       | (deferred to v2)
+S1-S4: validators + services + pre slot | A1, A2, A6              | (none — feeds D23 resolution)
 ```
 
 Letters: **P** = payload-transport-layer, **I** = aggregate-inheritance,
@@ -531,6 +532,54 @@ accumulated errors via the `combine` helper.
 
 Tracked here for completeness. Not v1.
 
+### Track 4 — Domain services and validators (Phase S)
+
+Independent of A4 / find-variant re-shape; can land before or after.
+Lands after A6 (validators in workflow / `?` propagation stable).
+Resolves D23. Full spec: [`domain-service.md`](./domain-service.md).
+
+#### S1 — Grammar + IR (~1 week)
+
+- Grammar: `validator <name>(...): or <Error> { ... }` declaration;
+  `service <name>(...): or <Result> { ... }` declaration; `pre
+  <name>(args)` clause on `AggregateOperationDecl`.
+- IR: `ValidatorDeclIR` and `ServiceDeclIR` (or unified
+  `CallableDeclIR` with `purity: 'pure' | 'mutating'`); `preClauses:
+  CallExprIR[]` on the operation IR.
+
+#### S2 — Body lowering + purity enforcement (~1 week)
+
+- Validator body walker: rejects mutation, op calls, event emission,
+  service calls (`loom.validator-impure`).
+- Service body walker: rejects workflow calls
+  (`loom.service-cannot-call-workflow`); enforces no own
+  `transactional` annotation.
+- Service call-graph cycle check (`loom.service-cycle`).
+
+#### S3 — Auto-injection at every op call site (~1.5 weeks)
+
+- Lowering pass: for every `agg.op(args)?` call expression, if `op`
+  has `pre <validator>(preArgs)` clauses, expand to:
+  ```
+  validator1(preArgs1)?;
+  validator2(preArgs2)?;
+  ...
+  agg.op(args)?
+  ```
+- The `?` propagation rules ensure each validator's error variants
+  bubble through the enclosing function's signature.
+- API auto-exposed CRUD wrappers consume the same injection — same
+  lowering, same machinery.
+
+#### S4 — Per-backend emission (~1 week)
+
+- TS / .NET / Phoenix: render validator and service declarations
+  as named functions with the same parameter / return-type
+  machinery used for workflows.
+- Auto-injection at call sites: per-backend, mechanical.
+
+**S total: ~4.5 weeks.** Independent of A4; can ship before or after.
+
 ## Coordinated migration moments
 
 Three points in the plan where multiple proposals' work *must* land
@@ -645,7 +694,10 @@ priority order.
 | D20 | Per-surface mappings beyond the api layer (UI / queue / CLI) | **Out of scope.** UI consumes ProblemDetails like any HTTP client; no language-level UI error-mapping surface. Queue / CLI deferred to v2 when those surfaces become real. | — | — |
 | D21 | Env-aware 500-ProblemDetails body (dev shows internals, prod redacts) | **`LOOM_EXPOSE_INTERNAL_ERRORS` env var; defaults from each backend's native dev/prod check** (TS `NODE_ENV !== "production"`, .NET `IHostEnvironment.IsDevelopment()`, Phoenix `:dev`/`:test`). Catalog event always carries full context; sensitive fields stay redacted even in dev. | A3 | exception-less.md |
 | D22 | Workflow `precondition` — typed return vs throw | **Throws** (pinned, flipped from earlier draft). Preconditions are *guards*, not designed business outcomes — bug-shaped, not user-recoverable. Route translates: aggregate-op `PreconditionViolation` → 500 (env-aware); workflow-level `PreconditionViolation` → 400 (rule text safe to surface). Designed-in business outcomes use typed `or` returns, not `precondition`. | A1 | exception-less.md |
-| D23 | Auto-derivation of more application-layer behaviour (uniqueness, FK checks, …) from aggregate annotations | **Open — needs design work**. Trivial CRUD already covered by api auto-exposure. Discussion below in §"Auto-generated application layer". | (later) | (TBD) |
+| D23 | Auto-derivation of more application-layer behaviour (uniqueness, FK checks, cross-aggregate domain rules) from aggregate annotations | **Resolved**: cross-aggregate domain rules via `validator` + `pre` clauses on aggregate operations (see [`domain-service.md`](./domain-service.md)); FK auto-derivation from `Customer id`-typed params; uniqueness as field annotation (uniqueness/OCC/transitions stay as v2 if validator + `pre` proves insufficient). | Phase S | domain-service.md |
+| D24 | Validator vs Service — one keyword or two? | **Two keywords** (pinned): `validator` (pure subtype) and `service` (mutating superset). Validator-as-subtype-of-service relationship documented; same IR machinery underneath. | Phase S | domain-service.md |
+| D25 | `pre` slot — validators only or also services / inline boolean expressions? | **Validators only** (pure; safe to run before potential op failure). Services run from workflow bodies. Inline expressions use `precondition Expr` (throw) or aggregate-op `requires X is E` (typed) instead. | Phase S | domain-service.md |
+| D26 | Validator auto-injection at every call site of the protected op vs only in api wrappers | **Every call site** (pinned). The `pre` clause is part of the operation's contract; can't be bypassed by calling the op through a different code path. Lowering pass expands `agg.op(args)?` to `validator(args)?; agg.op(args)?`. | Phase S | domain-service.md |
 
 **Workflow**: before starting each phase the implementing agent
 should explicitly confirm the relevant decisions with the
@@ -702,7 +754,8 @@ For the implementing agent:
 | Payload transport (P1–P5) | 10 | P3+P4 are the bulk (~6 of 10) |
 | Aggregate inheritance (I1–I4) | 7 | Independent track; can run parallel |
 | Exception-less (A1–A7a) | 11.5 | A1+A2+A3 stack together (~5.5); A4 is the migration spike |
-| **Total** | **~28.5 weeks of focused work** | Parallel work can compress to ~18-22 calendar weeks |
+| Domain services (S1–S4) | 4.5 | Independent of A4; lands after A6 |
+| **Total** | **~33 weeks of focused work** | Parallel work can compress to ~20-24 calendar weeks |
 
 Parallelism: a second implementer can take Track 2 (aggregate
 inheritance) while the first is on Track 1. Track 3 must wait for
