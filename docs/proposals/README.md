@@ -32,8 +32,8 @@ requirements-tracing one.
 | [`partial-update.md`](./partial-update.md) | Partial-update pattern | `command` + `T option` fields for PATCH semantics; supersedes the v0 `Optional<T>` proposal |
 | [`payload-transport-layer.md`](./payload-transport-layer.md) | Structural transport layer | `payload` keyword + five sugar keywords (`event`/`command`/`query`/`response`/`error`); carrier-bounded generics with ML-postfix syntax (`customer page`); both named unions (`payload Foo = A \| B`) and anonymous `or` unions (`A or B`); auto-synthesised aggregate wire payloads |
 | [`exception-less.md`](./exception-less.md) | Exception-less flow | `error` payloads (HTTP-blind in the domain); `option` ML-postfix sugar for `T or none`; `?` propagation operator dispatching on `error`-marked variants; `Repo.getById` re-shape to `T or NotFound`; preconditions throw at both layers (different status codes); api-surface `status <Error> <Code>` mapping + stdlib defaults driving auto-generated RFC 7807 ProblemDetails translation; aggregate-vs-workflow-vs-api layer-aware failure model; no `Result<T, E>` / `Ok` / `Err` wrappers |
-| [`domain-service.md`](./domain-service.md) | Domain services and validators | `validator <name>(...): or <Error>` (pure cross-aggregate domain rule check; subtype of service) + `service <name>(...): or <Result>` (full domain service; may mutate via aggregate ops). `pre <validator>(args)` clause on aggregate operations declaratively lifts the check into the synthesised application layer. Resolves D23. |
-| [`implementation-plan.md`](./implementation-plan.md) | Implementation plan | Stacked delivery plan covering all type-system proposals (state layer + transport layer + exception-less + domain-service). Phases, dependencies, coordinated migration moments, decisions to pin per phase, risk management |
+| [`specification.md`](./specification.md) | Cross-aggregate domain rules | `specification <Name>(args) of T { query:/check:/enumerate: }` declarations; bound to parameters via `from <Spec>(args)`. One declaration drives input validation + UI options + OpenAPI constraints (Specification Pattern from DDD). Plus `private workflow` modifier (reusing existing `private` from `private operation` / `private invariant`) for reusable internal orchestration; workflow-calls-workflow body extension. Resolves D23. |
+| [`implementation-plan.md`](./implementation-plan.md) | Implementation plan | Stacked delivery plan covering all type-system proposals (state layer + transport layer + exception-less + specifications). Phases, dependencies, coordinated migration moments, decisions to pin per phase, risk management |
 
 ## Type-system family — state, transport, exception-less
 
@@ -57,23 +57,30 @@ Six proposals + an implementation plan reshape Loom's type system:
   anonymous-inline (`A or B`) forms.
 - **Exception-less flow** —
   [`exception-less.md`](./exception-less.md). Uses the transport
-  layer's primitives. `error` payloads with their own status codes;
+  layer's primitives. `error` payloads (HTTP-blind in the domain);
   anonymous `or` unions replace the `Result<T, E>` wrapper; `?`
-  propagates `error` variants. Two-regime split enforced by the
-  validator.
+  propagates `error` variants. RFC 7807 ProblemDetails translation
+  at the api edge. Two-regime split (aggregate-invariant throws vs
+  boundary-returns-carrier) enforced by the validator.
+- **Cross-aggregate domain rules** —
+  [`specification.md`](./specification.md). `specification` declarations
+  (parameterised predicates / sets over T) bound to parameters via
+  `from <Spec>(args)`. One declaration drives input validation +
+  UI options + OpenAPI constraints (Specification Pattern from DDD).
+  Plus `private workflow` modifier + workflow-calls-workflow body
+  extension for reusable internal orchestration.
 - **Delivery plan** —
-  [`implementation-plan.md`](./implementation-plan.md). Stacks the
-  three above into one work stream with phases, coordinated
+  [`implementation-plan.md`](./implementation-plan.md). Stacks all
+  of the above into one work stream with phases, coordinated
   migration moments, and risk gates.
 
 Implementing agents: read the docs in order — aggregate-inheritance
-(independent), payload-transport-layer (foundation),
-exception-less (consumer), implementation-plan (delivery). The
-three share a load-bearing rule set (carrier bound,
-aggregate-as-carrier projection, variant-name-tagged union identity,
-`error` sugar keyword, anonymous-`or` unions) which is pinned in
-the transport-layer doc precisely because exception-less depends on
-it.
+(independent), payload-transport-layer (foundation), exception-less
+(consumer), specification (resolves D23), implementation-plan
+(delivery). The transport-layer doc pins the load-bearing rules
+(carrier bound, aggregate-as-carrier projection, variant-name-tagged
+union identity, `error` sugar keyword, anonymous-`or` unions) that
+the downstream proposals depend on.
 
 ## Relationship to the policies work
 

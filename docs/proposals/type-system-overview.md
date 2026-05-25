@@ -8,9 +8,9 @@
 
 Loom's type system is reshaped along two parallel axes — **state**
 (aggregates) and **transport** (payloads) — plus a coherent
-**exception-less flow** built on top, plus **domain services** for
-the missing cross-aggregate logic layer. Together these resolve five
-real pain points:
+**exception-less flow** built on top, plus **specifications** for
+the cross-aggregate domain rule layer (Specification Pattern).
+Together these resolve five real pain points:
 
 1. **No generic payloads** — no `T page`, no `T envelope`, no way to
    compose response shapes. Forces per-aggregate macros for every
@@ -20,9 +20,10 @@ real pain points:
    shape is hidden in operation signatures.
 3. **No aggregate inheritance** — `Customer is-a Party` requires
    copy-paste fields across every concrete or a macro per pattern.
-4. **No domain services** — cross-aggregate rules that aren't
-   orchestration have no place to live; they end up squeezed into
-   workflows or smuggled into aggregates as parameters.
+4. **No declarative cross-aggregate rules** — "active customer" or
+   "supplier that can fulfill X" can't be expressed once and reused
+   by both validation and UI; today the rule's split across workflow
+   bodies (validation) and hand-written frontend code (option lists).
 5. **Optional-vs-nullable confusion** — `T?` covers nullable, but
    there's no clean way to model "value or not supplied" without
    ad-hoc conventions.
@@ -56,11 +57,14 @@ real pain points:
                 └──────────────────────────────────┘ │
                               │                      │
                               ▼ consumes             │
-                ┌─ domain-service.md ──────────────┐ │
-                │   validator (pure, subtype)      │─┘
-                │   service (mutating superset)    │
-                │   pre <validator>(args) clause   │
-                └──────────────────────────────────┘
+                ┌─ specification.md ────────────────┐ │
+                │   specification <Name>(args) of T │─┘
+                │   query / check / enumerate forms  │
+                │   `from <Spec>(args)` parameter    │
+                │   binding drives validation + UI    │
+                │   + `private workflow` modifier     │
+                │   + workflow-calls-workflow         │
+                └────────────────────────────────────┘
 
                 ┌─ partial-update.md ───────────┐
                 │   pattern: command + option   │     (sits adjacent
@@ -89,13 +93,15 @@ real pain points:
 │  Aggregate-invariant throws → env-aware 500 fallback.       │
 ├─ Workflow (application layer) ──────────────────────────────┤
 │  Cross-aggregate orchestration. Loads via Repo.getById      │
-│  (returns T or NotFound). Calls aggregate ops + services    │
-│  + validators. Optionally transactional.                     │
+│  (returns T or NotFound). Calls aggregate ops + other        │
+│  workflows. Optionally transactional. `private workflow`     │
+│  for reusable internal orchestration not auto-exposed.        │
 │  ? propagation lives here as the workhorse.                  │
-├─ Domain services + validators ──────────────────────────────┤
-│  service: cross-aggregate logic; may mutate via ops.         │
-│  validator (subtype of service): pure cross-aggregate rule   │
-│  check; eligible for `pre` clauses on aggregate ops.         │
+├─ Specifications (cross-aggregate domain rules) ─────────────┤
+│  Pure parameterised predicates / sets over T. Composes        │
+│  existing views + named repo finds. Bound to parameters       │
+│  via `from <Spec>(args)`. One declaration drives input        │
+│  validation + UI options + OpenAPI constraints.               │
 ├─ Aggregate operation (domain core) ─────────────────────────┤
 │  Mutates own state only. precondition throws (guard).        │
 │  Returns T or BusinessError for designed-in own-domain       │
@@ -130,8 +136,8 @@ real pain points:
               (e.g., InsufficientCredit)             → ? propagates
                               │
                               ▼
-              cross-aggregate rule failure           → validator returns
-              (e.g., SupplierUnable, BranchClosed)   → ? propagates
+              specification mismatch                 → InvalidSpecMember
+              (parameter not in spec's set)          → ? propagates
                               │
                               ▼
               workflow precondition violation        → throws → 400
@@ -152,42 +158,47 @@ context Sales {
   error InsufficientCredit { requested: decimal, available: decimal }
   error SupplierUnable    { supplierId: Supplier id, orderType: OrderType }
 
-  # Pure cross-aggregate validator — used in `pre` clauses.
-  validator suppliersCanFulfill(orderType: OrderType, supplierIds: Supplier id[]): or SupplierUnable {
-    let suppliers = Suppliers.getMany(supplierIds)?
-    for s in suppliers {
-      if !s.canFulfill(orderType) {
-        return SupplierUnable { supplierId: s.id, orderType: orderType }
-      }
-    }
+  # Specification — pure parameterised predicate over Supplier.
+  # Composes existing named repo find (Suppliers.canFulfill).
+  specification SuppliersForOrderType(orderType: OrderType) of Supplier {
+    query: Suppliers.canFulfill(orderType)
+  }
+
+  specification ActiveCustomers of Customer {
+    query: Customers.findActive()
   }
 
   # Aggregate — pure domain. Cannot load other aggregates.
   aggregate Order {
     customerId: Customer id
 
-    operation place(orderType: OrderType, supplierIds: Supplier id[], lines: OrderLine[]): or InsufficientCredit
-      pre suppliersCanFulfill(orderType, supplierIds)     # validator auto-injected at every call site
-    {
+    operation place(lines: OrderLine[]): or InsufficientCredit {
       precondition lines.length > 0          # throws (guard)
       # ... own-state logic; may return InsufficientCredit
     }
   }
 
+  # Command — fields bound to specs via `from`.
+  command PlaceOrder {
+    customerId:  Customer id   from ActiveCustomers
+    orderType:   OrderType
+    supplierIds: Supplier id[] from SuppliersForOrderType(self.orderType)
+    lines:       OrderLine[]
+  }
+
   # Workflow — application layer. Orchestrates.
-  workflow placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or SupplierUnable or InsufficientCredit transactional {
+  workflow placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or InvalidSpecMember or InsufficientCredit transactional {
     precondition cmd.totalAmount > 0         # throws → 400
     let order = Order.create({ customerId: cmd.customerId })
-    order.place(cmd.orderType, cmd.supplierIds, cmd.lines)?
+    order.place(cmd.lines)?
     return order.id
   }
 
   # API — declares status mappings for non-default errors.
   api SalesApi from Sales {
     status InsufficientCredit 409
-    # NotFound, ValidationError, ParseError get stdlib defaults.
-    # SupplierUnable: would default 500+warning; lift to 422 if it's the author's intent.
-    status SupplierUnable 422
+    # NotFound, InvalidSpecMember, ValidationError, ParseError
+    # all get stdlib defaults (404 / 422 / 422 / 400).
   }
 }
 ```
@@ -196,13 +207,17 @@ What runs end-to-end:
 
 1. Client POSTs `/workflows/place_order` with the command JSON.
 2. `validate for PlaceOrderCommand` (Phase 5) fires on field-level rules.
-3. Workflow `precondition cmd.totalAmount > 0` checks; throw → 400 ProblemDetails if violated.
-4. `Order.create(...)` constructs the aggregate (factory).
-5. `order.place(...)` is auto-expanded to `suppliersCanFulfill(orderType, supplierIds)?; order.place(orderType, supplierIds, lines)?`.
-6. If validator returns `SupplierUnable`: workflow short-circuits; api emits 422 ProblemDetails.
-7. If `place` returns `InsufficientCredit`: same path; api emits 409 ProblemDetails.
-8. If `place` throws (invariant violated): api emits env-aware 500 ProblemDetails; catalog event logged.
-9. On success: HTTP 200, body is the `OrderId` data directly. No `kind` envelope on success.
+3. For each `from <Spec>(args)` binding on the command's fields,
+   the synthesised wrapper checks: load entity (`Repo.getById`),
+   evaluate spec's `check` against it. On mismatch → return
+   `InvalidSpecMember { spec, paramName, id }`.
+4. Workflow `precondition cmd.totalAmount > 0` checks; throw → 400 ProblemDetails if violated.
+5. `Order.create(...)` constructs the aggregate (factory).
+6. `order.place(...)` runs; aggregate-op `precondition lines.length > 0` throws if violated → 500.
+7. If spec validation failed at step 3: api emits 422 ProblemDetails with `InvalidSpecMember` body identifying which field / which spec.
+8. If `place` returns `InsufficientCredit`: api emits 409 ProblemDetails.
+9. If `place` throws (invariant violated): api emits env-aware 500 ProblemDetails; catalog event logged.
+10. On success: HTTP 200, body is the `OrderId` data directly. No `kind` envelope on success.
 
 ## Decisions table — what's pinned
 
@@ -224,7 +239,9 @@ load-bearing ones for the implementing agent:
 | D18 | Status mapping home | In the api surface as `status <Error> <Code>` lines |
 | D21 | 500 body shape — dev vs prod | `LOOM_EXPOSE_INTERNAL_ERRORS` env var |
 | D22 | `precondition` — typed or throw | **Throws** at both layers (different status codes) |
-| D24 | Validator vs service | Two keywords; validator is subtype of service |
+| D24 | Specification name | Full `specification` (no abbreviations) |
+| D25 | Spec bind keyword | `from <Spec>(args)` |
+| D27 | Reusable cross-aggregate mutation | `private workflow` + workflow-calls-workflow (no separate `service`) |
 | D25 | `pre` slot accepts | Validators only (pure) |
 | D26 | Validator auto-injection | At every call site of the protected op |
 
@@ -242,7 +259,8 @@ Phase ordering (full detail in `implementation-plan.md`):
 8. **A4** (~1 week + fixture re-baseline): find-variant re-shape (`Repo.getById` → `T or NotFound`).
 9. **A5/A6** (~3 weeks): parse + external API + `validate for X` re-shape.
 10. **A7a** (~2 weeks): carrier stdlib helpers.
-11. **S1–S4** (~4.5 weeks): validators + services + `pre` clauses.
+11. **Spec1–4** (~4.5 weeks): specifications + `from` binding.
+12. **W1** (~1 week): workflow-calls-workflow + `private workflow`.
 12. **I1–I4** (~7 weeks): aggregate inheritance (can run parallel with the P/A tracks).
 
 Phases P3+P4 (~6 weeks) are the foundation; A1+A2+A3 (~6 weeks) are the
@@ -260,8 +278,9 @@ point (one coordinated PR; do not split).
 | Why preconditions throw (both layers) | `exception-less.md` §"Preconditions throw — at both layers" |
 | Where status codes live (and don't) | `exception-less.md` §"API-edge ProblemDetails translation" |
 | Dev vs prod 500 body | `exception-less.md` §"Env-aware internals exposure" |
-| What can be auto-derived from aggregate annotations | `domain-service.md` §"Synthesis" |
-| When to use validator vs service vs workflow | `domain-service.md` §"Domain services and validators" + `docs/workflow.md` |
+| What can be auto-derived from `from <Spec>(args)` bindings | `specification.md` §"What the synthesised application layer does" |
+| When to use specification vs workflow | `specification.md` §"What this collapses" + `docs/workflow.md` |
+| `private workflow` + workflow-calls-workflow | `specification.md` §"Workflow-calls-workflow (related extension)" |
 | PATCH-style commands | `partial-update.md` |
 | Abstract aggregates / storage strategies | `aggregate-inheritance.md` |
 
@@ -274,7 +293,7 @@ Highest impact:
 - **D17** (`error` as sugar keyword) — affects parsing surface.
 - **D18** (status mapping in api surface vs elsewhere) — affects layer separation.
 - **D22** (precondition throws) — affects every workflow body migration.
-- **D24** (one keyword vs two for validator/service) — affects domain modelling clarity.
+- **D27** (`private workflow` + workflow-calls-workflow vs separate `service` keyword) — affects domain modelling clarity.
 
 The implementing agent should confirm each before the phase that depends on it lands. The plan's "Workflow" section lists which decisions block which phases.
 
@@ -306,7 +325,7 @@ docs/proposals/
 ├─ aggregate-inheritance.md      ← state layer
 ├─ payload-transport-layer.md    ← transport layer
 ├─ exception-less.md             ← error/option/?/api-edge translation
-├─ domain-service.md             ← validators + services
+├─ specification.md              ← cross-aggregate domain rules + private workflow
 ├─ partial-update.md             ← PATCH pattern
 ├─ implementation-plan.md        ← delivery plan
 ├─ provenance.md                 ← (existing) value provenance

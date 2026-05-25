@@ -13,10 +13,13 @@
 >   wrapper), `?` propagation, API-edge ProblemDetails translation
 >   (per-api `status` mapping + stdlib defaults), find-variant
 >   re-shape.
-> - [`domain-service.md`](./domain-service.md) — `validator`
->   (pure cross-aggregate domain rule check) + `service` (mutating
->   cross-aggregate domain logic); `pre <validator>(args)` clauses
->   on aggregate operations.
+> - [`specification.md`](./specification.md) — `specification`
+>   declarations (parameterised predicates / sets over T) bound to
+>   parameters via `from <Spec>(args)`. Replaces an earlier
+>   validator+service split with one construct that drives input
+>   validation + UI options + OpenAPI constraints. Plus `private
+>   workflow` modifier + workflow-calls-workflow for reusable
+>   mutating orchestration.
 >
 > Read all of these before starting. This doc covers ordering,
 > coordination points, risk management, and decision pins.
@@ -81,7 +84,8 @@ A5: parse + external API as Result      | A1, A2                  | (none)
 A6: validate for X returns Result       | A1, A2, P5              | (none)
 A7a: carrier stdlib helpers             | A1                      | (none)
 A7b: user-declared carrier generics     | A1, A4 (DEFERRED)       | (deferred to v2)
-S1-S4: validators + services + pre slot | A1, A2, A6              | (none — feeds D23 resolution)
+Spec1-4: specifications + `from` binding | A1, A2, A6              | (none — feeds D23 resolution)
+W1: workflow-calls-workflow + private    | A1                       | (independent of Spec; can land any order)
 ```
 
 Letters: **P** = payload-transport-layer, **I** = aggregate-inheritance,
@@ -537,53 +541,71 @@ accumulated errors via the `combine` helper.
 
 Tracked here for completeness. Not v1.
 
-### Track 4 — Domain services and validators (Phase S)
+### Track 4 — Specifications + workflow-calls-workflow (Phases Spec + W)
 
 Independent of A4 / find-variant re-shape; can land before or after.
-Lands after A6 (validators in workflow / `?` propagation stable).
-Resolves D23. Full spec: [`domain-service.md`](./domain-service.md).
+Lands after A6 (`?` propagation + `validate for X` stable).
+Resolves D23. Full spec: [`specification.md`](./specification.md).
 
-#### S1 — Grammar + IR (~1 week)
+#### Spec1 — Grammar + IR (~1 week)
 
-- Grammar: `validator <name>(...): or <Error> { ... }` declaration;
-  `service <name>(...): or <Result> { ... }` declaration; `pre
-  <name>(args)` clause on `AggregateOperationDecl`.
-- IR: `ValidatorDeclIR` and `ServiceDeclIR` (or unified
-  `CallableDeclIR` with `purity: 'pure' | 'mutating'`); `preClauses:
-  CallExprIR[]` on the operation IR.
+- Grammar: `specification <Name>(<Param>*) of <T> { query: /
+  check: / enumerate: / default: }` declaration; `from <Spec>(args)`
+  binding clause on `Parameter` and `CommandFieldDecl`.
+- IR: `SpecificationDeclIR`; `FromBindingIR` on parameter / field
+  IRs.
 
-#### S2 — Body lowering + purity enforcement (~1 week)
+#### Spec2 — Body lowering + derivation + purity (~1 week)
 
-- Validator body walker: rejects mutation, op calls, event emission,
-  service calls (`loom.validator-impure`).
-- Service body walker: rejects workflow calls
-  (`loom.service-cannot-call-workflow`); enforces no own
-  `transactional` annotation.
-- Service call-graph cycle check (`loom.service-cycle`).
+- Walker checks `query` / `check` / `enumerate` / `default`
+  bodies. Rejects mutation, aggregate-op calls that mutate,
+  `emit`, workflow calls (`loom.specification-impure`).
+- Derivation: query → check, enumerate → check.
+- Spec composition + cycle detection
+  (`loom.specification-cycle`).
 
-#### S3 — Auto-injection at every op call site (~1.5 weeks)
+#### Spec3 — Auto-injection at api wrappers (~1.5 weeks)
 
-- Lowering pass: for every `agg.op(args)?` call expression, if `op`
-  has `pre <validator>(preArgs)` clauses, expand to:
-  ```
-  validator1(preArgs1)?;
-  validator2(preArgs2)?;
-  ...
-  agg.op(args)?
-  ```
-- The `?` propagation rules ensure each validator's error variants
-  bubble through the enclosing function's signature.
-- API auto-exposed CRUD wrappers consume the same injection — same
-  lowering, same machinery.
+- Wrapper-synthesis lowering: per `from <Spec>(args)` binding,
+  inject the loop + check + `InvalidSpecMember` return at step 3
+  of the api wrapper pipeline.
+- Stdlib payload: `error InvalidSpecMember { spec, paramName, id,
+  value }` (default status 422).
+- OpenAPI emission: include per-spec constraints as schema
+  extensions.
+- UI metadata: per-spec, expose enumerate / range / default for
+  Builder + React form-generator consumption.
 
-#### S4 — Per-backend emission (~1 week)
+#### Spec4 — Per-backend emission (~1 week)
 
-- TS / .NET / Phoenix: render validator and service declarations
-  as named functions with the same parameter / return-type
-  machinery used for workflows.
-- Auto-injection at call sites: per-backend, mechanical.
+- TS / .NET / Phoenix render specification declarations as named
+  functions (parameter list + return type + body).
+- Auto-injection at api wrappers: per-backend, mechanical.
+- UI consumer integration: React form-generator reads spec
+  metadata; renders inputs accordingly.
 
-**S total: ~4.5 weeks.** Independent of A4; can ship before or after.
+**Spec total: ~4.5 weeks.** Independent of A4; can ship before
+or after.
+
+#### W1 — workflow-calls-workflow + `private workflow` (~1 week)
+
+Independent of Spec1-4; can ship before or after.
+
+- Grammar: workflow-call expression (`OtherWorkflow(args)`) in
+  workflow body; `private` modifier on workflow declaration
+  (reusing existing convention from `private operation` /
+  `private invariant`).
+- IR: `WorkflowCallStmtIR`; `isPrivate: boolean` on `WorkflowIR`.
+- Validator: workflow-call cycle detection (`loom.workflow-cycle`);
+  visibility check — private workflows skipped from api
+  auto-exposure.
+- Transactional inheritance: lowering pass implements the
+  caller-callee transaction shape per `specification.md`
+  §"Transactional semantics".
+- Per-backend emission: workflow-calls-workflow lowers to direct
+  function call (TS / Phoenix) or Mediator handler call (.NET).
+
+**W1 total: ~1 week.**
 
 ## Coordinated migration moments
 
@@ -699,10 +721,12 @@ priority order.
 | D20 | Per-surface mappings beyond the api layer (UI / queue / CLI) | **Out of scope.** UI consumes ProblemDetails like any HTTP client; no language-level UI error-mapping surface. Queue / CLI deferred to v2 when those surfaces become real. | — | — |
 | D21 | Env-aware 500-ProblemDetails body (dev shows internals, prod redacts) | **`LOOM_EXPOSE_INTERNAL_ERRORS` env var; defaults from each backend's native dev/prod check** (TS `NODE_ENV !== "production"`, .NET `IHostEnvironment.IsDevelopment()`, Phoenix `:dev`/`:test`). Catalog event always carries full context; sensitive fields stay redacted even in dev. | A3 | exception-less.md |
 | D22 | Workflow `precondition` — typed return vs throw | **Throws** (pinned, flipped from earlier draft). Preconditions are *guards*, not designed business outcomes — bug-shaped, not user-recoverable. Route translates: aggregate-op `PreconditionViolation` → 500 (env-aware); workflow-level `PreconditionViolation` → 400 (rule text safe to surface). Designed-in business outcomes use typed `or` returns, not `precondition`. | A1 | exception-less.md |
-| D23 | Auto-derivation of more application-layer behaviour (uniqueness, FK checks, cross-aggregate domain rules) from aggregate annotations | **Resolved**: cross-aggregate domain rules via `validator` + `pre` clauses on aggregate operations (see [`domain-service.md`](./domain-service.md)); FK auto-derivation from `Customer id`-typed params; uniqueness as field annotation (uniqueness/OCC/transitions stay as v2 if validator + `pre` proves insufficient). | Phase S | domain-service.md |
-| D24 | Validator vs Service — one keyword or two? | **Two keywords** (pinned): `validator` (pure subtype) and `service` (mutating superset). Validator-as-subtype-of-service relationship documented; same IR machinery underneath. | Phase S | domain-service.md |
-| D25 | `pre` slot — validators only or also services / inline boolean expressions? | **Validators only** (pure; safe to run before potential op failure). Services run from workflow bodies. Inline expressions use `precondition Expr` (throw) or an explicit `if !X { return E { ... } }` in the op body (typed) instead. | Phase S | domain-service.md |
-| D26 | Validator auto-injection at every call site of the protected op vs only in api wrappers | **Every call site** (pinned). The `pre` clause is part of the operation's contract; can't be bypassed by calling the op through a different code path. Lowering pass expands `agg.op(args)?` to `validator(args)?; agg.op(args)?`. | Phase S | domain-service.md |
+| D23 | Cross-aggregate domain rule pattern | **Resolved**: `specification <Name>(args) of T { query/check/enumerate }` declarations bound to parameters via `from <Spec>(args)`. One declaration drives validation + UI + OpenAPI. Replaces an earlier validator+service split. See [`specification.md`](./specification.md). | Phase Spec | specification.md |
+| D24 | Specification name (full vs abbreviated) | **`specification`** (pinned). Loom doesn't abbreviate keywords (`view`, `aggregate`, `workflow` are all full). | Phase Spec | specification.md |
+| D25 | Bind keyword (parameter ↔ specification) | **`from <Spec>(args)`** (pinned). Reads as "parameter drawn from the specified set". | Phase Spec | specification.md |
+| D26 | Spec-mismatch error variant | **Generic stdlib `InvalidSpecMember { spec, paramName, id, value }`** (default status 422; api-surface override available). Per-spec custom error variants deferred to v2. | Phase Spec | specification.md |
+| D27 | Reusable cross-aggregate mutating orchestration | **`private workflow X { ... }`** (reuses existing `private` modifier from `private operation` / `private invariant`). Plus workflow-calls-workflow body extension. No separate `service` keyword. | W1 | specification.md |
+| D28 | Workflow-calls-workflow transactional semantics | **Callee inherits caller's transaction**. If caller is non-transactional, callee's own `transactional` annotation activates its own scope. No nested-savepoint magic; single-level transaction lifetime per top-level workflow call. | W1 | specification.md |
 
 **Workflow**: before starting each phase the implementing agent
 should explicitly confirm the relevant decisions with the
@@ -759,7 +783,7 @@ For the implementing agent:
 | Payload transport (P1–P5) | 10 | P3+P4 are the bulk (~6 of 10) |
 | Aggregate inheritance (I1–I4) | 7 | Independent track; can run parallel |
 | Exception-less (A1–A7a) | 11.5 | A1+A2+A3 stack together (~5.5); A4 is the migration spike |
-| Domain services (S1–S4) | 4.5 | Independent of A4; lands after A6 |
+| Specifications (Spec1–4) + W1 | 5.5 | Independent of A4; lands after A6 |
 | **Total** | **~33 weeks of focused work** | Parallel work can compress to ~20-24 calendar weeks |
 
 Parallelism: a second implementer can take Track 2 (aggregate
