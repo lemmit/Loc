@@ -13,6 +13,12 @@ import {
   type ValueObjectIR,
 } from "../../ir/loom-ir.js";
 import { forApiRead, forCreateInput } from "../../ir/wire-projection.js";
+import {
+  peelCollection,
+  peelNullable,
+  type WirePrimitive,
+  wireTypeInfo,
+} from "../../ir/wire-types.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   chainSingleFieldNative,
@@ -329,43 +335,51 @@ function emitResponseSchema(
 // Type → Zod helpers
 // ---------------------------------------------------------------------------
 
+// Form inputs hand back native JS types where Mantine has a typed
+// primitive (number, boolean), and ISO strings for datetime — we use a
+// plain <input type="datetime-local"> so values are easy to fill from
+// Playwright tests.  JSON.stringify passes numbers and strings through
+// untouched, so the request map is the same as response on most
+// primitives — only money diverges (`moneySchema` inbound for the
+// decimal.js parse chain; `moneySchema` outbound too because the
+// response form already produces decimal-string JSON).
+
+const REQUEST_PRIMITIVE: Record<WirePrimitive, string> = {
+  int: "z.number().int()",
+  long: "z.number().int()",
+  decimal: "z.number()",
+  money: "moneySchema",
+  string: "z.string()",
+  bool: "z.boolean()",
+  datetime: "z.string()",
+  guid: "z.string()",
+};
+
+const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
+  int: "z.number().int()",
+  long: "z.number().int()",
+  decimal: "z.number()",
+  money: "moneySchema",
+  string: "z.string()",
+  bool: "z.boolean()",
+  datetime: "z.string()",
+  guid: "z.string()",
+};
+
 function zodForRequest(t: TypeIR): string {
-  // Form inputs hand back native JS types where Mantine has a typed
-  // primitive (number, boolean), and ISO strings for datetime — we
-  // use a plain <input type="datetime-local"> so values are easy to
-  // fill from Playwright tests.  JSON.stringify passes numbers and
-  // strings through untouched.
-  switch (t.kind) {
+  const info = wireTypeInfo(t, "request");
+  if (info.isNullable) return `${zodForRequest(peelNullable(t))}.nullish()`;
+  if (info.isCollection) return `z.array(${zodForRequest(peelCollection(t))})`;
+  switch (info.refKind) {
     case "primitive":
-      switch (t.name) {
-        case "int":
-        case "long":
-          return "z.number().int()";
-        case "decimal":
-          return "z.number()";
-        case "money":
-          return "moneySchema";
-        case "string":
-        case "guid":
-          return "z.string()";
-        case "bool":
-          return "z.boolean()";
-        case "datetime":
-          return "z.string()";
-      }
-    /* eslint-disable-next-line no-fallthrough */
+      return REQUEST_PRIMITIVE[info.primitive!];
     case "id":
       return "z.string()";
     case "enum":
-      return `${t.name}Schema`;
-    case "valueobject":
-      return `${t.name}Schema`;
+    case "valueObject":
+      return `${info.base}Schema`;
     case "entity":
       return "z.unknown()";
-    case "array":
-      return `z.array(${zodForRequest(t.element)})`;
-    case "optional":
-      return `${zodForRequest(t.inner)}.nullish()`;
   }
 }
 
@@ -375,37 +389,19 @@ function zodForResponse(t: TypeIR, optional: boolean): string {
 }
 
 function zodForResponseInner(t: TypeIR): string {
-  switch (t.kind) {
+  const info = wireTypeInfo(t, "response");
+  if (info.isNullable) return `${zodForResponseInner(peelNullable(t))}.nullish()`;
+  if (info.isCollection) return `z.array(${zodForResponseInner(peelCollection(t))})`;
+  switch (info.refKind) {
     case "primitive":
-      switch (t.name) {
-        case "int":
-        case "long":
-          return "z.number().int()";
-        case "decimal":
-          return "z.number()";
-        case "money":
-          return "moneySchema";
-        case "string":
-        case "guid":
-          return "z.string()";
-        case "bool":
-          return "z.boolean()";
-        case "datetime":
-          return "z.string()";
-      }
-    /* eslint-disable-next-line no-fallthrough */
+      return RESPONSE_PRIMITIVE[info.primitive!];
     case "id":
       return "z.string()";
     case "enum":
-      return `${t.name}Schema`;
-    case "valueobject":
-      return `${t.name}Schema`;
+    case "valueObject":
+      return `${info.base}Schema`;
     case "entity":
-      return `${t.name}Response`;
-    case "array":
-      return `z.array(${zodForResponseInner(t.element)})`;
-    case "optional":
-      return `${zodForResponseInner(t.inner)}.nullish()`;
+      return `${info.base}Response`;
   }
 }
 

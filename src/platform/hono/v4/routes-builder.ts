@@ -25,6 +25,12 @@ import {
 } from "../../../ir/loom-ir.js";
 import { opHasProvSite } from "../../../ir/prov-id.js";
 import { forCreateInput } from "../../../ir/wire-projection.js";
+import {
+  peelCollection,
+  peelNullable,
+  type WirePrimitive,
+  wireTypeInfo,
+} from "../../../ir/wire-types.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -695,98 +701,78 @@ function emitResponseDtoSchema(
 
 // ---------------------------------------------------------------------------
 // zod helpers
+//
+// Two primitive-to-Zod tables — `request` uses `z.coerce.*` because
+// inbound JSON arrives as strings/numbers from the wire and Zod handles
+// the coercion; `response` uses the strict equivalents because the
+// server serialises into the declared shape.  Money crosses as
+// `moneySchema` on the request side (a parse chain producing decimal.js
+// Decimal) and as `z.string()` on the response side (Decimal's
+// canonical JSON form).  Datetime: `z.coerce.date()` inbound, ISO
+// `z.string()` outbound.
 // ---------------------------------------------------------------------------
 
+const REQUEST_PRIMITIVE: Record<WirePrimitive, string> = {
+  int: "z.coerce.number().int()",
+  long: "z.coerce.number().int()",
+  decimal: "z.coerce.number()",
+  money: "moneySchema",
+  string: "z.string()",
+  bool: "z.coerce.boolean()",
+  datetime: "z.coerce.date()",
+  guid: "z.string()",
+};
+
+const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
+  int: "z.number().int()",
+  long: "z.number().int()",
+  decimal: "z.number()",
+  money: "z.string()",
+  string: "z.string()",
+  bool: "z.boolean()",
+  datetime: "z.string()",
+  guid: "z.string()",
+};
+
 export function zodFor(t: TypeIR): string {
-  switch (t.kind) {
+  const info = wireTypeInfo(t, "request");
+  if (info.isNullable) return `${zodFor(peelNullable(t))}.nullish()`;
+  if (info.isCollection) return `z.array(${zodFor(peelCollection(t))})`;
+  switch (info.refKind) {
     case "primitive":
-      switch (t.name) {
-        case "int":
-        case "long":
-          return "z.coerce.number().int()";
-        case "decimal":
-          return "z.coerce.number()";
-        case "money":
-          // Inbound: references the shared `moneySchema` helper
-          // emitted to `lib/schemas.ts` (one validation + parse
-          // chain for every money field across every route file).
-          // Outputs a `decimal.js` Decimal instance — refuses raw
-          // JS numbers per the OpenAPI finance convention declared
-          // in `.loom/wire-spec.json` as `{type: "string", format:
-          // "decimal"}`.
-          return "moneySchema";
-        case "string":
-        case "guid":
-          return "z.string()";
-        case "bool":
-          return "z.coerce.boolean()";
-        case "datetime":
-          return "z.coerce.date()";
-      }
-    /* eslint-disable-next-line no-fallthrough */
+      return REQUEST_PRIMITIVE[info.primitive!];
     case "id":
       return "z.string()";
     case "enum":
-      return `${t.name}Schema`;
-    case "valueobject":
-      return `${t.name}Schema`;
+    case "valueObject":
+      return `${info.base}Schema`;
     case "entity":
       return "z.unknown()";
-    case "array":
-      return `z.array(${zodFor(t.element)})`;
-    case "optional":
-      return `${zodFor(t.inner)}.nullish()`;
   }
 }
 
-/**
- * Response-side zod for a `TypeIR`.  Decimals are exposed as strings on
- * the wire (JSON loses precision); datetimes as ISO strings; ids as
- * plain strings.  Every other shape mirrors the request side.
- */
+/** Response-side zod for a `TypeIR`.  Decimals are exposed as strings on
+ *  the wire (JSON loses precision); datetimes as ISO strings; ids as
+ *  plain strings.  Every other shape mirrors the request side. */
 function zodForResponse(t: TypeIR, optional: boolean): string {
   const z = zodForResponseInner(t);
   return optional ? `${z}.nullish()` : z;
 }
 
 function zodForResponseInner(t: TypeIR): string {
-  switch (t.kind) {
+  const info = wireTypeInfo(t, "response");
+  if (info.isNullable) return `${zodForResponseInner(peelNullable(t))}.nullish()`;
+  if (info.isCollection) return `z.array(${zodForResponseInner(peelCollection(t))})`;
+  switch (info.refKind) {
     case "primitive":
-      switch (t.name) {
-        case "int":
-        case "long":
-          return "z.number().int()";
-        case "decimal":
-          return "z.number()";
-        case "money":
-          // Outbound: every Decimal instance turns into a decimal-
-          // formatted string.  decimal.js already exposes `toJSON`
-          // returning the canonical string form, so JSON.stringify of
-          // a response containing Decimals produces strings without
-          // any helper.  We still declare the schema as z.string() so
-          // OpenAPI mirrors the wire shape.
-          return "z.string()";
-        case "string":
-        case "guid":
-          return "z.string()";
-        case "bool":
-          return "z.boolean()";
-        case "datetime":
-          return "z.string()";
-      }
-    /* eslint-disable-next-line no-fallthrough */
+      return RESPONSE_PRIMITIVE[info.primitive!];
     case "id":
       return "z.string()";
     case "enum":
-      return `${t.name}Schema`;
-    case "valueobject":
-      return `${t.name}Schema`;
+    case "valueObject":
+      return `${info.base}Schema`;
     case "entity":
-      return `${t.name}Response`;
-    case "array":
-      return `z.array(${zodForResponseInner(t.element)})`;
-    case "optional":
-      return `${zodForResponseInner(t.inner)}.nullish()`;
+      return `${info.base}Response`;
   }
 }
 
@@ -908,29 +894,32 @@ function preconditionsAsInvariants(op: OperationIR): InvariantIR[] {
 // ---------------------------------------------------------------------------
 
 export function wireToDomainExpr(expr: string, t: TypeIR, ctx?: BoundedContextIR): string {
-  switch (t.kind) {
+  const info = wireTypeInfo(t, "request");
+  if (info.isNullable) {
+    return `(${expr} == null ? null : ${wireToDomainExpr(expr, peelNullable(t), ctx)})`;
+  }
+  if (info.isCollection) {
+    return `${expr}.map((e) => ${wireToDomainExpr("e", peelCollection(t), ctx)})`;
+  }
+  switch (info.refKind) {
     case "primitive":
       return expr;
     case "id":
-      return `Ids.${t.targetName}Id(${expr})`;
+      return `Ids.${info.idTarget}Id(${expr})`;
     case "enum":
       return expr;
-    case "valueobject": {
+    case "valueObject": {
       // VO ctor args follow the DSL's field declaration order.  Walk
       // ctx.valueObjects to find the field list; bare-name fallback
       // covers the (rare) case where ctx isn't threaded.
-      const vo = ctx?.valueObjects.find((v) => v.name === t.name);
-      if (!vo) return `new ${t.name}(${expr})`;
+      const vo = ctx?.valueObjects.find((v) => v.name === info.base);
+      if (!vo) return `new ${info.base}(${expr})`;
       const args = vo.fields
         .map((f) => wireToDomainExpr(`${expr}.${f.name}`, f.type, ctx))
         .join(", ");
-      return `new ${t.name}(${args})`;
+      return `new ${info.base}(${args})`;
     }
     case "entity":
       return expr;
-    case "array":
-      return `${expr}.map((e) => ${wireToDomainExpr("e", t.element, ctx)})`;
-    case "optional":
-      return `(${expr} == null ? null : ${wireToDomainExpr(expr, t.inner, ctx)})`;
   }
 }
