@@ -54,7 +54,7 @@ permissions:
 # saves CI minutes on rebases / force-pushes (mirrors the pattern in
 # test.yml / playground-e2e.yml / generated-react-build.yml).
 concurrency:
-  group: phoenix-build-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
