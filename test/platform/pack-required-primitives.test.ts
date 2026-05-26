@@ -23,7 +23,10 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { loadPack, resolvePackDir } from "../../src/generator/_packs/loader-fs.js";
-import { REQUIRED_PRIMITIVES, flattenRequired } from "../../src/generator/_packs/required-primitives.js";
+import {
+  flattenRequired,
+  REQUIRED_PRIMITIVES,
+} from "../../src/generator/_packs/required-primitives.js";
 
 const BUILTIN_PACKS: ReadonlyArray<{ name: string; format: "tsx" | "heex" }> = [
   { name: "mantine@v7", format: "tsx" },

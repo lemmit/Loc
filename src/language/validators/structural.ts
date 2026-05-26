@@ -24,14 +24,9 @@ import {
   isProperty,
   isValueObject,
 } from "../generated/ast.js";
-import {
-  checkDerived,
-  checkFunction,
-  checkInvariant,
-  checkPropertyCheck,
-} from "./types.js";
-import { checkOperation } from "./statements.js";
 import { envForAggregate, envForPart, envForValueObject } from "./_shared.js";
+import { checkOperation } from "./statements.js";
+import { checkDerived, checkFunction, checkInvariant, checkPropertyCheck } from "./types.js";
 
 export function checkTypeReferences(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
@@ -231,11 +226,7 @@ export function checkValueObject(vo: ValueObject, accept: ValidationAcceptor): v
   }
 }
 
-export function checkContainment(
-  c: Containment,
-  agg: Aggregate,
-  accept: ValidationAcceptor,
-): void {
+export function checkContainment(c: Containment, agg: Aggregate, accept: ValidationAcceptor): void {
   // An empty collection already encodes absence, so `[]?` is redundant
   // and almost certainly a mistake — reject it with a fixit pointer.
   if (c.collection && c.optional) {

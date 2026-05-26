@@ -13,7 +13,10 @@
 // *grammar-level* platform-family classification — what kind of
 // thing each platform is.
 
-import { BUILTIN_PACK_LATEST, packFormatForBuiltin } from "../../../generator/_packs/builtin-formats.js";
+import {
+  BUILTIN_PACK_LATEST,
+  packFormatForBuiltin,
+} from "../../../generator/_packs/builtin-formats.js";
 import type { Platform } from "../../../ir/loom-ir.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../../platform/registry.js";
 

@@ -1,9 +1,4 @@
-import type {
-  CallArg,
-  Expression,
-  PostfixChain,
-  PostfixSuffix,
-} from "../generated/ast.js";
+import type { CallArg, Expression, PostfixChain, PostfixSuffix } from "../generated/ast.js";
 import { isCallSuffix, isMemberSuffix } from "../generated/ast.js";
 
 // ---------------------------------------------------------------------------
@@ -85,9 +80,7 @@ export function printExpr(node: Expression): string {
   }
 }
 
-function printBinaryChain(
-  node: Extract<Expression, { $type: "BinaryChain" }>,
-): string {
+function printBinaryChain(node: Extract<Expression, { $type: "BinaryChain" }>): string {
   let out = printExpr(node.head);
   for (let i = 0; i < node.ops.length; i++) {
     out = `${out} ${node.ops[i]} ${printExpr(node.rest[i]!)}`;

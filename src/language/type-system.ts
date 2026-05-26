@@ -1221,9 +1221,7 @@ export interface CalleeSignature {
  *  Postfix-chain call: pass the chain plus the index of the call suffix
  *  (in `chain.suffixes`) whose signature we want. */
 export function calleeSignature(
-  call:
-    | import("./generated/ast.js").BuilderCall
-    | { chain: PostfixChain; suffixIdx: number },
+  call: import("./generated/ast.js").BuilderCall | { chain: PostfixChain; suffixIdx: number },
 ): CalleeSignature | undefined {
   if (!("chain" in call)) {
     // BuilderCall branch.
@@ -1273,7 +1271,11 @@ export function calleeSignature(
       AstUtils.getContainerOfType(chain, isValueObject);
     for (const m of owner?.members ?? []) {
       if ((isFunctionDecl(m) || isOperation(m)) && m.name === name) {
-        return { name: m.name, params: m.params, ret: isFunctionDecl(m) ? m.returnType : undefined };
+        return {
+          name: m.name,
+          params: m.params,
+          ret: isFunctionDecl(m) ? m.returnType : undefined,
+        };
       }
     }
     const ctx = AstUtils.getContainerOfType(chain, isBoundedContext);

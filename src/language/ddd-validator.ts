@@ -9,14 +9,14 @@
 import type { ValidationAcceptor, ValidationChecks } from "langium";
 import type { DddServices } from "./ddd-module.js";
 import type {
-  Deployable,
+  Api,
   DddAstType,
+  Deployable,
   Model,
   Storage,
   System,
   ThemeBlock,
   Ui,
-  Api,
 } from "./generated/ast.js";
 import {
   checkBinaryOperands,
@@ -25,8 +25,8 @@ import {
   checkDeployable,
   checkLegacyConstructorCalls,
   checkMacroExpansion,
-  checkMatcherArity,
   checkMatchExpressions,
+  checkMatcherArity,
   checkMatchesCalls,
   checkPrimitiveConversions,
   checkTheme,

@@ -12,7 +12,14 @@ export {
   checkDeployableUiCompose,
 } from "./deployable.js";
 export { checkMacroExpansion } from "./macros.js";
-export { checkMatcherArity, checkMatchExpressions, checkMatchesCalls } from "./match.js";
+export { checkMatchExpressions, checkMatcherArity, checkMatchesCalls } from "./match.js";
+export {
+  checkAssignOrCall,
+  checkCallStmt,
+  checkEmit,
+  checkOperation,
+  checkStatement,
+} from "./statements.js";
 export {
   checkAggregate,
   checkContainment,
@@ -21,13 +28,6 @@ export {
   checkTypeReferences,
   checkValueObject,
 } from "./structural.js";
-export {
-  checkAssignOrCall,
-  checkCallStmt,
-  checkEmit,
-  checkOperation,
-  checkStatement,
-} from "./statements.js";
 export { checkTraceability } from "./traceability.js";
 export {
   checkBinaryOperands,

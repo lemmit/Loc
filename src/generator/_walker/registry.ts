@@ -48,70 +48,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ExprIR } from "../../ir/loom-ir.js";
-import type { WalkContext as TsxWalkContext } from "../react/body-walker.js";
 import type { WalkContext as HeexWalkContext } from "../phoenix-live-view/heex-walker.js";
-
-// Re-exported emitters from the React/TSX walker.  Each function
-// takes `(call, ctx, depth)` and returns the JSX fragment.
-import {
-  emitAction,
-  emitButton,
-  emitIdLink,
-  emitQueryView,
-} from "../react/walker/primitives/controls.js";
-import {
-  emitAlert,
-  emitBadge,
-  emitBreadcrumbs,
-  emitDivider,
-  emitPaper,
-  emitSkeleton,
-  emitSlot,
-  emitStat,
-} from "../react/walker/primitives/display.js";
-import {
-  emitCreateForm,
-  emitModal,
-  emitOperationForm,
-  emitWorkflowForm,
-} from "../react/walker/primitives/forms.js";
-import {
-  emitField,
-  emitNumberField,
-  emitPasswordField,
-  emitToggle,
-} from "../react/walker/primitives/inputs.js";
-import {
-  emitCard,
-  emitContainer,
-  emitGrid,
-  emitGroup,
-  emitSection,
-  emitStack,
-  emitSticky,
-  emitTabs,
-  emitToolbar,
-} from "../react/walker/primitives/layout.js";
-import { emitCodeBlock } from "../react/walker/primitives/code-block.js";
-import { emitIcon } from "../react/walker/primitives/icon.js";
-import { emitTable } from "../react/walker/primitives/table.js";
-import {
-  emitAnchor,
-  emitAvatar,
-  emitBold,
-  emitDateDisplay,
-  emitEmpty,
-  emitEnumBadge,
-  emitHeading,
-  emitImage,
-  emitInlineCode,
-  emitItalic,
-  emitKeyValueRow,
-  emitLoader,
-  emitMoney,
-  emitText,
-} from "../react/walker/primitives/text.js";
-
 // Re-exported renderers from the Phoenix/HEEx walker.  Each function
 // takes `(call, ctx)` and returns the HEEx fragment.
 import {
@@ -137,11 +74,72 @@ import {
   renderQueryView as renderQueryViewHeex,
   renderSkeleton as renderSkeletonHeex,
   renderStack as renderStackHeex,
-  renderTable as renderTableHeex,
   renderTableColumn as renderTableColumnHeex,
+  renderTable as renderTableHeex,
   renderText as renderTextHeex,
   renderToolbar as renderToolbarHeex,
 } from "../phoenix-live-view/heex-walker.js";
+import type { WalkContext as TsxWalkContext } from "../react/body-walker.js";
+import { emitCodeBlock } from "../react/walker/primitives/code-block.js";
+// Re-exported emitters from the React/TSX walker.  Each function
+// takes `(call, ctx, depth)` and returns the JSX fragment.
+import {
+  emitAction,
+  emitButton,
+  emitIdLink,
+  emitQueryView,
+} from "../react/walker/primitives/controls.js";
+import {
+  emitAlert,
+  emitBadge,
+  emitBreadcrumbs,
+  emitDivider,
+  emitPaper,
+  emitSkeleton,
+  emitSlot,
+  emitStat,
+} from "../react/walker/primitives/display.js";
+import {
+  emitCreateForm,
+  emitModal,
+  emitOperationForm,
+  emitWorkflowForm,
+} from "../react/walker/primitives/forms.js";
+import { emitIcon } from "../react/walker/primitives/icon.js";
+import {
+  emitField,
+  emitNumberField,
+  emitPasswordField,
+  emitToggle,
+} from "../react/walker/primitives/inputs.js";
+import {
+  emitCard,
+  emitContainer,
+  emitGrid,
+  emitGroup,
+  emitSection,
+  emitStack,
+  emitSticky,
+  emitTabs,
+  emitToolbar,
+} from "../react/walker/primitives/layout.js";
+import { emitTable } from "../react/walker/primitives/table.js";
+import {
+  emitAnchor,
+  emitAvatar,
+  emitBold,
+  emitDateDisplay,
+  emitEmpty,
+  emitEnumBadge,
+  emitHeading,
+  emitImage,
+  emitInlineCode,
+  emitItalic,
+  emitKeyValueRow,
+  emitLoader,
+  emitMoney,
+  emitText,
+} from "../react/walker/primitives/text.js";
 
 /** Renderer signature for the React/TSX target.  Returns the
  *  rendered JSX fragment.  Reads/writes pass through `ctx` (the
@@ -357,6 +355,8 @@ export function isRegisteredPrimitive(name: string): boolean {
  *  to pin the language-side sets against this registry. */
 export function namesInGroup(group: PrimitiveGroup): string[] {
   return Object.keys(WALKER_PRIMITIVES)
-    .filter((k) => WALKER_PRIMITIVES[k]!.group === group && WALKER_PRIMITIVES[k]!.admissibleInSource)
+    .filter(
+      (k) => WALKER_PRIMITIVES[k]!.group === group && WALKER_PRIMITIVES[k]!.admissibleInSource,
+    )
     .sort();
 }

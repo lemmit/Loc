@@ -728,7 +728,10 @@ function renderToast(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
 /** `Breadcrumbs(items...)` → `<nav aria-label="breadcrumb">` with
  *  a list of spans/links.  Positional children are each an Anchor
  *  (link) or Text (current page) from the scaffold expander. */
-export function renderBreadcrumbs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderBreadcrumbs(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
   const items = expr.args.map((a) => renderChild(a, ctx));
   const itemsHeex = items
     .map((item, i) =>
@@ -1233,7 +1236,10 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
 }
 
 /** `KeyValueRow("Label", value_expr)` → `<div class="key-value-row">` */
-export function renderKeyValueRow(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderKeyValueRow(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const label =
     positionals[0]?.kind === "literal"
@@ -1295,7 +1301,10 @@ export function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
 }
 
 /** `DateDisplay(date_expr)` → `<time>` with formatted date. */
-export function renderDateDisplay(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderDateDisplay(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const dateExpr = positionals[0];
   if (!dateExpr) return `<time></time>`;

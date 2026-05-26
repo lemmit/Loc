@@ -261,10 +261,7 @@ export function checkDeployableDesignPack(
  *      bare `modules: Sales` deployables keep working).  Bare
  *      list still defaults to "no explicit storage; use generator
  *      defaults". */
-export function checkDeployableModuleStorages(
-  d: Deployable,
-  accept: ValidationAcceptor,
-): void {
+export function checkDeployableModuleStorages(d: Deployable, accept: ValidationAcceptor): void {
   const isBackend = platformOwnsBackend(d.platform);
   for (const mb of d.moduleBindings ?? []) {
     const block = mb.storages ?? [];
@@ -362,10 +359,7 @@ export function checkDeployableServes(d: Deployable, accept: ValidationAcceptor)
  *    - No duplicate param bindings.
  *    - Every UI api param must have a matching binding (no
  *      param left unbound). */
-export function checkDeployableUiCompose(
-  d: Deployable,
-  accept: ValidationAcceptor,
-): void {
+export function checkDeployableUiCompose(d: Deployable, accept: ValidationAcceptor): void {
   const ui = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
   if (!ui) return;
 
@@ -410,11 +404,10 @@ export function checkDeployableUiCompose(
     const paramName = b.name;
     const sourceName = b.source?.$refText ?? "";
     if (seenNames.has(paramName)) {
-      accept(
-        "error",
-        `Deployable '${d.name}' binds ui parameter '${paramName}' more than once.`,
-        { node: b, property: "name" },
-      );
+      accept("error", `Deployable '${d.name}' binds ui parameter '${paramName}' more than once.`, {
+        node: b,
+        property: "name",
+      });
       continue;
     }
     seenNames.add(paramName);

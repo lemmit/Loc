@@ -20,11 +20,7 @@ import { renderPrimitive } from "../context.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { stringNamed } from "../shared/args.js";
 
-export function emitIcon(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
+export function emitIcon(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   void depth;
   const name = stringNamed(call, "name");
   const customSvg = stringNamed(call, "svg");
@@ -33,7 +29,7 @@ export function emitIcon(
   // User-supplied SVG wins.  Falling back to the registry lookup
   // lets the typical "named icon" call stay terse while custom SVG
   // remains an escape hatch.
-  let svg = customSvg ?? (name !== undefined ? lookupBuiltinIcon(name) : undefined);
+  const svg = customSvg ?? (name !== undefined ? lookupBuiltinIcon(name) : undefined);
   if (svg === undefined) {
     // Unknown name + no `svg:` literal — emit a visible comment so
     // the gap is loud at review time.  Pages still compile.
