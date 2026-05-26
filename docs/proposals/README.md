@@ -175,6 +175,23 @@ Per CLAUDE.md, Loom has tiered test suites. The implementation
 plan §"Test / CI gates per phase" lists which `LOOM_*_BUILD=1`
 gates and which e2e suites each phase must pass before merge.
 
+## Infrastructure / composition proposals
+
+Proposals outside the provenance/governance and type-system families
+that still belong with the design corpus:
+
+| Doc | Aspect | Core addition |
+|---|---|---|
+| [`storage-and-platform-config.md`](./storage-and-platform-config.md) | Storage + generator config | One `storage` keyword in two forms (physical instance vs. per-aggregate logical binding); per-aggregate `persistenceStrategy: stateBased \| eventSourced`; per-deployable `style:` / `layout:` / `persistence:` config; per-deployable storage overrides; storage capability matrix; pluggable persistence / style / layout adapters per platform |
+| [`storage-and-platform-config-plan.md`](./storage-and-platform-config-plan.md) | Implementation plan | 14-phase build order, ~17–19 PRs total, ~65 implementer-days; Phase 1 broken into 6 feature-by-feature PRs |
+| [`storage-and-platform-config-micro-plan.md`](./storage-and-platform-config-micro-plan.md) | Foundation-first sub-plan | Skeleton-only delivery: ship grammar + IR + validator + downstream consumer alignment + adapter seams in ~22 days serialized (~12 with parallelism); all new features stubbed with `AdapterNotImplementedError`. F1 is delivered as 6 small per-feature PRs. Includes §"Sequencing relative to PR #549" pinning the position before the type-system family's A4 phase |
+
+### Coordination with the type-system family
+
+The storage proposal's §12 records one recommendation to the [`aggregate-inheritance.md`](./aggregate-inheritance.md) author: rename the inheritance-table-layout key `storage: shared | own` to `inheritanceStrategy: shareTable | ownTable` (moved inside the `aggregate { ... }` block). The two aspects (persistence model vs. inheritance table layout) are genuinely orthogonal; only the word `storage` is overloaded between the storage proposal's top-level keyword and the inheritance proposal's aggregate-property key. The corner case of an event-sourced concrete subtype of a TPH-inheritance hierarchy is documented with a recommended resolution (force `inheritanceStrategy: ownTable` for ES subtypes).
+
+The storage proposal's foundation phases are positioned to land **before** the type-system family's exception-less A4 phase, in parallel with the aggregate-inheritance I-track. The storage proposal's `PersistenceAdapter.emitRepository(...)` contract is stable under A4 — landing the seam first reduces A4's per-backend monolithic edits to per-adapter file edits.
+
 ## Relationship to the policies work
 
 Loom's authorization model is owned by
