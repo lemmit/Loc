@@ -78,11 +78,98 @@ Six proposals + an implementation plan reshape Loom's type system:
 
 Implementing agents: read the docs in order — aggregate-inheritance
 (independent), payload-transport-layer (foundation), exception-less
-(consumer), specification (resolves D23), implementation-plan
+(consumer), criterion (resolves D23), implementation-plan
 (delivery). The transport-layer doc pins the load-bearing rules
 (carrier bound, aggregate-as-carrier projection, variant-name-tagged
 union identity, `error` sugar keyword, anonymous-`or` unions) that
 the downstream proposals depend on.
+
+## High-level plan — parallelisation and pickup order
+
+The implementation plan organises the work into four tracks. **One
+track is fully independent; the others have ordered dependencies.**
+Multiple agents can pick up parallel tracks; the dependency graph
+governs serial points.
+
+```
+                     ┌──────────────────────────────┐
+                     │  Track I — Aggregate inh.    │
+                     │  ~7 weeks; fully independent │  ← AGENT B can take this
+                     │  Lands when ready            │     in parallel with everything
+                     │  Phases I1, I2, I3, I4       │
+                     └──────────────────────────────┘
+
+  ┌──────────────────┐    ┌──────────────────────┐    ┌─────────────────────┐
+  │ Track P          │ →  │ Track A              │ →  │ Track Crit          │
+  │ Payload transport│    │ Exception-less       │    │ Criterion + Repo.*  │
+  │ ~10 weeks         │    │ ~11.5 weeks           │    │ ~6 weeks            │
+  │ Phases P1-P5     │    │ Phases A1-A7a         │    │ Phases Crit1-5      │
+  └──────────────────┘    └──────────────────────┘    └─────────────────────┘
+       AGENT A starts here →   blocks on P3+P4 →           blocks on A6 →
+```
+
+### What an agent can take independently
+
+| Track | Depends on | Can start when | Approx. weeks |
+|---|---|---|---|
+| **I — Aggregate inheritance** | nothing | day 1 | ~7 |
+| **P1, P2 — Payload keyword + auto-synth wire shapes** | nothing | day 1 | ~2.5 |
+| **P3 — Carrier-bounded generics + ML-postfix syntax** | P1, P2 | week 3 | ~3 |
+| **P4 — Tagged unions + anonymous `or`** | P3 | week 6 | ~3 |
+| **P5 — `validate for X` / `authorize for X`** | P1 | week 3 | ~2 |
+| **A1 — `error` keyword + `option` + stdlib + two-regime rule** | P3, P4 | week 9 | ~2 |
+| **A2 — `?` propagation operator** | A1 | week 11 | ~2 |
+| **A3 — API-edge ProblemDetails translation** | A1 | week 11 | ~2 |
+| **A4 — Find-variant re-shape** (single coordinated PR) | A1, A3 | week 13 | ~1 + 2-3 days fixture re-baseline |
+| **A5 — Parse + external API as `or`** | A1, A2 | after A2 | ~1.5 |
+| **A6 — `validate for X` returns `or`** | A1, A2, P5 | after both | ~1.5 |
+| **A7a — Carrier stdlib helpers** | A1 | parallel with A2-A6 | ~2 |
+| **Crit1-4 — Criteria + `from`/`when` + `Repo.find`/`findAll`** | A1, A2, A6 | after A6 | ~5 |
+| **Crit5 — Workflow-calls-workflow + `private workflow`** | A1 | parallel with anything | ~1 |
+
+### Coordinated migration moments (must land as single PRs)
+
+| Moment | What | Why single PR |
+|---|---|---|
+| **M1** | P3 + P4 together | Anonymous `or` unions are the first real consumer of generics; shipping P3 without P4 leaves the type system half-built |
+| **M2** | A1 + A2 + A3 together | Authors need all three to express, compose, and translate typed errors — any subset is unusable in practice |
+| **M3** | A4 alone (with fixture re-baseline) | Every example .ddd, every backend repo emitter, every route emitter changes — coordinated commit prevents drift |
+
+### Suggested two-agent split
+
+If two implementers are available:
+
+- **Agent A** owns the **type-system foundation** (P1–P5 → A1–A7a → Crit1–5). Sequential, ~28.5 weeks of focused work.
+- **Agent B** owns **Track I** (aggregate inheritance, ~7 weeks). Independent.
+
+Agent B finishes early; can then absorb later phases of Track A (e.g., A5–A6 in parallel with A4's coordinated PR).
+
+### Suggested single-agent order
+
+If one implementer carries the whole thing:
+
+1. **Foundation** (~6 weeks): P1, P2, P3, P4 (M1 coordinated).
+2. **Minimum coherent ship** (~6 weeks): A1, A2, A3 (M2 coordinated).
+3. **The big migration** (~1.5 weeks): A4 alone (M3 coordinated).
+4. **Long tail** (~5 weeks): A5, A6, P5, A7a — order as convenient.
+5. **Criterion + repos** (~6 weeks): Crit1-5.
+6. **Aggregate inheritance** (~7 weeks, parallel-able): I1-I4 — can be interleaved at any point.
+
+Total: ~33 weeks focused work / ~20-24 calendar weeks for one implementer; faster with two.
+
+### Decisions to confirm per phase
+
+Each phase has decisions in the [`implementation-plan.md`](./implementation-plan.md)
+D-table (D1–D37 with recommended answers). **The agent should
+confirm D1–D4 + D14–D15 with the maintainer before grammar-shape
+phases land**; the rest can take the recommended answer. The plan
+flags which decisions block which phase.
+
+### Test gates per phase
+
+Per CLAUDE.md, Loom has tiered test suites. The implementation
+plan §"Test / CI gates per phase" lists which `LOOM_*_BUILD=1`
+gates and which e2e suites each phase must pass before merge.
 
 ## Relationship to the policies work
 
