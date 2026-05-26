@@ -136,6 +136,50 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
     expect(tsx).toMatch(/<Select[\s\S]*data=\{\(__customers\.data/);
   });
 
+  it("X id target with COMPOUND display still emits a Select (reads wire `display` field)", async () => {
+    // Before PR B: `derived display: string = firstName + " " + lastName`
+    // (anything other than a single bare property reference) routed
+    // the id field to the text-input fallback — Select picker
+    // disabled, label rendered as raw uuid.  The wire response from
+    // every backend already carries the computed `display` derived as
+    // a JSON field, so the picker can always read `__o.display`
+    // regardless of the source-expression shape.
+    const files = await buildAndGenerate(`
+      system S {
+        module M {
+          context C {
+            aggregate Customer {
+              firstName: string
+              lastName: string
+              derived display: string = firstName + " " + lastName
+            }
+            repository Customers for Customer { }
+            aggregate Order {
+              customerId: Customer id
+              quantity:   int
+            }
+            repository Orders for Order { }
+          }
+        }
+        ui WebApp {
+          page CreateOrder { route: "/orders/new"  body: CreateForm { of: Order } }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+      }
+    `);
+    const tsx = files.get("web/src/pages/create_order.tsx")!;
+    expect(tsx).toBeDefined();
+    // Hook is still imported and the Select is rendered.
+    expect(tsx).toMatch(/import \{ useAllCustomers \} from "\.\.\/api\/customer"/);
+    expect(tsx).toMatch(/<Select[\s\S]*data=\{\(__customers\.data/);
+    // Label binding reads the canonical wire `display` field — the
+    // expression shape is opaque to the client.
+    expect(tsx).toMatch(/label:\s*__o\.display\b/);
+    // No text-input fallback was emitted for the customerId field.
+    expect(tsx).not.toMatch(/<TextInput[^>]*customerId/);
+  });
+
   it("default submit handler emits the scaffold's create + notify + navigate flow", async () => {
     const files = await buildAndGenerate(baseOrderSystem(`CreateForm { of: Order }`));
     const tsx = files.get("web/src/pages/create_order.tsx")!;
