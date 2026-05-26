@@ -85,6 +85,20 @@ jobs:
         working-directory: web
         run: npm ci
 
+      # Pre-build the local npm-tarball mirror. Without it, the in-browser
+      # Bundle step in every `*-preview-runtime` spec (chakra-v3, mantine-v9,
+      # mui-v7, shadcn-v4, preview-shadcn) and runtime.spec.ts has to cold-
+      # fetch ~150 tarballs from registry.npmjs.org / esm.sh PER SPEC, which
+      # routinely takes 3-5 minutes apiece on CI's network. The mirror walks
+      # every shipped example, resolves their transitive deps, downloads each
+      # tarball to web/public/npm-mirror/, and writes a manifest the vfs-
+      # bundler worker prefers over the registry. Result: Bundle drops from
+      # minutes to seconds and the bundle/boot timeouts stop bleeding into
+      # the job cap.
+      - name: Pre-build npm-tarball mirror
+        working-directory: web
+        run: npm run build:npm-mirror
+
       # Cache the Playwright browser binaries (~100MB) keyed off the
       # @playwright/test version; re-installs only when Playwright
       # itself bumps.
