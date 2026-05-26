@@ -1387,6 +1387,11 @@ function renderPrimitive(
     }
   }
 
+  // `style: { ... }` escape hatch — see styleIrToHeex.  Pushed first
+  // so it lands before any other attributes for predictable output.
+  const styleHeexAttr = styleIrToHeex(expr);
+  if (styleHeexAttr) namedAttrs.unshift(styleHeexAttr);
+
   // Handle Heading specially: first positional is text, optional
   // `level:` attribute.
   if (spec.tag === ".header") {
@@ -1407,6 +1412,26 @@ function renderPrimitive(
     return spec.tag.startsWith(".") ? `<${spec.tag}${attrs} />` : `<${spec.tag}${attrs} />`;
   }
   return `<${spec.tag}${attrs}>\n${indent(childrenHeex, 2)}\n</${spec.tag}>`;
+}
+
+/** Build a `style="..."` HEEx attribute from a call's `style` IR.
+ *  Returns undefined when the call carries no style field.  Keys are
+ *  emitted verbatim (kebab-case is the HTML CSS spelling).  String-
+ *  literal values land as raw CSS values; non-literal values are
+ *  passed through as Elixir interpolation (`<%= … %>`) — but for v1
+ *  we keep the common path (string literals) static-safe.  Special
+ *  characters are HTML-escaped so the attribute stays well-formed. */
+function styleIrToHeex(expr: Extract<ExprIR, { kind: "call" }>): string | undefined {
+  if (!expr.style || expr.style.entries.length === 0) return undefined;
+  const parts = expr.style.entries.map(({ key, value }) => {
+    let v: string;
+    if (value.kind === "literal" && value.lit === "string") v = value.value;
+    else if (value.kind === "ref") v = `<%= ${value.name} %>`;
+    else v = "";
+    return `${key}: ${v}`;
+  });
+  const css = parts.join("; ").replace(/"/g, "&quot;");
+  return `style="${css}"`;
 }
 
 /** Returns true for calls that produce raw HEEx markup (not Elixir

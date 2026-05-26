@@ -1,6 +1,6 @@
-{{#if hasChildren}}<Grid{{{testidAttr}}}>
+{{#if hasChildren}}<Grid{{{testidAttr}}}{{{styleAttr}}}>
 {{colIndent}}{{#each children}}<Grid.Col span="auto">
 {{../childIndent}}{{{this}}}
 {{../colIndent}}</Grid.Col>{{#unless @last}}
 {{../colIndent}}{{/unless}}{{/each}}
-{{closeIndent}}</Grid>{{else}}<Grid{{{testidAttr}}} />{{/if}}
+{{closeIndent}}</Grid>{{else}}<Grid{{{testidAttr}}}{{{styleAttr}}} />{{/if}}

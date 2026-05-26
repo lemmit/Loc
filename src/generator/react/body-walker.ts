@@ -1162,6 +1162,49 @@ export function stringOrRefArgValue(
   return undefined;
 }
 
+/** Read the `style:` IR field hoisted from a `style: { … }` named arg
+ *  on a walker-primitive call.  Returns a JSX `style={{ ... }}` attribute
+ *  fragment (with a leading space) ready to splice into the template's
+ *  opening tag — or `''` when the call carries no `style` field.
+ *
+ *  Keys are camelCased on the way out (CSS property → React-style
+ *  property): `background-color` → `backgroundColor`, but
+ *  `backgroundColor` passes through.  Values are emitted via
+ *  `emitExpr` so refs / param interpolation compose naturally.
+ *
+ *  Templates splice via `{{{styleAttr}}}` mirroring `{{{testidAttr}}}`. */
+export function styleAttr(call: ExprIR & { kind: "call" }, ctx: WalkContext): string {
+  if (!call.style || call.style.entries.length === 0) return "";
+  const parts = call.style.entries.map(({ key, value }) => {
+    const camelKey = key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+    return `${JSON.stringify(camelKey)}: ${emitExpr(value, ctx)}`;
+  });
+  return ` style={{ ${parts.join(", ")} }}`;
+}
+
+/** Same payload as `styleAttr` but emitted as a Phoenix HEEx
+ *  `style="…"` attribute — a flat semicolon-separated CSS string.
+ *  Source keys are preserved verbatim (kebab-case is the HTML CSS
+ *  spelling).  Non-string-literal values are emitted as bare text
+ *  via `emitExpr`; templates wrap the whole attribute in HEEx
+ *  syntax (`style={"..."}`) when interpolation is needed.  For v1
+ *  we restrict to string-literal values to keep HEEx output
+ *  static-safe — non-string values fall back to their `emitExpr`
+ *  rendering. */
+export function styleAttrHeex(call: ExprIR & { kind: "call" }, ctx: WalkContext): string {
+  if (!call.style || call.style.entries.length === 0) return "";
+  const parts = call.style.entries.map(({ key, value }) => {
+    let v: string;
+    if (value.kind === "literal" && value.lit === "string") v = value.value;
+    else v = emitExpr(value, ctx);
+    return `${key}: ${v}`;
+  });
+  // Escape `"` in the joined string so it stays inside the HEEx
+  // attribute quotes.  Semicolon-separates entries.
+  const css = parts.join("; ").replace(/"/g, "&quot;");
+  return ` style="${css}"`;
+}
+
 /** Read the `testid:` named arg from any primitive call
  *  and produce a TSX attribute fragment ready to splice into the
  *  template's opening tag.  Returns `' data-testid="..."'` for

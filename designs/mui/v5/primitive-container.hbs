@@ -1,5 +1,5 @@
-{{#if hasSize}}{{#if hasChildren}}<Container maxWidth={{json size}}{{{testidAttr}}}>
+{{#if hasSize}}{{#if hasChildren}}<Container maxWidth={{json size}}{{{testidAttr}}}{{{styleAttr}}}>
 {{indent}}{{{childrenBlock}}}
-{{closeIndent}}</Container>{{else}}<Container maxWidth={{json size}}{{{testidAttr}}} />{{/if}}{{else}}{{#if hasChildren}}<Container{{{testidAttr}}}>
+{{closeIndent}}</Container>{{else}}<Container maxWidth={{json size}}{{{testidAttr}}}{{{styleAttr}}} />{{/if}}{{else}}{{#if hasChildren}}<Container{{{testidAttr}}}{{{styleAttr}}}>
 {{indent}}{{{childrenBlock}}}
-{{closeIndent}}</Container>{{else}}<Container{{{testidAttr}}} />{{/if}}{{/if}}
+{{closeIndent}}</Container>{{else}}<Container{{{testidAttr}}}{{{styleAttr}}} />{{/if}}{{/if}}

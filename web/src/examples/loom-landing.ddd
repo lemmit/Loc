@@ -78,6 +78,7 @@ system LoomLanding {
         // Phase 6 adds responsive Grid columns, both halves stack
         // vertically here.
         Container {
+          style: { background: "linear-gradient(180deg, rgba(139,92,246,0.1) 0%, transparent 100%)", padding: "60px 0" },
           Stack {
             // Eyebrow chip.  Phase 5 will add Badge(variant: "eyebrow", glow: true).
             Badge { "Langium-based DSL · Source-available" },

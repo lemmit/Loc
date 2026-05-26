@@ -9,6 +9,7 @@ import {
   firstPositionalContent,
   positionalChildren,
   renderTextContent,
+  styleAttr,
   testidAttr,
 } from "../../body-walker.js";
 import { renderPrimitive } from "../context.js";
@@ -37,6 +38,7 @@ export function emitStat(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -56,6 +58,7 @@ export function emitBadge(
     label: unwrapTextLiteral(raw),
     labelAttr: unwrapAsAttr(raw),
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -84,6 +87,7 @@ export function emitDivider(
     label,
     hasLabel: label !== undefined,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -106,6 +110,7 @@ export function emitBreadcrumbs(
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -130,6 +135,7 @@ export function emitPaper(
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -150,6 +156,7 @@ export function emitSkeleton(
     count,
     isMulti: count > 1,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -174,5 +181,6 @@ export function emitAlert(
     hasTitle: title !== undefined,
     title: title ?? "",
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }

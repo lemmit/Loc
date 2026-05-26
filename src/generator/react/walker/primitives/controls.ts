@@ -13,6 +13,7 @@ import {
   firstPositionalContent,
   propagateChildFlags,
   stringOrRefArgValue,
+  styleAttr,
   testidAttr,
   walk,
 } from "../../body-walker.js";
@@ -57,6 +58,7 @@ export function emitIdLink(
     idExpr,
     pathPrefix: `/${slug}/`,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -99,6 +101,7 @@ export function emitButton(
     loading,
     hasLoading: loading !== undefined,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -162,6 +165,7 @@ export function emitAction(
     loading: `${localVar}.isPending`,
     hasLoading: true,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -300,6 +304,7 @@ export function emitQueryView(
     branchIndent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
