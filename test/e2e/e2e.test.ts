@@ -341,6 +341,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
           console.warn("  request-body schemas:", diff.requestBodyDiffs);
         if (diff.responseBodyDiffs.length)
           console.warn("  response-body schemas:", diff.responseBodyDiffs);
+        if (diff.operationIdDiffs.length) console.warn("  operationIds:", diff.operationIdDiffs);
       }
 
       if (STRICT_PARITY) {
@@ -355,6 +356,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         expect(diff.paramTypeDiffs, `path-param type drift (${pair})`).toEqual([]);
         expect(diff.requestBodyDiffs, `request-body schema drift (${pair})`).toEqual([]);
         expect(diff.responseBodyDiffs, `response-body schema drift (${pair})`).toEqual([]);
+        expect(diff.operationIdDiffs, `operationId drift (${pair})`).toEqual([]);
       }
     }
 
