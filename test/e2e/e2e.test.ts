@@ -6,11 +6,9 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   collectOps,
-  collectResponseShapes,
-  fieldSet,
+  diffSpecs,
+  isCleanDiff,
   type OpenApiSpec,
-  requiredSet,
-  schemaNames,
 } from "../_helpers/openapi-normalize.js";
 
 // ---------------------------------------------------------------------------
@@ -304,94 +302,35 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       expect(collectOps(spec).size, `${name} emits at least one operation`).toBeGreaterThan(0);
     }
 
-    // Compare each backend against Hono as the reference.
-    const refOps = collectOps(specs.hono);
-    const refCard = collectResponseShapes(specs.hono);
-    // Auto-discover shared schemas: the intersection of both backends'
-    // component-schema names.  Catches drift on request bodies (Create<Agg>
-    // Request, <Op>Request, <Wf>Request), list responses, view responses
-    // — anything the generators emit symmetrically — without a hardcoded
-    // list that goes stale as the showcase grows.  Schemas that exist on
-    // only one side surface via the `onlySchemas` diff below.
-    const refSchemas = schemaNames(specs.hono);
-
+    // Compare each backend against Hono as the reference.  `diffSpecs`
+    // is pure — see test/_helpers/openapi-normalize.test.ts for the
+    // unit-test coverage of each divergence class.
     let cleanVsRef = true;
     for (const name of ["dotnet", "phoenix"] as const) {
-      const ops = collectOps(specs[name]);
-      const onlyRef = [...refOps].filter((o) => !ops.has(o)).sort();
-      const onlyThis = [...ops].filter((o) => !refOps.has(o)).sort();
+      const diff = diffSpecs({ name: "hono", spec: specs.hono }, { name, spec: specs[name] });
 
-      const cardMismatches: string[] = [];
-      const thisCard = collectResponseShapes(specs[name]);
-      for (const op of refCard.keys()) {
-        if (!thisCard.has(op)) continue;
-        if (refCard.get(op) !== thisCard.get(op)) {
-          cardMismatches.push(`${op}: hono=${refCard.get(op)}, ${name}=${thisCard.get(op)}`);
-        }
-      }
-
-      // Schema-presence diff + per-schema field-set diff.  Iterate the
-      // intersection so a schema only one backend emits doesn't double-
-      // count as a field-diff: it appears in `onlySchemasRef` /
-      // `onlySchemasThis` and stops there.
-      const thisSchemas = schemaNames(specs[name]);
-      const onlySchemasRef = [...refSchemas].filter((s) => !thisSchemas.has(s)).sort();
-      const onlySchemasThis = [...thisSchemas].filter((s) => !refSchemas.has(s)).sort();
-      const sharedSchemas = [...refSchemas].filter((s) => thisSchemas.has(s)).sort();
-
-      const fieldDiffs: string[] = [];
-      const requiredDiffs: string[] = [];
-      for (const schema of sharedSchemas) {
-        const ref = fieldSet(specs.hono, schema);
-        const got = fieldSet(specs[name], schema);
-        const onlyA = [...ref].filter((f) => !got.has(f)).sort();
-        const onlyB = [...got].filter((f) => !ref.has(f)).sort();
-        if (onlyA.length || onlyB.length) {
-          fieldDiffs.push(`${schema}: only-hono=[${onlyA}] only-${name}=[${onlyB}]`);
-        }
-        // Required-field set drift: contract changes clients would notice
-        // (a field flipping required → optional or vice versa).  Only
-        // compare on the intersection of property names so a missing
-        // field doesn't double-count as a required-set divergence too.
-        const refReq = [...requiredSet(specs.hono, schema)].filter((f) => got.has(f)).sort();
-        const gotReq = [...requiredSet(specs[name], schema)].filter((f) => ref.has(f)).sort();
-        const onlyReqRef = refReq.filter((f) => !gotReq.includes(f));
-        const onlyReqThis = gotReq.filter((f) => !refReq.includes(f));
-        if (onlyReqRef.length || onlyReqThis.length) {
-          requiredDiffs.push(
-            `${schema}: required-only-hono=[${onlyReqRef}] required-only-${name}=[${onlyReqThis}]`,
-          );
-        }
-      }
-
-      if (
-        onlyRef.length ||
-        onlyThis.length ||
-        cardMismatches.length ||
-        onlySchemasRef.length ||
-        onlySchemasThis.length ||
-        fieldDiffs.length ||
-        requiredDiffs.length
-      ) {
+      if (!isCleanDiff(diff)) {
         cleanVsRef = false;
         console.warn(`[parity] hono ↔ ${name} divergence (finding):`);
-        if (onlyThis.length) console.warn(`  ops only on ${name}:`, onlyThis);
-        if (onlyRef.length) console.warn(`  ops missing on ${name}:`, onlyRef);
-        if (cardMismatches.length) console.warn("  cardinality:", cardMismatches);
-        if (onlySchemasThis.length) console.warn(`  schemas only on ${name}:`, onlySchemasThis);
-        if (onlySchemasRef.length) console.warn(`  schemas missing on ${name}:`, onlySchemasRef);
-        if (fieldDiffs.length) console.warn("  fields:", fieldDiffs);
-        if (requiredDiffs.length) console.warn("  required:", requiredDiffs);
+        if (diff.onlyOther.length) console.warn(`  ops only on ${name}:`, diff.onlyOther);
+        if (diff.onlyRef.length) console.warn(`  ops missing on ${name}:`, diff.onlyRef);
+        if (diff.cardMismatches.length) console.warn("  cardinality:", diff.cardMismatches);
+        if (diff.onlySchemasOther.length)
+          console.warn(`  schemas only on ${name}:`, diff.onlySchemasOther);
+        if (diff.onlySchemasRef.length)
+          console.warn(`  schemas missing on ${name}:`, diff.onlySchemasRef);
+        if (diff.fieldDiffs.length) console.warn("  fields:", diff.fieldDiffs);
+        if (diff.requiredDiffs.length) console.warn("  required:", diff.requiredDiffs);
       }
 
       if (STRICT_PARITY) {
-        expect(onlyRef, `ops missing on ${name}`).toEqual([]);
-        expect(onlyThis, `ops only on ${name}`).toEqual([]);
-        expect(cardMismatches, `cardinality drift on ${name}`).toEqual([]);
-        expect(onlySchemasRef, `schemas missing on ${name}`).toEqual([]);
-        expect(onlySchemasThis, `schemas only on ${name}`).toEqual([]);
-        expect(fieldDiffs, `field-set drift on ${name}`).toEqual([]);
-        expect(requiredDiffs, `required-set drift on ${name}`).toEqual([]);
+        expect(diff.onlyRef, `ops missing on ${name}`).toEqual([]);
+        expect(diff.onlyOther, `ops only on ${name}`).toEqual([]);
+        expect(diff.cardMismatches, `cardinality drift on ${name}`).toEqual([]);
+        expect(diff.onlySchemasRef, `schemas missing on ${name}`).toEqual([]);
+        expect(diff.onlySchemasOther, `schemas only on ${name}`).toEqual([]);
+        expect(diff.fieldDiffs, `field-set drift on ${name}`).toEqual([]);
+        expect(diff.requiredDiffs, `required-set drift on ${name}`).toEqual([]);
       }
     }
 
