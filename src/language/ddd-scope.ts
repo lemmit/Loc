@@ -12,9 +12,9 @@ import {
 } from "langium";
 import {
   type Aggregate,
-  isComponent,
   type EntityPart,
   isAggregate,
+  isComponent,
   isContainment,
   isEntityPart,
   isEnumDecl,
