@@ -187,6 +187,15 @@ reflect that proposed target.)
   an AST → AST' rewrite. Macros that need IR-level introspection
   (e.g. `with crudish(...)`) inspect the host AST, not the IR.
 
+**Relationship to the capability surface.** The `audit` /
+`softDelete` / etc. macros don't emit a parallel machinery — they
+expand into ordinary `filter` / `stamp` / `implements` AST nodes
+(the capability source surface described in
+[`docs/capabilities.md`](capabilities.md)).  The lowerer's
+`lowerContext` pass then propagates the context-scope capability
+declarations onto each aggregate.  Anything a macro can produce, a
+user can hand-write — and vice versa.
+
 ## Phase ③ — Scope + Link
 
 **Files**
@@ -596,6 +605,17 @@ Each platform has the same module shape (in `src/generator/<platform>/`):
 | `*-builder.ts` | Procedural builders for content with too much per-aggregate variation to keep small (Hono routes, Hono repositories, React pages, React page-objects). |
 | `render-expr.ts` / `render-stmt.ts` | Recursive `ExprIR → string` / `StmtIR → string` renderers (only on platforms that execute domain logic — TS and .NET, not React). |
 
+### Shared generator subdirs
+
+Three `_`-prefixed subdirs under `src/generator/` are consumed by
+multiple platforms:
+
+| Subdir | Consumed by | What it owns |
+|---|---|---|
+| `_packs/` | every UI-mounting backend (react, fullstack dotnet, phoenixLiveView) | Design-pack discovery + loader.  `builtin-formats.ts` holds `BUILTIN_PACK_FORMATS` + `BUILTIN_PACK_LATEST` and the `parseBuiltinDesignRef` parser.  `loader-fs.ts` / `loader-vfs.ts` are the FS / browser-VFS backends.  See [`design-packs.md`](design-packs.md). |
+| `_walker/` | react today; phoenixLiveView in progress | `target.ts` defines the `WalkerTarget` interface that captures the framework-shaped seams (state read/write, navigation, API call lowering, `match` rendering).  The TSX walker (`react/body-walker.ts`) currently inlines its own implementations; extracting them behind this interface is the gate for plugging in a HEEx walker without touching the TSX path. |
+| `_obs/` | hono, dotnet, phoenixLiveView | Observability catalog + per-backend renderers.  `log-events.ts` defines the envelope schema; `render-<platform>.ts` emits the per-backend instrumentation.  See [`observability.md`](observability.md). |
+
 ### All-procedural emission
 
 The Loom v2 refactor dropped Handlebars in Phase 4.  Every file is
@@ -733,6 +753,16 @@ for the proposed move to `src/system/`.)
 **Inputs**: `LoomModel.systems[]` (each carries modules,
 deployables, and e2e tests) plus an optional `SnapshotStore` of
 previously-emitted IR snapshots for migration diffing.
+
+**Platform dispatch.** Each `deployable.platform` IR value resolves
+through `src/platform/registry.ts` to a `PlatformSurface` —
+`platformFor(name)` for barewords, `parseBuiltinPlatformRef` for
+pinned `family@version` strings (e.g. `hono@v4`).  Backend discovery
+goes through an injectable seam (`setBackendSource`) so the playground
+can back resolution with a VFS instead of `fs` / `node_modules` —
+phase ⑨ is otherwise agnostic to whether a backend is in-tree or an
+installed package.  See [`platforms.md`](platforms.md) for the
+registry shape.
 
 **Outputs**: a flat tree of files:
 
