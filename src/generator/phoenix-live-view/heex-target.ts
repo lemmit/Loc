@@ -183,18 +183,19 @@ function defaultInitForHeex(type: TypeIR): string {
   return "nil";
 }
 
-/** Ash code interface fn name: `<op>_<aggregate_snake>` (plural for
- *  list ops, singular otherwise).  Matches the convention emitted by
- *  the Phoenix domain-emit at `domain-emit.ts:create :<op>` and
- *  consumed by `heex-walker.ts:647-683`. */
+/** Ash code interface fn name: `<op>_<aggregate_snake>!` (plural for
+ *  list ops, singular otherwise).  Matches `renderApiCall` at
+ *  `heex-walker.ts:693-712` byte-for-byte — same crude `<single>s`
+ *  pluralisation, same `delete`/`destroy` aliasing, same `!` suffix
+ *  on every non-list op. */
 function codeInterfaceFnName(aggregate: string, op: string): string {
-  const singleSnake = snakeLocal(aggregate);
-  if (op === "all") return `list_${pluralLocal(singleSnake)}`;
-  if (op === "byId") return `get_${singleSnake}!`;
-  if (op === "create") return `create_${singleSnake}!`;
-  if (op === "update") return `update_${singleSnake}!`;
-  if (op === "delete") return `destroy_${singleSnake}!`;
-  return `${snakeLocal(op)}_${singleSnake}!`;
+  const single = snakeLocal(aggregate);
+  if (op === "create") return `create_${single}!`;
+  if (op === "update") return `update_${single}!`;
+  if (op === "delete" || op === "destroy") return `destroy_${single}!`;
+  if (op === "all") return `list_${single}s!`; // crude plural — matches walker
+  if (op === "byId") return `get_${single}!`;
+  return `${snakeLocal(op)}_${single}!`;
 }
 
 // Self-contained naming helpers — same behaviour as util/naming.ts
