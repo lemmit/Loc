@@ -51,9 +51,7 @@ describe("walker style: escape hatch — React emission", () => {
     const content = files.get("web/src/pages/home.tsx")!;
     expect(content).toBeDefined();
     // Camel-cased keys, quoted string literals, single style attribute.
-    expect(content).toMatch(
-      /<Container style=\{\{ "background": "red", "padding": "60px 0" \}\}>/,
-    );
+    expect(content).toMatch(/<Container style=\{\{ "background": "red", "padding": "60px 0" \}\}>/);
   });
 
   it("Stack { style: {...} } emits style on the root element", async () => {
