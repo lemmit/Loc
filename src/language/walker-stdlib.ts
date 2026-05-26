@@ -1,10 +1,9 @@
 // ---------------------------------------------------------------------------
 // Walker stdlib registry — names that are admissible as BuilderCall types
 // in body / component-body position without resolving to a user-declared
-// type.  Lives in `language/` (not `generator/`) so both the validator
-// and the per-platform body-walkers can consume it without violating the
-// one-directional layering rule (`language/` knows nothing about
-// `generator/`).
+// type.  Lives in `language/` (not `generator/`) so the validator
+// can consume it without violating the one-directional layering rule
+// (`language/` knows nothing about `generator/`).
 //
 // Three sets:
 //   WALKER_LAYOUT_PRIMITIVES — top-level layout / formatter primitives
@@ -18,10 +17,15 @@
 //     and the singleton sentinels (`Home`/`WorkflowsIndex`/`ViewsIndex`)
 //     recognised by `inferPageOrigin`.
 //
-// Adding a primitive here makes it `Name { … }`-admissible in source.
-// The per-platform walker still owns its own dispatch (the registry is
-// declarative, not behavioural) — keep these in sync when a new
-// primitive lands.
+// These three sets are DERIVED — the single source of truth is the
+// typed dispatch table at src/generator/_walker/registry.ts, which
+// holds the renderer functions for each target (React/TSX and
+// Phoenix/HEEx).  The layering rule forbids `language/` from
+// importing `generator/`, so the names below are hand-listed; a
+// completeness test (`test/language/walker-stdlib-completeness.test.ts`)
+// pins them mechanically against the registry, so drift surfaces as a
+// test failure rather than a runtime gap.  Adding a primitive: edit
+// the registry first, then add the name here when the test prompts.
 // ---------------------------------------------------------------------------
 
 export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([

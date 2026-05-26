@@ -54,6 +54,7 @@ import type {
   UiIR,
 } from "../../ir/loom-ir.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
+import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 
 export type RenderPosition = "template" | "handler";
 
@@ -436,7 +437,7 @@ function renderUserComponent(
  *  (a component param or a QueryView record), resolved via
  *  `instanceTypes`.  The handler is recorded as an `ActionBinding` and
  *  hoisted to the host page's LiveView by the emitter. */
-function renderAction(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderAction(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const opRef = expr.args.find((_, i) => !expr.argNames?.[i]);
   if (!opRef || opRef.kind !== "member" || opRef.receiver.kind !== "ref") {
     return `<!-- Action: expected <instance>.<operation> -->`;
@@ -486,30 +487,25 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   if (expr.name === "toast") {
     return renderToast(expr, ctx);
   }
-  // Scaffold expander primitives with custom HEEx shapes.
-  if (expr.name === "Breadcrumbs") return renderBreadcrumbs(expr, ctx);
-  if (expr.name === "Anchor") return renderAnchor(expr, ctx);
-  if (expr.name === "Modal") return renderModal(expr, ctx);
-  if (expr.name === "CreateForm" || expr.name === "OperationForm" || expr.name === "WorkflowForm") {
-    return renderForm(expr, ctx);
-  }
-  if (expr.name === "Table") return renderTable(expr, ctx);
-  if (expr.name === "QueryView") return renderQueryView(expr, ctx);
-  if (expr.name === "KeyValueRow") return renderKeyValueRow(expr, ctx);
-  if (expr.name === "Skeleton") return renderSkeleton(expr, ctx);
-  if (expr.name === "Alert") return renderAlert(expr, ctx);
-  if (expr.name === "Column") return renderTableColumn(expr, ctx);
-  if (expr.name === "IdLink") return renderIdLink(expr, ctx);
-  if (expr.name === "DateDisplay") return renderDateDisplay(expr, ctx);
-  if (expr.name === "EnumBadge") return renderEnumBadge(expr, ctx);
-  if (expr.name === "Action") return renderAction(expr, ctx);
+  // Closed-primitive library dispatch — the typed registry at
+  // src/generator/_walker/registry.ts holds the renderer for every
+  // primitive the HEEx target supports (a subset of what TSX
+  // supports; see the registry for the matrix).  Names registered
+  // without a `heex` entry fall through to the user-component /
+  // helper paths and ultimately to a visible HEEx comment so the
+  // gap is visible in generated output.
+  const def = WALKER_PRIMITIVES[expr.name];
+  if (def?.heex) return def.heex(expr, ctx);
   // User-defined `component` invocation → a remote HEEx function
   // component (`<MyAppWeb.Components.UiComponents.order_panel … />`).
   const userComp = ctx.ui.components.find((c) => c.name === expr.name);
   if (userComp) return renderUserComponent(expr, userComp, ctx);
-  // Closed primitive library — rendered as HEEx component invocations.
-  const prim = closedPrimitive(expr.name);
-  if (prim) return renderPrimitive(prim, expr, ctx);
+  // Registered primitive that the HEEx target doesn't support yet —
+  // emit a visible HEEx comment so the divergence shows up in
+  // generated output instead of silently producing wrong markup.
+  if (def) {
+    return `<!-- ${expr.name}: not supported by Phoenix LiveView target -->`;
+  }
   // Helper function call.
   if (expr.callKind === "function" || expr.callKind === "free") {
     ctx.usedHelpers.add(expr.name);
@@ -732,7 +728,7 @@ function renderToast(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
 /** `Breadcrumbs(items...)` → `<nav aria-label="breadcrumb">` with
  *  a list of spans/links.  Positional children are each an Anchor
  *  (link) or Text (current page) from the scaffold expander. */
-function renderBreadcrumbs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderBreadcrumbs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const items = expr.args.map((a) => renderChild(a, ctx));
   const itemsHeex = items
     .map((item, i) =>
@@ -747,7 +743,7 @@ function renderBreadcrumbs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
 /** `Anchor("label", to: "/path")` → `<.link navigate={~p"/path"}>label</.link>`
  *  Falls back to `<a href="...">` when not an internal route literal.
  *  `testid:` becomes `data-testid`. */
-function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let label = "";
   let to = "";
   let testid = "";
@@ -781,7 +777,7 @@ function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext)
  *  handle_event clauses.  The `Form(of:, op:)` child is consumed
  *  here (never visited by renderChild) — mirrors the React
  *  walker's `emitModal`. */
-function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let title = "";
   let triggerExpr: ExprIR | undefined;
   const positional: ExprIR[] = [];
@@ -890,7 +886,7 @@ function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
  *  inputs derived from the aggregate/workflow args.
  *  `runs: Wf` (workflow form) also emits a `<.simple_form>` but
  *  tied to the workflow action name. */
-function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   // `Form(<instance>.<operation>)` is the operation-modal form —
   // owned and rendered by `renderModal` (it consumes its Form child
   // directly).  This guard makes the function total if a stray
@@ -1024,7 +1020,7 @@ function htmlInputTypeForIRType(t: TypeIR): string {
 
 /** `Table(Column(...), ..., rows: ref("rows"), ...)` →
  *  `<.table id="..." rows={@rows}>` with `<:col :let={row}>` slots. */
-function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let rowsExpr = "@items";
   let testid = "";
   const cols: ExprIR[] = [];
@@ -1044,7 +1040,13 @@ function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
     // (these are Mantine-specific props; CoreComponents.table doesn't use them)
   }
   const tableId = testid || "data-table";
-  const colSlots = cols.map((c) => renderTableColumn(c, ctx)).join("\n");
+  const colSlots = cols
+    .map((c) =>
+      c.kind === "call"
+        ? renderTableColumn(c, ctx)
+        : `<:col :let={_row} label="Column">${renderChild(c, ctx)}</:col>`,
+    )
+    .join("\n");
   return [
     `<.table id="${tableId}" rows={${rowsExpr}}>`,
     colSlots.length > 0 ? indent(colSlots, 2) : `  <:col :let={_row} label="Data"></:col>`,
@@ -1056,8 +1058,11 @@ function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
  *  `<:col :let={row} label="...">...</:col>` slot.  Called only from
  *  `renderTable` — never registered as a top-level primitive because
  *  Column nodes are always children of Table in the expander output. */
-function renderTableColumn(expr: ExprIR, ctx: WalkContext): string {
-  if (expr.kind !== "call" || expr.name !== "Column") {
+export function renderTableColumn(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  if (expr.name !== "Column") {
     // Unexpected shape — emit a stub slot.
     return `<:col :let={_row} label="Column">${renderChild(expr, ctx)}</:col>`;
   }
@@ -1126,7 +1131,7 @@ function resolveQueryAggregate(arg: ExprIR): string | undefined {
   return undefined;
 }
 
-function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let ofExpr = "";
   let ofArgNode: ExprIR | undefined;
   let loadingHeex = `<div class="animate-pulse">Loading...</div>`;
@@ -1228,7 +1233,7 @@ function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkConte
 }
 
 /** `KeyValueRow("Label", value_expr)` → `<div class="key-value-row">` */
-function renderKeyValueRow(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderKeyValueRow(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const label =
     positionals[0]?.kind === "literal"
@@ -1241,7 +1246,7 @@ function renderKeyValueRow(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
 }
 
 /** `Skeleton(count: N)` → `<div class="animate-pulse">` repeated loading lines. */
-function renderSkeleton(expr: Extract<ExprIR, { kind: "call" }>, _ctx: WalkContext): string {
+export function renderSkeleton(expr: Extract<ExprIR, { kind: "call" }>, _ctx: WalkContext): string {
   let count = 3;
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -1258,7 +1263,7 @@ function renderSkeleton(expr: Extract<ExprIR, { kind: "call" }>, _ctx: WalkConte
 }
 
 /** `Alert("message")` → `<div class="alert">` */
-function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let color = "red";
   let message = "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
@@ -1272,7 +1277,7 @@ function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
 }
 
 /** `IdLink(value, of: Aggregate)` → `<.link navigate={...}>value</.link>` */
-function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let aggName = "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const valueExpr = positionals[0];
@@ -1290,7 +1295,7 @@ function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext)
 }
 
 /** `DateDisplay(date_expr)` → `<time>` with formatted date. */
-function renderDateDisplay(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderDateDisplay(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const dateExpr = positionals[0];
   if (!dateExpr) return `<time></time>`;
@@ -1299,7 +1304,7 @@ function renderDateDisplay(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
 }
 
 /** `EnumBadge(enum_value)` → `<.badge>` with the enum value. */
-function renderEnumBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+export function renderEnumBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const val = positionals[0] ? renderInTemplate(positionals[0], ctx) : "";
   return `<span class="badge badge-enum">${val}</span>`;
@@ -1322,36 +1327,66 @@ interface PrimitiveSpec {
   takesChildren?: boolean;
 }
 
-function closedPrimitive(name: string): PrimitiveSpec | null {
-  switch (name) {
-    case "Stack":
-      return { tag: "div", staticAttrs: ["class"], takesChildren: true };
-    case "Heading":
-      return { tag: ".header", takesChildren: true };
-    case "Text":
-      return { tag: "p", takesChildren: true };
-    case "Card":
-      return { tag: "div", staticAttrs: ["class"], takesChildren: true };
-    case "Toolbar":
-      return { tag: "div", staticAttrs: ["class"], takesChildren: true };
-    case "Group":
-      return { tag: "div", staticAttrs: ["class"], takesChildren: true };
-    case "Empty":
-      return { tag: ".empty", takesChildren: false };
-    case "Badge":
-      return { tag: ".badge", takesChildren: true };
-    case "Button":
-      return { tag: ".button", takesChildren: true };
-    // --- scaffold expander primitives ---
-    case "Paper":
-      return { tag: "div", staticAttrs: ["class"], takesChildren: true };
-    case "Grid":
-      return { tag: "div", staticAttrs: ["class"], takesChildren: true };
-    case "Container":
-      return { tag: "div", staticAttrs: ["class"], takesChildren: true };
-    default:
-      return null;
-  }
+/** Per-primitive HEEx spec for the generic `renderPrimitive` helper.
+ *  Listed inline so the small set is easy to scan.  The registered
+ *  per-primitive exports (`renderStack`, `renderHeading`, …) bind to
+ *  these specs; the typed dispatch table at
+ *  src/generator/_walker/registry.ts wires them up by name. */
+const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
+  Stack: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+  Heading: { tag: ".header", takesChildren: true },
+  Text: { tag: "p", takesChildren: true },
+  Card: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+  Toolbar: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+  Group: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+  Empty: { tag: ".empty", takesChildren: false },
+  Badge: { tag: ".badge", takesChildren: true },
+  Button: { tag: ".button", takesChildren: true },
+  // --- scaffold expander primitives ---
+  Paper: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+  Grid: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+  Container: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+};
+
+// Per-primitive registry-facing wrappers — bind the generic
+// `renderPrimitive` helper to a specific `closedPrimitive` spec so
+// the typed dispatch table can reference one named function per
+// primitive (rather than re-dispatching by name inside the renderer).
+export function renderStack(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Stack!, expr, ctx);
+}
+export function renderHeading(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Heading!, expr, ctx);
+}
+export function renderText(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Text!, expr, ctx);
+}
+export function renderCard(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Card!, expr, ctx);
+}
+export function renderToolbar(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Toolbar!, expr, ctx);
+}
+export function renderGroup(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Group!, expr, ctx);
+}
+export function renderEmpty(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Empty!, expr, ctx);
+}
+export function renderBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Badge!, expr, ctx);
+}
+export function renderButton(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Button!, expr, ctx);
+}
+export function renderPaper(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Paper!, expr, ctx);
+}
+export function renderGrid(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Grid!, expr, ctx);
+}
+export function renderContainer(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Container!, expr, ctx);
 }
 
 function renderPrimitive(
@@ -1440,26 +1475,12 @@ function styleIrToHeex(expr: Extract<ExprIR, { kind: "call" }>): string | undefi
 }
 
 /** Returns true for calls that produce raw HEEx markup (not Elixir
- *  expressions) — these should NOT be wrapped in `<%= %>`. */
+ *  expressions) — these should NOT be wrapped in `<%= %>`.  Consults
+ *  the typed registry (anything with a `heex` renderer registered
+ *  produces HEEx markup) so new primitives don't need a second list
+ *  edit. */
 function isHEExCall(name: string): boolean {
-  return (
-    closedPrimitive(name) !== null ||
-    name === "Breadcrumbs" ||
-    name === "Anchor" ||
-    name === "Modal" ||
-    name === "CreateForm" ||
-    name === "OperationForm" ||
-    name === "WorkflowForm" ||
-    name === "Table" ||
-    name === "QueryView" ||
-    name === "KeyValueRow" ||
-    name === "Skeleton" ||
-    name === "Alert" ||
-    name === "Column" ||
-    name === "IdLink" ||
-    name === "DateDisplay" ||
-    name === "EnumBadge"
-  );
+  return WALKER_PRIMITIVES[name]?.heex !== undefined;
 }
 
 function renderChild(child: ExprIR, ctx: WalkContext): string {
