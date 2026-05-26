@@ -15,6 +15,8 @@ import {
 import { renderPrimitive } from "../context.js";
 import {
   escapeJsxText,
+  namedArgValue,
+  numericNamed,
   positionalArgs,
   slugify,
   stringNamed,
@@ -58,21 +60,115 @@ export function emitGroup(
   });
 }
 
+/** Read the `cols:` named arg on a Grid call.
+ *
+ *  Accepts two forms:
+ *    - Scalar int literal:  `cols: 3`  →  all three breakpoints use 3.
+ *    - List literal:        `cols: [3, 2, 1]`  →  `[desktop, tablet, mobile]`.
+ *
+ *  When a breakpoint slot is missing in the list form, conservative
+ *  defaults apply: `tablet = ceil(desktop/2)`, `mobile = 1`.  When the
+ *  arg itself is absent, returns `undefined` and consumers fall back
+ *  to their own non-responsive default. */
+function gridColsArg(
+  call: ExprIR & { kind: "call" },
+): { desktop: number; tablet: number; mobile: number } | undefined {
+  const scalar = numericNamed(call, "cols");
+  if (scalar !== undefined) return { desktop: scalar, tablet: scalar, mobile: scalar };
+  const raw = namedArgValue(call, "cols");
+  if (!raw || raw.kind !== "list") return undefined;
+  const intElements: number[] = [];
+  for (const el of raw.elements) {
+    if (el.kind === "literal" && el.lit === "int") {
+      const n = Number(el.value);
+      if (Number.isFinite(n)) intElements.push(n);
+    }
+  }
+  if (intElements.length === 0) return undefined;
+  const desktop = intElements[0]!;
+  const tablet = intElements[1] ?? Math.max(1, Math.ceil(desktop / 2));
+  const mobile = intElements[2] ?? 1;
+  return { desktop, tablet, mobile };
+}
+
 export function emitGrid(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Each child wraps in a per-pack column container (Mantine's
   // <Grid.Col span="auto">; shadcn's plain `<div>` since gap is
-  // on the parent).  v0 gives every column equal weight; a future
-  // change can read a `span:` named arg per child.
+  // on the parent).  `cols:` (Phase 6) selects per-breakpoint column
+  // counts; when absent, every child takes `span="auto"` and the
+  // pack picks an equal-weight default.
   const children = positionalChildren(call, ctx, depth + 2);
   const colIndent = "  ".repeat(depth + 1);
   const childIndent = "  ".repeat(depth + 2);
   const closeIndent = "  ".repeat(depth);
+  const cols = gridColsArg(call);
+  // Translate column counts to Mantine/MUI `span` values out of 12.
+  // `floor(12 / N)` matches the on-screen ratios users intend; an N
+  // greater than 12 clamps to 1 so the math stays sane.
+  const spanFor = (n: number): number => Math.max(1, Math.floor(12 / Math.max(1, n)));
   return renderPrimitive(ctx, "primitive-grid", {
     hasChildren: children.length > 0,
     children,
     colIndent,
     childIndent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
+    hasResponsiveCols: cols !== undefined,
+    colsDesktop: cols?.desktop,
+    colsTablet: cols?.tablet,
+    colsMobile: cols?.mobile,
+    spanDesktop: cols ? spanFor(cols.desktop) : undefined,
+    spanTablet: cols ? spanFor(cols.tablet) : undefined,
+    spanMobile: cols ? spanFor(cols.mobile) : undefined,
+  });
+}
+
+export function emitSection(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Section(...children) — semantic anchor target.  The `id:` named
+  // arg lands as the `<section id="...">` attribute so anchor links
+  // (`Anchor { "Vision", to: "#vision" }`) scroll to the matching
+  // section.  Renders as a plain `<section>` element through every
+  // pack — the wrapping element shape is the same; only pack-specific
+  // theming (if any) varies per template.
+  const id = stringNamed(call, "id");
+  const children = positionalChildren(call, ctx, depth + 1);
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  return renderPrimitive(ctx, "primitive-section", {
+    hasChildren: children.length > 0,
+    childrenBlock: children.join(`\n${indent}`),
+    indent,
+    closeIndent,
+    id,
+    hasId: id !== undefined,
+    testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
+  });
+}
+
+export function emitSticky(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Sticky(...children) — position:sticky wrapper.  The `top:` named
+  // arg lands as a CSS offset (default "0").  Used to pin the landing
+  // page's nav bar to the top on scroll.
+  const top = stringNamed(call, "top") ?? "0";
+  const children = positionalChildren(call, ctx, depth + 1);
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  return renderPrimitive(ctx, "primitive-sticky", {
+    hasChildren: children.length > 0,
+    childrenBlock: children.join(`\n${indent}`),
+    indent,
+    closeIndent,
+    top,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });

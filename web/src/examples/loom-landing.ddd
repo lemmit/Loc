@@ -55,19 +55,23 @@ system LoomLanding {
       body: Stack {
 
         // ── Header / nav bar ────────────────────────────────────
-        // Phase 6 will introduce Sticky to pin this to the top on scroll.
-        Container {
-          Group {
-            Heading { "Loom", level: 3 },
+        // Phase 6 closed the sticky-positioning gap; the nav bar pins
+        // to the top on scroll.
+        Sticky {
+          top: "0",
+          Container {
             Group {
-              Anchor { "Vision",    to: "#vision" },
-              Anchor { "Pipeline",  to: "#pipeline" },
-              Anchor { "Platforms", to: "#platforms" },
-              Anchor { "CLI",       to: "#cli" },
-              Button { "GitHub", to: "https://github.com/lemmit/loc" }
-            }
-          },
-          size: "xl"
+              Heading { "Loom", level: 3 },
+              Group {
+                Anchor { "Vision",    to: "#vision" },
+                Anchor { "Pipeline",  to: "#pipeline" },
+                Anchor { "Platforms", to: "#platforms" },
+                Anchor { "CLI",       to: "#cli" },
+                Button { "GitHub", to: "https://github.com/lemmit/loc" }
+              }
+            },
+            size: "xl"
+          }
         },
 
         Divider {},

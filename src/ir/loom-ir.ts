@@ -1370,6 +1370,16 @@ export type ExprIR =
       kind: "object";
       fields: { name: string; value: ExprIR }[];
     }
+  | {
+      /** Bracketed list literal — `[expr, expr, ...]`.  Produced by
+       *  `ListLit` AST nodes; consumers that admit a list shape
+       *  (e.g. `Grid { cols: [3, 2, 1] }`) inspect `elements` directly.
+       *  No element-type unification happens at lowering — heterogeneous
+       *  element types are admissible at the IR level; per-use-site
+       *  validators decide whether to flag them. */
+      kind: "list";
+      elements: ExprIR[];
+    }
   | { kind: "paren"; inner: ExprIR }
   | { kind: "unary"; op: "-" | "!"; operand: ExprIR }
   | {

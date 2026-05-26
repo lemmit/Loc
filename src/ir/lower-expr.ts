@@ -35,6 +35,7 @@ import {
   isIntLit,
   isLambda,
   isLetStmt,
+  isListLit,
   isMatchExpr,
   isMemberAccess,
   isMoneyLit,
@@ -548,6 +549,12 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
       })),
     };
   }
+  if (isListLit(expr)) {
+    return {
+      kind: "list",
+      elements: (expr.elements ?? []).map((e) => lowerExpr(e, env)),
+    };
+  }
   if (isBuilderCall(expr)) {
     return lowerBuilderCall(expr, env);
   }
@@ -848,6 +855,18 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
   }
   if (isBoolLit(expr)) return { kind: "primitive", name: "bool" };
   if (isNullLit(expr)) return { kind: "primitive", name: "string" };
+  if (isListLit(expr)) {
+    // Best-effort element-type inference: use the first element's type
+    // as the array's element type.  Empty list / heterogeneous lists
+    // fall back to `string` element — consumers that care (e.g. the
+    // walker's `cols:` reader) inspect element kinds directly off
+    // the IR rather than relying on this approximation.
+    const first = expr.elements?.[0];
+    const elementType: TypeIR = first
+      ? inferExprType(first, env)
+      : { kind: "primitive", name: "string" };
+    return { kind: "array", element: elementType };
+  }
   if (isNowExpr(expr)) return { kind: "primitive", name: "datetime" };
   if (isThisRef(expr)) {
     if (env.part) return { kind: "entity", name: env.part.name };

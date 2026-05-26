@@ -247,7 +247,7 @@ export function isEntityPartMember(item: unknown): item is EntityPartMember {
     return reflection.isInstance(item, EntityPartMember);
 }
 
-export type Expression = BinaryExpr | BuilderCall | CallExpr | IdRef | Lambda | LiteralExpr | MatchExpr | MemberAccess | MoneyLit | NameRef | NowExpr | ObjectLit | ParenExpr | PrimitiveConversion | TernaryExpr | ThisRef | UnaryExpr;
+export type Expression = BinaryExpr | BuilderCall | CallExpr | IdRef | Lambda | ListLit | LiteralExpr | MatchExpr | MemberAccess | MoneyLit | NameRef | NowExpr | ObjectLit | ParenExpr | PrimitiveConversion | TernaryExpr | ThisRef | UnaryExpr;
 
 export const Expression = 'Expression';
 
@@ -488,7 +488,7 @@ export function isAssignOrCallStmt(item: unknown): item is AssignOrCallStmt {
 }
 
 export interface BinaryExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'BinaryExpr';
     left: Expression;
     op: '!=' | '%' | '&&' | '*' | '+' | '-' | '/' | '<' | '<=' | '==' | '>' | '>=' | '||';
@@ -527,7 +527,7 @@ export function isBodyProp(item: unknown): item is BodyProp {
 }
 
 export interface BoolLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'BoolLit';
     value: 'false' | 'true';
 }
@@ -553,7 +553,7 @@ export function isBoundedContext(item: unknown): item is BoundedContext {
 }
 
 export interface BuilderCall extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'BuilderCall';
     entries: Array<BuilderEntry>;
     type: string;
@@ -592,7 +592,7 @@ export function isCallArg(item: unknown): item is CallArg {
 }
 
 export interface CallExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'CallExpr';
     args: Array<CallArg>;
     callee: Expression;
@@ -647,7 +647,7 @@ export function isContainment(item: unknown): item is Containment {
 }
 
 export interface DecLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'DecLit';
     value: string;
 }
@@ -852,7 +852,7 @@ export function isFunctionDecl(item: unknown): item is FunctionDecl {
 }
 
 export interface IdRef extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'IdRef';
 }
 
@@ -899,7 +899,7 @@ export function isImportStmt(item: unknown): item is ImportStmt {
 }
 
 export interface IntLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'IntLit';
     value: number;
 }
@@ -925,7 +925,7 @@ export function isInvariant(item: unknown): item is Invariant {
 }
 
 export interface Lambda extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'Lambda';
     body?: Expression;
     param: string;
@@ -961,6 +961,18 @@ export const LetStmt = 'LetStmt';
 
 export function isLetStmt(item: unknown): item is LetStmt {
     return reflection.isInstance(item, LetStmt);
+}
+
+export interface ListLit extends AstNode {
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $type: 'ListLit';
+    elements: Array<Expression>;
+}
+
+export const ListLit = 'ListLit';
+
+export function isListLit(item: unknown): item is ListLit {
+    return reflection.isInstance(item, ListLit);
 }
 
 export interface LValue extends AstNode {
@@ -1078,7 +1090,7 @@ export function isMatchArm(item: unknown): item is MatchArm {
 }
 
 export interface MatchExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'MatchExpr';
     arms: Array<MatchArm>;
     elseExpr?: Expression;
@@ -1091,7 +1103,7 @@ export function isMatchExpr(item: unknown): item is MatchExpr {
 }
 
 export interface MemberAccess extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'MemberAccess';
     args: Array<CallArg>;
     call: boolean;
@@ -1224,7 +1236,7 @@ export function isModuleStorageBinding(item: unknown): item is ModuleStorageBind
 }
 
 export interface MoneyLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'MoneyLit';
     value?: string;
 }
@@ -1248,7 +1260,7 @@ export function isNamedType(item: unknown): item is NamedType {
 }
 
 export interface NameRef extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'NameRef';
     name: NameRefIdent;
 }
@@ -1260,7 +1272,7 @@ export function isNameRef(item: unknown): item is NameRef {
 }
 
 export interface NowExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'NowExpr';
 }
 
@@ -1271,7 +1283,7 @@ export function isNowExpr(item: unknown): item is NowExpr {
 }
 
 export interface NullLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'NullLit';
     value: 'null';
 }
@@ -1296,7 +1308,7 @@ export function isObjectFieldInit(item: unknown): item is ObjectFieldInit {
 }
 
 export interface ObjectLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'ObjectLit';
     fields: Array<ObjectFieldInit>;
 }
@@ -1376,7 +1388,7 @@ export function isParameter(item: unknown): item is Parameter {
 }
 
 export interface ParenExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'ParenExpr';
     inner: Expression;
 }
@@ -1424,7 +1436,7 @@ export function isPreconditionStmt(item: unknown): item is PreconditionStmt {
 }
 
 export interface PrimitiveConversion extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'PrimitiveConversion';
     target?: 'decimal' | 'long' | 'money' | 'string';
     value?: Expression;
@@ -1623,7 +1635,7 @@ export function isStorage(item: unknown): item is Storage {
 }
 
 export interface StringLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'StringLit';
     value: string;
 }
@@ -1648,7 +1660,7 @@ export function isSystem(item: unknown): item is System {
 }
 
 export interface TernaryExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'TernaryExpr';
     condition: Expression;
     elseExpr: Expression;
@@ -1731,7 +1743,7 @@ export function isThemeProp(item: unknown): item is ThemeProp {
 }
 
 export interface ThisRef extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'ThisRef';
 }
 
@@ -1859,7 +1871,7 @@ export function isUiSugarBinding(item: unknown): item is UiSugarBinding {
 }
 
 export interface UnaryExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryExpr | BindEntry | BodyProp | BuilderEntry | CallArg | CallExpr | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LetStmt | ListLit | MatchArm | MatchExpr | MemberAccess | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'UnaryExpr';
     op: '!' | '-';
     operand: Expression;
@@ -2000,6 +2012,7 @@ export type DddAstType = {
     Lambda: Lambda
     LayoutProp: LayoutProp
     LetStmt: LetStmt
+    ListLit: ListLit
     LiteralExpr: LiteralExpr
     MacroArg: MacroArg
     MacroArgBool: MacroArgBool
@@ -2091,7 +2104,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryExpr, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallExpr, CanonicalProp, Component, ComponentDecl, Containment, ContextMember, DecLit, Deployable, DerivedProp, DescriptionProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, LayoutProp, LetStmt, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberAccess, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, Module, ModuleBinding, ModuleStorageBinding, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SensitivityClause, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
+        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryExpr, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallExpr, CanonicalProp, Component, ComponentDecl, Containment, ContextMember, DecLit, Deployable, DerivedProp, DescriptionProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, LayoutProp, LetStmt, ListLit, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberAccess, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, Module, ModuleBinding, ModuleStorageBinding, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SensitivityClause, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2115,6 +2128,7 @@ export class DddAstReflection extends AbstractAstReflection {
             case CallExpr:
             case IdRef:
             case Lambda:
+            case ListLit:
             case LiteralExpr:
             case MatchExpr:
             case MemberAccess:
@@ -2647,6 +2661,14 @@ export class DddAstReflection extends AbstractAstReflection {
                     properties: [
                         { name: 'expr' },
                         { name: 'name' }
+                    ]
+                };
+            }
+            case ListLit: {
+                return {
+                    name: ListLit,
+                    properties: [
+                        { name: 'elements', defaultValue: [] }
                     ]
                 };
             }

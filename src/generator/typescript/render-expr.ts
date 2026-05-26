@@ -79,6 +79,11 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
       }
       return out;
     }
+    case "list":
+      // List literals are walker-config sugar (e.g. responsive Grid cols).
+      // No domain-expression position consumes one today; emit a TS array
+      // literal so unexpected uses still compile.
+      return `[${e.elements.map((el) => renderTsExpr(el, ctx)).join(", ")}]`;
   }
 }
 

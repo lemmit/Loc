@@ -62,6 +62,8 @@ export function printExpr(node: Expression): string {
       return `${node.type} {${printBuilderEntries(node.entries)}}`;
     case "ObjectLit":
       return `{${printObjectFields(node.fields)}}`;
+    case "ListLit":
+      return `[${(node.elements ?? []).map((e) => printExpr(e)).join(", ")}]`;
     case "MatchExpr":
       return printMatch(node);
     case "PrimitiveConversion":

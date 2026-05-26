@@ -96,7 +96,9 @@ import {
   emitContainer,
   emitGrid,
   emitGroup,
+  emitSection,
   emitStack,
+  emitSticky,
   emitTabs,
   emitToolbar,
 } from "./walker/primitives/layout.js";
@@ -298,6 +300,8 @@ export const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Modal",
   "CodeBlock",
   "Icon",
+  "Section",
+  "Sticky",
 ]);
 
 export function isWalkableLayoutBody(
@@ -705,6 +709,10 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
       return emitGrid(call, ctx, depth);
     case "Container":
       return emitContainer(call, ctx, depth);
+    case "Section":
+      return emitSection(call, ctx, depth);
+    case "Sticky":
+      return emitSticky(call, ctx, depth);
     case "Tabs":
       return emitTabs(call, ctx, depth);
     case "Table":
