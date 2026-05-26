@@ -535,18 +535,16 @@ function lowerSystem(sys: System): SystemIR {
     storages,
     layouts,
   };
-  // Scaffold expander always runs.  Every page with a
-  // recognised `archetype` gets `body` rewritten to a
-  // walker-stdlib composition; the React emitter then routes
-  // through the walker.  The legacy archetype path
-  // `page.origin` drives the per-page side effects (emit path,
-  // auto-`id` param for detail pages).  Bodies are left alone —
-  // pages scaffold-emitted with canonical body primitives are
-  // rewritten by `expandInlineScaffoldPrimitiveCalls` below, which
-  // produces the full Stack/QueryView/Table tree the walker
-  // consumes.  The per-aggregate page-object emitter still
-  // dispatches on `page.origin` to produce the rich
-  // `e2e/pages/<agg>.ts` helper classes.
+  // Scaffold expander always runs.  `page.origin` (set during page
+  // lowering from the synthesised body's primitive shape) drives the
+  // per-page side effects (emit path, auto-`id` param for detail
+  // pages).  Bodies are left alone — pages scaffold-emitted with
+  // canonical body primitives are rewritten by
+  // `expandInlineScaffoldPrimitiveCalls` below, which produces the
+  // full Stack/QueryView/Table tree the walker consumes.  The
+  // per-aggregate page-object emitter also dispatches on
+  // `page.origin` to produce the rich `e2e/pages/<agg>.ts`
+  // helper classes.
   applyPageOriginSideEffects(built);
   expandInlineScaffoldPrimitiveCalls(built);
   return built;
@@ -554,9 +552,9 @@ function lowerSystem(sys: System): SystemIR {
 
 /** Rewrite the inline body primitives `scaffoldDetails(of:)` and
  *  `scaffoldOperations(of:)` into their expanded ExprIR forms.
- *  Runs against EVERY page's body (not just archetype-tagged ones)
- *  because the scaffold detail page emits an explicit body that
- *  doesn't trigger archetype detection.  Pages whose body never
+ *  Runs against EVERY page's body (regardless of origin) because the
+ *  scaffold detail page emits an explicit body whose `origin`
+ *  doesn't carry the primitive-call info.  Pages whose body never
  *  uses these primitives are no-ops — the rewriter walks each tree
  *  once and returns the same reference when nothing changed. */
 function expandInlineScaffoldPrimitiveCalls(sys: SystemIR): void {

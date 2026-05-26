@@ -51,7 +51,8 @@ const BANK_THREE_BACKEND = `
     deployable dotnetApi { platform: dotnet, modules: Accounts, port: 3001 }
     deployable elixirApi { platform: phoenixLiveView, modules: Accounts, port: 4000 }
     deployable marketingApi { platform: hono, modules: Marketing, port: 3010 }
-    deployable webApp { platform: static, targets: honoApi, port: 8080 }
+    ui WebUi { with scaffold(modules: [Accounts]) }
+    deployable webApp { platform: static, targets: honoApi, ui: WebUi, port: 8080 }
 
     test e2e "create an account" against honoApi {
       let a = api.accounts.create({ balance: 0 });

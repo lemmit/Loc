@@ -26,13 +26,12 @@ import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflo
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
 //
-// Emits a Vite-built SPA per react-platform deployable.  Pages are
-// derived mechanically from each aggregate's IR:
-//
-//   /<plural>            list.tsx        Mantine Table from useAll<Agg>()
-//   /<plural>/new        new.tsx         Mantine form for Create<Agg>Request
-//   /<plural>/:id        detail.tsx      Card + nested tables (master-detail)
-//                                        + one button per public operation
+// Emits a Vite-built SPA per react-platform deployable.  Every React
+// deployable declares a `ui:` binding (enforced by validator rule
+// `loom.react-deployable-missing-ui`); pages are emitted by walking
+// `ui.pages` through the body walker.  The `scaffold` stdlib macro
+// populates `ui.pages` for the bulk-CRUD case so authors don't
+// hand-write per-aggregate List / New / Detail pages.
 //
 // API URLs are baked in at generation time from the target deployable's
 // port (overridable via `import.meta.env.VITE_API_BASE_URL`).  The
@@ -93,23 +92,28 @@ export function generateReactForContexts(
   const design = deployable.design ?? "mantine@v7";
   const pack = loadPack(resolvePackDir(design));
 
-  // Page metamodel routing.  When the deployable declares
-  // a `ui:` binding, the React generator walks `ui.pages` (after
-  // scaffold expansion) via `emitPagesForUi`, which dispatches per
-  // `archetype` to the SAME `renderXxx` functions invoked
-  // below for the legacy direct walk.  Byte-for-byte equivalent in
-  // the bulk-scaffold case.
-  //
-  // Without a `ui:` binding (legacy/back-compat), fall through to
-  // the per-aggregate / per-workflow / per-view loops directly.
-  // A later change finalises the migration and deletes the fallback.
-  const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
+  // Page metamodel routing.  Every React deployable declares a
+  // `ui:` binding (validator rule `loom.react-deployable-missing-ui`
+  // enforces this) — the legacy "no-ui → per-aggregate fallback"
+  // path was removed.  `ui` is the resolved UiIR; if a programmatic
+  // IR bypasses the validator and produces a react deployable with
+  // no `uiName`, that's a bug — fail loudly here rather than emit
+  // a half-formed project.
+  if (!deployable.uiName) {
+    throw new Error(
+      `React deployable '${deployable.name}' has no 'ui:' binding. The validator should have caught this; an upstream pipeline (programmatic IR construction?) skipped the AST validator.`,
+    );
+  }
+  const ui = sys.uis.find((u) => u.name === deployable.uiName);
+  if (!ui) {
+    throw new Error(
+      `React deployable '${deployable.name}' references ui '${deployable.uiName}' but no such ui is declared in the system.`,
+    );
+  }
 
   // Per-aggregate api modules — always emitted; 1:1 with the
-  // aggregate inventory.  The Playwright page object emission moves
-  // into the `if (ui)` branch below so page-IR-routed
-  // deployables walk the same source for both pages and page
-  // objects.
+  // aggregate inventory.  Page emission below walks the resolved
+  // `ui.pages` for both pages and page-objects (single source).
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
     out.set(`src/api/${lowerFirst(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
@@ -118,25 +122,21 @@ export function generateReactForContexts(
   const workflows = allWorkflows(contexts);
   const views = allViews(contexts);
 
-  if (ui) {
-    // Single codegen path: every `src/pages/...` file
-    // (scaffold-derived OR explicit) routes through `emitPagesForUi`
-    // → walker.  The legacy archetype renderers (`renderListPage`,
-    // `renderNewPage`, `renderDetailPage`, etc.) are deleted.
-    const contextsByName = new Map<string, BoundedContextIR>();
-    for (const ctx of contexts) contextsByName.set(ctx.name, ctx);
-    const emitCtx = {
-      sys,
-      deployable,
-      aggregatesByName,
-      contextsByName,
-      pack,
-    };
-    const pages = emitPagesForUi(ui, emitCtx);
-    pages.forEach((content, path) => out.set(path, content));
-    const pageObjects = emitPageObjectsForUi(ui, emitCtx);
-    pageObjects.forEach((content, path) => out.set(path, content));
-  }
+  // Single codegen path: every `src/pages/...` file (scaffold-derived
+  // OR explicit) routes through `emitPagesForUi` → walker.
+  const contextsByName = new Map<string, BoundedContextIR>();
+  for (const ctx of contexts) contextsByName.set(ctx.name, ctx);
+  const emitCtx = {
+    sys,
+    deployable,
+    aggregatesByName,
+    contextsByName,
+    pack,
+  };
+  const pages = emitPagesForUi(ui, emitCtx);
+  pages.forEach((content, path) => out.set(path, content));
+  const pageObjects = emitPageObjectsForUi(ui, emitCtx);
+  pageObjects.forEach((content, path) => out.set(path, content));
 
   // Workflow UI — the shared workflows API module is 1:1 with the
   // workflow inventory; emit it regardless of the page-emission
@@ -179,10 +179,9 @@ export function generateReactForContexts(
   // When the ui block declares an explicit `menu { … }`,
   // its derived sidebar overrides the hardcoded Aggregates /
   // Workflows / Views grouping below.  When the ui has no menu
-  // block (or no ui binding at all), `sidebarOverride` is
-  // `undefined` and the AppShell preparer falls back to its legacy
-  // hardcoded shape — byte-identical to the original sidebar output.
-  const sidebarOverride = ui ? deriveSidebarFromUi(ui) : undefined;
+  // block, `sidebarOverride` is `undefined` and the AppShell
+  // preparer falls back to its default hardcoded shape.
+  const sidebarOverride = deriveSidebarFromUi(ui);
 
   // Explicit pages with non-conventional names need
   // to register their import + route in App.tsx so React Router
@@ -192,52 +191,40 @@ export function generateReactForContexts(
   // `prepareAppShellVM`.  Pages with `layout: none` go to a
   // separate `outOfShell` channel that mounts as sibling routes
   // outside the AppShell chrome.
-  const extraRouteSplit = ui ? deriveExtraRoutesFromUi(ui) : undefined;
-  const extraRoutes = extraRouteSplit?.inShell;
-  const outOfShellRoutes = extraRouteSplit?.outOfShell;
+  const extraRouteSplit = deriveExtraRoutesFromUi(ui);
+  const extraRoutes = extraRouteSplit.inShell;
+  const outOfShellRoutes = extraRouteSplit.outOfShell;
   // Phase 8 step 2: walk each declared `layout <Name>` referenced by
   // a page in this ui into pre-built `NamedLayoutVM`s (slot JSX +
   // route bucket + the imports the slot JSX needs).  The shell
   // template renders one `<XLayout>` component + matching
   // `<Route element={<XLayout />}>` block per entry.
-  const layoutPrep = ui
-    ? prepareNamedLayouts(ui, sys, pack, extraRouteSplit?.namedLayouts ?? new Map())
-    : { namedLayouts: [], extraImports: [] };
+  const layoutPrep = prepareNamedLayouts(ui, sys, pack, extraRouteSplit.namedLayouts ?? new Map());
   const namedLayouts = layoutPrep.namedLayouts;
   const layoutImports = layoutPrep.extraImports;
 
   // App.tsx's per-aggregate / -workflow / -view route block emits
-  // imports for scaffold-archetype page files (`./pages/<plural>/list`,
+  // imports for scaffold-derived page files (`./pages/<plural>/list`,
   // etc.).  Those files exist only when the ui declared `scaffold:`
   // covering the target — explicit-page-only uis (no scaffold) would
   // otherwise produce dangling imports and duplicate identifiers
   // alongside the explicit-page extraRoutes.  Filter the lists down to
-  // the targets that the ui actually scaffolded.  When ui is absent
-  // (legacy non-ui deployable) fall through to the full inventory.
-  const scaffoldedAggregates = ui
-    ? aggregates.filter(({ agg }) =>
-        ui.pages.some(
-          (p) => p.origin?.kind === "aggregate-list" && p.origin.aggregateName === agg.name,
-        ),
-      )
-    : aggregates;
-  const scaffoldedWorkflows = ui
-    ? workflows.filter(({ wf }) =>
-        ui.pages.some(
-          (p) => p.origin?.kind === "workflow-form" && p.origin.workflowName === wf.name,
-        ),
-      )
-    : workflows;
-  const scaffoldedViews = ui
-    ? views.filter(({ view }) =>
-        ui.pages.some((p) => p.origin?.kind === "view-list" && p.origin.viewName === view.name),
-      )
-    : views;
+  // the targets that the ui actually scaffolded.
+  const scaffoldedAggregates = aggregates.filter(({ agg }) =>
+    ui.pages.some(
+      (p) => p.origin?.kind === "aggregate-list" && p.origin.aggregateName === agg.name,
+    ),
+  );
+  const scaffoldedWorkflows = workflows.filter(({ wf }) =>
+    ui.pages.some((p) => p.origin?.kind === "workflow-form" && p.origin.workflowName === wf.name),
+  );
+  const scaffoldedViews = views.filter(({ view }) =>
+    ui.pages.some((p) => p.origin?.kind === "view-list" && p.origin.viewName === view.name),
+  );
 
   // Whether the scaffold expander synthesised a `Home` page (only
-  // happens when the ui declared at least one scaffold).  Default true
-  // when no ui (legacy non-page-IR path always emits Home).
-  const hasScaffoldHome = ui ? ui.pages.some((p) => p.origin?.kind === "home") : true;
+  // happens when the ui declared at least one scaffold).
+  const hasScaffoldHome = ui.pages.some((p) => p.origin?.kind === "home");
 
   out.set(
     "src/App.tsx",
@@ -255,11 +242,11 @@ export function generateReactForContexts(
       layoutImports,
     ),
   );
-  // Home is always synthesised by the scaffold expander
-  // when a `ui:` binding is present.  Deployables without `ui:`
-  // emit no Home page (no scaffold archetype renderer left to fall
-  // back to); a future change tightens the validator to require a
-  // `ui:` binding for any react deployable.
+  // Home is synthesised by the scaffold expander whenever the
+  // ui declares `with scaffold(...)`.  Explicit-page-only uis
+  // (no scaffold) produce no Home page and the AppShell preparer
+  // skips the `/` route — the user's explicit `/`-routed page (if
+  // any) takes its place.
 
   // `decimal.js` is conditional in the React package.json — only
   // pulled in when at least one served context uses a money field /
@@ -283,7 +270,7 @@ export function generateReactForContexts(
   // detect-once / inject-once gate keeps the HTML lean when no page
   // uses code rendering.  Mirrors the `usesMoney` flag for
   // `decimal.js` in `package.json` below.
-  const usesCodeBlock = ui ? uiUsesCodeBlock(ui) : false;
+  const usesCodeBlock = uiUsesCodeBlock(ui);
   out.set(
     "index.html",
     renderShellFile(
@@ -368,9 +355,8 @@ function emitShellGlobs(pack: LoadedPack, out: Map<string, string>): void {
 // index.html shell — page metadata + favicon projection.
 //
 // Picks the route-`/` page (or the first page when no `/` page is
-// declared) as the source of static SEO metadata.  Falls back to a
-// sensible default title when no UI is bound to this deployable
-// (back-end-only react: target stub or `dotnet` without a UI mount).
+// declared) as the source of static SEO metadata.  Falls back to the
+// deployable's own name when the chosen page declares no title.
 //
 // The favicon path on the deployable is platform-neutral text — the
 // generator emits the path verbatim into `<link rel="icon" href="…">`.
@@ -387,15 +373,15 @@ interface IndexHtmlVM {
 }
 
 function prepareIndexHtmlVM(
-  // Reserved for a future "system-level title fallback" when a
-  // deployable has no `ui:` binding (then the system name becomes
-  // the html title).  Today the deployable-name fallback below is
-  // enough; underscore-prefix signals intentional unused.
+  // Reserved for a future "system-level title fallback" when no page
+  // declares a static title (the system name becomes the html title).
+  // Today the deployable-name fallback below is enough; underscore-
+  // prefix signals intentional unused.
   _sys: SystemIR,
   deployable: DeployableIR,
-  ui: UiIR | undefined,
+  ui: UiIR,
 ): IndexHtmlVM {
-  const page = ui ? pickMetadataPage(ui.pages) : undefined;
+  const page = pickMetadataPage(ui.pages);
   const title = staticTitleOf(page) ?? deployable.name;
   const metadata = page?.metadata;
   return {
