@@ -256,6 +256,7 @@ for details.
 | [`docs/generators.md`](docs/generators.md) | Per-platform feature matrix — what each backend emits, file-by-file, with side-by-side comparisons. |
 | [`docs/technical.md`](docs/technical.md) | Architecture: AST → IR → templates, design rationale, how to extend the language or add a backend. |
 | [`docs/tools.md`](docs/tools.md) | CLI usage, `.loomignore`, watch mode, migration workflow, Docker, Playwright UI tests, OpenAPI cross-check, proxy CAs. |
+| [`docs/conformance.md`](docs/conformance.md) | Cross-generator conformance harness — the nine OpenAPI dimensions the parity gate diffs, how to read a divergence report, how to add a tenth dimension. |
 | [`docs/license-faq.md`](docs/license-faq.md) | Plain-English answers to "is this OK to use in production?" — generator vs. generated-code licensing, what counts as Competing Use, OSI considerations. |
 
 Plus [`experience_gathered.md`](experience_gathered.md) — running
