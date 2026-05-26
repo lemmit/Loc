@@ -91,28 +91,28 @@ export const tsxTarget: WalkerTarget = {
   },
 
   /** Hoist one `const <var> = useXxx(args);` line per unique hook
-   *  usage. Args are pre-rendered by the caller (the walker had a
-   *  WalkContext at the time `ApiCallSite` was built — see
-   *  `walker/api-hooks.ts:101`).  Sorted by `varName` for stable
-   *  output. */
+   *  usage.  When `varName`/`hookName`/`argsRendered` are supplied
+   *  on the ApiCallSite (the delegating walker passes ApiHookUse
+   *  fields through), the target uses them verbatim — this
+   *  preserves the View-hook shape (`useXxxView`) that the
+   *  aggregate+op formula can't capture.  When absent (standalone
+   *  test usage), the target falls back to recomputing from
+   *  aggregate+op with empty args.
+   *
+   *  Iteration order preserves the caller's input order so the
+   *  hoisted block reflects whatever ordering the walker tracks —
+   *  pages today register hooks in the order they're discovered
+   *  during the body walk (Map insertion order). */
   renderApiHoisting(uses: ApiCallSite[]): string[] {
     const seen = new Set<string>();
     const lines: string[] = [];
-    for (const u of [...uses].sort((a, b) =>
-      hookVarName(a.aggregateName, a.operation).localeCompare(
-        hookVarName(b.aggregateName, b.operation),
-      ),
-    )) {
-      const varName = hookVarName(u.aggregateName, u.operation);
+    for (const u of uses) {
+      const varName = u.varName ?? hookVarName(u.aggregateName, u.operation);
       if (seen.has(varName)) continue;
       seen.add(varName);
-      const hookName = hookFnName(u.aggregateName, u.operation);
-      // Args aren't pre-rendered here (the contract passes
-      // `ApiCallSite` whose `args` are still `ExprIR`); for the
-      // standalone impl emit empty args so the line is syntactically
-      // valid.  The delegating walker passes rendered args in via
-      // a follow-up signature change.
-      lines.push(`const ${varName} = ${hookName}();`);
+      const hookName = u.hookName ?? hookFnName(u.aggregateName, u.operation);
+      const args = u.argsRendered ?? [];
+      lines.push(`const ${varName} = ${hookName}(${args.join(", ")});`);
     }
     return lines;
   },

@@ -226,11 +226,31 @@ export function renderCustomLayoutPage(
     .renderHelperImports(usedHelpers, helperImports)
     .map((l) => `${l}\n`)
     .join("");
-  // Api hook declarations, emitted at page-top right
-  // before the JSX return.  Each unique `<param>.<aggregate>.<op>`
-  // becomes one `const <var> = use<Op><Aggregate>(args?);` line.
-  const apiHookDecls = [...usedApiHooks.values()]
-    .map((h) => `  const ${h.varName} = ${h.hookName}(${h.argsRendered.join(", ")});\n`)
+  // Api hook declarations, emitted at page-top right before the
+  // JSX return.  Each unique `<param>.<aggregate>.<op>` becomes
+  // one `const <var> = use<Op><Aggregate>(args?);` line.
+  // Delegated to `tsxTarget.renderApiHoisting` — see
+  // `src/generator/_walker/target.ts`.  Walker passes ApiHookUse
+  // fields through as pre-resolved varName/hookName/argsRendered
+  // overrides on ApiCallSite, sidestepping the formula-based
+  // recomputation (View hooks like `useXxxView` don't follow the
+  // aggregate+op shape).  The 2-space indent + trailing newline
+  // stays at the call site for splice into the function-shell
+  // template.
+  const apiHookDecls = tsxTarget
+    .renderApiHoisting(
+      [...usedApiHooks.values()].map((h) => ({
+        apiHandle: "",
+        aggregateName: "",
+        operation: "",
+        kind: "query" as const,
+        args: [],
+        varName: h.varName,
+        hookName: h.hookName,
+        argsRendered: h.argsRendered,
+      })),
+    )
+    .map((line) => `  ${line}\n`)
     .join("");
   // RHF wiring when the body included `Form(of:)` /
   // `Form(runs:)` / `Form(of:, op:)` primitives.  Emits the

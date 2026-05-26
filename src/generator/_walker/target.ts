@@ -99,6 +99,18 @@ export interface ApiCallSite {
   kind: "query" | "mutation";
   /** Argument expressions, in source order.  Empty for `.all`. */
   args: ExprIR[];
+  /** Pre-resolved hook variable name — when present, the target's
+   *  hoisting uses this verbatim instead of recomputing from
+   *  aggregate+op.  Required for shapes the formula can't capture
+   *  (e.g. View hooks: `<viewCamel>View` is not aggregate-shaped). */
+  varName?: string;
+  /** Pre-resolved hook function name — same escape hatch as varName. */
+  hookName?: string;
+  /** Pre-rendered argument strings (the walker had a WalkContext at
+   *  the time the args were detected; the target consumes the
+   *  rendered list directly so refs to params/state propagate
+   *  through the walker's `usedParams` / `usesState` side-effects). */
+  argsRendered?: readonly string[];
 }
 
 /** Per-target lowering interface.  An implementation is selected by

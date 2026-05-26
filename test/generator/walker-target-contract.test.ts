@@ -141,6 +141,42 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
     expect(heex).toEqual([]);
   });
 
+  it("renderApiHoisting: pre-resolved varName/hookName/argsRendered override aggregate+op formula", () => {
+    // The View-hook case the walker emits today: varName + hookName
+    // don't match the aggregate+op formula (View has no aggregate).
+    // The optional fields on ApiCallSite let the walker pass
+    // pre-resolved values through.
+    const tsx = tsxTarget.renderApiHoisting([
+      {
+        apiHandle: "",
+        aggregateName: "",
+        operation: "",
+        kind: "query",
+        args: [],
+        varName: "activeOrdersView",
+        hookName: "useActiveOrdersView",
+        argsRendered: [],
+      },
+    ]);
+    expect(tsx).toEqual(["const activeOrdersView = useActiveOrdersView();"]);
+  });
+
+  it("renderApiHoisting: argsRendered are interpolated into the hook call", () => {
+    const tsx = tsxTarget.renderApiHoisting([
+      {
+        apiHandle: "",
+        aggregateName: "",
+        operation: "",
+        kind: "query",
+        args: [],
+        varName: "customerById",
+        hookName: "useCustomerById",
+        argsRendered: ["id"],
+      },
+    ]);
+    expect(tsx).toEqual(["const customerById = useCustomerById(id);"]);
+  });
+
   it("renderHelperImports diverges: TSX `import { x } from`; HEEx `alias`", () => {
     const used = new Set(["fmt"]);
     const decls = [{ name: "fmt", path: "../helpers/fmt" }];
