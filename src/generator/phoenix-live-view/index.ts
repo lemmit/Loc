@@ -540,6 +540,17 @@ defmodule ${appModule}.MixProject do
       {:ash, "~> 3.24"},
       {:ash_postgres, "~> 2.0"},
       {:ash_phoenix, "~> 2.0"},
+      # ash_postgres' ResourceGenerator (lib/resource_generator/spec.ex)
+      # references Igniter.Inflex and Owl.IO at compile time.  Both are
+      # optional deps for the \`mix ash_postgres.gen.resources\` task
+      # and aren't pulled by \`mix deps.get --only prod\`, which surfaces
+      # as "module X is not available" warnings.  Under the
+      # phoenix-build workflow's \`mix compile --warnings-as-errors\`,
+      # any warning fails the build.  Declaring them here with
+      # \`runtime: false\` resolves the compile-time references without
+      # pulling them into the application start sequence.
+      {:igniter, "~> 0.5", runtime: false},
+      {:owl, "~> 0.11", runtime: false},
       {:jason, "~> 1.2"},
       {:bandit, "~> 1.5"},
       {:plug_cowboy, "~> 2.5"},
