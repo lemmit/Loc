@@ -2542,32 +2542,81 @@ describe("Ash 3.x compile-correctness regressions", () => {
     expect(domain).not.toMatch(/action: :all\b/);
   });
 
-  it("inspect derived does NOT render to Phoenix (Ash auto-derives Inspect)", async () => {
-    // The `derived inspect` IR node stays in the model (consumed by
-    // .NET ToString + TS toString) but the Phoenix backend renders
-    // NEITHER a `calculate :inspect, :string, expr(...)` NOR a
-    // `defimpl Inspect, for: <Module>` block.  Two layered constraints:
+  it("inspect derived emits as a `def inspect(record)` module function (not calc, not defimpl)", async () => {
+    // The `derived inspect` IR node — auto-injected on every aggregate
+    // with sensitivity-aware redaction — must reach Phoenix as a
+    // public module function rather than either of the two routes
+    // earlier iterations tried:
     //
     //   1. Ash's `expr()` DSL doesn't admit string concat (`<>`) or
     //      `to_string/1`, both of which the auto-synthesised inspect
-    //      body uses — so `calculate :inspect` won't compile.
-    //      (PR #524's original Phoenix CI failure.)
+    //      body uses — so `calculate :inspect, :string, expr(...)`
+    //      won't compile.  (PR #524's original Phoenix CI failure.)
     //   2. `defimpl Inspect, for: <Module>` collides with the Inspect
     //      protocol impl that Ash 3.x's `use Ash.Resource` macro
     //      auto-derives for the resource struct, surfacing under
     //      `mix compile --warnings-as-errors` as:
     //        warning: redefining module Inspect.<Module>
-    //      (Surfaced after #541 unblocked the phoenix-build workflow.)
+    //      (PR #546's regression — surfaced after #541 unblocked the
+    //      phoenix-build workflow.)
     //
-    // Until Ash exposes an opt-out for its Inspect auto-derive (or we
-    // route the synthesised body through a non-Inspect channel such as
-    // a dedicated `inspect/1` helper), neither path is viable.  Ash's
-    // default `%<Module>{...}` Inspect output is adequate for
-    // debugging.
+    // The module-fn channel sidesteps both: native-Elixir body (so
+    // `<>` / `to_string/1` work), separate namespace from the
+    // auto-derived `Inspect.<Module>` (so no collision).  Callers
+    // invoke explicitly — `Customer.inspect(record)` from Logger /
+    // IEx — instead of relying on `Kernel.inspect/1`.
     const files = await buildFormFixture();
     const customer = files.get("phoenix_app/lib/phoenix_app/sales/customer.ex")!;
+    // Neither legacy path is emitted.
     expect(customer).not.toMatch(/calculate :inspect/);
     expect(customer).not.toMatch(/defimpl Inspect, for: PhoenixApp\.Sales\.Customer/);
+    // The new path: a public `def inspect(record)` whose body uses the
+    // native Elixir `<>` concat and accesses stored attributes via
+    // `record.<field>`.
+    expect(customer).toMatch(/def inspect\(record\) do\b/);
+    expect(customer).toMatch(/record\.id/);
+    expect(customer).toMatch(/<>/);
+  });
+
+  it("sensitive-tagged fields render as `<redacted>` in the Phoenix inspect body", async () => {
+    // PR #524's plan promised cross-backend redaction of fields tagged
+    // `sensitive(...)`.  The auto-synthesised inspect substitutes the
+    // literal `<redacted>` for any sensitive field's value.  Pin the
+    // shape on Phoenix specifically — the regression that #546 left
+    // behind (Ash's default Inspect output shows fields plaintext)
+    // doesn't apply when the caller invokes the module function.
+    const src = `
+      system Bank {
+        module M {
+          context People {
+            aggregate Person {
+              fullName: string
+              ssn: string sensitive(pii)
+              derived display: string = fullName
+            }
+            repository People for Person {}
+          }
+        }
+        deployable api { platform: phoenixLiveView, modules: M, port: 4000 }
+      }
+    `;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-inspect-redact-"));
+    const file = path.join(dir, "src.ddd");
+    fs.writeFileSync(file, src);
+    const services = createDddServices(NodeFileSystem);
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
+    await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+    const { files } = generateSystems(doc.parseResult.value as Model);
+    const person = files.get("api/lib/api/people/person.ex")!;
+    expect(person).toMatch(/def inspect\(record\) do/);
+    // The sensitive field name still appears (so log readers see the
+    // structural slot); the VALUE is the redacted literal, not a
+    // `record.ssn` access.
+    expect(person).toMatch(/"ssn: "/);
+    expect(person).toMatch(/"<redacted>"/);
+    expect(person).not.toMatch(/record\.ssn/);
   });
 });
 

@@ -126,14 +126,21 @@ datetimes are ISO strings.
 **Aggregate stringification hooks**: when an aggregate declares
 `derived inspect: string = ...` (auto-injected when omitted), each
 backend emits a host-language debug-string hook that delegates to
-the `inspect` value — `public override string ToString()` (.NET),
-`toString()` + `[Symbol.for("nodejs.util.inspect.custom")]` (TS),
-`defimpl Inspect, for: <Module>` (Phoenix).  This is what fires in
-debugger watches, exception messages, Serilog destructuring,
-`console.log`, IEx, and similar developer-facing surfaces — never
-the user-facing form.  The user-facing form is `derived display:
-string = ...` (opt-in), reached only via `string(aggregate)`,
-implicit `"x " + aggregate`, and the React Select picker.
+the `inspect` value — `public override string ToString()` (.NET,
+auto-invoked by `$"{x}"` / `Console.WriteLine`), `toString()` +
+`[Symbol.for("nodejs.util.inspect.custom")]` (TS, auto-invoked by
+`String(x)` / `${x}` / `console.log`), and a public
+`def inspect(record)` module function (Phoenix, **invoked
+explicitly** as `MyApp.Catalog.Customer.inspect(record)` — Ash 3.x
+auto-derives the `Inspect` protocol for every resource module, so
+the loom-emitted form lives at the module-function level to avoid a
+`redefining module Inspect.<...>` collision under `mix compile
+--warnings-as-errors`).  Honours `sensitive(...)` field tags by
+substituting `<redacted>` for the value while keeping the field
+name in the structural output.  Never reached by `string(aggregate)`
+or implicit `"x " + aggregate` — the user-facing form is `derived
+display: string = ...` (opt-in), routed through the Loom expression
+layer and the React Select picker.
 
 **`db/repositories/<aggregate>-repository.ts`** — built by
 `repository-builder.ts`:
