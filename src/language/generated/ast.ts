@@ -331,7 +331,7 @@ export function isMemberName(item: unknown): item is MemberName {
     return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type ModelMember = BoundedContext | EnumDecl | Requirement | Solution | System | TestCase | ValueObject;
+export type ModelMember = BoundedContext | Component | EnumDecl | Requirement | Solution | System | TestCase | ValueObject;
 
 export const ModelMember = 'ModelMember';
 
@@ -642,7 +642,7 @@ export function isCanonicalProp(item: unknown): item is CanonicalProp {
 }
 
 export interface Component extends AstNode {
-    readonly $container: Ui;
+    readonly $container: Model | Ui;
     readonly $type: 'Component';
     body: Expression;
     decls: Array<ComponentDecl>;
@@ -2247,12 +2247,8 @@ export class DddAstReflection extends AbstractAstReflection {
             case MemberSuffix: {
                 return this.isSubtype(PostfixSuffix, supertype);
             }
-            case Component:
-            case MenuBlock:
-            case Page:
-            case UiApiParam:
-            case UiHelperImport: {
-                return this.isSubtype(UiMember, supertype);
+            case Component: {
+                return this.isSubtype(ModelMember, supertype) || this.isSubtype(UiMember, supertype);
             }
             case Containment: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype);
@@ -2307,6 +2303,12 @@ export class DddAstReflection extends AbstractAstReflection {
             case MacroArgRefList:
             case MacroArgString: {
                 return this.isSubtype(MacroArgValue, supertype);
+            }
+            case MenuBlock:
+            case Page:
+            case UiApiParam:
+            case UiHelperImport: {
+                return this.isSubtype(UiMember, supertype);
             }
             case Operation: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(Targetable, supertype);

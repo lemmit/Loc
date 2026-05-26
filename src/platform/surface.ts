@@ -1,4 +1,10 @@
-import type { BoundedContextIR, DeployableIR, Platform, SystemIR } from "../ir/loom-ir.js";
+import type {
+  BoundedContextIR,
+  ComponentIR,
+  DeployableIR,
+  Platform,
+  SystemIR,
+} from "../ir/loom-ir.js";
 import type { MigrationsIR } from "../ir/migrations-ir.js";
 
 // ---------------------------------------------------------------------------
@@ -83,6 +89,13 @@ export interface PlatformSurface {
      * `value_computed`, `precondition_evaluated`, etc.).  Off keeps the
      * artefact lean and the domain layer pure. */
     emitTrace?: boolean;
+    /** Top-level (workspace-wide) components declared as bare
+     *  `ModelMember`s in any reachable `.ddd` document — pure render
+     *  functions visible to every page in every ui.  Today only the
+     *  React generator consumes them (emits one
+     *  `src/components/<Name>.tsx` per ui that references the
+     *  component); other platforms ignore the arg. */
+    topLevelComponents?: ComponentIR[];
   }): Map<string, string>;
   /** Inputs for the deployable's docker-compose service stanza. */
   composeService(args: {

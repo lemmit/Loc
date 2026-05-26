@@ -3,11 +3,13 @@
 // EntityParts.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import type { DddServices } from "../ddd-module.js";
 import type { BuilderCall, EntityPart, Model, NameRef, Ui } from "../generated/ast.js";
 import {
   isAggregate,
   isBoundedContext,
   isCallSuffix,
+  isComponent,
   isPostfixChain,
   isValueObject,
 } from "../generated/ast.js";
@@ -56,8 +58,17 @@ export function checkLegacyConstructorCalls(model: Model, accept: ValidationAcce
 
 /** v2 BuilderCall type names are bare strings (no cross-reference) —
  *  resolve them at validation time and reject unknown names with a
- *  diagnostic listing the four admissible categories. */
-export function checkBuilderCallType(model: Model, accept: ValidationAcceptor): void {
+ *  diagnostic listing the four admissible categories.
+ *
+ *  When `services` is provided the lookup falls through to the
+ *  workspace-wide index for top-level components declared in
+ *  another `.ddd` document; without it (single-document path,
+ *  e.g. unit tests) only the document under validation is consulted. */
+export function checkBuilderCallType(
+  model: Model,
+  accept: ValidationAcceptor,
+  services?: DddServices,
+): void {
   for (const node of AstUtils.streamAllContents(model)) {
     if (node.$type !== "BuilderCall") continue;
     const bc = node as BuilderCall;
@@ -85,13 +96,44 @@ export function checkBuilderCallType(model: Model, accept: ValidationAcceptor): 
       }
       if (resolved) continue;
     }
-    // 3. User-defined component in enclosing UI.
+    // 3. User-defined component in enclosing UI (ui-scope wins on
+    //    name collision with a top-level component declared in the
+    //    same workspace).
     const ui = AstUtils.getContainerOfType(bc, (n): n is Ui => n.$type === "Ui");
     if (ui) {
       const userComp = ui.members.some(
         (m) => m.$type === "Component" && (m as { name: string }).name === name,
       );
       if (userComp) continue;
+    }
+    // 4. Top-level component (declared as a `ModelMember` rather than
+    //    inside a `ui { … }`).  Workspace-wide via the import-graph
+    //    walk; matches by bare name.  Local document checked first
+    //    (avoids paying for index lookup when the call lives in the
+    //    same file as the declaration); if missing, the workspace
+    //    index is consulted so a multi-file project sees a component
+    //    declared in any imported sibling.
+    const localTopLevel = (model as Model).members.some(
+      (m) => isComponent(m) && (m as { name: string }).name === name,
+    );
+    if (localTopLevel) continue;
+    if (services) {
+      const index = services.shared.workspace.IndexManager;
+      // Don't filter by node type at the index level: a typo-tolerant
+      // lookup keeps the surface honest even if the description's
+      // `type` doesn't match exactly.  Component descriptions exported
+      // by `DddScopeComputation.computeExports` carry the bare name,
+      // so a name match is sufficient (the corresponding node is
+      // checked below to be a Component).
+      let workspaceTopLevel = false;
+      for (const desc of index.allElements()) {
+        if (desc.name !== name) continue;
+        if (desc.type === "Component") {
+          workspaceTopLevel = true;
+          break;
+        }
+      }
+      if (workspaceTopLevel) continue;
     }
     accept(
       "error",

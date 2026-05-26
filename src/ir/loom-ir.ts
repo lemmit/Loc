@@ -515,6 +515,15 @@ export interface LoomModel {
   /** Root-level enums.  Same visibility / emission rules as
    *  `rootValueObjects`. */
   rootEnums: EnumIR[];
+  /** Root-level components — declared at the top of any `.ddd` file
+   *  outside any `ui { … }`.  Pure render functions visible to every
+   *  page in every ui workspace-wide; the import-graph walk merges
+   *  them into the same global symbol space as `rootValueObjects` /
+   *  `rootEnums`.  A `ui`-scope component with the same name wins on
+   *  resolution (override semantics).  Backends emit one
+   *  `src/components/<Name>.tsx` per ui that references the
+   *  component. */
+  components: ComponentIR[];
   /** Traceability artifacts — model-wide, since a Solution
    *  or TestCase may reference code across modules and systems. */
   requirements: RequirementIR[];

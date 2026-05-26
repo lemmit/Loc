@@ -38,6 +38,16 @@ import {
 } from "./validators/index.js";
 
 export class DddValidator {
+  /** Langium services — held so per-theme checks can reach the
+   *  workspace-wide index (cross-document name resolution for
+   *  surfaces like top-level components whose names aren't
+   *  cross-references). */
+  private readonly services: DddServices;
+
+  constructor(services: DddServices) {
+    this.services = services;
+  }
+
   /** Entry: full model walk.  Dispatch order matches the pre-split
    *  monolith — model-level passes first (macro diagnostics, then
    *  match / matcher / builder / traceability / type references /
@@ -73,7 +83,7 @@ export class DddValidator {
     // validator resolves the type name against the available builder
     // targets (VO / EntityPart / user-component / walker primitive) and
     // errors on misses.
-    checkBuilderCallType(model, accept);
+    checkBuilderCallType(model, accept, this.services);
     // `import helper <name> from "..."` declarations.
     // Reject names that shadow walker stdlib primitives so a typo
     // never silently overrides Stack / Form / etc.  Also flag

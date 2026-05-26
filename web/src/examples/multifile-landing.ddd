@@ -1,0 +1,77 @@
+// Landing-page deployable that consumes a shared component library
+// from a sibling file.  `import "./marketing-lib.ddd"` brings every
+// top-level `component` declared there into scope; pages reference
+// them by bare name without restating the body.
+//
+// This is the canonical pattern for "marketing site that reuses the
+// same Hero / Footer across many products" — the library file ships
+// once, every product's `.ddd` imports it.
+
+import "./multifile-marketing-lib.ddd"
+
+system MultiFileLanding {
+
+  // Hono backend — empty surface but required so the playground's
+  // preview pipeline has something to bundle and boot alongside the
+  // React frontend.
+  module Empty {
+    context Stub { }
+  }
+
+  ui Site {
+    page Landing {
+      route: "/"
+      layout: none
+      body: Stack {
+        Hero {
+          eyebrow: "Loom",
+          title: "Shared component libraries",
+          subtitle: "One `.ddd` file, every page can drop a Hero in.",
+          ctaLabel: "Learn more",
+          ctaTo: "/features"
+        },
+        FeatureCard {
+          title: "Imported by name",
+          body: "A page body invokes `Hero { ... }` with no local declaration."
+        },
+        FeatureCard {
+          title: "Cross-system reuse",
+          body: "Two unrelated systems can share the same marketing components without copy-paste."
+        },
+        CtaSection {
+          title: "Try it",
+          subtitle: "Open multifile-marketing-lib.ddd to see the component definitions.",
+          ctaLabel: "Open library",
+          ctaTo: "/features"
+        },
+        Footer { copyright: "© 2026 Loom" }
+      }
+    }
+
+    page Features {
+      route: "/features"
+      layout: none
+      body: Container {
+        Stack {
+          Heading { "Features", level: 1 },
+          Text { "Top-level components live alongside root-level value objects and enums — visible workspace-wide through the same import-graph walk." },
+          Button { "Back home", to: "/" }
+        }
+      }
+    }
+  }
+
+  deployable api {
+    platform: hono
+    modules: Empty
+    port: 3000
+  }
+
+  deployable site {
+    platform: react
+    targets: api
+    ui: Site
+    port: 3001
+    design: mantine
+  }
+}
