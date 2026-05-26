@@ -222,11 +222,10 @@ export function renderCustomLayoutPage(
   // `src/generator/_walker/target.ts`.  The target returns one
   // line per import; this site re-attaches the trailing newline
   // matching the existing splice into the import block template.
-  const helperImportLines =
-    tsxTarget
-      .renderHelperImports(usedHelpers, helperImports)
-      .map((l) => `${l}\n`)
-      .join("");
+  const helperImportLines = tsxTarget
+    .renderHelperImports(usedHelpers, helperImports)
+    .map((l) => `${l}\n`)
+    .join("");
   // Api hook declarations, emitted at page-top right
   // before the JSX return.  Each unique `<param>.<aggregate>.<op>`
   // becomes one `const <var> = use<Op><Aggregate>(args?);` line.

@@ -122,10 +122,7 @@ export function bodyProp(expr: Expression): BodyProp {
  * pair such as `section: "Orders"` or `hidden: true`. */
 function menuMetaEntry(name: string, value: Expression): MenuMetaEntry {
   const origin = _currentOrigin();
-  const e: MenuMetaEntry = _tag(
-    mkMenuMetaEntry({ $type: "MenuMetaEntry", name, value }),
-    origin,
-  );
+  const e: MenuMetaEntry = _tag(mkMenuMetaEntry({ $type: "MenuMetaEntry", name, value }), origin);
   _setContainer(value, e, "value");
   return e;
 }

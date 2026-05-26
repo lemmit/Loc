@@ -48,6 +48,7 @@ import type {
   AggregateIR,
   ExprIR,
   PageIR,
+  StateFieldIR,
   StmtIR,
   TypeIR,
   UiHelperImportIR,
@@ -165,6 +166,12 @@ export interface WalkContext {
   ui: UiIR;
   /** Local name set for `state { … }` fields (snake-cased). */
   stateNames: Set<string>;
+  /** Per-field StateFieldIR keyed by snake-cased name.  Drives
+   *  `heexTarget.renderStateRead` delegation — the contract's
+   *  `StateRef` carries the full field, but the walker historically
+   *  carried only the name set.  Built once at walker entry next
+   *  to `stateNames` so lookups stay symmetric. */
+  stateFields: Map<string, StateFieldIR>;
   /** Set of helper names actually referenced; populated as we walk. */
   usedHelpers: Set<string>;
   /** Accumulated handle_event clauses. */
@@ -197,6 +204,7 @@ export function walkBodyToHeex(
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
 ): WalkResult {
   const stateNames = new Set<string>(page.state.map((f) => snake(f.name)));
+  const stateFields = new Map<string, StateFieldIR>(page.state.map((f) => [snake(f.name), f]));
   // Seed instance types from aggregate-typed params so `Action(p.op)` /
   // `Form(p.op)` resolve the operation's aggregate.  A component param
   // `order: Order` → `order → "Order"`; QueryView extends this for its
@@ -215,6 +223,7 @@ export function walkBodyToHeex(
     page,
     ui,
     stateNames,
+    stateFields,
     usedHelpers: new Set(),
     handlers: [],
     actionBindings: [],
@@ -356,6 +365,18 @@ function renderRef(expr: Extract<ExprIR, { kind: "ref" }>, ctx: WalkContext): st
   }
   // State field — position-dependent.
   if (ctx.stateNames.has(snake(expr.name))) {
+    // Delegated to heexTarget.renderStateRead — see
+    // `src/generator/_walker/target.ts`.  Walker looks the full
+    // StateFieldIR up by snake-cased name (built once at walker
+    // entry) and passes through; the target snake-cases the name
+    // itself and dispatches by position.
+    const field = ctx.stateFields.get(snake(expr.name));
+    if (field) {
+      return heexTarget.renderStateRead({ field, name: field.name }, ctx.position);
+    }
+    // Fallback to legacy path if the field isn't in the map (shouldn't
+    // happen — stateNames and stateFields are populated together at
+    // walker entry).  Behavior-identical to delegation.
     return ctx.position === "template"
       ? `@${snake(expr.name)}`
       : `socket.assigns.${snake(expr.name)}`;
@@ -1630,6 +1651,7 @@ export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): 
     page,
     ui,
     stateNames: new Set(page.state.map((f) => snake(f.name))),
+    stateFields: new Map(page.state.map((f) => [snake(f.name), f])),
     usedHelpers: new Set(),
     handlers: [],
     actionBindings: [],
