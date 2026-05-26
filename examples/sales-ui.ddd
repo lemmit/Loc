@@ -26,15 +26,15 @@ ui SalesAdmin with scaffold(modules: [Catalog], aggregates: [Customer, Product],
   // Components are typed functions from params (+ optional state) to
   // a body expression.  No route, no menu — pure region tree.
   component OrderPanel(order: Order) {
-    body: Stack([
-      Heading("Order " + order.id, level: 2),
-      Badge(order.status),
-      Table(order.lines, columns: [productId, quantity, unitPrice, subtotal]),
-      Toolbar([
-        Action(confirm, then: navigate(OrderConsole, { customerId: order.customerId })),
-        Action(cancel,  then: toast("Cancelled"))
-      ])
-    ])
+    body: Stack {[
+      Heading { "Order " + order.id, level: 2 },
+      Badge { order.status },
+      Table { order.lines, columns: [productId, quantity, unitPrice, subtotal] },
+      Toolbar {[
+        Action { confirm, then: navigate(OrderConsole, { customerId: order.customerId }) },
+        Action { cancel,  then: toast("Cancelled") }
+      ]}
+    ]}
   }
 
 
@@ -50,12 +50,10 @@ ui SalesAdmin with scaffold(modules: [Catalog], aggregates: [Customer, Product],
       selectedId: Order id?
     }
 
-    body: MasterDetail(
-      of:      Order,
+    body: MasterDetail { of:      Order,
       scope:   Orders.byCustomer(customerId),
       actions: [confirm, cancel],
-      detail:  order => OrderPanel(order)
-    )
+      detail:  order => OrderPanel(order) }
 
     menu { section: "Sales", label: "Order console" }
   }
@@ -66,13 +64,13 @@ ui SalesAdmin with scaffold(modules: [Catalog], aggregates: [Customer, Product],
   // remaining pages explicitly.
   page OrderList {
     route: "/orders"
-    body:  List(of: Order)
+    body:  List { of: Order }
     menu   { section: "Sales", label: "All orders" }
   }
 
   page OrderDetail(id: Order id) {
     route: "/orders/:id"
-    body:  Detail(of: Order, by: id)
+    body:  Detail { of: Order, by: id }
     menu   { hidden: true }                      // reached via row-click only
   }
 
@@ -110,7 +108,7 @@ ui SalesAdmin with scaffold(modules: [Catalog], aggregates: [Customer, Product],
           navigate(OrderConsole, { customerId: draft.customerId })
         }
       )
-      else => Empty()
+      else => Empty {}
     }
 
     menu { section: "Sales", label: "New order" }
@@ -125,9 +123,9 @@ ui SalesAdmin with scaffold(modules: [Catalog], aggregates: [Customer, Product],
     title: "Sales dashboard"
 
     body: Dashboard(items: [
-      Card("Confirmed orders", Stat(view ActiveOrders, format: "count")),
-      Card("EUR/USD",          Stat(api ExchangeRates.usd("EUR"), decimals: 4)),
-      Card("Customer breakdown", Table(view CustomerOrders), span: 2)
+      Card { "Confirmed orders", Stat { view ActiveOrders, format: "count" } },
+      Card { "EUR/USD",          Stat { api ExchangeRates.usd("EUR"), decimals: 4 } },
+      Card { "Customer breakdown", Table { view CustomerOrders }, span: 2 }
     ])
 
     menu { section: "Reports", label: "Dashboard", order: 0 }
@@ -139,11 +137,11 @@ ui SalesAdmin with scaffold(modules: [Catalog], aggregates: [Customer, Product],
   // filter lambdas — anywhere an expression appears.  Shown here as
   // a custom component for illustration.
   component RiskBadge(amount: decimal) {
-    body: Badge(match {
+    body: Badge {match {
       amount > 10000 => "high"
       amount > 1000  => "medium"
       else           => "low"
-    })
+    }}
   }
 
 
@@ -182,12 +180,12 @@ ui SalesAdmin with scaffold(modules: [Catalog], aggregates: [Customer, Product],
 // held workflows or views, those would scaffold too.)
 //
 //   page CatalogProductList   { route: "/catalog/products",
-//                               body:  List(of: Product) }
+//                               body:  List { of: Product } }
 //   page CatalogProductNew    { route: "/catalog/products/new",
-//                               body:  Form(creates: Product) }
+//                               body:  CreateForm { of: Product } }
 //   page CatalogProductDetail(id: Product id) {
 //                               route: "/catalog/products/:id",
-//                               body:  Detail(of: Product, by: id) }
+//                               body:  Detail { of: Product, by: id } }
 //
 // Each gets default menu metadata (section "Aggregates", label
 // "Products").  The explicit `menu { … }` block above doesn't link

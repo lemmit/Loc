@@ -1,5 +1,5 @@
 // Auto-generated.
-import { Routes, Route, Link as RouterLink, useLocation } from "{{routerPackage}}";
+import { Routes, Route, Link as RouterLink, useLocation, Outlet } from "{{routerPackage}}";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -98,7 +98,12 @@ function NavLink({ to, label, active, testId }: NavLinkProps) {
   );
 }
 
-export default function App() {
+// Default app chrome — header + sidebar + main with an Outlet that
+// React Router fills with the active in-shell child route.  Pages
+// declared with `layout: none` mount as sibling routes outside this
+// wrapper (see `App()` below) so they get no header / sidebar /
+// padding.
+function AppShellLayout() {
   const isActive = useIsActive();
   const [opened, setOpened] = useState(false);
   // Mobile UX: auto-close the sidebar after a route change.  Tapping
@@ -142,13 +147,22 @@ export default function App() {
         </nav>
         <main className="flex-1 p-4 lg:p-6">
           <AppErrorBoundary>
-            <Routes>
-{{#each routes}}              <Route path="{{path}}" element={{expr elementJsx}} />
-{{/each}}              <Route path="*" element={<NotFound />} />
-            </Routes>
+            <Outlet />
           </AppErrorBoundary>
         </main>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+{{#each outOfShellRoutes}}      <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}      <Route element={<AppShellLayout />}>
+{{#each routes}}        <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}        <Route path="*" element={<NotFound />} />
+      </Route>
+    </Routes>
   );
 }

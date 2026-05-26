@@ -77,7 +77,12 @@ import {
   emitSlot,
   emitStat,
 } from "./walker/primitives/display.js";
-import { emitFormOf, emitModal } from "./walker/primitives/forms.js";
+import {
+  emitCreateForm,
+  emitModal,
+  emitOperationForm,
+  emitWorkflowForm,
+} from "./walker/primitives/forms.js";
 import {
   emitField,
   emitNumberField,
@@ -97,11 +102,14 @@ import { emitTable } from "./walker/primitives/table.js";
 import {
   emitAnchor,
   emitAvatar,
+  emitBold,
   emitDateDisplay,
   emitEmpty,
   emitEnumBadge,
   emitHeading,
   emitImage,
+  emitInlineCode,
+  emitItalic,
   emitKeyValueRow,
   emitLoader,
   emitMoney,
@@ -233,8 +241,11 @@ export interface ApiHookUse {
 
 /** Component names the walker recognises.  Used by the page
  *  emitter to fast-fail dispatch when a body is neither a scaffold
- *  archetype nor a layout primitive — those pages stay silent. */
-const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
+ *  archetype nor a layout primitive — those pages stay silent.
+ *  Exported so the conformance completeness guard
+ *  (`test/conformance/showcase-completeness.test.ts`) can assert the
+ *  showcase fixture exercises every walker primitive. */
+export const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Stack",
   "Group",
   "Grid",
@@ -253,6 +264,9 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Slot",
   "Heading",
   "Text",
+  "Bold",
+  "Italic",
+  "InlineCode",
   "Button",
   "Card",
   "Stat",
@@ -263,7 +277,9 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "DateDisplay",
   "EnumBadge",
   "IdLink",
-  "Form",
+  "CreateForm",
+  "OperationForm",
+  "WorkflowForm",
   "Breadcrumbs",
   "Paper",
   "Skeleton",
@@ -683,8 +699,12 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
       return emitEnumBadge(call, ctx, depth);
     case "IdLink":
       return emitIdLink(call, ctx, depth);
-    case "Form":
-      return emitFormOf(call, ctx, depth);
+    case "CreateForm":
+      return emitCreateForm(call, ctx, depth);
+    case "OperationForm":
+      return emitOperationForm(call, ctx, depth);
+    case "WorkflowForm":
+      return emitWorkflowForm(call, ctx, depth);
     case "Breadcrumbs":
       return emitBreadcrumbs(call, ctx, depth);
     case "Paper":
@@ -723,6 +743,12 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
       return emitHeading(call, ctx, depth);
     case "Text":
       return emitText(call, ctx, depth);
+    case "Bold":
+      return emitBold(call, ctx, depth);
+    case "Italic":
+      return emitItalic(call, ctx, depth);
+    case "InlineCode":
+      return emitInlineCode(call, ctx, depth);
     case "Button":
       return emitButton(call, ctx, depth);
     case "Action":
@@ -930,6 +956,27 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       return `/* unresolved: ${expr.name} */ undefined`;
     case "binary":
       return `(${emitExpr(expr.left, ctx)} ${expr.op} ${emitExpr(expr.right, ctx)})`;
+    case "convert": {
+      // Mirrors `generator/typescript/render-expr.ts`'s renderTsConvert.
+      // Implicit-string-concat in page bodies (`"Active: " + count`)
+      // injects a `convert` IR node around the non-string operand;
+      // the walker emits the same `String(x)` / `x.toString()` form
+      // the domain renderer does.
+      const v = emitExpr(expr.value, ctx);
+      if (expr.target === "string") {
+        if (expr.from === "money") return `${v}.toString()`;
+        return `String(${v})`;
+      }
+      if (expr.target === "long" || expr.target === "decimal") {
+        if (expr.from === "money") return `${v}.toNumber()`;
+        return v;
+      }
+      if (expr.target === "money") {
+        if (expr.from === "money") return v;
+        return `new Decimal(${v})`;
+      }
+      return v;
+    }
     case "unary":
       return `(${expr.op}${emitExpr(expr.operand, ctx)})`;
     case "call": {
@@ -1113,6 +1160,49 @@ export function stringOrRefArgValue(
     }
   }
   return undefined;
+}
+
+/** Read the `style:` IR field hoisted from a `style: { … }` named arg
+ *  on a walker-primitive call.  Returns a JSX `style={{ ... }}` attribute
+ *  fragment (with a leading space) ready to splice into the template's
+ *  opening tag — or `''` when the call carries no `style` field.
+ *
+ *  Keys are camelCased on the way out (CSS property → React-style
+ *  property): `background-color` → `backgroundColor`, but
+ *  `backgroundColor` passes through.  Values are emitted via
+ *  `emitExpr` so refs / param interpolation compose naturally.
+ *
+ *  Templates splice via `{{{styleAttr}}}` mirroring `{{{testidAttr}}}`. */
+export function styleAttr(call: ExprIR & { kind: "call" }, ctx: WalkContext): string {
+  if (!call.style || call.style.entries.length === 0) return "";
+  const parts = call.style.entries.map(({ key, value }) => {
+    const camelKey = key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+    return `${JSON.stringify(camelKey)}: ${emitExpr(value, ctx)}`;
+  });
+  return ` style={{ ${parts.join(", ")} }}`;
+}
+
+/** Same payload as `styleAttr` but emitted as a Phoenix HEEx
+ *  `style="…"` attribute — a flat semicolon-separated CSS string.
+ *  Source keys are preserved verbatim (kebab-case is the HTML CSS
+ *  spelling).  Non-string-literal values are emitted as bare text
+ *  via `emitExpr`; templates wrap the whole attribute in HEEx
+ *  syntax (`style={"..."}`) when interpolation is needed.  For v1
+ *  we restrict to string-literal values to keep HEEx output
+ *  static-safe — non-string values fall back to their `emitExpr`
+ *  rendering. */
+export function styleAttrHeex(call: ExprIR & { kind: "call" }, ctx: WalkContext): string {
+  if (!call.style || call.style.entries.length === 0) return "";
+  const parts = call.style.entries.map(({ key, value }) => {
+    let v: string;
+    if (value.kind === "literal" && value.lit === "string") v = value.value;
+    else v = emitExpr(value, ctx);
+    return `${key}: ${v}`;
+  });
+  // Escape `"` in the joined string so it stays inside the HEEx
+  // attribute quotes.  Semicolon-separates entries.
+  const css = parts.join("; ").replace(/"/g, "&quot;");
+  return ` style="${css}"`;
 }
 
 /** Read the `testid:` named arg from any primitive call

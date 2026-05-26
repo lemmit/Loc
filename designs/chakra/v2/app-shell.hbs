@@ -1,5 +1,5 @@
 // Auto-generated.
-import { Routes, Route, Link as RouterLink, useLocation, useNavigate } from "{{routerPackage}}";
+import { Routes, Route, Link as RouterLink, useLocation, useNavigate, Outlet } from "{{routerPackage}}";
 import {
   Box, Flex, VStack, HStack, Divider, IconButton,
   Text, Heading, Alert, AlertIcon, AlertDescription, Button,
@@ -84,7 +84,12 @@ function useIsActive() {
   };
 }
 
-export default function App() {
+// Default app chrome — header + sidebar + main with an Outlet that
+// React Router fills with the active in-shell child route.  Pages
+// declared with `layout: none` mount as sibling routes outside this
+// wrapper (see `App()` below) so they get no header / sidebar /
+// padding.
+function AppShellLayout() {
   const isActive = useIsActive();
   const navigate = useNavigate();
   const { isOpen, onOpen, onClose } = useDisclosure();
@@ -194,13 +199,22 @@ export default function App() {
         </HStack>
         <Box p={6}>
           <AppErrorBoundary>
-            <Routes>
-{{#each routes}}              <Route path="{{path}}" element={{expr elementJsx}} />
-{{/each}}              <Route path="*" element={<NotFound />} />
-            </Routes>
+            <Outlet />
           </AppErrorBoundary>
         </Box>
       </Box>
     </Flex>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+{{#each outOfShellRoutes}}      <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}      <Route element={<AppShellLayout />}>
+{{#each routes}}        <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}        <Route path="*" element={<NotFound />} />
+      </Route>
+    </Routes>
   );
 }

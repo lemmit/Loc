@@ -18,19 +18,20 @@ system Acme {
             }
 
             aggregate Product {
-                sku: string display
+                sku: string
                 price: Money
                 invariant sku.length > 0
 
                 test "money keeps its amount and currency" {
-                    let m = Money(10.5, "USD")
+                    let m = Money { amount: 10.5, currency: "USD" }
                     expect(m.amount).toBe(10.5)
                     expect(m.currency).toBe("USD")
                 }
 
                 test "money rejects a negative amount" {
-                    expectThrows Money(-1.0, "USD")
+                    expectThrows Money { amount: -1.0, currency: "USD" }
                 }
+                derived display: string = sku
             }
 
             repository Products for Product {
@@ -59,7 +60,7 @@ system Acme {
                 operation addLine(productId: Product id, qty: int) {
                     precondition isMutable()
                     precondition qty > 0
-                    lines += new OrderLine {
+                    lines += OrderLine {
                         productId: productId, quantity: qty
                     }
                 }

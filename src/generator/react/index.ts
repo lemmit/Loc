@@ -3,7 +3,9 @@ import {
   type BoundedContextIR,
   contextUsesMoney,
   type DeployableIR,
+  type PageIR,
   type SystemIR,
+  type UiIR,
 } from "../../ir/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
@@ -181,19 +183,58 @@ export function generateReactForContexts(
   // can mount them.  Pages that override a scaffolded shape at the
   // conventional name keep the conventional path and are routed
   // by the per-aggregate / -workflow / -view loop in
-  // `prepareAppShellVM`.
-  const extraRoutes = ui ? deriveExtraRoutesFromUi(ui) : undefined;
+  // `prepareAppShellVM`.  Pages with `layout: none` go to a
+  // separate `outOfShell` channel that mounts as sibling routes
+  // outside the AppShell chrome.
+  const extraRouteSplit = ui ? deriveExtraRoutesFromUi(ui) : undefined;
+  const extraRoutes = extraRouteSplit?.inShell;
+  const outOfShellRoutes = extraRouteSplit?.outOfShell;
+
+  // App.tsx's per-aggregate / -workflow / -view route block emits
+  // imports for scaffold-archetype page files (`./pages/<plural>/list`,
+  // etc.).  Those files exist only when the ui declared `scaffold:`
+  // covering the target — explicit-page-only uis (no scaffold) would
+  // otherwise produce dangling imports and duplicate identifiers
+  // alongside the explicit-page extraRoutes.  Filter the lists down to
+  // the targets that the ui actually scaffolded.  When ui is absent
+  // (legacy non-ui deployable) fall through to the full inventory.
+  const scaffoldedAggregates = ui
+    ? aggregates.filter(({ agg }) =>
+        ui.pages.some(
+          (p) => p.origin?.kind === "aggregate-list" && p.origin.aggregateName === agg.name,
+        ),
+      )
+    : aggregates;
+  const scaffoldedWorkflows = ui
+    ? workflows.filter(({ wf }) =>
+        ui.pages.some(
+          (p) => p.origin?.kind === "workflow-form" && p.origin.workflowName === wf.name,
+        ),
+      )
+    : workflows;
+  const scaffoldedViews = ui
+    ? views.filter(({ view }) =>
+        ui.pages.some((p) => p.origin?.kind === "view-list" && p.origin.viewName === view.name),
+      )
+    : views;
+
+  // Whether the scaffold expander synthesised a `Home` page (only
+  // happens when the ui declared at least one scaffold).  Default true
+  // when no ui (legacy non-page-IR path always emits Home).
+  const hasScaffoldHome = ui ? ui.pages.some((p) => p.origin?.kind === "home") : true;
 
   out.set(
     "src/App.tsx",
     renderAppShell(
-      aggregates.map((a) => a.agg),
-      workflows.map((w) => w.wf),
-      views.map((v) => v.view),
+      scaffoldedAggregates.map((a) => a.agg),
+      scaffoldedWorkflows.map((w) => w.wf),
+      scaffoldedViews.map((v) => v.view),
       sys.name,
       sidebarOverride,
       extraRoutes,
       pack,
+      hasScaffoldHome,
+      outOfShellRoutes,
     ),
   );
   // Home is always synthesised by the scaffold expander
@@ -218,7 +259,7 @@ export function generateReactForContexts(
   out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));
   out.set("tsconfig.node.json", renderShellFile("tsconfig-node", {}, pack));
   out.set("vite.config.ts", renderShellFile("vite-config", {}, pack));
-  out.set("index.html", renderShellFile("index-html", {}, pack));
+  out.set("index.html", renderShellFile("index-html", prepareIndexHtmlVM(sys, deployable, ui), pack));
   out.set("Dockerfile", renderShellFile("dockerfile", {}, pack));
   out.set(".dockerignore", renderShellFile("dockerignore", {}, pack));
   out.set("certs/.gitkeep", "");
@@ -289,6 +330,72 @@ function emitShellGlobs(pack: LoadedPack, out: Map<string, string>): void {
       out.set(outputPath, renderShellFile(templateName, {}, pack));
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// index.html shell — page metadata + favicon projection.
+//
+// Picks the route-`/` page (or the first page when no `/` page is
+// declared) as the source of static SEO metadata.  Falls back to a
+// sensible default title when no UI is bound to this deployable
+// (back-end-only react: target stub or `dotnet` without a UI mount).
+//
+// The favicon path on the deployable is platform-neutral text — the
+// generator emits the path verbatim into `<link rel="icon" href="…">`.
+// Users are responsible for placing the referenced file at the URL
+// (typically by dropping it under `public/`).
+// ---------------------------------------------------------------------------
+
+interface IndexHtmlVM {
+  title: string;
+  description?: string;
+  ogImage?: string;
+  canonical?: string;
+  favicon?: string;
+}
+
+function prepareIndexHtmlVM(
+  sys: SystemIR,
+  deployable: DeployableIR,
+  ui: UiIR | undefined,
+): IndexHtmlVM {
+  const page = ui ? pickMetadataPage(ui.pages) : undefined;
+  const title = staticTitleOf(page) ?? deployable.name;
+  const metadata = page?.metadata;
+  return {
+    title,
+    description: metadata?.description,
+    ogImage: metadata?.ogImage,
+    canonical: metadata?.canonical,
+    favicon: deployable.favicon,
+  };
+  // `sys` is reserved for a future "system-level title fallback"
+  // when a deployable has no `ui:` binding (then the system name
+  // becomes the html title).  Today the deployable-name fallback
+  // above is enough; reference `sys` so the linter doesn't flag it.
+  void sys;
+}
+
+/** Pick the page whose metadata projects into the shell.  The
+ *  route-`/` page wins when one exists (it's what the user lands on
+ *  cold); otherwise the first declared page is the natural pick (the
+ *  scaffold-synthesised `Home` page lives there for scaffolded
+ *  UIs).  Returns undefined when the ui has no pages — index.html
+ *  then falls back to deployable-name title with no meta tags. */
+function pickMetadataPage(pages: PageIR[]): PageIR | undefined {
+  return pages.find((p) => p.route === "/") ?? pages[0];
+}
+
+/** Extract a string title from a page's title expression, when the
+ *  expression is a plain string literal.  Pages that interpolate
+ *  state/params into their title (e.g. `title: "Order " + id`) get
+ *  no static title — the shell falls back to the deployable name. */
+function staticTitleOf(page: PageIR | undefined): string | undefined {
+  if (!page) return undefined;
+  const t = page.title;
+  if (!t) return undefined;
+  if (t.kind === "literal" && t.lit === "string") return t.value;
+  return undefined;
 }
 
 function smokeSpec(aggregates: AggregateIR[]): string {

@@ -26,12 +26,18 @@ import {
  *
  *   aggregate Order {
  *     subject: string
- *     createdAt: datetime
- *     updatedAt: datetime
- *     createdBy: Id<User>
- *     updatedBy: Id<User>
+ *     createdAt: datetime managed
+ *     updatedAt: datetime managed
+ *     createdBy: User id managed
+ *     updatedBy: User id managed
  *     implements "auditable"
  *   }
+ *
+ * All four fields carry `access: "managed"` — they're server-owned
+ * and must not appear in client-supplied create/update inputs.  This
+ * is also what excludes them from `crudish`'s generated `update`
+ * operation (the `writableUpdateFields` filter checks both the
+ * macro-origin tag AND the access modifier as belt-and-braces).
  *
  * Compose with `audit` at context level for the runtime stamping,
  * or use `auditedByDefault` to apply both in one go. */
@@ -46,10 +52,10 @@ export default defineMacro({
     'hand-written `stamp for "auditable" ...`.',
   expand() {
     return [
-      field("createdAt", primType("datetime")),
-      field("updatedAt", primType("datetime")),
-      field("createdBy", idRef("User")),
-      field("updatedBy", idRef("User")),
+      field("createdAt", primType("datetime"), { access: "managed" }),
+      field("updatedAt", primType("datetime"), { access: "managed" }),
+      field("createdBy", idRef("User"), { access: "managed" }),
+      field("updatedBy", idRef("User"), { access: "managed" }),
       implementsCapability("auditable"),
     ];
   },

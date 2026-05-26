@@ -13,10 +13,11 @@ system MultiFileStore {
   module Catalog {
     context Products {
       aggregate Product {
-        sku: string display
+        sku: string
         price: Money
         currency: Currency
         invariant sku.length > 0
+        derived display: string = sku
       }
       repository Products for Product {
         find bySku(sku: string): Product? where this.sku == sku

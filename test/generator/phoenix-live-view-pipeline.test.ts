@@ -7,6 +7,7 @@ import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
 import { emitApiControllers } from "../../src/generator/phoenix-live-view/api-emit.js";
 import { emitAggregateResources } from "../../src/generator/phoenix-live-view/domain-emit.js";
+import { emitOpenApiSpec } from "../../src/generator/phoenix-live-view/openapi-emit.js";
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../src/ir/loom-ir.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
@@ -35,7 +36,8 @@ const FIXTURE_SOURCE = `system MiniLiveView {
         currency: string
       }
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         email: string
         creditLimit: Money
         invariant email.length > 0
@@ -301,7 +303,7 @@ describe("phoenixLiveView pipeline", () => {
     const src = `system MiniBad {
   module Sales {
     context Sales {
-      aggregate Customer { name: string display }
+      aggregate Customer { name: string  derived display: string = name }
       repository Customers for Customer { }
     }
   }
@@ -480,7 +482,7 @@ describe("emitApiControllers (api-emit unit)", () => {
     );
   });
 
-  it("aggregates_controller.ex emits wire_in (debug) on Create + Update when --trace is on", () => {
+  it("orders_controller.ex emits wire_in (debug) on Create + Update when --trace is on", () => {
     // Phase 8 Phoenix --trace v1 — mirrors Hono Phase 6d / .NET v6.
     // Only seam available in Phoenix today is the controller's CRUD
     // actions; Ash resources are declarative so domain trace events
@@ -513,9 +515,8 @@ describe("emitApiControllers (api-emit unit)", () => {
       appModule: "PhoenixApp",
       emitTrace: true,
     });
-    const aggCtrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
-    // create_order + update_order both emit wire_in immediately
-    // after the `do` line.
+    const aggCtrl = files.get("lib/phoenix_app_web/controllers/orders_controller.ex")!;
+    // create + update both emit wire_in immediately after the `do` line.
     const wireIns = aggCtrl.match(/Logger\.debug\("wire_in"/g) ?? [];
     expect(wireIns.length).toBeGreaterThanOrEqual(2);
     expect(aggCtrl).toMatch(
@@ -523,7 +524,7 @@ describe("emitApiControllers (api-emit unit)", () => {
     );
   });
 
-  it("aggregates_controller.ex stays free of wire_in when --trace is off", () => {
+  it("orders_controller.ex stays free of wire_in when --trace is off", () => {
     const aggCtx: BoundedContextIR = {
       ...workflowCtx,
       aggregates: [
@@ -548,18 +549,15 @@ describe("emitApiControllers (api-emit unit)", () => {
       appModule: "PhoenixApp",
       // no emitTrace
     });
-    const aggCtrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    const aggCtrl = files.get("lib/phoenix_app_web/controllers/orders_controller.ex")!;
     expect(aggCtrl).not.toMatch(/wire_in/);
     expect(aggCtrl).not.toMatch(/Map\.keys\(params\)/);
   });
 
-  it("aggregates_controller.ex emits aggregate_created on each Create action via Logger", () => {
+  it("orders_controller.ex emits aggregate_created on its Create action via Logger", () => {
     // Phase 8 Phoenix — every per-aggregate Create action emits the
     // catalog's aggregate_created (info) line via Elixir's Logger.
     // Same event identity the Hono + .NET Create handlers emit.
-    // (Local context inline: workflowCtx has aggregates:[] so
-    // aggregates_controller.ex wouldn't emit; for this assertion we
-    // need at least one aggregate.)
     const aggCtx: BoundedContextIR = {
       ...workflowCtx,
       aggregates: [
@@ -583,7 +581,7 @@ describe("emitApiControllers (api-emit unit)", () => {
       appName: "phoenix_app",
       appModule: "PhoenixApp",
     });
-    const aggCtrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    const aggCtrl = files.get("lib/phoenix_app_web/controllers/orders_controller.ex")!;
     expect(aggCtrl).toMatch(/require Logger/);
     expect(aggCtrl).toMatch(
       /Logger\.info\("aggregate_created", event: "aggregate_created", aggregate: "Order", id: record\.id\)/,
@@ -850,7 +848,10 @@ describe("JWT auth emission (auth-emit unit)", () => {
     expect(authEx).toMatch(/def call\(conn, _opts\)/);
     expect(authEx).toMatch(/"Bearer " <> token/);
     expect(authEx).toMatch(/assign\(conn, :current_user, build_user\(claims\)\)/);
-    expect(authEx).toMatch(/put_status\(:unauthorized\)/);
+    // 401 must be sent with send_resp/3 — put_status + halt without a
+    // send raises Plug.Conn.NotSentError at the cowboy adapter and
+    // surfaces as a 500.  See send_unauthorized/1.
+    expect(authEx).toMatch(/send_resp\(401/);
     expect(authEx).toMatch(/halt\(\)/);
   });
 
@@ -905,7 +906,8 @@ describe("router wiring (orchestrator integration)", () => {
   module Sales {
     context Sales {
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         email: string
       }
       repository Customers for Customer { }
@@ -1105,7 +1107,8 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
       }
       event OrderConfirmed { order: Order id, at: datetime }
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         email: string
         invariant email.length > 0
       }
@@ -1239,9 +1242,11 @@ describe("cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
     const model = await buildAcmeLiveViewModel();
     const { files } = generateSystems(model);
     const spec = files.get("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex")!;
-    // GET /aggregates/customers (list) + GET /aggregates/customers/:id (read)
-    expect(spec).toMatch(/\/aggregates\/customers/);
-    expect(spec).toMatch(/\/aggregates\/orders/);
+    // GET /customers (list) + GET /customers/:id (read) — Phoenix aggregate
+    // routes are flush to the API base, matching Hono/.NET path conventions
+    // (PR A of the parity-fix series).
+    expect(spec).toMatch(/"\/customers"/);
+    expect(spec).toMatch(/"\/orders"/);
     expect(spec).toMatch(/CreateCustomerRequest/);
     expect(spec).toMatch(/CustomerListResponse/);
   });
@@ -1667,7 +1672,8 @@ const ACME_UI_E2E_SOURCE = `system AcmeUI {
   module Sales {
     context Sales {
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         email: string
       }
       repository Customers for Customer { }
@@ -1754,7 +1760,8 @@ const FORM_FIXTURE = `system AcmeForm {
   module Sales {
     context Sales {
       aggregate Customer {
-        name: string display
+        name: string
+        derived display: string = name
         email: string
       }
       repository Customers for Customer { }
@@ -1791,7 +1798,7 @@ async function buildFormFixture() {
   return files;
 }
 
-describe("scaffold-form regression — Form(of:Agg) resolves fields + mount assigns @form", () => {
+describe("scaffold-form regression — CreateForm { of: Agg } resolves fields + mount assigns @form", () => {
   it("emits one <.input> per aggregate field (id excluded), not a single _placeholder", async () => {
     const files = await buildFormFixture();
     const customerNew = files.get("phoenix_app/lib/phoenix_app_web/live/customer_new_live.ex")!;
@@ -1829,7 +1836,7 @@ describe("scaffold-form regression — Form(of:Agg) resolves fields + mount assi
 // Aggregates controller + router + @derive — unit tests (api-emit + domain-emit)
 // ---------------------------------------------------------------------------
 
-describe("AggregatesController emission (api-emit unit)", () => {
+describe("Per-aggregate controller emission (api-emit unit)", () => {
   const aggCtx: BoundedContextIR = {
     name: "Sales",
     enums: [],
@@ -1877,7 +1884,7 @@ describe("AggregatesController emission (api-emit unit)", () => {
     storages: [],
   };
 
-  it("emits aggregates_controller.ex when deployable serves an api and aggregates exist", () => {
+  it("emits customers_controller.ex when deployable serves an api and aggregates exist", () => {
     const { files } = emitApiControllers({
       contexts: [aggCtx],
       deployable: stubDeployable,
@@ -1885,10 +1892,10 @@ describe("AggregatesController emission (api-emit unit)", () => {
       appName: "phoenix_app",
       appModule: "PhoenixApp",
     });
-    expect(files.has("lib/phoenix_app_web/controllers/aggregates_controller.ex")).toBe(true);
+    expect(files.has("lib/phoenix_app_web/controllers/customers_controller.ex")).toBe(true);
   });
 
-  it("does NOT emit aggregates_controller.ex when deployable serves nothing", () => {
+  it("does NOT emit customers_controller.ex when deployable serves nothing", () => {
     const noServe: DeployableIR = { ...stubDeployable, serves: [] };
     const { files } = emitApiControllers({
       contexts: [aggCtx],
@@ -1897,10 +1904,10 @@ describe("AggregatesController emission (api-emit unit)", () => {
       appName: "phoenix_app",
       appModule: "PhoenixApp",
     });
-    expect(files.has("lib/phoenix_app_web/controllers/aggregates_controller.ex")).toBe(false);
+    expect(files.has("lib/phoenix_app_web/controllers/customers_controller.ex")).toBe(false);
   });
 
-  it("aggregates_controller.ex contains list_customers action", () => {
+  it("customers_controller.ex contains list action", () => {
     const { files } = emitApiControllers({
       contexts: [aggCtx],
       deployable: stubDeployable,
@@ -1908,12 +1915,12 @@ describe("AggregatesController emission (api-emit unit)", () => {
       appName: "phoenix_app",
       appModule: "PhoenixApp",
     });
-    const ctrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
-    expect(ctrl).toMatch(/def list_customers\(conn, _params\)/);
+    const ctrl = files.get("lib/phoenix_app_web/controllers/customers_controller.ex")!;
+    expect(ctrl).toMatch(/def list\(conn, _params\)/);
     expect(ctrl).toMatch(/PhoenixApp\.Sales\.list_customers!/);
   });
 
-  it("aggregates_controller.ex contains get_customer action", () => {
+  it("customers_controller.ex contains get action", () => {
     const { files } = emitApiControllers({
       contexts: [aggCtx],
       deployable: stubDeployable,
@@ -1921,12 +1928,12 @@ describe("AggregatesController emission (api-emit unit)", () => {
       appName: "phoenix_app",
       appModule: "PhoenixApp",
     });
-    const ctrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
-    expect(ctrl).toMatch(/def get_customer\(conn, %\{"id" => id\}\)/);
+    const ctrl = files.get("lib/phoenix_app_web/controllers/customers_controller.ex")!;
+    expect(ctrl).toMatch(/def get\(conn, %\{"id" => id\}\)/);
     expect(ctrl).toMatch(/PhoenixApp\.Sales\.get_customer!\(id\)/);
   });
 
-  it("aggregates_controller.ex contains create_customer action", () => {
+  it("customers_controller.ex contains create action", () => {
     const { files } = emitApiControllers({
       contexts: [aggCtx],
       deployable: stubDeployable,
@@ -1934,12 +1941,12 @@ describe("AggregatesController emission (api-emit unit)", () => {
       appName: "phoenix_app",
       appModule: "PhoenixApp",
     });
-    const ctrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
-    expect(ctrl).toMatch(/def create_customer\(conn, params\)/);
+    const ctrl = files.get("lib/phoenix_app_web/controllers/customers_controller.ex")!;
+    expect(ctrl).toMatch(/def create\(conn, params\)/);
     expect(ctrl).toMatch(/PhoenixApp\.Sales\.create_customer!\(params\)/);
   });
 
-  it("aggregates_controller.ex contains update_customer action", () => {
+  it("customers_controller.ex contains update action", () => {
     const { files } = emitApiControllers({
       contexts: [aggCtx],
       deployable: stubDeployable,
@@ -1947,13 +1954,13 @@ describe("AggregatesController emission (api-emit unit)", () => {
       appName: "phoenix_app",
       appModule: "PhoenixApp",
     });
-    const ctrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
-    expect(ctrl).toMatch(/def update_customer\(conn, %\{"id" => id\} = params\)/);
+    const ctrl = files.get("lib/phoenix_app_web/controllers/customers_controller.ex")!;
+    expect(ctrl).toMatch(/def update\(conn, %\{"id" => id\} = params\)/);
     expect(ctrl).toMatch(/Map\.drop\(params, \["id"\]\)/);
     expect(ctrl).toMatch(/PhoenixApp\.Sales\.update_customer!\(id, attrs\)/);
   });
 
-  it("aggregates_controller.ex contains destroy_customer action", () => {
+  it("customers_controller.ex contains destroy action", () => {
     const { files } = emitApiControllers({
       contexts: [aggCtx],
       deployable: stubDeployable,
@@ -1961,13 +1968,13 @@ describe("AggregatesController emission (api-emit unit)", () => {
       appName: "phoenix_app",
       appModule: "PhoenixApp",
     });
-    const ctrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
-    expect(ctrl).toMatch(/def destroy_customer\(conn, %\{"id" => id\}\)/);
+    const ctrl = files.get("lib/phoenix_app_web/controllers/customers_controller.ex")!;
+    expect(ctrl).toMatch(/def destroy\(conn, %\{"id" => id\}\)/);
     expect(ctrl).toMatch(/PhoenixApp\.Sales\.destroy_customer!\(id\)/);
     expect(ctrl).toMatch(/send_resp\(conn, 204, ""\)/);
   });
 
-  it("emits 5 aggregate routes for customer (list, create, get, update, destroy)", () => {
+  it("emits 5 CRUD routes for customer (list, create, get, update, destroy) referencing CustomersController", () => {
     const { apiRoutes } = emitApiControllers({
       contexts: [aggCtx],
       deployable: stubDeployable,
@@ -1975,37 +1982,30 @@ describe("AggregatesController emission (api-emit unit)", () => {
       appName: "phoenix_app",
       appModule: "PhoenixApp",
     });
-    const listRoute = apiRoutes.find(
-      (r) => r.path === "/aggregates/customers" && r.method === "get",
-    );
-    const createRoute = apiRoutes.find(
-      (r) => r.path === "/aggregates/customers" && r.method === "post",
-    );
-    const getRoute = apiRoutes.find(
-      (r) => r.path === "/aggregates/customers/:id" && r.method === "get",
-    );
-    const updateRoute = apiRoutes.find(
-      (r) => r.path === "/aggregates/customers/:id" && r.method === "patch",
-    );
+    const listRoute = apiRoutes.find((r) => r.path === "/customers" && r.method === "get");
+    const createRoute = apiRoutes.find((r) => r.path === "/customers" && r.method === "post");
+    const getRoute = apiRoutes.find((r) => r.path === "/customers/:id" && r.method === "get");
+    const updateRoute = apiRoutes.find((r) => r.path === "/customers/:id" && r.method === "patch");
     const destroyRoute = apiRoutes.find(
-      (r) => r.path === "/aggregates/customers/:id" && r.method === "delete",
+      (r) => r.path === "/customers/:id" && r.method === "delete",
     );
 
     expect(listRoute).toBeDefined();
-    expect(listRoute?.action).toBe(":list_customers");
-    expect(listRoute?.controller).toBe("AggregatesController");
+    expect(listRoute?.action).toBe(":list");
+    expect(listRoute?.controller).toBe("CustomersController");
 
     expect(createRoute).toBeDefined();
-    expect(createRoute?.action).toBe(":create_customer");
+    expect(createRoute?.action).toBe(":create");
+    expect(createRoute?.controller).toBe("CustomersController");
 
     expect(getRoute).toBeDefined();
-    expect(getRoute?.action).toBe(":get_customer");
+    expect(getRoute?.action).toBe(":get");
 
     expect(updateRoute).toBeDefined();
-    expect(updateRoute?.action).toBe(":update_customer");
+    expect(updateRoute?.action).toBe(":update");
 
     expect(destroyRoute).toBeDefined();
-    expect(destroyRoute?.action).toBe(":destroy_customer");
+    expect(destroyRoute?.action).toBe(":destroy");
   });
 });
 
@@ -2013,43 +2013,339 @@ describe("AggregatesController emission (api-emit unit)", () => {
 // Aggregates controller + router integration — via generateSystems
 // ---------------------------------------------------------------------------
 
-describe("AggregatesController router integration (orchestrator)", () => {
+describe("Per-aggregate controller router integration (orchestrator)", () => {
   it("router.ex has aggregate routes for customers when deployable serves an api", async () => {
     const model = await buildFixture();
     const { files } = generateSystems(model);
     const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
     // List and create on collection path
-    expect(router).toMatch(/get "\/aggregates\/customers", AggregatesController, :list_customers/);
-    expect(router).toMatch(
-      /post "\/aggregates\/customers", AggregatesController, :create_customer/,
-    );
+    expect(router).toMatch(/get "\/customers", CustomersController, :list/);
+    expect(router).toMatch(/post "\/customers", CustomersController, :create/);
     // Get, update, destroy on member path
-    expect(router).toMatch(
-      /get "\/aggregates\/customers\/:id", AggregatesController, :get_customer/,
-    );
-    expect(router).toMatch(
-      /patch "\/aggregates\/customers\/:id", AggregatesController, :update_customer/,
-    );
-    expect(router).toMatch(
-      /delete "\/aggregates\/customers\/:id", AggregatesController, :destroy_customer/,
-    );
+    expect(router).toMatch(/get "\/customers\/:id", CustomersController, :get/);
+    expect(router).toMatch(/patch "\/customers\/:id", CustomersController, :update/);
+    expect(router).toMatch(/delete "\/customers\/:id", CustomersController, :destroy/);
   });
 
-  it("aggregates_controller.ex is in the generated file map when deployable serves an api", async () => {
+  it("customers_controller.ex is in the generated file map when deployable serves an api", async () => {
     const model = await buildFixture();
     const { files } = generateSystems(model);
-    expect(files.has("phoenix_app/lib/phoenix_app_web/controllers/aggregates_controller.ex")).toBe(
+    expect(files.has("phoenix_app/lib/phoenix_app_web/controllers/customers_controller.ex")).toBe(
       true,
     );
   });
 });
 
 // ---------------------------------------------------------------------------
-// @derive Jason.Encoder — domain-emit unit test
+// Per-operation + per-find routes / actions (parity follow-up B/4)
+//
+// Mirrors the per-aggregate route surface that Hono (`http/<agg>.routes.ts`)
+// and .NET (`<Aggs>Controller`) emit: one POST /<plural>/:id/<op> per
+// public operation, one GET /<plural>/<find> per repository find (auto-`all`
+// excluded — already served by `GET /<plural>`).
 // ---------------------------------------------------------------------------
 
-describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
-  it("emits @derive {Jason.Encoder, only: [...]} on aggregate resource", () => {
+describe("Per-operation + per-find route emission (api-emit unit)", () => {
+  const opsAndFindsCtx: BoundedContextIR = {
+    name: "Sales",
+    enums: [],
+    valueObjects: [],
+    events: [],
+    aggregates: [
+      {
+        name: "Project",
+        idValueType: "guid",
+        fields: [{ name: "name", type: { kind: "primitive", name: "string" }, optional: false }],
+        contains: [],
+        derived: [],
+        invariants: [],
+        functions: [],
+        operations: [
+          {
+            name: "archive",
+            visibility: "public",
+            params: [],
+            statements: [],
+            extern: false,
+          },
+          {
+            name: "rename",
+            visibility: "public",
+            params: [{ name: "newName", type: { kind: "primitive", name: "string" } }],
+            statements: [],
+            extern: false,
+          },
+          {
+            name: "touch",
+            visibility: "private",
+            params: [],
+            statements: [],
+            extern: false,
+          },
+        ],
+        parts: [],
+        tests: [],
+      } as unknown as BoundedContextIR["aggregates"][number],
+    ],
+    repositories: [
+      {
+        name: "Projects",
+        aggregateName: "Project",
+        finds: [
+          // The auto-injected `all` find — enrichments adds this; controller
+          // emission must skip it (CRUD /list already serves it).
+          {
+            name: "all",
+            params: [],
+            returnType: { kind: "array", element: { kind: "entity", name: "Project" } },
+          },
+          {
+            name: "byName",
+            params: [{ name: "name", type: { kind: "primitive", name: "string" } }],
+            returnType: { kind: "optional", inner: { kind: "entity", name: "Project" } },
+          },
+          {
+            name: "active",
+            params: [],
+            returnType: { kind: "array", element: { kind: "entity", name: "Project" } },
+          },
+        ],
+      },
+    ],
+    workflows: [],
+    views: [],
+  };
+
+  const stubDeployable: DeployableIR = {
+    name: "phoenixApp",
+    platform: "phoenixLiveView",
+    moduleNames: ["Sales"],
+    port: 4000,
+    serves: ["SalesApi"],
+    uiBindings: [],
+    moduleBindings: [],
+  };
+
+  const stubSys: SystemIR = {
+    name: "Mini",
+    modules: [],
+    deployables: [stubDeployable],
+    e2eTests: [],
+    uis: [],
+    apis: [],
+    storages: [],
+  };
+
+  it("emits POST /<plural>/:id/<op> route for each public operation", () => {
+    const { apiRoutes } = emitApiControllers({
+      contexts: [opsAndFindsCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const archive = apiRoutes.find(
+      (r) => r.path === "/projects/:id/archive" && r.method === "post",
+    );
+    expect(archive).toBeDefined();
+    expect(archive?.controller).toBe("ProjectsController");
+    expect(archive?.action).toBe(":archive");
+
+    const rename = apiRoutes.find((r) => r.path === "/projects/:id/rename" && r.method === "post");
+    expect(rename).toBeDefined();
+    expect(rename?.action).toBe(":rename");
+  });
+
+  it("skips private operations from the route list", () => {
+    const { apiRoutes } = emitApiControllers({
+      contexts: [opsAndFindsCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const touch = apiRoutes.find((r) => r.path === "/projects/:id/touch");
+    expect(touch).toBeUndefined();
+  });
+
+  it("emits GET /<plural>/<find> route for each non-`all` find", () => {
+    const { apiRoutes } = emitApiControllers({
+      contexts: [opsAndFindsCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const byName = apiRoutes.find((r) => r.path === "/projects/by_name" && r.method === "get");
+    expect(byName).toBeDefined();
+    expect(byName?.controller).toBe("ProjectsController");
+    expect(byName?.action).toBe(":by_name");
+
+    const active = apiRoutes.find((r) => r.path === "/projects/active" && r.method === "get");
+    expect(active).toBeDefined();
+    expect(active?.action).toBe(":active");
+  });
+
+  it("skips the auto-injected `all` find — CRUD /list already serves it", () => {
+    const { apiRoutes } = emitApiControllers({
+      contexts: [opsAndFindsCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const allFind = apiRoutes.find((r) => r.path === "/projects/all");
+    expect(allFind).toBeUndefined();
+  });
+
+  it("projects_controller.ex contains per-op + per-find action defs", () => {
+    const { files } = emitApiControllers({
+      contexts: [opsAndFindsCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const ctrl = files.get("lib/phoenix_app_web/controllers/projects_controller.ex")!;
+    // Per-op actions
+    expect(ctrl).toMatch(/def archive\(conn, %\{"id" => id\} = params\)/);
+    expect(ctrl).toMatch(/PhoenixApp\.Sales\.archive_project!\(id\)/);
+    expect(ctrl).toMatch(/def rename\(conn, %\{"id" => id\} = params\)/);
+    expect(ctrl).toMatch(/PhoenixApp\.Sales\.rename_project!\(id, params\["new_name"\]\)/);
+    // Ops return 204 No Content (matches Hono/.NET — ops are side-effecting)
+    expect(ctrl).toMatch(/send_resp\(conn, 204, ""\)/);
+    // Per-find actions
+    expect(ctrl).toMatch(/def by_name\(conn, params\)/);
+    expect(ctrl).toMatch(/PhoenixApp\.Sales\.by_name_project!\(params\["name"\]\)/);
+    expect(ctrl).toMatch(/def active\(conn, params\)/);
+    expect(ctrl).toMatch(/PhoenixApp\.Sales\.active_project!\(\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-op + per-find OpenAPI spec paths (parity follow-up B/4)
+// ---------------------------------------------------------------------------
+
+describe("OpenAPI spec — per-op + per-find paths", () => {
+  it("emits POST /<plural>/{id}/<op> + GET /<plural>/<find> entries", () => {
+    // Drive the OpenAPI emitter directly so we don't pay the full Langium
+    // parse cost; the IR fixture below mirrors what a parsed showcase would
+    // produce (one Project aggregate with one public op + a custom find).
+    const ctx: BoundedContextIR = {
+      name: "Sales",
+      enums: [],
+      valueObjects: [],
+      events: [],
+      aggregates: [
+        {
+          name: "Project",
+          idValueType: "guid",
+          fields: [{ name: "name", type: { kind: "primitive", name: "string" }, optional: false }],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [
+            {
+              name: "archive",
+              visibility: "public",
+              params: [],
+              statements: [],
+              extern: false,
+            },
+          ],
+          parts: [],
+          tests: [],
+          // Enrichment normally populates wireShape; constructing manually
+          // here keeps the test out of the langium parse path.
+          wireShape: [
+            {
+              name: "id",
+              type: { kind: "primitive", name: "guid" },
+              optional: false,
+              source: "id",
+            },
+            {
+              name: "name",
+              type: { kind: "primitive", name: "string" },
+              optional: false,
+              source: "property",
+            },
+          ],
+        } as unknown as BoundedContextIR["aggregates"][number],
+      ],
+      repositories: [
+        {
+          name: "Projects",
+          aggregateName: "Project",
+          finds: [
+            // The auto-injected `all` find — must NOT surface as its own path.
+            {
+              name: "all",
+              params: [],
+              returnType: { kind: "array", element: { kind: "entity", name: "Project" } },
+            },
+            {
+              name: "byName",
+              params: [{ name: "name", type: { kind: "primitive", name: "string" } }],
+              returnType: { kind: "optional", inner: { kind: "entity", name: "Project" } },
+            },
+          ],
+        },
+      ],
+      workflows: [],
+      views: [],
+    };
+    const deployable: DeployableIR = {
+      name: "phoenixApp",
+      platform: "phoenixLiveView",
+      moduleNames: ["Sales"],
+      port: 4000,
+      serves: ["SalesApi"],
+      uiBindings: [],
+      moduleBindings: [],
+    };
+    const sys: SystemIR = {
+      name: "Mini",
+      modules: [],
+      deployables: [deployable],
+      e2eTests: [],
+      uis: [],
+      apis: [],
+      storages: [],
+    };
+    const { files } = emitOpenApiSpec({
+      contexts: [ctx],
+      deployable,
+      sys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const spec = files.get("lib/phoenix_app_web/api/sales_api_spec.ex")!;
+    // Per-op path
+    expect(spec).toMatch(/"\/projects\/\{id\}\/archive"/);
+    expect(spec).toMatch(/operationId: "archive_project"/);
+    // Per-find path
+    expect(spec).toMatch(/"\/projects\/by_name"/);
+    expect(spec).toMatch(/operationId: "by_name_project"/);
+    // Auto-`all` find must NOT have its own path entry.
+    expect(spec).not.toMatch(/"\/projects\/all"/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Jason.Encoder defimpl — camelCase wire shape (parity follow-up C/4)
+//
+// Replaces the legacy `@derive {Jason.Encoder, only: [...]}` (which emitted
+// snake_case JSON keys) with a per-resource `defimpl Jason.Encoder` that
+// delegates to a shared `<App>.JasonCamelCase.encode_struct/3` helper.
+// The helper takes (struct, atom-key list, opts), camelizes each key, and
+// hands the result to `Jason.Encode.map/2`.  Result: aggregate/part/VO
+// wire shapes match Hono / .NET (camelCase keys).
+// ---------------------------------------------------------------------------
+
+describe("Jason.Encoder defimpl emission (domain-emit unit)", () => {
+  it("emits a defimpl Jason.Encoder block on the aggregate resource", () => {
     const ctx: BoundedContextIR = {
       name: "Sales",
       enums: [],
@@ -2080,12 +2376,18 @@ describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
     const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
     const customerEx = files.get("lib/phoenix_app/sales/customer.ex")!;
     expect(customerEx).toBeDefined();
+    // Defimpl block exists, references the right struct + helper module.
+    expect(customerEx).toMatch(/defimpl Jason\.Encoder, for: PhoenixApp\.Sales\.Customer do/);
     expect(customerEx).toMatch(
-      /@derive \{Jason\.Encoder, only: \[:id, :name, :email, :inserted_at, :updated_at\]\}/,
+      /PhoenixApp\.JasonCamelCase\.encode_struct\(value, \[:id, :name, :email, :inserted_at, :updated_at\], opts\)/,
     );
+    // Legacy @derive must NOT be emitted alongside the defimpl —
+    // otherwise both implementations register and the second compile
+    // pass warns "redefining module Jason.Encoder.PhoenixApp.Sales.Customer".
+    expect(customerEx).not.toMatch(/@derive \{Jason\.Encoder/);
   });
 
-  it("@derive includes :id and timestamps in correct positions", () => {
+  it("defimpl atom list includes :id and timestamps in correct order", () => {
     const ctx: BoundedContextIR = {
       name: "Sales",
       enums: [],
@@ -2116,11 +2418,11 @@ describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
     const orderEx = files.get("lib/phoenix_app/sales/order.ex")!;
     expect(orderEx).toBeDefined();
     expect(orderEx).toMatch(
-      /@derive \{Jason\.Encoder, only: \[:id, :total, :inserted_at, :updated_at\]\}/,
+      /encode_struct\(value, \[:id, :total, :inserted_at, :updated_at\], opts\)/,
     );
   });
 
-  it("@derive is placed before use Ash.Resource in the module", () => {
+  it("defimpl is placed after defmodule close (outside the resource module)", () => {
     const ctx: BoundedContextIR = {
       name: "Sales",
       enums: [],
@@ -2147,10 +2449,54 @@ describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
 
     const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
     const customerEx = files.get("lib/phoenix_app/sales/customer.ex")!;
-    const derivePos = customerEx.indexOf("@derive");
-    const usePos = customerEx.indexOf("use Ash.Resource");
-    expect(derivePos).toBeGreaterThanOrEqual(0);
-    expect(usePos).toBeGreaterThan(derivePos);
+    // Defimpl follows the resource's defmodule close, never inside it.
+    const moduleClose = customerEx.indexOf("\nend\n");
+    const defimplPos = customerEx.indexOf("defimpl Jason.Encoder");
+    expect(moduleClose).toBeGreaterThan(0);
+    expect(defimplPos).toBeGreaterThan(moduleClose);
+  });
+
+  it("multi-word fields camelize via the helper (e.g. credit_limit → creditLimit)", () => {
+    // The helper itself is what does the camelization at runtime; here
+    // we only assert the atom-key list passed to encode_struct includes
+    // the snake_case atom — the helper is responsible for converting
+    // it to camelCase JSON.  Pinning the snake_case in the call keeps
+    // the test resilient to helper-internal refactors.
+    const ctx: BoundedContextIR = {
+      name: "Sales",
+      enums: [],
+      valueObjects: [],
+      events: [],
+      aggregates: [
+        {
+          name: "Customer",
+          idValueType: "guid",
+          fields: [
+            { name: "name", type: { kind: "primitive", name: "string" }, optional: false },
+            {
+              name: "createdAt",
+              type: { kind: "primitive", name: "datetime" },
+              optional: false,
+            },
+          ],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [],
+          parts: [],
+          tests: [],
+        },
+      ],
+      repositories: [],
+      workflows: [],
+      views: [],
+    };
+    const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
+    const customerEx = files.get("lib/phoenix_app/sales/customer.ex")!;
+    expect(customerEx).toMatch(
+      /encode_struct\(value, \[:id, :name, :created_at, :inserted_at, :updated_at\], opts\)/,
+    );
   });
 });
 
@@ -2194,6 +2540,83 @@ describe("Ash 3.x compile-correctness regressions", () => {
     expect(customer).not.toMatch(/read :all do/);
     expect(domain).not.toMatch(/define :all_customer/);
     expect(domain).not.toMatch(/action: :all\b/);
+  });
+
+  it("inspect derived emits as a `def inspect(record)` module function (not calc, not defimpl)", async () => {
+    // The `derived inspect` IR node — auto-injected on every aggregate
+    // with sensitivity-aware redaction — must reach Phoenix as a
+    // public module function rather than either of the two routes
+    // earlier iterations tried:
+    //
+    //   1. Ash's `expr()` DSL doesn't admit string concat (`<>`) or
+    //      `to_string/1`, both of which the auto-synthesised inspect
+    //      body uses — so `calculate :inspect, :string, expr(...)`
+    //      won't compile.  (PR #524's original Phoenix CI failure.)
+    //   2. `defimpl Inspect, for: <Module>` collides with the Inspect
+    //      protocol impl that Ash 3.x's `use Ash.Resource` macro
+    //      auto-derives for the resource struct, surfacing under
+    //      `mix compile --warnings-as-errors` as:
+    //        warning: redefining module Inspect.<Module>
+    //      (PR #546's regression — surfaced after #541 unblocked the
+    //      phoenix-build workflow.)
+    //
+    // The module-fn channel sidesteps both: native-Elixir body (so
+    // `<>` / `to_string/1` work), separate namespace from the
+    // auto-derived `Inspect.<Module>` (so no collision).  Callers
+    // invoke explicitly — `Customer.inspect(record)` from Logger /
+    // IEx — instead of relying on `Kernel.inspect/1`.
+    const files = await buildFormFixture();
+    const customer = files.get("phoenix_app/lib/phoenix_app/sales/customer.ex")!;
+    // Neither legacy path is emitted.
+    expect(customer).not.toMatch(/calculate :inspect/);
+    expect(customer).not.toMatch(/defimpl Inspect, for: PhoenixApp\.Sales\.Customer/);
+    // The new path: a public `def inspect(record)` whose body uses the
+    // native Elixir `<>` concat and accesses stored attributes via
+    // `record.<field>`.
+    expect(customer).toMatch(/def inspect\(record\) do\b/);
+    expect(customer).toMatch(/record\.id/);
+    expect(customer).toMatch(/<>/);
+  });
+
+  it("sensitive-tagged fields render as `<redacted>` in the Phoenix inspect body", async () => {
+    // PR #524's plan promised cross-backend redaction of fields tagged
+    // `sensitive(...)`.  The auto-synthesised inspect substitutes the
+    // literal `<redacted>` for any sensitive field's value.  Pin the
+    // shape on Phoenix specifically — the regression that #546 left
+    // behind (Ash's default Inspect output shows fields plaintext)
+    // doesn't apply when the caller invokes the module function.
+    const src = `
+      system Bank {
+        module M {
+          context People {
+            aggregate Person {
+              fullName: string
+              ssn: string sensitive(pii)
+              derived display: string = fullName
+            }
+            repository People for Person {}
+          }
+        }
+        deployable api { platform: phoenixLiveView, modules: M, port: 4000 }
+      }
+    `;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-inspect-redact-"));
+    const file = path.join(dir, "src.ddd");
+    fs.writeFileSync(file, src);
+    const services = createDddServices(NodeFileSystem);
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
+    await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+    const { files } = generateSystems(doc.parseResult.value as Model);
+    const person = files.get("api/lib/api/people/person.ex")!;
+    expect(person).toMatch(/def inspect\(record\) do/);
+    // The sensitive field name still appears (so log readers see the
+    // structural slot); the VALUE is the redacted literal, not a
+    // `record.ssn` access.
+    expect(person).toMatch(/"ssn: "/);
+    expect(person).toMatch(/"<redacted>"/);
+    expect(person).not.toMatch(/record\.ssn/);
   });
 });
 
@@ -2351,9 +2774,10 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
   const ROSTER_SOURCE = `system Roster {
   module Roster {
     context Roster {
-      aggregate Pokemon { species: string display  level: int }
+      aggregate Pokemon { species: string  level: int  derived display: string = species }
       aggregate Trainer {
-        name: string display
+        name: string
+        derived display: string = name
         party: Pokemon id[]
         caught: Pokemon id[]
         operation addToParty(pokemon: Pokemon id) {
@@ -2432,11 +2856,10 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
     // No `attribute :party, {:array, :uuid}` line on the resource.
     expect(tr).not.toMatch(/attribute :party,/);
     expect(tr).not.toMatch(/attribute :caught,/);
-    // Jason `only:` list excludes party/caught (calculations aren't
-    // attribute-serialised by @derive).
-    expect(tr).toMatch(
-      /@derive \{Jason\.Encoder, only: \[:id, :name, :inserted_at, :updated_at\]\}/,
-    );
+    // Jason encoder atom list excludes party/caught (ref-collection
+    // attributes are persisted via the join table, not as a column;
+    // surfacing them on the wire would require an explicit Ash.load).
+    expect(tr).toMatch(/encode_struct\(value, \[:id, :name, :inserted_at, :updated_at\], opts\)/);
     // create action's accept[...] drops the ref-collections.
     expect(tr).toMatch(/accept \[:name\]/);
     expect(tr).not.toMatch(/accept \[[^\]]*:party/);
@@ -2494,5 +2917,109 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
     const dom = files.get("phoenix_app/lib/phoenix_app/roster.ex")!;
     expect(dom).toMatch(/resource PhoenixApp\.Roster\.TrainerParty/);
     expect(dom).toMatch(/resource PhoenixApp\.Roster\.TrainerCaught/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JasonCamelCase helper module + cross-cutting wire-shape parity (PR C/4)
+// ---------------------------------------------------------------------------
+
+describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
+  it("emits lib/<app>/jason_camel_case.ex with encode_struct/3", async () => {
+    const dsl = `
+      system Mini {
+        module Sales {
+          context Sales {
+            aggregate Project ids guid {
+              name: string
+              derived display: string = name
+            }
+          }
+        }
+        api SalesApi from Sales
+        ui SalesUi with scaffold(modules: [Sales]) { }
+        deployable phoenixApp {
+          platform: phoenixLiveView
+          modules: Sales
+          serves: SalesApi
+          ui: SalesUi
+          port: 4000
+        }
+      }
+    `;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pliv-c-"));
+    const file = path.join(dir, "mini.ddd");
+    fs.writeFileSync(file, dsl);
+    const services = createDddServices(NodeFileSystem);
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
+    await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+    if (errors.length > 0) {
+      throw new Error(`Validation errors:\n${errors.map((e) => `  ${e.message}`).join("\n")}`);
+    }
+    const model = doc.parseResult.value as Model;
+    const { files } = generateSystems(model);
+    const helper = files.get("phoenix_app/lib/phoenix_app/jason_camel_case.ex");
+    expect(helper, "JasonCamelCase helper module").toBeDefined();
+    expect(helper!).toMatch(/defmodule PhoenixApp\.JasonCamelCase do/);
+    expect(helper!).toMatch(/def encode_struct\(value, fields, opts\) do/);
+    // The camelization fn (kept private; pin the surface so refactors
+    // keep producing camelCase output for multi-word keys).
+    expect(helper!).toMatch(/Enum\.map_join\(rest, "", &String\.capitalize\/1\)/);
+  });
+
+  it("value objects emit defimpl Jason.Encoder targeting the shared helper", async () => {
+    // Drive through the top-level orchestrator so we exercise the VO
+    // emit path (renderValueObjectModule).  Money is a multi-field VO
+    // embedded under an aggregate — same shape Hono/.NET surface in
+    // their wire shape.
+    const dsl = `
+      system Mini {
+        module Sales {
+          context Sales {
+            valueobject Money {
+              amount: decimal
+              currency: string
+            }
+            aggregate Customer {
+              name: string
+              wallet: Money
+              derived display: string = name
+            }
+          }
+        }
+        api SalesApi from Sales
+        ui SalesUi with scaffold(modules: [Sales]) { }
+        deployable phoenixApp {
+          platform: phoenixLiveView
+          modules: Sales
+          serves: SalesApi
+          ui: SalesUi
+          port: 4000
+        }
+      }
+    `;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pliv-c-vo-"));
+    const file = path.join(dir, "vo.ddd");
+    fs.writeFileSync(file, dsl);
+    const services = createDddServices(NodeFileSystem);
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
+    await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+    if (errors.length > 0) {
+      throw new Error(`Validation errors:\n${errors.map((e) => `  ${e.message}`).join("\n")}`);
+    }
+    const model = doc.parseResult.value as Model;
+    const { files } = generateSystems(model);
+    const moneyEx = files.get("phoenix_app/lib/phoenix_app/sales/money.ex");
+    expect(moneyEx, "Money value-object module").toBeDefined();
+    expect(moneyEx!).toMatch(/defimpl Jason\.Encoder, for: PhoenixApp\.Sales\.Money do/);
+    expect(moneyEx!).toMatch(
+      /PhoenixApp\.JasonCamelCase\.encode_struct\(value, \[:amount, :currency\], opts\)/,
+    );
   });
 });

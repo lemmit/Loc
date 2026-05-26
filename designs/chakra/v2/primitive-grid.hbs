@@ -1,6 +1,6 @@
-{{#if hasChildren}}<SimpleGrid columns=\{{ base: 1, sm: 2, md: 3 }} spacing={4}{{{testidAttr}}}>
+{{#if hasChildren}}<SimpleGrid columns=\{{ base: 1, sm: 2, md: 3 }} spacing={4}{{{testidAttr}}}{{{styleAttr}}}>
 {{colIndent}}{{#each children}}<Box>
 {{../childIndent}}{{{this}}}
 {{../colIndent}}</Box>{{#unless @last}}
 {{../colIndent}}{{/unless}}{{/each}}
-{{closeIndent}}</SimpleGrid>{{else}}<SimpleGrid{{{testidAttr}}} />{{/if}}
+{{closeIndent}}</SimpleGrid>{{else}}<SimpleGrid{{{testidAttr}}}{{{styleAttr}}} />{{/if}}

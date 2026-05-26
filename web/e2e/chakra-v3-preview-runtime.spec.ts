@@ -23,6 +23,36 @@ test("chakra@v3 preview boots without runtime errors", async ({ page }) => {
     errors.push(`pageerror: ${err.message}`);
   });
 
+  // Diagnostic: count which side of the install path the bundle worker hit
+  // for each tarball — same-origin mirror vs external registry. Logged at
+  // the end so we can compare against the mirror manifest size (printed by
+  // the workflow's mirror-build step) and see whether the bundle is
+  // actually using the prebuilt mirror or falling back to the registry.
+  // Split registry into packument (metadata, fast) vs tarball (slow miss).
+  const mirrorHits: string[] = [];
+  const registryPackument: string[] = []; // GET /<pkg> (no /-/)
+  const registryTarball: string[] = []; // GET /<pkg>/-/<file>.tgz
+  page.on("request", (req) => {
+    const u = req.url();
+    if (u.includes("/npm-mirror/")) mirrorHits.push(u);
+    else if (u.includes("registry.npmjs.org")) {
+      if (u.includes("/-/") || u.endsWith(".tgz")) registryTarball.push(u);
+      else registryPackument.push(u);
+    } else if (u.endsWith(".tgz")) registryTarball.push(u);
+  });
+
+  // Diagnostic: surface EVERY console message + page error, not just errors.
+  // The bundle worker logs install/bundle progress through console — without
+  // capturing it, a stuck bundle just hangs silently until timeout. We tag
+  // each line with its timestamp-since-test-start so we can see where time
+  // goes.
+  const consoleLog: string[] = [];
+  const tTestStart = Date.now();
+  const stamp = () => `+${Math.round((Date.now() - tTestStart) / 1000)}s`;
+  page.on("console", (msg) => {
+    consoleLog.push(`[${stamp()} ${msg.type()}] ${msg.text().slice(0, 200)}`);
+  });
+
   await page.goto("/");
   await waitForPlaygroundReady(page);
 
@@ -43,14 +73,42 @@ test("chakra@v3 preview boots without runtime errors", async ({ page }) => {
     );
   }
 
+  const tBundleStart = Date.now();
   await page.getByTestId("btn-bundle").click();
-  await expect(
-    page.getByText(/bundled .*KB in \d+ ms \(\d+ deps fetched\)/),
-  ).toBeVisible({ timeout: 180_000 });
+  try {
+    await expect(
+      page.getByText(/bundled .*KB in \d+ ms \(\d+ deps fetched\)/),
+    ).toBeVisible({ timeout: 600_000 });
+  } finally {
+    // Always log the install-path breakdown — even on bundle timeout — so
+    // we can tell what the worker actually did with its 5 minutes.
+    const elapsed = Date.now() - tBundleStart;
+    console.log(
+      `[chakra-v3] bundle phase elapsed: ${elapsed}ms`,
+      `\n  mirror tarballs:    ${mirrorHits.length}`,
+      `\n  registry packument: ${registryPackument.length}  (metadata, fast)`,
+      `\n  registry tarballs:  ${registryTarball.length}  (mirror MISS — slow)`,
+    );
+    if (registryTarball.length > 0) {
+      console.log(
+        "[chakra-v3] missed-from-mirror tarballs (first 15):",
+        registryTarball.slice(0, 15).map((u) => u.split("/").slice(-3).join("/")),
+      );
+    }
+    // Snapshot the page so we can see what the UI is showing at the moment
+    // of failure — install progress? Bundle progress? An error?
+    try {
+      await page.screenshot({ path: "test-results/chakra-v3-bundle-timeout.png", fullPage: true });
+    } catch { /* best-effort */ }
+    // Tail the last 60 console lines from the worker — usually carries the
+    // install/bundle progress messages that tell us where time went.
+    console.log("[chakra-v3] last 60 console lines:");
+    for (const line of consoleLog.slice(-60)) console.log("  " + line);
+  }
 
   await page.getByTestId("btn-boot").click();
   await expect(page.getByTestId("backend-status")).toHaveText("booted", {
-    timeout: 180_000,
+    timeout: 600_000,
   });
 
   // Preview is always mounted in the four-region shell — no tab to click.

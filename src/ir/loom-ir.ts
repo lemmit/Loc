@@ -76,15 +76,25 @@ export interface ParamIR {
   type: TypeIR;
 }
 
+/** Resolved access role for a stored field.  Controls the field's
+ * presence in create/update inputs, the update wire envelope, and
+ * view/API read exposure.  See `src/ir/enrichments.ts` for resolution
+ * rules.
+ *
+ *   editable  — default; client may read and write freely
+ *   immutable — client may write on create only; read otherwise
+ *   managed   — server lifecycle owns the value; client read-only
+ *   token     — server-managed but echoed by the client on update
+ *               (identity, concurrency); always non-nullable
+ *   internal  — views may read; never exposed via API; no client input
+ *   secret    — client may write (create + update); never disclosed
+ *               in any read */
+export type FieldAccess = "editable" | "immutable" | "managed" | "token" | "internal" | "secret";
+
 export interface FieldIR {
   name: string;
   type: TypeIR;
   optional: boolean;
-  /** True iff the source declared this property with the `display`
-   * modifier.  At most one such field per aggregate (enforced by the
-   * validator).  Used by the React generator to pick the option label
-   * for `X id` Selects pointing at this aggregate. */
-  display?: boolean;
   /** True iff the source declared this property with the `provenanced`
    * modifier.  Every assignment statement (`:=`/`+=`/`-=`) targeting such
    * a field becomes a per-site rule snapshot; see `ProvSite`. */
@@ -95,6 +105,15 @@ export interface FieldIR {
    * phases wire it through the wire-shape, DTO emitters, and sink
    * type-checking.  See `docs/proposals/sensitivity-and-compliance.md`. */
   sensitivity?: SensitivityTags;
+  /** Resolved access role.  Populated by `enrichLoomModel`; lowering
+   * leaves this undefined when the source declared no modifier so
+   * enrichment can apply its precedence (declared > default).
+   * After enrichment every `FieldIR` carries a value. */
+  access?: FieldAccess;
+  /** Where `access` came from.  Diagnostic-only: used by the validator
+   * to phrase conflict messages and by the wire-spec diff to explain
+   * the field's role.  Same nullability as `access`. */
+  accessSource?: "declared" | "default";
 }
 
 export interface ContainmentIR {
@@ -210,6 +229,12 @@ export interface WireField {
   optional: boolean;
   /** Where the wire field came from in the IR. */
   source: WireFieldSource;
+  /** Resolved access role.  Always set after enrichment.  For
+   * `source: "id"` this is always `"token"`; for `source: "property"`
+   * it mirrors the originating `FieldIR.access`; for `"containment"`
+   * and `"derived"` it is `"editable"` until a real case demands
+   * otherwise. */
+  access: FieldAccess;
 }
 
 export interface AggregateIR {
@@ -261,6 +286,19 @@ export interface AggregateIR {
    * Sorted + deduped at lowering time.  Undefined when the
    * aggregate names no capabilities. */
   implementsCapabilities?: readonly string[];
+  /** Pointer to the `derived display: string` field, if the
+   * aggregate declared one.  Populated by `enrichLoomModel`.
+   * When set, `string(aggregate)` and implicit `string + aggregate`
+   * compile by lowering to a member access on this derived; when
+   * unset, both are validator errors.  See plan
+   * `/root/.claude/plans/i-think-we-have-glittery-lecun.md`. */
+  displayDerived?: DerivedIR;
+  /** Pointer to the `derived inspect: string` field; always populated
+   * after enrichment (auto-injected by the `defaultInspect()` macro
+   * when the user didn't declare one).  Read by the host-language
+   * debug-string emitters (TS `toString()`/`util.inspect.custom`,
+   * C# `ToString()` override, Elixir `defimpl Inspect`). */
+  inspectDerived?: DerivedIR;
 }
 
 /** A single stamping rule attached to an aggregate.  Backends
@@ -716,6 +754,18 @@ export interface ThemeIR {
    *  10-shade ramp from this hex and registers it as the project's
    *  `primaryColor`. */
   primary?: string;
+  /** Secondary brand colour — used by packs that ship a second
+   *  named accent (e.g. CSS `--color-secondary`).  Optional. */
+  secondary?: string;
+  /** Accent colour — third accent slot (e.g. highlight chips,
+   *  callouts).  Optional. */
+  accent?: string;
+  /** Success semantic colour (positive feedback / confirmations). */
+  success?: string;
+  /** Warning semantic colour (cautions, non-blocking notices). */
+  warning?: string;
+  /** Error semantic colour (destructive actions, validation errors). */
+  error?: string;
   /** Neutral / gray palette source.  Mantine emitter sets
    *  `colors.gray` to a 10-shade ramp from this hex, which Mantine
    *  uses for muted text, borders, dimmed backgrounds, etc. */
@@ -726,6 +776,14 @@ export interface ThemeIR {
    *  is responsible for ensuring the named fonts are available
    *  (web font import, system fallback chain). */
   fontFamily?: string;
+  /** Monospace font stack — used for code blocks, ID displays,
+   *  and other tabular content.  Same pass-through semantics as
+   *  `fontFamily`. */
+  fontFamilyMono?: string;
+  /** Initial colour scheme — `"light"`, `"dark"`, or `"auto"`
+   *  (follow system preference).  Packs that support theme
+   *  toggling read this as the boot-time default. */
+  colorScheme?: "light" | "dark" | "auto";
 }
 
 /** System-level `user { ... }` block.  Each field carries an
@@ -816,6 +874,14 @@ export interface UiApiParamIR {
   apiName: string;
 }
 
+/** Per-page layout selector.  v1 surfaces two presets (`default` —
+ *  page is wrapped by the deployable's AppShell chrome; `none` —
+ *  page mounts at the top of the router with no chrome at all).
+ *  The discriminated-union shape reserves room for a v2
+ *  `{ kind: "named"; ref: string }` variant that references a named
+ *  `layout` SystemMember without breaking downstream consumers. */
+export type PageLayoutIR = { kind: "preset"; name: "default" | "none" };
+
 /** A page declaration: route + parameters + reactive state + body. */
 export interface PageIR {
   name: string;
@@ -848,30 +914,48 @@ export interface PageIR {
    *  re-parsing the body expression.  Same source context the legacy
    *  generator's per-aggregate / per-workflow / per-view loop
    *  received. */
-  archetype?: PageArchetypeIR;
+  origin?: PageOriginIR;
   /** Explicit emit path override for walker-rendered
    *  pages.  When set, the page-emitter writes the rendered TSX to
    *  this path instead of the default `src/pages/<page-snake>.tsx`.
-   *  Populated by `expandWalkerPrimitive` so a scaffold-
-   *  expanded page lands at the conventional archetype path
-   *  (`src/pages/<plural>/list.tsx` for `aggregate-list`, etc.) —
-   *  preserves URL/file shape when scaffold expansion becomes the
-   *  default. */
+   *  Populated during lowering so a scaffold-emitted page lands at
+   *  its conventional path (`src/pages/<plural>/list.tsx` for an
+   *  `aggregate-list` origin, etc.) — preserves URL/file shape. */
   emitPath?: string;
-  /** True when the scaffold expander rewrote `body`
-   *  from the original archetype call (e.g. `List(of: …)`) to a
-   *  walker-stdlib composition.  `archetype` is intentionally
-   *  preserved on these pages so the per-aggregate page-object
-   *  emitter still fires; `expandedFromScaffold` tells the
-   *  page-emitter to dispatch the rewritten body through the
-   *  walker instead of the archetype renderer. */
-  expandedFromScaffold?: boolean;
+  /** Optional layout selector.  When undefined, the page receives
+   *  the deployable's default app-shell chrome.  See `PageLayoutIR`
+   *  for the preset value set; undefined is intentionally distinct
+   *  from `{ kind: "preset", name: "default" }` to preserve the
+   *  v2-named-layout-inheritance posture (a ui-level layout supplies
+   *  the default when the page doesn't declare one). */
+  layout?: PageLayoutIR;
+  /** Optional static page metadata projected into the generated
+   *  `index.html` shell — `<meta name="description">`,
+   *  `<meta property="og:image">`, and `<link rel="canonical">`.
+   *  All three are plain string literals (no state / param
+   *  interpolation), so we carry them verbatim rather than as
+   *  `ExprIR`.  Only the route-`/` page (or the first page when
+   *  no `/` exists) contributes metadata to the shell. */
+  metadata?: PageMetadataIR;
 }
 
-/** Provenance for a scaffold-synthesised page.  Each kind names the
- *  domain-IR target plus the page archetype within that target's
- *  generated set. */
-export type PageArchetypeIR =
+/** Static page metadata — SEO + social-graph tags written into
+ *  the generated `index.html`.  All fields optional; absent fields
+ *  produce no markup. */
+export interface PageMetadataIR {
+  description?: string;
+  ogImage?: string;
+  canonical?: string;
+}
+
+/** Provenance for a page's body shape.  Scaffold-emitted pages carry
+ *  a non-`custom` origin so downstream generators (pages-emitter,
+ *  menu-emitter, page-objects-emit) can pick the right emit path,
+ *  nav-link metadata, and Playwright page-object class without
+ *  re-introspecting the body.  User-written explicit pages get
+ *  `{ kind: "custom" }` — they emit at `src/pages/<page-snake>.tsx`
+ *  and contribute no auto-nav entry. */
+export type PageOriginIR =
   | { kind: "aggregate-list"; aggregateName: string; contextName: string }
   | { kind: "aggregate-new"; aggregateName: string; contextName: string }
   | { kind: "aggregate-detail"; aggregateName: string; contextName: string }
@@ -879,7 +963,8 @@ export type PageArchetypeIR =
   | { kind: "view-list"; viewName: string; contextName: string }
   | { kind: "workflows-index" }
   | { kind: "views-index" }
-  | { kind: "home" };
+  | { kind: "home" }
+  | { kind: "custom" };
 
 /** A user-defined component: typed function from params (and optional
  *  local state) to a body expression.  Components compose other
@@ -1070,6 +1155,12 @@ export interface DeployableIR {
    *  redis }`).  Bare-list form (`modules: Sales, Marketing`)
    *  produces entries with empty `storages` arrays. */
   moduleBindings: ModuleBindingIR[];
+  /** Optional favicon path — relative to the source `.ddd` file.
+   *  Carried verbatim through lowering; the React generator
+   *  resolves the path, copies the referenced file into
+   *  `public/favicon.<ext>`, and emits a corresponding
+   *  `<link rel="icon">` in the generated `index.html`. */
+  favicon?: string;
 }
 
 /** A single UI-parameter binding on a frontend deployable.
@@ -1158,15 +1249,18 @@ export interface ProvSite {
 // Expressions — fully resolved, every name has a kind tag.
 // ---------------------------------------------------------------------------
 
-export type LiteralKind =
-  | "string"
-  | "int"
-  | "long"
-  | "decimal"
-  | "money"
-  | "bool"
-  | "null"
-  | "now";
+export type LiteralKind = "string" | "int" | "long" | "decimal" | "money" | "bool" | "null" | "now";
+
+/**
+ * Per-primitive style escape hatch — pack-neutral CSS entries.
+ * Lowered from `style: { background: "...", padding: "..." }` named args
+ * on walker-primitive calls.  Entries use an ordered list (not a
+ * Record<string, ExprIR>) so source order survives the IR pipeline and
+ * downstream emitters can produce deterministic output.  Keys are CSS
+ * property names (kebab- or camel-cased as in source); values are any
+ * `ExprIR` so refs/interpolation compose naturally.
+ */
+export type StyleIR = { entries: Array<{ key: string; value: ExprIR }> };
 
 export type RefKind =
   | "param"
@@ -1246,6 +1340,14 @@ export type ExprIR =
       args: ExprIR[];
       /** Same shape as `method-call.argNames` — see above. */
       argNames?: (string | undefined)[];
+      /** Per-primitive `style:` escape hatch.  Populated by lowering
+       *  when the source supplied a `style: { … }` named arg on a
+       *  walker-primitive call (`Container { style: { background: "red" }, ... }`).
+       *  The named arg is hoisted out of `args`/`argNames` into this
+       *  field.  React emits `style={{...}}`; Phoenix emits `style="..."`.
+       *  Use the ordered `entries` shape (not a `Record`) so entry order
+       *  survives the IR pipeline. */
+      style?: StyleIR;
     }
   | {
       kind: "lambda";
@@ -1291,6 +1393,22 @@ export type ExprIR =
       resultType?: TypeIR;
     }
   | { kind: "ternary"; cond: ExprIR; then: ExprIR; otherwise: ExprIR }
+  /**
+   * Explicit primitive conversion — `<target>(<value>)`.  Source-
+   * level form: `string(age)`, `money(decimalField)`,
+   * `decimal(moneyValue)`.  Distinct from `MoneyLit`'s `money("…")`
+   * literal form (which lowers to `lit("money", …)`); this is for
+   * converting a TYPED VALUE between primitives.
+   *
+   * `from` carries the source operand's inferred primitive type so
+   * backends can dispatch the right emit form per (from, target)
+   * pair (TS `String(x)` vs `x.toString()`, .NET `(decimal)x` vs
+   * `x` no-op, Phoenix `to_string(x)` vs `Decimal.to_string(x)`).
+   * Populated by lowering — may be `undefined` if the source's type
+   * couldn't be inferred (broken upstream; validator will already be
+   * reporting it).
+   */
+  | { kind: "convert"; target: PrimitiveName; from: PrimitiveName | undefined; value: ExprIR }
   /**
    * Predicate-arms expression — first arm whose
    * `cond` evaluates to `true` returns its `value`; if no arm

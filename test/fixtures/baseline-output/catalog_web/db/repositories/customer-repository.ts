@@ -79,7 +79,7 @@ export class CustomerRepository {
   }
 
   toWire(root: Customer): unknown {
-    return { id: root.id as string, username: root.username, email: root.email, age: root.age };
+    return { id: root.id as string, username: root.username, email: root.email, age: root.age, display: root.display };
   }
 
 }

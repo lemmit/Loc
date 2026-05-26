@@ -88,93 +88,93 @@ describe("page-builder model — primitive coverage", () => {
   };
 
   for (const bodyExpr of [
-    "List(of: Order)",
-    'Form(of: Order, testid: "orders-new")',
-    "Form(creates: Product)",
-    "Form(account.withdraw)",
-    "Form(runs: PlaceOrder)",
-    'Badge("Alpha", color: "blue")',
+    "List { of: Order }",
+    'CreateForm { of: Order, testid: "orders-new" }',
+    "CreateForm { of: Product }",
+    "OperationForm { account.withdraw }",
+    "WorkflowForm { runs: PlaceOrder }",
+    'Badge { "Alpha", color: "blue" }',
     // Expression-valued props (the `expr` prop kind): data-bound args must
     // round-trip verbatim, not collapse the whole call to Opaque.
-    "Badge(order.status)",
-    'Badge(line.total, color: "green")',
-    "Badge(format(amount))",
-    'Alert("Couldn\'t load")',
-    'Anchor("Home", to: "/")',
-    "Divider()",
-    'Empty("Nothing here")',
-    'Grid(Text("a"), Text("b"), Text("c"))',
-    'Toolbar(Button("Save"), Button("Cancel"))',
-    'Stack(Heading("Title", level: 2), List(of: Order))',
+    "Badge { order.status }",
+    'Badge { line.total, color: "green" }',
+    "Badge { format(amount) }",
+    'Alert { "Couldn\'t load" }',
+    'Anchor { "Home", to: "/" }',
+    "Divider {}",
+    'Empty { "Nothing here" }',
+    'Grid { Text { "a" }, Text { "b" }, Text { "c" } }',
+    'Toolbar { Button { "Save" }, Button { "Cancel" } }',
+    'Stack { Heading { "Title", level: 2 }, List { of: Order } }',
     // Containers with props: titled/modified containers whose
     // children must remain editable nodes, not collapse to Opaque.
-    'Card("Summary", Stack(Text("hi")))',
-    'Card(Stack(Text("untitled")))',
-    'Card("Just a title")',
-    'Container(Stack(Text("x")), size: "md")',
-    'Paper(Text("p"), padding: "lg")',
+    'Card { "Summary", Stack { Text { "hi" } } }',
+    'Card { Stack { Text { "untitled" } } }',
+    'Card { "Just a title" }',
+    'Container { Stack { Text { "x" } }, size: "md" }',
+    'Paper { Text { "p" }, padding: "lg" }',
     // remaining stdlib scalar/expr primitives.
-    'Stat("Active users", "1,247")',
-    'Stat("Revenue", order.total)',
-    "Money(line.subtotal)",
-    "DateDisplay(order.placedAt)",
-    "EnumBadge(order.status)",
-    "IdLink(order.id, of: Order)",
-    'Field("Your name", bind: userName)',
-    'NumberField("Quantity", bind: qty)',
-    'PasswordField("Password", bind: secret)',
-    'Toggle("Notifications", bind: notifications)',
-    'Image(src: "/logo.png", alt: "Logo")',
-    'Avatar(alt: "User")',
-    "Skeleton(count: 5)",
-    "Loader()",
-    "Slot()",
-    'Breadcrumbs(Anchor("Home", to: "/"), Text("Orders"))',
-    'KeyValueRow("Total", Text("42"))',
-    'KeyValueRow("Total", order.total)',
+    'Stat { "Active users", "1,247" }',
+    'Stat { "Revenue", order.total }',
+    "Money { line.subtotal }",
+    "DateDisplay { order.placedAt }",
+    "EnumBadge { order.status }",
+    "IdLink { order.id, of: Order }",
+    'Field { "Your name", bind: userName }',
+    'NumberField { "Quantity", bind: qty }',
+    'PasswordField { "Password", bind: passphrase }',
+    'Toggle { "Notifications", bind: notifications }',
+    'Image { src: "/logo.png", alt: "Logo" }',
+    'Avatar { alt: "User" }',
+    "Skeleton { count: 5 }",
+    "Loader {}",
+    "Slot {}",
+    'Breadcrumbs { Anchor { "Home", to: "/" }, Text { "Orders" } }',
+    'KeyValueRow { "Total", Text { "42" } }',
+    'KeyValueRow { "Total", order.total }',
     // Tabs holds editable Tab children, each with a title + body.
-    'Tabs(Tab("Overview", Text("a")), Tab("Details", List(of: Order)))',
-    'Card("Tabs", Tabs(Tab("Overview", Text("Overview tab body"))))',
+    'Tabs { Tab { "Overview", Text { "a" } }, Tab { "Details", List { of: Order } } }',
+    'Card { "Tabs", Tabs { Tab { "Overview", Text { "Overview tab body" } } } }',
     // lambdas (expression body) and Table/Column accessors.
-    'Table(rows: orders, Column("ID", o => IdLink(o.id, of: Order)), Column("Status", o => EnumBadge(o.status)))',
-    'Column("Name", o => Text(o.name))',
+    'Table { rows: orders, Column { "ID", o => IdLink { o.id, of: Order } }, Column { "Status", o => EnumBadge { o.status } } }',
+    'Column { "Name", o => Text { o.name } }',
     // match: predicate arms with value children + optional else.
-    'match {\n  step == 0 => Text("first")\n  step == 1 => Text("second")\n}',
-    'match {\n  step == 1 => List(of: Order),\n  else => Empty("loading")\n}',
+    'match {\n  step == 0 => Text { "first" }\n  step == 1 => Text { "second" }\n}',
+    'match {\n  step == 1 => List { of: Order },\n  else => Empty { "loading" }\n}',
     // Named-arg child slots: QueryView branches, Table callbacks, Modal trigger
     // are nested editable nodes rather than collapsing the parent to Opaque.
-    'QueryView(of: orders, loading: Skeleton(count: 5), empty: Empty("none"), data: List(of: Order))',
-    'QueryView(of: orders, data: rows => Table(Column("ID", o => Text(o.id)), rows: rows))',
-    'Table(Column("Name", o => Text(o.name)), rows: orders, rowTestid: r => "row-" + r.id)',
-    'Modal(Form(of: Order), trigger: Button("Edit"))',
+    'QueryView { of: orders, loading: Skeleton { count: 5 }, empty: Empty { "none" }, data: List { of: Order } }',
+    'QueryView { of: orders, data: rows => Table { Column { "ID", o => Text { o.id } }, rows: rows } }',
+    'Table { Column { "Name", o => Text { o.name } }, rows: orders, rowTestid: r => "row-" + r.id }',
+    'Modal { CreateForm { of: Order }, trigger: Button { "Edit" } }',
     // Non-canonical arg order (a positional after a named arg) must round-trip
     // by preserving the source ordering, not fall back to Opaque.
-    'Badge(color: "blue", order.status)',
-    'Container(size: "md", Stack(Text("x")))',
-    'Table(rows: orders, Column("ID", o => Text(o.id)), Column("Name", o => Text(o.name)))',
-    'Table(rows: orders, rowTestid: r => "row-" + r.id, Column("ID", o => IdLink(o.id, of: Order)))',
+    'Badge { color: "blue", order.status }',
+    'Container { size: "md", Stack { Text { "x" } } }',
+    'Table { rows: orders, Column { "ID", o => Text { o.id } }, Column { "Name", o => Text { o.name } } }',
+    'Table { rows: orders, rowTestid: r => "row-" + r.id, Column { "ID", o => IdLink { o.id, of: Order } } }',
     // Passthrough modifiers (unmodelled named args) and optional positionals
     // must round-trip rather than collapse the node to Opaque.
-    "Empty()",
-    'Stack(Text("x"), testid: "panel")',
-    'Toolbar(Heading("Orders", level: 2), testid: "bar")',
-    'Table(Column("ID", o => Text(o.id)), rows: orders, striped: true, sticky: true)',
+    "Empty {}",
+    'Stack { Text { "x" }, testid: "panel" }',
+    'Toolbar { Heading { "Orders", level: 2 }, testid: "bar" }',
+    'Table { Column { "ID", o => Text { o.id } }, rows: orders, striped: true, sticky: true }',
     // Text content that is an expression (not a bare string literal).
-    'Text("Hello, " + userName)',
-    "Heading(pageTitle, level: 1)",
+    'Text { "Hello, " + userName }',
+    "Heading { pageTitle, level: 1 }",
     // Event-handler lambdas keep the carrying primitive recognised (the handler
     // round-trips as a passthrough prop).
-    'Button("Save", onClick: e => save())',
-    'Button("Increment", onClick: e => { count := count + 1 })',
+    'Button { "Save", onClick: e => save() }',
+    'Button { "Increment", onClick: e => { count := count + 1 } }',
     // Qualified refs in a `ref` slot.
-    "Form(of: Sales.Order)",
-    "IdLink(o.id, of: Catalog.Product)",
+    "CreateForm { of: Sales.Order }",
+    "IdLink { o.id, of: Catalog.Product }",
     // Detail / MasterDetail primitives.
-    "Detail(of: Order, by: id)",
-    "MasterDetail(of: Order, scope: Orders.byCustomer(c), detail: o => Stack(Text(o.name)))",
+    "Detail { of: Order, by: id }",
+    "MasterDetail { of: Order, scope: Orders.byCustomer(c), detail: o => Stack { Text { o.name } } }",
     // Block-bodied (statement) handler lambdas in a named-child slot.
-    'Table(rows: orders, onRowClick: r => {\n  select(r.id)\n}, Column("ID", o => Text(o.id)))',
-    'Table(rows: orders, onRowClick: r => {\n  let x = r.id\n  select(x)\n}, Column("ID", o => Text(o.id)))',
+    'Table { rows: orders, onRowClick: r => {\n  select(r.id)\n}, Column { "ID", o => Text { o.id } } }',
+    'Table { rows: orders, onRowClick: r => {\n  let x = r.id\n  select(x)\n}, Column { "ID", o => Text { o.id } } }',
   ]) {
     it(`round-trips ${bodyExpr}`, () => roundtrips(bodyExpr));
   }
@@ -198,20 +198,20 @@ describe("page-builder model — user-defined component calls", () => {
   };
 
   it("recognises a component call (positional args → param-named props)", () => {
-    const node = seedWith("OrderPanel(order)", { OrderPanel: ["panelOrder"] });
+    const node = seedWith("OrderPanel { order }", { OrderPanel: ["panelOrder"] });
     expect(node.name).toBe("OrderPanel");
     expect(node.props.panelOrder).toBe("order");
   });
 
   it("keeps a non-component call (a value function) Opaque", () => {
     // `format` isn't a component, so it stays a value expression, not a node.
-    const node = seedWith("Text(format(amount))", { OrderPanel: ["order"] });
+    const node = seedWith("Text { format(amount) }", { OrderPanel: ["order"] });
     expect(node.name).toBe("Text");
     expect(node.props.text).toBe("format(amount)");
   });
 
   it("recognises a component nested in a MasterDetail detail lambda", () => {
-    const node = seedWith("MasterDetail(of: Order, detail: o => OrderPanel(o))", {
+    const node = seedWith("MasterDetail { of: Order, detail: o => OrderPanel { o } }", {
       OrderPanel: ["order"],
     });
     expect(node.name).toBe("MasterDetail");
@@ -234,7 +234,7 @@ describe("page-builder model — container-with-props seed shape", () => {
   };
 
   it("recognises Card title + nested children (not Opaque)", () => {
-    const node = seed('Card("Summary", Stack(Text("hi")))');
+    const node = seed('Card { "Summary", Stack { Text { "hi" } } }');
     expect(node.name).toBe("Card");
     expect(node.props.title).toBe("Summary");
     expect(node.children.map((c) => c.name)).toEqual(["Stack"]);
@@ -245,19 +245,19 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("treats a leading call as content (no title)", () => {
-    const node = seed('Card(Stack(Text("x")))');
+    const node = seed('Card { Stack { Text { "x" } } }');
     expect(node.name).toBe("Card");
     expect(node.props.title).toBeUndefined();
     expect(node.children.map((c) => c.name)).toEqual(["Stack"]);
   });
 
   it("recognises Container/Paper named modifiers + children", () => {
-    const container = seed('Container(Stack(Text("x")), size: "md")');
+    const container = seed('Container { Stack { Text { "x" } }, size: "md" }');
     expect(container.name).toBe("Container");
     expect(container.props.size).toBe("md");
     expect(container.children.map((c) => c.name)).toEqual(["Stack"]);
 
-    const paper = seed('Paper(Text("p"), padding: "lg")');
+    const paper = seed('Paper { Text { "p" }, padding: "lg" }');
     expect(paper.name).toBe("Paper");
     expect(paper.props.padding).toBe("lg");
     expect(paper.children.map((c) => c.name)).toEqual(["Text"]);
@@ -265,35 +265,35 @@ describe("page-builder model — container-with-props seed shape", () => {
 
   it("recognises the real Table form (named rows: before positional Columns)", () => {
     const node = seed(
-      'Table(rows: orders, Column("ID", o => Text(o.id)), Column("Name", o => Text(o.name)))',
+      'Table { rows: orders, Column { "ID", o => Text { o.id } }, Column { "Name", o => Text { o.name } } }',
     );
     expect(node.name).toBe("Table");
     expect(node.props.rows).toBe("orders");
     expect(node.children.map((c) => c.name)).toEqual(["Column", "Column"]);
     // The named-before-positional ordering is recorded so emit replays it.
     expect(emitBody(node)).toBe(
-      'Table(rows: orders, Column("ID", o => Text(o.id)), Column("Name", o => Text(o.name)))',
+      'Table { rows: orders, Column { "ID", o => Text { o.id } }, Column { "Name", o => Text { o.name } } }',
     );
     // And it survives the craft serialization round-trip.
     expect(emitBody(fromCraft(toCraft(node)))).toBe(emitBody(node));
   });
 
   it("keeps unmodelled named modifiers as passthrough props (not Opaque)", () => {
-    const node = seed('Stack(Text("x"), testid: "panel")');
+    const node = seed('Stack { Text { "x" }, testid: "panel" }');
     expect(node.name).toBe("Stack");
     expect(node.props.testid).toBe('"panel"');
     expect(node.children.map((c) => c.name)).toEqual(["Text"]);
-    expect(emitBody(node)).toBe('Stack(Text("x"), testid: "panel")');
+    expect(emitBody(node)).toBe('Stack { Text { "x" }, testid: "panel" }');
   });
 
   it("recognises expression-valued text content (not Opaque)", () => {
-    const node = seed('Text("Hello, " + userName)');
+    const node = seed('Text { "Hello, " + userName }');
     expect(node.name).toBe("Text");
     expect(node.props.text).toBe('"Hello, " + userName');
   });
 
   it("models an event-handler lambda as an editable slot child", () => {
-    const node = seed('Button("Increment", onClick: e => { count := count + 1 })');
+    const node = seed('Button { "Increment", onClick: e => { count := count + 1 } }');
     expect(node.name).toBe("Button");
     expect(node.props.label).toBe('"Increment"');
     const handler = node.children.find((c) => c.slot === "onClick")!;
@@ -312,7 +312,7 @@ describe("page-builder model — container-with-props seed shape", () => {
 
   it("structures an assignment statement but keeps other statements raw", () => {
     const node = seed(
-      'Table(rows: r, onRowClick: x => {\n  draft.id := x.id\n  refresh()\n}, Column("ID", o => Text(o.id)))',
+      'Table { rows: r, onRowClick: x => {\n  draft.id := x.id\n  refresh()\n}, Column { "ID", o => Text { o.id } } }',
     );
     const lambda = node.children.find((c) => c.slot === "onRowClick")!;
     expect(lambda.children[0].props).toMatchObject({
@@ -325,7 +325,7 @@ describe("page-builder model — container-with-props seed shape", () => {
 
   it("structures a navigate(...) statement into target page + params", () => {
     const node = seed(
-      'Button("Go", onClick: e => {\n  navigate(OrderConsole, draft.customerId)\n})',
+      'Button { "Go", onClick: e => {\n  navigate(OrderConsole, draft.customerId)\n} }',
     );
     const handler = node.children.find((c) => c.slot === "onClick")!;
     expect(handler.children[0].props).toMatchObject({
@@ -337,7 +337,7 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("structures navigate without params", () => {
-    const node = seed('Button("Go", onClick: e => {\n  navigate(Home)\n})');
+    const node = seed('Button { "Go", onClick: e => {\n  navigate(Home)\n} }');
     const handler = node.children.find((c) => c.slot === "onClick")!;
     expect(handler.children[0].props).toMatchObject({ kind: "navigate", to: "Home", params: "" });
     expect(emitBody(node)).toContain("navigate(Home)");
@@ -345,7 +345,7 @@ describe("page-builder model — container-with-props seed shape", () => {
 
   it("structures `let` and keeps a bare call verbatim, both round-tripping", () => {
     const node = seed(
-      'Button("Go", onClick: e => {\n  let total = order.total + 1\n  refresh(order)\n})',
+      'Button { "Go", onClick: e => {\n  let total = order.total + 1\n  refresh(order)\n} }',
     );
     const handler = node.children.find((c) => c.slot === "onClick")!;
     expect(handler.children[0].props).toMatchObject({
@@ -359,7 +359,7 @@ describe("page-builder model — container-with-props seed shape", () => {
 
   it("models a block-handler lambda slot as editable statement rows", () => {
     const node = seed(
-      'Table(rows: orders, onRowClick: r => {\n  let x = r.id\n  select(x)\n}, Column("ID", o => Text(o.id)))',
+      'Table { rows: orders, onRowClick: r => {\n  let x = r.id\n  select(x)\n}, Column { "ID", o => Text { o.id } } }',
     );
     const handler = node.children.find((c) => c.slot === "onRowClick")!;
     expect(handler.name).toBe("Lambda");
@@ -374,25 +374,28 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("recognises a qualified ref binding", () => {
-    const node = seed("Form(of: Sales.Order)");
-    expect(node.name).toBe("Form");
+    const node = seed("CreateForm { of: Sales.Order }");
+    expect(node.name).toBe("CreateForm");
     expect(node.props.of).toBe("Sales.Order");
   });
 
   it("recognises the instance-qualified operation form + runs binding", () => {
-    const op = seed("Form(account.withdraw)");
+    const op = seed("OperationForm { account.withdraw }");
+    expect(op.name).toBe("OperationForm");
     expect(op.props.operation).toBe("account.withdraw");
-    expect(seed("Form(runs: PlaceOrder)").props.runs).toBe("PlaceOrder");
+    const wf = seed("WorkflowForm { runs: PlaceOrder }");
+    expect(wf.name).toBe("WorkflowForm");
+    expect(wf.props.runs).toBe("PlaceOrder");
   });
 
   it("recognises a call with optional positionals omitted", () => {
-    expect(seed("Empty()").name).toBe("Empty");
-    expect(seed("Heading()").name).toBe("Heading");
+    expect(seed("Empty {}").name).toBe("Empty");
+    expect(seed("Heading {}").name).toBe("Heading");
   });
 
   it("emits an as-yet-empty single-child slot as a placeholder", () => {
     const lambda: BuilderNode = { name: "Lambda", props: { param: "x" }, children: [] };
-    expect(emitBody(lambda)).toBe("x => Empty()");
+    expect(emitBody(lambda)).toBe("x => Empty {}");
   });
 
   it("emits a match else last regardless of child order", () => {
@@ -422,7 +425,7 @@ describe("page-builder model — container-with-props seed shape", () => {
 
   it("models named-arg child slots and survives the craft round-trip", () => {
     const node = seed(
-      'QueryView(of: orders, loading: Skeleton(count: 5), data: rows => Table(Column("ID", o => Text(o.id)), rows: rows))',
+      'QueryView { of: orders, loading: Skeleton { count: 5 }, data: rows => Table { Column { "ID", o => Text { o.id } }, rows: rows } }',
     );
     expect(node.name).toBe("QueryView");
     expect(node.props.of).toBe("orders");
@@ -440,7 +443,9 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("recognises Tabs with nested editable Tab children", () => {
-    const node = seed('Tabs(Tab("Overview", Text("a")), Tab("Details", List(of: Order)))');
+    const node = seed(
+      'Tabs { Tab { "Overview", Text { "a" } }, Tab { "Details", List { of: Order } } }',
+    );
     expect(node.name).toBe("Tabs");
     expect(node.children.map((c) => c.name)).toEqual(["Tab", "Tab"]);
     const [tab1, tab2] = node.children;
@@ -451,7 +456,7 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("models a lambda as param + body child", () => {
-    const node = seed('Column("Status", o => EnumBadge(o.status))');
+    const node = seed('Column { "Status", o => EnumBadge { o.status } }');
     expect(node.name).toBe("Column");
     expect(node.props.header).toBe("Status");
     const lambda = node.children[0];
@@ -462,7 +467,7 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("models a block-bodied lambda as a Lambda with statement rows", () => {
-    const node = seed('Column("X", o => { let y = o.id })');
+    const node = seed('Column { "X", o => { let y = o.id } }');
     expect(node.name).toBe("Column");
     const lambda = node.children[0];
     expect(lambda.name).toBe("Lambda");
@@ -472,7 +477,7 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("models match arms with cond + value children and an else", () => {
-    const node = seed('match {\n  step == 0 => Text("first")\n  else => Empty("none")\n}');
+    const node = seed('match {\n  step == 0 => Text { "first" }\n  else => Empty { "none" }\n}');
     expect(node.name).toBe("Match");
     expect(node.children.map((c) => c.name)).toEqual(["MatchArm", "MatchElse"]);
     const [arm, els] = node.children;
@@ -482,18 +487,18 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("recognises data-bound expr props (not Opaque)", () => {
-    const member = seed("Badge(order.status)");
+    const member = seed("Badge { order.status }");
     expect(member.name).toBe("Badge");
     expect(member.props.value).toBe("order.status");
 
-    const call = seed('Badge(format(amount), color: "green")');
+    const call = seed('Badge { format(amount), color: "green" }');
     expect(call.name).toBe("Badge");
     expect(call.props.value).toBe("format(amount)");
     expect(call.props.color).toBe("green");
 
     // A string literal in an expr slot round-trips through the printer
     // (re-quoted), still recognised as a Badge rather than Opaque.
-    const lit = seed('Badge("Alpha")');
+    const lit = seed('Badge { "Alpha" }');
     expect(lit.name).toBe("Badge");
     expect(lit.props.value).toBe('"Alpha"');
   });

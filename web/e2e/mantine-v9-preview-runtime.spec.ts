@@ -58,12 +58,12 @@ test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   await page.getByTestId("btn-bundle").click();
   await expect(
     page.getByText(/bundled .*KB in \d+ ms \(\d+ deps fetched\)/),
-  ).toBeVisible({ timeout: 180_000 });
+  ).toBeVisible({ timeout: 600_000 });
 
   // Boot the Hono backend — PGlite WASM + .data come from jsdelivr.
   await page.getByTestId("btn-boot").click();
   await expect(page.getByTestId("backend-status")).toHaveText("booted", {
-    timeout: 180_000,
+    timeout: 600_000,
   });
 
   // Switch to Preview.  This is where the iframe loads the bundle

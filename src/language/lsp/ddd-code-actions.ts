@@ -8,7 +8,7 @@ import {
   type Diagnostic,
   TextEdit,
 } from "vscode-languageserver";
-import { isMacroCall, isProperty, type MacroCall } from "../generated/ast.js";
+import { isMacroCall, type MacroCall } from "../generated/ast.js";
 import { unfoldMacro } from "./unfold-macro.js";
 
 // ---------------------------------------------------------------------------
@@ -31,11 +31,6 @@ export class DddCodeActionProvider implements CodeActionProvider {
     if (unfoldAction) actions.push(unfoldAction);
     for (const diag of params.context.diagnostics) {
       switch (diag.code) {
-        case "loom.display-not-string": {
-          const edit = this.setDisplayTypeToString(document, diag);
-          if (edit) actions.push(quickFix("Change type to 'string'", document, diag, edit));
-          break;
-        }
         case "loom.framework-mismatch": {
           const expected = (diag.data as { expected?: string } | undefined)?.expected;
           if (expected) {
@@ -79,21 +74,6 @@ export class DddCodeActionProvider implements CodeActionProvider {
         changes: { [document.textDocument.uri]: result.edits },
       },
     };
-  }
-
-  /** The diagnostic sits on the `display` keyword; navigate to the owning
-   *  property's declared type and replace it with `string`. */
-  private setDisplayTypeToString(
-    document: LangiumDocument,
-    diag: Diagnostic,
-  ): TextEdit | undefined {
-    const rootCst = document.parseResult?.value?.$cstNode;
-    if (!rootCst) return undefined;
-    const offset = document.textDocument.offsetAt(diag.range.start);
-    const leaf = CstUtils.findLeafNodeAtOffset(rootCst, offset);
-    const prop = AstUtils.getContainerOfType(leaf?.astNode, isProperty);
-    const typeCst = prop?.type?.$cstNode;
-    return typeCst ? TextEdit.replace(typeCst.range, "string") : undefined;
   }
 }
 

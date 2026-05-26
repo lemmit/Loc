@@ -60,9 +60,20 @@ export function renderAppShell(
   sidebarOverride: import("./view-models.js").NavSectionVM[] | undefined,
   extraRoutes: import("./preparers/app-shell.js").ExtraPageRoute[] | undefined,
   pack: LoadedPack,
+  hasScaffoldHome: boolean = true,
+  outOfShellRoutes: import("./preparers/app-shell.js").ExtraPageRoute[] | undefined = undefined,
 ): string {
   return pack.render("app-shell", {
-    ...prepareAppShellVM(aggs, workflows, views, systemName, sidebarOverride, extraRoutes),
+    ...prepareAppShellVM(
+      aggs,
+      workflows,
+      views,
+      systemName,
+      sidebarOverride,
+      extraRoutes,
+      hasScaffoldHome,
+      outOfShellRoutes,
+    ),
     // Router 7 (stack v3) renamed the package react-router-dom →
     // react-router; library mode keeps the v6 API so only the
     // import specifier changes.  Pre-v3 stacks resolve to

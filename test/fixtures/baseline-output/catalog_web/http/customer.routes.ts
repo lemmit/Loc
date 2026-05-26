@@ -22,6 +22,7 @@ export const CustomerResponse = z.object({
   username: z.string(),
   email: z.string(),
   age: z.number().int(),
+  display: z.string(),
 }).openapi("CustomerResponse");
 export const CustomerListResponse = z.array(CustomerResponse).openapi("CustomerListResponse");
 const ErrorResponse = z.object({ error: z.string() }).openapi("ErrorResponse");

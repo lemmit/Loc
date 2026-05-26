@@ -10,6 +10,7 @@ import {
   emitStmt,
   extendLambdaParams,
   propagateChildFlags,
+  styleAttr,
   testidAttr,
   walk,
 } from "../../body-walker.js";
@@ -119,6 +120,7 @@ export function emitTable(
     cellIndent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 

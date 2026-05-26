@@ -274,7 +274,7 @@ describe("react generator", () => {
         system Plain {
           module M {
             context C {
-              aggregate Thing { name: string display }
+              aggregate Thing { name: string  derived display: string = name }
               repository Things for Thing { }
             }
           }
@@ -306,6 +306,79 @@ describe("react generator", () => {
     // 404 catch-all route after every aggregate route.
     expect(app).toMatch(/function NotFound\(\) \{/);
     expect(app).toMatch(/<Route path="\*" element={<NotFound \/>} \/>/);
+  });
+
+  describe("per-page `layout:` (v1)", () => {
+    // Inline DSL mirrors `examples/acme.ddd`'s minimum shape — one
+    // module + api + ui + react deployable + hono deployable — so
+    // the react generator runs end-to-end.  Each test adds one
+    // explicit page with the layout selector under test.
+    const buildSrc = (page: string): string => `
+        system Acme {
+          module Sales {
+            context S {
+              aggregate Order { name: string }
+              repository Orders for Order { }
+            }
+          }
+          api SalesApi from Sales
+          ui WebApp with scaffold(modules: [Sales]) {
+            api Sales: SalesApi
+            ${page}
+          }
+          storage primarySql { type: postgres }
+          deployable api {
+            platform: hono
+            modules: Sales { primary: primarySql }
+            serves: SalesApi
+            port: 3001
+          }
+          deployable web_app {
+            platform: static
+            targets: api
+            ui: WebApp { Sales: api }
+            port: 5173
+          }
+        }
+      `;
+
+    it("mounts a `layout: none` page OUTSIDE the AppShell layout-route", async () => {
+      const { generateSystemFiles } = await import("../_helpers/index.js");
+      const files = await generateSystemFiles(
+        buildSrc(`page Kiosk {
+              route: "/kiosk"
+              layout: none
+              body: Heading("Kiosk")
+            }`),
+      );
+      const app = files.get("web_app/src/App.tsx")!;
+      expect(app).toBeDefined();
+      // Layout route extracted; Outlet is the slot.
+      expect(app).toMatch(/function AppShellLayout\(\)/);
+      expect(app).toMatch(/<AppErrorBoundary>\s*<Outlet \/>\s*<\/AppErrorBoundary>/);
+      // The `layout: none` page mounts as a sibling of the
+      // <Route element={<AppShellLayout />}> wrapper — not nested
+      // inside it.
+      const re =
+        /<Route path="\/kiosk" element=\{<Kiosk \/>\} \/>\s*<Route element=\{<AppShellLayout \/>\}>/;
+      expect(app).toMatch(re);
+    });
+
+    it("a `layout: default` page mounts inside the AppShell layout-route alongside scaffold routes", async () => {
+      const { generateSystemFiles } = await import("../_helpers/index.js");
+      const files = await generateSystemFiles(
+        buildSrc(`page Console {
+              route: "/console"
+              layout: default
+              body: Heading("Console")
+            }`),
+      );
+      const app = files.get("web_app/src/App.tsx")!;
+      expect(app).toBeDefined();
+      // Inside the layout-route block (AppShellLayout's <Route>).
+      const layoutBlock = app.split("<Route element={<AppShellLayout />}>")[1] ?? "";
+      expect(layoutBlock).toMatch(/<Route path="\/console" element=\{<Console \/>\} \/>/);
+    });
   });
 
   describe("design tokens (theme block → Mantine theme)", () => {
@@ -343,7 +416,7 @@ describe("react generator", () => {
         system Untheme {
           module M {
             context C {
-              aggregate A { name: string display }
+              aggregate A { name: string  derived display: string = name }
               repository As for A { }
             }
           }
@@ -639,7 +712,7 @@ describe("react generator", () => {
         system Demo {
           module M {
             context C {
-              aggregate A { name: string display }
+              aggregate A { name: string  derived display: string = name }
               repository As for A { }
             }
           }
@@ -675,7 +748,7 @@ describe("react generator", () => {
         system Demo {
           module M {
             context C {
-              aggregate A { name: string display }
+              aggregate A { name: string  derived display: string = name }
               repository As for A { }
             }
           }
@@ -781,7 +854,8 @@ describe("react generator", () => {
             module M {
               context Auth {
                 aggregate User {
-                  email: string display
+                  email: string
+                  derived display: string = email
                   invariant email.matches("^[^@]+@.+$")
                 }
                 repository Users for User { }
@@ -808,7 +882,8 @@ describe("react generator", () => {
             module M {
               context Catalog {
                 aggregate Product {
-                  sku:  string display check sku.length >= 1 && sku.length <= 32
+                  sku:  string check sku.length >= 1 && sku.length <= 32
+                  derived display: string = sku
                   name: string check name.length <= 120
                 }
                 repository Products for Product { }
@@ -837,7 +912,8 @@ describe("react generator", () => {
             module M {
               context Acct {
                 aggregate User {
-                  username: string display
+                  username: string
+                  derived display: string = username
                   private invariant username.length >= 3
                 }
                 repository Users for User { }

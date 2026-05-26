@@ -23,6 +23,7 @@ import {
   isBinaryExpr,
   isBoolLit,
   isBoundedContext,
+  isBuilderCall,
   isCallExpr,
   isContainment,
   isDecLit,
@@ -40,11 +41,11 @@ import {
   isMoneyLit,
   isNamedType,
   isNameRef,
-  isNewExpr,
   isNowExpr,
   isNullLit,
   isOperation,
   isParenExpr,
+  isPrimitiveConversion,
   isPrimitiveType,
   isProperty,
   isStringLit,
@@ -346,6 +347,7 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
   if (isIntLit(expr)) return T.prim("int");
   if (isDecLit(expr)) return T.prim("decimal");
   if (isMoneyLit(expr)) return T.prim("money");
+  if (isPrimitiveConversion(expr)) return T.prim(expr.target as PrimitiveName);
   if (isBoolLit(expr)) return T.prim("bool");
   if (isNullLit(expr)) return T.opt(T.never);
   if (isNowExpr(expr)) return T.prim("datetime");
@@ -390,10 +392,8 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
     // Lambda type is contextual; without a target type it's unknown.
     return T.unknown;
   }
-  if (isNewExpr(expr)) {
-    const part = expr.partType?.ref;
-    if (part) return { kind: "entity", ref: part };
-    return T.unknown;
+  if (isBuilderCall(expr)) {
+    return typeOfBuilderCall(expr, env);
   }
   if (isMemberAccess(expr)) {
     return typeOfMemberAccess(expr, env);
@@ -414,6 +414,30 @@ export function arithmeticResult(a: DddType, b: DddType, op: string): DddType {
   // tags either operand carries.
   const tags = mergeTags(a.sensitivity, b.sensitivity);
 
+  // String concatenation: `+` between a string and an "implicitly
+  // stringifiable" operand (numeric primitive, bool, enum, or `X id`)
+  // produces a string, with the non-string side auto-converted at
+  // the lowering layer (mirrors how every modern `+`-for-concat
+  // language behaves).  Checked before the money/numeric paths so
+  // `"hello" + money(...)` and `"id: " + orderId` succeed instead
+  // of falling into the wrong branch.  The convert-injection lives
+  // in `lower-expr.ts`'s binary handler — same `convert` IR shape
+  // explicit `string(x)` produces, so backends emit identically.
+  if (op === "+") {
+    const aStr = a.kind === "primitive" && a.name === "string";
+    const bStr = b.kind === "primitive" && b.name === "string";
+    if (aStr || bStr) {
+      const other = aStr ? b : a;
+      if (aStr && bStr) return withTags(T.prim("string"), tags);
+      if (isImplicitlyStringifiable(other)) return withTags(T.prim("string"), tags);
+      // Fall through — `"hello" + customer` (a VO) hits unknown,
+      // surfaced by the validator with a "no canonical string form"
+      // diagnostic.  Same for datetime / guid until each gets its
+      // own explicit form (datetime needs format choices, guid is
+      // rare).
+    }
+  }
+
   // money is a closed type with restricted arithmetic.  Checked before
   // the general numeric-widening path so a stray decimal in a money
   // expression is rejected instead of silently widening through
@@ -433,9 +457,46 @@ export function arithmeticResult(a: DddType, b: DddType, op: string): DddType {
     const ai = (order as readonly string[]).indexOf(a.name);
     const bi = (order as readonly string[]).indexOf(b.name);
     if (ai >= 0 && bi >= 0) return withTags(T.prim(order[Math.max(ai, bi)]!), tags);
-    if (a.name === "string" && b.name === "string") return withTags(T.prim("string"), tags);
   }
   return withTags(T.unknown, tags);
+}
+
+/**
+ * Whether a type can be implicitly stringified in `string + X` arithmetic.
+ * Yes for:
+ *   - numeric primitives (int / long / decimal / money) — universally
+ *     stringified in every backend
+ *   - bool — `"true"` / `"false"`
+ *   - enum — host enum-to-name conversion (`OrderStatus.Confirmed.toString()`
+ *     etc.)
+ *   - `X id` — wraps a primitive, ID's underlying form is its string
+ *     representation
+ * No for everything else — value objects, aggregates, entities,
+ * arrays, datetime (format ambiguity), guid (rarely concatenated;
+ * explicit `string(x)` once admitted).  Same set the explicit
+ * `string(x)` conversion vocabulary admits.
+ */
+function isImplicitlyStringifiable(t: DddType): boolean {
+  if (t.kind === "primitive") {
+    return (
+      t.name === "int" ||
+      t.name === "long" ||
+      t.name === "decimal" ||
+      t.name === "money" ||
+      t.name === "bool"
+    );
+  }
+  if (t.kind === "enum") return true;
+  if (t.kind === "id") return true;
+  if (t.kind === "aggregate") return aggregateHasDisplay(t.ref);
+  return false;
+}
+
+/** True iff the aggregate declares a `derived display: string = ...`.
+ * Anchors `string(aggregate)` and implicit `"x " + aggregate` to a
+ * concrete expression; absence makes both compile errors. */
+function aggregateHasDisplay(agg: Aggregate): boolean {
+  return agg.members.some((m) => isDerivedProp(m) && m.name === "display");
 }
 
 function moneyArithmetic(
@@ -625,6 +686,43 @@ function lookupFunctionInScope(
     if (!s) continue;
     for (const m of s.members) {
       if (isFunctionDecl(m) && m.name === name) return m;
+    }
+  }
+  return undefined;
+}
+
+/** v2 BuilderCall typing.  The type name resolves against the enclosing
+ *  bounded context (value objects + aggregates + parts).  Unknown names
+ *  type as `unknown` — the validator surfaces the diagnostic. */
+function typeOfBuilderCall(expr: import("./generated/ast.js").BuilderCall, env: Env): DddType {
+  const name = expr.type;
+  const vo = lookupValueObjectByName(name, env);
+  if (vo) return { kind: "valueobject", ref: vo };
+  const ent = lookupEntityByName(name, env);
+  if (ent) {
+    return ent.$type === "Aggregate"
+      ? { kind: "aggregate", ref: ent }
+      : { kind: "entity", ref: ent };
+  }
+  return T.unknown;
+}
+
+function lookupEntityByName(name: string, env: Env): Aggregate | EntityPart | undefined {
+  let cur: AstNode | undefined = (env.aggregate ?? env.part ?? env.valueObject) as
+    | AstNode
+    | undefined;
+  while (cur && cur.$type !== "BoundedContext") cur = cur.$container;
+  if (!cur) return undefined;
+  const ctxMembers = (cur as unknown as { members: AstNode[] }).members;
+  for (const m of ctxMembers) {
+    if (m.$type === "Aggregate") {
+      const agg = m as Aggregate;
+      if (agg.name === name) return agg;
+      for (const inner of agg.members) {
+        if (inner.$type === "EntityPart" && (inner as EntityPart).name === name) {
+          return inner as EntityPart;
+        }
+      }
     }
   }
   return undefined;
@@ -1084,7 +1182,20 @@ export interface CalleeSignature {
  *  (its params) or a value-object constructor (its declared properties,
  *  positional). Shared by the LSP signature-help provider and the Model
  *  builder's structured editor. Undefined when the callee can't be resolved. */
-export function calleeSignature(call: CallExpr | MemberAccess): CalleeSignature | undefined {
+export function calleeSignature(
+  call: CallExpr | MemberAccess | import("./generated/ast.js").BuilderCall,
+): CalleeSignature | undefined {
+  if (call.$type === "BuilderCall") {
+    const ctx = AstUtils.getContainerOfType(call, isBoundedContext);
+    const vo = ctx?.members.find((m): m is ValueObject => isValueObject(m) && m.name === call.type);
+    if (vo) {
+      return {
+        name: vo.name,
+        params: vo.members.filter(isProperty).map((p) => ({ name: p.name, type: p.type })),
+      };
+    }
+    return undefined;
+  }
   if (isMemberAccess(call)) {
     if (!call.call) return undefined;
     const decl = stepIntoNode(typeOf(call.receiver, envForNode(call)), call.member);

@@ -28,7 +28,7 @@ text stays the source of truth.
 - **`expr` prop kind**: a permissive data-binding prop that accepts any
   expression (member access, calls, literals, refs) except the structured
   Lambda/Match slots, stores its printed text verbatim, and re-emits it unquoted.
-  Data-bound display args (`Badge(order.status)`, `Stat("Total", order.total)`)
+  Data-bound display args (`Badge { order.status }`, `Stat { "Total", order.total }`)
   now seed as editable nodes instead of Opaque. Settings panel renders them as a
   reparse-validated textarea.
 - **Full stdlib primitive coverage**: the remaining `STDLIB_LAYOUT_COMPONENTS`
@@ -44,16 +44,16 @@ text stays the source of truth.
 - **Component editing**: the body picker collects both page `body:` and
   `component` `body:` expressions, so reusable components are editable too.
 - **Named-arg child slots**: args whose value is itself a node and that arrive
-  *named* — `QueryView(loading:/error:/empty:/data:)`, `Table(onRowClick:/
-  rowTestid:)` callbacks, `Modal(trigger:)`. Seeded as `slot`-tagged children
+  *named* — `QueryView { loading:/error:/empty:/data: }`, `Table {onRowClick:/
+  rowTestid:}` callbacks, `Modal { trigger: }`. Seeded as `slot`-tagged children
   (flat children, no craft `linkedNodes`); the slot survives craft's
   `SerializedNodes` round-trip via a reserved `__slot` prop. `data:` lambdas
-  nest a `Lambda` body child, so a `QueryView(data: rows => Table(…))` is
+  nest a `Lambda` body child, so a `QueryView { data: rows => Table { … } }` is
   editable all the way down.
 - **Arbitrary arg order**: a node records its source arg order (an `order`
   token list of prop keys + child markers, persisted via a reserved `__order`
   prop) and `emitBody` replays it, so a positional after a named arg — the
-  common hand-written `Table(rows: x, Column(…), Column(…))` — round-trips
+  common hand-written `Table { rows: x, Column { … }, Column { … } }` — round-trips
   instead of falling back to Opaque. Replay is edit-safe: children are pulled in
   array order, and children/named props added after seed are appended; fresh
   palette nodes (no recorded order) still emit in canonical order.
@@ -61,35 +61,35 @@ text stays the source of truth.
   (`testid:`/`striped:`/`gap:`/…) is kept as a verbatim passthrough prop —
   editable as a generic expr field, surfaced in the settings panel — instead of
   collapsing the node to Opaque; and declared positionals are optional from the
-  right (`Empty()` is recognised). See also event-handler lambdas, below.
+  right (`Empty {}` is recognised). See also event-handler lambdas, below.
 - **Expression-valued text**: text content (`Heading`/`Text`/`Button`/`Anchor`/
   `Alert`/`Empty`) is a `text` kind — a plain text box for a string literal,
-  the raw expression otherwise — so `Text("Hello, " + name)` is editable rather
+  the raw expression otherwise — so `Text { "Hello, " + name }` is editable rather
   than Opaque.
 - **In-canvas add-arm / add-child**: a selected `Match` shows "+ arm"/"+ else"
   controls (arms aren't palette primitives); the palette won't drop a raw
   primitive into a Match or an already-full single-child slot.
 - **Event-handler lambdas + qualified refs**: an unknown named arg whose value
-  is a lambda (`Button(onClick: e => { … })`, form `onSubmit`) becomes an
+  is a lambda (`Button { onClick: e => { … } }`, form `onSubmit`) becomes an
   editable slot child — a `Lambda` node (with the statement-row editor for block
   bodies), rendered nested inside the carrying primitive (leaves render their
   slot children too) — instead of a raw passthrough string or Opaque; and a
-  `ref` slot accepts a qualified ref (`Form(of: Sales.Order)`), surfaced as the
+  `ref` slot accepts a qualified ref (`Form { of: Sales.Order }`), surfaced as the
   current value in its dropdown.
-- **`Detail` / `MasterDetail` + user-component calls**: `Detail(of:, by:)` and
-  `MasterDetail(of:, …, detail: o => …)` are recognised; and a call to a
+- **`Detail` / `MasterDetail` + user-component calls**: `Detail { of:, by: }` and
+  `MasterDetail { of:, …, detail: o => … }` are recognised; and a call to a
   user-defined `component` (collected from the source with its param names,
   registered in the craft resolver) is recognised, its positional args modelled
   as props **labelled by the declared param name**. A non-component value call
   (`format(x)`) stays an expression.
-- **Typed binding pickers**: `Form(op:)` is a dropdown of the bound `of:`
+- **Typed binding pickers**: `Form { op: }` is a dropdown of the bound `of:`
   aggregate's operations (contextual — it follows the selected `of:`);
-  `Form(runs:)` lists workflows. Aggregate/workflow/view option sets are
+  `Form { runs: }` lists workflows. Aggregate/workflow/view option sets are
   collected from the source (`BuilderPane`); `op:` is contextual via the
   per-aggregate operations map.  A boolean-valued modifier (`striped: true`)
   edits as a switch, and `color:` (Badge/Alert) is a palette dropdown.
 - **Statement-level handler editor**: a block-bodied lambda (any named-arg
-  handler — `Button(onClick:)`, form `onSubmit`, `Table(onRowClick:)`) seeds as a
+  handler — `Button { onClick: }`, form `onSubmit`, `Table { onRowClick: }`) seeds as a
   `Lambda` node holding one editable `Stmt` row per statement; rows are
   add/edit/delete/reorderable and round-trip. An **assignment** statement
   (`target := value`, `+=`, `-=`) is structured into target / op / value
@@ -236,7 +236,7 @@ Done:
   (`f(a, b)`) and member access (`a.b`, `a.b(c)`) render editable callee/receiver
   + member + an add/remove/edit argument list, expression-body lambdas
   (`p => expr`) render an editable param + body (the param is threaded into the
-  body's scope suggestions), `new Part { … }` and object literals `{ … }` render
+  body's scope suggestions), `Part { … }` and object literals `{ … }` render
   an editable partType + a named-field list (add/remove/edit), and anything still
   unmodelled is a reparse-validated `raw` text leaf (recognise-or-raw). (`match`,
   ternary, and block-body lambdas were since structured — see below.) Plugged
@@ -293,7 +293,7 @@ Done:
   `requires` predicates, `let` values, **assignment right-hand values** (`x :=
   <value>` — only the value is spliced, target/op preserved), and **each `emit`
   field value** (addressed by a `field` index). So domain-logic expressions —
-  including `balance := Money(…)` and `emit E { f: <expr> }` — are editable with
+  including `balance := Money { … }` and `emit E { f: <expr> }` — are editable with
   the structured editor (calls, members, `new`, member completion), not just the
   BodyEditor's text rows. Candidates include params and earlier `let` bindings
   (operations also see the aggregate's members; workflows have no `this`). Bare
@@ -616,3 +616,37 @@ grouping, persisted positions).
 
 Layout polish (slot in opportunistically): drag-to-rebind edges, persisted
 positions, auto-layout (dagre/elk) + nested grouping, add target-context picker.
+
+## Playground LSP — multi-file workspace
+
+**Status: long-standing gap.** The browser-hosted Langium LSP
+(`web/src/lsp/ddd-server.worker.ts` → `src/language/main-browser.ts`) starts
+on `EmptyFileSystem`. The only document the LSP sees is whatever the editor
+opens via `textDocument/didOpen` — today that's just `/workspace/main.ddd`.
+
+The workspace VFS (`web/src/workspace/use-workspace-sources.ts`) holds the
+rest of the user's `.ddd` files (shared / imports / Phase 2b multi-file
+tabs), but they never reach the LSP. Effect: any `import "./shared/x.ddd"`
+fails to resolve and the editor opens with `Could not resolve reference to
+NamedDecl 'X'` errors.
+
+Workaround in place: `examples/index.ts` pins `defaultExample` to
+`sales-system` (a single-file example) so the playground opens clean
+instead of "2 ERRORS". The multi-file example still works for the user once
+they pick it manually, but the LSP can't validate the imports.
+
+To fix:
+
+  1. **Push every workspace `.ddd` to the LSP** — wrap the workspace-sources
+     controller so adding/changing/removing a `.ddd` issues
+     `textDocument/didOpen` / `didChange` / `didClose` to the LSP client,
+     not just the active one. Use a URI scheme matching what Langium
+     expects (`file:///workspace/...`).
+  2. **Import resolution** — confirm Langium can chase `import "./shared/X.ddd"`
+     across these in-memory documents (it should, since the scope provider
+     walks the document index; just needs every doc registered).
+  3. **Switch `defaultExample` back to the multi-file showcase** so the
+     playground demos the multi-file feature out of the box.
+
+Once shipped, restore the `examples[0]` default and remove the workaround
+comment in `web/src/examples/index.ts`.

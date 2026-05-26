@@ -72,7 +72,7 @@ describe("api binding validator", () => {
           ui WebApp {
             api Sales: SalesApi
             api Sales: SalesApi
-            page X { route: "/x" body: Heading("hi") }
+            page X { route: "/x" body: Heading { "hi" } }
           }
           deployable api { platform: hono, modules: Sales, port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
@@ -89,7 +89,7 @@ describe("api binding validator", () => {
           module Sales { context C { } }
           ui WebApp {
             api Sales: NoSuchApi
-            page X { route: "/x" body: Heading("hi") }
+            page X { route: "/x" body: Heading { "hi" } }
           }
           deployable api { platform: hono, modules: Sales, port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
@@ -112,7 +112,7 @@ describe("api binding validator", () => {
           api SalesApi from Sales
           ui WebApp {
             api Sales: SalesApi
-            page X { route: "/x" body: Text(Sales.NoSuchAggregate.all.isLoading) }
+            page X { route: "/x" body: Text { Sales.NoSuchAggregate.all.isLoading } }
           }
           deployable api { platform: hono, modules: Sales, port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
@@ -135,7 +135,7 @@ describe("api binding validator", () => {
           api SalesApi from Sales
           ui WebApp {
             api Sales: SalesApi
-            page X { route: "/x" body: Text(Sales.Customer.allll.isLoading) }
+            page X { route: "/x" body: Text { Sales.Customer.allll.isLoading } }
           }
           deployable api { platform: hono, modules: Sales, port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
@@ -162,11 +162,11 @@ describe("api binding validator", () => {
             api Sales: SalesApi
             page X {
               route: "/x"
-              body: Stack(
-                Text(Sales.Customer.all.isLoading),
-                Text(Sales.Customer.byId("xx").isLoading),
-                Button("Create", onClick: e => { Sales.Customer.create.mutate({ name: "x" }) })
-              )
+              body: Stack {
+                Text { Sales.Customer.all.isLoading },
+                Text { Sales.Customer.byId("xx").isLoading },
+                Button { "Create", onClick: e => { Sales.Customer.create.mutate({ name: "x" }) } }
+              }
             }
           }
           deployable api { platform: hono, modules: Sales, port: 3000 }
@@ -190,7 +190,7 @@ describe("api binding validator", () => {
             api Sales: SalesApi
             page X(email: string) {
               route: "/x/:email"
-              body: Text(Sales.Customer.byEmail(email).isLoading)
+              body: Text { Sales.Customer.byEmail(email).isLoading }
             }
           }
           deployable api { platform: hono, modules: Sales, port: 3000 }
@@ -211,7 +211,7 @@ describe("api binding validator", () => {
             page X {
               route: "/x"
               state { items: int = 0 }
-              body: Button("Foo", onClick: e => { lodash.compact.foo(items) })
+              body: Button { "Foo", onClick: e => { lodash.compact.foo(items) } }
             }
           }
           deployable api { platform: hono, modules: Sales, port: 3000 }

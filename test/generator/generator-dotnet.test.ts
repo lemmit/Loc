@@ -712,7 +712,8 @@ describe(".NET generator", () => {
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
           creditLimit: decimal
           operation deductCredit(amount: decimal) {
             precondition amount > 0
@@ -805,7 +806,8 @@ describe(".NET generator", () => {
       `
       context T {
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
           creditLimit: decimal
           operation addCredit(amount: decimal) {
             precondition amount > 0
@@ -942,7 +944,7 @@ describe(".NET generator", () => {
       `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
-        aggregate Customer { name: string display, email: string }
+        aggregate Customer { name: string, email: string  derived display: string = name }
         aggregate Order {
           customerId: Customer id
           status: OrderStatus
@@ -1100,8 +1102,8 @@ describe(".NET generator", () => {
       `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
-        aggregate Region { name: string display, countryCode: string }
-        aggregate Customer { name: string display, regionId: Region id }
+        aggregate Region { name: string, countryCode: string  derived display: string = name }
+        aggregate Customer { name: string, regionId: Region id  derived display: string = name }
         aggregate Order { customerId: Customer id, status: OrderStatus }
         repository Regions for Region { }
         repository Customers for Customer { }
@@ -1144,7 +1146,8 @@ describe(".NET generator", () => {
       `
       context T {
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
           creditLimit: decimal
           operation addCredit(amount: decimal) {
             precondition amount > 0
@@ -1541,7 +1544,8 @@ describe(".NET generator", () => {
         `
           context Plain {
             aggregate Note {
-              title: string display
+              title: string
+              derived display: string = title
               body:  string
             }
             repository Notes for Note { }
@@ -1573,7 +1577,8 @@ describe(".NET generator", () => {
         `
           context Auth {
             aggregate User {
-              email: string display
+              email: string
+              derived display: string = email
               invariant email.matches("^[^@]+@.+$")
             }
             repository Users for User { }
@@ -1594,7 +1599,8 @@ describe(".NET generator", () => {
         `
           context Auth {
             aggregate User {
-              email: string display
+              email: string
+              derived display: string = email
               invariant email.matches("^[^@]+@.+$")
             }
             repository Users for User { }
@@ -1616,7 +1622,8 @@ describe(".NET generator", () => {
         `
           context Acct {
             aggregate User {
-              username: string display
+              username: string
+              derived display: string = username
               private invariant username.length >= 3
             }
             repository Users for User { }

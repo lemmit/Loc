@@ -11,18 +11,18 @@ import { generateSystemFiles } from "../_helpers/index.js";
 const buildAndGenerate = generateSystemFiles;
 
 describe("Group + Grid in walker stdlib", () => {
-  it("Group(...children) emits Mantine <Group> with positional children", async () => {
+  it("Group { ...children } emits Mantine <Group> with positional children", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Toolbar {
             route: "/toolbar"
-            body:  Group(
-              Heading("Title"),
-              Badge("Live"),
-              Button("Save")
-            )
+            body:  Group {
+              Heading { "Title" },
+              Badge { "Live" },
+              Button { "Save" }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -44,14 +44,14 @@ describe("Group + Grid in walker stdlib", () => {
     expect(content).toMatch(/<\/Group>/);
   });
 
-  it("empty Group() self-closes", async () => {
+  it("empty Group {} self-closes", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Empty {
             route: "/empty"
-            body:  Group()
+            body:  Group {}
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -67,18 +67,18 @@ describe("Group + Grid in walker stdlib", () => {
     expect(content).toMatch(/<Group \/>/);
   });
 
-  it('Grid(...children) wraps each child in <Grid.Col span="auto">', async () => {
+  it('Grid { ...children } wraps each child in <Grid.Col span="auto">', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Dashboard {
             route: "/dashboard"
-            body:  Grid(
-              Stat("Revenue", "$10k"),
-              Stat("Users", "240"),
-              Stat("Active", "47")
-            )
+            body:  Grid {
+              Stat { "Revenue", "$10k" },
+              Stat { "Users", "240" },
+              Stat { "Active", "47" }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -104,14 +104,14 @@ describe("Group + Grid in walker stdlib", () => {
     expect(content).toMatch(/Active/);
   });
 
-  it("empty Grid() self-closes", async () => {
+  it("empty Grid {} self-closes", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Empty {
             route: "/empty"
-            body:  Grid()
+            body:  Grid {}
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -127,17 +127,17 @@ describe("Group + Grid in walker stdlib", () => {
     expect(content).toMatch(/<Grid \/>/);
   });
 
-  it("Stack(Group(...), Grid(...)) — composition stays clean", async () => {
+  it("Stack { Group { ... }, Grid { ... } } — composition stays clean", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
         ui WebApp {
           page Layout {
             route: "/layout"
-            body:  Stack(
-              Group(Heading("Header"), Badge("v1")),
-              Grid(Text("a"), Text("b"))
-            )
+            body:  Stack {
+              Group { Heading { "Header" }, Badge { "v1" } },
+              Grid { Text { "a" }, Text { "b" } }
+            }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

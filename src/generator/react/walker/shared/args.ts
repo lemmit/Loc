@@ -120,10 +120,17 @@ export function numericNamed(call: ExprIR & { kind: "call" }, name: string): num
 }
 
 export function escapeJsxText(s: string): string {
-  // Replace `{` and `}` (which JSX would interpret as expression
-  // delimiters) with their HTML entity equivalents.  Apostrophes /
-  // quotes are fine inside JSX text.
-  return s.replace(/\{/g, "&#123;").replace(/\}/g, "&#125;");
+  // Replace JSX-significant punctuation with HTML entity equivalents
+  // so the emitted source compiles under `tsc --noEmit`.  `{` and
+  // `}` are expression delimiters; `<` and `>` are tag delimiters
+  // (TS1382 fires on a literal `>` in JSX text, even when it's an
+  // arithmetic comparison or a lambda arrow inside a code snippet).
+  // Apostrophes / quotes are fine inside JSX text.
+  return s
+    .replace(/\{/g, "&#123;")
+    .replace(/\}/g, "&#125;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 /** Indent every line of a JSX fragment by a given prefix.  First

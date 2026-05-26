@@ -38,15 +38,17 @@ system StorefrontDotnet {
       event WalletDebited { wallet: Wallet id, amount: Money, at: datetime }
 
       aggregate Customer {
-        name: string display
+        name: string
         email: string
         invariant email.length > 0
+        derived display: string = name
       }
 
       aggregate Product {
-        sku: string display
+        sku: string
         price: Money
         invariant sku.length > 0
+        derived display: string = sku
       }
 
       aggregate Wallet {
@@ -63,7 +65,7 @@ system StorefrontDotnet {
         operation topUp(amount: Money) {
           precondition isMutable()
           precondition amount.amount > 0
-          balance := Money(balance.amount + amount.amount, balance.currency)
+          balance := Money { amount: balance.amount + amount.amount, currency: balance.currency }
           emit WalletToppedUp { wallet: id, amount: amount, at: now() }
         }
 
@@ -71,7 +73,7 @@ system StorefrontDotnet {
           precondition isMutable()
           precondition amount.amount > 0
           precondition balance.amount >= amount.amount
-          balance := Money(balance.amount - amount.amount, balance.currency)
+          balance := Money { amount: balance.amount - amount.amount, currency: balance.currency }
           emit WalletDebited { wallet: id, amount: amount, at: now() }
         }
 
@@ -96,7 +98,7 @@ system StorefrontDotnet {
         operation addLine(productId: Product id, unitPrice: Money, qty: int) {
           precondition isMutable()
           precondition qty > 0
-          lines += new OrderLine {
+          lines += OrderLine {
             productId: productId,
             unitPrice: unitPrice,
             quantity: qty

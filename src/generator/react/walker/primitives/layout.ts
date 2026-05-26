@@ -5,7 +5,13 @@
 
 import type { ExprIR } from "../../../../ir/loom-ir.js";
 import type { WalkContext } from "../../body-walker.js";
-import { positionalChildren, renderTextContent, testidAttr, walk } from "../../body-walker.js";
+import {
+  positionalChildren,
+  renderTextContent,
+  styleAttr,
+  testidAttr,
+  walk,
+} from "../../body-walker.js";
 import { renderPrimitive } from "../context.js";
 import {
   escapeJsxText,
@@ -30,6 +36,7 @@ export function emitStack(
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -47,6 +54,7 @@ export function emitGroup(
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -66,6 +74,7 @@ export function emitGrid(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     childIndent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -90,6 +99,7 @@ export function emitContainer(
     size,
     hasSize: size !== undefined,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -102,10 +112,15 @@ export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   const positionals = positionalArgs(call);
   const tabs = positionals.map((arg, i) => {
     if (arg.kind !== "call" || arg.name !== "Tab") {
+      // Bare positional (e.g. `Tabs(Card(...), Card(...))`) — treat it as
+      // the panel body directly with an auto-generated label.  Without
+      // this fallback, the panel would emit a JSX comment as its only
+      // child and tsc rejects it (Mantine's `TabsPanelProps` requires
+      // a non-empty `children`).
       return {
         value: `tab-${i + 1}`,
         label: `Tab ${i + 1}`,
-        bodyJsx: "{/* missing tab body */}",
+        bodyJsx: walk(arg, ctx, depth + 2),
       };
     }
     const tabPositionals = positionalArgs(arg);
@@ -129,6 +144,7 @@ export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     innerIndent: "  ".repeat(depth + 2),
     closeIndent: "  ".repeat(depth),
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -149,6 +165,7 @@ export function emitToolbar(
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -176,5 +193,6 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }

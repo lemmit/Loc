@@ -248,8 +248,8 @@ namespaces to the **plural** form (`Sales.Domain.Orders`) to avoid the
 clash without changing the grammar.
 
 ### Positional records skip invariant enforcement
-`record Money(decimal Amount, string Currency)` doesn't run a body block
-on `new Money(...)` — only on `new Money()`.  Use **explicit
+`record Money { decimal Amount, string Currency }` doesn't run a body block
+on `new Money { ... }` — only on `new Money {}`.  Use **explicit
 constructors with init-only properties** for value objects so invariants
 fire on every construction.
 
@@ -315,8 +315,8 @@ body validates correctly.
 ### Test DSL: `expectThrows <expression>`, not `<statement>`
 Statements like `:=`, `+=`, `emit` only make sense inside an aggregate
 operation, not in free-standing tests.  Use `expectThrows <expression>`
-so users naturally write `expectThrows Money(-1, "USD")` and the
-expression renderer (`new Money(-1, "USD")`) just works.
+so users naturally write `expectThrows Money { -1, "USD" }` and the
+expression renderer (`new Money { -1, "USD" }`) just works.
 
 ### Templates split → small, single-purpose modules
 Once the scope crossed ~500 lines per template-file, lookups and edits
@@ -622,12 +622,23 @@ or not.
   `(owner_fk, target_fk)` makes that idempotent).  Load batches the join
   rows into a `Map<ownerId, targetId[]>` and brands them back to
   `Ids.<Target>Id`.
-- **Order is preserved via an `ordinal` column.**  The collection is a
-  list, not a bag — `party[0]` must round-trip as the lead.  Each join
-  row carries its position; save upserts with `onConflictDoUpdate(set:
-  {ordinal})` so reorders persist, load `ORDER BY ordinal`.  The
-  composite PK stays `(owner_fk, target_fk)` (a target appears once per
-  owner); ordinal is positional, not part of identity.
+- **The contract is set semantics; ordinal is implementation detail.**
+  An earlier iteration of this work pitched `X id[]` as an ordered list
+  and added an `ordinal` column to preserve `party[0]` across a
+  round-trip.  TS/Drizzle and .NET/EF honour ordinal (write per-row on
+  `+=`, `ORDER BY ordinal` on load); Phoenix/Ash leaves the column at
+  its default because `Ash.Changeset.manage_relationship` doesn't
+  inject join-row attributes.  Three backends, three different ordering
+  guarantees — a false promise on the cross-backend contract.  Pulled
+  back: a relational join table is naturally a set (composite
+  `(owner_fk, target_fk)` PK enforces "each pair appears once"), and
+  *that* is what `X id[]` now contractually means.  The ordinal column
+  stays on TS/.NET (harmless, gives stable iteration order on those
+  backends as a byproduct) and is nullable+defaulted on Phoenix.  When
+  position genuinely belongs to the domain — battle slots, draft picks
+  — model it as an explicit ordinal field on a dedicated child
+  aggregate, not on a `X id[]` field.  Lesson: don't let the natural
+  ordering of one backend become an accidental contract.
 - **Only `primaryKey` import is conditional.**  Adding `primaryKey` to the
   Drizzle import line unconditionally drifted every existing schema's
   byte-for-byte fixture.  Gate the import on "context has ≥1 join table"
@@ -769,3 +780,165 @@ or not.
   from `src/ir/loom-ir.ts` removes the failure mode entirely — the
   playground's type picker now picks up new primitives without an
   additional code change.
+
+- Two string forms, not one: `derived display` vs `derived inspect`.
+
+  The original `display` was a property-suffix annotation
+  (`name: string display`) consumed only by the React form layer.
+  Stretching it to cover "what `string(aggregate)` should render"
+  surfaced a hidden conflation: UI labels ("John Smith", short,
+  pretty, sensitive-aware) and developer-facing debug forms
+  ("User(id: 42, ssn: <redacted>)", structural, includes
+  IDs) are different concerns with different audiences.  Every
+  mature stdlib already separates them (Ruby `to_s` vs `inspect`,
+  Elixir `String.Chars` vs `Inspect`, Python `__str__` vs
+  `__repr__`); Loom had one annotation pretending to be both.
+
+  Resolution: two reserved-name derived clauses on aggregates.
+  - `derived display: string = ...` — opt-in.  Anchors
+    `string(aggregate)` and implicit `"x " + aggregate` (lowering
+    rewrites both to `aggregate.display` member access).  Without
+    it, both expressions are compile errors — forces an explicit
+    decision rather than silent stringification.
+  - `derived inspect: string = ...` — auto-synthesized at IR
+    enrichment time when omitted.  Structural shape; `sensitive(...)`
+    fields render as `<redacted>` literals; VO / array / entity
+    fields use `[Type]` placeholders (calling host-language
+    `.ToString()` on a VO surfaces the namespace-qualified type
+    name, rarely useful).  Backends emit it as `ToString()` (.NET),
+    `toString()` + `[util.inspect.custom]` (TS), `defimpl Inspect`
+    (Phoenix).  Wire-shape excludes it — internal structure must
+    not leak to JSON DTOs.
+
+  Two never collide because they're reached via different call
+  paths: `display` only via explicit Loom paths (`string(x)`,
+  implicit `+`, UI walker); `inspect` only via host-language debug
+  hooks (`Console.WriteLine`, exception messages, IEx, Serilog
+  destructuring).  A .NET developer who writes `$"{user}"` gets the
+  inspect form (debug-shaped), never accidentally the display form
+  (UI-shaped).
+
+  Reserved-name precedent: a property literally named `id` IS the
+  aggregate identifier — no annotation, just convention.  `display`
+  and `inspect` follow that pattern.  No new grammar primitive;
+  `derived <name>: <type> = <expr>` already exists.
+
+  Synthesis lives in `src/ir/enrichments.ts:synthesizeInspect`
+  rather than as a stdlib macro.  Two reasons: (a) the macro
+  factory layer has no binary-expression / convert-expression
+  factories, so a macro implementation would have needed three
+  new factories before producing a single inspect; (b) sensitivity
+  metadata + wire-shape ordering are both already available at the
+  IR layer, so building the expression directly in IR matched the
+  surrounding code style.  If a future requirement asks for
+  user-replaceable defaults (`derived inspect: string =
+  defaultInspectButSkipPii()`), promoting to a macro is mechanical.
+
+  The trap that bit us during implementation: idempotency.
+  `enrich(enrich(m))` must equal `enrich(m)`.  First implementation
+  added the synthesized inspect to `agg.derived` AFTER computing
+  `wireShape`, so the second enrichment saw a longer `derived`
+  list and produced a longer wireShape.  Fix: compute the
+  post-synthesis aggregate first, then derive wireShape from it
+  (`aggWithDerived` local).  Also: filter `inspect` out of the
+  wire-fields loop so even user-written `derived inspect` doesn't
+  leak to DTOs.
+
+## Cross-generator conformance harness (parity follow-ups)
+
+The 3-way OpenAPI parity test (`test/e2e/e2e.test.ts`,
+`test/_helpers/openapi-normalize.ts`) landed in #401 as REPORT-ONLY:
+each Phoenix↔Hono / Phoenix↔.NET / Hono↔.NET diff was logged but the
+job stayed green.  Closing the showcase divergences took four
+sequenced PRs (A → D) plus three side fixes; each surfaced a category
+of footgun worth documenting.
+
+- **Layered failures stay hidden behind earlier blockers.**
+  PR #524 hard-broke the `Property` grammar's `display` modifier but
+  missed migrating `examples/showcase.ddd` (added 12 min earlier in
+  #401) and an inline fixture in `phoenix-build.yml`.  Both files
+  parsed-error at `node bin/cli.js generate`, so every downstream
+  failure was invisible.  Fix in #529 + #541.  Lesson: a hard grammar
+  break needs a corpus sweep, not just an "in-tree fixtures
+  migrated" claim.  Cheap mitigation: run `bin/cli.js parse <file>`
+  across every `.ddd` in the repo (incl. workflow inline heredocs)
+  in the same commit that changes a Property production.
+
+- **`mix compile --warnings-as-errors` makes every warning a release
+  gate.**  Once #541 unblocked the parse step, the Phoenix
+  workflow's strict-mode compile surfaced two real warnings that
+  blocked every PR touching the generator:
+
+  1. `Igniter.Inflex.{pluralize,singularize}/1` + `Owl.IO.input/1`
+     undefined.  `ash_postgres`'s `lib/resource_generator/spec.ex`
+     references these at compile time; they're optional deps for
+     `mix ash_postgres.gen.resources` and don't get pulled by
+     `mix deps.get --only prod`.  Fix in #546: declare them in the
+     generated `mix.exs` with `runtime: false` — resolves the
+     references without inflating the application start sequence.
+
+  2. `redefining module Inspect.<App>.<Ctx>.<Agg>`.  PR #537 emitted
+     a `defimpl Inspect, for: <Module>` after each resource's
+     `defmodule` close to render the synthesised `derived inspect`
+     body.  `use Ash.Resource` already emits an `Inspect` impl for
+     the resource struct; the two collide at compile time.  The
+     final fix routes the expression body through a public
+     `def inspect(record)` **module function** on the resource
+     (`MyApp.Catalog.Customer.inspect/1`) rather than the Inspect
+     protocol — different namespace, same body, no collision.  IEx
+     / Logger keep Ash's struct Inspect output; callers wanting the
+     custom string invoke `<Mod>.inspect(record)` explicitly (the
+     same call shape .NET's `ToString()` / TS's `toString()` use).
+
+  Lesson on protocols: when adding an explicit `defimpl Protocol,
+  for: <Struct>` to a struct produced by a macro you don't control,
+  test against `--warnings-as-errors` BEFORE committing to that
+  protocol surface.  Picking a NON-protocol channel (here: a regular
+  module function) when the macro-controlled struct owns the
+  protocol slot sidesteps the entire collision class.
+
+- **Plug router syntax (`:id`) vs OpenAPI path-template syntax
+  (`{id}`) are different.**  The OpenApiSpex emitter happily renders
+  `"/<plural>/:id"` as a path key — valid Elixir, invalid OpenAPI 3.
+  Hono and .NET both emit `{id}`, so the parity harness reports a
+  full set of "ops only on phoenix" / "ops missing on phoenix"
+  even though the same operation exists on both sides.  Fix in #540:
+  use `{id}` in the OpenAPI spec, keep `:id` in `router.ex`.
+  Lesson: an OpenAPI emitter is documenting an HTTP contract, not
+  the router's internal pattern — the two namespaces happen to
+  overlap visually but follow different rules.
+
+- **Runtime wire shape ≠ OpenAPI spec property names.**  PR C
+  (#544) added a per-resource `defimpl Jason.Encoder` that camelizes
+  atom keys at runtime — `created_at` → `createdAt` on the wire.
+  But `openapi-emit.ts` still snake-cased property names in the
+  spec, advertising `created_at` to clients while the response said
+  `createdAt`.  Strict parity caught it as a field-set drift.
+  Fix in C's follow-up commit: emit the source-level (camelCase)
+  identifier as the OpenApiSpex property key.  Lesson: when two
+  emitters describe the same wire — one declarative (spec) and one
+  imperative (runtime) — they need to share the casing decision,
+  not converge accidentally.
+
+- **`/ready` is contract from .NET's POV, infrastructure from
+  Hono's.**  .NET's `app.MapGet("/ready", ...)` auto-registers the
+  endpoint in the OpenAPI document; Hono's `app.get(...)` skips
+  registration entirely (no `app.openapi(createRoute(...))`).
+  Same backend behaviour at runtime, different doc surface.  The
+  harness's `isInfraPath` filter excluded `/health` but not
+  `/ready`, so strict mode tripped on a benign divergence.  Fix in
+  D (#547): `/ready` joins `/health` in the infra filter.  Lesson:
+  the normalisation helper is the right place to encode "what's
+  PART of the contract" — the per-backend emitters shouldn't have
+  to coordinate on which endpoints to suppress from their specs.
+
+- **The 4-PR cadence (A → B → C → D) paid off.**  Each PR closed
+  one diff category in REPORT-ONLY mode; the D flip to
+  `LOOM_E2E_STRICT_PARITY=1` waited until the diff list was
+  literally empty across the showcase.  Sequencing rationale:
+  every intermediate PR has to keep the parity job green (in
+  report mode it always is), so the gate flip becomes a one-line
+  YAML change instead of a coordinated multi-PR merge.  Same
+  pattern works for any "log it now, gate it later" rollout —
+  the report-only phase doubles as a regression baseline.
+

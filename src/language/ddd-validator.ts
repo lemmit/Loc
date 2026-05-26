@@ -30,6 +30,7 @@ import {
   isAggregate,
   isAssignOrCallStmt,
   isBinaryExpr,
+  isBoundedContext,
   isContainment,
   isDecLit,
   isDerivedProp,
@@ -88,6 +89,7 @@ import {
   typeToString,
   withTags,
 } from "./type-system.js";
+import { isWalkerPrimitive } from "./walker-stdlib.js";
 
 export class DddValidator {
   // Entry: full model walk
@@ -112,6 +114,16 @@ export class DddValidator {
     // type system is the source of truth); structural checks run
     // unconditionally.
     this.checkMatchExpressions(model, accept);
+    // v2 hard cut: reject pre-v2 surfaces that have a builder-call replacement.
+    // `Money(10, "USD")` → `Money { amount: 10, currency: "USD" }`,
+    // `OrderLine(...)` (entity part) → `OrderLine { ... }`.
+    this.checkLegacyConstructorCalls(model, accept);
+    // BuilderCall.type is a bare string (not a Langium cross-reference),
+    // so typos like `Mony { ... }` pass parsing & linking silently.  The
+    // validator resolves the type name against the available builder
+    // targets (VO / EntityPart / user-component / walker primitive) and
+    // errors on misses.
+    this.checkBuilderCallType(model, accept);
     // `import helper <name> from "..."` declarations.
     // Reject names that shadow walker stdlib primitives so a typo
     // never silently overrides Stack / Form / etc.  Also flag
@@ -134,6 +146,12 @@ export class DddValidator {
     // pattern in `checkDerived` etc. — see the function's header
     // for the full rationale.
     this.checkBinaryOperands(model, accept);
+    // Primitive conversion expressions (`string(x)`, `money(d)`):
+    // restrict to the infallible (source, target) pairs.  Fallible
+    // parses (`int("42")`) and narrowing (`int(longValue)`) are
+    // deferred until we settle the failure model (`T?` vs throw);
+    // an explicit error keeps the surface honest in the meantime.
+    this.checkPrimitiveConversions(model, accept);
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
         this.checkContext(m, accept);
@@ -416,8 +434,28 @@ export class DddValidator {
   }
 
   private checkTheme(block: ThemeBlock, accept: ValidationAcceptor): void {
-    const knownNames = new Set(["primary", "neutral", "radius", "fontFamily"]);
+    // Colour tokens (validated as hex) — palette + semantic slots.
+    const colorNames = new Set([
+      "primary",
+      "secondary",
+      "accent",
+      "success",
+      "warning",
+      "error",
+      "neutral",
+    ]);
+    // Non-colour tokens — each has its own per-property validator
+    // below (radius enum, fontFamily/fontFamilyMono free-form,
+    // colorScheme enum).
+    const knownNames = new Set([
+      ...colorNames,
+      "radius",
+      "fontFamily",
+      "fontFamilyMono",
+      "colorScheme",
+    ]);
     const knownRadius = new Set(["none", "sm", "md", "lg", "xl"]);
+    const knownColorSchemes = new Set(["light", "dark", "auto"]);
     // Hex colors: #RGB, #RRGGBB, or #RRGGBBAA.  Everything else
     // ("blue" / "rgb(...)" / "var(--brand)") can be supported later
     // if a user asks; rejecting here keeps the surface tight
@@ -444,7 +482,7 @@ export class DddValidator {
       }
       seen.add(p.name);
       // (3) Per-property value validation.
-      if (p.name === "primary" || p.name === "neutral") {
+      if (colorNames.has(p.name)) {
         if (!hexColor.test(p.value)) {
           accept(
             "error",
@@ -460,11 +498,19 @@ export class DddValidator {
             { node: p, property: "value" },
           );
         }
+      } else if (p.name === "colorScheme") {
+        if (!knownColorSchemes.has(p.value)) {
+          accept(
+            "error",
+            `theme 'colorScheme' must be one of ${[...knownColorSchemes].join(" | ")}; got '${p.value}'.`,
+            { node: p, property: "value" },
+          );
+        }
       }
-      // fontFamily is a free-form string — pass-through to the
-      // Mantine theme.  No validation beyond "non-empty"; a typo'd
-      // family name silently falls through to the OS fallback at
-      // runtime, which is acceptable.
+      // fontFamily / fontFamilyMono are free-form strings —
+      // pass-through to the Mantine theme.  No validation beyond
+      // "non-empty"; a typo'd family name silently falls through
+      // to the OS fallback at runtime, which is acceptable.
     }
   }
 
@@ -903,7 +949,8 @@ export class DddValidator {
   private checkAggregate(agg: Aggregate, accept: ValidationAcceptor) {
     // Ensure unique part names within the aggregate
     const partNames = new Set<string>();
-    let displayField: Property | undefined;
+    let displayDerived: DerivedProp | undefined;
+    let inspectDerived: DerivedProp | undefined;
     for (const m of agg.members) {
       if (isEntityPart(m)) {
         if (partNames.has(m.name)) {
@@ -918,29 +965,48 @@ export class DddValidator {
       if (isContainment(m)) this.checkContainment(m, agg, accept);
       if (isInvariant(m)) this.checkInvariant(m, this.envForAggregate(agg), accept);
       if (isProperty(m) && m.check) this.checkPropertyCheck(m, this.envForAggregate(agg), accept);
-      if (isDerivedProp(m)) this.checkDerived(m, this.envForAggregate(agg), accept);
+      if (isDerivedProp(m)) {
+        this.checkDerived(m, this.envForAggregate(agg), accept);
+        // Reserved-name derived fields — `display` (user-facing label) and
+        // `inspect` (developer-facing debug form).  Both must be `string`;
+        // at most one of each per aggregate.  See plan
+        // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+        if (m.name === "display" || m.name === "inspect") {
+          const slot = m.name === "display" ? displayDerived : inspectDerived;
+          if (slot) {
+            accept(
+              "error",
+              `Aggregate '${agg.name}' declares multiple 'derived ${m.name}' fields; at most one is allowed.`,
+              { node: m, property: "name" },
+            );
+          } else if (m.name === "display") {
+            displayDerived = m;
+          } else {
+            inspectDerived = m;
+          }
+          const typeText = m.type?.base;
+          const isString = typeText && isPrimitiveType(typeText) && typeText.name === "string";
+          if (!isString) {
+            accept(
+              "error",
+              `Reserved 'derived ${m.name}' on aggregate '${agg.name}' must have type 'string'.`,
+              { node: m, property: "type", code: `loom.derived-${m.name}-not-string` },
+            );
+          }
+        }
+      }
       if (isFunctionDecl(m)) this.checkFunction(m, agg, undefined, accept);
       if (isOperation(m)) this.checkOperation(m, agg, accept);
-      if (isProperty(m) && m.display) {
-        // At most one display field per aggregate.  Type must be `string`
-        // (the React generator uses it as a Mantine <Select> option label).
-        if (displayField) {
-          accept(
-            "error",
-            `Aggregate '${agg.name}' declares multiple 'display' fields ('${displayField.name}' and '${m.name}'); at most one is allowed.`,
-            { node: m, property: "display" },
-          );
-        }
-        displayField = m;
-        const typeText = m.type?.base;
-        const isString = typeText && isPrimitiveType(typeText) && typeText.name === "string";
-        if (!isString) {
-          accept(
-            "error",
-            `Display field '${m.name}' on aggregate '${agg.name}' must have type 'string'.`,
-            { node: m, property: "display", code: "loom.display-not-string" },
-          );
-        }
+      if (isProperty(m) && m.access === "token" && m.type?.optional) {
+        // A `token` field is echoed by the client on every update so the
+        // server can identify the target / detect concurrency conflicts.
+        // A nullable token cannot serve that role — the wire contract
+        // would accept `null` and silently disable the check.
+        accept(
+          "error",
+          `Token field '${m.name}' on aggregate '${agg.name}' cannot be nullable; \`token\` requires a non-optional type.`,
+          { node: m, property: "access", code: "loom.token-nullable" },
+        );
       }
       const hasExtern = agg.members.some((x) => isOperation(x) && x.extern);
       if (isProperty(m) && m.provenanced && !hasExtern && !this.fieldIsWritten(agg, m.name)) {
@@ -990,7 +1056,19 @@ export class DddValidator {
       }
       if (isInvariant(m)) this.checkInvariant(m, this.envForValueObject(vo), accept);
       if (isProperty(m) && m.check) this.checkPropertyCheck(m, this.envForValueObject(vo), accept);
-      if (isDerivedProp(m)) this.checkDerived(m, this.envForValueObject(vo), accept);
+      if (isDerivedProp(m)) {
+        this.checkDerived(m, this.envForValueObject(vo), accept);
+        if (m.name === "display" || m.name === "inspect") {
+          // Reserved derived names are aggregate-only — VOs don't
+          // participate in `string(x)` lowering or host-language
+          // `ToString()`/`Inspect` emission.
+          accept(
+            "error",
+            `Reserved 'derived ${m.name}' is only allowed on aggregates, not value objects.`,
+            { node: m, property: "name", code: `loom.reserved-derived-on-vo` },
+          );
+        }
+      }
     }
   }
 
@@ -1142,6 +1220,103 @@ export class DddValidator {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Primitive conversion compatibility check.
+  //
+  // Walks every `PrimitiveConversion` AST node and rejects (source,
+  // target) pairs that aren't in the infallible vocabulary.  See
+  // `docs/language.md` (conversions section) for the full table.
+  //
+  // Infallible, admitted:
+  //   string ← int | long | decimal | money | bool
+  //   long   ← int
+  //   decimal ← int | long | money
+  //   money  ← int | long | decimal
+  // Anything else (string → numeric / datetime / bool; narrowing
+  // long→int / decimal→long; etc.) errors with "not supported yet"
+  // pointing at the source position.
+  //
+  // The same-type identity case (`string(stringValue)`, `money(
+  // moneyValue)`) is admitted as a no-op — useful as an explicit
+  // annotation when reading code.
+  // ---------------------------------------------------------------------------
+  private checkPrimitiveConversions(model: Model, accept: ValidationAcceptor): void {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (node.$type !== "PrimitiveConversion") continue;
+      this.checkSinglePrimitiveConversion(
+        node as import("./generated/ast.js").PrimitiveConversion,
+        accept,
+      );
+    }
+  }
+
+  private checkSinglePrimitiveConversion(
+    node: import("./generated/ast.js").PrimitiveConversion,
+    accept: ValidationAcceptor,
+  ): void {
+    const env = envForNode(node);
+    const valueType = typeOf(node.value, env);
+    // Cascade suppression: upstream resolution failure already
+    // reported elsewhere.
+    if (valueType.kind === "unknown") return;
+    // Grammar guarantees `target` is one of the admitted strings;
+    // null-guard for the langium AST's optional-prop typing.
+    const target = node.target;
+    if (!target) return;
+    // `string(x)` admits enum + `X id` in addition to primitives —
+    // every backend stringifies enum values to their case name and
+    // `X id` to its underlying primitive form.  The conversion
+    // vocabulary calls these "implicitly stringifiable" sources;
+    // they're also the set the `string + X` implicit-concat rule
+    // admits (see `arithmeticResult.isImplicitlyStringifiable`).
+    if (target === "string" && (valueType.kind === "enum" || valueType.kind === "id")) {
+      return;
+    }
+    // Aggregates with a `derived display: string` declared participate
+    // in `string(x)` — lowers to a member access on the display derived.
+    // Without one, the aggregate has no canonical string form and we
+    // reject (forces an explicit `derived display` decision).
+    if (target === "string" && valueType.kind === "aggregate") {
+      if (valueType.ref.members.some((m) => isDerivedProp(m) && m.name === "display")) {
+        return;
+      }
+      accept(
+        "error",
+        `Aggregate '${valueType.ref.name}' has no display form — ` +
+          `declare \`derived display: string = ...\` on '${valueType.ref.name}' ` +
+          `to enable \`string(${valueType.ref.name.toLowerCase()})\` and implicit ` +
+          `string concatenation.`,
+        { node, property: "value" },
+      );
+      return;
+    }
+    // Other domain-shaped sources (VO / entity / array) need a separate
+    // design — VO/entity stringification is deferred.
+    if (valueType.kind !== "primitive") {
+      accept(
+        "error",
+        `Cannot convert '${typeToString(valueType)}' to '${target}': ` +
+          `value objects, entities, and collections have no canonical string ` +
+          `form.  Reference a specific field (e.g. \`string(value.<field>)\`) ` +
+          `or wait for a future toString derivation.`,
+        { node, property: "value" },
+      );
+      return;
+    }
+    const source = valueType.name;
+    if (source === target) return; // identity no-op
+    if (isInfallibleConversion(source, target)) return;
+    accept(
+      "error",
+      `Cannot convert '${source}' to '${target}': not supported.  ` +
+        `Today's conversion vocabulary admits: string ← any primitive | enum | X id; ` +
+        `long ← int; decimal ← int | long | money; money ← int | long | decimal.  ` +
+        `Fallible parses (string → numeric / datetime / bool) and narrowing ` +
+        `(long → int, decimal → long) are deferred pending a failure-model decision.`,
+      { node },
+    );
+  }
+
   private checkTypeReferences(model: Model, accept: ValidationAcceptor): void {
     for (const node of AstUtils.streamAllContents(model)) {
       if (node.$type !== "NamedType") continue;
@@ -1200,6 +1375,97 @@ export class DddValidator {
           );
         }
       }
+    }
+  }
+
+  /** v2 hard cut: reject CallExpr forms that v2 replaces with BuilderCall.
+   *  Specifically, any `Name(args)` where `Name` resolves to a ValueObject
+   *  or EntityPart inside the enclosing context — those constructions must
+   *  use `Name { slot: value, ... }` syntax now. */
+  private checkLegacyConstructorCalls(model: Model, accept: ValidationAcceptor): void {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (node.$type !== "CallExpr") continue;
+      const call = node as import("./generated/ast.js").CallExpr;
+      const callee = call.callee;
+      if (callee.$type !== "NameRef") continue;
+      const name = (callee as import("./generated/ast.js").NameRef).name;
+      const ctx = AstUtils.getContainerOfType(call, isBoundedContext);
+      if (!ctx) continue;
+      for (const m of ctx.members) {
+        if (isValueObject(m) && m.name === name) {
+          accept(
+            "error",
+            `v2 syntax: construct '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
+            { node: call, code: "loom.legacy-vo-call" },
+          );
+          break;
+        }
+        if (isAggregate(m)) {
+          for (const inner of m.members) {
+            if (
+              inner.$type === "EntityPart" &&
+              (inner as import("./generated/ast.js").EntityPart).name === name
+            ) {
+              accept(
+                "error",
+                `v2 syntax: construct entity part '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
+                { node: call, code: "loom.legacy-part-call" },
+              );
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /** v2 BuilderCall type names are bare strings (no cross-reference) —
+   *  resolve them at validation time and reject unknown names with a
+   *  diagnostic listing the four admissible categories. */
+  private checkBuilderCallType(model: Model, accept: ValidationAcceptor): void {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (node.$type !== "BuilderCall") continue;
+      const bc = node as import("./generated/ast.js").BuilderCall;
+      const name = bc.type;
+      // 1. Walker primitive (stdlib).
+      if (isWalkerPrimitive(name)) continue;
+      // 2. VO / EntityPart in enclosing context.
+      const ctx = AstUtils.getContainerOfType(bc, isBoundedContext);
+      if (ctx) {
+        let resolved = false;
+        for (const m of ctx.members) {
+          if (isValueObject(m) && m.name === name) {
+            resolved = true;
+            break;
+          }
+          if (isAggregate(m)) {
+            for (const inner of m.members) {
+              if (
+                inner.$type === "EntityPart" &&
+                (inner as import("./generated/ast.js").EntityPart).name === name
+              ) {
+                resolved = true;
+                break;
+              }
+            }
+            if (resolved) break;
+          }
+        }
+        if (resolved) continue;
+      }
+      // 3. User-defined component in enclosing UI.
+      const ui = AstUtils.getContainerOfType(bc, (n): n is Ui => n.$type === "Ui");
+      if (ui) {
+        const userComp = ui.members.some(
+          (m) => m.$type === "Component" && (m as { name: string }).name === name,
+        );
+        if (userComp) continue;
+      }
+      accept(
+        "error",
+        `Unknown builder type '${name}'. Expected a ValueObject, EntityPart, user-defined component, or stdlib walker primitive (e.g., Stack, Form, Card).`,
+        { node: bc, property: "type", code: "loom.unknown-builder-type" },
+      );
     }
   }
 
@@ -1841,6 +2107,33 @@ export class DddValidator {
         }
       }
     }
+
+    // LayoutProp — v1 admits two preset values (`default`, `none`)
+    // and only on explicit user-written pages.  Scaffold-synthesised
+    // pages (Home / aggregate list / detail / etc.) reject the
+    // property pending v2's named-layout SystemMember, which makes
+    // `layout: AdminFrame` on a scaffold page meaningful.
+    const allowedLayoutValues = new Set(["default", "none"]);
+    const scaffolded = isScaffoldOriginPageBody(p);
+    for (const prop of p.props) {
+      if (prop.$type !== "LayoutProp") continue;
+      if (!allowedLayoutValues.has(prop.value)) {
+        accept(
+          "error",
+          `Unknown layout '${prop.value}' on page '${p.name}'.  Recognised values: ${[
+            ...allowedLayoutValues,
+          ].join(", ")}.`,
+          { node: prop, property: "value" },
+        );
+      }
+      if (scaffolded) {
+        accept(
+          "error",
+          `'layout' is not allowed on scaffold-synthesised pages in v1 (page '${p.name}').  Move the layout selector to an explicit page, or wait for v2's named-layout support.`,
+          { node: prop, property: "value" },
+        );
+      }
+    }
   }
 
   private checkMenuBlock(block: MenuBlock, ui: Ui, accept: ValidationAcceptor): void {
@@ -1992,9 +2285,56 @@ function pagePropDisplayName(typeName: string): string {
       return "body";
     case "PageMenuMeta":
       return "menu";
+    case "LayoutProp":
+      return "layout";
+    case "DescriptionProp":
+      return "description";
+    case "OgImageProp":
+      return "ogImage";
+    case "CanonicalProp":
+      return "canonical";
     default:
       return typeName;
   }
+}
+
+// Names of body-call expressions produced by the scaffold stdlib
+// (see `src/stdlib/scaffold/_pages.ts`).  Used by the layout
+// validator to refuse `layout:` on scaffold-synthesised pages in
+// v1 — the AST shape is the source of truth here because the
+// validator runs before IR lowering, and `inferPageOrigin`
+// (`src/ir/lower.ts:934`) is the lowering's same-shape mirror.
+const SCAFFOLD_BODY_CALL_NAMES = new Set([
+  "Home",
+  "WorkflowsIndex",
+  "ViewsIndex",
+  "scaffoldList",
+  "scaffoldNewForm",
+  "scaffoldWorkflowForm",
+  "scaffoldViewList",
+]);
+
+function isScaffoldOriginPageBody(p: Page): boolean {
+  const bodyProp = p.props.find((prop) => prop.$type === "BodyProp");
+  if (!bodyProp || bodyProp.$type !== "BodyProp") return false;
+  const expr = bodyProp.expr;
+  if (!expr || expr.$type !== "CallExpr") return false;
+  const callee = expr.callee;
+  if (!callee || callee.$type !== "NameRef") return false;
+  if (SCAFFOLD_BODY_CALL_NAMES.has(callee.name)) return true;
+  // Aggregate-detail pages are emitted as `Stack(scaffoldDetails(of:),
+  // …)` — recognise by scanning the Stack's args for a
+  // `scaffoldDetails` call (matches the lowering-side discriminator
+  // in `inferPageOrigin`).
+  if (callee.name === "Stack") {
+    for (const arg of expr.args) {
+      const v = arg.value;
+      if (!v || v.$type !== "CallExpr") continue;
+      const inner = v.callee;
+      if (inner && inner.$type === "NameRef" && inner.name === "scaffoldDetails") return true;
+    }
+  }
+  return false;
 }
 
 function _singular(selector: string): string {
@@ -2016,6 +2356,45 @@ function _singular(selector: string): string {
 
 function pathString(lv: LValue): string {
   return [lv.head, ...lv.tail].join(".");
+}
+
+/**
+ * Allowed (source, target) primitive-conversion pairs.  Each pair is
+ * infallible at runtime — no parse failures, no precision overflow.
+ * Identity (source === target) is admitted separately by the caller
+ * as a no-op.
+ *
+ * Pairs:
+ *   string ← int | long | decimal | money | bool
+ *   long   ← int                              (widening)
+ *   decimal ← int | long                      (widening)
+ *   decimal ← money                           (lossy projection)
+ *   money  ← int | long | decimal             (widening)
+ *
+ * Notably absent:
+ *   - string → anything else (parse-fallible; needs `T?`/throw design)
+ *   - narrowing (long→int, decimal→long, money→{int,long})
+ *   - datetime / guid / enum conversions (separate design — backend-
+ *     specific format choices)
+ */
+function isInfallibleConversion(source: string, target: string): boolean {
+  if (target === "string") {
+    return (
+      source === "int" ||
+      source === "long" ||
+      source === "decimal" ||
+      source === "money" ||
+      source === "bool"
+    );
+  }
+  if (target === "long") return source === "int";
+  if (target === "decimal") {
+    return source === "int" || source === "long" || source === "money";
+  }
+  if (target === "money") {
+    return source === "int" || source === "long" || source === "decimal";
+  }
+  return false;
 }
 
 /**

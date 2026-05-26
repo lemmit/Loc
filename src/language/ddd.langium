@@ -98,7 +98,7 @@ Module:
 // in one module merge their declarations.
 PermissionsBlock:
     'permissions' '{'
-        (decls+=PermissionDecl (',' decls+=PermissionDecl)* ','?)?
+        (decls+=PermissionDecl (','? decls+=PermissionDecl)* ','?)?
     '}';
 
 PermissionDecl:
@@ -134,6 +134,11 @@ Deployable:
         ('port' ':' port=INT ','?)?
         ('auth' ':' auth=AuthMode ','?)?
         ('design' ':' design=DesignPack ','?)?
+        // Optional favicon path — relative to the .ddd source file.
+        // The React generator copies the referenced file into
+        // `public/favicon.<ext>` and the index.html shell emits a
+        // `<link rel="icon" href="/favicon.<ext>">`.
+        ('favicon' ':' favicon=STRING ','?)?
     '}';
 
 // Slice 11.26 — frontend composition.  `ui: WebApp { Sales: salesApi
@@ -306,7 +311,8 @@ Page:
     '}';
 
 PageProp:
-      RouteProp | TitleProp | RequiresProp | StateBlock | BodyProp | PageMenuMeta;
+      RouteProp | TitleProp | RequiresProp | StateBlock | BodyProp | PageMenuMeta | LayoutProp
+    | DescriptionProp | OgImageProp | CanonicalProp;
 
 RouteProp:
     'route' ':' value=STRING;
@@ -320,6 +326,29 @@ RequiresProp:
 BodyProp:
     'body' ':' expr=Expression;
 
+// Page metadata props — projected into the generated `index.html`
+// shell as standard SEO / social-graph meta tags.  All three are
+// plain string literals (not Expression) — static metadata, no
+// state interpolation.  Validator enforces uniqueness; lowering
+// stores them under `PageIR.metadata`.
+DescriptionProp:
+    'description' ':' value=STRING;
+
+OgImageProp:
+    'ogImage' ':' value=STRING;
+
+CanonicalProp:
+    'canonical' ':' value=STRING;
+
+// Per-page layout selector.  v1 admits two preset values
+// (`default`, `none`) and is gated by the validator; the bare `ID`
+// shape (rather than a hard keyword enum) reserves the seam for v2,
+// where this position becomes a cross-reference to a named `layout`
+// SystemMember (`layout AdminFrame { ... }`).  Default behaviour
+// (unset) preserves the existing app-shell chrome.
+LayoutProp:
+    'layout' ':' value=ID;
+
 // Per-page sidebar metadata.  Read by the menu emitter (Slice 6) when
 // no explicit `ui`-level `menu { ... }` block is declared.  Recognised
 // keys are `section` (string), `label` (string), `order` (int),
@@ -330,7 +359,7 @@ BodyProp:
 // `hidden` in domain aggregates (e.g. `event LineAdded { order: Id<Order> }`).
 PageMenuMeta:
     'menu' '{'
-        (entries+=MenuMetaEntry (',' entries+=MenuMetaEntry)* ','?)?
+        (entries+=MenuMetaEntry (','? entries+=MenuMetaEntry)* ','?)?
     '}';
 
 MenuMetaEntry:
@@ -386,7 +415,7 @@ MenuBlock:
 
 MenuSection:
     'section' label=STRING '{'
-        (links+=MenuLink (',' links+=MenuLink)* ','?)?
+        (links+=MenuLink (','? links+=MenuLink)* ','?)?
     '}';
 
 // Page links use a real Langium cross-reference now that scaffold
@@ -397,7 +426,7 @@ MenuSection:
 // IDE affordances (autocomplete, go-to-def, find-refs, rename)
 // follow.
 MenuLink:
-      'link' page=[Page:LooseName] ('{' (props+=MenuLinkProp (',' props+=MenuLinkProp)* ','?)? '}')?
+      'link' page=[Page:LooseName] ('{' (props+=MenuLinkProp (','? props+=MenuLinkProp)* ','?)? '}')?
     | 'link' externalLabel=STRING '->' externalUrl=STRING;
 
 // Same approach as MenuMetaEntry — `LooseName` + validator-side
@@ -502,7 +531,7 @@ ContextMember:
 
 EnumDecl:
     'enum' name=ID '{'
-        values+=EnumValue (',' values+=EnumValue)* ','?
+        values+=EnumValue (','? values+=EnumValue)* ','?
     '}';
 
 EnumValue:
@@ -636,7 +665,7 @@ EntityPartMember:
 
 EventDecl:
     'event' name=ID '{'
-        (fields+=Property (',' fields+=Property)* ','?)?
+        (fields+=Property (','? fields+=Property)* ','?)?
     '}';
 
 Repository:
@@ -702,14 +731,40 @@ BindEntry:
 // Members
 // ---------------------------------------------------------------------------
 
-// `money` admitted as a property name so pre-existing files that
-// named a field `money` (e.g. `pokemon-world.ddd`) keep parsing —
-// adding `money` to the grammar in #498 made it a hard keyword
-// which `name=ID` couldn't admit.  Treat it as a soft keyword in
-// identifier positions everywhere; the only hard-keyword positions
-// remain `PrimitiveType` and `MoneyLit`.
+// Field access modifier — single optional keyword controlling the
+// field's role in input DTOs, update wire shape, and view/API read
+// exposure.  See `src/ir/enrichments.ts` for resolution rules and
+// `FieldIR.access` in `src/ir/loom-ir.ts` for downstream semantics.
+//
+//   editable (default) — client read+write
+//   immutable          — client write on create only
+//   managed            — server-managed; client read-only
+//   token              — server-managed; echoed by client on update (id, version)
+//   internal           — views may read; not exposed via API; no client input
+//   secret             — client write-only; never disclosed in any read
+//
+// All five names are also admitted as identifiers in property/parameter
+// /name-ref positions via `Property.name`, `LooseName`, `NameRefIdent`
+// (same soft-keyword treatment as `money`) so this addition does not
+// break user code that already uses `secret` etc. as a field name.
+FieldAccess returns string:
+    'immutable' | 'managed' | 'token' | 'internal' | 'secret';
+
+// `money` and the five field-access keywords are admitted as property
+// names so pre-existing files that named a field `money` / `secret` /
+// etc. keep parsing.  Hard-keyword positions for `money` remain
+// `PrimitiveType` and `MoneyLit`; for the access modifiers they remain
+// the `FieldAccess` slot below.  See `LooseName` and `NameRefIdent`
+// for the same admission in parameter / expression positions.
 Property:
-    name=(ID | 'money') ':' type=TypeRef (display?='display')? (provenanced?='provenanced')? sensitivity=SensitivityClause? ('check' check=Expression)?;
+    name=(ID | 'money' | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
+        // Phase 2 page-metadata + favicon keywords — soft in property position.
+        | 'description' | 'ogImage' | 'canonical' | 'favicon')
+    ':' type=TypeRef
+    (provenanced?='provenanced')?
+    sensitivity=SensitivityClause?
+    (access=FieldAccess)?
+    ('check' check=Expression)?;
 
 // Information-flow sensitivity tag(s) on a property.  Tags are bare
 // identifiers, opaque to the compiler — `pii`, `phi`, `cred` are
@@ -772,7 +827,17 @@ LooseName returns string:
     // identifier in field / parameter / property positions; without
     // this, adding `money` to the grammar (#498) silently broke any
     // file that named a field `money` (e.g. `pokemon-world.ddd`).
-    | 'money';
+    | 'money'
+    // Field-access modifier keywords (`FieldAccess` rule) are likewise
+    // soft.  They only act as hard keywords in the optional `access`
+    // slot of `Property`; everywhere else (parameter names, field
+    // names, property bindings) they're admitted as identifiers so
+    // adding them in this PR does not break any user code.
+    | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
+    // Phase 2 page-metadata + favicon keywords.  Admitted as soft so
+    // user code can still name fields `description`, `ogImage`,
+    // `canonical`, `favicon`.
+    | 'description' | 'ogImage' | 'canonical' | 'favicon';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -950,26 +1015,42 @@ Lambda:
 
 PrimaryExpr infers Expression:
       Lambda
-    | NewExpr
+    | BuilderCall
     | ObjectLit
     | ParenExpr
     | LiteralExpr
     | MoneyLit
+    | PrimitiveConversion
     | NowExpr
     | ThisRef
     | IdRef
     | NameRef;
 
-NewExpr:
-    'new' partType=[EntityPart:ID] '{'
-        (fields+=ObjectFieldInit (',' fields+=ObjectFieldInit)* ','?)?
+// Universal construction form (Loom v2).  Replaces `new Part { ... }`
+// and the walker-call form (`Form(state: ..., body: ...)`).  The type
+// name resolves at lowering time:
+//   - ValueObject / EntityPart  → value construction, runs invariants
+//   - EventDecl                 → event construction (only as `emit` operand)
+//   - Component (stdlib walker primitive or user component) → UI element
+// Entries are `(name ':')? expr` so named slots and bare positional
+// children (Stack { Heading{...}, Button{...} }) coexist.  Explicit
+// alternation (not optional `(name ':')?`) is required for stable
+// LL(*) selection on bare-positional entries whose token is a soft
+// keyword (e.g. `Card { title, Slot {} }`).
+BuilderCall:
+    type=ID '{'
+        (entries+=BuilderEntry (',' entries+=BuilderEntry)* ','?)?
     '}';
+
+BuilderEntry:
+      name=LooseName ':' value=Expression
+    | value=Expression;
 
 // Bare object literal — used inside e2e test bodies to build request
 // payloads (`api.orders.create({ customerId: "..." })`).  Distinct
-// from `new PartName {…}`: no aggregate / part type binding, no
-// invariant checks; it is a structural literal that the e2e renderer
-// hands straight to JSON.stringify.
+// from a typed `BuilderCall`: no type binding, no invariant checks; it
+// is a structural literal that the e2e renderer hands straight to
+// JSON.stringify.
 ObjectLit:
     '{' (fields+=ObjectFieldInit (',' fields+=ObjectFieldInit)* ','?)? '}';
 
@@ -993,6 +1074,29 @@ LiteralExpr:
 // string without loss.
 MoneyLit:
     {infer MoneyLit} 'money' '(' value=STRING ')';
+
+// Loom-style explicit conversion vocabulary — `<target>(value)` where
+// `target` is a primitive type and `value` is the expression to
+// convert.  Used for things the strict binary validator now requires
+// to be explicit: `"Hello " + string(age)` instead of bare
+// `"Hello " + age`, `money(decimalField)` to bridge a typed decimal
+// into money, `decimal(moneyValue)` for the lossy projection.
+//
+// Targets in this PR (infallible only):
+//   string  ← {int, long, decimal, money, bool}
+//   long    ← int
+//   decimal ← {int, long, money}
+//   money   ← {int, long, decimal}
+//
+// Notably missing — fallible parses (`int("42")`, `decimal("3.14")`,
+// `datetime("...")`, …) need a `T?`-or-throw decision before the
+// vocabulary settles; deferred.
+//
+// MoneyLit comes first in PrimaryExpr's alternative list so
+// `money("10.50")` (string-arg literal) wins the parse; PrimitiveConversion
+// catches the expression-arg form `money(someDecimal)`.
+PrimitiveConversion:
+    {infer PrimitiveConversion} target=('string' | 'long' | 'decimal' | 'money') '(' value=Expression ')';
 
 NowExpr:
     {infer NowExpr} 'now' '(' ')';
@@ -1029,7 +1133,34 @@ NameRefIdent returns string:
     // form.  MoneyLit comes before NameRef in PrimaryExpr, so the
     // parser picks the literal form whenever `(` follows and falls
     // back to NameRef otherwise.
-    ID | 'permissions' | 'ui' | 'api' | 'money';
+    // v2 expanded set: every soft keyword that LooseName admits is also
+    // admissible as a bare NameRef in expression position.  This lets a
+    // BuilderCall's bare-positional entry (`Card { title, Slot {} }`) parse
+    // when the entry happens to be a NameRef whose token is a soft keyword
+    // — without this, the parser commits to the named-slot alternative
+    // (`name=LooseName ':'`) and fails on the missing `:`.
+    //
+    // Field-access modifier keywords (`FieldAccess` rule) are admitted
+    // here so `let s = secret`, `currentUser.token`, etc. keep working
+    // even though `secret`/`token`/etc. are reserved in the access slot
+    // of a `Property` declaration.  Same soft-keyword treatment `money`
+    // gets above.
+    //
+    // `id` is intentionally excluded: it's the magic identifier handled by
+    // IdRef and would create an ambiguity with IdRef inside PrimaryExpr.
+    ID | 'permissions' | 'ui' | 'api' | 'money'
+       | 'contains' | 'page' | 'component' | 'state' | 'menu'
+       | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
+       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
+       | 'design' | 'targets' | 'bind'
+       | 'primary' | 'cache' | 'search' | 'events' | 'bi'
+       | 'filter' | 'stamp' | 'implements'
+       | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
+       // Phase 2 page-metadata + favicon keywords admitted as NameRef
+       // so expressions can read a field named `description`,
+       // `ogImage`, etc. (e.g. `description != null` in a derived
+       // property — see showcase.ddd).
+       | 'description' | 'ogImage' | 'canonical' | 'favicon';
 
 // ---------------------------------------------------------------------------
 // Terminals

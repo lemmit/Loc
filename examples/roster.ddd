@@ -13,14 +13,15 @@
 context Roster {
 
   aggregate Pokemon {
-    species: string display
+    species: string
     level: int
     invariant level >= 1
     invariant level <= 100
+    derived display: string = species
   }
 
   aggregate Trainer {
-    name: string display
+    name: string
     party: Pokemon id[]
     caught: Pokemon id[]
     invariant party.count <= 6
@@ -34,6 +35,7 @@ context Roster {
       precondition party.count > 0
       party -= pokemon
     }
+    derived display: string = name
   }
 
   repository Trainers for Trainer {

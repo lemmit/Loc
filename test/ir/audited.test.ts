@@ -41,7 +41,8 @@ system S {
   module M {
     context C {
       aggregate Cart ids guid {
-        label: string display
+        label: string
+        derived display: string = label
         status: int
         operation cancel(reason: int) audited {
           status := reason

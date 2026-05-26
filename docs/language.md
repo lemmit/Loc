@@ -211,9 +211,15 @@ aggregate Trainer {
 ```
 
 No grammar keyword switches it on — any aggregate field whose type is
-`X id[]` is a reference collection.  Semantically it is an ordered set
-of references: the same target appears at most once per owner, and the
-collection's order is preserved across a persistence round-trip.
+`X id[]` is a reference collection.  **Semantically it is a set of
+references**: the same target appears at most once per owner (the join
+table's composite `(owner_id, target_id)` primary key enforces this),
+and **iteration order is not part of the contract** — different
+backends may return the list in different orders, even across reads
+of the same row.  If a position is part of the domain (e.g. a battle
+slot number where slot 1 attacks first), model it as a separate
+ordinal field on a dedicated child aggregate rather than relying on
+list order.
 
 Mutate the collection from operations with `+=` / `-=`:
 
@@ -240,11 +246,13 @@ Inside an aggregate or an `entity` part:
 
 | Form | Notes |
 | --- | --- |
-| `name: TypeRef [display] [provenanced] [check Expr]` | Property, with optional modifiers (in this order). `display` marks the human-readable label field; `provenanced` records assignment lineage (below); `check Expr` is a per-field validation predicate. |
+| `name: TypeRef [provenanced] [sensitive(tags)] [check Expr]` | Property, with optional modifiers. `provenanced` records assignment lineage (below); `sensitive(...)` tags the field for log-redaction / inspect; `check Expr` is a per-field validation predicate. |
 | `contains name: PartName[]` | Containment of a part declared within the same aggregate; collection. |
 | `contains name: PartName` | Containment, single (required). |
 | `contains name: PartName?` | Containment, single (optional) — the part may be absent at runtime; serialised as a nullable wire field.  `[]?` is rejected: an empty collection already encodes absence. |
 | `derived name: TypeRef = Expression` | Computed read-only property. |
+| `derived display: string = Expression` | **Reserved** — declares the aggregate's user-facing label.  When present, `string(aggregate)` and implicit `"x " + aggregate` compile to a member access on this derived; React Select pickers use it for option text.  Without it, those expressions are compile errors. |
+| `derived inspect: string = Expression` | **Reserved** — declares the aggregate's developer-facing debug form.  Auto-generated when omitted (structural form, sensitive fields shown as `<redacted>`).  Backends emit it as `ToString()` / `[util.inspect.custom]` / `Inspect` so debugger watches, exceptions, and logger output get a useful representation. |
 | `invariant Expression [when Expression]` | `bool` predicate; checked after every mutation. Optional `when` is a guard. |
 | `function name(params): TypeRef = Expression` | Pure helper; callable from any expression in the same aggregate. |
 | `operation name(params) { … }` | Public mutating method (root only). |
@@ -373,8 +381,8 @@ Pragmatic core, similar to a subset of TypeScript / C# expressions.
 | `a && b`, `a \|\| b` | Logical. |
 | `cond ? a : b` | Ternary. |
 | `x => expr` | Lambda (only valid as a collection-op argument). |
-| `new PartName { field: expr, … }` | Construct a contained part; `id` and parent `parentId` are auto-injected. |
-| `Money(amount, currency)` | Value-object constructor. |
+| `PartName { field: expr, … }` | Construct a contained part; `id` and parent `parentId` are auto-injected. |
+| `Money { amount, currency }` | Value-object constructor. |
 
 ### Collection operators
 
@@ -460,13 +468,13 @@ Each aggregate may declare zero or more `test` blocks at the root level:
 
 ```ddd
 test "money literal builds" {
-    let m = Money(10.5, "USD")
+    let m = Money { 10.5, "USD" }
     expect m.amount == 10.5
     expect m.currency == "USD"
 }
 
 test "negative money rejected" {
-    expectThrows Money(-1.0, "USD")
+    expectThrows Money { -1.0, "USD" }
 }
 ```
 
@@ -651,7 +659,7 @@ context Sales {
         contains lines: OrderLine[]
 
         derived total: Money =
-            Money(lines.sum(l => l.subtotal.amount), "USD")
+            Money { lines.sum(l => l.subtotal.amount), "USD" }
 
         invariant lines.count > 0 when status == Confirmed
 
@@ -660,7 +668,7 @@ context Sales {
         operation addLine(productId: Product id, qty: int, price: Money) {
             precondition isMutable()
             precondition qty > 0
-            lines += new OrderLine {
+            lines += OrderLine {
                 productId: productId, quantity: qty, unitPrice: price
             }
         }
@@ -677,12 +685,12 @@ context Sales {
             quantity: int
             unitPrice: Money
             derived subtotal: Money =
-                Money(unitPrice.amount * quantity, unitPrice.currency)
+                Money { unitPrice.amount * quantity, unitPrice.currency }
             invariant quantity > 0
         }
 
         test "money literal builds" {
-            let m = Money(10.5, "USD")
+            let m = Money { 10.5, "USD" }
             expect m.amount == 10.5
             expect m.currency == "USD"
         }

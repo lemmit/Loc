@@ -315,6 +315,14 @@ function printPageProp(node: PageProp): string {
         "menu",
         node.entries.map((e) => `${e.name}: ${printExpr(e.value)}`),
       );
+    case "LayoutProp":
+      return `layout: ${node.value}`;
+    case "DescriptionProp":
+      return `description: ${quote(node.value)}`;
+    case "OgImageProp":
+      return `ogImage: ${quote(node.value)}`;
+    case "CanonicalProp":
+      return `canonical: ${quote(node.value)}`;
     default: {
       const exhaustive: never = node;
       throw new Error(`printPageProp: unhandled ${(exhaustive as { $type: string }).$type}`);
@@ -495,10 +503,14 @@ function printBindEntry(node: BindEntry): string {
 }
 
 function printProperty(node: Property): string {
-  const display = node.display ? " display" : "";
   const provenanced = node.provenanced ? " provenanced" : "";
+  const sensitivity =
+    node.sensitivity && node.sensitivity.tags.length > 0
+      ? ` sensitive(${node.sensitivity.tags.join(", ")})`
+      : "";
+  const access = node.access ? ` ${node.access}` : "";
   const check = node.check ? ` check ${printExpr(node.check)}` : "";
-  return `${node.name}: ${printTypeRef(node.type)}${display}${provenanced}${check}`;
+  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${sensitivity}${access}${check}`;
 }
 
 function printContainment(node: Containment): string {

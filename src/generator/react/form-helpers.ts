@@ -55,7 +55,7 @@ export function needsController(
     if (inner.kind === "enum") return true;
     if (inner.kind === "id") {
       const target = aggregatesByName.get(inner.targetName);
-      return !!target?.fields.some((f) => f.display);
+      return !!target?.displayDerived;
     }
     if (inner.kind === "valueobject") {
       const vo = ctx.valueObjects.find((v) => v.name === inner.name);

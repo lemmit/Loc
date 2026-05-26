@@ -284,6 +284,27 @@ function renderExpr(expr: ExprIR, ctx: WalkContext): string {
       return renderBinary(expr, ctx);
     case "ternary":
       return `if ${renderExpr(expr.cond, ctx)}, do: ${renderExpr(expr.then, ctx)}, else: ${renderExpr(expr.otherwise, ctx)}`;
+    case "convert": {
+      // Phoenix HEEx conversion — mirror the renderExpr emit in
+      // `phoenix-live-view/render-expr.ts`.  HEEx pages embed Elixir
+      // expressions verbatim inside `<%= … %>`, so the same Elixir
+      // idioms apply (Decimal.to_string for money, to_string for
+      // primitives, Decimal.new for the inverse).
+      const v = renderExpr(expr.value, ctx);
+      if (expr.target === "string") {
+        if (expr.from === "money") return `Decimal.to_string(${v})`;
+        return `to_string(${v})`;
+      }
+      if (expr.target === "long" || expr.target === "decimal") {
+        if (expr.from === "money") return `Decimal.to_float(${v})`;
+        return v;
+      }
+      if (expr.target === "money") {
+        if (expr.from === "money") return v;
+        return `Decimal.new(${v})`;
+      }
+      return v;
+    }
     case "match":
       return renderMatch(expr, ctx);
   }
@@ -464,7 +485,9 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   if (expr.name === "Breadcrumbs") return renderBreadcrumbs(expr, ctx);
   if (expr.name === "Anchor") return renderAnchor(expr, ctx);
   if (expr.name === "Modal") return renderModal(expr, ctx);
-  if (expr.name === "Form") return renderForm(expr, ctx);
+  if (expr.name === "CreateForm" || expr.name === "OperationForm" || expr.name === "WorkflowForm") {
+    return renderForm(expr, ctx);
+  }
   if (expr.name === "Table") return renderTable(expr, ctx);
   if (expr.name === "QueryView") return renderQueryView(expr, ctx);
   if (expr.name === "KeyValueRow") return renderKeyValueRow(expr, ctx);
@@ -770,7 +793,7 @@ function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
     }
   }
   const formChild = positional.find(
-    (c): c is Extract<ExprIR, { kind: "call" }> => c.kind === "call" && c.name === "Form",
+    (c): c is Extract<ExprIR, { kind: "call" }> => c.kind === "call" && c.name === "OperationForm",
   );
   // The op-form names its operation via one of two shapes:
   //
@@ -1364,6 +1387,11 @@ function renderPrimitive(
     }
   }
 
+  // `style: { ... }` escape hatch — see styleIrToHeex.  Pushed first
+  // so it lands before any other attributes for predictable output.
+  const styleHeexAttr = styleIrToHeex(expr);
+  if (styleHeexAttr) namedAttrs.unshift(styleHeexAttr);
+
   // Handle Heading specially: first positional is text, optional
   // `level:` attribute.
   if (spec.tag === ".header") {
@@ -1386,6 +1414,26 @@ function renderPrimitive(
   return `<${spec.tag}${attrs}>\n${indent(childrenHeex, 2)}\n</${spec.tag}>`;
 }
 
+/** Build a `style="..."` HEEx attribute from a call's `style` IR.
+ *  Returns undefined when the call carries no style field.  Keys are
+ *  emitted verbatim (kebab-case is the HTML CSS spelling).  String-
+ *  literal values land as raw CSS values; non-literal values are
+ *  passed through as Elixir interpolation (`<%= … %>`) — but for v1
+ *  we keep the common path (string literals) static-safe.  Special
+ *  characters are HTML-escaped so the attribute stays well-formed. */
+function styleIrToHeex(expr: Extract<ExprIR, { kind: "call" }>): string | undefined {
+  if (!expr.style || expr.style.entries.length === 0) return undefined;
+  const parts = expr.style.entries.map(({ key, value }) => {
+    let v: string;
+    if (value.kind === "literal" && value.lit === "string") v = value.value;
+    else if (value.kind === "ref") v = `<%= ${value.name} %>`;
+    else v = "";
+    return `${key}: ${v}`;
+  });
+  const css = parts.join("; ").replace(/"/g, "&quot;");
+  return `style="${css}"`;
+}
+
 /** Returns true for calls that produce raw HEEx markup (not Elixir
  *  expressions) — these should NOT be wrapped in `<%= %>`. */
 function isHEExCall(name: string): boolean {
@@ -1394,7 +1442,9 @@ function isHEExCall(name: string): boolean {
     name === "Breadcrumbs" ||
     name === "Anchor" ||
     name === "Modal" ||
-    name === "Form" ||
+    name === "CreateForm" ||
+    name === "OperationForm" ||
+    name === "WorkflowForm" ||
     name === "Table" ||
     name === "QueryView" ||
     name === "KeyValueRow" ||

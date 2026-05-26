@@ -249,6 +249,28 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
       return `({ ${e.fields.map((f) => `${f.name}: ${renderE2EExpr(f.value, ctx)}`).join(", ")} })`;
     case "object":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderE2EExpr(f.value, ctx)}`).join(", ")} })`;
+    case "convert": {
+      // Same TS coercion idioms as the domain renderer
+      // (`generator/typescript/render-expr.ts`'s renderTsConvert).
+      // E2E test bodies that build payloads — `applyDiscount({ amount:
+      // money("50.00") })` etc. — get the same per-(from, target)
+      // emission so the request shape matches what the route's Zod
+      // schema parses.
+      const v = renderE2EExpr(e.value, ctx);
+      if (e.target === "string") {
+        if (e.from === "money") return `${v}.toString()`;
+        return `String(${v})`;
+      }
+      if (e.target === "long" || e.target === "decimal") {
+        if (e.from === "money") return `${v}.toNumber()`;
+        return v;
+      }
+      if (e.target === "money") {
+        if (e.from === "money") return v;
+        return `new Decimal(${v})`;
+      }
+      return v;
+    }
     case "match": {
       // Lower a match expression to a chained ternary.  E2E
       // test bodies are unlikely to use match in v0, but the IR can

@@ -7,6 +7,7 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
+import { forApiRead } from "../../ir/wire-projection.js";
 import { upperFirst } from "../../util/naming.js";
 import { renderCsType } from "./render-expr.js";
 
@@ -210,6 +211,9 @@ export function domainToRequestExpr(domainExpr: string, t: TypeIR, ctx: BoundedC
 function csIsValueType(t: TypeIR): boolean {
   switch (t.kind) {
     case "primitive":
+      // `string` is the only reference-type primitive — others (int, long,
+      // decimal, bool, datetime, guid, money) lower to value types.
+      return t.name !== "string";
     case "id":
     case "enum":
       return true;
@@ -231,8 +235,9 @@ export function projectEntityExpr(
   // `enrichLoomModel` (src/ir/enrichments.ts).  Each wire field
   // maps to one positional argument on `new <Ent>Response(...)`,
   // in the same order both response Zod schemas (Hono / React)
-  // emit.
-  const fields = wireShapeFor(entity);
+  // emit.  `forApiRead` strips `internal` and `secret` fields so
+  // the projected response shape matches the DTO record's params.
+  const fields = forApiRead(wireShapeFor(entity));
   const args: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
@@ -264,7 +269,9 @@ export function entityResponseParams(part: EntityPartIR, ctx: BoundedContextIR):
 }
 
 function responseRecordParams(ent: AggregateIR | EntityPartIR, ctx: BoundedContextIR): string {
-  const fields = wireShapeFor(ent);
+  // Drop `internal` / `secret` fields so the C# record's param list
+  // matches what `projectEntityExpr` actually projects.
+  const fields = forApiRead(wireShapeFor(ent));
   const idValueType = isPart(ent) ? ent.parentIdValueType : ent.idValueType;
   const parts: string[] = [];
   for (const wf of fields) {

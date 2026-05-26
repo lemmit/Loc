@@ -31,7 +31,7 @@ describe("id-link & optional-containment syntax", () => {
     const doc = await helper(
       `
       context T {
-        aggregate Customer { name: string display }
+        aggregate Customer { name: string  derived display: string = name }
         aggregate Order {
           customerId: Customer id
           relatedIds: Customer id[]
@@ -128,7 +128,7 @@ describe("parsing & validation of examples", () => {
       `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
-        aggregate Customer { name: string display }
+        aggregate Customer { name: string  derived display: string = name }
         aggregate Order {
           customerId: Customer id
           status: OrderStatus
@@ -394,7 +394,7 @@ describe("page metamodel — grammar smoke tests", () => {
             state {
               filter: string = ""
             }
-            body: List(of: Order)
+            body: List { of: Order }
             menu { section: "Sales", label: "Orders" }
           }
         }
@@ -408,7 +408,7 @@ describe("page metamodel — grammar smoke tests", () => {
       system Acme {
         ui WebApp {
           component OrderPanel(order: Order) {
-            body: Stack(items: [order.id, order.status])
+            body: Stack { items: [order.id, order.status] }
           }
         }
       }
@@ -416,11 +416,44 @@ describe("page metamodel — grammar smoke tests", () => {
     expect(errors).toEqual([]);
   });
 
+  it("parses a `page` with a `layout:` property (preset names)", async () => {
+    // Grammar admits any ID at the layout position; the validator
+    // restricts the v1 value set.  Both presets parse without error
+    // (and the AST exposes the LayoutProp under `props`).
+    const { errors, model } = await parseSnippet(`
+      system Acme {
+        ui WebApp {
+          page Kiosk {
+            route: "/kiosk"
+            layout: none
+            body: Heading("Kiosk")
+          }
+          page Dashboard {
+            route: "/dash"
+            layout: default
+            body: Heading("Dash")
+          }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+    const sys = model.members.find((m) => m.$type === "System")!;
+    const ui = sys.members.find((m) => m.$type === "Ui")!;
+    const pages = ui.members.filter((m) => m.$type === "Page");
+    const kiosk = pages.find((p) => p.name === "Kiosk")!;
+    const layoutProp = kiosk.props.find((p) => p.$type === "LayoutProp")!;
+    expect(layoutProp.$type).toBe("LayoutProp");
+    expect((layoutProp as { value: string }).value).toBe("none");
+    const dash = pages.find((p) => p.name === "Dashboard")!;
+    const dashLayout = dash.props.find((p) => p.$type === "LayoutProp")!;
+    expect((dashLayout as { value: string }).value).toBe("default");
+  });
+
   it("parses a `menu` block with internal and external links", async () => {
     const { errors } = await parseSnippet(`
       system Acme {
         ui WebApp {
-          page Home { route: "/", body: Heading("hi") }
+          page Home { route: "/", body: Heading { "hi" } }
           menu {
             section "Main" {
               link Home { label: "Home" }
@@ -440,8 +473,8 @@ describe("page metamodel — grammar smoke tests", () => {
           page X {
             route: "/x"
             body: match {
-              true => List(of: Order)
-              else => Empty()
+              true => List { of: Order }
+              else => Empty {}
             }
           }
         }

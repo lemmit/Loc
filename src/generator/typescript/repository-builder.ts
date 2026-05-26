@@ -10,6 +10,7 @@ import type {
   TypeIR,
 } from "../../ir/loom-ir.js";
 import { aggregateUsesMoney, findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
+import { forApiRead } from "../../ir/wire-projection.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
@@ -228,8 +229,10 @@ function wireProjectionEntity(
   // src/ir/enrichments.ts).  This
   // serializer feeds repo.toWire(); its output's keys must line up
   // with the route's response Zod schema and the .NET DTO.  Single
-  // canonical walk populated by `enrichLoomModel`.
-  const fields = wireShapeFor(ent);
+  // canonical walk populated by `enrichLoomModel`.  `forApiRead`
+  // strips `internal` and `secret` fields so the wire output matches
+  // the response schema's field set.
+  const fields = forApiRead(wireShapeFor(ent));
   const parts: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
@@ -425,9 +428,9 @@ function saveTxBody(agg: AggregateIR, ctx: BoundedContextIR, emitTrace: boolean)
   });
   // Diff-sync each reference collection's join table: delete pairs the
   // aggregate no longer holds, insert the new ones (idempotent via the
-  // composite PK).  Ordered: keep the field's array order so the
-  // round-trip is stable; the ordinal column carries the position and
-  // is updated on reorder.
+  // composite PK).  Set semantics — the wire contract for `Id<T>[]`
+  // doesn't promise order — but we still write the ordinal column from
+  // the field's index so it's something deterministic per backend.
   const assocBlocks = associationsOf(agg).flatMap((assoc) => {
     const joinConst = joinTableConstName(assoc);
     const ownerCol = joinColumnName(assoc.ownerFk);

@@ -122,6 +122,10 @@ ${externHandlers
 // Auth — JWT decode middleware + scoped accessor.  Register your
 // IUserVerifier implementation here (or anywhere in DI); the verifier
 // translates inbound tokens into the strongly-typed User claim record.
+// Dev-stub DevStubUserVerifier is registered first so a generated stack
+// boots out of the box; replace by registering your own IUserVerifier
+// (the last DI registration wins for new scope resolutions).
+builder.Services.AddScoped<IUserVerifier, DevStubUserVerifier>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>();
 `
@@ -511,6 +515,9 @@ RUN dotnet publish ${ns}.csproj -c Release -o /app/publish --no-restore /p:UseAp
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
+# wget for the compose healthcheck (see the other dockerfile branch).
+RUN apt-get update -y && apt-get install -y --no-install-recommends wget \\
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 COPY --from=dotnet-build /app/publish ./
@@ -537,6 +544,11 @@ RUN dotnet publish ${ns}.csproj -c Release -o /app/publish --no-restore /p:UseAp
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
+# wget is here so the compose healthcheck (which shells out to wget) works
+# inside the aspnet image — without it the container reports unhealthy
+# even though the API is responding on /health.
+RUN apt-get update -y && apt-get install -y --no-install-recommends wget \\
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 COPY --from=build /app/publish ./

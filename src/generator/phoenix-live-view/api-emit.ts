@@ -5,7 +5,7 @@ import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 // ---------------------------------------------------------------------------
 // API controller emission for Phoenix LiveView / Ash.
 //
-// Emits three controller files (when applicable) and a companion route list
+// Emits controller files (when applicable) and a companion route list
 // that the orchestrator (index.ts) can splice into router.ex:
 //
 //   lib/<app>_web/controllers/workflows_controller.ex
@@ -13,6 +13,13 @@ import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 //
 //   lib/<app>_web/controllers/views_controller.ex
 //     — one action per view; delegates to <App>.<Ctx>.Views.<View>.run/1
+//
+//   lib/<app>_web/controllers/<aggs_snake>_controller.ex
+//     — ONE FILE PER AGGREGATE.  Module name `<App>Web.<Aggs>Controller`
+//       (matches .NET's `<Aggs>Controller`).  Actions:
+//         list / create / get / update / destroy   — CRUD
+//         <op_snake>                                — one per public operation
+//         <find_snake>                              — one per non-"all" find
 //
 //   lib/<app>_web/controllers/health_controller.ex
 //     — ALWAYS emitted; two actions:
@@ -132,64 +139,82 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
     }
   }
 
-  // --- Aggregates controller ------------------------------------------------
-  // Collect all aggregates across all contexts.
-  const allAggregates: Array<{
-    ctx: BoundedContextIR;
-    agg: import("../../ir/loom-ir.js").AggregateIR;
-  }> = [];
-  for (const ctx of contexts) {
-    for (const agg of ctx.aggregates) {
-      allAggregates.push({ ctx, agg });
-    }
-  }
+  // --- Per-aggregate controllers --------------------------------------------
+  // One controller file + module per aggregate (e.g. `ProjectsController`).
+  // Matches the .NET (`<Aggs>Controller`) and Hono (`http/<agg>.routes.ts`)
+  // per-aggregate organisation, and keeps the per-op + per-find actions
+  // scoped to their owning resource module.
+  if (hasServes) {
+    for (const ctx of contexts) {
+      for (const agg of ctx.aggregates) {
+        const aggsSnake = snake(plural(agg.name));
+        const controllerLocal = `${upperFirst(plural(agg.name))}Controller`;
+        const controllerPath = `lib/${appName}_web/controllers/${aggsSnake}_controller.ex`;
+        files.set(controllerPath, renderAggregateController(ctx, agg, appModule, !!args.emitTrace));
 
-  if (hasServes && allAggregates.length > 0) {
-    const controllerPath = `lib/${appName}_web/controllers/aggregates_controller.ex`;
-    files.set(
-      controllerPath,
-      renderAggregatesController(allAggregates, appModule, !!args.emitTrace),
-    );
-
-    for (const { agg } of allAggregates) {
-      const aggSnake = snake(agg.name);
-      const aggPlural = snake(plural(agg.name));
-
-      // GET /aggregates/<plural>  → list
-      apiRoutes.push({
-        method: "get",
-        path: `/aggregates/${aggPlural}`,
-        controller: "AggregatesController",
-        action: `:list_${aggPlural}`,
-      });
-      // POST /aggregates/<plural>  → create
-      apiRoutes.push({
-        method: "post",
-        path: `/aggregates/${aggPlural}`,
-        controller: "AggregatesController",
-        action: `:create_${aggSnake}`,
-      });
-      // GET /aggregates/<plural>/:id  → get
-      apiRoutes.push({
-        method: "get",
-        path: `/aggregates/${aggPlural}/:id`,
-        controller: "AggregatesController",
-        action: `:get_${aggSnake}`,
-      });
-      // PATCH /aggregates/<plural>/:id  → update
-      apiRoutes.push({
-        method: "patch",
-        path: `/aggregates/${aggPlural}/:id`,
-        controller: "AggregatesController",
-        action: `:update_${aggSnake}`,
-      });
-      // DELETE /aggregates/<plural>/:id  → destroy
-      apiRoutes.push({
-        method: "delete",
-        path: `/aggregates/${aggPlural}/:id`,
-        controller: "AggregatesController",
-        action: `:destroy_${aggSnake}`,
-      });
+        const aggPlural = aggsSnake;
+        // Route order matters: Phoenix matches the first declared route.
+        // Literal-segment paths (`/<plural>/<find>`) MUST come before the
+        // `:id`-parameterised member route (`/<plural>/:id`), otherwise
+        // `:id` would shadow them.  Emission order:
+        //   1. Collection: list / create
+        //   2. Per-find:   GET /<plural>/<find>     (literal segments)
+        //   3. Member:     get / update / destroy   (`:id` paths)
+        //   4. Per-op:     POST /<plural>/:id/<op>  (member action; longer
+        //                  than `:id` so no ambiguity)
+        apiRoutes.push({
+          method: "get",
+          path: `/${aggPlural}`,
+          controller: controllerLocal,
+          action: ":list",
+        });
+        apiRoutes.push({
+          method: "post",
+          path: `/${aggPlural}`,
+          controller: controllerLocal,
+          action: ":create",
+        });
+        const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+        if (repo) {
+          for (const find of repo.finds) {
+            if (find.name === "all") continue;
+            const findSnake = snake(find.name);
+            apiRoutes.push({
+              method: "get",
+              path: `/${aggPlural}/${findSnake}`,
+              controller: controllerLocal,
+              action: `:${findSnake}`,
+            });
+          }
+        }
+        apiRoutes.push({
+          method: "get",
+          path: `/${aggPlural}/:id`,
+          controller: controllerLocal,
+          action: ":get",
+        });
+        apiRoutes.push({
+          method: "patch",
+          path: `/${aggPlural}/:id`,
+          controller: controllerLocal,
+          action: ":update",
+        });
+        apiRoutes.push({
+          method: "delete",
+          path: `/${aggPlural}/:id`,
+          controller: controllerLocal,
+          action: ":destroy",
+        });
+        for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+          const opSnake = snake(op.name);
+          apiRoutes.push({
+            method: "post",
+            path: `/${aggPlural}/:id/${opSnake}`,
+            controller: controllerLocal,
+            action: `:${opSnake}`,
+          });
+        }
+      }
     }
   }
 
@@ -359,78 +384,44 @@ function renderViewAction(
 }
 
 // ---------------------------------------------------------------------------
-// AggregatesController
+// Per-aggregate controllers (`<Aggs>Controller`)
 // ---------------------------------------------------------------------------
 
-function renderAggregatesController(
-  aggregates: Array<{ ctx: BoundedContextIR; agg: import("../../ir/loom-ir.js").AggregateIR }>,
-  appModule: string,
-  emitTrace: boolean,
-): string {
-  const webModule = `${appModule}Web`;
-
-  const actions = aggregates
-    .map(({ ctx, agg }) => renderAggregateActions(ctx, agg, appModule, emitTrace))
-    .join("\n\n");
-
-  return `# Auto-generated.
-defmodule ${webModule}.AggregatesController do
-  use ${webModule}, :controller
-  # Catalog log events (aggregate_created on Create; see
-  # docs/proposals/observability.md) reach Elixir's Logger via the
-  # renderer in src/generator/_obs/render-phoenix.ts.  Required at
-  # module top so the macro-expanded Logger.<level>(...) calls below
-  # compile without further per-action imports.
-  require Logger
-
-  @moduledoc """
-  HTTP entry points for all aggregate CRUD code-interface functions.
-  Each action delegates to the matching Ash domain code-interface entry.
-  """
-
-${actions}
-end
-`;
-}
-
-function renderAggregateActions(
+function renderAggregateController(
   ctx: BoundedContextIR,
   agg: import("../../ir/loom-ir.js").AggregateIR,
   appModule: string,
   emitTrace: boolean,
 ): string {
+  const webModule = `${appModule}Web`;
   const aggSnake = snake(agg.name);
   const aggPlural = snake(plural(agg.name));
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+  const controllerModule = `${webModule}.${upperFirst(plural(agg.name))}Controller`;
 
   // wire_in (debug, since Elixir's Logger has no `trace` — catalog's
   // trace level maps to Logger.debug per render-phoenix.ts) — emitted
-  // only on --trace.  Keys = `Map.keys(params)` (runtime introspection
-  // of the parsed `conn` params); GET-by-id includes the `id`
-  // path-binding too.  Mirrors Hono Phase 6d + .NET v6's wire_in
-  // identity so a cross-backend filter on `event="wire_in"` joins.
-  const wireInCreate = emitTrace
-    ? `    ${renderPhoenixLogCall("wireIn", [{ name: "keys", valueExpr: "Map.keys(params)" }])}\n`
-    : "";
-  const wireInUpdate = emitTrace
+  // only on --trace.  Mirrors Hono + .NET wire_in identity so a
+  // cross-backend filter on `event="wire_in"` joins.
+  const wireInLine = emitTrace
     ? `    ${renderPhoenixLogCall("wireIn", [{ name: "keys", valueExpr: "Map.keys(params)" }])}\n`
     : "";
 
-  return `  @doc "GET /api/aggregates/${aggPlural}"
-  def list_${aggPlural}(conn, _params) do
+  const crud = `  @doc "GET /api/${aggPlural}"
+  def list(conn, _params) do
     records = ${contextModule}.list_${aggPlural}!()
     json(conn, records)
   end
 
-  @doc "GET /api/aggregates/${aggPlural}/:id"
-  def get_${aggSnake}(conn, %{"id" => id}) do
+  @doc "GET /api/${aggPlural}/:id"
+  def get(conn, %{"id" => id}) do
     record = ${contextModule}.get_${aggSnake}!(id)
     json(conn, record)
   end
 
-  @doc "POST /api/aggregates/${aggPlural}"
-  def create_${aggSnake}(conn, params) do
-${wireInCreate}    record = ${contextModule}.create_${aggSnake}!(params)
+  @doc "POST /api/${aggPlural}"
+  def create(conn, params) do
+${wireInLine}    record = ${contextModule}.create_${aggSnake}!(params)
     ${renderPhoenixLogCall("aggregateCreated", [
       { name: "aggregate", valueExpr: `"${agg.name}"` },
       { name: "id", valueExpr: "record.id" },
@@ -440,18 +431,81 @@ ${wireInCreate}    record = ${contextModule}.create_${aggSnake}!(params)
     |> json(record)
   end
 
-  @doc "PATCH /api/aggregates/${aggPlural}/:id"
-  def update_${aggSnake}(conn, %{"id" => id} = params) do
-${wireInUpdate}    attrs = Map.drop(params, ["id"])
+  @doc "PATCH /api/${aggPlural}/:id"
+  def update(conn, %{"id" => id} = params) do
+${wireInLine}    attrs = Map.drop(params, ["id"])
     record = ${contextModule}.update_${aggSnake}!(id, attrs)
     json(conn, record)
   end
 
-  @doc "DELETE /api/aggregates/${aggPlural}/:id"
-  def destroy_${aggSnake}(conn, %{"id" => id}) do
+  @doc "DELETE /api/${aggPlural}/:id"
+  def destroy(conn, %{"id" => id}) do
     ${contextModule}.destroy_${aggSnake}!(id)
     send_resp(conn, 204, "")
   end`;
+
+  // Per-find actions.  Each delegates to `<Ctx>.<find>_<agg>` (positional
+  // args extracted from query params; the Ash code-interface declared
+  // them via `args: [...]` in the domain module).  Auto-`all` is skipped —
+  // `list/2` above already serves it.
+  const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+  const findActions: string[] = [];
+  if (repo) {
+    for (const find of repo.finds) {
+      if (find.name === "all") continue;
+      const findSnake = snake(find.name);
+      // Code-interface call: `<Ctx>.<find>_<agg>!(arg1, arg2, ...)` —
+      // positional from the GET query string.  Wire keys come in
+      // camelCase per the cross-backend convention.
+      const argReads = find.params
+        .map((p) => `params[${JSON.stringify(snake(p.name))}]`)
+        .join(", ");
+      findActions.push(`  @doc "GET /api/${aggPlural}/${findSnake}"
+  def ${findSnake}(conn, params) do
+    _ = params
+    result = ${contextModule}.${findSnake}_${aggSnake}!(${argReads})
+    json(conn, result)
+  end`);
+    }
+  }
+
+  // Per-operation actions.  POST /<plural>/:id/<op>; delegates to
+  // `<Ctx>.<op>_<agg>!(id, arg1, arg2, ...)`.  Op params are read from
+  // the JSON body (camelCase keys); a successful op returns 204 No
+  // Content (matching the Hono/.NET convention — ops are side-
+  // effecting and don't return the entity).
+  const opActions: string[] = [];
+  for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+    const opSnake = snake(op.name);
+    const argReads = op.params.map((p) => `params[${JSON.stringify(snake(p.name))}]`).join(", ");
+    const callArgs = argReads.length > 0 ? `id, ${argReads}` : "id";
+    opActions.push(`  @doc "POST /api/${aggPlural}/:id/${opSnake}"
+  def ${opSnake}(conn, %{"id" => id} = params) do
+    _ = params
+    ${contextModule}.${opSnake}_${aggSnake}!(${callArgs})
+    send_resp(conn, 204, "")
+  end`);
+  }
+
+  const allActions = [crud, ...findActions, ...opActions].join("\n\n");
+
+  return `# Auto-generated.
+defmodule ${controllerModule} do
+  use ${webModule}, :controller
+  # Catalog log events (aggregate_created on Create; see
+  # docs/proposals/observability.md) reach Elixir's Logger via the
+  # renderer in src/generator/_obs/render-phoenix.ts.
+  require Logger
+
+  @moduledoc """
+  HTTP entry points for the ${agg.name} aggregate.
+  CRUD + per-operation + per-find actions delegate to the matching
+  Ash domain code-interface entries on ${contextModule}.
+  """
+
+${allActions}
+end
+`;
 }
 
 // ---------------------------------------------------------------------------

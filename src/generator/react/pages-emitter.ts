@@ -129,11 +129,22 @@ function buildBcByWorkflow(ctx: PageEmitContext): Map<string, BoundedContextIR> 
  *  Route + import; conventional overrides (page name matches the
  *  scaffolded shape) are mounted at the conventional route by
  *  the existing per-aggregate / -workflow / -view loops in
- *  `prepareAppShellVM`. */
-export function deriveExtraRoutesFromUi(
-  ui: UiIR,
-): import("./templating/preparers/app-shell.js").ExtraPageRoute[] {
-  const out: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
+ *  `prepareAppShellVM`.
+ *
+ *  The return value partitions on `page.layout`:
+ *    - `inShell`: pages with `layout: default` (or unset) — mounted
+ *      inside the AppShell layout-route, alongside the conventional
+ *      per-aggregate / -workflow / -view routes.
+ *    - `outOfShell`: pages with `layout: none` — mounted as sibling
+ *      routes OUTSIDE the AppShell, getting no header / sidebar /
+ *      main padding.  Validator gates `layout:` to explicit pages
+ *      only in v1, so scaffold-origin pages can never appear here. */
+export function deriveExtraRoutesFromUi(ui: UiIR): {
+  inShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[];
+  outOfShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[];
+} {
+  const inShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
+  const outOfShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
   // Same name→params map the page emitter builds, so
   // route derivation recognises pages whose body is a user-component
   // invocation.
@@ -151,17 +162,23 @@ export function deriveExtraRoutesFromUi(
     // one (e.g. a hand-written `OrderList`) overrides — the
     // AppShell loop sees both and keeps the conventional route
     // active; the explicit page's body simply replaces the
-    // default rendering.
-    if (page.archetype) continue;
+    // default rendering.  Scaffold-origin pages (anything other than
+    // `custom`) get the per-aggregate page-object treatment below.
+    if (page.origin && page.origin.kind !== "custom") continue;
     if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
-      out.push({
+      const route: import("./templating/preparers/app-shell.js").ExtraPageRoute = {
         componentName: page.name,
         importFrom: `./pages/${snake(page.name)}`,
         route: page.route,
-      });
+      };
+      if (page.layout?.kind === "preset" && page.layout.name === "none") {
+        outOfShell.push(route);
+      } else {
+        inShell.push(route);
+      }
     }
   }
-  return out;
+  return { inShell, outOfShell };
 }
 
 export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, string> {
@@ -201,13 +218,13 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
 
   for (const page of ui.pages) {
     // Every page (scaffold OR explicit) routes through
-    // Every page (scaffold OR explicit) routes through
-    // the walker.  Scaffold-synthesised pages had their bodies
-    // rewritten in `lowerSystem`'s `expandWalkerPrimitives` pass, so
-    // by the time we're here the body is always walker-eligible.
-    // `archetype` is preserved on rewritten pages so the
-    // per-aggregate page-object emitter (later in this file) still
-    // fires the rich `e2e/pages/<agg>.ts` helper classes.
+    // Every page (scaffold OR explicit) routes through the walker.
+    // Scaffold pages emit canonical body primitives
+    // (`scaffoldList(of:)`, etc.) which `expandInlineScaffoldPrimitiveCalls`
+    // rewrote during lowering, so by the time we're here the body
+    // is always walker-eligible.  `page.origin` distinguishes
+    // scaffold-origin (per-aggregate page-object emitter handles
+    // those) from `custom` (walker-side per-page page-object).
     if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
       // `page.emitPath` overrides the default
       // `src/pages/<page-snake>.tsx` location.  Set by the
@@ -281,10 +298,10 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
   for (const page of ui.pages) {
     // Only scaffold-origin pages dispatch to the
     // per-aggregate / per-workflow / per-view page-object
-    // builders.  Explicit pages (no `archetype`) get the
+    // builders.  Custom-origin (user-written) pages get the
     // walker-side per-page page-object emitted later.
-    const origin = page.archetype;
-    if (!origin) continue;
+    const origin = page.origin;
+    if (!origin || origin.kind === "custom") continue;
     switch (origin.kind) {
       case "aggregate-list":
       case "aggregate-new":
@@ -375,7 +392,7 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
   for (const page of ui.pages) {
     // Skip scaffold-origin pages; per-aggregate page-objects above
     // covered them (with their richer fill/submit/expectRow surface).
-    if (page.archetype) continue;
+    if (page.origin && page.origin.kind !== "custom") continue;
     if (!isWalkableLayoutBody(page.body, userComponents, helperNames)) continue;
     if (!page.body) continue;
     const paramNames = new Set(page.params.map((p) => p.name));

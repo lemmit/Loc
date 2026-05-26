@@ -99,18 +99,18 @@ ui WebApp {
 
   page CustomerList {
     route: "/customers"
-    body: For(Sales.Customer.all.data, c => Card(c.name))
+    body: For { Sales.Customer.all.data, c => Card { c.name } }
   }
 
   page CustomerNew {
     route: "/customers/new"
     state { name: string = "" }
-    body: Stack(
-      Field("Name", bind: name),
-      Button("Save",
+    body: Stack {
+      Field { "Name", bind: name },
+      Button {"Save",
         disabled: Sales.Customer.create.isPending,
-        onClick: e => { Sales.Customer.create.mutate({ name }) })
-    )
+        onClick: e => { Sales.Customer.create.mutate({ name }) }}
+    }
   }
 }
 ```
@@ -270,8 +270,8 @@ system Acme {
     page Home {
       route: "/"
       body: Sales.Customer.all.isLoading
-        ? Loader()
-        : For(Sales.Customer.all.data, c => Card(c.name))
+        ? Loader {}
+        : For { Sales.Customer.all.data, c => Card { c.name } }
     }
   }
 
@@ -313,21 +313,21 @@ lower to explicit walker-stdlib bodies via
 ```
 scaffold aggregates: Order
   ↓ (AST expander synthesises pages with scaffoldOrigin)
-page OrderList { route: "/orders"  body: List(of: Order) }
+page OrderList { route: "/orders"  body: List { of: Order } }
   ↓ (IR-level scaffold expander rewrites body)
 page OrderList {
   route: "/orders"
-  body: Stack(
-    Breadcrumbs(Anchor("Home", to: "/"), Text("Orders")),
-    Toolbar(Heading("Orders", level: 2),
-            Button("New order", to: "/orders/new", testid: ...)),
-    QueryView(of: Sales.Order.all,
-              loading: Skeleton(count: 5),
-              error: Alert("Couldn't load orders"),
-              empty: Empty("No orders yet."),
-              data: rows => Paper(Table(rows, …))),
+  body: Stack {
+    Breadcrumbs { Anchor { "Home", to: "/" }, Text { "Orders" } },
+    Toolbar {Heading { "Orders", level: 2 },
+            Button { "New order", to: "/orders/new", testid: ... }},
+    QueryView {of: Sales.Order.all,
+              loading: Skeleton { count: 5 },
+              error: Alert { "Couldn't load orders" },
+              empty: Empty { "No orders yet." },
+              data: rows => Paper { Table { rows, … } }},
     testid: "orders-list"
-  )
+  }
 }
   ↓ (single walker emit path)
 src/pages/orders/list.tsx

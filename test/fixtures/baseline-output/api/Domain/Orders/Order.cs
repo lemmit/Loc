@@ -29,6 +29,8 @@ public sealed class Order
         PlacedAt = default!;
     }
 
+    public string Inspect => "Order(" + "id: " + this.Id.ToString() + ", " + "customerId: " + "'" + this.CustomerId + "'" + ", " + "status: " + this.Status.ToString() + ", " + "placedAt: " + this.PlacedAt.ToString() + ", " + "lines: " + "[OrderLine[]]" + ")";
+    public override string ToString() => Inspect;
     private bool IsMutable() => this.Status == OrderStatus.Draft;
     public void AddLine(ProductId productId, int qty)
     {

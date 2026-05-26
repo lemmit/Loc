@@ -1,14 +1,25 @@
 name: Phoenix LiveView build verification
 
-# Generates a Phoenix project from examples/acme.ddd retargeted onto
-# the phoenixLiveView platform, then runs `mix deps.get && mix compile`
-# inside an Elixir/Erlang container.  Catches Ash 3.x API drift,
-# OpenApiSpex schema mismatches, and any other emission bug that
-# only surfaces when the generated source actually compiles.
+# For every fixture under `test/e2e/fixtures/phoenix-build/`, generate
+# a Phoenix project then `mix deps.get && mix compile --warnings-as-errors`
+# inside the hexpm/elixir Docker image.  Catches Ash 3.x API drift,
+# OpenApiSpex schema mismatches, join-table emission bugs, and any
+# other emission that only surfaces when the generated source
+# actually compiles.
+#
+# The actual generate + compile loop lives in
+# `test/e2e/generated-phoenix-build.test.ts` (entrypoint:
+# `npm run test:phoenix`); this workflow is a thin wrapper that
+# pre-generates once to compute the deps-cache signature, restores
+# the cache, then hands off to the test (which honours
+# `LOOM_PHOENIX_OUT_DIR` and skips regeneration when the project is
+# already on disk).  Both the workflow and the test read the same
+# fixture files, so language-feature additions no longer need a
+# separate workflow-side update (compare #524 → #541 follow-up).
 #
 # Triggers:
 #   - PRs that touch the Phoenix generator, the ashPhoenix design pack,
-#     or the parity follow-ups plan.
+#     the fixtures, or the test.
 #   - Pushes to main (full regression check).
 #   - Manual dispatch.
 
@@ -20,6 +31,8 @@ on:
       - 'src/platform/phoenix-live-view.ts'
       - 'designs/ashPhoenix/**'
       - 'examples/**'
+      - 'test/e2e/fixtures/phoenix-build/**'
+      - 'test/e2e/generated-phoenix-build.test.ts'
       - 'package.json'
       - '.github/workflows/phoenix-build.yml'
   pull_request:
@@ -28,6 +41,8 @@ on:
       - 'src/platform/phoenix-live-view.ts'
       - 'designs/ashPhoenix/**'
       - 'examples/**'
+      - 'test/e2e/fixtures/phoenix-build/**'
+      - 'test/e2e/generated-phoenix-build.test.ts'
       - 'package.json'
       - '.github/workflows/phoenix-build.yml'
   workflow_dispatch:
@@ -35,12 +50,20 @@ on:
 permissions:
   contents: read
 
+# Cancel in-flight runs of the same branch when a new commit lands —
+# saves CI minutes on rebases / force-pushes (mirrors the pattern in
+# test.yml / playground-e2e.yml / generated-react-build.yml).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-generated-phoenix:
     runs-on: ubuntu-latest
-    # Tight cap to protect CI minutes.  First-run cold mix compile is
-    # ~3-4min; warm runs (with deps cache below) are ~1min.  10min
-    # leaves headroom without letting a hung job burn through quota.
+    # Tight cap to protect CI minutes.  Cold path (no cache hit) is
+    # ~3-4min dominated by `mix deps.get`; warm runs (deps cache
+    # restored) are ~60-90s for the two fixtures.  10min leaves
+    # headroom without letting a hung job burn through quota.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -50,159 +73,67 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      # Build the Loom toolchain.  `prepare` lifecycle runs
-      # `langium:generate` which populates src/language/generated/.
+      # `npm ci` runs the `prepare` lifecycle (langium:generate +
+      # build) which populates src/language/generated/.  No need for a
+      # separate `npm run build` step — `prepare` does it.
       - name: Install Loom toolchain
         run: npm ci
 
-      - name: Type-check
-        run: npm run build
-
-      - name: Unit tests
-        run: npx vitest run --reporter=verbose
-
-      # Generate a fixture Phoenix project from examples/acme.ddd.
-      # The example today targets dotnet + hono + react; we synthesise
-      # a sibling .ddd that adds a phoenixLiveView deployable serving
-      # the same modules + UI.
-      - name: Generate fixture .ddd with phoenixLiveView deployable
+      # Pre-generate each fixture once into a stable path so we can
+      # hash the emitted mix.exs for the cache key.  Cheap (~1s per
+      # fixture, no docker, no hex fetch).  The test step below honours
+      # `LOOM_PHOENIX_OUT_DIR` and re-uses the same tree (skipping its
+      # own regeneration when `mix.exs` already exists), so the docker
+      # `mix compile` runs against THIS pre-generated source with deps
+      # restored from the cache.
+      - name: Pre-generate fixtures (for cache key)
         run: |
-          mkdir -p /tmp/ci
-          cat > /tmp/ci/acme-lv.ddd <<'EOF'
-          system AcmeLV {
-            module Sales {
-              context Sales {
-                valueobject Money {
-                  amount: decimal
-                  currency: string
-                }
-                aggregate Customer {
-                  name: string display
-                  email: string
-                  creditLimit: Money
-                  invariant email.length > 0
-                  operation adjustCredit(amount: decimal) {
-                    precondition amount > 0
-                  }
-                }
-                repository Customers for Customer { }
-              }
-            }
-            api SalesApi from Sales
-            ui SalesAdmin with scaffold(modules: [Sales]) { }
-            deployable phoenixApp {
-              platform: phoenixLiveView
-              modules: Sales
-              serves: SalesApi
-              ui: SalesAdmin
-              port: 4000
-            }
-          }
-          EOF
+          for fixture in test/e2e/fixtures/phoenix-build/*.ddd; do
+            stem=$(basename "$fixture" .ddd)
+            mkdir -p "/tmp/ci/phoenix/$stem/out"
+            node bin/cli.js generate system "$fixture" -o "/tmp/ci/phoenix/$stem/out"
+          done
 
-      - name: Generate Phoenix project
-        run: |
-          ./bin/cli.js generate system /tmp/ci/acme-lv.ddd -o /tmp/ci/out
-          ls /tmp/ci/out/phoenix_app
-
-      # Per-file syntax check — works without `mix deps.get`.  Catches
-      # any emission that produces malformed Elixir even when the deps
-      # can't be fetched.
-      # Per-file syntax check — works without `mix deps.get`.  Catches
-      # any emission that produces malformed Elixir even when the deps
-      # can't be fetched.  Uses explicit `docker run` (rather than the
-      # `uses: docker://…` action shape) so we can mount `/tmp/ci/out`
-      # — `docker://` actions only see `$GITHUB_WORKSPACE`, which left
-      # the previous invocation looking at an empty tree.
-      - name: Elixir syntax check
-        run: |
-          docker run --rm \
-            -v /tmp/ci/out/phoenix_app:/app \
-            -w /app \
-            hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim \
-            bash -c '
-              fail=0
-              for f in $(find lib config priv -name "*.ex" -o -name "*.exs"); do
-                out=$(elixir -e "Code.string_to_quoted!(File.read!(\"$f\"))" 2>&1)
-                if [ -n "$out" ]; then
-                  echo "::error file=$f::$out"
-                  fail=1
-                fi
-              done
-              if [ "$fail" -eq 0 ]; then
-                echo "All Elixir files parse cleanly ($(find lib config priv -name "*.ex" -o -name "*.exs" | wc -l) files)."
-              fi
-              exit $fail
-            '
-
-      # Full mix compile against the real Ash 3.x dep set.  This is
-      # the gold-standard check — verifies that the orchestrator's
-      # output is semantically valid (right Ash.transaction signature,
-      # right code_interface form, right OpenApiSpex shapes, etc.).
-      # On the GitHub runner, repo.hex.pm is reachable directly so
-      # the egress-proxy block I hit in the sandbox doesn't apply.
-
-      # Cache the hex dep tree + Elixir build outputs across runs so
-      # only the first cold run pays the ~3-4min download/compile
-      # cost.  The cache (deps/ + _build/) is several hundred MB, so
-      # the key MUST be stable across unrelated generator edits —
-      # otherwise every template tweak mints a fresh giant entry and
-      # churns the 10GB repo cache (evicting the npm / Playwright
-      # caches).  The dep set only changes when the emitted mix.exs
-      # changes, so we sign the key on that file's hash rather than
-      # the whole emitter source.  hashFiles() can't read /tmp, so we
-      # compute the digest in a prior step.
+      # The dep set only changes when the emitted mix.exs changes, so
+      # we sign the cache key on a concatenated hash of every fixture's
+      # mix.exs.  Avoids the broad-source-hash churn that would mint a
+      # fresh ~hundreds-of-MB cache entry on unrelated emitter edits
+      # (and evict unrelated caches under the 10GB repo quota).
       - name: Compute Phoenix dep signature
         id: phoenix-depsig
         run: |
-          echo "hash=$(sha256sum /tmp/ci/out/phoenix_app/mix.exs | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          hash=$(cat /tmp/ci/phoenix/*/out/phoenix_app/mix.exs | sha256sum | cut -d' ' -f1)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
       - name: Cache Phoenix deps + _build
         uses: actions/cache@v5
         with:
           path: |
-            /tmp/ci/out/phoenix_app/deps
-            /tmp/ci/out/phoenix_app/_build
+            /tmp/ci/phoenix/*/out/phoenix_app/deps
+            /tmp/ci/phoenix/*/out/phoenix_app/_build
           key: phoenix-mix-${{ steps.phoenix-depsig.outputs.hash }}
+          # On cache miss (mix.exs changed), fall back to the most
+          # recent stale cache so mix only re-fetches deltas instead
+          # of the full ~3-4min cold dep set.
           restore-keys: |
             phoenix-mix-
 
-      - name: mix deps.get && mix compile
-        run: |
-          set -o pipefail
-          docker run --rm \
-            -v /tmp/ci/out/phoenix_app:/app \
-            -w /app \
-            -e MIX_ENV=prod \
-            hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim \
-            bash -c '
-              set -e
-              mix local.hex --force
-              mix local.rebar --force
-              mix deps.get --only prod
-              mix compile --warnings-as-errors
-            ' 2>&1 | tee mix.log
+      # Hand off to the test — its `it.each` iterates every fixture,
+      # spawns `docker run mix compile --warnings-as-errors`, and
+      # surfaces failures via vitest's reporter into the job log
+      # (captured via `stdio: "inherit"` in the test).
+      - name: Run test:phoenix (mix compile against every fixture)
+        env:
+          LOOM_PHOENIX_OUT_DIR: /tmp/ci/phoenix
+        run: npm run test:phoenix
 
-      # On mix compile failure surface the tail of the log via
-      # ::error:: annotations (visible in the check-runs API without
-      # auth) and via GITHUB_STEP_SUMMARY (visible on the run page).
-      # Strips ANSI colour codes so the annotation text is grep-able.
-      - name: Surface mix compile output on failure
+      # Mirrors dotnet-obs-e2e.yml's failure-context pattern — point
+      # readers at the captured docker / mix output that vitest
+      # already printed to the job log via stdio: inherit.
+      - name: Surface failure context
         if: failure()
         run: |
-          echo '## mix deps.get && mix compile output (tail)' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          tail -n 200 mix.log >> $GITHUB_STEP_SUMMARY || true
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          # Pull out Elixir CompileError / Error: lines + their
-          # adjacent context, strip ANSI colour, truncate each line
-          # to 500 chars, and emit as annotations.
-          if [ -f mix.log ]; then
-            tail -n 300 mix.log \
-              | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
-              | grep -E '^\*\* \(|error:|warning:|^  [a-z_]+\.exs?:[0-9]+:' \
-              | while IFS= read -r line; do
-                  short=$(printf '%s' "$line" | head -c 500)
-                  echo "::error::$short"
-                done
-          fi
+          echo '## Phoenix mix compile failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the "Run test:phoenix" step above for the captured `mix deps.get` + `mix compile --warnings-as-errors` diagnostics from each fixture.' >> $GITHUB_STEP_SUMMARY
+          echo 'Each fixture under `test/e2e/fixtures/phoenix-build/` runs as its own `it.each` iteration in `test/e2e/generated-phoenix-build.test.ts`.' >> $GITHUB_STEP_SUMMARY

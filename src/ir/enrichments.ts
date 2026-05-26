@@ -5,8 +5,11 @@ import type {
   BoundedContextIR,
   CodeRefKind,
   DeployableIR,
+  DerivedIR,
   EntityPartIR,
   EnumIR,
+  ExprIR,
+  FieldIR,
   FindIR,
   LoomModel,
   ModuleIR,
@@ -168,19 +171,220 @@ function enrichContext(
     ...rootValueObjects.filter((v) => !ownVoNames.has(v.name)),
   ];
   const enums = [...ctx.enums, ...rootEnums.filter((e) => !ownEnumNames.has(e.name))];
-  const aggregates = ctx.aggregates.map(enrichAggregate);
+  const aggregates = ctx.aggregates.map((a) => enrichAggregate(a, valueObjects));
   const repositories = ensureFindAll(aggregates, ctx.repositories);
   return { ...ctx, valueObjects, enums, aggregates, repositories };
 }
 
-function enrichAggregate(agg: AggregateIR): AggregateIR {
+function enrichAggregate(agg: AggregateIR, contextVOs: ValueObjectIR[]): AggregateIR {
   const parts = agg.parts.map(enrichPart);
+  const fields = agg.fields.map(resolveFieldAccess);
+  // Synthesize a `derived inspect: string = <structural>` when the user
+  // didn't declare one.  Always-present after enrichment so backends
+  // can emit a `ToString()` / `Inspect` / `util.inspect.custom` hook
+  // unconditionally.  See plan
+  // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+  //
+  // The VO lookup gives synth visibility into nested fields so a
+  // `price: Money` field can expand to `price: <Money(amount: ...,
+  // currency: '...')>` rather than the opaque `[Money]` placeholder
+  // the first cut emitted.
+  const voLookup = new Map(contextVOs.map((v) => [v.name, v] as const));
+  const userInspect = agg.derived.find((d) => d.name === "inspect");
+  const inspectDerived = userInspect ?? synthesizeInspect(agg, voLookup);
+  const derived = userInspect ? agg.derived : [...agg.derived, inspectDerived];
+  // Compute wireShape on the post-synthesis, post-access-resolution
+  // agg so the wire spec is idempotent (second enrichment finds the
+  // synthesized inspect already in `derived` and doesn't double-add,
+  // and `resolveFieldAccess` skips fields that already carry access).
+  const resolved: AggregateIR = { ...agg, derived, fields };
   return {
-    ...agg,
+    ...resolved,
     parts,
-    wireShape: wireFieldsForAggregate(agg),
-    associations: associationsForAggregate(agg),
+    wireShape: wireFieldsForAggregate(resolved),
+    associations: associationsForAggregate(resolved),
+    displayDerived: derived.find((d) => d.name === "display"),
+    inspectDerived,
   };
+}
+
+/** Build a default `derived inspect: string` expression for an aggregate
+ * that didn't declare one.  Shape: `"User(id: " + id + ", name: '" + name
+ * + "', ssn: <redacted>)"` — structural form with field names + values,
+ * sensitive fields redacted by literal text rather than value reference.
+ *
+ * Built directly in IR (no AST roundtrip) to avoid threading a new
+ * factory through the macro layer.  Composes `binary` nodes with
+ * `lit("string", ...)` left/right ends and `ref`/`id` field accesses
+ * in between; the existing `string + X` implicit-concat rule lowers
+ * non-string operands via `convert` IR for us if needed, but because
+ * we control the structure we emit the conversion explicitly so
+ * downstream backends see a fully-typed tree from the start. */
+function synthesizeInspect(agg: AggregateIR, voLookup: Map<string, ValueObjectIR>): DerivedIR {
+  const STRING: TypeIR = { kind: "primitive", name: "string" };
+  const lit = (value: string): ExprIR => ({ kind: "literal", lit: "string", value });
+  const concat = (left: ExprIR, right: ExprIR): ExprIR => ({
+    kind: "binary",
+    op: "+",
+    left,
+    right,
+    leftType: STRING,
+    resultType: STRING,
+  });
+  const redacted = lit("<redacted>");
+
+  /** Stringify a single primitive/id/enum/string LEAF access node.
+   * Caller picks the access (top-level `ref` to a stored property,
+   * or `member` access through a containing VO).  Out-of-scope
+   * shapes (entity refs, arrays, optionals) return the placeholder
+   * — see the type-shorthand fallback at the bottom. */
+  const stringifyLeaf = (access: ExprIR, fieldType: TypeIR, sensitive: boolean): ExprIR => {
+    if (sensitive) return redacted;
+    if (fieldType.kind === "primitive" && fieldType.name === "string") {
+      // Wrap as `'<value>'` — open quote, value, close quote.
+      return concat(concat(lit("'"), access), lit("'"));
+    }
+    if (fieldType.kind === "primitive" || fieldType.kind === "id" || fieldType.kind === "enum") {
+      const fromPrimitive =
+        fieldType.kind === "primitive"
+          ? fieldType.name
+          : fieldType.kind === "id"
+            ? fieldType.valueType
+            : undefined;
+      return { kind: "convert", target: "string", from: fromPrimitive, value: access };
+    }
+    return lit(`[${typeShorthand(fieldType)}]`);
+  };
+
+  /** Inline a VO field's structural inspect: each VO field becomes a
+   * `member` access through `parentRef`, formatted as `VOName(f1:
+   * <v1>, f2: <v2>)`.  Nested VOs / arrays / optionals inside the
+   * inlined VO fall back to a placeholder (depth-1 — keeps the
+   * expression bounded and avoids cycles for self-recursive VO
+   * shapes, which are rare but possible). */
+  const inlineVO = (
+    parentFieldName: string,
+    voType: TypeIR & { kind: "valueobject" },
+    vo: ValueObjectIR,
+  ): ExprIR => {
+    const parentRef: ExprIR = {
+      kind: "ref",
+      name: parentFieldName,
+      refKind: "this-prop",
+      type: voType,
+    };
+    const pieces: ExprIR[] = [lit(`${vo.name}(`)];
+    let first = true;
+    for (const f of vo.fields) {
+      if (!first) pieces.push(lit(", "));
+      pieces.push(lit(`${f.name}: `));
+      const isSensitive = !!f.sensitivity && f.sensitivity.length > 0;
+      const access: ExprIR = {
+        kind: "member",
+        receiver: parentRef,
+        member: f.name,
+        receiverType: voType,
+        memberType: f.type,
+      };
+      pieces.push(stringifyLeaf(access, f.type, isSensitive));
+      first = false;
+    }
+    pieces.push(lit(")"));
+    let expr: ExprIR = pieces[0]!;
+    for (let i = 1; i < pieces.length; i++) {
+      expr = concat(expr, pieces[i]!);
+    }
+    return expr;
+  };
+
+  const valueForField = (fieldName: string, fieldType: TypeIR, sensitive: boolean): ExprIR => {
+    if (sensitive) return redacted;
+    // Single (non-array, non-optional) VO with a known definition →
+    // inline the VO's structural form so debug strings show the
+    // contents rather than `[Money]`.  Sensitive marker on the field
+    // itself was already handled above (redact wholesale); per-VO-
+    // field sensitivity is honoured inside `inlineVO`.
+    if (fieldType.kind === "valueobject") {
+      const vo = voLookup.get(fieldType.name);
+      if (vo) return inlineVO(fieldName, fieldType, vo);
+    }
+    // Plain `ref` to a stored property — same shape `lower-expr` would
+    // produce for a bare property name inside a derived body.
+    const ref: ExprIR = {
+      kind: "ref",
+      name: fieldName,
+      refKind: "this-prop",
+      type: fieldType,
+    };
+    return stringifyLeaf(ref, fieldType, false);
+  };
+
+  const pieces: ExprIR[] = [lit(`${agg.name}(`)];
+  let first = true;
+
+  const pushField = (label: string, value: ExprIR) => {
+    if (!first) pieces.push(lit(", "));
+    pieces.push(lit(`${label}: `));
+    pieces.push(value);
+    first = false;
+  };
+
+  // ID first.
+  pushField("id", {
+    kind: "convert",
+    target: "string",
+    from: agg.idValueType,
+    value: { kind: "id" },
+  });
+
+  // Stored properties.
+  for (const f of agg.fields) {
+    const isSensitive = !!f.sensitivity && f.sensitivity.length > 0;
+    pushField(f.name, valueForField(f.name, f.type, isSensitive));
+  }
+
+  // Containments: short structural placeholder.  Recursing into the
+  // contained inspect is a follow-up — keeps this first cut simple
+  // and avoids cycles for self-containing parts (which are rare but
+  // possible).
+  for (const c of agg.contains) {
+    pushField(c.name, lit(`[${c.partName}${c.collection ? "[]" : ""}]`));
+  }
+
+  pieces.push(lit(")"));
+
+  // Fold the pieces into a left-leaning binary chain: ((((p0 + p1) + p2) + p3) ...)
+  let expr: ExprIR = pieces[0]!;
+  for (let i = 1; i < pieces.length; i++) {
+    expr = concat(expr, pieces[i]!);
+  }
+
+  return {
+    name: "inspect",
+    type: STRING,
+    expr,
+  };
+}
+
+/** Short structural name for a TypeIR — used as the placeholder text
+ * for non-stringifiable field types in the synthesized inspect form. */
+function typeShorthand(t: TypeIR): string {
+  switch (t.kind) {
+    case "primitive":
+      return t.name;
+    case "id":
+      return `${t.targetName} id`;
+    case "enum":
+      return t.name;
+    case "valueobject":
+      return t.name;
+    case "entity":
+      return t.name;
+    case "array":
+      return `${typeShorthand(t.element)}[]`;
+    case "optional":
+      return `${typeShorthand(t.inner)}?`;
+  }
 }
 
 /** Derive a join-table association for every field whose type is a
@@ -214,11 +418,35 @@ function associationsForAggregate(agg: AggregateIR): AssociationIR[] {
 }
 
 function enrichPart(part: EntityPartIR): EntityPartIR {
-  return { ...part, wireShape: wireFieldsForPart(part) };
+  const fields = part.fields.map(resolveFieldAccess);
+  const resolved: EntityPartIR = { ...part, fields };
+  return { ...resolved, wireShape: wireFieldsForPart(resolved) };
 }
 
 function enrichValueObject(vo: ValueObjectIR): ValueObjectIR {
-  return { ...vo, wireShape: wireFieldsForValueObject(vo) };
+  const fields = vo.fields.map(resolveFieldAccess);
+  const resolved: ValueObjectIR = { ...vo, fields };
+  return { ...resolved, wireShape: wireFieldsForValueObject(resolved) };
+}
+
+/** Resolve a field's access role.  Precedence:
+ *   1. Declared modifier in the source (`lowerField` carried it through).
+ *   2. Default — `editable`.
+ *
+ * NOTE: there is intentionally no type-driven inference for `X id`
+ * fields.  A declared `X id` is a foreign-key reference — the client
+ * supplies it (e.g. `holder: Customer id` on `Account.create(holder)`)
+ * so it must default to editable, not `token`.  The aggregate's own
+ * synthetic identity is added separately by `wireFieldsForAggregate`
+ * with `access: "token"` hardcoded.  Explicit token semantics for a
+ * declared field (e.g. `version: int token` for optimistic concurrency)
+ * are opt-in via the `token` modifier in source.
+ *
+ * Idempotent: a field that already carries `access` (set on a previous
+ * enrichment pass or by a declared modifier) is returned unchanged. */
+function resolveFieldAccess(f: FieldIR): FieldIR {
+  if (f.access) return f;
+  return { ...f, access: "editable", accessSource: "default" };
 }
 
 /** Every aggregate gets a repository with an implicit `find all():
@@ -281,10 +509,16 @@ function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
 
 function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
   const out: WireField[] = [
-    { name: "id", type: idTypeFor(agg.name), optional: false, source: "id" },
+    { name: "id", type: idTypeFor(agg.name), optional: false, source: "id", access: "token" },
   ];
   for (const f of agg.fields) {
-    out.push({ name: f.name, type: f.type, optional: f.optional, source: "property" });
+    out.push({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      source: "property",
+      access: f.access ?? "editable",
+    });
   }
   for (const c of agg.contains) {
     out.push({
@@ -292,20 +526,39 @@ function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
       type: containmentTypeFor(c.partName, c.collection),
       optional: !!c.optional && !c.collection,
       source: "containment",
+      access: "editable",
     });
   }
   for (const d of agg.derived) {
-    out.push({ name: d.name, type: d.type, optional: false, source: "derived" });
+    // `inspect` is the host-language debug-string hook (ToString /
+    // util.inspect.custom / Inspect protocol) — emitted as a getter on
+    // the domain class but kept out of JSON DTOs.  Exposing the
+    // structural form on the wire would leak internal field layout to
+    // every API client.
+    if (d.name === "inspect") continue;
+    out.push({
+      name: d.name,
+      type: d.type,
+      optional: false,
+      source: "derived",
+      access: "editable",
+    });
   }
   return out;
 }
 
 function wireFieldsForPart(part: EntityPartIR): WireField[] {
   const out: WireField[] = [
-    { name: "id", type: idTypeFor(part.name), optional: false, source: "id" },
+    { name: "id", type: idTypeFor(part.name), optional: false, source: "id", access: "token" },
   ];
   for (const f of part.fields) {
-    out.push({ name: f.name, type: f.type, optional: f.optional, source: "property" });
+    out.push({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      source: "property",
+      access: f.access ?? "editable",
+    });
   }
   for (const c of part.contains) {
     out.push({
@@ -313,10 +566,17 @@ function wireFieldsForPart(part: EntityPartIR): WireField[] {
       type: containmentTypeFor(c.partName, c.collection),
       optional: !!c.optional && !c.collection,
       source: "containment",
+      access: "editable",
     });
   }
   for (const d of part.derived) {
-    out.push({ name: d.name, type: d.type, optional: false, source: "derived" });
+    out.push({
+      name: d.name,
+      type: d.type,
+      optional: false,
+      source: "derived",
+      access: "editable",
+    });
   }
   return out;
 }
@@ -324,10 +584,22 @@ function wireFieldsForPart(part: EntityPartIR): WireField[] {
 function wireFieldsForValueObject(vo: ValueObjectIR): WireField[] {
   const out: WireField[] = [];
   for (const f of vo.fields) {
-    out.push({ name: f.name, type: f.type, optional: f.optional, source: "property" });
+    out.push({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      source: "property",
+      access: f.access ?? "editable",
+    });
   }
   for (const d of vo.derived) {
-    out.push({ name: d.name, type: d.type, optional: false, source: "derived" });
+    out.push({
+      name: d.name,
+      type: d.type,
+      optional: false,
+      source: "derived",
+      access: "editable",
+    });
   }
   return out;
 }

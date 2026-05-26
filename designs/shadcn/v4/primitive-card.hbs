@@ -1,8 +1,8 @@
-{{#if hasTitle}}{{#if hasContent}}<Card{{{testidAttr}}}>
+{{#if hasTitle}}{{#if hasContent}}<Card{{{testidAttr}}}{{{styleAttr}}}>
 {{indent}}<CardHeader><CardTitle>{{{titleText}}}</CardTitle></CardHeader>
 {{indent}}<CardContent>{{{contentJsx}}}</CardContent>
-{{closeIndent}}</Card>{{else}}<Card{{{testidAttr}}}>
+{{closeIndent}}</Card>{{else}}<Card{{{testidAttr}}}{{{styleAttr}}}>
 {{indent}}<CardHeader><CardTitle>{{{titleText}}}</CardTitle></CardHeader>
-{{closeIndent}}</Card>{{/if}}{{else}}{{#if hasContent}}<Card{{{testidAttr}}}>
+{{closeIndent}}</Card>{{/if}}{{else}}{{#if hasContent}}<Card{{{testidAttr}}}{{{styleAttr}}}>
 {{indent}}<CardContent>{{{contentJsx}}}</CardContent>
-{{closeIndent}}</Card>{{else}}<Card{{{testidAttr}}} />{{/if}}{{/if}}
+{{closeIndent}}</Card>{{else}}<Card{{{testidAttr}}}{{{styleAttr}}} />{{/if}}{{/if}}

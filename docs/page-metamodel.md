@@ -102,12 +102,12 @@ colon-separator idiom (matches `Deployable`, `ThemeProp`, `EmitField`).
 ```ddd
 page OrderList {
   route: "/orders"
-  body:  List(of: Order)
+  body:  List { of: Order }
 }
 
 page OrderDetail(id: Order id) {
   route: "/orders/:id"
-  body:  Detail(of: Order, by: id)
+  body:  Detail { of: Order, by: id }
 }
 
 page OrderConsole(customerId: Customer id) {
@@ -119,11 +119,11 @@ page OrderConsole(customerId: Customer id) {
     selectedId: Order id?
   }
 
-  body: MasterDetail(
+  body: MasterDetail {
     of:      Order,
     scope:   Orders.byCustomer(customerId),
     actions: [confirm, cancel]
-  )
+  }
 
   menu { section: "Sales", label: "Order console" }
 }
@@ -147,22 +147,22 @@ to a body expression. They never declare a route.
 
 ```ddd
 component OrderPanel(order: Order) {
-  body: Stack([
-    Heading("Order " + order.id, level: 2),
-    Badge(order.status),
-    Table(order.lines, columns: [productId, quantity, unitPrice, subtotal]),
-    Toolbar([
+  body: Stack {[
+    Heading { "Order " + order.id, level: 2 },
+    Badge { order.status },
+    Table { order.lines, columns: [productId, quantity, unitPrice, subtotal] },
+    Toolbar {[
       Action(confirm, then: navigate(OrderConsole, { customerId: order.customerId })),
       Action(cancel,  then: toast("Cancelled"))
-    ])
-  ])
+    ]}
+  ]}
 }
 ```
 
 The compiler enforces parameter relationships at every call site:
-`MasterDetail(of: Order, scope: …)` requires `scope` to produce `Order[]`;
-`Detail(of: Order, by: x)` requires `x: Order id`; `actions:` items must
-be operations on the `of:` aggregate; `Form(creates: Order)` binds form
+`MasterDetail { of: Order, scope: … }` requires `scope` to produce `Order[]`;
+`Detail { of: Order, by: x }` requires `x: Order id`; `actions:` items must
+be operations on the `of:` aggregate; `Form { creates: Order }` binds form
 fields to `wireShape(Order.create)`.
 
 User-defined components are pure functions over their parameters and local
@@ -199,10 +199,10 @@ the expression engine and is usable anywhere an expression appears.
 
 ```ddd
 body: match {
-  step == 0 => Form(fields: [customerId], onSubmit: c => { … })
-  step == 1 => Form(fields: [items],      onSubmit: i => { … })
+  step == 0 => Form { fields: [customerId], onSubmit: c => { … } }
+  step == 1 => Form { fields: [items],      onSubmit: i => { … } }
   step == 2 => Review(draft,              onSubmit: () => { … })
-  else      => Empty()
+  else      => Empty {}
 }
 ```
 
@@ -251,20 +251,20 @@ Reuses the existing `Statement` rule (covers `let`, `:=`, calls, `emit`).
 
 | Component | Purpose |
 |---|---|
-| `List(of: T, source?)` | Table over `T[]`; row click navigates to `T`'s detail. |
-| `Detail(of: T, by: T id)` | Single-record view; fields, embeds `contains`, exposes operations as actions. |
-| `Form(creates: T \| runs: workflow \| into: state, fields, onSubmit, then?)` | Input form bound to a typed request slice. |
-| `MasterDetail(of: T, scope, actions?, detail?)` | Split-pane: list + selection state + detail panel. |
+| `List { of: T, source? }` | Table over `T[]`; row click navigates to `T`'s detail. |
+| `Detail { of: T, by: T id }` | Single-record view; fields, embeds `contains`, exposes operations as actions. |
+| `Form { creates: T \| runs: workflow \| into: state, fields, onSubmit, then? }` | Input form bound to a typed request slice. |
+| `MasterDetail { of: T, scope, actions?, detail? }` | Split-pane: list + selection state + detail panel. |
 | `Dashboard(items: […])` | Composite read-only page; grid layout. |
 | `Review(of: T, onSubmit)` | Read-only summary view of a typed value, with a submit action. |
 | `Stack`, `Group`, `Grid`, `Tabs`, `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider` | Layout primitives. |
 | `Heading`, `Text`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow` | Display primitives. |
 | `Field`, `NumberField`, `PasswordField`, `Toggle`, `Select`, `Fieldset` | Bindable inputs. |
-| `Action(operation, then?)`, `Button(label, on?)` | Action primitives. |
+| `Action(operation, then?)`, `Button { label, on? }` | Action primitives. |
 | `Money`, `DateDisplay`, `EnumBadge`, `IdLink` | Formatter primitives. |
 | `Table`, `Column` | Tabular display (data lambda accessors). |
-| `Form(of: <Agg>)`, `Form(runs: <wf>)`, `Form(<instance>.<operation>)` | RHF-bound form auto-dispatched off the aggregate / workflow / operation IR. The operation form references the op through an in-scope aggregate instance (like `Action`). |
-| `QueryView(of:, loading:, error:, empty:, data:, single?:)` | 4-arm query-state branching (collection or single-record). |
+| `Form { of: <Agg> }`, `Form { runs: <wf> }`, `Form { <instance>.<operation> }` | RHF-bound form auto-dispatched off the aggregate / workflow / operation IR. The operation form references the op through an in-scope aggregate instance (like `Action`). |
+| `QueryView { of:, loading:, error:, empty:, data:, single?: }` | 4-arm query-state branching (collection or single-record). |
 
 The set is closed in v0. **Removed from earlier drafts:** `Wizard`, `Stage`,
 `Switch`, `Case`, `When`, `Sequence` — all subsumed by `match` plus the
@@ -298,11 +298,11 @@ contract per page:
 
 | Page | Body |
 |---|---|
-| `<Agg>List` | Breadcrumbs · Toolbar (heading + "New" button) · `QueryView(of: api.<Agg>.all)` → `Table` with one `Column` per **non-collection** scalar field (`IdLink` / `EnumBadge` / `DateDisplay` / text by type), per-row testid. |
-| `<Agg>New` | Breadcrumbs · heading · `Card(Form(of: <Agg>))` — RHF + Zod + `useCreate<Agg>`, one input per required field. |
-| `<Agg>Detail` | Breadcrumbs · heading · `QueryView(of: api.<Agg>.byId(id), single: true)` whose data card holds **three** sections: ① `KeyValueRow` per scalar field; ② one **operation control** per `public operation` — a button that opens a `Modal` hosting an auto-generated `Form(data.<operation>)` (the operation referenced through the loaded record) bound to the `use<Op><Agg>` mutation hook (params dispatched by the same type rules as `Form(of:)`); ③ one **related-entity list** per `contains` collection — a titled `Card(Table)` over `data.<containment>` with a `Column` per part field. |
-| `<Workflow>Workflow` | Breadcrumbs · heading · `Card(Form(runs: <wf>))`. |
-| `<View>View` | Heading · `QueryView(of: Views.<name>)` → `Table`. |
+| `<Agg>List` | Breadcrumbs · Toolbar (heading + "New" button) · `QueryView { of: api.<Agg>.all }` → `Table` with one `Column` per **non-collection** scalar field (`IdLink` / `EnumBadge` / `DateDisplay` / text by type), per-row testid. |
+| `<Agg>New` | Breadcrumbs · heading · `Card { Form { of: <Agg> } }` — RHF + Zod + `useCreate<Agg>`, one input per required field. |
+| `<Agg>Detail` | Breadcrumbs · heading · `QueryView { of: api.<Agg>.byId(id), single: true }` whose data card holds **three** sections: ① `KeyValueRow` per scalar field; ② one **operation control** per `public operation` — a button that opens a `Modal` hosting an auto-generated `Form { data.<operation> }` (the operation referenced through the loaded record) bound to the `use<Op><Agg>` mutation hook (params dispatched by the same type rules as `Form { of: }`); ③ one **related-entity list** per `contains` collection — a titled `Card { Table }` over `data.<containment>` with a `Column` per part field. |
+| `<Workflow>Workflow` | Breadcrumbs · heading · `Card { Form { runs: <wf> } }`. |
+| `<View>View` | Heading · `QueryView { of: Views.<name> }` → `Table`. |
 
 The Detail page's operations + related-entity lists are the
 platform-completeness proof for the modal/disclosure and nested-table
@@ -399,16 +399,16 @@ page PlaceOrderWizard {
   }
 
   body: match {
-    step == 0 => Form(into: draft, fields: [customerId],
-                      onSubmit: () => step := 1)
-    step == 1 => Form(into: draft, fields: [items],
-                      onSubmit: () => step := 2)
+    step == 0 => Form {into: draft, fields: [customerId],
+                      onSubmit: () => step := 1}
+    step == 1 => Form {into: draft, fields: [items],
+                      onSubmit: () => step := 2}
     step == 2 => Review(of: draft,
                         onSubmit: () => {
                           call placeOrder(draft)
                           navigate(OrderConsole, { customerId: draft.customerId })
                         })
-    else      => Empty()
+    else      => Empty {}
   }
 }
 ```
@@ -418,14 +418,14 @@ page PlaceOrderWizard {
 ```ddd
 page CustomerStep {
   route: "/orders/new/customer"
-  body:  Form(fields: [customerId],
-              onSubmit: c => navigate(ItemsStep, { customerId: c.customerId }))
+  body:  Form {fields: [customerId],
+              onSubmit: c => navigate(ItemsStep, { customerId: c.customerId })}
 }
 page ItemsStep(customerId: Customer id) {
   route: "/orders/new/items"
-  body:  Form(fields: [items],
+  body:  Form {fields: [items],
               onSubmit: i => navigate(ReviewStep,
-                                       { customerId, items: i.items }))
+                                       { customerId, items: i.items })}
 }
 page ReviewStep(customerId: Customer id, items: OrderLine[]) {
   route: "/orders/new/review"
@@ -623,7 +623,7 @@ lowers the IR onto Phoenix LiveView semantics.  Per-construct mapping:
 | `match { p1 => v1, … else => fallback }` | `cond do p1 -> v1; … true -> fallback end` (expressions); `<%= cond do … end %>` in HEEx templates. |
 | `requires <expr>` (page-level) | guard in `handle_params/3` that `push_navigate`s home with a `flash` on failure (v0 stub: bind only — full guard is a follow-up). |
 | `navigate(<Page>, {…})` (in a lambda) | `push_navigate(socket, to: ~p"/route?…")` with the target page's route + interpolated args. |
-| `Form(creates: T)` / `Form(into: state)` | `<.simple_form for={@form} phx-submit="save">` over `AshPhoenix.Form.for_create/3` (or a draft assign for wizard steps). |
+| `Form { creates: T }` / `Form { into: state }` | `<.simple_form for={@form} phx-submit="save">` over `AshPhoenix.Form.for_create/3` (or a draft assign for wizard steps). |
 | Body of an aggregate-scaffolded page | `pack.render("page-list" | "page-new" | "page-detail", vm)` → HEEx inline in the LiveView's `render/1` — the same framework-neutral preparer VMs the React generator uses (`src/generator/react/templating/preparers/`). |
 | `import helper X from "path"` | Elixir `alias` / `import` directives at the LiveView module top (vs JS `import` in TSX). |
 | `Sales.Customer.create.mutate(args)` (api binding) | direct context call `<App>.Sales.create_customer!(args)` — no hook hoisting, since LiveView reads in `mount/3` / `handle_event/3`. |

@@ -58,12 +58,19 @@ export function printExpr(node: Expression): string {
       return `${printExpr(node.callee)}(${printArgs(node.args)})`;
     case "Lambda":
       return printLambda(node);
-    case "NewExpr":
-      return `new ${node.partType.$refText} {${printObjectFields(node.fields)}}`;
+    case "BuilderCall":
+      return `${node.type} {${printBuilderEntries(node.entries)}}`;
     case "ObjectLit":
       return `{${printObjectFields(node.fields)}}`;
     case "MatchExpr":
       return printMatch(node);
+    case "PrimitiveConversion":
+      // value is `Expression | undefined` in the generated AST (the
+      // grammar's `value=Expression` doesn't force presence — a
+      // parser error mid-construction yields undefined).  Render an
+      // empty paren in that case; the validator will have surfaced
+      // the parse error elsewhere.
+      return node.value ? `${node.target}(${printExpr(node.value)})` : `${node.target}()`;
     default: {
       // Exhaustiveness guard — a new Expression node kind must be handled.
       const exhaustive: never = node;
@@ -89,6 +96,14 @@ function printObjectFields(fields: { name: string; value: Expression }[]): strin
   return ` ${inner} `;
 }
 
+function printBuilderEntries(entries: { name?: string; value: Expression }[]): string {
+  if (entries.length === 0) return "";
+  const inner = entries
+    .map((e) => (e.name ? `${e.name}: ${printExpr(e.value)}` : printExpr(e.value)))
+    .join(", ");
+  return ` ${inner} `;
+}
+
 function printLambda(node: Extract<Expression, { $type: "Lambda" }>): string {
   if (node.body) return `${node.param} => ${printExpr(node.body)}`;
   if (!printStatement) {
@@ -101,5 +116,9 @@ function printLambda(node: Extract<Expression, { $type: "Lambda" }>): string {
 function printMatch(node: Extract<Expression, { $type: "MatchExpr" }>): string {
   const arms = node.arms.map((arm) => `${printExpr(arm.cond)} => ${printExpr(arm.value)}`);
   if (node.elseExpr) arms.push(`else => ${printExpr(node.elseExpr)}`);
-  return `match {\n${arms.join("\n")}\n}`;
+  // Comma-separate arms: without separators a match-arm value expression
+  // greedily consumes the next arm's condition (e.g. `... + name` followed
+  // by `(visibility == ...)` parses as a call), so the printed form would
+  // not round-trip.  The grammar accepts an optional comma between arms.
+  return `match {\n${arms.join(",\n")}\n}`;
 }

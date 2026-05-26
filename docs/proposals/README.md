@@ -33,7 +33,11 @@ requirements-tracing one.
 | [`payload-transport-layer.md`](./payload-transport-layer.md) | Structural transport layer | `payload` keyword + five sugar keywords (`event`/`command`/`query`/`response`/`error`); carrier-bounded generics with ML-postfix syntax (`customer page`); both named unions (`payload Foo = A \| B`) and anonymous `or` unions (`A or B`); auto-synthesised aggregate wire payloads |
 | [`exception-less.md`](./exception-less.md) | Exception-less flow | `error` payloads (HTTP-blind in the domain); `option` ML-postfix sugar for `T or none`; `?` propagation operator dispatching on `error`-marked variants; `Repo.getById` re-shape to `T or NotFound`; preconditions throw at both layers (different status codes); api-surface `status <Error> <Code>` mapping + stdlib defaults driving auto-generated RFC 7807 ProblemDetails translation; aggregate-vs-workflow-vs-api layer-aware failure model; no `Result<T, E>` / `Ok` / `Err` wrappers |
 | [`criterion.md`](./criterion.md) | Cross-aggregate domain rules + list queries | `criterion <Name>(args) of T = <bool expr>` (Spring-Data / Evans style pure predicate); bound to parameters via `from <Criterion>(args)`, to operation guards via `when <Criterion>` (canCommand pattern with auto-exposed `can-<op>` endpoint). Plus built-in `Repo.findAll(criterion, sort?, page?, loads?)` for generic list queries (solves "repository with 40 methods"). Plus `private workflow` modifier + workflow-calls-workflow body extension. Resolves D23. |
-| [`implementation-plan.md`](./implementation-plan.md) | Implementation plan | Stacked delivery plan covering all type-system proposals (state layer + transport layer + exception-less + specifications). Phases, dependencies, coordinated migration moments, decisions to pin per phase, risk management |
+| [`implementation-plan.md`](./implementation-plan.md) | Implementation plan | Stacked delivery plan covering all type-system proposals (state layer + transport layer + exception-less + criterion). Phases, dependencies, coordinated migration moments, decisions to pin per phase, risk management |
+| [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md) | Multi-tenancy | `tenancy by user.tenantId` at system level; `crossTenant` / `platform` aggregate modifiers; auto-stamped `TenantId` column + EF/Drizzle/Ash query filter |
+| [`pagination-design-note.md`](./pagination-design-note.md) | Pagination | `Paged<T>` response envelope; offset/limit defaults; `unpaged` opt-out for small reference lists |
+| [`mutation-testing.md`](./mutation-testing.md) | Mutation testing | IR-level `ExprIR → ExprIR[]` operators; gated instrumented emit mode preserving byte-identical fixtures; staged runner plan |
+| [`authorization.md`](./authorization.md) | Authorization | `DataKey` hierarchical scoping, `policy { data { … } }` reachability, operation/view/workflow gates, field masking |
 
 ## Type-system family — state, transport, exception-less
 
@@ -173,13 +177,19 @@ gates and which e2e suites each phase must pass before merge.
 
 ## Relationship to the policies work
 
-A separate effort owns Loom's authorization model (`DataKey`,
-`dataPolicy`, `operationPolicy`, relation-based sharing). Several
-aspects here touch that model at the seams — sensitivity tags drive a
-policy-presence lint, audit records reference a policy decision id, the
-load-spec layer and any data-policy filtering both wrap `Repo.load`,
-and one source conversation contained an *entire alternate policy DSL*
-(typed `policy` boolean functions, `@requires`, field `read`/`write`
-gates). All of that is collected — with explicit reconciliation notes —
-in [`policies-supplementary-note.md`](./policies-supplementary-note.md)
-so the two visions stay complementary rather than colliding.
+Loom's authorization model is owned by
+[`authorization.md`](./authorization.md), which consolidates the
+earlier research — including the `DataKey`/`dataPolicy`/operation-gate
+split and the alternate function-style policy DSL — into a single
+design (a `policy {}` context member with a `data {}` reachability
+section, parameterized operation/view/workflow gates, and field
+masking, layered on top of `DataKey` for hierarchical scoping). It
+overlaps with [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md)
+on the `crossTenant` keyword and tenancy primitives; reconciliation
+between the two is tracked in §0 of `authorization.md`. Several
+aspects here touch the authorization layer at the seams: sensitivity
+tags drive a policy-presence lint, audit records reference a policy
+decision id, and the load-spec layer and any data-policy filtering
+both wrap `Repo.load`. The earlier reconciliation note
+[`policies-supplementary-note.md`](./policies-supplementary-note.md)
+is retained as background; it is superseded by `authorization.md`.

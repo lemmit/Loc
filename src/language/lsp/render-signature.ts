@@ -15,10 +15,12 @@ export function buildSignature(
   name: string,
   params: ReadonlyArray<{ name: string; type: TypeRef }>,
   ret?: TypeRef,
+  style: "()" | "{}" = "()",
 ): SignatureInformation {
   const paramStrs = params.map(paramSig);
   const retStr = ret ? `: ${typeToString(resolveTypeRef(ret))}` : "";
-  const label = `${name}(${paramStrs.join(", ")})${retStr}`;
+  const [open, close] = style === "{}" ? [" { ", " }"] : ["(", ")"];
+  const label = `${name}${open}${paramStrs.join(", ")}${close}${retStr}`;
   const parameters: ParameterInformation[] = paramStrs.map((s) => ParameterInformation.create(s));
   return SignatureInformation.create(label, undefined, ...parameters);
 }

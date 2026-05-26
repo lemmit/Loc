@@ -18,7 +18,7 @@ describe("page title via useEffect(document.title)", () => {
           page Home {
             route: "/"
             title: "Acme — Home"
-            body:  Heading("Welcome")
+            body:  Heading { "Welcome" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -44,7 +44,7 @@ describe("page title via useEffect(document.title)", () => {
           page User(name: string) {
             route: "/u/:name"
             title: "User: " + name
-            body:  Heading(name)
+            body:  Heading { name }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -72,7 +72,7 @@ describe("page title via useEffect(document.title)", () => {
             route: "/c"
             state { count: int = 0 }
             title: "Count: " + count
-            body:  Button("+", onClick: e => { count += 1 })
+            body:  Button { "+", onClick: e => { count += 1 } }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -89,8 +89,11 @@ describe("page title via useEffect(document.title)", () => {
     expect(content).toMatch(/import \{ useState, useEffect \} from "react";/);
     expect(content).toMatch(/const \[count, setCount\] = useState<number>\(0\);/);
     // Effect deps include the state field referenced in the title.
+    // `count` (int) → wrapped via `String(count)` per the implicit
+    // `string + X` concat rule; deps tracker recurses into the
+    // `convert` IR's value so `count` still lands in the deps array.
     expect(content).toMatch(
-      /useEffect\(\(\) => \{ document\.title = \("Count: " \+ count\); \}, \[count\]\);/,
+      /useEffect\(\(\) => \{ document\.title = \("Count: " \+ String\(count\)\); \}, \[count\]\);/,
     );
   });
 
@@ -103,7 +106,7 @@ describe("page title via useEffect(document.title)", () => {
             route: "/h/:slug"
             state { n: int = 0 }
             title: slug + ":" + n
-            body:  Text("hi")
+            body:  Text { "hi" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -130,7 +133,7 @@ describe("page title via useEffect(document.title)", () => {
         ui WebApp {
           page Plain {
             route: "/plain"
-            body:  Heading("hi")
+            body:  Heading { "hi" }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }

@@ -11,6 +11,7 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../ir/loom-ir.js";
+import { forApiRead, forCreateInput } from "../../ir/wire-projection.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { ApiRoute } from "./api-emit.js";
 
@@ -240,14 +241,19 @@ function renderApiSpec(
       }`);
   }
 
-  // Aggregate CRUD paths: GET /aggregates/<plural>, GET /aggregates/<plural>/:id, POST /aggregates/<plural>
-  for (const { agg } of allAggregates) {
+  // Aggregate CRUD paths: GET /<plural>, GET /<plural>/{id}, POST /<plural>
+  // Note: path-template parameters use the OpenAPI `{id}` syntax (not the
+  // Plug-router `:id` form), matching the Hono/.NET emitters so the
+  // conformance parity diff treats them as the same operation.
+  // Plus per-op and per-find paths derived from the aggregate's
+  // public operations and repository finds.
+  for (const { ctx, agg } of allAggregates) {
     const aggSlug = snake(plural(agg.name));
     const respMod = `${schemasModule}.${agg.name}Response`;
     const listRespMod = `${schemasModule}.${agg.name}ListResponse`;
     const createReqMod = `${schemasModule}.Create${agg.name}Request`;
     pathEntries.push(
-      `      "/aggregates/${aggSlug}" => %OpenApiSpex.PathItem{
+      `      "/${aggSlug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "List ${agg.name}",
           operationId: "list_${snake(agg.name)}",
@@ -277,7 +283,7 @@ function renderApiSpec(
           }
         }
       }`,
-      `      "/aggregates/${aggSlug}/:id" => %OpenApiSpex.PathItem{
+      `      "/${aggSlug}/{id}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "Get ${agg.name} by id",
           operationId: "get_${snake(agg.name)}_by_id",
@@ -295,6 +301,61 @@ function renderApiSpec(
         }
       }`,
     );
+
+    // Per-operation paths: POST /<plural>/{id}/<op>
+    for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+      const opSnake = snake(op.name);
+      const opReqMod = `${schemasModule}.${upperFirst(op.name)}Request`;
+      pathEntries.push(
+        `      "/${aggSlug}/{id}/${opSnake}" => %OpenApiSpex.PathItem{
+        post: %OpenApiSpex.Operation{
+          summary: "${op.name} on ${agg.name}",
+          operationId: "${opSnake}_${snake(agg.name)}",
+          tags: ["${aggSlug}"],
+          parameters: [
+            %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: %OpenApiSpex.Schema{type: :string}}
+          ],
+          requestBody: %OpenApiSpex.RequestBody{
+            required: true,
+            content: %{
+              "application/json" => %OpenApiSpex.MediaType{schema: ${opReqMod}}
+            }
+          },
+          responses: %{
+            204 => %OpenApiSpex.Response{description: "No Content"}
+          }
+        }
+      }`,
+      );
+    }
+
+    // Per-find paths: GET /<plural>/<find>.  Skip auto-`all` (already served
+    // by the CRUD `GET /<plural>` above).  Response cardinality follows the
+    // declared find return type: array → list response; otherwise single.
+    const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+    if (repo) {
+      for (const find of repo.finds) {
+        if (find.name === "all") continue;
+        const findSnake = snake(find.name);
+        const isArrayReturn = find.returnType.kind === "array";
+        const findRespMod = isArrayReturn ? listRespMod : respMod;
+        pathEntries.push(
+          `      "/${aggSlug}/${findSnake}" => %OpenApiSpex.PathItem{
+        get: %OpenApiSpex.Operation{
+          summary: "${find.name} on ${agg.name}",
+          operationId: "${findSnake}_${snake(agg.name)}",
+          tags: ["${aggSlug}"],
+          responses: %{
+            200 => %OpenApiSpex.Response{
+              description: "OK",
+              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${findRespMod}}}
+            }
+          }
+        }
+      }`,
+        );
+      }
+    }
   }
 
   const pathsBlock =
@@ -400,8 +461,15 @@ function renderProperties(fields: Array<{ name: string; type: TypeIR; optional: 
   const propsLines: string[] = [];
   const requiredAtoms: string[] = [];
 
+  // Field names land in the spec as the source-level identifier from the
+  // `.ddd` source (camelCase by convention, e.g. `createdAt`,
+  // `pipelineCount`).  The runtime wire shape — produced by the
+  // per-resource `defimpl Jason.Encoder` introduced in PR C — emits the
+  // same casing, so the spec and the response body agree.  Snake-casing
+  // here would re-introduce the divergence the parity harness reports
+  // as `only-phoenix=[created_at,...]`.
   for (const f of fields) {
-    const key = snake(f.name);
+    const key = f.name;
     const schema = openApiType(f.type);
     propsLines.push(`      ${key}: ${schema}`);
     if (!f.optional) requiredAtoms.push(`:${key}`);
@@ -458,13 +526,17 @@ function renderValueObjectSchema(vo: ValueObjectIR, webModule: string): string {
 
 function renderPartResponseSchema(part: EntityPartIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.${part.name}Response`;
-  const wireFields = wireShapeFor(part);
+  // `forApiRead` drops `internal` and `secret` fields from the OpenAPI
+  // response schema so it matches what the Phoenix LiveView controller
+  // actually serves — same contract the .NET / Hono / React backends
+  // follow.
+  const wireFields = forApiRead(wireShapeFor(part));
   return renderSchemaModule(moduleName, `${part.name}Response`, wireFieldsToProps(wireFields));
 }
 
 function renderAggregateResponseSchema(agg: AggregateIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.${agg.name}Response`;
-  const wireFields = wireShapeFor(agg);
+  const wireFields = forApiRead(wireShapeFor(agg));
   return renderSchemaModule(moduleName, `${agg.name}Response`, wireFieldsToProps(wireFields));
 }
 
@@ -488,8 +560,13 @@ end
 
 function renderCreateRequestSchema(agg: AggregateIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.Create${agg.name}Request`;
-  // Create request carries required (non-optional) fields only, matching Hono
-  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = agg.fields
+  // Create request carries required (non-optional) fields that the
+  // client may supply.  `forCreateInput` drops server-controlled fields
+  // (`managed`, `token`, `internal`); keeps `immutable` and `secret`.
+  // Matches the .NET / Hono / React CreateRequest shapes.
+  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = forCreateInput(
+    agg.fields,
+  )
     .filter((f: FieldIR) => !f.optional)
     .map((f: FieldIR) => ({ name: f.name, type: f.type, optional: false }));
   return renderSchemaModule(moduleName, `Create${agg.name}Request`, fields);
@@ -547,10 +624,11 @@ function renderViewResponseSchema(
       optional: f.optional,
     }));
   } else {
-    // Shorthand view: use source aggregate's wire shape
+    // Shorthand view: use source aggregate's wire shape, filtered
+    // for API exposure — drops `internal` and `secret` fields.
     const sourceAgg = ctx.aggregates.find((a) => a.name === view.aggregateName);
     if (sourceAgg) {
-      const wireFields = wireShapeFor(sourceAgg);
+      const wireFields = forApiRead(wireShapeFor(sourceAgg));
       fields = wireFieldsToProps(wireFields);
     } else {
       fields = [];
@@ -577,7 +655,7 @@ defmodule ${moduleName} do
   OpenApiSpex.schema(%{
     title: "${schemaName}",
     type: :array,
-    items: %{
+    items: %OpenApiSpex.Schema{
       type: :object,
       properties: %{
 ${propsBlock}

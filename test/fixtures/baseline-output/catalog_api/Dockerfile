@@ -15,6 +15,11 @@ RUN dotnet publish CatalogApi.csproj -c Release -o /app/publish --no-restore /p:
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
+# wget is here so the compose healthcheck (which shells out to wget) works
+# inside the aspnet image — without it the container reports unhealthy
+# even though the API is responding on /health.
+RUN apt-get update -y && apt-get install -y --no-install-recommends wget \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 COPY --from=build /app/publish ./

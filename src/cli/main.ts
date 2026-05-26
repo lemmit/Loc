@@ -582,14 +582,21 @@ generate
   .action(
     async (
       file: string,
-      options: { out: string; watch?: boolean; dryRun?: boolean; trace?: boolean },
+      options: {
+        out: string;
+        watch?: boolean;
+        dryRun?: boolean;
+        trace?: boolean;
+      },
     ) => {
-      await runGenerate("system", file, options.out, {
+      const runOpts = {
         dryRun: options.dryRun,
         emitTrace: !!options.trace,
-      });
-      if (options.watch)
-        await watchAndRegenerate("system", file, options.out, { emitTrace: !!options.trace });
+      };
+      await runGenerate("system", file, options.out, runOpts);
+      if (options.watch) {
+        await watchAndRegenerate("system", file, options.out, runOpts);
+      }
     },
   );
 
@@ -622,7 +629,7 @@ async function watchAndRegenerate(
   target: GenerateTarget,
   file: string,
   outDir: string,
-  options: { emitTrace?: boolean } = {},
+  extraOptions: Partial<RunOptions> = {},
 ) {
   console.log(`Watching ${file} for changes…`);
   let timer: NodeJS.Timeout | null = null;
@@ -638,10 +645,7 @@ async function watchAndRegenerate(
     }
     inFlight = true;
     try {
-      await runGenerate(target, file, outDir, {
-        continueOnError: true,
-        emitTrace: options.emitTrace,
-      });
+      await runGenerate(target, file, outDir, { continueOnError: true, ...extraOptions });
     } catch (err) {
       // Defensive — runGenerate is supposed to capture its own
       // errors when continueOnError is set, but a renderer throwing

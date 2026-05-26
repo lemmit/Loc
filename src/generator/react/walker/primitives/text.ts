@@ -9,6 +9,7 @@ import {
   emitExpr,
   firstPositionalContent,
   stringOrRefArgValue,
+  styleAttr,
   testidAttr,
   walk,
 } from "../../body-walker.js";
@@ -39,6 +40,7 @@ export function emitMoney(
     hasDecimals: decimals !== undefined,
     decimals: decimals !== undefined ? String(decimals) : "",
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -57,6 +59,7 @@ export function emitDateDisplay(
   return renderPrimitive(ctx, "primitive-date-display", {
     valueExpr,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -79,6 +82,7 @@ export function emitEnumBadge(
     hasColor: color !== undefined,
     color: color !== undefined ? JSON.stringify(color) : "",
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -96,6 +100,7 @@ export function emitEmpty(
   return renderPrimitive(ctx, "primitive-empty", {
     text: unwrapTextLiteral(msg),
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -111,6 +116,7 @@ export function emitLoader(
     size,
     hasSize: size !== undefined,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -131,6 +137,7 @@ export function emitAnchor(
     to,
     hasTo: to !== undefined,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -150,6 +157,7 @@ export function emitImage(
     hasSrc: src !== undefined,
     hasAlt: alt !== undefined,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -169,6 +177,7 @@ export function emitAvatar(
     hasSrc: src !== undefined,
     hasAlt: alt !== undefined,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -187,6 +196,7 @@ export function emitHeading(
     text: unwrapTextLiteral(text),
     level,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }
 
@@ -194,6 +204,48 @@ export function emitText(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   const text = firstPositionalContent(call, ctx) ?? '""';
   void depth;
   return renderPrimitive(ctx, "primitive-text", {
+    text: unwrapTextLiteral(text),
+    testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
+  });
+}
+
+/** `Bold { "..." }` — inline strong-emphasis span.  Same shape as
+ *  `emitText`; lowers to the pack-specific `<strong>` equivalent. */
+export function emitBold(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
+  const text = firstPositionalContent(call, ctx) ?? '""';
+  void depth;
+  return renderPrimitive(ctx, "primitive-bold", {
+    text: unwrapTextLiteral(text),
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** `Italic { "..." }` — inline emphasis span.  Same shape as
+ *  `emitText`; lowers to the pack-specific `<em>` equivalent. */
+export function emitItalic(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const text = firstPositionalContent(call, ctx) ?? '""';
+  void depth;
+  return renderPrimitive(ctx, "primitive-italic", {
+    text: unwrapTextLiteral(text),
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** `InlineCode { "..." }` — inline `<code>` span for mono-styled
+ *  terms (e.g. `.ddd`, `docker compose`) embedded in running prose. */
+export function emitInlineCode(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const text = firstPositionalContent(call, ctx) ?? '""';
+  void depth;
+  return renderPrimitive(ctx, "primitive-inline-code", {
     text: unwrapTextLiteral(text),
     testidAttr: testidAttr(call, ctx),
   });
@@ -214,5 +266,6 @@ export function emitKeyValueRow(
     label: escapeJsxText(labelStr),
     childJsx,
     testidAttr: testidAttr(call, ctx),
+    styleAttr: styleAttr(call, ctx),
   });
 }

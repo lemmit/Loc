@@ -1,5 +1,5 @@
 // Auto-generated.
-import { Routes, Route, Link as RouterLink, useLocation } from "{{routerPackage}}";
+import { Routes, Route, Link as RouterLink, useLocation, Outlet } from "{{routerPackage}}";
 import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button, Stack } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import React from "react";
@@ -73,7 +73,12 @@ function useIsActive() {
   };
 }
 
-export default function App() {
+// Default app chrome — header + sidebar + main with an Outlet that
+// React Router fills with the active in-shell child route.  Pages
+// declared with `layout: none` mount as sibling routes outside this
+// wrapper (see `App()` below) so they get no header / sidebar /
+// padding.
+function AppShellLayout() {
   const isActive = useIsActive();
   const [opened, { toggle, close }] = useDisclosure();
   // Mobile UX: auto-close the navbar drawer after a route change.
@@ -119,12 +124,21 @@ export default function App() {
       </AppShell.Navbar>
       <AppShell.Main>
         <AppErrorBoundary>
-          <Routes>
-{{#each routes}}            <Route path="{{path}}" element={{expr elementJsx}} />
-{{/each}}            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <Outlet />
         </AppErrorBoundary>
       </AppShell.Main>
     </AppShell>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+{{#each outOfShellRoutes}}      <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}      <Route element={<AppShellLayout />}>
+{{#each routes}}        <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}        <Route path="*" element={<NotFound />} />
+      </Route>
+    </Routes>
   );
 }

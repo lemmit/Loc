@@ -1,5 +1,5 @@
 // Auto-generated.
-import { Routes, Route, Link as RouterLink, useLocation } from "react-router";
+import { Routes, Route, Link as RouterLink, useLocation, Outlet } from "react-router";
 import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button, Stack } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import React from "react";
@@ -86,7 +86,12 @@ function useIsActive() {
   };
 }
 
-export default function App() {
+// Default app chrome — header + sidebar + main with an Outlet that
+// React Router fills with the active in-shell child route.  Pages
+// declared with `layout: none` mount as sibling routes outside this
+// wrapper (see `App()` below) so they get no header / sidebar /
+// padding.
+function AppShellLayout() {
   const isActive = useIsActive();
   const [opened, { toggle, close }] = useDisclosure();
   // Mobile UX: auto-close the navbar drawer after a route change.
@@ -141,26 +146,34 @@ export default function App() {
       </AppShell.Navbar>
       <AppShell.Main>
         <AppErrorBoundary>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/products" element={<ProductList />} />
-            <Route path="/products/new" element={<ProductNew />} />
-            <Route path="/products/:id" element={<ProductDetail />} />
-            <Route path="/orders" element={<OrderList />} />
-            <Route path="/orders/new" element={<OrderNew />} />
-            <Route path="/orders/:id" element={<OrderDetail />} />
-            <Route path="/customers" element={<CustomerList />} />
-            <Route path="/customers/new" element={<CustomerNew />} />
-            <Route path="/customers/:id" element={<CustomerDetail />} />
-            <Route path="/workflows" element={<WorkflowsIndex />} />
-            <Route path="/workflows/place_order" element={<PlaceOrderWorkflowPage />} />
-            <Route path="/views" element={<ViewsIndex />} />
-            <Route path="/views/active_orders" element={<ActiveOrdersViewPage />} />
-            <Route path="/views/order_summary" element={<OrderSummaryViewPage />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <Outlet />
         </AppErrorBoundary>
       </AppShell.Main>
     </AppShell>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route element={<AppShellLayout />}>
+        <Route path="/" element={<Home />} />
+        <Route path="/products" element={<ProductList />} />
+        <Route path="/products/new" element={<ProductNew />} />
+        <Route path="/products/:id" element={<ProductDetail />} />
+        <Route path="/orders" element={<OrderList />} />
+        <Route path="/orders/new" element={<OrderNew />} />
+        <Route path="/orders/:id" element={<OrderDetail />} />
+        <Route path="/customers" element={<CustomerList />} />
+        <Route path="/customers/new" element={<CustomerNew />} />
+        <Route path="/customers/:id" element={<CustomerDetail />} />
+        <Route path="/workflows" element={<WorkflowsIndex />} />
+        <Route path="/workflows/place_order" element={<PlaceOrderWorkflowPage />} />
+        <Route path="/views" element={<ViewsIndex />} />
+        <Route path="/views/active_orders" element={<ActiveOrdersViewPage />} />
+        <Route path="/views/order_summary" element={<OrderSummaryViewPage />} />
+        <Route path="*" element={<NotFound />} />
+      </Route>
+    </Routes>
   );
 }

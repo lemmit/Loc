@@ -6,6 +6,7 @@ on:
     paths:
       - 'src/**'
       - 'test/**'
+      - 'web/**'
       - 'package.json'
       - 'package-lock.json'
       - 'langium-config.json'
@@ -18,6 +19,7 @@ on:
     paths:
       - 'src/**'
       - 'test/**'
+      - 'web/**'
       - 'package.json'
       - 'package-lock.json'
       - 'langium-config.json'
@@ -91,3 +93,40 @@ jobs:
           name: coverage-html
           path: coverage/
           retention-days: 14
+
+  # Fast typecheck gate for the playground (`web/`).  The playground imports
+  # the Loom toolchain straight from `../src`, so a `src/` change can silently
+  # break `web/` — exactly the failure mode of PR #517, where a `case "Form"`
+  # in web/src/builder/page/components.tsx survived a `PrimitiveName` narrowing
+  # in src/ir/loom-ir.ts and only surfaced days later in playground-e2e.  This
+  # job closes that gap in under two minutes by running `tsc -b` against
+  # `web/` (skipping `vite build`, which `web`'s `npm run build` script
+  # bundles in).
+  web-tsc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      # Root install runs the `prepare` lifecycle (langium:generate + build);
+      # `web/` resolves `../src/language/generated/**` at typecheck time, so
+      # this must complete before `tsc -b` runs inside `web/`.
+      - name: Install root (runs langium:generate + build)
+        run: npm ci
+
+      - name: Install web
+        working-directory: web
+        run: npm ci
+
+      # `npm run build` in web/ chains `tsc -b && vite build`; we only need
+      # the typecheck for this gate, so invoke `tsc` directly.
+      - name: Typecheck web
+        working-directory: web
+        run: npx tsc -b

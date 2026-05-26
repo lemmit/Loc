@@ -8,15 +8,19 @@ import { useEffect, useMemo, useState, Fragment, type ReactNode } from "react";
 import { Box, Button, Group, Text } from "@mantine/core";
 import {
   Background,
+  BaseEdge,
   Controls,
+  Position,
   ReactFlow,
   ReactFlowProvider,
+  getSmoothStepPath,
   useEdgesState,
   useNodesInitialized,
   useNodesState,
   useReactFlow,
   type Connection,
   type Edge,
+  type EdgeProps,
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -68,6 +72,7 @@ const KIND_COLOR: Record<ViewKind, string> = {
   module: "var(--mantine-color-blue-7)",
   context: "var(--mantine-color-cyan-8)",
   aggregate: "var(--mantine-color-teal-7)",
+  entity: "var(--mantine-color-teal-6)",
   operation: "var(--mantine-color-orange-8)",
   workflow: "var(--mantine-color-orange-8)",
   valueobject: "var(--mantine-color-cyan-7)",
@@ -77,6 +82,7 @@ const KIND_COLOR: Record<ViewKind, string> = {
   invariant: "var(--mantine-color-yellow-8)",
   view: "var(--mantine-color-lime-8)",
   function: "var(--mantine-color-yellow-8)",
+  derived: "var(--mantine-color-cyan-7)",
   field: "var(--mantine-color-gray-7)",
   containment: "var(--mantine-color-teal-8)",
   api: "var(--mantine-color-pink-7)",
@@ -137,6 +143,44 @@ function toRfNodes(
 
 const NODE_TYPES = { stmt: StmtNode, construct: ConstructNode } as const;
 
+/** Pixel offset below the root banner where the `contains` fork's horizontal
+ *  segment lands. React Flow's default smoothstep places the bend at the
+ *  vertical midpoint between source and target — for a tall layout that
+ *  midpoint falls into the workflow row and the fork bar visually overlaps
+ *  the orchestrator tier. Pinning the bend to a small offset just below
+ *  the banner keeps the fork in its own empty horizontal lane, above every
+ *  tier of children. */
+const CONTAINS_FORK_OFFSET = 50;
+
+/** Custom edge component for `contains`. Forces the smoothstep bend to a
+ *  fixed Y offset below the source (when leaving the bottom handle), or X
+ *  offset right/left of the source (when leaving a side handle). Other
+ *  React Flow edges fall back to the built-in routing. */
+function ContainsEdge(props: EdgeProps): JSX.Element {
+  const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style } = props;
+  const centerY =
+    sourcePosition === Position.Bottom ? sourceY + CONTAINS_FORK_OFFSET : undefined;
+  const centerX =
+    sourcePosition === Position.Left
+      ? sourceX - CONTAINS_FORK_OFFSET
+      : sourcePosition === Position.Right
+        ? sourceX + CONTAINS_FORK_OFFSET
+        : undefined;
+  const [edgePath] = getSmoothStepPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    centerX,
+    centerY,
+  });
+  return <BaseEdge path={edgePath} style={style} />;
+}
+
+const EDGE_TYPES = { contains: ContainsEdge } as const;
+
 // ViewKind → AST `$type`. Drives both the on-node delete (splice the matching
 // AST node out of source) and the on-node rename (rewrite the declared name +
 // every reference via Langium's NameProvider). Field and containment aren't
@@ -147,8 +191,10 @@ const AST_TYPE_BY_VIEW: Partial<Record<ViewKind, string>> = {
   module: "Module",
   context: "BoundedContext",
   aggregate: "Aggregate",
+  entity: "EntityPart",
   operation: "Operation",
   function: "FunctionDecl",
+  derived: "DerivedProp",
   workflow: "Workflow",
   valueobject: "ValueObject",
   event: "EventDecl",
@@ -176,17 +222,62 @@ function leafBodyLocator(path: ViewPath): BodyLocator | null {
   return null;
 }
 
+/** Per-edge-kind stroke + dashing. Keeps the visual language consistent across
+ *  views: bindings & writes are solid (commit-shaped), reads & constraints are
+ *  dashed (observation-shaped), event emissions get their own accent. */
+const EDGE_STYLE: Record<string, { stroke: string; dash?: string; labelFill?: string; opacity?: number; strokeWidth?: number }> = {
+  binding:    { stroke: "var(--mantine-color-dark-2)" },
+  next:       { stroke: "var(--mantine-color-dark-2)" },
+  writes:     { stroke: "var(--mantine-color-teal-4)" },
+  reads:      { stroke: "var(--mantine-color-gray-5)", dash: "4 3", labelFill: "var(--mantine-color-gray-5)" },
+  constrains: { stroke: "var(--mantine-color-yellow-5)", dash: "2 3", labelFill: "var(--mantine-color-yellow-5)" },
+  emits:      { stroke: "var(--mantine-color-grape-5)" },
+  // Containment edges (root → child) are a faint structural backdrop —
+  // visible enough to read the tree shape, dim enough that the semantic
+  // edges (reads/writes/etc.) stay foreground.
+  contains:   { stroke: "var(--mantine-color-dark-3)", opacity: 0.5, strokeWidth: 1 },
+};
+
 function toRfEdges(g: ViewGraph): Edge[] {
   return g.edges.map((e) => {
     const reconnectable: "target" | false = isRebindableDeployableEdge(e.label ?? "") ? "target" : false;
+    const styleSpec = EDGE_STYLE[e.kind ?? "binding"] ?? EDGE_STYLE.binding;
+    // Pivot (centre-routed) containment edges form the structural backbone
+    // root↔aggregate/workflow/state and deserve more visual weight than the
+    // peripheral containment trace. Pivot contains attach to the BOTTOM
+    // handle; peripheral ones attach to LEFT / RIGHT.
+    const isPivotContains = e.kind === "contains" && e.sourceHandle === "bottom";
+    const stroke = isPivotContains ? "var(--mantine-color-dark-1)" : styleSpec.stroke;
+    const opacity = isPivotContains ? 0.85 : styleSpec.opacity;
+    const strokeWidth = isPivotContains ? 1.5 : styleSpec.strokeWidth;
     return {
       id: e.id,
       source: e.source,
       target: e.target,
+      // `contains` edges leave the root's left/right side handle so they trace
+      // down the periphery instead of crossing every tier through the centre.
+      // Smoothstep gives them an L-shape that hugs the canvas edge.
+      ...(e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}),
+      // Containment edges use a custom edge component that pins the smoothstep
+      // bend to a small offset below the banner (instead of the default
+      // midpoint between source and target). That keeps the fork's horizontal
+      // segment in its own empty lane between the banner and the first child
+      // row, so workflows / operations don't end up sitting on the fork bar.
+      ...(e.kind === "contains" ? { type: "contains" } : {}),
       label: e.label,
       reconnectable,
-      labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
-      style: { stroke: "var(--mantine-color-dark-2)" },
+      // Only deployable bindings carry visible labels — reads/writes/constrains
+      // use stroke styling instead, which keeps the aggregate view legible
+      // even at zoom-out (label text would crowd the field column).
+      ...(e.kind === "binding" ? {} : { label: undefined }),
+      labelStyle: { fontSize: 9, fill: styleSpec.labelFill ?? "var(--mantine-color-dimmed)" },
+      style: {
+        stroke,
+        strokeDasharray: styleSpec.dash,
+        opacity,
+        strokeWidth,
+      },
+      data: { edgeKind: e.kind ?? "binding" },
     };
   });
 }
@@ -417,6 +508,21 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     for (const n of graph.nodes) {
       if (n.kind === "stmt") continue;
 
+      // The synthesised "title" node re-states the current container at the
+      // top of the canvas. Read-only — no rename/delete/expr affordances, no
+      // drill (you're already inside it).
+      if (n.isRoot) {
+        m.set(n.id, {
+          kind: n.kind,
+          name: n.name,
+          color: KIND_COLOR[n.kind],
+          drillable: false,
+          isRoot: true,
+          compact,
+        });
+        continue;
+      }
+
       // Invariants are unnamed, so view-graph keys them by index. Delete
       // requires finding the right Invariant member by index in the aggregate.
       if (n.kind === "invariant" && aggOwner?.kind === "aggregate") {
@@ -574,6 +680,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         expressionEditor,
         onToggleExpression,
         compact,
+        unused: n.unused,
       });
     }
     return m;
@@ -596,7 +703,11 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const drill = (id: string): void => {
     const v = graph.nodes.find((x) => x.id === id);
     if (!v?.drillable) return;
-    setPath((p) => [...p, { kind: v.kind, name: v.name }]);
+    // VNode.drillTo overrides the default `{kind, name}` step — used by
+    // containment leaves whose drill target is the entity they reference,
+    // not the containment node itself.
+    const step = v.drillTo ?? { kind: v.kind, name: v.name };
+    setPath((p) => [...p, step]);
   };
 
   /** Repoint a deployable's `targets` / `ui` binding by dragging the edge's
@@ -618,6 +729,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           nodes={nodes}
           edges={edges}
           nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onReconnect={onReconnect}

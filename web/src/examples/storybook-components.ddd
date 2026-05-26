@@ -43,98 +43,98 @@ system Storybook {
         clickCount: int = 0
       }
 
-      body: Stack(
+      body: Stack {
         // ── Header ────────────────────────────────────────────
-        Heading("Loom UI Storybook", level: 1),
-        Text("Every primitive in the page metamodel stdlib, on one page."),
-        Divider(),
+        Heading { "Loom UI Storybook", level: 1 },
+        Text { "Every primitive in the page metamodel stdlib, on one page." },
+        Divider {},
 
         // ── Layout ────────────────────────────────────────────
-        Heading("Layout", level: 2),
+        Heading { "Layout", level: 2 },
 
-        Card("Stack — vertical stacking", Stack(
-          Text("Item one"),
-          Text("Item two"),
-          Text("Item three")
-        )),
+        Card {"Stack — vertical stacking", Stack {
+          Text { "Item one" },
+          Text { "Item two" },
+          Text { "Item three" }
+        }},
 
-        Card("Group — horizontal row", Group(
-          Badge("Alpha"),
-          Badge("Beta"),
-          Badge("Gamma")
-        )),
+        Card {"Group — horizontal row", Group {
+          Badge { "Alpha" },
+          Badge { "Beta" },
+          Badge { "Gamma" }
+        }},
 
-        Card("Grid — multi-column", Grid(
-          Card("A", Text("Cell A body")),
-          Card("B", Text("Cell B body")),
-          Card("C", Text("Cell C body"))
-        )),
+        Card {"Grid — multi-column", Grid {
+          Card { "A", Text { "Cell A body" } },
+          Card { "B", Text { "Cell B body" } },
+          Card { "C", Text { "Cell C body" } }
+        }},
 
-        Card("Tabs", Tabs(
-          Tab("Overview",  Text("Overview tab body")),
-          Tab("Details",   Text("Details tab body")),
-          Tab("Settings",  Text("Settings tab body"))
-        )),
+        Card {"Tabs", Tabs {
+          Tab { "Overview",  Text { "Overview tab body" } },
+          Tab { "Details",   Text { "Details tab body" } },
+          Tab { "Settings",  Text { "Settings tab body" } }
+        }},
 
-        Card("Toolbar", Toolbar(
-          Button("Primary"),
-          Button("Secondary"),
-          Button("Tertiary")
-        )),
+        Card {"Toolbar", Toolbar {
+          Button { "Primary" },
+          Button { "Secondary" },
+          Button { "Tertiary" }
+        }},
 
-        Divider(),
+        Divider {},
 
         // ── Display ───────────────────────────────────────────
-        Heading("Display", level: 2),
+        Heading { "Display", level: 2 },
 
-        Card("Headings ladder", Stack(
-          Heading("h2 example", level: 2),
-          Heading("h3 example", level: 3),
-          Heading("h4 example", level: 4)
-        )),
+        Card {"Headings ladder", Stack {
+          Heading { "h2 example", level: 2 },
+          Heading { "h3 example", level: 3 },
+          Heading { "h4 example", level: 4 }
+        }},
 
-        Card("Text",
-          Text("Plain body text — Lorem ipsum dolor sit amet, consectetur adipiscing elit.")
-        ),
+        Card {"Text",
+          Text { "Plain body text — Lorem ipsum dolor sit amet, consectetur adipiscing elit." }
+        },
 
-        Card("Stat — labelled metric", Group(
-          Stat("Active users", "1,247"),
-          Stat("Conversion",   "12.4%"),
-          Stat("Revenue",      "$48,210")
-        )),
+        Card {"Stat — labelled metric", Group {
+          Stat { "Active users", "1,247" },
+          Stat { "Conversion",   "12.4%" },
+          Stat { "Revenue",      "$48,210" }
+        }},
 
-        Card("Badge — coloured pill", Group(
-          Badge("Active"),
-          Badge("Draft"),
-          Badge("Archived")
-        )),
+        Card {"Badge — coloured pill", Group {
+          Badge { "Active" },
+          Badge { "Draft" },
+          Badge { "Archived" }
+        }},
 
-        Card("Empty state", Empty()),
+        Card { "Empty state", Empty {} },
 
-        Divider(),
+        Divider {},
 
         // ── Inputs ────────────────────────────────────────────
-        Heading("Inputs", level: 2),
+        Heading { "Inputs", level: 2 },
 
-        Card("Field — text bound to state", Stack(
-          Field("Your name", bind: userName),
-          Text("Hello, " + userName)
-        )),
+        Card {"Field — text bound to state", Stack {
+          Field { "Your name", bind: userName },
+          Text { "Hello, " + userName }
+        }},
 
-        Card("Toggle — bool bound to state",
-          Toggle("Notifications enabled", bind: notifications)
-        ),
+        Card {"Toggle — bool bound to state",
+          Toggle { "Notifications enabled", bind: notifications }
+        },
 
-        Divider(),
+        Divider {},
 
         // ── Actions ───────────────────────────────────────────
-        Heading("Actions", level: 2),
+        Heading { "Actions", level: 2 },
 
-        Card("Button — event handler", Stack(
-          Button("Increment", onClick: e => { clickCount := clickCount + 1 }),
-          Text("Clicks: " + clickCount)
-        ))
-      )
+        Card {"Button — event handler", Stack {
+          Button { "Increment", onClick: e => { clickCount := clickCount + 1 } },
+          Text { "Clicks: " + clickCount }
+        }}
+      }
     }
 
     // Single-page storybook — one menu link.

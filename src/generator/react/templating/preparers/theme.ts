@@ -22,6 +22,16 @@ const DEFAULT_PRIMARY_HEX = "#4f46e5";
  *  table rows) from feeling laboratory-cold the way pure mantine
  *  greys do. */
 const DEFAULT_NEUTRAL_HEX = "#64748b";
+/** Default semantic colours — chosen to read coherently across
+ *  light + dark schemes and against the indigo / slate baseline.
+ *  Packs may override per-token in future, but the baseline keeps
+ *  templates that always emit semantic slots from rendering
+ *  blank. */
+const DEFAULT_SECONDARY_HEX = "#6fd1ff";
+const DEFAULT_ACCENT_HEX = "#ffb98a";
+const DEFAULT_SUCCESS_HEX = "#22c55e";
+const DEFAULT_WARNING_HEX = "#f59e0b";
+const DEFAULT_ERROR_HEX = "#ef4444";
 /** Default body / heading family.  System-ui chain falls back
  *  cleanly without bundling a webfont; Inter takes over when the
  *  page already has it loaded. */
@@ -30,18 +40,32 @@ const DEFAULT_FONT_FAMILY =
 const DEFAULT_FONT_FAMILY_MONO =
   'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace';
 const DEFAULT_RADIUS = "md";
+const DEFAULT_COLOR_SCHEME: "light" | "dark" | "auto" = "light";
 
 export function prepareThemeVM(t: ThemeIR | undefined): ThemeVM {
   const primary = t?.primary ?? DEFAULT_PRIMARY_HEX;
   const neutral = t?.neutral ?? DEFAULT_NEUTRAL_HEX;
+  const secondary = t?.secondary ?? DEFAULT_SECONDARY_HEX;
+  const accent = t?.accent ?? DEFAULT_ACCENT_HEX;
+  const success = t?.success ?? DEFAULT_SUCCESS_HEX;
+  const warning = t?.warning ?? DEFAULT_WARNING_HEX;
+  const error = t?.error ?? DEFAULT_ERROR_HEX;
   const radius = t?.radius ?? DEFAULT_RADIUS;
   const fontFamily = t?.fontFamily ?? DEFAULT_FONT_FAMILY;
+  const fontFamilyMonospace = t?.fontFamilyMono ?? DEFAULT_FONT_FAMILY_MONO;
+  const colorScheme = t?.colorScheme ?? DEFAULT_COLOR_SCHEME;
   return {
     brandShades: generateShades(primary),
     neutralShades: generateShades(neutral),
+    secondaryShades: generateShades(secondary),
+    accentShades: generateShades(accent),
+    successShades: generateShades(success),
+    warningShades: generateShades(warning),
+    errorShades: generateShades(error),
     radius,
     fontFamily,
-    fontFamilyMonospace: DEFAULT_FONT_FAMILY_MONO,
+    fontFamilyMonospace,
+    colorScheme,
   };
 }
 

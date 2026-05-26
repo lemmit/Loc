@@ -19,6 +19,7 @@ import storybookMuiV7Source from "./storybook-mui-v7.ddd?raw";
 import storybookChakraSource from "./storybook-chakra.ddd?raw";
 import storybookChakraV3Source from "./storybook-chakra-v3.ddd?raw";
 import storybookComponentsSource from "./storybook-components.ddd?raw";
+import loomLandingSource from "./loom-landing.ddd?raw";
 import dotnetBackendSource from "./dotnet-backend.ddd?raw";
 import actionShowcaseSource from "./action-showcase.ddd?raw";
 import multifileMainSource from "./multifile-main.ddd?raw";
@@ -74,6 +75,13 @@ export const examples: LoomExample[] = [
   // entries hard to spot in a narrow mobile dropdown — they all
   // looked like "UI Storybook (..." until you read to the parenthesis.
   {
+    id: "loom-landing",
+    label: "Loom landing page — gap-closing baseline",
+    source: loomLandingSource,
+    blurb:
+      "A faithful port of the hand-authored landing at docs/index.html using today's primitives.  Visible approximations (plain-text code blocks, equal-weight grids, no icons) mark each gap that subsequent PRs will close one at a time.",
+  },
+  {
     id: "storybook-components",
     label: "Components storybook (single page)",
     source: storybookComponentsSource,
@@ -85,7 +93,7 @@ export const examples: LoomExample[] = [
     label: "Action showcase (operation buttons + forms)",
     source: actionShowcaseSource,
     blurb:
-      "Hand-authored Action(order.confirm) buttons in a component, plus scaffold operation forms — the instance-qualified operation surface end-to-end.",
+      "Hand-authored Action { order.confirm } buttons in a component, plus scaffold operation forms — the instance-qualified operation surface end-to-end.",
   },
   {
     id: "storybook-mantine",
@@ -220,4 +228,23 @@ export const examples: LoomExample[] = [
   },
 ];
 
-export const defaultExample = examples[0];
+// Default is the Sales System — the canonical full-stack demo with
+// aggregates, repositories, workflows, events, a React UI, AND the
+// requirements that the mobile-requirements e2e relies on (US-001,
+// SOL-001…). Two reasons we DON'T default to `examples[0]` (the
+// multi-file project):
+//
+//  1. The playground LSP runs on an `EmptyFileSystem` and only sees
+//     files pushed via `textDocument/didOpen`. The multi-file example
+//     imports `./shared/money.ddd` which is in the workspace VFS but
+//     never reaches the LSP, so the editor opens with two unresolved-
+//     reference errors and every e2e that begins with
+//     `waitForPlaygroundReady` fails 30s waiting for the "0 errors"
+//     badge.
+//  2. The mobile-requirements specs hard-code US-001 / SOL-001 row
+//     IDs that only exist in sales-system.
+//
+// When the workspace → LSP file-notification path lands, we can flip
+// the default back to the multi-file showcase.
+export const defaultExample =
+  examples.find((e) => e.id === "sales-system") ?? examples[0];

@@ -32,7 +32,7 @@ fastest way to read this matrix concretely.
 | `aggregate` | Class with private state, factory, ops, derived getters, `pullEvents()` | Sealed class with private state, factory, ops, derived getters, `PullEvents()` | List + Detail + New page; api hooks |
 | `entity` part | Same as aggregate but with `_parentId` | Same as aggregate; mapped via `OwnsMany` | Sub-table on detail page, master-detail row testids |
 | `contains` (collection) | Drizzle table with `parent_id` FK; auto-loaded in repo | EF owned-collection; auto-loaded by tracker | Sub-table on detail; not editable in the create form |
-| `X id[]` (reference collection) | Auto-derived many-to-many **join table** with composite PK + `ordinal` column; save diff-syncs join rows, load orders by `ordinal`. `this.<field>.contains(param)` is queryable (subquery against the join table). | EF Core join entity + `DbSet<JoinEntity>` (composite PK + `Ordinal`); `GetByIdAsync` loads via the join entity, `SaveAsync` diff-syncs (delete removed / upsert with ordinal); `.contains(param)` lowers to `_db.<JoinDbSet>.Any(...)`. (Phoenix/Ash backend: `many_to_many ... through <JoinResource>` + a `calculate :<field>, {:array, :uuid}, expr(<rel>.id)` to keep the wire shape; `.contains` lowers to `exists(<rel>, id == ^arg(:<param>))`. Ordinal column present but not yet populated per-row — set semantics for now.) | `X id[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
+| `X id[]` (reference collection) | Auto-derived many-to-many **join table** (composite PK enforces set semantics); save diff-syncs join rows, `.contains(param)` lowers to an `inArray` subquery against the join table. The join table also carries an `ordinal` column written on every `+=`, but the wire contract is unordered — see "What the generators don't do" below. | EF Core join entity + `DbSet<JoinEntity>` (composite PK + `Ordinal`); `GetByIdAsync` loads via the join entity, `SaveAsync` diff-syncs, `.contains(param)` lowers to `_db.<JoinDbSet>.Any(...)`. (Phoenix/Ash backend: `many_to_many ... through <JoinResource>` + a `calculate :<field>, {:array, :uuid}, expr(<rel>.id)`; `.contains` lowers to `exists(<rel>, id == ^arg(:<param>))`.) | `X id[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
 | `derived` | Getter that calls into the expression | Computed property that calls into the expression | Read-only field on detail; included in the response Zod schema |
 | `invariant` | Private `_assertInvariants()` called at the end of every mutator | Private `AssertInvariants()` called at the end of every mutator | (enforced server-side; surfaces as 400 in the UI) |
 | `provenanced` property | `domain/provenance.ts` SDK + `recordTrace(...)` after each write; `ddd snapshot` captures rule snapshots to `.loom/snapshots/*.loomsnap.json` | (keyword parsed; no trace code emitted) | (n/a — wire shape unaffected) |
@@ -118,8 +118,37 @@ operations.
 - Domain-error handler maps `DomainError` → 400, `AggregateNotFoundError` → 404
 
 Response schemas carry the **full wire shape**: every field, every
-contained part nested, every derived value, value objects as nested
-objects.  Decimals are JSON numbers; datetimes are ISO strings.
+contained part nested, every derived value (except the reserved
+`inspect` derived, which stays host-language-only — see below),
+value objects as nested objects.  Decimals are JSON numbers;
+datetimes are ISO strings.
+
+**Aggregate stringification hooks**: when an aggregate declares
+`derived inspect: string = ...` (auto-injected when omitted), each
+backend emits a host-language debug-string hook that delegates to
+the `inspect` value — `public override string ToString()` (.NET,
+auto-invoked by `$"{x}"` / `Console.WriteLine`), `toString()` +
+`[Symbol.for("nodejs.util.inspect.custom")]` (TS, auto-invoked by
+`String(x)` / `${x}` / `console.log`), and a public
+`def inspect(record)` module function (Phoenix, **invoked
+explicitly** as `MyApp.Catalog.Customer.inspect(record)` — Ash 3.x
+auto-derives the `Inspect` protocol for every resource module, so
+the loom-emitted form lives at the module-function level to avoid a
+`redefining module Inspect.<...>` collision under `mix compile
+--warnings-as-errors`).  Honours `sensitive(...)` field tags by
+substituting `<redacted>` for the value while keeping the field
+name in the structural output.  VO-typed fields are inlined
+structurally one level deep — `price: Money` shows as
+`price: Money(amount: 99, currency: 'USD')` rather than the opaque
+`price: [Money]` placeholder; further nesting (VO inside VO,
+arrays, optionals) falls back to the placeholder so the expression
+stays bounded and self-recursive VO shapes can't cycle.  A
+`sensitive(...)` tag on the parent's VO-typed field redacts the
+whole VO; per-field `sensitive(...)` inside the VO redacts only
+that slot.  Never reached by `string(aggregate)` or implicit
+`"x " + aggregate` — the user-facing form is `derived display:
+string = ...` (opt-in), routed through the Loom expression layer
+and the React Select picker.
 
 **`db/repositories/<aggregate>-repository.ts`** — built by
 `repository-builder.ts`:
@@ -672,16 +701,17 @@ Out of scope for v1 (intentional):
 - **Typeahead lookups for `X id` form fields**: rendered as plain
   text inputs.  A future enhancement could resolve `Customer id`
   to a `<Select>` populated from `useAllCustomers()`.
-- **Per-row ordinal preservation on Phoenix `X id[]`**: TypeScript and
-  .NET write `ordinal: i` on every `+=` (TS: `onConflictDoUpdate set
-  ordinal`, .NET: `__row.Ordinal = __i`), so the round-trip preserves
-  order.  Phoenix's `Ash.Changeset.manage_relationship` doesn't yet
-  inject ordinal per row, so the join column is nullable + defaulted
-  to `0` and order is not preserved.  Compiles cleanly, no runtime
-  failure — but cross-backend order parity is a follow-up.  Fix path
-  is a custom `change fn changeset, _ctx -> …` block that resolves the
-  current count + writes ordinal alongside the `manage_relationship`
-  call.
+- **Ordering on `X id[]` collections**: the wire contract is
+  unordered — a relational join table is naturally a set, and the
+  three backends realise that differently (TS/Drizzle and .NET/EF
+  happen to write a per-row `ordinal` and load `ORDER BY ordinal`;
+  Phoenix/Ash leaves ordinal at the column default and returns rows
+  in whatever order Postgres yields).  Treat `party[0]` as "some
+  element of `party`," not "the first element of `party`."  When
+  position is part of the domain (a battle slot, a draft pick
+  number), model it as an explicit ordinal field on a separate child
+  aggregate instead of relying on collection order — that's the
+  honest spelling and aligns with set semantics across all backends.
 - **Server-side rendering**: client-only Vite.  Next.js variant
   would be a separate platform.
 - **Generated CI / k8s manifests**: project-init concerns, not

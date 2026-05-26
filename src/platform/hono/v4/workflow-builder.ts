@@ -156,7 +156,7 @@ export function buildWorkflowsFile(
   ].filter(hasRef);
   const usesEvents = /\bEvents\.\w/.test(bodyStr);
   const usesIds = /\bIds\.\w/.test(bodyStr);
-  const usesSchema = /\bschema\.\w/.test(bodyStr);
+  const usesSchema = /\bschema\.\w/.test(bodyStr) || /\bNodePgDatabase\b/.test(bodyStr);
   const usesDb = /\bNodePgDatabase\b/.test(bodyStr);
   const usesDispatcher = /\bDomainEventDispatcher\b/.test(bodyStr);
   const aggsReferenced = [...aggsTouched].filter((n) =>

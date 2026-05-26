@@ -143,16 +143,16 @@ test("palette adds a data primitive with a binding dropdown", async ({ page }) =
   await page.getByTestId("doc-tab-builder").click();
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
 
-  // Add a Form and select it; its `of:` binding renders as a dropdown.
-  await page.getByTestId("c4palette-Form").click();
-  const formNode = page.getByTestId("c4node-Form").first();
+  // Add a CreateForm and select it; its `of:` binding renders as a dropdown.
+  await page.getByTestId("c4palette-CreateForm").click();
+  const formNode = page.getByTestId("c4node-CreateForm").first();
   await expect(formNode).toBeVisible();
   await formNode.click();
   await expect(page.getByTestId("c4builder-prop-of")).toBeVisible();
 
   // Applying a binding primitive keeps the source valid (re-seeds cleanly).
   await page.getByTestId("c4builder-apply").click();
-  await expect(page.getByTestId("c4node-Form").first()).toBeVisible();
+  await expect(page.getByTestId("c4node-CreateForm").first()).toBeVisible();
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
@@ -309,10 +309,10 @@ const OP_SOURCE = `system S {
       operation deposit(n: decimal) { }
       operation withdraw(n: decimal) { } }
   }
-  ui U { page P { body: Form(of: Account) } }
+  ui U { page P { body: OperationForm(of: Account) } }
 }`;
 
-test("Form op: offers the bound aggregate's operations as a dropdown", async ({ page }) => {
+test("OperationForm: offers the bound aggregate's operations as a dropdown", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
 
@@ -321,14 +321,14 @@ test("Form op: offers the bound aggregate's operations as a dropdown", async ({ 
   await page.getByTestId("doc-tab-builder").click();
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
 
-  // Select the Form; its `op:` dropdown is populated from Account's operations.
-  await page.getByTestId("c4node-Form").first().click();
+  // Select the OperationForm; its `op:` dropdown is populated from Account's operations.
+  await page.getByTestId("c4node-OperationForm").first().click();
   await page.getByTestId("c4builder-prop-op").click();
   await expect(page.getByRole("option", { name: "deposit" })).toBeVisible();
   await page.getByRole("option", { name: "withdraw" }).click();
 
   await page.getByTestId("c4builder-apply").click();
-  await expect(page.getByTestId("c4builder-canvas")).toContainText("Form");
+  await expect(page.getByTestId("c4builder-canvas")).toContainText("OperationForm");
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
@@ -379,7 +379,7 @@ const STATE_SOURCE = `system S {
   ui U {
     page P {
       state { step: int = 0 }
-      body: Form(of: Order)
+      body: CreateForm(of: Order)
     }
   }
 }`;

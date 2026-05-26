@@ -4,6 +4,7 @@ import type {
   Aggregate,
   AggregateMember,
   BoundedContext,
+  BuilderCall,
   EntityPart,
   EntityPartMember,
   Expression,
@@ -20,6 +21,7 @@ import {
   isAssignOrCallStmt,
   isBinaryExpr,
   isBoolLit,
+  isBuilderCall,
   isCallExpr,
   isContainment,
   isDecLit,
@@ -38,13 +40,13 @@ import {
   isMoneyLit,
   isNamedType,
   isNameRef,
-  isNewExpr,
   isNowExpr,
   isNullLit,
   isObjectLit,
   isOperation,
   isParenExpr,
   isPreconditionStmt,
+  isPrimitiveConversion,
   isPrimitiveType,
   isProperty,
   isRequiresStmt,
@@ -60,8 +62,10 @@ import type {
   IdValueType,
   PathIR,
   PermissionDeclIR,
+  PrimitiveName,
   ProvSite,
   StmtIR,
+  StyleIR,
   TypeIR,
   UserIR,
 } from "./loom-ir.js";
@@ -380,6 +384,33 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (isIntLit(expr)) return lit("int", String(expr.value));
   if (isDecLit(expr)) return lit("decimal", expr.value);
   if (isMoneyLit(expr)) return lit("money", expr.value ?? "0");
+  if (isPrimitiveConversion(expr)) {
+    const fromType = inferExprType(expr.value, env);
+    // Aggregate → string lowers to `aggregate.display` member access.
+    // The validator has already ensured `display` exists; if it
+    // didn't, lowering still produces a member access that backends
+    // would emit but the validator's diagnostic blocks the build.
+    if (
+      expr.target === "string" &&
+      fromType.kind === "entity" &&
+      entityHasDisplay(fromType.name, env)
+    ) {
+      return {
+        kind: "member",
+        receiver: lowerExpr(expr.value, env),
+        member: "display",
+        receiverType: fromType,
+        memberType: { kind: "primitive", name: "string" },
+      };
+    }
+    const from = fromType.kind === "primitive" ? (fromType.name as PrimitiveName) : undefined;
+    return {
+      kind: "convert",
+      target: expr.target as PrimitiveName,
+      from,
+      value: lowerExpr(expr.value, env),
+    };
+  }
   if (isBoolLit(expr)) return lit("bool", expr.value);
   if (isNullLit(expr)) return lit("null", "null");
   if (isNowExpr(expr)) return lit("now", "now");
@@ -426,6 +457,25 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
       if (promoted) {
         left = promoted;
         leftType = { kind: "primitive", name: rAnchor };
+      }
+    }
+    // Implicit `string + X` concat: wrap the non-string operand in a
+    // `convert` IR so backends emit `String(x)` / `x.ToString()` /
+    // `to_string(x)` per their existing renderConvert dispatch —
+    // identical to what the explicit `string(x)` form would produce.
+    // `arithmeticResult` / `binaryResultType` have already accepted
+    // this combination above; the convert wrap is the lowering's
+    // payback.  Same shape both ways means the validator's strict
+    // gate never fires, and backends don't need a separate code path.
+    if (expr.op === "+") {
+      const lStr = leftType.kind === "primitive" && leftType.name === "string";
+      const rStr = rightType.kind === "primitive" && rightType.name === "string";
+      if (lStr && !rStr && isImplicitlyStringifiableIR(rightType, env)) {
+        right = wrapForStringConcat(right, rightType);
+        rightType = { kind: "primitive", name: "string" };
+      } else if (rStr && !lStr && isImplicitlyStringifiableIR(leftType, env)) {
+        left = wrapForStringConcat(left, leftType);
+        leftType = { kind: "primitive", name: "string" };
       }
     }
     return {
@@ -498,15 +548,8 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
       })),
     };
   }
-  if (isNewExpr(expr)) {
-    return {
-      kind: "new",
-      partName: expr.partType?.ref?.name ?? "Unknown",
-      fields: expr.fields.map((f) => ({
-        name: f.name,
-        value: lowerExpr(f.value, env),
-      })),
-    };
+  if (isBuilderCall(expr)) {
+    return lowerBuilderCall(expr, env);
   }
   if (isMemberAccess(expr)) {
     // `permissions.<name>` magic identifier.  Resolves only when the
@@ -565,8 +608,13 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   }
   if (isCallExpr(expr)) {
     const callee = expr.callee;
-    const args = expr.args.map((a) => lowerExpr(a.value, env));
-    const argNames = expr.args.map((a) => a.name || undefined);
+    // Hoist `style:` named arg the same way builder-call form does, so
+    // both `Container { style: {...}, ... }` and `Container(style: {...}, ...)`
+    // surface the same IR shape downstream.
+    const styleHoist = hoistStyleArg(expr.args, env);
+    const callArgs = styleHoist.remainingEntries;
+    const args = callArgs.map((a) => lowerExpr(a.value, env));
+    const argNames = callArgs.map((a) => a.name || undefined);
     const named = argNames.some((n) => n !== undefined);
     if (isNameRef(callee)) {
       const callKind = resolveCallKind(callee.name, env);
@@ -576,6 +624,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
         name: callee.name,
         args,
         ...(named ? { argNames } : {}),
+        ...(styleHoist.style ? { style: styleHoist.style } : {}),
       };
     }
     return {
@@ -584,12 +633,98 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
       name: "<expr>",
       args,
       ...(named ? { argNames } : {}),
+      ...(styleHoist.style ? { style: styleHoist.style } : {}),
     };
   }
   if (isNameRef(expr)) {
     return resolveNameRef(expr.name, env);
   }
   return lit("null", "null");
+}
+
+/** Lower a v2 BuilderCall (`Type { slot: value, ... }`).  The type name
+ *  resolves at lowering time against the in-scope declarations:
+ *    - ValueObject       → "call" IR (callKind "value-object-ctor")
+ *    - EntityPart        → "new" IR (part construction)
+ *    - Anything else     → "call" IR (callKind "free") — walker
+ *      primitives, user components, unknown names.  The walker
+ *      dispatches by name on the resulting CallIR. */
+function lowerBuilderCall(expr: BuilderCall, env: Env): ExprIR {
+  const name = expr.type;
+  const vo = findValueObjectByName(env, name);
+  if (vo) {
+    return lowerBuilderCallAsCall(expr, env, name, "value-object-ctor");
+  }
+  const ent = findEntityByName(env, name);
+  if (ent && isEntityPart(ent)) {
+    const fields = expr.entries
+      .filter((e) => e.name !== undefined)
+      .map((e) => ({
+        name: e.name as string,
+        value: lowerExpr(e.value, env),
+      }));
+    return { kind: "new", partName: name, fields };
+  }
+  return lowerBuilderCallAsCall(expr, env, name, "free");
+}
+
+function inferBuilderCallType(expr: BuilderCall, env: Env): TypeIR {
+  const name = expr.type;
+  const vo = findValueObjectByName(env, name);
+  if (vo) return { kind: "valueobject", name };
+  const ent = findEntityByName(env, name);
+  if (ent) return { kind: "entity", name };
+  return { kind: "entity", name };
+}
+
+function lowerBuilderCallAsCall(
+  expr: BuilderCall,
+  env: Env,
+  name: string,
+  callKind: "value-object-ctor" | "free",
+): ExprIR {
+  // Hoist `style:` named arg into its own IR field — see lowerStyleArg.
+  // Filtering happens by index so `args` and `argNames` stay parallel.
+  const styleHoist = hoistStyleArg(expr.entries, env);
+  const entries = styleHoist.remainingEntries;
+  const args = entries.map((e) => lowerExpr(e.value, env));
+  const argNames = entries.map((e) => e.name || undefined);
+  const named = argNames.some((n) => n !== undefined);
+  return {
+    kind: "call",
+    callKind,
+    name,
+    args,
+    ...(named ? { argNames } : {}),
+    ...(styleHoist.style ? { style: styleHoist.style } : {}),
+  };
+}
+
+/** Hoist a `style: { … }` named entry out of a list of BuilderEntries
+ *  or CallArgs.  Returns the remaining entries (parallel to the
+ *  source order) plus a `StyleIR` when present.  When `style:` is
+ *  present but its value isn't an object literal, the entry is
+ *  dropped silently (validator surfaces a clearer diagnostic) so
+ *  downstream rendering doesn't see a half-broken shape. */
+function hoistStyleArg<E extends { name?: string; value: Expression }>(
+  entries: ReadonlyArray<E>,
+  env: Env,
+): { remainingEntries: E[]; style?: StyleIR } {
+  let style: StyleIR | undefined;
+  const remaining: E[] = [];
+  for (const e of entries) {
+    if (e.name === "style" && isObjectLit(e.value)) {
+      style = {
+        entries: e.value.fields.map((f) => ({
+          key: f.name,
+          value: lowerExpr(f.value, env),
+        })),
+      };
+      continue;
+    }
+    remaining.push(e);
+  }
+  return { remainingEntries: remaining, style };
 }
 
 function resolveNameRef(name: string, env: Env): ExprIR {
@@ -708,6 +843,9 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
   if (isIntLit(expr)) return { kind: "primitive", name: "int" };
   if (isDecLit(expr)) return { kind: "primitive", name: "decimal" };
   if (isMoneyLit(expr)) return { kind: "primitive", name: "money" };
+  if (isPrimitiveConversion(expr)) {
+    return { kind: "primitive", name: expr.target as PrimitiveName };
+  }
   if (isBoolLit(expr)) return { kind: "primitive", name: "bool" };
   if (isNullLit(expr)) return { kind: "primitive", name: "string" };
   if (isNowExpr(expr)) return { kind: "primitive", name: "datetime" };
@@ -765,8 +903,8 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     return { kind: "primitive", name: "string" };
   }
   if (isLambda(expr)) return { kind: "primitive", name: "string" };
-  if (isNewExpr(expr)) {
-    return { kind: "entity", name: expr.partType?.ref?.name ?? "Unknown" };
+  if (isBuilderCall(expr)) {
+    return inferBuilderCallType(expr, env);
   }
   if (isMemberAccess(expr)) {
     // `permissions.<name>` always types as `string` (matches the
@@ -892,9 +1030,7 @@ export function lowerExprInContext(
  *  promotes against (the binary handler in `lowerExpr`).  Returns
  *  null for non-anchor types (int, string, bool, etc.) — int doesn't
  *  anchor anything because every IntLit already types as int. */
-function literalPromotionAnchor(
-  t: TypeIR,
-): "long" | "decimal" | "money" | null {
+function literalPromotionAnchor(t: TypeIR): "long" | "decimal" | "money" | null {
   if (t.kind !== "primitive") return null;
   if (t.name === "long" || t.name === "decimal" || t.name === "money") return t.name;
   return null;
@@ -917,10 +1053,118 @@ function tryPromoteNumericLit(
   return null;
 }
 
+/** Wrap a value-IR in a `convert` IR with target=string so backends
+ *  emit the same to-string form they'd produce for an explicit
+ *  `string(x)` source-level call.  Used by the lowering binary
+ *  handler for implicit `string + X` concat — the validator has
+ *  already accepted the combination via `arithmeticResult`.
+ *
+ *  `from` is derived from the operand's source type — same primitive
+ *  name for primitives, `"enum"`/`"id"` sentinels for the non-
+ *  primitive admitted sources so backend `renderConvert` dispatches
+ *  consistently. */
+function wrapInStringConvert(value: ExprIR, fromType: TypeIR): ExprIR {
+  let from: PrimitiveName | undefined;
+  if (fromType.kind === "primitive") from = fromType.name;
+  // enum and `X id` are admitted as stringifiable but aren't
+  // primitives; backends inspect the wrapped value's runtime shape
+  // (enum value, id newtype) and pick the right host call.  Leaving
+  // `from` undefined here is the signal to the backend `convert`
+  // renderer to use the source operand's shape via the value
+  // itself (rather than the typed-primitive switch).
+  return { kind: "convert", target: "string", from, value };
+}
+
+/** Lowering hook for the implicit `string + X` concat rule when X is
+ *  one of the admitted sources.  Primitives / enum / id wrap in a
+ *  `convert` IR (backend-dispatched stringification).  Aggregates
+ *  rewrite to a `member(aggregate, "display")` access — `display` is
+ *  already string-typed, so no convert wrap is needed.  Both shapes
+ *  produce a string-typed result; downstream binary lowering doesn't
+ *  need to distinguish. */
+function wrapForStringConcat(value: ExprIR, fromType: TypeIR): ExprIR {
+  if (fromType.kind === "entity") {
+    return {
+      kind: "member",
+      receiver: value,
+      member: "display",
+      receiverType: fromType,
+      memberType: { kind: "primitive", name: "string" },
+    };
+  }
+  return wrapInStringConvert(value, fromType);
+}
+
+/** Mirror of `type-system.ts`'s `isImplicitlyStringifiable`, on
+ *  `TypeIR` instead of `DddType`.  Same set: numeric primitives,
+ *  bool, enum, `X id`, plus aggregates that declare a
+ *  `derived display: string`.  Used by the lowering binary handler
+ *  to decide whether to inject a `convert` node (primitives / enum /
+ *  id) or rewrite the operand to `aggregate.display` (aggregates). */
+function isImplicitlyStringifiableIR(t: TypeIR, env: Env): boolean {
+  if (isImplicitlyStringifiablePrimitiveOrEnum(t)) return true;
+  if (t.kind === "entity") return entityHasDisplay(t.name, env);
+  return false;
+}
+
+/** Env-free subset of `isImplicitlyStringifiableIR` — admits the
+ *  primitives / enum / X id that don't need an aggregate lookup.
+ *  Used by `binaryResultType` (which has no env) to decide the
+ *  result type of `string + X` without re-doing the aggregate
+ *  display lookup; aggregate operands fall through to the
+ *  type-system-level rule when env-aware code runs. */
+function isImplicitlyStringifiablePrimitiveOrEnum(t: TypeIR): boolean {
+  if (t.kind === "primitive") {
+    return (
+      t.name === "int" ||
+      t.name === "long" ||
+      t.name === "decimal" ||
+      t.name === "money" ||
+      t.name === "bool"
+    );
+  }
+  if (t.kind === "enum") return true;
+  if (t.kind === "id") return true;
+  return false;
+}
+
+/** True iff `name` resolves to an aggregate (in the current bounded
+ *  context) that declares a `derived display: string`.  Entity parts
+ *  don't participate; the validator's check on reserved derived names
+ *  is aggregate-only. */
+function entityHasDisplay(name: string, env: Env): boolean {
+  const agg = env.ctx?.members.find((m): m is Aggregate => isAggregate(m) && m.name === name);
+  if (!agg) return false;
+  return agg.members.some((m) => isDerivedProp(m) && m.name === "display");
+}
+
 function binaryResultType(op: string, a: TypeIR, b: TypeIR): TypeIR {
   if (op === "&&" || op === "||") return { kind: "primitive", name: "bool" };
   if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
     return { kind: "primitive", name: "bool" };
+  }
+  // Implicit string concatenation: `string + X` where X is
+  // stringifiable returns string.  Mirrors `arithmeticResult` in
+  // `type-system.ts` — the lowering wraps the non-string operand in
+  // a `convert` IR node so backends emit identical code to the
+  // explicit `string(x)` form.
+  if (op === "+") {
+    const aStr = a.kind === "primitive" && a.name === "string";
+    const bStr = b.kind === "primitive" && b.name === "string";
+    if (aStr || bStr) {
+      const other = aStr ? b : a;
+      // Note: `binaryResultType` lives outside of lowering's env-aware
+      // path; for aggregate-with-display admission we'd need the env,
+      // which the caller has but doesn't thread here.  The lowering
+      // binary handler computes the result type itself afterwards via
+      // `binaryResultType(op, leftType, rightType)`; if we miss
+      // admission here for an `entity` operand, the result type just
+      // falls through to the type-system rule (string + aggregate
+      // already admitted at AST-level via `arithmeticResult`).
+      if ((aStr && bStr) || isImplicitlyStringifiablePrimitiveOrEnum(other)) {
+        return { kind: "primitive", name: "string" };
+      }
+    }
   }
   const aIsMoney = a.kind === "primitive" && a.name === "money";
   const bIsMoney = b.kind === "primitive" && b.name === "money";

@@ -32,9 +32,10 @@ system AcmeOrderExplicit {
             enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
 
             aggregate Order {
-                customerId: string display
+                customerId: string
                 status:     OrderStatus
                 placedAt:   datetime
+                derived display: string = customerId
             }
 
             repository Orders for Order { }
@@ -53,58 +54,58 @@ system AcmeOrderExplicit {
         // Column lambdas (IdLink / Text / EnumBadge / DateDisplay).
         page OrderList {
             route: "/orders"
-            body:  Stack(
-                Breadcrumbs(
-                    Anchor("Home",   to: "/"),
-                    Text("Orders")
-                ),
-                Toolbar(
-                    Heading("Orders", level: 2),
-                    Button("New order",
+            body:  Stack {
+                Breadcrumbs {
+                    Anchor { "Home",   to: "/" },
+                    Text { "Orders" }
+                },
+                Toolbar {
+                    Heading { "Orders", level: 2 },
+                    Button {"New order",
                            to:     "/orders/new",
-                           testid: "orders-list-create")
-                ),
-                QueryView(
+                           testid: "orders-list-create"}
+                },
+                QueryView {
                     of:      Sales.Order.all,
-                    loading: Skeleton(count: 5),
-                    error:   Alert("Couldn't load orders"),
-                    empty:   Empty("No orders yet."),
-                    data:    rows => Paper(
-                        Table(
+                    loading: Skeleton { count: 5 },
+                    error:   Alert { "Couldn't load orders" },
+                    empty:   Empty { "No orders yet." },
+                    data:    rows => Paper {
+                        Table {
                             rows:       rows,
                             striped:    true,
                             highlight:  true,
                             sticky:     true,
                             rowTestid:  r => "orders-row-" + r.id,
-                            Column("ID",          o => IdLink(o.id, of: Order)),
-                            Column("Customer Id", o => Text(o.customerId)),
-                            Column("Status",      o => EnumBadge(o.status)),
-                            Column("Placed At",   o => DateDisplay(o.placedAt))
-                        ),
+                            Column { "ID",          o => IdLink { o.id, of: Order } },
+                            Column { "Customer Id", o => Text { o.customerId } },
+                            Column { "Status",      o => EnumBadge { o.status } },
+                            Column { "Placed At",   o => DateDisplay { o.placedAt } }
+                        },
                         padding: "none"
-                    ),
+                    },
                     testid: "orders-query"
-                ),
+                },
                 testid: "orders-list"
-            )
+            }
         }
 
         // OrderNew — replaces scaffold's `aggregate-new` archetype.
-        // Form(of: Order) handles all the RHF + zodResolver +
+        // CreateForm { of: Order } handles all the RHF + zodResolver +
         // useCreate<Aggregate> wiring; the page chrome (breadcrumbs,
         // title, card wrapper) is composed by hand.
         page OrderNew {
             route: "/orders/new"
-            body:  Stack(
-                Breadcrumbs(
-                    Anchor("Home",   to: "/"),
-                    Anchor("Orders", to: "/orders"),
-                    Text("New")
-                ),
-                Heading("Create order", level: 2),
-                Card(Form(of: Order, testid: "orders-new")),
+            body:  Stack {
+                Breadcrumbs {
+                    Anchor { "Home",   to: "/" },
+                    Anchor { "Orders", to: "/orders" },
+                    Text { "New" }
+                },
+                Heading { "Create order", level: 2 },
+                Card { CreateForm { of: Order, testid: "orders-new" } },
                 testid: "orders-new-page"
-            )
+            }
         }
     }
 

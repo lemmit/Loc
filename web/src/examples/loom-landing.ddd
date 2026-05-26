@@ -1,0 +1,449 @@
+// Loom landing page — Step 0 of the gap-closing roadmap.
+//
+// This example mirrors the content and section structure of the
+// hand-authored landing at `docs/index.html` (the real Loom landing
+// page) using only primitives that exist today.  Wherever the DSL
+// can't yet express what the real page renders, we use a graceful
+// approximation that visibly signals the gap.  Every subsequent
+// "Gap closing PR" replaces one such approximation with the proper
+// primitive and shrinks the gap until the generated render matches
+// the hand-written one.
+//
+// What's still approximated (matches the phases of the roadmap):
+//
+//   Phase 1  Style escape hatch        — backgrounds, padding, gradients all default.
+//   Phase 2  Theme palette + metadata  — only `primary`/`neutral` colours, no meta tags.
+//   Phase 3  CodeBlock + Icon          — code-card body is plain monospace text.
+//   Phase 4  Inline emphasis           — `**bold**` / `*italic*` shown as plain text.
+//   Phase 5  Button/Card variants, gradient headings — single rank, plain h1.
+//   Phase 6  Responsive Grid + Section anchors + Sticky — equal cols, no #anchors.
+//   Phase 7  Stdlib compound components (Hero/Footer/...)  — composed inline.
+//   Phase 8  Named `layout` SystemMember — only `default` and `none` available.
+//
+// Two pages so the chrome contrast stays visible side-by-side:
+//   /     — `layout: none`, the marketing landing (no AppShell chrome).
+//   /app  — default chrome — header + sidebar reappear.
+
+system LoomLanding {
+
+  // Visual identity — projected by every React pack to its idiom.
+  // Today only 4 tokens; Phase 2 expands to a full palette.
+  theme {
+    primary:    "#8b5cf6"
+    neutral:    "#64748b"
+    radius:     "lg"
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+  }
+
+  // Empty module — the landing has no domain.  Required because
+  // the playground's preview pipeline needs the api deployable to
+  // bundle something alongside the React frontend.
+  module Empty {
+    context Empty { }
+  }
+
+  ui Landing {
+
+    // ──────────────────────────────────────────────────────────────
+    // The landing page — `layout: none` strips the AppShell entirely.
+    // ──────────────────────────────────────────────────────────────
+    page Home {
+      route:  "/"
+      layout: none
+      title:  "Loom — a DSL that weaves Domain-Driven systems"
+
+      body: Stack {
+
+        // ── Header / nav bar ────────────────────────────────────
+        // Phase 6 will introduce Sticky to pin this to the top on scroll.
+        Container {
+          Group {
+            Heading { "Loom", level: 3 },
+            Group {
+              Anchor { "Vision",    to: "#vision" },
+              Anchor { "Pipeline",  to: "#pipeline" },
+              Anchor { "Platforms", to: "#platforms" },
+              Anchor { "CLI",       to: "#cli" },
+              Button { "GitHub", to: "https://github.com/lemmit/loc" }
+            }
+          },
+          size: "xl"
+        },
+
+        Divider {},
+
+        // ── Hero ────────────────────────────────────────────────
+        // The real landing's hero is a two-column grid: copy on the
+        // left, syntax-highlighted code card on the right.  Until
+        // Phase 6 adds responsive Grid columns, both halves stack
+        // vertically here.
+        Container {
+          style: { background: "linear-gradient(180deg, rgba(139,92,246,0.1) 0%, transparent 100%)", padding: "60px 0" },
+          Stack {
+            // Eyebrow chip.  Phase 5 will add Badge(variant: "eyebrow", glow: true).
+            Badge { "Langium-based DSL · Source-available" },
+
+            // Hero title — two lines.  Phase 5 will add a `gradient:`
+            // named arg so the second line picks up the brand gradient.
+            Heading { "Weave a domain model.", level: 1 },
+            Heading { "Generate the whole system.", level: 1 },
+
+            // Subtitle.  Phase 4 closed the inline-emphasis gap, so
+            // `.ddd` and `docker compose` here render as InlineCode
+            // chips inside a Group — the same mono-styled spans the
+            // hand-written landing at docs/index.html shows.
+            Group {
+              Text { "Loom is a high-descriptive DSL for Domain-Driven Design.  Write aggregates, value objects, invariants, and operations in " },
+              InlineCode { ".ddd" },
+              Text { " — and mechanically generate a runnable TypeScript + .NET + React system, wired together as one " },
+              InlineCode { "docker compose" },
+              Text { " stack." }
+            },
+
+            // CTA cluster.  Phase 5 brings variants + icon slots so
+            // the primary button reads "Try in browser →" with an
+            // arrow icon.
+            Group {
+              Button  { "Try in browser",        to: "/app" },
+              Button  { "Get started",           to: "#cli" },
+              Button  { "View on GitHub",        to: "https://github.com/lemmit/loc" },
+              Anchor  { "Language reference",    to: "https://github.com/lemmit/loc/blob/main/docs/language.md" }
+            },
+
+            // Meta pips — three quick claims with a leading dot glyph.
+            // Phase 5's Badge variants will make these visually distinct.
+            Group {
+              Badge { "Type-safe end-to-end" },
+              Badge { "DDD-faithful by construction" },
+              Badge { "49 unit tests · opt-in e2e" }
+            },
+
+            // ── Hero code card placeholder ────────────────────────
+            // Phase 3 replaces this Card+Text combo with a real
+            // CodeBlock { language: "typescript", source: "...", title: "orders.ddd" }
+            // that loads highlight.js from CDN and renders coloured tokens.
+            Card { "orders.ddd",
+              Stack {
+                Text { "aggregate Order {" },
+                Text { "  customerId: string" },
+                Text { "  status: OrderStatus" },
+                Text { "  placedAt: datetime" },
+                Text { "  contains lines: OrderLine[]" },
+                Text { "" },
+                Text { "  derived total: Money =" },
+                Text { "    Money(lines.sum(l => l.subtotal.amount), \"USD\")" },
+                Text { "" },
+                Text { "  invariant lines.count > 0 when status == Confirmed" },
+                Text { "" },
+                Text { "  operation confirm() {" },
+                Text { "    precondition isMutable()" },
+                Text { "    precondition lines.count > 0" },
+                Text { "    status := Confirmed" },
+                Text { "    emit OrderConfirmed { order: id, at: now() }" },
+                Text { "  }" },
+                Text { "}" },
+                Text { "" },
+                Text { "// Three deployables, one stack:" },
+                Text { "deployable api    { platform: dotnet, modules: Sales, port: 8080 }" },
+                Text { "deployable webApp { platform: react,  targets: api,   port: 3001 }" }
+              }
+            }
+          },
+          size: "xl"
+        },
+
+        Divider {},
+
+        // ── Vision section ──────────────────────────────────────
+        // Phase 6 wraps this in Section { id: "vision", ... } so the
+        // nav-bar anchor at the top of the page actually jumps here.
+        Container {
+          Stack {
+            // Kicker label.  Phase 4 / Phase 5 will give us text-transform
+            // / Badge variants so this isn't manually-uppercased.
+            Text { "THE VISION" },
+            Heading { "The model is the system.", level: 2 },
+            Text { "Most DDD codebases are aspirational: a tactical pattern in the docs, a CRUD service in the repo.  Loom closes that gap.  The .ddd source is the single source of truth — every line of running code, in every deployable, is derived from it.  Refactor the model, regenerate the system." },
+
+            // Four vision cards laid out as a 2×2 grid on the real
+            // page; Phase 6's responsive Grid lands "cols: [2, 1, 1]".
+            Grid {
+              Card { "Domain-first, not framework-first",
+                // Inline emphasis primitives (Phase 4): `Bold` wraps
+                // the list of DDD concepts; `Italic` italicises the
+                // discipline name — mirrors the <strong>/<em> spans
+                // in docs/index.html.
+                Stack {
+                  Group {
+                    Text { "You write " },
+                    Bold { "aggregates, invariants, operations, events, repositories" },
+                    Text { " — concepts from " },
+                    Italic { "Domain-Driven Design" },
+                    Text { ", not from a web framework." }
+                  },
+                  Text { "The framework choice is a deployable attribute, not a design constraint." }
+                }
+              },
+              Card { "Mechanical, not magical",
+                Text { "Lowering goes through a fully-resolved IR, then per-platform Handlebars templates plus procedural builders.  Generated output is idiomatic enough to read, debug, and grep — not framework lock-in." }
+              },
+              Card { "One model, multiple platforms",
+                Text { "The same aggregate compiles to ASP.NET + EF + Mediator and Hono + Drizzle + Zod.  A built-in cross-platform OpenAPI parity check guarantees both backends present an identical wire shape." }
+              },
+              Card { "The whole stack, including the UI",
+                Text { "Per aggregate the generator emits list, detail, and create pages with React Query hooks, Zod parsing, Mantine forms, and Playwright page-objects keyed off stable data-testids.  UI tests are written top-down, not selector-by-selector." }
+              }
+            }
+          },
+          size: "xl"
+        },
+
+        Divider {},
+
+        // ── Pipeline section ────────────────────────────────────
+        Container {
+          Stack {
+            Text { "HOW IT WORKS" },
+            Heading { "From .ddd source to a running stack.", level: 2 },
+            Text { "The pipeline is fully type-safe end-to-end.  Validation runs before any generator emits; a --dry-run mode prints the full write plan without touching disk." },
+
+            // Five pipeline stages — the real page is a 5-column row;
+            // Phase 6's responsive Grid handles cols: [5, 3, 1].
+            Grid {
+              Card { "01 — Source",
+                Text { ".ddd file authored against the Loom grammar." }
+              },
+              Card { "02 — AST",
+                Text { "Langium parser & validator.  Errors abort generation." }
+              },
+              Card { "03 — IR",
+                Text { "Name resolution, type inference, semantic shaping — platform-neutral." }
+              },
+              Card { "04 — Templates",
+                Text { "Per-platform Handlebars + procedural builders for TypeScript, .NET, React." }
+              },
+              Card { "05 — System",
+                Text { "Multi-project tree with docker-compose.yml + healthchecks + e2e." }
+              }
+            }
+          },
+          size: "xl"
+        },
+
+        Divider {},
+
+        // ── Platforms section ───────────────────────────────────
+        Container {
+          Stack {
+            Text { "THREE PLATFORMS, ONE MODEL" },
+            Heading { "Idiomatic output. Identical wire shapes.", level: 2 },
+            Text { "Every backend produces the same aggregate root, repository, routes, and DTOs — but in the language and framework conventions you'd write by hand." },
+
+            // Three platform cards in a row.  Phase 6's cols: [3, 1, 1].
+            Grid {
+              Card { "Hono · Drizzle · Zod",
+                Stack {
+                  Badge { "TypeScript backend" },
+                  Text { "HTTP via Hono with full type-validated routes, Drizzle ORM with master-detail load/save, and OpenAPI through @hono/zod-openapi." },
+                  Text { "• Aggregate roots with private state & factories" },
+                  Text { "• Repositories with user-declared finds" },
+                  Text { "• Domain events dispatched on save" }
+                }
+              },
+              Card { "ASP.NET Core · EF Core · Mediator",
+                Stack {
+                  Badge { ".NET backend" },
+                  Text { "Controllers wired through martinothamar/Mediator, EF Core for persistence, Swashbuckle for OpenAPI — all scaffolded from your aggregates." },
+                  Text { "• Entity-part classes with invariant checks" },
+                  Text { "• Derived properties & domain events" },
+                  Text { "• Cross-platform OpenAPI parity-checked" }
+                }
+              },
+              Card { "Vite · React Query · Mantine · Playwright",
+                Stack {
+                  Badge { "React frontend" },
+                  Text { "Per-aggregate list / detail / create pages, typed RQ hooks parsing responses with Zod, and Playwright page-objects keyed off stable test ids." },
+                  Text { "• Master-detail when aggregates contain parts" },
+                  Text { "• Modal-form button per public operation" },
+                  Text { "• Generated UI e2e tests pass against the live stack" }
+                }
+              }
+            }
+          },
+          size: "xl"
+        },
+
+        Divider {},
+
+        // ── Features section ────────────────────────────────────
+        Container {
+          Stack {
+            Text { "WHAT YOU GET" },
+            Heading { "One generate. A full deployable stack.", level: 2 },
+            Text { "From a single source, ddd generate system emits a runnable multi-deployable system with database init, healthchecks, OpenAPI specs, and end-to-end tests." },
+
+            // Six feature cards — 3x2 on the real page.
+            // Each starts with an Icon glyph (emoji placeholder until
+            // Phase 3 ships Icon(name:) with a builtin set).
+            Grid {
+              Card { "⬢  Aggregate roots, faithfully",
+                Text { "Private state, factories, invariant checks, derived properties, and emitted domain events — in every backend." }
+              },
+              Card { "≡  Repositories with finds",
+                Text { "find-by-id, save, find-all, plus user-declared finds — with full master-detail load and event dispatch." }
+              },
+              Card { "→  HTTP routes & DTOs",
+                Text { "Wire-shape DTOs identical across backends so the OpenAPI cross-check passes byte-for-byte." }
+              },
+              Card { "▦  List / detail / create UI",
+                Text { "Mantine tables and modal forms, React Query hooks, Zod-validated request bodies — per aggregate, automatically." }
+              },
+              Card { "✓  Playwright page-objects",
+                Text { "One class per page, keyed off stable data-testid attributes.  Write top-down UI tests without crafting selectors." }
+              },
+              Card { "⇄  Wired stack out of the box",
+                // Phase 4 inline emphasis — the original landing has
+                // `docker compose up -d` as a `<code class="mono-chip">`
+                // chip; route the equivalent through InlineCode.
+                Group {
+                  Text { "docker-compose.yml with Postgres, every deployable, healthchecks, and a db-init SQL bootstrap — " },
+                  InlineCode { "docker compose up -d" },
+                  Text { " and you're running." }
+                }
+              }
+            }
+          },
+          size: "xl"
+        },
+
+        Divider {},
+
+        // ── CLI section ─────────────────────────────────────────
+        Container {
+          Stack {
+            Text { "CLI" },
+            Heading { "Three commands. One model. Whatever shape you need.", level: 2 },
+            Text { "Generate a single deployable for a focused service, or the full system for an integrated stack.  Watch mode re-runs on save; --dry-run prints the plan with write / skip annotations." },
+
+            // Terminal mockup + command reference.  Phase 3's
+            // CodeBlock(language: "shell") will replace the Card+Text
+            // approximation with a real terminal-styled card.
+            Card { "~/acme",
+              Stack {
+                Text { "$ ddd generate system acme.ddd -o ./out" },
+                Text { "  parse acme.ddd ............................. ok" },
+                Text { "  validate ................................... ok  (0 errors, 0 warnings)" },
+                Text { "  emit api/         (.NET · Sales, Catalog) .. write 84" },
+                Text { "  emit catalog_web/ (Hono · Catalog) ......... write 41" },
+                Text { "  emit web_app/     (React · targets api) .... write 67" },
+                Text { "  emit e2e/         (DSL e2e) ................ write  9" },
+                Text { "  emit docker-compose.yml + db-init/ ......... write  2" },
+                Text { "  cross-platform OpenAPI parity .............. match" },
+                Text { "" },
+                Text { "$ docker compose -f out/docker-compose.yml up -d" },
+                Text { " ✔ postgres        healthy" },
+                Text { " ✔ api             healthy (:8080)" },
+                Text { " ✔ catalog_web     healthy (:3000)" },
+                Text { " ✔ web_app         healthy (:3001)" }
+              }
+            },
+
+            // Command reference rows.  KeyValueRow gives us label/value
+            // pairs without needing the table primitive.
+            Stack {
+              KeyValueRow { "ddd parse",            "Parse + validate.  Exits non-zero on errors." },
+              KeyValueRow { "ddd generate ts",      "Emit a single Hono + Drizzle project." },
+              KeyValueRow { "ddd generate dotnet",  "Emit a single ASP.NET + EF + Mediator project." },
+              KeyValueRow { "ddd generate system",  "Emit every deployable + docker-compose.yml." },
+              KeyValueRow { "-w, --watch",          "Re-run on every save of the .ddd source." },
+              KeyValueRow { "--dry-run",            "Print the plan; touch nothing." }
+            }
+          },
+          size: "xl"
+        },
+
+        Divider {},
+
+        // ── CTA strip ───────────────────────────────────────────
+        Container {
+          Stack {
+            Heading { "Ready to weave?", level: 2 },
+            Text { "Loom is source-available under the FSL-1.1-Apache-2.0 license — free for any non-competing use, with an Apache 2.0 future license two years after publication." },
+            Group {
+              Button { "Try in browser",             to: "/app" },
+              Button { "Clone on GitHub",            to: "https://github.com/lemmit/loc" },
+              Anchor { "Read the language reference",to: "https://github.com/lemmit/loc/blob/main/docs/language.md" },
+              Anchor { "Per-platform feature matrix",to: "https://github.com/lemmit/loc/blob/main/docs/generators.md" }
+            }
+          },
+          size: "xl"
+        },
+
+        Divider {},
+
+        // ── Footer ──────────────────────────────────────────────
+        // Multi-column footer is a Group with two children today;
+        // Phase 7's builtin Footer compound component will make this
+        // a single declarative call.
+        Container {
+          Group {
+            Text { "© Loom contributors · FSL-1.1-Apache-2.0" },
+            Group {
+              Anchor { "Language",       to: "https://github.com/lemmit/loc/blob/main/docs/language.md" },
+              Anchor { "Generators",     to: "https://github.com/lemmit/loc/blob/main/docs/generators.md" },
+              Anchor { "Architecture",   to: "https://github.com/lemmit/loc/blob/main/docs/technical.md" },
+              Anchor { "Observability",  to: "https://github.com/lemmit/loc/blob/main/docs/observability.md" },
+              Anchor { "Tools",          to: "https://github.com/lemmit/loc/blob/main/docs/tools.md" },
+              Anchor { "GitHub",         to: "https://github.com/lemmit/loc" }
+            }
+          },
+          size: "xl"
+        }
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // The in-app page — default chrome.  Header + sidebar reappear,
+    // so the contrast with the landing's `layout: none` is visible.
+    // ──────────────────────────────────────────────────────────────
+    page AppHome {
+      route: "/app"
+      title: "Loom"
+
+      body: Stack {
+        Heading { "You're in the app", level: 1 },
+        Text { "Notice the header up top and the navbar on the left?  This page uses the default layout (chrome on), so it picks up the AppShell wrapper the deployable's design pack emits." },
+        Text { "The landing page at \"/\" sets `layout: none` and mounts outside that wrapper — no chrome at all, just the page body." },
+        Anchor { "← Back to the landing", to: "/" }
+      }
+    }
+
+    // Sidebar — only the in-app page appears.  The landing intentionally
+    // stays out of the nav (it has no chrome to host a sidebar anyway).
+    menu {
+      section "Loom" {
+        link AppHome { label: "App home" }
+      }
+    }
+  }
+
+  // Hono backend — empty surface but required so the playground's
+  // preview pipeline has something to bundle and boot alongside the
+  // React frontend.
+  deployable api {
+    platform: hono
+    modules: Empty
+    port: 3000
+  }
+
+  // React frontend — Mantine pack by default.  Swap `design:` for
+  // `shadcn` / `mui` / `chakra` to route the same DSL through a
+  // different design system.
+  deployable webApp {
+    platform: react
+    targets: api
+    ui: Landing
+    port: 3001
+    design: mantine
+  }
+}

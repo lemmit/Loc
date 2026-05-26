@@ -83,9 +83,48 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
     case "ternary":
       // Lower to `if … do … else … end`
       return `if ${renderExpr(e.cond, ctx)}, do: ${renderExpr(e.then, ctx)}, else: ${renderExpr(e.otherwise, ctx)}`;
+    case "convert":
+      return renderElixirConvert(e.target, e.from, e.value, ctx);
     case "match":
       return renderMatch(e.arms, e.otherwise, ctx);
   }
+}
+
+/**
+ * Render an explicit conversion expression for the Phoenix/Ash
+ * backend.  Per-(from, target) pair, using Elixir idioms:
+ *   string(x: int|long|decimal|bool) → `to_string(x)`
+ *   string(x: money)                 → `Decimal.to_string(x)`
+ *   long(x: int)                     → `x`           (Elixir has only
+ *                                                     integer)
+ *   decimal(x: int|long)             → `x`           (Loom's `decimal`
+ *                                                     is a plain number
+ *                                                     on Phoenix —
+ *                                                     no boxing needed)
+ *   decimal(x: money)                → `Decimal.to_float(x)` (lossy)
+ *   money(x: int|long|decimal)       → `Decimal.new(x)`
+ *   money(x: money)                  → `x`           (no-op)
+ */
+function renderElixirConvert(
+  target: string,
+  from: string | undefined,
+  value: ExprIR,
+  ctx: RenderCtx,
+): string {
+  const v = renderExpr(value, ctx);
+  if (target === "string") {
+    if (from === "money") return `Decimal.to_string(${v})`;
+    return `to_string(${v})`;
+  }
+  if (target === "long" || target === "decimal") {
+    if (from === "money") return `Decimal.to_float(${v})`;
+    return v;
+  }
+  if (target === "money") {
+    if (from === "money") return v;
+    return `Decimal.new(${v})`;
+  }
+  return v;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,7 +284,11 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): strin
       return `%${ctx.contextModule}.${upperFirst(e.name)}{${args}}`;
     case "function":
     case "private-operation":
-      return `${snake(e.name)}(${ctx.thisName}, ${args})`;
+      // Receiver-prefixed call.  Skip the trailing comma when the user
+      // function has no params — `passed(changeset, )` is invalid Elixir.
+      return args.length > 0
+        ? `${snake(e.name)}(${ctx.thisName}, ${args})`
+        : `${snake(e.name)}(${ctx.thisName})`;
     case "free":
       return `${snake(e.name)}(${args})`;
   }
@@ -314,6 +357,15 @@ function isStringType(e: ExprIR): boolean {
     const mt = e.memberType;
     return mt.kind === "primitive" && mt.name === "string";
   }
+  if (e.kind === "binary") {
+    // Chained string concats: the outer binary's left is an inner
+    // binary whose `resultType` is string.  Inspect the IR-level
+    // type rather than re-running the shape check on the inner.
+    const rt = e.resultType;
+    if (rt?.kind === "primitive" && rt.name === "string") return true;
+  }
+  if (e.kind === "convert") return e.target === "string";
+  if (e.kind === "paren") return isStringType(e.inner);
   return false;
 }
 
@@ -335,7 +387,12 @@ function renderBinary(
   if (leftType?.kind === "primitive" && leftType.name === "money") {
     return renderMoneyBinary(op, l, r);
   }
-  const elOp = elixirOp(op, isStringType(left));
+  // Prefer the IR-level `leftType` over the AST-shape check: chained
+  // string concats (`a + b + c`) carry `leftType: string` on the outer
+  // binary even when the left operand is itself a binary.
+  const leftIsString =
+    (leftType?.kind === "primitive" && leftType.name === "string") || isStringType(left);
+  const elOp = elixirOp(op, leftIsString);
   if (op === "%") {
     // `rem` is a function in Elixir.
     return `rem(${l}, ${r})`;

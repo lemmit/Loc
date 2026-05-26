@@ -28,6 +28,9 @@ public sealed class Customer
         Age = default!;
     }
 
+    public string Display => this.Username;
+    public string Inspect => "Customer(" + "id: " + this.Id.ToString() + ", " + "username: " + "'" + this.Username + "'" + ", " + "email: " + "'" + this.Email + "'" + ", " + "age: " + this.Age.ToString() + ")";
+    public override string ToString() => Inspect;
 
     public IReadOnlyList<IDomainEvent> PullEvents()
     {

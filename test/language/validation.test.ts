@@ -94,7 +94,8 @@ describe("validation", () => {
     const { errors } = await parse(`
       context T {
         aggregate Product {
-          sku: string display
+          sku: string
+          derived display: string = sku
           desc: string
         }
       }
@@ -102,23 +103,26 @@ describe("validation", () => {
     expect(errors).toEqual([]);
   });
 
-  it("rejects multiple `display` fields on an aggregate", async () => {
+  it("rejects multiple `derived display` fields on an aggregate", async () => {
     const { errors } = await parse(`
       context T {
         aggregate Product {
-          sku: string display
-          name: string display
+          sku: string
+          derived display: string = sku
+          name: string
+          derived display: string = name
         }
       }
     `);
-    expect(errors.some((e) => /multiple 'display' fields/i.test(e))).toBe(true);
+    expect(errors.some((e) => /multiple 'derived display' fields/i.test(e))).toBe(true);
   });
 
-  it("rejects `display` on a non-string field", async () => {
+  it("rejects `derived display` with a non-string return type", async () => {
     const { errors } = await parse(`
       context T {
         aggregate Product {
-          qty: int display
+          qty: int
+          derived display: int = qty
         }
       }
     `);
@@ -163,6 +167,105 @@ describe("validation", () => {
   // Page metamodel validator obligations.
   // ---------------------------------------------------------------------------
 
+  describe("v2 hard cut: legacy constructor call forms", () => {
+    it('rejects positional VO call (Money(10, "USD")) — must use BuilderCall', async () => {
+      const { errors } = await parse(`
+        context Sales {
+          valueobject Money { amount: decimal  currency: string }
+          aggregate Order {
+            derived total: Money = Money(0.0, "USD")
+          }
+        }
+      `);
+      expect(errors.some((e) => /v2 syntax.*construct 'Money' with builder-call/.test(e))).toBe(
+        true,
+      );
+    });
+
+    it("rejects entity-part call (LineItem(...)) — must use BuilderCall", async () => {
+      const { errors } = await parse(`
+        context Sales {
+          aggregate Order {
+            entity LineItem { qty: int }
+            contains lines: LineItem[]
+            operation addLine(qty: int) {
+              lines += LineItem(qty)
+            }
+          }
+        }
+      `);
+      expect(errors.some((e) => /v2 syntax.*entity part 'LineItem'.*builder-call/.test(e))).toBe(
+        true,
+      );
+    });
+
+    it("accepts the BuilderCall form", async () => {
+      const { errors } = await parse(`
+        context Sales {
+          valueobject Money { amount: decimal  currency: string }
+          aggregate Order {
+            derived total: Money = Money { amount: 0.0, currency: "USD" }
+          }
+        }
+      `);
+      expect(errors.some((e) => /v2 syntax/.test(e))).toBe(false);
+    });
+  });
+
+  describe("v2 BuilderCall — unknown type names", () => {
+    it("rejects a typo on a VO name", async () => {
+      const { errors } = await parse(`
+        context Sales {
+          valueobject Money { amount: decimal  currency: string }
+          aggregate Order {
+            derived total: Money = Mony { amount: 0.0, currency: "USD" }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type 'Mony'/.test(e))).toBe(true);
+    });
+
+    it("rejects a typo on a walker primitive name", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page P {
+              route: "/p"
+              body: Stak { Heading { "hi" } }
+            }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type 'Stak'/.test(e))).toBe(true);
+    });
+
+    it("accepts a known walker primitive", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page P { route: "/p"  body: Stack { Heading { "hi" } } }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type/.test(e))).toBe(false);
+    });
+
+    it("accepts a user-defined component", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            component PageBox(title: string) { body: Card { title } }
+            page P { route: "/p"  body: PageBox { "hi" } }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type/.test(e))).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Page metamodel validator obligations.
+  // ---------------------------------------------------------------------------
   describe("page metamodel", () => {
     it("rejects duplicate ui block names within a system", async () => {
       const { errors } = await parse(`
@@ -404,6 +507,86 @@ describe("validation", () => {
       `);
       // Body call is fine; match warnings don't apply here.
       expect(errors).toEqual([]);
+    });
+
+    it("accepts the recognised layout preset values (default / none)", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page Dash {
+              route: "/dash"
+              layout: default
+              body: f()
+            }
+            page Kiosk {
+              route: "/kiosk"
+              layout: none
+              body: g()
+            }
+          }
+        }
+      `);
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects an unknown layout value on a page", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page X {
+              route: "/x"
+              layout: weird
+              body: f()
+            }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown layout 'weird'/.test(e))).toBe(true);
+    });
+
+    it("rejects two `layout:` properties on the same page using the display name", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page X {
+              route: "/x"
+              layout: none
+              layout: default
+              body: f()
+            }
+          }
+        }
+      `);
+      expect(errors.some((e) => /more than one 'layout' property/.test(e))).toBe(true);
+    });
+
+    it("rejects `layout:` on a scaffold-synthesised page body (e.g. Home / scaffoldList)", async () => {
+      // The body shapes here are the same ones the scaffold stdlib
+      // synthesises (see `src/stdlib/scaffold/_pages.ts`).  v1
+      // refuses `layout:` on these explicitly so the future
+      // named-layout SystemMember (v2) can introduce per-page
+      // chrome selection without a backwards-incompatible meaning
+      // shift.
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page Home {
+              route: "/"
+              layout: none
+              body: Home()
+            }
+            page OrdersList {
+              route: "/orders"
+              layout: default
+              body: scaffoldList(of: Order)
+            }
+          }
+        }
+      `);
+      const matches = errors.filter((e) =>
+        /'layout' is not allowed on scaffold-synthesised pages/.test(e),
+      );
+      expect(matches.length).toBeGreaterThanOrEqual(2);
     });
 
     it("rejects a menu link to a page declared in a different ui", async () => {
@@ -659,7 +842,7 @@ describe("validation", () => {
     it("rejects a bare aggregate name in property position with a fixit pointing at 'X id'", async () => {
       const { errors } = await parse(`
         context T {
-          aggregate Customer { name: string display }
+          aggregate Customer { name: string  derived display: string = name }
           aggregate Order { customer: Customer }
         }
       `);
@@ -674,7 +857,7 @@ describe("validation", () => {
     it("rejects a bare aggregate name in operation-parameter position", async () => {
       const { errors } = await parse(`
         context T {
-          aggregate Customer { name: string display }
+          aggregate Customer { name: string  derived display: string = name }
           aggregate Order {
             customerId: string
             operation assignTo(c: Customer) { customerId := "x" }
@@ -743,7 +926,7 @@ describe("validation", () => {
     it("accepts a bare aggregate name in a find return type (queries return domain objects)", async () => {
       const { errors } = await parse(`
         context T {
-          aggregate Customer { name: string display }
+          aggregate Customer { name: string  derived display: string = name }
           repository Customers for Customer {
             find byName(n: string): Customer? where this.name == n
           }
@@ -905,7 +1088,7 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects find name 'save' (collides with auto-emitted save method)", async () => {
     const loom = await loomFrom(`
       context T {
-        aggregate Order { sku: string display }
+        aggregate Order { sku: string  derived display: string = sku }
         repository Orders for Order {
           find save(s: string): Order[] where this.sku == s
         }
@@ -954,9 +1137,10 @@ describe("Loom IR validation (post-lowering)", async () => {
       context T {
         valueobject Money { amount: decimal, currency: string }
         aggregate Order {
-          sku: string display
+          sku: string
+          derived display: string = sku
           test "money builds" {
-            let m = Money(1.0, "USD")
+            let m = Money { amount: 1.0, currency: "USD" }
             expect m.amount == 1.0
           }
         }
@@ -970,7 +1154,8 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       context T {
         aggregate Order {
-          sku: string display
+          sku: string
+          derived display: string = sku
           operation confirm() extern {
             precondition sku.length > 0
           }
@@ -985,7 +1170,8 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       context T {
         aggregate Order {
-          sku: string display
+          sku: string
+          derived display: string = sku
           private operation foo() extern { precondition sku.length > 0 }
         }
       }
@@ -1004,7 +1190,8 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       context T {
         aggregate Order {
-          sku: string display
+          sku: string
+          derived display: string = sku
           operation foo() extern {
             precondition sku.length > 0
             sku := "X"
@@ -1033,7 +1220,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     // valid on both.
     const loom = await loomFrom(`
       context T {
-        aggregate Order { sku: string display }
+        aggregate Order { sku: string  derived display: string = sku }
         repository Orders for Order {
           find saveAsync(s: string): Order[] where this.sku == s
         }
@@ -1053,7 +1240,7 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects X id referencing a non-mounted aggregate (react deployable)", async () => {
     const loom = await loomFrom(`
       system S {
-        module Customers { context C { aggregate Customer { name: string display } } }
+        module Customers { context C { aggregate Customer { name: string  derived display: string = name } } }
         module Sales {
           context T {
             aggregate Order {
@@ -1076,7 +1263,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     ).toBe(true);
   });
 
-  it("rejects X id targeting an aggregate without a 'display' field (react deployable)", async () => {
+  it("rejects X id targeting an aggregate without a 'derived display' (react deployable)", async () => {
     const loom = await loomFrom(`
       system S {
         module M {
@@ -1094,7 +1281,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       diags.some(
         (d) =>
           d.severity === "error" &&
-          /references Customer id, but 'Customer' has no 'display' field/.test(d.message),
+          /references Customer id, but 'Customer' has no 'derived display'/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1103,7 +1290,7 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects where-clause referencing an unknown aggregate field", async () => {
     const loom = await loomFrom(`
       context T {
-        aggregate Task { name: string display }
+        aggregate Task { name: string  derived display: string = name }
         repository Tasks for Task {
           find byUnknown(p: string): Task[] where this.unknownField == p
         }
@@ -1122,7 +1309,7 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects where-clause comparing two columns (no value side)", async () => {
     const loom = await loomFrom(`
       context T {
-        aggregate Task { name: string display, alt: string }
+        aggregate Task { name: string, alt: string  derived display: string = name }
         repository Tasks for Task {
           find both(): Task[] where this.name == this.alt
         }
@@ -1144,7 +1331,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       system S {
         module M {
           context T {
-            aggregate Customer { name: string display }
+            aggregate Customer { name: string  derived display: string = name }
             aggregate Order { customerId: Customer id }
           }
         }
@@ -1254,7 +1441,8 @@ describe("Loom IR validation (post-lowering)", async () => {
       context T {
         enum OrderStatus { Draft, Confirmed }
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
           creditLimit: decimal
           operation deductCredit(amount: decimal) {
             precondition amount > 0
@@ -1290,7 +1478,8 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       context T {
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
           creditLimit: decimal
           operation addCredit(amount: decimal) {
             precondition amount > 0
@@ -1313,19 +1502,20 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       context T {
         aggregate Customer {
-          name: string display
-          private operation secret() { }
+          name: string
+          derived display: string = name
+          private operation hush() { }
         }
         repository Customers for Customer { }
         workflow w(customerId: Customer id) {
           let c = Customers.getById(id)
-          c.secret()
+          c.hush()
         }
       }
     `);
     const diags = validateLoomModel(loom);
     expect(
-      diags.some((d) => d.severity === "error" && /'Customer\.secret' is private/.test(d.message)),
+      diags.some((d) => d.severity === "error" && /'Customer\.hush' is private/.test(d.message)),
       JSON.stringify(diags),
     ).toBe(true);
   });
@@ -1334,7 +1524,8 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       context T {
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
           operation confirm() extern { precondition name.length > 0 }
         }
         repository Customers for Customer { }
@@ -1352,7 +1543,8 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       context T {
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
           creditLimit: decimal
           operation deduct(amount: decimal) extern { precondition amount > 0 }
         }
@@ -1370,7 +1562,7 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects unknown repo method from a workflow", async () => {
     const loom = await loomFrom(`
       context T {
-        aggregate Customer { name: string display }
+        aggregate Customer { name: string  derived display: string = name }
         repository Customers for Customer { }
         workflow w(customerId: Customer id) {
           let c = Customers.byMagic(id)
@@ -1392,7 +1584,8 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       context T {
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
           email: string
         }
         repository Customers for Customer { }
@@ -1412,7 +1605,8 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       context T {
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
           tier: string
         }
         repository Customers for Customer {
@@ -1437,7 +1631,7 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects emit with unknown event from a workflow", async () => {
     const loom = await loomFrom(`
       context T {
-        aggregate Customer { name: string display }
+        aggregate Customer { name: string  derived display: string = name }
         repository Customers for Customer { }
         workflow w(customerId: Customer id) {
           emit Nope { x: id }
@@ -1551,7 +1745,8 @@ describe("Loom IR validation (post-lowering)", async () => {
       const loom = await loomFrom(`
         context T {
           aggregate Customer {
-            name: string display
+            name: string
+            derived display: string = name
             creditLimit: decimal
             operation addCredit(amount: decimal) {
               precondition amount > 0
@@ -1576,7 +1771,8 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       context T {
         aggregate Customer {
-          name: string display
+          name: string
+          derived display: string = name
         }
         repository Customers for Customer { }
         workflow w(customerId: Customer id) {
@@ -1822,7 +2018,8 @@ describe("Loom IR validation (post-lowering)", async () => {
         module M {
           context T {
             aggregate Customer {
-              name: string display
+              name: string
+              derived display: string = name
               creditLimit: decimal
               operation addCredit(amount: decimal) {
                 precondition amount > 0
@@ -2031,7 +2228,8 @@ describe("Loom IR validation (post-lowering)", async () => {
       const { errors } = await parse(`
         context T {
           aggregate A {
-            email: string display check email.length <= 120
+            email: string check email.length <= 120
+            derived display: string = email
           }
           repository As for A { }
         }

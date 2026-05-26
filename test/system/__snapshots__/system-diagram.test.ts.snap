@@ -43,6 +43,8 @@ classDiagram
     +Id~Product~ id
     +string sku
     +Money price
+    +string /display
+    +string /inspect
   }
   class Products {
     <<repository>>
@@ -68,6 +70,7 @@ classDiagram
     +string customerId
     +OrderStatus status
     +datetime placedAt
+    +string /inspect
     +isMutable() bool
     +addLine(productId, qty)
     +confirm()
@@ -95,6 +98,8 @@ classDiagram
     +string username
     +string email
     +int age
+    +string /display
+    +string /inspect
   }
   class Customers {
     <<repository>>

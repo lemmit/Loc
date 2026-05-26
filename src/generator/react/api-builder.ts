@@ -12,6 +12,7 @@ import {
   type TypeIR,
   type ValueObjectIR,
 } from "../../ir/loom-ir.js";
+import { forApiRead, forCreateInput } from "../../ir/wire-projection.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   chainSingleFieldNative,
@@ -56,8 +57,12 @@ export function buildApiModule(
   for (const vo of usedVOs) lines.push(...emitValueObjectSchema(vo));
   lines.push("");
 
-  // Request schemas.
-  const requiredFields = agg.fields.filter((f) => !f.optional);
+  // Request schemas.  `forCreateInput` drops server-controlled fields
+  // (`managed`, `token`, `internal`) from the client-supplied payload,
+  // keeping `immutable` (settable on create) and `secret` (client
+  // provides password hashes / API keys).  Aligns with the Hono and
+  // .NET CreateRequest shapes.
+  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
   lines.push(
     ...emitObjectWithRefines(
       `Create${agg.name}Request`,
@@ -302,8 +307,10 @@ function emitResponseSchema(
   // Single canonical walk — populated by `enrichLoomModel` (see
   // src/ir/enrichments.ts).  Backends + frontend all read the same
   // field list, so Zod schemas line up field-for-field with what
-  // the wire actually carries.
-  const fields = wireShapeFor(ent);
+  // the wire actually carries.  `forApiRead` strips `internal` and
+  // `secret` fields so the React response schema matches what the
+  // .NET and Hono backends actually serve.
+  const fields = forApiRead(wireShapeFor(ent));
   void ctx;
   void isAgg;
   for (const wf of fields) {

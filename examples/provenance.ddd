@@ -22,7 +22,7 @@ system OrderingSystem {
     context Ordering {
 
       aggregate Order ids guid {
-        reference: string display
+        reference: string
         quantity: int
         unitPrice: int
         discount: int
@@ -45,6 +45,7 @@ system OrderingSystem {
           discount := amount
           total := quantity * unitPrice - amount
         }
+        derived display: string = reference
       }
 
       repository Orders for Order {

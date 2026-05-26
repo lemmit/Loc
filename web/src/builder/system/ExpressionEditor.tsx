@@ -390,20 +390,21 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
         </Box>
       );
     }
-    case "new":
+    case "builder":
       return (
         <Group gap={2} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }}>
-          <Text size="xs" c="dimmed">new</Text>
           <TextInput
             size="xs"
             w={90}
-            value={node.partType}
-            data-testid="c4expr-new-type"
+            value={node.type}
+            data-testid="c4expr-builder-type"
             styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
-            onChange={(e) => onChange({ ...node, partType: e.currentTarget.value }, false)}
+            onChange={(e) => onChange({ ...node, type: e.currentTarget.value }, false)}
             onBlur={() => onChange(node, true)}
           />
-          <FieldsEditor fields={node.fields} path={path} onFields={(fields, c) => onChange({ ...node, fields }, c)} />
+          <Text size="xs" c="dimmed">{"{"}</Text>
+          <ArgsEditor args={node.entries} path={path} onArgs={(entries, c) => onChange({ ...node, entries }, c)} />
+          <Text size="xs" c="dimmed">{"}"}</Text>
         </Group>
       );
     case "object":

@@ -1,4 +1,4 @@
-import type { CallArg, Expression, Statement } from "../../../../src/language/generated/ast.js";
+import type { BuilderEntry, CallArg, Expression, Statement } from "../../../../src/language/generated/ast.js";
 import { printExpr } from "../../../../src/language/print/index.js";
 
 // ---------------------------------------------------------------------------
@@ -95,11 +95,14 @@ const SPECS = {
   Empty: { kind: "leaf", positional: [{ key: "message", kind: "text" }] },
   Divider: { kind: "leaf" },
   List: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
-  // Operation form: `Form(<instance>.<operation>)` — the operation is a
-  // positional ref (a member access through an in-scope aggregate
-  // instance, like Action). Create/workflow forms use the named args:
-  // `of:`/`creates:` bind an aggregate, `runs:` binds a workflow.
-  Form: { kind: "leaf", positional: [{ key: "operation", kind: "ref", options: "operation" }], named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "creates", kind: "ref", options: "aggregate" }, { key: "runs", kind: "ref", options: "workflow" }, { key: "testid", kind: "string" }] },
+  // Named-leaf form primitives — one entry per shape, no
+  // argument-introspection dispatch:
+  //   * CreateForm(of:)       — create-form for the aggregate
+  //   * OperationForm(of:,op:) or OperationForm(<inst>.<op>) — op form
+  //   * WorkflowForm(runs:)   — workflow-run form
+  CreateForm: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
+  OperationForm: { kind: "leaf", positional: [{ key: "operation", kind: "ref", options: "operation" }], named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "op", kind: "ref", options: "operation" }, { key: "testid", kind: "string" }] },
+  WorkflowForm: { kind: "leaf", named: [{ key: "runs", kind: "ref", options: "workflow" }, { key: "testid", kind: "string" }] },
   // Layout / no-arg primitives.
   Breadcrumbs: { kind: "container" },
   KeyValueRow: { kind: "container", positional: ["label"] },
@@ -261,7 +264,7 @@ const CHILD_TOKEN = "";
 // non-canonical orderings — a positional after a named arg — round-trip instead
 // of falling back to Opaque).  Returns null if the call doesn't match the spec
 // (caller falls back to Opaque).
-function seedCall(name: string, spec: PrimitiveSpec, args: CallArg[], components: ReadonlyMap<string, readonly string[]>): BuilderNode | null {
+function seedCall(name: string, spec: PrimitiveSpec, args: ReadonlyArray<CallArg | BuilderEntry>, components: ReadonlyMap<string, readonly string[]>): BuilderNode | null {
   const posKeys = posSpecs(spec);
   const namedSpec = new Map((spec.named ?? []).map((n) => [n.key, n] as const));
   const namedChildren = new Set(spec.namedChildren ?? []);
@@ -406,16 +409,28 @@ function seedNode(expr: Expression, components: ReadonlyMap<string, readonly str
     if (expr.elseExpr) children.push({ name: "MatchElse", props: {}, children: [seedFromBody(expr.elseExpr, components)] });
     return { name: "Match", props: {}, children };
   }
-  if (expr.$type !== "CallExpr" || expr.callee.$type !== "NameRef") return opaque(expr);
-  const name = expr.callee.name;
-  if (name in SPECS) return seedCall(name, specOf(name as keyof typeof SPECS), expr.args, components) ?? opaque(expr);
+  // v2: BuilderCall (`Name { slot: value, ... }`) is the canonical surface for
+  // walker primitives and user components.  v1 CallExpr (`Name(arg, ...)`) is
+  // still accepted by the grammar so legacy fragments keep parsing.
+  let name: string;
+  let args: ReadonlyArray<CallArg | BuilderEntry>;
+  if (expr.$type === "BuilderCall") {
+    name = expr.type;
+    args = expr.entries;
+  } else if (expr.$type === "CallExpr" && expr.callee.$type === "NameRef") {
+    name = expr.callee.name;
+    args = expr.args;
+  } else {
+    return opaque(expr);
+  }
+  if (name in SPECS) return seedCall(name, specOf(name as keyof typeof SPECS), args, components) ?? opaque(expr);
   // A user-defined `component` call: model its positional args as props keyed by
   // the declared param names (so they edit as labelled fields), with `__params`
   // recording which keys emit positionally.
   const params = components.get(name);
   if (!params) return opaque(expr);
   const spec: PrimitiveSpec = { kind: "leaf", positional: params.map((p) => ({ key: p, kind: "text" as const })) };
-  const node = seedCall(name, spec, expr.args, components);
+  const node = seedCall(name, spec, args, components);
   if (!node) return opaque(expr);
   node.props.__params = JSON.stringify(params);
   return node;
@@ -449,7 +464,7 @@ export function emitBody(node: BuilderNode): string {
   // Synthetic nodes reconstruct their bespoke syntax from structure.  An
   // as-yet-unfilled single-child slot emits an `Empty()` placeholder so the
   // source stays parseable while it's being built up in the canvas.
-  const body = (n: BuilderNode): string => (n.children[0] ? emitBody(n.children[0]) : "Empty()");
+  const body = (n: BuilderNode): string => (n.children[0] ? emitBody(n.children[0]) : "Empty {}");
   if (node.name === "Stmt") {
     if (node.props.kind === "assign") return `${node.props.target ?? ""} ${node.props.op ?? ":="} ${node.props.value ?? ""}`;
     if (node.props.kind === "let") return `let ${node.props.name ?? "x"} = ${node.props.value ?? ""}`;
@@ -526,5 +541,7 @@ export function emitBody(node: BuilderNode): string {
     parts.push(...emitNamed(node, spec.named));
     for (const c of node.children) if (c.slot !== undefined) parts.push(`${c.slot}: ${emitBody(c)}`);
   }
-  return `${node.name}(${parts.join(", ")})`;
+  // v2: walker primitives and user-component invocations both emit as
+  // builder-calls `Name { entries }`.  Empty-slot placeholder is `Name {}`.
+  return parts.length === 0 ? `${node.name} {}` : `${node.name} { ${parts.join(", ")} }`;
 }
