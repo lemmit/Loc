@@ -160,6 +160,26 @@ function toRfNodes(
 
 const NODE_TYPES = { stmt: StmtNode, construct: ConstructNode } as const;
 
+/** Total budget for a drill transition: ~200ms zoom-into the clicked node
+ *  (drill-in only), then ~250ms `fitView` to settle into the new view.
+ *  Drill-out skips the pre-step and just animates the fit. */
+const DRILL_ZOOM_IN_MS = 200;
+const DRILL_FIT_MS = 250;
+/** Target zoom multiplier for the pre-step (zoom toward the clicked node).
+ *  Capped so we don't overshoot the canvas — final `fitView` always corrects. */
+const DRILL_ZOOM_IN_FACTOR = 1.5;
+
+/** Respect `prefers-reduced-motion`. Read once at module load (the OS-level
+ *  preference rarely changes mid-session and we don't subscribe to changes). */
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
+
 /** Pixel offset below the root banner where the `contains` fork's horizontal
  *  segment lands. React Flow's default smoothstep places the bend at the
  *  vertical midpoint between source and target — for a tall layout that
@@ -728,9 +748,20 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   const rf = useReactFlow();
   const nodesInitialized = useNodesInitialized();
+  // `true` for the first render of a new path (drill-in or drill-out): tells
+  // the fit-view effect to animate. Reset right after the fit fires, so
+  // unrelated re-renders (rev bump, source edits, structuredKey toggles)
+  // settle without re-animating an already-fit view.
+  const animateNextFit = useRef(false);
+  // Reduced-motion is captured once per `Inner` mount — cheap to recompute
+  // here rather than thread through every callback.
+  const reduceMotion = prefersReducedMotion();
   useEffect(() => {
-    if (nodesInitialized && graph.nodes.length > 0) void rf.fitView({ padding: 0.2 });
-  }, [nodesInitialized, graph, rf]);
+    if (!nodesInitialized || graph.nodes.length === 0) return;
+    const duration = animateNextFit.current && !reduceMotion ? DRILL_FIT_MS : 0;
+    animateNextFit.current = false;
+    void rf.fitView({ padding: 0.2, duration });
+  }, [nodesInitialized, graph, rf, reduceMotion]);
 
   /** Persist a node's final position on drag end. Skip stmt nodes (never
    *  draggable) and the root banner (auto-centred). Same-position drags
@@ -774,7 +805,36 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     // containment leaves whose drill target is the entity they reference,
     // not the containment node itself.
     const step = v.drillTo ?? { kind: v.kind, name: v.name };
+    animateNextFit.current = true;
+    // Optional pre-step: zoom toward the clicked node so the path-push reads
+    // as a hierarchical drill instead of a discrete jump. The new graph
+    // renders synchronously below; the animated `fitView` (queued by the
+    // nodes-initialized effect) settles on top of whatever zoom level
+    // `setCenter` reached. No setTimeout chain — keeps tests deterministic.
+    const node = rf.getNode(id);
+    if (!reduceMotion && node?.position) {
+      const w = node.measured?.width ?? 160;
+      const h = node.measured?.height ?? 80;
+      const cx = node.position.x + w / 2;
+      const cy = node.position.y + h / 2;
+      const targetZoom = Math.min(2, rf.getZoom() * DRILL_ZOOM_IN_FACTOR);
+      try {
+        void rf.setCenter(cx, cy, { zoom: targetZoom, duration: DRILL_ZOOM_IN_MS });
+      } catch {
+        // setCenter throws if React Flow is mid-teardown; safe to ignore.
+      }
+    }
     setPath((p) => [...p, step]);
+  };
+
+  /** Breadcrumb jumps animate the fit (drill-out), but skip the zoom-into
+   *  pre-step — there's no specific node to zoom toward. */
+  const jumpTo = (depth: number): void => {
+    setPath((p) => {
+      if (p.length === depth) return p;
+      animateNextFit.current = true;
+      return p.slice(0, depth);
+    });
   };
 
   /** Repoint a deployable's `targets` / `ui` binding by dragging the edge's
@@ -789,7 +849,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   return (
     <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <Breadcrumb path={path} onJump={(d) => setPath((p) => p.slice(0, d))} />
+      <Breadcrumb path={path} onJump={jumpTo} />
       <AddPalette path={path} source={ctx.getSource()} onChange={apply} />
       <Box style={{ flex: 1, position: "relative", minHeight: 0 }} data-testid="c4system-v2-pane">
         <ReactFlow
