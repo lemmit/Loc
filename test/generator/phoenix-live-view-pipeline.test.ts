@@ -2542,32 +2542,41 @@ describe("Ash 3.x compile-correctness regressions", () => {
     expect(domain).not.toMatch(/action: :all\b/);
   });
 
-  it("inspect derived does NOT render to Phoenix (Ash auto-derives Inspect)", async () => {
-    // The `derived inspect` IR node stays in the model (consumed by
-    // .NET ToString + TS toString) but the Phoenix backend renders
-    // NEITHER a `calculate :inspect, :string, expr(...)` NOR a
-    // `defimpl Inspect, for: <Module>` block.  Two layered constraints:
+  it("inspect derived renders via String.Chars (NOT Inspect or calculate :inspect)", async () => {
+    // The `derived inspect` IR node renders on the Phoenix backend as a
+    // `defimpl String.Chars, for: <Module>` block — the same expression
+    // body the .NET (`ToString()`) and TS (`toString()`) emitters use.
+    // Two routes deliberately NOT taken:
     //
-    //   1. Ash's `expr()` DSL doesn't admit string concat (`<>`) or
-    //      `to_string/1`, both of which the auto-synthesised inspect
-    //      body uses — so `calculate :inspect` won't compile.
-    //      (PR #524's original Phoenix CI failure.)
-    //   2. `defimpl Inspect, for: <Module>` collides with the Inspect
-    //      protocol impl that Ash 3.x's `use Ash.Resource` macro
-    //      auto-derives for the resource struct, surfacing under
+    //   1. `calculate :inspect, :string, expr(...)` — Ash's `expr()`
+    //      DSL doesn't admit string concat (`<>`) or `to_string/1`,
+    //      both of which the auto-synthesised inspect body uses, so
+    //      the calculation wouldn't compile.  (PR #524's original
+    //      Phoenix CI failure.)
+    //   2. `defimpl Inspect, for: <Module>` — collides with the
+    //      Inspect impl Ash 3.x's `use Ash.Resource` macro emits for
+    //      the resource struct, surfacing under
     //      `mix compile --warnings-as-errors` as:
     //        warning: redefining module Inspect.<Module>
     //      (Surfaced after #541 unblocked the phoenix-build workflow.)
     //
-    // Until Ash exposes an opt-out for its Inspect auto-derive (or we
-    // route the synthesised body through a non-Inspect channel such as
-    // a dedicated `inspect/1` helper), neither path is viable.  Ash's
-    // default `%<Module>{...}` Inspect output is adequate for
-    // debugging.
+    // String.Chars is the canonical Elixir protocol for explicit
+    // string conversion (`to_string(record)`, `"#{record}"`) — the
+    // semantic match for what the .NET / TS emitters expose.  Ash's
+    // macro doesn't touch String.Chars, so there's no collision.  IEx
+    // / Logger still get Ash's default struct Inspect output.
     const files = await buildFormFixture();
     const customer = files.get("phoenix_app/lib/phoenix_app/sales/customer.ex")!;
+    // Neither legacy route appears.
     expect(customer).not.toMatch(/calculate :inspect/);
     expect(customer).not.toMatch(/defimpl Inspect, for: PhoenixApp\.Sales\.Customer/);
+    // String.Chars impl carries the expression body — `record.<field>`
+    // attribute reads + native Elixir `<>` concat.
+    expect(customer).toMatch(
+      /defimpl String\.Chars, for: PhoenixApp\.Sales\.Customer do\s+def to_string\(record\) do/,
+    );
+    expect(customer).toMatch(/record\.id/);
+    expect(customer).toMatch(/<>/);
   });
 });
 

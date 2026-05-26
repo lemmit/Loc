@@ -92,25 +92,38 @@ function renderAggregateResource(
     ":updated_at",
   ];
 
-  // NOTE on the `inspect` derived (PR #524 + PR #537 lineage):
+  // `derived inspect: string = <expr>` renders via the **String.Chars**
+  // protocol, NOT Inspect.  Two reasons:
   //
-  // Earlier iterations emitted a `defimpl Inspect, for: <Module> do … end`
-  // block that inlined the user-written / auto-synthesised inspect
-  // expression body as native Elixir.  Ash 3.x's `use Ash.Resource`
-  // macro auto-derives its own `Inspect` impl for the resource struct,
-  // which collides with our explicit `defimpl` and surfaces under
-  // `--warnings-as-errors` (the `phoenix-build` workflow uses it) as:
+  //   1. Ash 3.x's `use Ash.Resource` macro emits an `Inspect`
+  //      implementation for the resource struct as part of resource
+  //      compilation.  Adding our own `defimpl Inspect, for: <Module>`
+  //      on top of that surfaces under `mix compile --warnings-as-errors`
+  //      (the `phoenix-build` workflow uses the flag) as:
+  //        warning: redefining module Inspect.<App>.<Ctx>.<Agg>
+  //   2. String.Chars matches the semantics of the .NET (`ToString()`)
+  //      and TypeScript (`toString()`) backends — explicit string
+  //      conversion of a record produces the derived-inspect expression
+  //      body.  IEx / Logger still see Ash's struct-formatted Inspect
+  //      output; callers wanting the custom string call `to_string/1`
+  //      (or string-interpolate, e.g. `"#{record}"`).  The expression
+  //      body itself is unchanged from PR #524's synthesis — only the
+  //      protocol it lands under is different.
   //
-  //   warning: redefining module Inspect.<App>.<Ctx>.<Agg>
-  //
-  // Until Ash exposes an opt-out for its auto-Inspect derive (or we
-  // route the synthesised body through a non-Inspect channel like a
-  // dedicated `inspect/1` helper on the resource module), dropping
-  // the emission is the only way to keep mix compile clean.  Ash's
-  // default Inspect output (`%<App>.<Ctx>.<Agg>{id: …, name: …}`) is
-  // adequate for debugging; the `derived inspect` IR node remains in
-  // the model so downstream emitters (.NET ToString, TS toString)
-  // still consume it.
+  // Ash's macro does NOT auto-derive String.Chars (it's a less common
+  // candidate for auto-derive than Inspect / Jason), so there's no
+  // collision risk on the protocol we're using here.
+  const inspectDerived = agg.derived.find((d) => d.name === "inspect");
+  const stringCharsImpl = inspectDerived
+    ? `
+
+defimpl String.Chars, for: ${moduleName} do
+  def to_string(record) do
+    ${renderExpr(inspectDerived.expr, renderCtx)}
+  end
+end
+`
+    : "";
 
   // camelCase wire-shape Jason encoder.  Pairs with the resource
   // module — same struct, separate protocol impl.  Cross-backend
@@ -136,7 +149,7 @@ function renderAggregateResource(
 ${renderRelationships(agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${renderHelperFunctions(agg.functions, renderCtx)}
 end
 
-${jasonImpl}`;
+${jasonImpl}${stringCharsImpl}`;
 }
 
 // ---------------------------------------------------------------------------
