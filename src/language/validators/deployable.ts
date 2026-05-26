@@ -31,11 +31,18 @@ export function checkDeployable(
   siblings: Deployable[],
   accept: ValidationAcceptor,
 ): void {
-  // Page-metamodel UI binding rules (3, 4).
-  // Rule 3: only platforms that mount a UI admit `ui:` — `react`,
-  //         `static`, and `phoenixLiveView` (fullstack Ash + Phoenix).
-  // Rule 4: every `static` deployable must declare `ui:` (otherwise
-  //         it has nothing to serve).
+  // Page-metamodel UI binding rules (3, 4, 4b).
+  // Rule 3:  only platforms that mount a UI admit `ui:` — `react`,
+  //          `static`, and `phoenixLiveView` (fullstack Ash + Phoenix).
+  // Rule 4:  every `static` deployable must declare `ui:` (otherwise
+  //          it has nothing to serve).
+  // Rule 4b: every `react` deployable must declare `ui:`.  The
+  //          legacy "no ui → fall back to per-aggregate scaffolded
+  //          pages" path was removed in favour of the explicit page
+  //          metamodel — every React project's pages now flow through
+  //          `ui.pages`, which the `scaffold` stdlib macro populates
+  //          for the bulk-CRUD case.  Diagnostic code
+  //          `loom.react-deployable-missing-ui`.
   checkDeployablePlatform(d, accept);
   const hasUiBinding = !!(d.uiSugar || d.uiCompose || d.uiBlock);
   if (hasUiBinding && !platformMountsUi(d.platform)) {
@@ -53,6 +60,13 @@ export function checkDeployable(
       "error",
       `Static deployable '${d.name}' must declare a 'ui:' binding — there is nothing to serve without one.`,
       { node: d, property: "name" },
+    );
+  }
+  if (d.platform === "react" && !hasUiBinding) {
+    accept(
+      "error",
+      `React deployable '${d.name}' must declare a 'ui:' binding — every page now flows through the page metamodel. Add 'ui: <UiName>' (use 'ui <UiName> { with scaffold(modules: [...]) }' for the bulk-CRUD case).`,
+      { node: d, property: "name", code: "loom.react-deployable-missing-ui" },
     );
   }
   // Rule 13: framework values must match the deployable's platform.

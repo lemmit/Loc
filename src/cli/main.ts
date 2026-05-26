@@ -224,9 +224,11 @@ async function runGenerate(
 ): Promise<RunResult> {
   // `generate system` is multi-file aware: load the entry's import
   // graph, lower per document, merge.  Legacy single-deployable
-  // `generate ts` / `generate dotnet` stay on the single-file path.
+  // `generate ts` / `generate dotnet` stay on the single-file path
+  // and re-lower internally through `generateTypeScript` /
+  // `generateDotnet` (each of which calls `enrichLoomModel(lowerModel(model))`).
   let loom: EnrichedLoomModel;
-  let legacyModel: Model | undefined; // non-system targets only
+  let model: Model | undefined;
   if (target === "system") {
     let projectResult: ProjectParseResult;
     try {
@@ -252,7 +254,7 @@ async function runGenerate(
       if (!options.continueOnError) process.exit(1);
       return { hadError: true };
     }
-    legacyModel = result.model;
+    model = result.model;
     loom = enrichLoomModel(lowerModel(result.model));
   }
 
@@ -293,9 +295,9 @@ async function runGenerate(
       return { hadError: true };
     }
   } else if (target === "ts") {
-    files = generateTypeScript(legacyModel!, HONO_V4_PINS, { emitTrace: options.emitTrace });
+    files = generateTypeScript(model!, HONO_V4_PINS, { emitTrace: options.emitTrace });
   } else {
-    files = generateDotnet(legacyModel!, { emitTrace: options.emitTrace });
+    files = generateDotnet(model!, { emitTrace: options.emitTrace });
   }
 
   if (!files.has("LICENSE")) {

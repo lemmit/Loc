@@ -278,8 +278,9 @@ describe("react generator", () => {
               repository Things for Thing { }
             }
           }
+          ui WebApp with scaffold(modules: [M]) { }
           deployable api { platform: hono, modules: M, port: 3000 }
-          deployable web { platform: react, targets: api, port: 3001 }
+          deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
         }
       `,
         { validation: true },
@@ -420,8 +421,9 @@ describe("react generator", () => {
               repository As for A { }
             }
           }
+          ui WebApp with scaffold(modules: [M]) { }
           deployable api { platform: dotnet, modules: M, port: 8080 }
-          deployable web { platform: react, targets: api, port: 3001 }
+          deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
         }
       `,
         { validation: true },
@@ -716,8 +718,9 @@ describe("react generator", () => {
               repository As for A { }
             }
           }
+          ui WebApp with scaffold(modules: [M]) { }
           deployable api { platform: dotnet, modules: M, port: 8080 }
-          deployable web { platform: react, targets: api, port: 3001 }
+          deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           test e2e "bad" against web {
             ui.workflows.doesNotExist({})
           }
@@ -752,8 +755,9 @@ describe("react generator", () => {
               repository As for A { }
             }
           }
+          ui WebApp with scaffold(modules: [M]) { }
           deployable api { platform: dotnet, modules: M, port: 8080 }
-          deployable web { platform: react, targets: api, port: 3001 }
+          deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           test e2e "bad" against web {
             let r = ui.views.doesNotExist()
           }
@@ -861,8 +865,9 @@ describe("react generator", () => {
                 repository Users for User { }
               }
             }
+            ui WebApp with scaffold(modules: [M]) { }
             deployable api { platform: dotnet, modules: M, port: 8080 }
-            deployable web { platform: react, targets: api, port: 3001 }
+            deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,
         { validation: true },
@@ -889,8 +894,9 @@ describe("react generator", () => {
                 repository Products for Product { }
               }
             }
+            ui WebApp with scaffold(modules: [M]) { }
             deployable api { platform: dotnet, modules: M, port: 8080 }
-            deployable web { platform: react, targets: api, port: 3001 }
+            deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,
         { validation: true },
@@ -919,8 +925,9 @@ describe("react generator", () => {
                 repository Users for User { }
               }
             }
+            ui WebApp with scaffold(modules: [M]) { }
             deployable api { platform: dotnet, modules: M, port: 8080 }
-            deployable web { platform: react, targets: api, port: 3001 }
+            deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,
         { validation: true },
