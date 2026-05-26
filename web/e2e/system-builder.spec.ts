@@ -330,6 +330,33 @@ test("rebinds a repository's target aggregate from the inspector", async ({ page
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
+test("rebinds a deployable's targets deployable from the inspector", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  // Acme exposes several deployables — `webApp { targets: api }` plus
+  // `catalogWeb` / `catalogApi` to rebind onto.
+  await selectExample(page, /Acme/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // webApp.targets defaults to `api`; rebind it to `catalogWeb`. The drag
+  // gesture for edge reconnection is exercised by the unit test
+  // (`test/system/system-edge-rebind.test.ts`) — the inspector flow here
+  // pins the surgical setter wiring end-to-end.
+  await page.locator('[data-testid="rf__node-deployable:webApp"]').click();
+  const targets = page.getByTestId("c4system-deployable-targets");
+  await expect(targets).toBeVisible();
+  await expect(targets).toHaveValue("api");
+
+  await targets.click();
+  await page.getByRole("option", { name: "catalogWeb", exact: true }).click();
+
+  await expect(page.getByTestId("c4system-deployable-targets")).toHaveValue("catalogWeb");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
 test("edits a workflow body's statements", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
