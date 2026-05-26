@@ -128,8 +128,29 @@ export interface AppShellVM {
    *  no page opted out, in which case the template emits zero
    *  out-of-shell route entries. */
   outOfShellRoutes: RouteVM[];
+  /** Phase 8 step 2: one entry per declared named `layout` SystemMember
+   *  that's actually referenced by at least one page in this ui.  Each
+   *  emits a `function <Name>Layout() { … <Outlet /> … }` component
+   *  in App.tsx plus a matching `<Route element={<Name>Layout />}>`
+   *  wrapping the routes that opted into it. */
+  namedLayouts: NamedLayoutVM[];
   /** One section per construct kind that has at least one entry. */
   navSections: NavSectionVM[];
+}
+
+/** A named-layout wrapper view-model.  Each slot's JSX is the
+ *  pre-walked output of the layout slot's ExprIR; `hasX` flags let
+ *  the template skip empty slots cleanly. */
+export interface NamedLayoutVM {
+  name: string;
+  hasHeader: boolean;
+  headerJsx: string;
+  hasSidebar: boolean;
+  sidebarJsx: string;
+  hasFooter: boolean;
+  footerJsx: string;
+  /** Routes that opted into this layout (page name + path JSX). */
+  routes: RouteVM[];
 }
 
 /** A single form input.  Picked per field type by the preparer:
