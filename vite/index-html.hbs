@@ -10,7 +10,27 @@
 {{/if}}{{#if favicon}}    <link rel="icon" href="{{favicon}}" />
 {{/if}}{{#if usesCodeBlock}}    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" />
     <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
-    <script>document.addEventListener('DOMContentLoaded', () => window.hljs && window.hljs.highlightAll());</script>
+    <script>
+      // React mounts AFTER DOMContentLoaded, so hljs.highlightAll()
+      // alone would miss the entire app subtree.  Use a
+      // MutationObserver to highlight each `pre code` once it shows
+      // up in the DOM (idempotent via the `data-hljs` marker).
+      (function () {
+        function apply() {
+          if (!window.hljs) return;
+          document.querySelectorAll("pre code:not([data-hljs])").forEach(function (el) {
+            try { window.hljs.highlightElement(el); } catch (e) {}
+            el.setAttribute("data-hljs", "1");
+          });
+        }
+        function arm() {
+          apply();
+          new MutationObserver(apply).observe(document.body, { childList: true, subtree: true });
+        }
+        if (document.body) arm();
+        else document.addEventListener("DOMContentLoaded", arm);
+      })();
+    </script>
 {{/if}}  </head>
   <body>
     <div id="root"></div>
