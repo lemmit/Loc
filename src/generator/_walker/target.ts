@@ -18,66 +18,28 @@
 //   6. Cross-page navigation — `useNavigate()` vs `push_navigate(socket, to: ...)`
 //
 // `WalkerTarget` is the contract every framework-specific walker
-// implements.  v0 wires the React (TSX) walker through `tsxTarget`
-// and the Phoenix LiveView (HEEx) walker through `heexTarget`.  The
-// walker itself takes a `WalkerTarget` parameter and consults it at
-// each of the seams above; the rest (pack dispatch, attribute
-// formatting, lambda traversal) stays in the shared walker.
+// implements.  v1 wires the React (TSX) walker through `tsxTarget`
+// and the Phoenix LiveView (HEEx) walker through `heexTarget`.  Each
+// walker threads its target through its own `WalkContext` and the
+// inline seams now delegate to a method on the target — adding a
+// third backend would mean writing a new target, not a new walker.
 //
-// CURRENT STATE: this module DEFINES the contract.  The TSX walker
-// (src/generator/react/body-walker.ts) currently inlines its own
-// implementations of these seams — the byte-identical-output gate
-// keeps that path unchanged.  Remaining work:
-//
-//   - implement `heexTarget` for Phoenix LiveView module emission,
-//     which validates this interface against a real second consumer
-//     before the React walker is refactored to delegate to
-//     `tsxTarget`.
-//   - a follow-up cleanup extracts the React walker's inline seams
-//     into `tsxTarget` and switches `body-walker.ts` to consume the
-//     abstract `WalkerTarget`.  Acceptance gate is still byte-identical
-//     TSX output against the existing fixture suite.
+// Note on coupling: a few seams are inherently shaped by the host
+// walker's argument shapes (e.g. TSX navigate is invoked from
+// inside `Action.then`, where the `navigate` call's args have
+// already been emitted by `emitExpr`).  Where that's the case the
+// target method takes the pre-rendered string fragments rather
+// than re-rendering — keeps the seam interface platform-neutral
+// without forcing each walker's emission order onto the contract.
 // ---------------------------------------------------------------------------
 
-import type { ExprIR, StateFieldIR, TypeIR } from "../../ir/loom-ir.js";
+import type { StateFieldIR, TypeIR } from "../../ir/loom-ir.js";
 
 /** Discriminator: where in the emitted module the walker is currently
  *  rendering.  Drives state-reference syntax — HEEx differentiates
  *  template position (`@step`) from handler position
  *  (`socket.assigns.step`).  TSX renders identically in both. */
 export type RenderPosition = "template" | "handler";
-
-/** A state field reference — produced by the walker when it
- *  encounters a `LooseName` resolving to a state field declared in
- *  the enclosing `state { ... }` block. */
-export interface StateRef {
-  field: StateFieldIR;
-  /** Local name as written in source (matches `field.name`). */
-  name: string;
-}
-
-/** A single API call site detected by the walker — the
- *  `Sales.Customer.create.mutate(args)` shape.  Carries the
- *  resolved api-handle / aggregate / op so the target can produce
- *  framework-correct output:
- *    TSX: hoist `useCreateCustomer()` at page top, rewrite call to
- *         `customerCreate.mutate(args)`.
- *    HEEx: emit `MyApp.Sales.create_customer!(args)` inline; no
- *          hoisting — LiveView reads in `mount/3` / `handle_event`. */
-export interface ApiCallSite {
-  /** The local UI api parameter name (e.g. "Sales"). */
-  apiHandle: string;
-  /** The aggregate accessed off the api handle (e.g. "Customer"). */
-  aggregateName: string;
-  /** The operation invoked (`create` / `update` / `delete` / `all`
-   *  / `byId` / a custom finder name). */
-  operation: string;
-  /** Whether this is a read (`all`/`byId`/finder) or a mutation
-   *  (`create`/`update`/`delete`/operation).  Drives hook choice. */
-  kind: "query" | "mutation";
-  /** Argument expressions, in source order.  Empty for `.all`. */
-  args: ExprIR[];
-}
 
 /** Per-target lowering interface.  An implementation is selected by
  *  the deployable's framework: `tsxTarget` for `react`/`static`,
@@ -89,75 +51,55 @@ export interface WalkerTarget {
 
   // --- State seam ---------------------------------------------------------
 
-  /** Render a read of `state.<field>` at the given position.  TSX
-   *  returns `step`; HEEx returns `@step` (template) or
-   *  `socket.assigns.step` (handler). */
-  renderStateRead(ref: StateRef, position: RenderPosition): string;
+  /** Render a read of `state.<field>` (or a page state field referenced
+   *  bare) at the given position.  TSX returns `step` regardless of
+   *  position; HEEx returns `@step` (template) or `socket.assigns.step`
+   *  (handler).  Returns the identifier only — the caller adds JSX
+   *  braces / HEEx `<%= … %>` wrappers based on context.
+   *
+   *  `name` is the source-side field name as written; targets snake-
+   *  case as appropriate. */
+  stateRead(name: string, position: RenderPosition): string;
 
-  /** Render a write to `state.<field>` from a `state.field := <expr>`
-   *  statement encountered inside a block-body lambda.  TSX returns
-   *  the React setter call (`setStep(value)`); HEEx returns the
-   *  `assign(socket, :step, value)` form.  `value` is already
-   *  rendered via `renderExpression`. */
-  renderStateWrite(ref: StateRef, value: string): string;
+  /** Render a `state.<field> := <value>` statement, where `value` is
+   *  already rendered to the target's expression syntax by the
+   *  caller (TSX: `value + 1`; HEEx: `value + 1`).  Returns a single
+   *  statement with the target's terminator (`;` for TSX, none for
+   *  HEEx — the HEEx walker pipes it as `|> assign(:x, v)`). */
+  stateWrite(name: string, value: string): string;
 
-  /** Render the initial-value expression for a state field's `mount`
-   *  / `useState` initialiser.  `init` is the lowered IR or undefined
-   *  (caller falls back to the type-default). */
-  renderStateInit(field: StateFieldIR, init: ExprIR | undefined): string;
-
-  // --- API binding seam ---------------------------------------------------
-
-  /** Render an API call site detected during walk.  TSX rewrites to
-   *  the local hook variable (`customerCreate.mutate(...)`); HEEx
-   *  emits the direct context-function call
-   *  (`MyApp.Sales.create_customer!(...)`). */
-  renderApiCall(call: ApiCallSite, renderedArgs: string): string;
-
-  /** Per-page hoisted bindings — TSX returns the React Query hook
-   *  call lines (`const customerCreate = useCreateCustomer();`)
-   *  emitted at page-component top; HEEx returns an empty array
-   *  (LiveView reads inside `mount/3` / `handle_event`).  Called
-   *  once per page after the body walk completes. */
-  renderApiHoisting(uses: ApiCallSite[]): string[];
-
-  // --- Helper-import seam -------------------------------------------------
-
-  /** Produce the per-page import block for user `import helper X
-   *  from "..."` declarations actually referenced by the page body.
-   *  TSX returns JS `import { fn } from "path"` lines; HEEx returns
-   *  Elixir `alias Path.To.Module` / `import Path.To.Module` lines.
-   *  `decls` is the UI-level import declarations; `used` is the
-   *  subset the walker actually encountered. */
-  renderHelperImports(
-    used: ReadonlySet<string>,
-    decls: ReadonlyArray<{ name: string; path: string }>,
-  ): string[];
-
-  // --- Match expression seam ----------------------------------------------
-
-  /** Render a `match { arm => expr, ..., else => expr }` expression.
-   *  `arms` are pre-rendered (predicate + value strings); `elseArm`
-   *  is the `else` branch's pre-rendered value, or undefined.
-   *  TSX returns chained ternary (`a ? b : c ? d : fallback`);
-   *  HEEx returns a `<%= cond do … end %>` block. */
-  renderMatch(
-    arms: ReadonlyArray<{ predicate: string; value: string }>,
-    elseArm: string | undefined,
-  ): string;
+  /** Render a compound state update — `state.<field> += <value>` or
+   *  `state.<field> -= <value>` (op is `"+"` or `"-"`).  TSX returns
+   *  `setX(name + v);` (the value is the right-hand side, not the new
+   *  field value); HEEx returns the pipe analogue. */
+  stateCompoundWrite(name: string, op: "+" | "-", value: string): string;
 
   // --- Navigation seam ----------------------------------------------------
 
-  /** Render a cross-page navigation call — `navigate(<TargetPage>,
-   *  { ...args })` from a block-body lambda.  TSX returns
-   *  `navigate("/path", { state: args })`; HEEx returns
-   *  `push_navigate(socket, to: ~p"/path")` with args interpolated
-   *  into the route.  `routeTemplate` is the target page's route
-   *  with `:param` placeholders; `args` is the rendered argument
-   *  map. */
-  renderNavigate(
-    routeTemplate: string,
-    args: ReadonlyArray<{ name: string; value: string }>,
+  /** Render a cross-page navigation call.  `route` is the target page's
+   *  route path (with `:param` placeholders for HEEx route sigils, or
+   *  a literal `"/path"` for TSX).  `state` is the already-rendered
+   *  state-argument expression (TSX: a JS object literal; HEEx ignores
+   *  this), or undefined for a no-state navigation.  Returns the JS /
+   *  Elixir call expression — `navigate("/page", { state: x })` for
+   *  TSX, `push_navigate(socket, to: ~p"/page")` for HEEx.
+   *
+   *  Called from inside `Action.then: navigate(<Page>, …)` and from
+   *  `Button(to: …)` lowering. */
+  renderNavigate(route: string, state: string | undefined): string;
+
+  // --- Match expression seam ----------------------------------------------
+
+  /** Render a `match { p => v, …, else => f }` expression.  `arms` is
+   *  the pre-rendered predicate/value pairs in source order; `elseArm`
+   *  is the rendered `else` value, or undefined.  TSX returns a
+   *  chained ternary (`a ? b : c ? d : fallback`); HEEx returns a
+   *  `cond do … end` block — the caller wraps in `<%= … %>` if it's
+   *  in template position. */
+  renderMatch(
+    arms: ReadonlyArray<{ predicate: string; value: string }>,
+    elseArm: string | undefined,
+    position: RenderPosition,
   ): string;
 
   // --- Type-default seam --------------------------------------------------
@@ -165,6 +107,53 @@ export interface WalkerTarget {
   /** Default initial value for a state field whose declaration omits
    *  `= <init>`.  TSX returns JS literals (`0`, `""`, `false`, `null`,
    *  `[]`, `{}`); HEEx returns Elixir literals (`0`, `""`, `false`,
-   *  `nil`, `[]`, `%{}`). */
+   *  `nil`, `[]`, `%{}`).
+   *
+   *  Currently only consumed by HEEx — the TSX walker reads through
+   *  its own `defaultInitForField` in `walker/page-shell.ts` (the
+   *  emit path also needs the TS-type form, which is a different
+   *  concern).  Kept on the interface so future TSX consumers can
+   *  delegate. */
   defaultInitFor(type: TypeIR): string;
+
+  // --- State field default-init expression seam ---------------------------
+  // Reserved for a future cleanup: today's TSX walker also needs the
+  // TypeIR → TS-type form (`useState<T>(…)`).  That seam is not platform-
+  // neutral enough to live on WalkerTarget without dragging TS-isms
+  // (decimal → "Decimal", money → "Decimal", X id → "string") into the
+  // contract.  See `walker/page-shell.ts::typeRefAsTsString` for the
+  // current implementation.
 }
+
+// ---------------------------------------------------------------------------
+// Deferred seams (documented; not promoted to WalkerTarget yet)
+// ---------------------------------------------------------------------------
+//
+// A handful of seams *could* be expressed via WalkerTarget but each
+// would force one of the two walkers into a less-natural shape; the
+// payoff doesn't justify the cost yet:
+//
+// - API call lowering.  TSX detects `<param>.<aggregate>.<op>(args?)`
+//   structurally inside `tryDetectApiHook` (api-hooks.ts) and rewrites
+//   to a local hook variable, recording metadata on the walker's `Sink`
+//   so the page shell emits per-page hook decls + imports.  HEEx
+//   detects the same shape inside `renderMethodCall` and emits the
+//   direct context-function call inline (no hook hoisting because
+//   LiveView reads inside `mount/3` / `handle_event`).  The structures
+//   differ enough that any WalkerTarget seam here would just be a thin
+//   wrapper around each walker's detector — no clear win.
+//
+// - Helper imports.  Both walkers collect a `usedHelpers` set during
+//   the walk and render `import { name } from "path"` (TSX) / `alias
+//   Mod, as: Name` (HEEx) lines AFTER the walk completes — those
+//   renderers (`renderHelperImports` in walker/import-lines.ts and
+//   `elixirAliasForHelper` in heex-walker.ts) live outside the walk
+//   loop and are invoked from different post-walk paths.  A
+//   `renderHelperImports` seam on WalkerTarget would require
+//   restructuring the shell-emission path; the current setup already
+//   uses target-specific renderers cleanly.
+//
+// Both deferred seams stay inline; the WalkerTarget contract focuses
+// on the state/navigation/match seams that share a true call-shape
+// across both walkers.
+

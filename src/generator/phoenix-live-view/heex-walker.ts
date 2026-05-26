@@ -55,6 +55,8 @@ import type {
 } from "../../ir/loom-ir.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
+import type { WalkerTarget } from "../_walker/target.js";
+import { heexTarget } from "./walker/heex-target.js";
 
 export type RenderPosition = "template" | "handler";
 
@@ -143,6 +145,12 @@ export interface QueryBinding {
 }
 
 export interface WalkContext {
+  /** Framework-specific lowering seams (state read/write, navigate,
+   *  match, default init).  Always `heexTarget` for this walker; the
+   *  field is here so per-seam call sites delegate to the contract in
+   *  `src/generator/_walker/target.ts` instead of re-implementing
+   *  HEEx-specific syntax inline. */
+  target: WalkerTarget;
   /** App's module prefix, e.g. "PhoenixApp" — used for Ash code-interface
    *  call qualification (`PhoenixApp.Sales.create_customer!(...)`). */
   appModule: string;
@@ -207,6 +215,7 @@ export function walkBodyToHeex(
     }
   }
   const ctx: WalkContext = {
+    target: heexTarget,
     appModule,
     aggregatesByName,
     formBindings: [],
@@ -343,23 +352,21 @@ function renderLiteral(kind: string, value: string): string {
 function renderRef(expr: Extract<ExprIR, { kind: "ref" }>, ctx: WalkContext): string {
   // Variable remapping — QueryView maps lambda params (e.g. "rows") to
   // their LiveView assign names (e.g. "items").  Check this first.
+  // Delegates to the WalkerTarget's `stateRead` for the actual assign
+  // syntax (template `@x` vs. handler `socket.assigns.x`).
   if (ctx.varRemapping) {
     const remapped = ctx.varRemapping.get(snake(expr.name));
     if (remapped !== undefined) {
-      return ctx.position === "template" ? `@${remapped}` : `socket.assigns.${remapped}`;
+      return ctx.target.stateRead(remapped, ctx.position);
     }
   }
   // State field — position-dependent.
   if (ctx.stateNames.has(snake(expr.name))) {
-    return ctx.position === "template"
-      ? `@${snake(expr.name)}`
-      : `socket.assigns.${snake(expr.name)}`;
+    return ctx.target.stateRead(expr.name, ctx.position);
   }
   // Page route param.
   if (ctx.page.params.some((p) => p.name === expr.name)) {
-    return ctx.position === "template"
-      ? `@${snake(expr.name)}`
-      : `socket.assigns.${snake(expr.name)}`;
+    return ctx.target.stateRead(expr.name, ctx.position);
   }
   switch (expr.refKind) {
     case "param":
@@ -541,15 +548,16 @@ function isStringLit(e: ExprIR): boolean {
 }
 
 function renderMatch(expr: Extract<ExprIR, { kind: "match" }>, ctx: WalkContext): string {
-  // `match { p => v; … else => f }` → Elixir `cond do … end`.
-  // Wrapping in `<%= … %>` is the caller's job when the match appears
-  // in template position; in handler position, just the bare cond.
-  const arms = expr.arms
-    .map((a) => `      ${renderExpr(a.cond, ctx)} -> ${renderExpr(a.value, ctx)}`)
-    .join("\n");
-  const elseArm = expr.otherwise ? `\n      true -> ${renderExpr(expr.otherwise, ctx)}` : "";
-  const cond = `cond do\n${arms}${elseArm}\n    end`;
-  return ctx.position === "template" ? `<%= ${cond} %>` : cond;
+  // `match { p => v; … else => f }` → Elixir `cond do … end`,
+  // delegated to the WalkerTarget for the exact rendering.  The
+  // target handles position-dependent wrapping (`<%= cond do … end %>`
+  // in template position, bare in handler position).
+  const arms = expr.arms.map((a) => ({
+    predicate: renderExpr(a.cond, ctx),
+    value: renderExpr(a.value, ctx),
+  }));
+  const elseArm = expr.otherwise ? renderExpr(expr.otherwise, ctx) : undefined;
+  return ctx.target.renderMatch(arms, elseArm, ctx.position);
 }
 
 function renderObjectLiteral(expr: Extract<ExprIR, { kind: "object" }>, ctx: WalkContext): string {
@@ -690,9 +698,10 @@ function renderApiCall(call: ApiCallSite, ctx: WalkContext): string {
 function renderNavigate(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   // navigate(<Page>, { customerId: x }) — first arg is the page
   // reference, second is the params object.
-  // The router uses `live "<route>", <Page>Live`; we lower to
-  // `push_navigate(socket, to: ~p"<route>")`.  Param substitution into
-  // `:param` placeholders happens via Phoenix's `~p` sigil.
+  // The router uses `live "<route>", <Page>Live`; the WalkerTarget
+  // lowers to `push_navigate(socket, to: ~p"<route>")`.  Param
+  // substitution into `:param` placeholders happens via Phoenix's
+  // `~p` sigil.
   const target = expr.args[0];
   const params = expr.args[1];
   if (!target || target.kind !== "ref") {
@@ -711,7 +720,7 @@ function renderNavigate(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContex
           .join("&")
       : "";
   const route = queryPairs ? `${routePath}?${queryPairs}` : routePath;
-  return `push_navigate(socket, to: ~p"${route}")`;
+  return ctx.target.renderNavigate(route, undefined);
 }
 
 function renderToast(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
@@ -1565,11 +1574,12 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
   switch (stmt.kind) {
     case "assign": {
       // state.field := value  →  |> assign(:field, value)
-      // Path's first segment is the state field name.
+      // Path's first segment is the state field name.  Syntax routed
+      // through the WalkerTarget for cross-walker consistency.
       const fieldName = stmt.target.segments[0];
       if (!fieldName) return `# bad assign`;
       const value = renderExpr(stmt.value, { ...ctx, position: "handler" });
-      return `|> assign(:${snake(fieldName)}, ${value})`;
+      return ctx.target.stateWrite(fieldName, value);
     }
     case "let": {
       const value = renderExpr(stmt.expr, { ...ctx, position: "handler" });
@@ -1601,6 +1611,7 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
 export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): string | null {
   if (!page.requires) return null;
   const ctx: WalkContext = {
+    target: heexTarget,
     appModule,
     aggregatesByName: new Map(),
     formBindings: [],
@@ -1622,35 +1633,12 @@ export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): 
 // `defaultInitFor(field)` when the field has no explicit `= <init>`.
 // ---------------------------------------------------------------------------
 
+/** Default initial value for a state field — delegated to
+ *  `heexTarget.defaultInitFor` so the per-platform mapping has a
+ *  single source of truth.  Re-exported as a free function for
+ *  back-compat with the existing emitters that imported it directly. */
 export function defaultInitFor(t: TypeIR): string {
-  switch (t.kind) {
-    case "optional":
-      return "nil";
-    case "primitive":
-      switch (t.name) {
-        case "int":
-        case "long":
-        case "decimal":
-          return "0";
-        case "money":
-          return `Decimal.new("0")`;
-        case "bool":
-          return "false";
-        case "string":
-        case "guid":
-          return `""`;
-        case "datetime":
-          return "DateTime.utc_now()";
-        default:
-          return "nil";
-      }
-    case "id":
-      return "nil";
-    case "array":
-      return "[]";
-    default:
-      return "nil";
-  }
+  return heexTarget.defaultInitFor(t);
 }
 
 // ---------------------------------------------------------------------------

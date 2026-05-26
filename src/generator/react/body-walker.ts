@@ -60,9 +60,11 @@ import type {
 } from "../../ir/loom-ir.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
+import type { WalkerTarget } from "../_walker/target.js";
 import { registerApiHook, tryDetectApiHook } from "./walker/api-hooks.js";
 import { emitUserComponent } from "./walker/primitives/controls.js";
 import { describeReceiver, escapeJsxText, positionalArgs } from "./walker/shared/args.js";
+import { tsxTarget } from "./walker/tsx-target.js";
 
 /** Per-source named-import map — `from` module → set of named
  *  exports the page needs from it.  Replaces the old single-source
@@ -351,6 +353,7 @@ export function walkBodyToTsx(
   const helperNameToPath = new Map<string, string>();
   for (const h of helperImports) helperNameToPath.set(h.name, h.path);
   const ctx: WalkContext = {
+    target: tsxTarget,
     imports: new Map(),
     pack,
     paramNames,
@@ -417,6 +420,10 @@ export function walkBodyToTsx(
 
 /** Read-only lookups threaded through the walk. */
 export interface WalkEnv {
+  /** Framework-specific lowering seams (state read/write, navigate,
+   *  match, default init).  See `src/generator/_walker/target.ts`.
+   *  For the React/TSX walker this is always `tsxTarget`. */
+  target: WalkerTarget;
   pack: LoadedPack;
   paramNames: ReadonlySet<string>;
   stateNames: ReadonlySet<string>;
@@ -627,9 +634,12 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       }
       // Refs that match a state field name emit the
       // same way; the shell brings them into scope via `useState`.
+      // State-read syntax delegates to the WalkerTarget (TSX returns
+      // a bare identifier regardless of position; the JSX braces are
+      // added here at the call site).
       if (ctx.stateNames.has(expr.name)) {
         ctx.usesState = true;
-        return `{${expr.name}}`;
+        return `{${ctx.target.stateRead(expr.name, "template")}}`;
       }
       return `{/* ref: ${expr.name} */}`;
     case "ternary": {
@@ -842,7 +852,9 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       }
       if (ctx.stateNames.has(expr.name)) {
         ctx.usesState = true;
-        return expr.name;
+        // Expression position — let the target render the bare
+        // identifier (no JSX braces in this path).
+        return ctx.target.stateRead(expr.name, "handler");
       }
       if (ctx.paramNames.has(expr.name)) {
         ctx.usedParams.add(expr.name);
@@ -981,9 +993,7 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       const seg = stmt.target.segments;
       if (seg.length === 1 && ctx.stateNames.has(seg[0]!)) {
         ctx.usesState = true;
-        const name = seg[0]!;
-        const setter = "set" + name[0]!.toUpperCase() + name.slice(1);
-        return `${setter}(${emitExpr(stmt.value, ctx)});`;
+        return ctx.target.stateWrite(seg[0]!, emitExpr(stmt.value, ctx));
       }
       return unsupportedPageStmt(
         `assignment to '${seg.join(".")}'`,
@@ -1000,10 +1010,8 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       const seg = stmt.target.segments;
       if (seg.length === 1 && ctx.stateNames.has(seg[0]!)) {
         ctx.usesState = true;
-        const name = seg[0]!;
-        const setter = "set" + name[0]!.toUpperCase() + name.slice(1);
         const op = stmt.kind === "add" ? "+" : "-";
-        return `${setter}(${name} ${op} ${emitExpr(stmt.value, ctx)});`;
+        return ctx.target.stateCompoundWrite(seg[0]!, op, emitExpr(stmt.value, ctx));
       }
       return unsupportedPageStmt(
         `'${stmt.kind === "add" ? "+=" : "-="}' on '${seg.join(".")}'`,
@@ -1215,7 +1223,7 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
     }
     if (ctx.stateNames.has(expr.name)) {
       ctx.usesState = true;
-      return `{${expr.name}}`;
+      return `{${ctx.target.stateRead(expr.name, "template")}}`;
     }
     // Unresolved ref in text position emits a JSX
     // comment so the user sees the unresolved name in the

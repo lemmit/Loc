@@ -85,6 +85,12 @@ export function emitButton(
     const to = stringOrRefArgValue(call, "to", ctx);
     if (to) {
       ctx.usesNavigate = true;
+      // `stringOrRefArgValue` returns the route in already-quoted /
+      // template-literal form (e.g. `"\"/orders\""` for a string
+      // literal, `` `${id}` `` for a route param ref).  The
+      // WalkerTarget's `renderNavigate` expects an unquoted route
+      // string and re-quotes; to avoid double-quoting we splice
+      // here directly while preserving the historical TSX output.
       onClickHandler = `() => navigate(${to})`;
     }
   }
@@ -205,10 +211,8 @@ function emitActionThen(then: ExprIR, ctx: WalkContext): string {
         : "/";
     ctx.usesNavigate = true;
     const stateArg = then.args[1];
-    if (stateArg) {
-      return `navigate(${JSON.stringify(route)}, { state: ${emitExpr(stateArg, ctx)} })`;
-    }
-    return `navigate(${JSON.stringify(route)})`;
+    const stateRendered = stateArg !== undefined ? emitExpr(stateArg, ctx) : undefined;
+    return ctx.target.renderNavigate(route, stateRendered);
   }
   return emitExpr(then, ctx);
 }
