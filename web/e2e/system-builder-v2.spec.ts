@@ -322,6 +322,56 @@ test("Model v2 edits a repository find's filter inline", async ({ page }) => {
   await expect(find.getByTestId("c4system-v2-expression-editor")).toBeVisible({ timeout: 10_000 });
 });
 
+test("Model v2 persists hand-dragged node positions across a reload, and Reset clears them", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  // Drill system → module → context so the aggregate nodes are visible.
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+
+  const node = page.locator('[data-testid="rf__node-aggregate:Order"]');
+  await expect(node).toBeVisible({ timeout: 5_000 });
+  // The node's CSS transform is in flow coordinates (pan/zoom lives on the
+  // viewport), so it's a stable identity to compare across reload + fitView.
+  const transform = (): Promise<string> => node.evaluate((el) => (el as HTMLElement).style.transform);
+  const derived = await transform();
+
+  // Drag the aggregate by a screen delta; its transform should change.
+  const box = (await node.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 140, box.y + box.height / 2 + 80, { steps: 10 });
+  await page.mouse.up();
+  await expect.poll(transform).not.toBe(derived);
+  const dragged = await transform();
+
+  // Reload + re-drill to the same context — the dragged transform survives.
+  await page.reload();
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await expect(node).toBeVisible({ timeout: 5_000 });
+  await expect.poll(transform, { timeout: 10_000 }).toBe(dragged);
+
+  // Reset layout (auto-accept the `confirm` dialog) → back to the derived
+  // position and the button disappears once nothing is persisted.
+  page.once("dialog", (d) => void d.accept());
+  await page.getByTestId("c4system-v2-reset-layout").click();
+  await expect.poll(transform).toBe(derived);
+  await expect(page.getByTestId("c4system-v2-reset-layout")).toHaveCount(0);
+});
+
 test("Model v2 repoints an emit statement's event inline", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

@@ -73,7 +73,11 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
 
   return (
     <Box
-      className="nodrag"
+      // The root banner is auto-centred over its children on every layout
+      // pass; persisted positions skip it explicitly. Marking it `nodrag`
+      // here makes that intent visible at the DOM layer too — React Flow
+      // ignores drag attempts inside this subtree.
+      className={d.isRoot ? "nodrag" : undefined}
       style={{
         background: d.color,
         color: "white",
@@ -150,6 +154,9 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
           size="xs"
           autoFocus
           value={draft}
+          // React Flow treats children flagged with `nodrag` as drag-exempt —
+          // typing into the rename input must not start a node drag.
+          className="nodrag"
           data-testid="c4system-v2-rename-input"
           onChange={(e) => setDraft(e.currentTarget.value)}
           onBlur={commit}
@@ -174,6 +181,8 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
       {(d.onRename || d.onDelete || d.onToggleExpression) && !editing && (
         <Group
           gap={2}
+          // Drag-exempt: clicking ✎ / × / ƒx should never start a node drag.
+          className="nodrag"
           style={{ position: "absolute", top: 2, right: 2 }}
         >
           {d.onToggleExpression && (
@@ -225,12 +234,12 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
         </Group>
       )}
       {d.expressionEditor && (
-        <Box mt={6} data-testid="c4system-v2-expression-editor">
+        <Box mt={6} className="nodrag" data-testid="c4system-v2-expression-editor">
           {d.expressionEditor}
         </Box>
       )}
       {d.multiSelects && d.multiSelects.length > 0 && (
-        <Stack gap={4} mt={6}>
+        <Stack gap={4} mt={6} className="nodrag">
           {d.multiSelects.map((sel) => (
             <MultiSelect
               key={sel.label}
