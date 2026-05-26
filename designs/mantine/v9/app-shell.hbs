@@ -1,5 +1,5 @@
 // Auto-generated.
-import { Routes, Route, Link as RouterLink, useLocation, Outlet } from "{{routerPackage}}";
+import { Routes, Route, Link as RouterLink, useLocation, useNavigate, Outlet } from "{{routerPackage}}";
 import { AppShell, Box, Burger, Card, Container, Divider, Grid, Group, Title, NavLink, Anchor, Alert, Badge, Button, Image, Stack, Text } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import React from "react";
@@ -136,7 +136,8 @@ function AppShellLayout() {
 // the .ddd source.  Pages with `layout: {{name}}` route through
 // this wrapper instead of the default AppShellLayout.
 function {{name}}Layout() {
-  return (
+{{#if usesNavigate}}  const navigate = useNavigate();
+{{/if}}  return (
     <>
 {{#if hasHeader}}      {{{headerJsx}}}
 {{/if}}      <AppErrorBoundary>

@@ -76,6 +76,7 @@ export function prepareAppShellVM(
     sidebarJsx: string;
     hasFooter: boolean;
     footerJsx: string;
+    usesNavigate: boolean;
     routes: ExtraPageRoute[];
   }>,
   /** Phase 8 step 2: extra imports the named-layout JSX needs.
@@ -243,6 +244,7 @@ export function prepareAppShellVM(
     sidebarJsx: nl.sidebarJsx,
     hasFooter: nl.hasFooter,
     footerJsx: nl.footerJsx,
+    usesNavigate: nl.usesNavigate,
     routes: nl.routes.map((r) => ({
       path: r.route,
       elementJsx: `<${r.componentName} />`,

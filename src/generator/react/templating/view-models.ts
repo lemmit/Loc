@@ -149,6 +149,11 @@ export interface NamedLayoutVM {
   sidebarJsx: string;
   hasFooter: boolean;
   footerJsx: string;
+  /** Any slot uses a `Button { to: }` (or other primitive that
+   *  lowers to `navigate(...)`).  Template injects
+   *  `const navigate = useNavigate()` at the top of the wrapper
+   *  function when set. */
+  usesNavigate: boolean;
   /** Routes that opted into this layout (page name + path JSX). */
   routes: RouteVM[];
 }
