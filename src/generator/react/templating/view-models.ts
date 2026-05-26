@@ -99,8 +99,17 @@ export interface AppShellVM {
   systemNameHuman: string;
   /** Page-component imports the routes refer to. */
   imports: ImportVM[];
-  /** Every route the Router renders, in source order. */
+  /** Every route the Router renders inside the AppShell chrome, in
+   *  source order.  Pages with `layout: none` are routed via
+   *  `outOfShellRoutes` instead — they mount at the top of the
+   *  router with no header / sidebar / main padding. */
   routes: RouteVM[];
+  /** Routes that mount OUTSIDE the AppShell chrome — one per page
+   *  that declared `layout: none`.  Rendered as sibling `<Route>`
+   *  entries to the AppShell layout-route in App.tsx.  Empty when
+   *  no page opted out, in which case the template emits zero
+   *  out-of-shell route entries. */
+  outOfShellRoutes: RouteVM[];
   /** One section per construct kind that has at least one entry. */
   navSections: NavSectionVM[];
 }

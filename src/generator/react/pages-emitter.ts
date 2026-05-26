@@ -129,11 +129,22 @@ function buildBcByWorkflow(ctx: PageEmitContext): Map<string, BoundedContextIR> 
  *  Route + import; conventional overrides (page name matches the
  *  scaffolded shape) are mounted at the conventional route by
  *  the existing per-aggregate / -workflow / -view loops in
- *  `prepareAppShellVM`. */
-export function deriveExtraRoutesFromUi(
-  ui: UiIR,
-): import("./templating/preparers/app-shell.js").ExtraPageRoute[] {
-  const out: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
+ *  `prepareAppShellVM`.
+ *
+ *  The return value partitions on `page.layout`:
+ *    - `inShell`: pages with `layout: default` (or unset) — mounted
+ *      inside the AppShell layout-route, alongside the conventional
+ *      per-aggregate / -workflow / -view routes.
+ *    - `outOfShell`: pages with `layout: none` — mounted as sibling
+ *      routes OUTSIDE the AppShell, getting no header / sidebar /
+ *      main padding.  Validator gates `layout:` to explicit pages
+ *      only in v1, so scaffold-origin pages can never appear here. */
+export function deriveExtraRoutesFromUi(ui: UiIR): {
+  inShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[];
+  outOfShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[];
+} {
+  const inShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
+  const outOfShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
   // Same name→params map the page emitter builds, so
   // route derivation recognises pages whose body is a user-component
   // invocation.
@@ -155,14 +166,19 @@ export function deriveExtraRoutesFromUi(
     // `custom`) get the per-aggregate page-object treatment below.
     if (page.origin && page.origin.kind !== "custom") continue;
     if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
-      out.push({
+      const route: import("./templating/preparers/app-shell.js").ExtraPageRoute = {
         componentName: page.name,
         importFrom: `./pages/${snake(page.name)}`,
         route: page.route,
-      });
+      };
+      if (page.layout?.kind === "preset" && page.layout.name === "none") {
+        outOfShell.push(route);
+      } else {
+        inShell.push(route);
+      }
     }
   }
-  return out;
+  return { inShell, outOfShell };
 }
 
 export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, string> {

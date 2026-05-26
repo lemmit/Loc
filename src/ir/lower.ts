@@ -106,6 +106,7 @@ import type {
   ModuleStorageRole,
   OperationIR,
   PageIR,
+  PageLayoutIR,
   PageOriginIR,
   ParamIR,
   PermissionDeclIR,
@@ -854,6 +855,7 @@ function lowerPage(p: Page): PageIR {
   let requires: ExprIR | undefined;
   let body: ExprIR | undefined;
   let menuMeta: MenuMetaIR | undefined;
+  let layout: PageLayoutIR | undefined;
   const state: StateFieldIR[] = [];
   // Page-scoped env: route params + state fields bind as locals so
   // `inferExprType` resolves their refs to their declared types
@@ -890,6 +892,14 @@ function lowerPage(p: Page): PageIR {
           value: lowerExpr(e.value, env),
         })),
       };
+    } else if (prop.$type === "LayoutProp") {
+      // The validator restricts `prop.value` to the v1 preset set
+      // ({"default","none"}) and rejects the property on
+      // scaffold-origin pages; the cast here is safe at any point
+      // the IR is consumed (validator runs before lowering in
+      // production, and the React generator branches only on the
+      // narrower "none" sentinel).
+      layout = { kind: "preset", name: prop.value as "default" | "none" };
     }
   }
   // Pass-1 AST-to-AST scaffold expansion populates
@@ -910,6 +920,7 @@ function lowerPage(p: Page): PageIR {
     menuMeta,
     source: inferred.kind === "custom" ? "explicit" : "scaffold",
     origin: inferred,
+    layout,
   };
 }
 

@@ -130,6 +130,29 @@ describe("page metamodel — IR shape", () => {
     expect(page.menuMeta?.entries.map((e) => e.name)).toEqual(["section", "label"]);
   });
 
+  it("lowers `layout: none` to a preset PageLayoutIR; omitted layout stays undefined", async () => {
+    const loom = await buildLoom(`
+      system Acme {
+        ui WebApp {
+          page Kiosk {
+            route: "/kiosk"
+            layout: none
+            body: Heading("hi")
+          }
+          page Dashboard {
+            route: "/dash"
+            body: Heading("dash")
+          }
+        }
+      }
+    `);
+    const ui = uiByName(loom, "WebApp");
+    const kiosk = ui.pages.find((p) => p.name === "Kiosk")!;
+    expect(kiosk.layout).toEqual({ kind: "preset", name: "none" });
+    const dash = ui.pages.find((p) => p.name === "Dashboard")!;
+    expect(dash.layout).toBeUndefined();
+  });
+
   it("lowers a page with parameters (typed) — including `id` as a param name", async () => {
     // `Parameter.name` uses `LooseName`, so `id` no longer collides
     // with the IdRef magic-identifier keyword and can be used as a

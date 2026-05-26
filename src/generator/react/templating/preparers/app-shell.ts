@@ -57,6 +57,14 @@ export function prepareAppShellVM(
    *  dangling reference (explicit-page-only uis emit no Home file).
    *  Default true preserves legacy behaviour for callers without a ui. */
   hasScaffoldHome: boolean = true,
+  /** Explicit pages with `layout: none` — mounted OUTSIDE the
+   *  AppShell chrome as sibling routes to the layout-route.
+   *  Imports go into the shared `imports` channel so each component
+   *  appears once regardless of which shell branch routes it.
+   *  Phoenix LiveView ignores this channel today; see TODO below.
+   *  TODO(layout-v2): when v2 introduces named layouts the
+   *  partition becomes per-layout-name, not a single binary split. */
+  outOfShellRoutes?: ExtraPageRoute[],
 ): AppShellVM {
   const imports: ImportVM[] = [];
   const routes: RouteVM[] = [];
@@ -120,6 +128,24 @@ export function prepareAppShellVM(
       from: extra.importFrom,
     });
     routes.push({
+      path: extra.route,
+      elementJsx: `<${extra.componentName} />`,
+    });
+  }
+
+  // Pages with `layout: none` — same import shape as the in-shell
+  // extras, routed via a separate channel that the template emits
+  // OUTSIDE the AppShell layout-route.  Imports live in the
+  // shared list so each component module is imported exactly
+  // once even if a future extension routes a single page through
+  // both channels.
+  const outOfShellRoutesVM: RouteVM[] = [];
+  for (const extra of outOfShellRoutes ?? []) {
+    imports.push({
+      specifier: extra.componentName,
+      from: extra.importFrom,
+    });
+    outOfShellRoutesVM.push({
       path: extra.route,
       elementJsx: `<${extra.componentName} />`,
     });
@@ -189,6 +215,7 @@ export function prepareAppShellVM(
     systemNameHuman: humanize(systemName),
     imports,
     routes,
+    outOfShellRoutes: outOfShellRoutesVM,
     navSections: sidebarOverride ?? navSections,
   };
 }

@@ -854,6 +854,14 @@ export interface UiApiParamIR {
   apiName: string;
 }
 
+/** Per-page layout selector.  v1 surfaces two presets (`default` —
+ *  page is wrapped by the deployable's AppShell chrome; `none` —
+ *  page mounts at the top of the router with no chrome at all).
+ *  The discriminated-union shape reserves room for a v2
+ *  `{ kind: "named"; ref: string }` variant that references a named
+ *  `layout` SystemMember without breaking downstream consumers. */
+export type PageLayoutIR = { kind: "preset"; name: "default" | "none" };
+
 /** A page declaration: route + parameters + reactive state + body. */
 export interface PageIR {
   name: string;
@@ -894,6 +902,13 @@ export interface PageIR {
    *  its conventional path (`src/pages/<plural>/list.tsx` for an
    *  `aggregate-list` origin, etc.) — preserves URL/file shape. */
   emitPath?: string;
+  /** Optional layout selector.  When undefined, the page receives
+   *  the deployable's default app-shell chrome.  See `PageLayoutIR`
+   *  for the preset value set; undefined is intentionally distinct
+   *  from `{ kind: "preset", name: "default" }` to preserve the
+   *  v2-named-layout-inheritance posture (a ui-level layout supplies
+   *  the default when the page doesn't declare one). */
+  layout?: PageLayoutIR;
 }
 
 /** Provenance for a page's body shape.  Scaffold-emitted pages carry

@@ -306,7 +306,7 @@ Page:
     '}';
 
 PageProp:
-      RouteProp | TitleProp | RequiresProp | StateBlock | BodyProp | PageMenuMeta;
+      RouteProp | TitleProp | RequiresProp | StateBlock | BodyProp | PageMenuMeta | LayoutProp;
 
 RouteProp:
     'route' ':' value=STRING;
@@ -319,6 +319,15 @@ RequiresProp:
 
 BodyProp:
     'body' ':' expr=Expression;
+
+// Per-page layout selector.  v1 admits two preset values
+// (`default`, `none`) and is gated by the validator; the bare `ID`
+// shape (rather than a hard keyword enum) reserves the seam for v2,
+// where this position becomes a cross-reference to a named `layout`
+// SystemMember (`layout AdminFrame { ... }`).  Default behaviour
+// (unset) preserves the existing app-shell chrome.
+LayoutProp:
+    'layout' ':' value=ID;
 
 // Per-page sidebar metadata.  Read by the menu emitter (Slice 6) when
 // no explicit `ui`-level `menu { ... }` block is declared.  Recognised
