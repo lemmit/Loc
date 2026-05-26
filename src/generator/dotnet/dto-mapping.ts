@@ -2,6 +2,8 @@ import { wireShapeFor } from "../../ir/enrichments.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  EnrichedAggregateIR,
+  EnrichedEntityPartIR,
   EntityPartIR,
   IdValueType,
   TypeIR,
@@ -240,8 +242,10 @@ export function projectEntityExpr(
   // `entity.wireShape` is populated by `enrichLoomModel`.  Each wire
   // field maps to one positional argument on `new <Ent>Response(...)`,
   // in the same order the Hono / React Zod schemas emit.  `forApiRead`
-  // strips `internal` and `secret` fields.
-  const fields = forApiRead(wireShapeFor(entity));
+  // strips `internal` and `secret` fields.  Local cast asserts the
+  // brand — see `wireShapeFor`'s docstring for why the surface contract
+  // still hands us raw IR even though the runtime value is enriched.
+  const fields = forApiRead(wireShapeFor(entity as EnrichedAggregateIR | EnrichedEntityPartIR));
   const args: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
@@ -274,8 +278,9 @@ export function entityResponseParams(part: EntityPartIR, ctx: BoundedContextIR):
 
 function responseRecordParams(ent: AggregateIR | EntityPartIR, ctx: BoundedContextIR): string {
   // Drop `internal` / `secret` fields so the C# record's param list
-  // matches what `projectEntityExpr` projects.
-  const fields = forApiRead(wireShapeFor(ent));
+  // matches what `projectEntityExpr` projects.  Local brand cast —
+  // see `projectEntityExpr` above.
+  const fields = forApiRead(wireShapeFor(ent as EnrichedAggregateIR | EnrichedEntityPartIR));
   const idValueType = isPart(ent) ? ent.parentIdValueType : ent.idValueType;
   const parts: string[] = [];
   for (const wf of fields) {

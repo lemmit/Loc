@@ -9,6 +9,8 @@ import type { ClassifyContext, SingleFieldPattern } from "../../../ir/invariant-
 import type {
   AggregateIR,
   BoundedContextIR,
+  EnrichedAggregateIR,
+  EnrichedEntityPartIR,
   EntityPartIR,
   EnumIR,
   FindIR,
@@ -680,7 +682,9 @@ function emitResponseDtoSchema(
   // Single canonical walk — populated by `enrichLoomModel` (see
   // src/ir/enrichments.ts).  Order and field-set match every other
   // emitter (.NET DTO, React Zod, Hono toWire serializer).
-  const fields = wireShapeFor(ent);
+  // Local brand cast — surface still hands us raw IR; see
+  // `wireShapeFor`'s docstring on the brand-cascade gap.
+  const fields = wireShapeFor(ent as EnrichedAggregateIR | EnrichedEntityPartIR);
   void ctx;
   void isAgg;
   for (const wf of fields) {

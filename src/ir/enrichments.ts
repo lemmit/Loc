@@ -1,3 +1,4 @@
+import { platformFor } from "../platform/registry.js";
 import { snake } from "../util/naming.js";
 import type {
   AggregateIR,
@@ -84,22 +85,27 @@ export function enrichLoomModel(loom: RawLoomModel): EnrichedLoomModel {
  * site, scattering the same precondition across four files.  This
  * helper centralises the assumption.
  *
- * Branded `EnrichedAggregateIR` / `EnrichedEntityPartIR` /
- * `EnrichedValueObjectIR` now make `wireShape` non-optional at the
- * type level — passing a raw entity is a compile error.  The runtime
- * non-null assertion stays as a belt-and-suspenders cast for callers
- * that still carry a structural `AggregateIR` reference (e.g.
- * pre-enriched intermediate IR in tests or external constructors). */
+ * Enriched-only by signature: `EnrichedAggregateIR` /
+ * `EnrichedEntityPartIR` / `EnrichedValueObjectIR` make `wireShape`
+ * non-optional at the type level, so passing a raw entity is a
+ * compile error.  The earlier raw-union overload + `!` non-null
+ * cast is gone — every production caller flows enriched IR through.
+ *
+ * Note on the brand cascade: the surface contract still types
+ * `emitProject(contexts: BoundedContextIR[])`, and the symmetric
+ * `system/index.ts` helpers (`collectContextsFor`, `emitDeployable`)
+ * use the raw structural type, so internal emitters that walk
+ * `ctx.aggregates[i]` see `AggregateIR | EntityPartIR` at compile
+ * time even though the runtime value is enriched.  Each of those
+ * callers asserts the brand locally where it invokes `wireShapeFor`
+ * (see grep "as EnrichedAggregateIR" — five sites).  Threading the
+ * brand all the way through `surface.ts` + every `<platform>/emit.ts`
+ * + every emitter helper (~224 typed sites) is a follow-up of its
+ * own; until that lands, the local casts record the runtime invariant. */
 export function wireShapeFor(
-  entity:
-    | EnrichedAggregateIR
-    | EnrichedEntityPartIR
-    | EnrichedValueObjectIR
-    | AggregateIR
-    | EntityPartIR
-    | ValueObjectIR,
+  entity: EnrichedAggregateIR | EnrichedEntityPartIR | EnrichedValueObjectIR,
 ): WireField[] {
-  return entity.wireShape!;
+  return entity.wireShape;
 }
 
 function enrichSystem(
@@ -501,13 +507,14 @@ function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
     // target backend exposes (so the page-IR emitter has every
     // aggregate's wire shape in scope).
     //
-    // NOTE: this hardcoded check mirrors `PlatformSurface.isFrontend`
-    // in `src/platform/<name>.ts`.  Kept in sync manually because
-    // `enrichments.ts` is platform-agnostic and can't import from
-    // the registry — same reason `platformNeedsDb` above is
-    // hardcoded.
-    const isFrontend = d.platform === "react" || d.platform === "static";
-    if (!isFrontend || !d.targetName) return d;
+    // Routed through `PlatformSurface.isFrontend` so there is one
+    // source of truth.  The registry import is safe: `registry.ts`
+    // only imports per-platform `Surface` impls (none of which
+    // import back into `ir/`), so no cycle.  `platformNeedsDb`
+    // above still mirrors `PlatformSurface.needsDb` inline only
+    // because pulling it through the registry there would force an
+    // identical import — kept consistent as a follow-up.
+    if (!platformFor(d.platform).isFrontend || !d.targetName) return d;
     const target = deployables.find((t) => t.name === d.targetName);
     if (!target) return d;
     return { ...d, moduleNames: [...target.moduleNames] };
