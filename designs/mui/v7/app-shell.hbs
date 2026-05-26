@@ -1,7 +1,8 @@
 // Auto-generated.
 import { Routes, Route, Link as RouterLink, useLocation, useNavigate, Outlet } from "{{routerPackage}}";
 import {
-  AppBar, Box, CssBaseline, Divider, Drawer, IconButton,
+  AppBar, Box, Card, CardContent, Chip, Container, CssBaseline, Divider, Drawer, Grid,
+  IconButton, Link,
   List, ListItem, ListItemButton, ListItemText, ListSubheader,
   Toolbar, Typography, Alert, Button, Stack,
 } from "@mui/material";
@@ -157,10 +158,30 @@ function AppShellLayout() {
   );
 }
 
-export default function App() {
+{{#each namedLayouts}}
+// Named layout '{{name}}' — declared via `layout {{name}} { … }` in
+// the .ddd source.  Pages with `layout: {{name}}` route through
+// this wrapper instead of the default AppShellLayout.
+function {{name}}Layout() {
+{{#if usesNavigate}}  const navigate = useNavigate();
+{{/if}}  return (
+    <>
+{{#if hasHeader}}      {{{headerJsx}}}
+{{/if}}      <AppErrorBoundary>
+        <Outlet />
+      </AppErrorBoundary>
+{{#if hasFooter}}      {{{footerJsx}}}
+{{/if}}    </>
+  );
+}
+
+{{/each}}export default function App() {
   return (
     <Routes>
 {{#each outOfShellRoutes}}      <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}{{#each namedLayouts}}      <Route element={<{{name}}Layout />}>
+{{#each routes}}        <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}      </Route>
 {{/each}}      <Route element={<AppShellLayout />}>
 {{#each routes}}        <Route path="{{path}}" element={{expr elementJsx}} />
 {{/each}}        <Route path="*" element={<NotFound />} />
