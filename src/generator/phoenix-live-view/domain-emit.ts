@@ -92,25 +92,34 @@ function renderAggregateResource(
     ":updated_at",
   ];
 
-  // NOTE on the `inspect` derived (PR #524 + PR #537 lineage):
+  // `inspect` derived → public `def inspect(record)` module function
+  // (PR #524 → #537 → #546 → this).
   //
-  // Earlier iterations emitted a `defimpl Inspect, for: <Module> do … end`
-  // block that inlined the user-written / auto-synthesised inspect
-  // expression body as native Elixir.  Ash 3.x's `use Ash.Resource`
-  // macro auto-derives its own `Inspect` impl for the resource struct,
-  // which collides with our explicit `defimpl` and surfaces under
-  // `--warnings-as-errors` (the `phoenix-build` workflow uses it) as:
+  // PR #524 auto-injects a structural `derived inspect: string = ...` on
+  // every aggregate; the .NET and TS backends emit it as `ToString()` /
+  // `[util.inspect.custom]` so debugger output / exception messages
+  // honour `sensitive(...)` redaction.
   //
-  //   warning: redefining module Inspect.<App>.<Ctx>.<Agg>
+  // The earlier Phoenix path emitted `defimpl Inspect, for: <Module>`,
+  // which collided with Ash 3.x's auto-derived Inspect protocol impl
+  // (`warning: redefining module Inspect.<App>.<Ctx>.<Agg>` under
+  // `--warnings-as-errors`).  #546 dropped the emission, leaving
+  // Phoenix without the redaction-aware debug form the plan promised.
   //
-  // Until Ash exposes an opt-out for its auto-Inspect derive (or we
-  // route the synthesised body through a non-Inspect channel like a
-  // dedicated `inspect/1` helper on the resource module), dropping
-  // the emission is the only way to keep mix compile clean.  Ash's
-  // default Inspect output (`%<App>.<Ctx>.<Agg>{id: …, name: …}`) is
-  // adequate for debugging; the `derived inspect` IR node remains in
-  // the model so downstream emitters (.NET ToString, TS toString)
-  // still consume it.
+  // This restores it as a regular **module function** rather than a
+  // protocol impl: callers invoke it explicitly (`Customer.inspect(record)`
+  // from Logger / IEx) instead of relying on `Kernel.inspect/1`.  No
+  // collision with Ash's auto-Inspect because they live in different
+  // modules (`MyApp.Catalog.Customer.inspect/1` vs
+  // `Inspect.MyApp.Catalog.Customer.inspect/2`).
+  //
+  // The `expr()`-DSL constraint that originally bit `calculate :inspect`
+  // (Ash `expr()` doesn't admit `<>` / `to_string/1`) doesn't apply
+  // here — module-function bodies are native Elixir.
+  const inspectDerived = agg.derived.find((d) => d.name === "inspect");
+  const inspectFn = inspectDerived
+    ? `\n  def inspect(record) do\n    ${renderExpr(inspectDerived.expr, renderCtx)}\n  end\n`
+    : "";
 
   // camelCase wire-shape Jason encoder.  Pairs with the resource
   // module — same struct, separate protocol impl.  Cross-backend
@@ -133,8 +142,7 @@ function renderAggregateResource(
     ${persistedFields.map((f) => renderAttribute(f, ctxModule)).join("\n    ")}
     timestamps()
   end
-${renderRelationships(agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${renderHelperFunctions(agg.functions, renderCtx)}
-end
+${renderRelationships(agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
 
 ${jasonImpl}`;
 }
@@ -319,10 +327,13 @@ function renderCalculations(
   for (const d of derived) {
     // Lifted to aggregates (count :rel) above; skip here.
     if (isRelationshipCountDerive(d, agg.contains)) continue;
-    // The reserved `inspect` derived is realised as a `defimpl Inspect`
-    // block outside the resource module — Ash's `expr()` DSL doesn't
-    // admit the `<>` / `to_string/1` shapes the synthesised expression
-    // uses.  See the inspect-impl block in `renderAggregateResource`.
+    // The reserved `inspect` derived is realised as a public
+    // `def inspect(record)` module function (see `inspectFn` in
+    // `renderAggregateResource`).  Ash's `expr()` DSL doesn't admit
+    // the `<>` / `to_string/1` shapes the synthesised expression uses,
+    // so a `calculate :inspect, :string, expr(...)` would fail to
+    // compile.  Module-function bodies are native Elixir — no
+    // constraint.
     if (d.name === "inspect") continue;
     const ashType = renderAshType(d.type, ctx.contextModule);
     const exprStr = renderExpr(d.expr, ctx);
