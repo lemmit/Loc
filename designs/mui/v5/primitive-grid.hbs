@@ -1,5 +1,5 @@
 {{#if hasChildren}}<Grid container spacing={2}{{{testidAttr}}}{{{styleAttr}}}>
-{{colIndent}}{{#each children}}<Grid item xs={12} sm="auto">
+{{colIndent}}{{#each children}}{{#if ../hasResponsiveCols}}<Grid item xs={12} sm={ {{../spanTablet}} } lg={ {{../spanDesktop}} }>{{else}}<Grid item xs={12} sm="auto">{{/if}}
 {{../childIndent}}{{{this}}}
 {{../colIndent}}</Grid>{{#unless @last}}
 {{../colIndent}}{{/unless}}{{/each}}

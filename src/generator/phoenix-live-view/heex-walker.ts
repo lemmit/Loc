@@ -307,6 +307,11 @@ function renderExpr(expr: ExprIR, ctx: WalkContext): string {
     }
     case "match":
       return renderMatch(expr, ctx);
+    case "list":
+      // List literals are walker-config sugar (e.g. responsive Grid cols).
+      // No HEEx page-body emit path consumes one today; emit a literal
+      // Elixir list so unexpected uses produce valid Elixir.
+      return `[${expr.elements.map((el) => renderExpr(el, ctx)).join(", ")}]`;
   }
 }
 

@@ -473,6 +473,10 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
       }
       return out;
     }
+    case "list":
+      // List literals are walker-config sugar.  UI E2E tests don't
+      // currently consume them, but keep the renderer total.
+      return `[${e.elements.map((el) => renderUIExpr(el, ctx)).join(", ")}]`;
   }
 }
 

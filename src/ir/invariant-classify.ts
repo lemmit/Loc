@@ -172,6 +172,11 @@ function exprIsTranslatable(
         ) &&
         (e.otherwise === undefined || exprIsTranslatable(e.otherwise, ctx, scope))
       );
+    case "list":
+      // List literals only appear as walker-config sugar (e.g. responsive
+      // Grid cols) — never in wire-validated invariants.  Mark them
+      // server-side only so the classifier doesn't try to translate one.
+      return false;
   }
 }
 
@@ -407,6 +412,9 @@ function firstFieldRef(e: ExprIR): string | null {
         if (fromValue) return fromValue;
       }
       return e.otherwise ? firstFieldRef(e.otherwise) : null;
+    case "list":
+      // Walk each element left-to-right looking for a field reference.
+      return e.elements.reduce<string | null>((acc, el) => acc ?? firstFieldRef(el), null);
     case "literal":
     case "this":
     case "id":

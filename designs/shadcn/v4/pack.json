@@ -80,6 +80,8 @@
     "primitive-modal": "primitive-modal.hbs",
     "primitive-code-block": "primitive-code-block.hbs",
     "primitive-icon": "primitive-icon.hbs",
+    "primitive-section": "primitive-section.hbs",
+    "primitive-sticky": "primitive-sticky.hbs",
     "form-op-decls": "form-op-decls.hbs",
     "form-op-module": "form-op-module.hbs"
   },

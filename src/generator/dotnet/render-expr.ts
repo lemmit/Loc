@@ -74,6 +74,11 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
       // Bare object literals only appear in e2e contexts; in operation
       // bodies this branch is unreachable (the validator rejects them).
       return `new { ${e.fields.map((f) => `${upperFirst(f.name)} = ${renderCsExpr(f.value, ctx)}`).join(", ")} }`;
+    case "list":
+      // List literals are walker-config sugar (e.g. responsive Grid cols).
+      // No .NET render context emits one today; keep total with an array
+      // initializer fallback so unexpected uses produce valid C#.
+      return `new[] { ${e.elements.map((el) => renderCsExpr(el, ctx)).join(", ")} }`;
     case "paren":
       return `(${renderCsExpr(e.inner, ctx)})`;
     case "unary":

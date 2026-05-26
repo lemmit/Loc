@@ -1018,6 +1018,7 @@ PrimaryExpr infers Expression:
     | BuilderCall
     | ObjectLit
     | ParenExpr
+    | ListLit
     | LiteralExpr
     | MoneyLit
     | PrimitiveConversion
@@ -1025,6 +1026,14 @@ PrimaryExpr infers Expression:
     | ThisRef
     | IdRef
     | NameRef;
+
+// Bracketed list literal — `[3, 2, 1]`.  Used as the value of named
+// args that admit a list shape (e.g. `Grid { cols: [3, 2, 1] }` for
+// responsive breakpoints).  Heterogeneous expression elements are
+// admitted at the grammar level; the type system / each consumer
+// validates element shape per use site.
+ListLit:
+    {infer ListLit} '[' (elements+=Expression (',' elements+=Expression)* ','?)? ']';
 
 // Universal construction form (Loom v2).  Replaces `new Part { ... }`
 // and the walker-call form (`Form(state: ..., body: ...)`).  The type

@@ -780,6 +780,10 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       // from the queryable sublanguage; full match semantics live in
       // the application layer / generator.
       return "match expression";
+    case "list":
+      // Bracketed list literals are walker-config sugar (e.g. responsive
+      // Grid cols) — never queryable.
+      return "list literal";
   }
 }
 

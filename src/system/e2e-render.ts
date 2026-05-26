@@ -285,6 +285,11 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
       }
       return out;
     }
+    case "list":
+      // List literals are walker-config sugar (Grid cols, etc.).  E2E
+      // tests don't currently surface them, but keep the renderer total
+      // with a TS array literal so unexpected uses still compile.
+      return `[${e.elements.map((el) => renderE2EExpr(el, ctx)).join(", ")}]`;
   }
 }
 

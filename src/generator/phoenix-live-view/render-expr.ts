@@ -87,6 +87,11 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
       return renderElixirConvert(e.target, e.from, e.value, ctx);
     case "match":
       return renderMatch(e.arms, e.otherwise, ctx);
+    case "list":
+      // List literals are walker-config sugar (e.g. responsive Grid cols);
+      // no domain-expression position consumes one today, but keep total
+      // with an Elixir-list emit so unexpected uses still compile.
+      return `[${e.elements.map((el) => renderExpr(el, ctx)).join(", ")}]`;
   }
 }
 
