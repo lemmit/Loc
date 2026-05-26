@@ -237,7 +237,10 @@ describe("Model v2 — view-graph per level", () => {
       { kind: "entity", name: "OrderLine" },
     ]);
     expect(entG.title).toBe("entity OrderLine");
-    const childIds = entG.nodes.filter((n) => !n.isRoot).map((n) => n.id).sort();
+    const childIds = entG.nodes
+      .filter((n) => !n.isRoot)
+      .map((n) => n.id)
+      .sort();
     expect(childIds).toEqual(["derived:double", "field:qty", "field:sku"]);
     const derivedReads = entG.edges
       .filter((e) => e.kind === "reads")
