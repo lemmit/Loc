@@ -3,7 +3,9 @@ import {
   classifyShape,
   collectOps,
   collectResponseShapes,
+  diffSpecs,
   fieldSet,
+  isCleanDiff,
   normalisePath,
   type OpenApiSpec,
   requiredSet,
@@ -234,6 +236,197 @@ describe("openapi-normalize", () => {
       };
       expect(requiredSet(spec, "ProductResponse")).toEqual(new Set());
       expect(requiredSet(spec, "Nonexistent")).toEqual(new Set());
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // diffSpecs — the cross-backend comparator the e2e parity test uses.
+  // ---------------------------------------------------------------------
+
+  describe("diffSpecs + isCleanDiff", () => {
+    // Minimal but representative spec: one CRUD op, one custom op, two
+    // schemas (response + request).  Each test mutates a copy to inject
+    // one specific divergence so the per-dimension assertion isolates.
+    const baseSpec = (): OpenApiSpec => ({
+      paths: {
+        "/products": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: { type: "array", items: { $ref: "#/components/schemas/Product" } },
+                  },
+                },
+              },
+            },
+          },
+          post: {
+            responses: {
+              "201": {
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Product" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Product: {
+            type: "object",
+            properties: { id: {}, name: {}, sku: {} },
+            // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
+            required: ["id", "name"],
+          } as any,
+          CreateProductRequest: {
+            type: "object",
+            properties: { name: {}, sku: {} },
+            // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
+            required: ["name"],
+          } as any,
+        },
+      },
+    });
+
+    it("returns an all-empty diff when the two specs agree", () => {
+      const diff = diffSpecs(
+        { name: "ref", spec: baseSpec() },
+        { name: "other", spec: baseSpec() },
+      );
+      expect(diff.onlyRef).toEqual([]);
+      expect(diff.onlyOther).toEqual([]);
+      expect(diff.cardMismatches).toEqual([]);
+      expect(diff.onlySchemasRef).toEqual([]);
+      expect(diff.onlySchemasOther).toEqual([]);
+      expect(diff.fieldDiffs).toEqual([]);
+      expect(diff.requiredDiffs).toEqual([]);
+      expect(isCleanDiff(diff)).toBe(true);
+    });
+
+    it("flags an op present only on the reference side", () => {
+      const other = baseSpec();
+      delete other.paths!["/products"]!.get;
+      const diff = diffSpecs({ name: "ref", spec: baseSpec() }, { name: "other", spec: other });
+      expect(diff.onlyRef).toEqual(["GET /products"]);
+      expect(diff.onlyOther).toEqual([]);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("flags an op present only on the other side", () => {
+      const other = baseSpec();
+      other.paths!["/products/{id}"] = {
+        delete: {
+          responses: {
+            "204": { content: { "application/json": { schema: { type: "object" } } } },
+          },
+        },
+      };
+      const diff = diffSpecs({ name: "ref", spec: baseSpec() }, { name: "other", spec: other });
+      expect(diff.onlyRef).toEqual([]);
+      expect(diff.onlyOther).toEqual(["DELETE /products/{id}"]);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("flags response-cardinality drift on the same op", () => {
+      const other = baseSpec();
+      // Other backend returns the array as an object wrapper instead.
+      other.paths!["/products"]!.get = {
+        responses: {
+          "200": {
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/Product" } },
+            },
+          },
+        },
+      };
+      const diff = diffSpecs({ name: "ref", spec: baseSpec() }, { name: "other", spec: other });
+      expect(diff.cardMismatches).toEqual(["GET /products: ref=array, other=object"]);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("flags schemas declared on only one side", () => {
+      const other = baseSpec();
+      delete other.components!.schemas!.CreateProductRequest;
+      other.components!.schemas!.OtherOnlySchema = { type: "object" };
+      const diff = diffSpecs({ name: "ref", spec: baseSpec() }, { name: "other", spec: other });
+      expect(diff.onlySchemasRef).toEqual(["CreateProductRequest"]);
+      expect(diff.onlySchemasOther).toEqual(["OtherOnlySchema"]);
+      // Field/required diffs only run on the schema intersection, so a
+      // missing schema doesn't double-count.
+      expect(diff.fieldDiffs).toEqual([]);
+      expect(diff.requiredDiffs).toEqual([]);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("flags property-name drift on a shared schema (the casing case the parity series fixed)", () => {
+      const other = baseSpec();
+      // Phoenix-style snake_case vs the camelCase Hono / .NET serve.
+      other.components!.schemas!.Product = {
+        type: "object",
+        properties: { id: {}, name: {}, sku_alt: {} },
+        // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
+        required: ["id", "name"],
+      } as any;
+      const diff = diffSpecs({ name: "ref", spec: baseSpec() }, { name: "other", spec: other });
+      expect(diff.fieldDiffs).toEqual(["Product: only-ref=[sku] only-other=[sku_alt]"]);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("flags required-set drift on the property intersection only", () => {
+      const other = baseSpec();
+      // Same properties; one side flips `sku` to required.
+      other.components!.schemas!.Product = {
+        type: "object",
+        properties: { id: {}, name: {}, sku: {} },
+        // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
+        required: ["id", "name", "sku"],
+      } as any;
+      const diff = diffSpecs({ name: "ref", spec: baseSpec() }, { name: "other", spec: other });
+      expect(diff.requiredDiffs).toEqual([
+        "Product: required-only-ref=[] required-only-other=[sku]",
+      ]);
+      // Property names match; the field-set diff stays empty.
+      expect(diff.fieldDiffs).toEqual([]);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("does NOT double-count a required-only field as also field-missing", () => {
+      // Property `extra` only exists on `other` — fieldDiffs catches it,
+      // requiredDiffs filters it out via the intersection.
+      const other = baseSpec();
+      other.components!.schemas!.Product = {
+        type: "object",
+        properties: { id: {}, name: {}, sku: {}, extra: {} },
+        // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
+        required: ["id", "name", "extra"],
+      } as any;
+      const diff = diffSpecs({ name: "ref", spec: baseSpec() }, { name: "other", spec: other });
+      expect(diff.fieldDiffs).toEqual(["Product: only-ref=[] only-other=[extra]"]);
+      // `extra` filtered out of the required diff (not in ref's properties);
+      // the intersection's required sets agree.
+      expect(diff.requiredDiffs).toEqual([]);
+    });
+
+    it("preserves ref/other names in divergence strings (for human-readable logging)", () => {
+      const other = baseSpec();
+      other.components!.schemas!.Product = {
+        type: "object",
+        properties: { id: {}, name: {}, sku_alt: {} },
+      } as OpenApiSpec["components"] extends infer C
+        ? C extends { schemas?: infer S }
+          ? S extends Record<string, infer V>
+            ? V
+            : never
+          : never
+        : never;
+      const diff = diffSpecs({ name: "hono", spec: baseSpec() }, { name: "phoenix", spec: other });
+      // The names should appear verbatim in the human-readable diff line.
+      expect(diff.fieldDiffs[0]).toContain("only-hono=");
+      expect(diff.fieldDiffs[0]).toContain("only-phoenix=");
     });
   });
 });

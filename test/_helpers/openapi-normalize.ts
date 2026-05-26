@@ -179,3 +179,125 @@ export function classifyShape(
 export function normalisePath(p: string): string {
   return p.replace(/\{[^}]+\}/g, "{id}").replace(/\/+$/, "") || "/";
 }
+
+// ---------------------------------------------------------------------------
+// Cross-backend parity diff (pure)
+//
+// The e2e parity test (test/e2e/e2e.test.ts) calls `diffSpecs` for each
+// (reference, other) pair after fetching both OpenAPI docs over HTTP.
+// Splitting the comparison out keeps it unit-testable in the fast suite
+// — the e2e wrapper only owns the docker-compose fetch.
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a single (reference, other) spec comparison.  Each `[]`-typed
+ * field is empty in the clean case; any non-empty entry is a contract
+ * divergence the strict gate would fail on.
+ */
+export interface ParityDiff {
+  refName: string;
+  otherName: string;
+  /** Operations declared on ref but missing on other. */
+  onlyRef: string[];
+  /** Operations declared on other but missing on ref. */
+  onlyOther: string[];
+  /** Per-op response-cardinality drift on the intersection (array vs object vs nullable). */
+  cardMismatches: string[];
+  /** Component schemas declared on ref but missing on other. */
+  onlySchemasRef: string[];
+  /** Component schemas declared on other but missing on ref. */
+  onlySchemasOther: string[];
+  /** Per-schema property-name drift on the intersection. */
+  fieldDiffs: string[];
+  /** Per-schema `required: [...]` drift on the intersection. */
+  requiredDiffs: string[];
+}
+
+/**
+ * Compare two OpenAPI specs across every dimension the parity gate
+ * enforces.  Pure — no I/O, no logging.  Callers decide what to do with
+ * the diff (log it in report mode, assert empty in strict mode).
+ *
+ * Naming the reference vs. other side carries through to the divergence
+ * strings (`only-hono=[...]` vs `only-${otherName}=[...]`), which is how
+ * the e2e test surfaces failures in its `console.warn` output.
+ */
+export function diffSpecs(
+  ref: { name: string; spec: OpenApiSpec },
+  other: { name: string; spec: OpenApiSpec },
+): ParityDiff {
+  const refOps = collectOps(ref.spec);
+  const otherOps = collectOps(other.spec);
+  const onlyRef = [...refOps].filter((o) => !otherOps.has(o)).sort();
+  const onlyOther = [...otherOps].filter((o) => !refOps.has(o)).sort();
+
+  const refCard = collectResponseShapes(ref.spec);
+  const otherCard = collectResponseShapes(other.spec);
+  const cardMismatches: string[] = [];
+  for (const op of refCard.keys()) {
+    if (!otherCard.has(op)) continue;
+    if (refCard.get(op) !== otherCard.get(op)) {
+      cardMismatches.push(
+        `${op}: ${ref.name}=${refCard.get(op)}, ${other.name}=${otherCard.get(op)}`,
+      );
+    }
+  }
+
+  // Schema-presence diff + per-schema field-set / required-set diff on the
+  // intersection.  Iterating the intersection keeps a missing schema out
+  // of the field-set count — it only shows in `onlySchemas*`.
+  const refSchemas = schemaNames(ref.spec);
+  const otherSchemas = schemaNames(other.spec);
+  const onlySchemasRef = [...refSchemas].filter((s) => !otherSchemas.has(s)).sort();
+  const onlySchemasOther = [...otherSchemas].filter((s) => !refSchemas.has(s)).sort();
+  const sharedSchemas = [...refSchemas].filter((s) => otherSchemas.has(s)).sort();
+
+  const fieldDiffs: string[] = [];
+  const requiredDiffs: string[] = [];
+  for (const schema of sharedSchemas) {
+    const refFields = fieldSet(ref.spec, schema);
+    const otherFields = fieldSet(other.spec, schema);
+    const onlyA = [...refFields].filter((f) => !otherFields.has(f)).sort();
+    const onlyB = [...otherFields].filter((f) => !refFields.has(f)).sort();
+    if (onlyA.length || onlyB.length) {
+      fieldDiffs.push(`${schema}: only-${ref.name}=[${onlyA}] only-${other.name}=[${onlyB}]`);
+    }
+    // Intersection-based required diff: if a field doesn't exist on a
+    // side, its required status on the other side is moot — surfaces in
+    // the fields diff above instead.
+    const refReq = [...requiredSet(ref.spec, schema)].filter((f) => otherFields.has(f)).sort();
+    const otherReq = [...requiredSet(other.spec, schema)].filter((f) => refFields.has(f)).sort();
+    const onlyReqRef = refReq.filter((f) => !otherReq.includes(f));
+    const onlyReqOther = otherReq.filter((f) => !refReq.includes(f));
+    if (onlyReqRef.length || onlyReqOther.length) {
+      requiredDiffs.push(
+        `${schema}: required-only-${ref.name}=[${onlyReqRef}] required-only-${other.name}=[${onlyReqOther}]`,
+      );
+    }
+  }
+
+  return {
+    refName: ref.name,
+    otherName: other.name,
+    onlyRef,
+    onlyOther,
+    cardMismatches,
+    onlySchemasRef,
+    onlySchemasOther,
+    fieldDiffs,
+    requiredDiffs,
+  };
+}
+
+/** True iff every dimension is empty — the diff is contract-clean. */
+export function isCleanDiff(diff: ParityDiff): boolean {
+  return (
+    diff.onlyRef.length === 0 &&
+    diff.onlyOther.length === 0 &&
+    diff.cardMismatches.length === 0 &&
+    diff.onlySchemasRef.length === 0 &&
+    diff.onlySchemasOther.length === 0 &&
+    diff.fieldDiffs.length === 0 &&
+    diff.requiredDiffs.length === 0
+  );
+}
