@@ -616,3 +616,37 @@ grouping, persisted positions).
 
 Layout polish (slot in opportunistically): drag-to-rebind edges, persisted
 positions, auto-layout (dagre/elk) + nested grouping, add target-context picker.
+
+## Playground LSP — multi-file workspace
+
+**Status: long-standing gap.** The browser-hosted Langium LSP
+(`web/src/lsp/ddd-server.worker.ts` → `src/language/main-browser.ts`) starts
+on `EmptyFileSystem`. The only document the LSP sees is whatever the editor
+opens via `textDocument/didOpen` — today that's just `/workspace/main.ddd`.
+
+The workspace VFS (`web/src/workspace/use-workspace-sources.ts`) holds the
+rest of the user's `.ddd` files (shared / imports / Phase 2b multi-file
+tabs), but they never reach the LSP. Effect: any `import "./shared/x.ddd"`
+fails to resolve and the editor opens with `Could not resolve reference to
+NamedDecl 'X'` errors.
+
+Workaround in place: `examples/index.ts` pins `defaultExample` to
+`sales-system` (a single-file example) so the playground opens clean
+instead of "2 ERRORS". The multi-file example still works for the user once
+they pick it manually, but the LSP can't validate the imports.
+
+To fix:
+
+  1. **Push every workspace `.ddd` to the LSP** — wrap the workspace-sources
+     controller so adding/changing/removing a `.ddd` issues
+     `textDocument/didOpen` / `didChange` / `didClose` to the LSP client,
+     not just the active one. Use a URI scheme matching what Langium
+     expects (`file:///workspace/...`).
+  2. **Import resolution** — confirm Langium can chase `import "./shared/X.ddd"`
+     across these in-memory documents (it should, since the scope provider
+     walks the document index; just needs every doc registered).
+  3. **Switch `defaultExample` back to the multi-file showcase** so the
+     playground demos the multi-file feature out of the box.
+
+Once shipped, restore the `examples[0]` default and remove the workaround
+comment in `web/src/examples/index.ts`.
