@@ -617,36 +617,28 @@ grouping, persisted positions).
 Layout polish (slot in opportunistically): drag-to-rebind edges, persisted
 positions, auto-layout (dagre/elk) + nested grouping, add target-context picker.
 
-## Playground LSP — multi-file workspace
+## Playground LSP — multi-file workspace ✓
 
-**Status: long-standing gap.** The browser-hosted Langium LSP
-(`web/src/lsp/ddd-server.worker.ts` → `src/language/main-browser.ts`) starts
-on `EmptyFileSystem`. The only document the LSP sees is whatever the editor
-opens via `textDocument/didOpen` — today that's just `/workspace/main.ddd`.
+**Done.** The browser-hosted Langium LSP now sees every workspace `.ddd`
+source, not just the active editor model.
 
-The workspace VFS (`web/src/workspace/use-workspace-sources.ts`) holds the
-rest of the user's `.ddd` files (shared / imports / Phase 2b multi-file
-tabs), but they never reach the LSP. Effect: any `import "./shared/x.ddd"`
-fails to resolve and the editor opens with `Could not resolve reference to
-NamedDecl 'X'` errors.
+  - `web/src/lsp/workspace-lsp-sync.ts` subscribes to the
+    `WorkspaceSourcesController` and creates a Monaco model for every
+    `.ddd` in `/workspace/`. `MonacoLanguageClient`'s
+    `documentSelector: ["ddd"]` then auto-sends `textDocument/didOpen` and
+    `didChange` per model, putting every file into the LSP's global scope
+    — cross-references between aggregates / value objects / enums across
+    files resolve.
+  - URI scheme unified: `LoomEditor.modelUriFor` dropped its
+    `inmemory:///main.ddd` special case in favour of the consistent
+    `inmemory:///workspace/<path>`. Both the editor and the sync layer
+    now produce identical URIs for the same file, so a single Langium
+    document is registered (no phantom ambiguity errors).
+  - Active-file model is left to `LoomEditor` (avoid `setValue` racing
+    with user edits); inactive files are kept in lock-step with the VFS
+    by the sync layer.
 
-Workaround in place: `examples/index.ts` pins `defaultExample` to
-`sales-system` (a single-file example) so the playground opens clean
-instead of "2 ERRORS". The multi-file example still works for the user once
-they pick it manually, but the LSP can't validate the imports.
-
-To fix:
-
-  1. **Push every workspace `.ddd` to the LSP** — wrap the workspace-sources
-     controller so adding/changing/removing a `.ddd` issues
-     `textDocument/didOpen` / `didChange` / `didClose` to the LSP client,
-     not just the active one. Use a URI scheme matching what Langium
-     expects (`file:///workspace/...`).
-  2. **Import resolution** — confirm Langium can chase `import "./shared/X.ddd"`
-     across these in-memory documents (it should, since the scope provider
-     walks the document index; just needs every doc registered).
-  3. **Switch `defaultExample` back to the multi-file showcase** so the
-     playground demos the multi-file feature out of the box.
-
-Once shipped, restore the `examples[0]` default and remove the workaround
-comment in `web/src/examples/index.ts`.
+Multi-file example (`examples[0]`, "Multi-file project (root-level shared
+types)") opens clean with `0 errors`. The default cold-boot landing stays
+on **sales-system** because the mobile-requirements e2e specs hard-code
+US-001 / SOL-001 row IDs that only live there.
