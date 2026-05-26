@@ -46,6 +46,7 @@
 
 import type {
   AggregateIR,
+  EnumIR,
   ExprIR,
   PageIR,
   StateFieldIR,
@@ -154,6 +155,10 @@ export interface WalkContext {
    *  hardcoded placeholder.  Empty map = no lookup available
    *  (validators upstream will catch missing aggregates). */
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
+  /** Workspace-wide enum registry — drives `renderFieldInputForField`
+   *  dispatch for enum-typed fields to `<.input type="select" options={...}>`.
+   *  Built once at walker entry from every loaded context's enums. */
+  enumsByName: ReadonlyMap<string, EnumIR>;
   /** Form bindings discovered as the walker visits `Form(...)` calls. */
   formBindings: FormBinding[];
   /** Query bindings discovered as the walker visits `QueryView(...)`. */
@@ -202,6 +207,12 @@ export function walkBodyToHeex(
   ui: UiIR,
   appModule: string,
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
+  /** Workspace-wide enum registry — drives `renderFieldInputForField`
+   *  dispatch for enum-typed fields to `<.input type="select">`.
+   *  Defaults to empty when callers haven't threaded enums yet; the
+   *  walker falls back to `text` input as before.  See the matching
+   *  `aggregatesByName` plumbing for how to populate. */
+  enumsByName: ReadonlyMap<string, EnumIR> = new Map(),
 ): WalkResult {
   const stateNames = new Set<string>(page.state.map((f) => snake(f.name)));
   const stateFields = new Map<string, StateFieldIR>(page.state.map((f) => [snake(f.name), f]));
@@ -218,6 +229,7 @@ export function walkBodyToHeex(
   const ctx: WalkContext = {
     appModule,
     aggregatesByName,
+    enumsByName,
     formBindings: [],
     queryBindings: [],
     page,
@@ -892,7 +904,7 @@ export function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
 
   const inputs =
     params.length > 0
-      ? params.map((p) => `    ${renderFieldInputForField(p, formAssign)}`)
+      ? params.map((p) => `    ${renderFieldInputForField(p, formAssign, ctx.enumsByName)}`)
       : [`    <%!-- ${opSnake} has no parameters --%>`];
 
   return [
@@ -964,7 +976,7 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
     if (agg) {
       for (const f of agg.fields) {
         if (f.name === "id") continue;
-        inputs.push(`  ${renderFieldInputForField(f)}`);
+        inputs.push(`  ${renderFieldInputForField(f, "form", ctx.enumsByName)}`);
       }
     }
   }
@@ -1004,9 +1016,27 @@ function findPascalArg(
  *  `T id` references fall through to a text input — a proper
  *  select-with-options requires loading T's list at mount time, which
  *  is out of scope here. */
-function renderFieldInputForField(f: { name: string; type: TypeIR }, formAssign = "form"): string {
+function renderFieldInputForField(
+  f: { name: string; type: TypeIR },
+  formAssign = "form",
+  enumsByName?: ReadonlyMap<string, EnumIR>,
+): string {
   const fieldName = snake(f.name);
   const label = humanize(f.name);
+  // Enum fields render as `<.input type="select" options={[...]}>`.
+  // Phoenix CoreComponents' `<.input>` accepts an `options` list of
+  // strings (when label == value) or `{label, value}` tuples.  Loom
+  // enums have a flat string list; the label IS the value.  Falls
+  // back to text input when the enum can't be resolved (registry
+  // empty or name unknown) so the form stays valid.
+  const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (inner.kind === "enum" && enumsByName) {
+    const en = enumsByName.get(inner.name);
+    if (en) {
+      const options = en.values.map((v) => JSON.stringify(v)).join(", ");
+      return `<.input field={@${formAssign}[:${fieldName}]} type="select" label="${label}" options={[${options}]} />`;
+    }
+  }
   const inputType = htmlInputTypeForIRType(f.type);
   const isDecimal = f.type.kind === "primitive" && f.type.name === "decimal";
   const isMoney = f.type.kind === "primitive" && f.type.name === "money";
@@ -1774,6 +1804,7 @@ export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): 
   const ctx: WalkContext = {
     appModule,
     aggregatesByName: new Map(),
+    enumsByName: new Map(),
     formBindings: [],
     queryBindings: [],
     page,
