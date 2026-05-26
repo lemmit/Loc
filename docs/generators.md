@@ -385,7 +385,10 @@ web_app/
 All hooks parse the response with the matching Zod schema before
 returning, so callers get type-checked, validated data.
 
-**`src/pages/<plural>/list.tsx`** — built by `pages-builder.ts`:
+**`src/pages/<plural>/list.tsx`** — built by `body-walker.ts` +
+`pages-emitter.ts` (the legacy `pages-builder.ts` archetype renderer
+has been removed; bodies — scaffolded or hand-written — all route
+through the walker now):
 
 - Mantine `<Table>` with one column per primitive / enum field
 - Each row links to `/<plural>/<id>`
@@ -431,9 +434,11 @@ Form-input emission walks the field type:
 
 ### `data-testid` map
 
-The pages-builder sprinkles a stable `data-testid` on every
+The body-walker sprinkles a stable `data-testid` on every
 interactive element so the page-objects-builder can write
-selector-free test code.
+selector-free test code. Walker-stdlib primitives accept an explicit
+`testid:` named arg; the walker threads it through the rendered
+component.
 
 | Element | testid pattern |
 | --- | --- |

@@ -4,40 +4,106 @@
 > Companion to [`test-layout-and-macro-consolidation.md`](./test-layout-and-macro-consolidation.md)
 > — that one made the *test tree* mirror the pipeline; this one does
 > the same for the *IR source tree*.
+>
+> **Revision history**
+> - **v2** — corrected `transform/` bucket (see "Correction" below); folded
+>   `walker-primitive-expander.ts` into `lower/` because it actually runs as
+>   the final sub-pass of `lowerModel`, not as a separate post-IR pass;
+>   moved `migrations-builder.ts` out of `src/ir/` entirely (to `src/system/`)
+>   because it runs at system composition time. Added the verified pipeline
+>   map and references to the corrected `docs/technical.md`.
 
-## Context
+## Why this proposal exists
 
-`CLAUDE.md` lays out the compiler as a one-directional pipeline with
-named phases:
+The pipeline as a sequence of named phases is well understood and matches
+the rule in `CLAUDE.md` ("`language/` knows nothing about `ir/`, `ir/`
+knows nothing about `generator/`, …"). But the **intra-`ir/` phase order
+is invisible from the file tree**: lowering, IR data types, enrichment,
+validation, and an in-lowering transform all sit at one depth, alongside
+a derivation (`migrations-builder.ts`) that doesn't even run in the IR
+phase. `ls src/ir/` shows ten files in alphabetical order with no clue
+which run first or which the rest of the compiler consumes.
+
+Below is the verified phase sequence the proposal aligns to. The
+canonical, detailed version is in
+[`docs/technical.md`](../technical.md); this is the abbreviated
+phase-by-phase view that motivates the file layout.
+
+### The compiler pipeline (verified against the code)
 
 ```
-AST → Lowering → Loom IR → Enrichment → Validation → (post-IR transforms) → Generator
-                 src/ir/   src/ir/      src/ir/       src/ir/
+┌───────────────────────────────────────────────────────────────────────────────┐
+│  Phase 1 — Parse                              src/language/generated/         │
+│    .ddd text → AST (Langium-generated parser)                                 │
+├───────────────────────────────────────────────────────────────────────────────┤
+│  Phase 2 — AST macro expansion                src/macros/expander.ts          │
+│    `with X(...)` clauses → synthesised members spliced into the AST           │
+│    Runs on DocumentState.IndexedContent (before scope computation)            │
+├───────────────────────────────────────────────────────────────────────────────┤
+│  Phase 3 — Scope + Link                       src/language/ddd-scope.ts       │
+│    Langium linker resolves Reference<X> across the AST                        │
+├───────────────────────────────────────────────────────────────────────────────┤
+│  Phase 4 — AST validation                     src/language/ddd-validator.ts   │
+│                                               src/language/type-system.ts     │
+├───────────────────────────────────────────────────────────────────────────────┤
+│  Phase 5 — LOWERING (AST → Loom IR)           src/ir/lower.ts                 │
+│    Three intertwined sub-passes, all in `lowerModel`:                         │
+│      5a  Structural walk                       src/ir/lower.ts                │
+│      5b  Expression / name-resolution walk     src/ir/lower-expr.ts           │
+│      5c  Inline scaffold expansion             src/ir/walker-primitive-       │
+│            (rewrites scaffoldDetails/Operations           expander.ts         │
+│             primitives in page bodies; called at                              │
+│             the end of lowerModel — NOT a separate                            │
+│             post-IR phase)                                                    │
+│    Output: LoomModel (per file; multi-file merges via mergeLoomModels)        │
+├───────────────────────────────────────────────────────────────────────────────┤
+│  Phase 6 — Enrichment                         src/ir/enrichments.ts           │
+│    One pure pass: wireShape, auto-findAll, associations,                      │
+│    react targets: module inheritance                                          │
+├───────────────────────────────────────────────────────────────────────────────┤
+│  Phase 7 — IR validation                      src/ir/validate.ts              │
+│    Cross-aggregate / multi-file checks needing the fully-resolved IR          │
+├───────────────────────────────────────────────────────────────────────────────┤
+│  Phase 8 — System composition + migration     src/system/index.ts             │
+│           derivation                                                          │
+│    buildMigrations(sys, snapshots): IR diff → MigrationsIR[]                  │
+│      (using src/ir/migrations-builder.ts — but called HERE, at system         │
+│       composition time, not in the IR phase)                                  │
+├───────────────────────────────────────────────────────────────────────────────┤
+│  Phase 9 — Per-platform code generation       src/generator/<platform>/       │
+│    Each backend reads IR.wireShape directly; backends that run                │
+│    domain logic also walk ExprIR/StmtIR via render-expr/render-stmt           │
+├───────────────────────────────────────────────────────────────────────────────┤
+│  Phase 10 — Output writing                    src/cli/main.ts                 │
+│    Map<path, content> → filesystem (with .loomignore filtering)               │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Four of those phases — lowering, IR data types, enrichment, validation —
-**all live at the same depth inside `src/ir/`**, next to two post-IR
-transforms (walker-primitive expansion, migrations builder) and a
-utility (`prov-id`). You cannot tell the phase order from `ls src/ir/`.
+**There is no target-backend IR.** Every backend consumes `LoomModel`
+directly. The only secondary IR is `MigrationsIR`, produced once at system
+time and shared across every backend that has a database.
 
-The current layout (sorted by size):
+### What this means for `src/ir/`
+
+Five things actually live there:
 
 ```
 src/ir/  (~9.7k lines)
-  walker-primitive-expander.ts  1055   ┐ post-IR transforms
-  migrations-builder.ts          465   ┘
-  lower.ts                      1987   ┐ AST → IR
+  walker-primitive-expander.ts  1055   ← final sub-pass of Phase 5 (lowering)
+  lower.ts                      1987   ┐ Phase 5 — AST → IR
   lower-expr.ts                 1439   ┘
   loom-ir.ts                    1615   ┐ IR data types
   migrations-ir.ts               113   ┘
-  validate.ts                   1697   ┐ post-lower validation
-  invariant-classify.ts          415   ┘
-  enrichments.ts                 766   ┐ post-lower derivation
+  enrichments.ts                 766   ┐ Phase 6 — derivation
   wire-projection.ts              74   ┘
+  validate.ts                   1697   ┐ Phase 7 — IR-level validation
+  invariant-classify.ts          415   ┘
+  migrations-builder.ts          465   ← used in Phase 8 (system composition)
   prov-id.ts                     105   utility (FNV-1a hashing)
 ```
 
-Five distinct phases interleaved at one level.
+Two of those (`walker-primitive-expander.ts` and `migrations-builder.ts`)
+hide where they actually run.
 
 ## Proposal — phase-named subdirectories
 
@@ -47,130 +113,135 @@ src/ir/
 │   ├── loom-ir.ts              (the IR ADT — 126 importers)
 │   └── migrations-ir.ts        (migration step ADT — 14 importers)
 │
-├── lower/                       # AST → IR
+├── lower/                       # Phase 5 — AST → IR
 │   ├── lower.ts                (structural walker; never descends into expressions)
-│   └── lower-expr.ts           (expressions, statements, name resolution, member typing)
+│   ├── lower-expr.ts           (expressions, statements, name resolution, member typing)
+│   └── walker-primitive-expander.ts  (inline scaffold expansion;
+│                                       runs at the end of lowerModel)
 │
-├── enrich/                      # one pure pass after lowering
-│   ├── enrichments.ts          (wireShape, auto-findAll, react targets:)
+├── enrich/                      # Phase 6 — one pure pass after lowering
+│   ├── enrichments.ts          (wireShape, auto-findAll, associations, react targets)
 │   └── wire-projection.ts      (helper used by enrichments + by system/wire-spec)
 │
-├── validate/                    # post-lower validation
+├── validate/                    # Phase 7 — post-lower validation
 │   ├── validate.ts             (cross-aggregate / multi-file checks)
 │   └── invariant-classify.ts   (classify invariant expressions by category)
-│
-├── transform/                   # post-IR transforms (run after enrichment)
-│   ├── walker-primitive-expander.ts   (page-archetype → walker-stdlib bodies)
-│   └── migrations-builder.ts          (IR diff → migration step list)
 │
 └── util/
     └── prov-id.ts              (FNV-1a hash for provenance ids)
 ```
 
+**Separately, in Part B of the same migration:**
+
+```
+src/system/
+├── …existing files…
+└── migrations-builder.ts        ← MOVED from src/ir/ (runs at Phase 8,
+                                    not in the IR layer)
+```
+
 ### Why this grouping
 
-- **Phase-named, not file-type-named.** `lower/`, `enrich/`, `validate/`,
-  `transform/` are the same words `CLAUDE.md` and `docs/technical.md`
-  already use to describe the pipeline. A new contributor's mental model
-  of "lower → enrich → validate → transform" lines up 1:1 with the file
-  tree.
+- **Phase-named subdirs, not file-type-named.** `lower/`, `enrich/`,
+  `validate/` are the same words `CLAUDE.md` and `docs/technical.md`
+  use. A new contributor's mental model of
+  "lower → enrich → validate" lines up 1:1 with the file tree.
 - **`types/` is what the rest of the compiler actually consumes.** 126
-  files import from `loom-ir.ts`; only `lower/`, `enrich/`, `validate/`,
-  `transform/`, and `prov-id.ts` import from each other. Putting the
-  type ADT in its own subdir signals that distinction at the file-tree
-  level: *the rest of the compiler consumes `ir/types/`, not the
-  passes.*
-- **Migration is a transform, not an IR concern of its own.** Today
-  `migrations-builder.ts` sits next to lowering despite being a
-  derivation that runs *after* the IR is built and validated — same
-  shape as `walker-primitive-expander.ts`. Grouping them under
-  `transform/` makes that explicit.
+  files import from `loom-ir.ts`; only `lower/`, `enrich/`, and
+  `validate/` import from each other. Putting the type ADT in its own
+  subdir signals that distinction: *the rest of the compiler consumes
+  `ir/types/`, not the passes.*
+- **`walker-primitive-expander.ts` lives in `lower/`** because
+  `lower.ts:537` calls `expandInlineScaffoldPrimitiveCalls(built)` as
+  the last thing before returning the `LoomModel`. It's the final
+  sub-pass of lowering, not a post-IR pass.
+- **`migrations-builder.ts` leaves `src/ir/` entirely** because
+  `src/system/index.ts:116` is the only call site — it derives
+  `MigrationsIR[]` at system composition time from an already-built,
+  already-enriched, already-validated `LoomModel`. Living in `src/ir/`
+  misled the previous revision of this proposal into bucketing it as a
+  "post-IR transform". It is a system-time derivation.
 - **`enrichments.ts` and `wire-projection.ts` are a pair.** The
   enrichment pass produces `wireShape`; `wire-projection.ts` is the
   shared helper that `system/wire-spec.ts` also calls. They belong
-  together — currently easy to miss.
+  together.
 - **`invariant-classify.ts` is part of validation.** It's used by
-  `validate.ts` to bucket invariants by category. Sitting at the same
-  depth as `lower.ts` hides that.
+  `validate.ts` to bucket invariants by category.
+
+### Correction relative to v1 of this proposal
+
+v1 (merged in #584) proposed a `transform/` bucket containing
+`walker-primitive-expander.ts` and `migrations-builder.ts`. That was
+wrong on both counts:
+
+| File | v1 placement | v2 placement | Why |
+|---|---|---|---|
+| `walker-primitive-expander.ts` | `src/ir/transform/` | `src/ir/lower/` | Called from inside `lowerModel` (lower.ts:537) as the final sub-pass of lowering, not a separate phase. |
+| `migrations-builder.ts` | `src/ir/transform/` | `src/system/` | Called only from `src/system/index.ts:116` at system composition time (Phase 8), not in the IR phase. |
+
+The `transform/` bucket therefore disappears entirely. v2's layout has
+four phase subdirs (`types/`, `lower/`, `enrich/`, `validate/`) plus
+`util/`, mirroring the four phases the IR layer actually runs.
 
 ### What this is *not*
 
 - **Not a logic change.** Every file moves verbatim. The structural
   walker rule "`lower.ts` imports from `lower-expr.ts`, never the other
-  way" is preserved; the only change is that the import path becomes
-  `./lower-expr.js` within the same `lower/` directory (it already is).
+  way" is preserved.
 - **Not a refactor of any phase.** The 1987-line `lower.ts` stays at
   1987 lines; we are not splitting it further in this proposal.
 - **Not a new layering rule.** The existing rule
   (`language → ir → generator`) is unchanged; this proposal only adds
-  *intra-`ir/`* phase visibility.
+  *intra-`ir/`* phase visibility, plus moves one mis-located file out
+  of `ir/`.
 
 ## Import impact
 
-Total external importers of `src/ir/*.ts` files today:
+Total external importers of `src/ir/*.ts` files today (unchanged from v1):
 
-| File                          | Importers |
-|-------------------------------|----------:|
-| `loom-ir.ts`                  |       126 |
-| `enrichments.ts`              |        24 |
-| `lower.ts`                    |        22 |
-| `migrations-ir.ts`            |        14 |
-| `wire-projection.ts`          |         7 |
-| `prov-id.ts`                  |         6 |
-| `validate.ts`                 |         6 |
-| `invariant-classify.ts`       |         6 |
-| `migrations-builder.ts`       |         2 |
-| `lower-expr.ts`               |         1 |
-| `walker-primitive-expander.ts`|         0 |
-| **Total**                     |   **214** |
+| File                          | Importers | New home                          |
+|-------------------------------|----------:|-----------------------------------|
+| `loom-ir.ts`                  |       126 | `ir/types/loom-ir.ts`             |
+| `enrichments.ts`              |        24 | `ir/enrich/enrichments.ts`        |
+| `lower.ts`                    |        22 | `ir/lower/lower.ts`               |
+| `migrations-ir.ts`            |        14 | `ir/types/migrations-ir.ts`       |
+| `wire-projection.ts`          |         7 | `ir/enrich/wire-projection.ts`    |
+| `prov-id.ts`                  |         6 | `ir/util/prov-id.ts`              |
+| `validate.ts`                 |         6 | `ir/validate/validate.ts`         |
+| `invariant-classify.ts`       |         6 | `ir/validate/invariant-classify.ts` |
+| `migrations-builder.ts`       |         2 | **`system/migrations-builder.ts`**  |
+| `lower-expr.ts`               |         1 | `ir/lower/lower-expr.ts`          |
+| `walker-primitive-expander.ts`|         0 | `ir/lower/walker-primitive-expander.ts` |
+| **Total**                     |   **214** |                                   |
 
 214 import sites need rewriting. **All mechanical** — a single sweep per
-file:
-
-```
-ir/loom-ir            → ir/types/loom-ir
-ir/migrations-ir      → ir/types/migrations-ir
-ir/lower              → ir/lower/lower
-ir/lower-expr         → ir/lower/lower-expr
-ir/enrichments        → ir/enrich/enrichments
-ir/wire-projection    → ir/enrich/wire-projection
-ir/validate           → ir/validate/validate
-ir/invariant-classify → ir/validate/invariant-classify
-ir/walker-primitive-expander → ir/transform/walker-primitive-expander
-ir/migrations-builder        → ir/transform/migrations-builder
-ir/prov-id                   → ir/util/prov-id
-```
-
-**Internal IR imports** also rewrite, but the new paths shorten where
-files now share a subdir (`./lower-expr.js` instead of
-`./lower-expr.js` — no change; `../enrich/wire-projection.js` from
-`validate/` — one extra `..`).
-
-`tsconfig.json` (`"include": ["src/**/*.ts"]`) and the langium config
-need no edit. The generated parser in `src/language/generated/` does
-not import from `src/ir/` and is unaffected.
+file. `tsconfig.json` and `langium-config.json` need no edit. The
+generated parser in `src/language/generated/` does not import from
+`src/ir/` and is unaffected.
 
 ## Why this is safe
 
 - **`git mv` preserves history.** Every file blames cleanly through
   the rename.
 - **Diff is mechanical and reviewable.** Two kinds of change only:
-  (a) `git mv` per file, (b) one import-path rewrite per importer. A
-  reviewer can spot-check by sampling — there are no judgement calls.
+  (a) `git mv` per file, (b) one import-path rewrite per importer.
 - **No public API change.** Nothing in `bin/`, `package.json`, the CLI,
   the VS Code extension, or the playground depends on the *intra-IR*
-  module layout — they all import either the `ir/loom-ir` ADT or
-  high-level CLI / system entry points.
+  module layout.
 - **The default `npm test` suite is the regression gate.** If imports
   resolve and `tsc` builds, the IR is observably unchanged.
 - **Verifies one easy invariant after the move.**
-  `rg "from ['\"][^'\"]*ir/(loom-ir|migrations-ir|lower|enrichments|validate|invariant-classify|walker-primitive-expander|migrations-builder|wire-projection|prov-id)['\"]" src/ web/ test/`
+  `rg "from ['\"][^'\"]*ir/(loom-ir|migrations-ir|lower|lower-expr|enrichments|wire-projection|validate|invariant-classify|walker-primitive-expander|prov-id)['\"]" src/ web/ test/`
   should return zero results. Anything that hits is a missed rewrite.
+  Plus `rg "from ['\"][^'\"]*ir/migrations-builder['\"]" src/` should
+  also be zero (it moved to `system/`).
 
 ## Execution sketch (when implemented)
 
-1. Make the five new subdirs under `src/ir/`.
-2. `git mv` each file to its new home (11 moves).
+1. Make the four phase subdirs under `src/ir/` (`types/`, `lower/`,
+   `enrich/`, `validate/`) plus `util/`.
+2. `git mv` each file to its new home (11 moves, one of which is the
+   cross-layer move of `migrations-builder.ts` to `src/system/`).
 3. Run the rewrite sweep across `src/`, `web/`, `test/`, `vscode/`,
    `packages/` — a single `sed` per old→new path pair.
 4. `npm run langium:generate && npm run build && npm test`.

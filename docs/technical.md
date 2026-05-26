@@ -13,85 +13,203 @@ for usage / Docker / Playwright workflow see
 
 ## Pipeline at a glance
 
+The compiler is **ten distinct phases**. The previous summary collapsed
+several into "Lowering" — they're broken out below because conflating
+them was costing readers an accurate mental model.
+
 ```
    .ddd source text
          │
-         ▼   ① Lexer + parser + linker (Langium / Chevrotain)
-   Loom AST                            ─ tokens, CST, AST nodes,
-                                         cross-references resolved
+         ▼   ① Parse (Langium-generated lexer + parser)
+   Raw AST                             ─ tokens → CST → typed AST,
+                                         cross-references NOT yet
+                                         linked
          │
-         ▼   ② Validator (semantic checks against the linked AST)
-   Loom AST + diagnostics              ─ aborts with non-zero exit
-                                         code on errors
+         ▼   ② AST macro expansion          src/macros/expander.ts
+   AST'                                ─ `with auditable(...)`,
+                                         `with softDeletable(...)`,
+                                         `with scaffold(...)` etc.
+                                         splice synthesised members
+                                         into host declarations BEFORE
+                                         scope is computed, so they
+                                         participate in linking and
+                                         validation.
          │
-         ▼   ③ Lowering (AST → Loom IR)
-   Loom IR                             ─ platform-neutral, fully
-                                         resolved: every name carries
-                                         a refKind, every member
-                                         access carries types, every
-                                         find filter is an ExprIR
+         ▼   ③ Scope + Link (Langium linker + src/language/ddd-scope.ts)
+   AST''                               ─ every `Reference<X>` populated;
+                                         cross-aggregate part refs must
+                                         use `X id` (enforced here).
          │
-         ▼   ④ Wire-shape derivation (shared)
-   WireField[] per aggregate / part    ─ canonical field list every
-                                         backend's response DTO
-                                         walks identically
+         ▼   ④ AST validation               src/language/ddd-validator.ts
+   AST'' + diagnostics                 ─ semantic checks on the linked
+                                         AST; CLI aborts non-zero on
+                                         errors.
          │
-         ▼   ⑤ Per-platform shaping
-   Map<path, content> per deployable   ─ Hono / .NET / React, plus
-                                         shared helpers for ids,
-                                         events, common errors
+         ▼   ⑤ Lowering (AST → Loom IR)     src/ir/lower.ts +
+   Loom IR (LoomModel)                       src/ir/lower-expr.ts +
+                                             src/ir/walker-primitive-
+                                                expander.ts
+                                       ─ THREE intertwined sub-passes
+                                         all driven by `lowerModel`:
+                                         (5a) structural walk,
+                                         (5b) expression / name-resolution
+                                              walk,
+                                         (5c) inline scaffold expansion
+                                              (rewrites scaffoldDetails /
+                                               scaffoldOperations primitives
+                                               in page bodies; runs at the
+                                               END of lowerModel — NOT a
+                                               separate post-IR phase).
+                                       ─ Output: a LoomModel per file.
+                                         Multi-file projects merge here
+                                         via `mergeLoomModels`.
          │
-         ▼   ⑥ System orchestration (multi-deployable mode)
-   Map<path, content> for the system   ─ docker-compose.yml,
-                                         db-init/, e2e/, ui specs,
-                                         per-deployable env vars
+         ▼   ⑥ Enrichment                   src/ir/enrichments.ts
+   Loom IR'                            ─ ONE pure pass derives wireShape,
+                                         auto-findAll, associations, and
+                                         react `targets:` module
+                                         inheritance. Idempotent.
          │
-         ▼   ⑦ Output writing (.loomignore filter)
+         ▼   ⑦ IR validation                src/ir/validate.ts
+   Loom IR' + LoomDiagnostic[]         ─ cross-aggregate / multi-file
+                                         checks that need the fully-
+                                         resolved IR.
+         │
+         ▼   ⑧ Per-platform code generation src/generator/<platform>/
+   Map<path, content> per deployable   ─ each backend reads `IR.wireShape`
+                                         directly. Backends that execute
+                                         domain logic also walk ExprIR /
+                                         StmtIR via render-expr.ts /
+                                         render-stmt.ts. React skips
+                                         those — frontend doesn't run
+                                         domain logic.
+                                       ─ INVOKED BY phase ⑨; not a
+                                         standalone driver.
+         │
+         ▼   ⑨ System composition +         src/system/index.ts +
+        migration derivation                src/ir/migrations-builder.ts
+   Map<path, content> for the system   ─ the orchestrator runs
+                                         `buildMigrations(sys, snapshots)`
+                                         (IR diff → MigrationsIR[]), then
+                                         invokes each platform's emitter
+                                         with the IR + the relevant
+                                         migrations slice, then stitches
+                                         outputs into a docker-compose
+                                         tree (db-init/, e2e/, per-
+                                         deployable services).
+         │
+         ▼   ⑩ Output writing (.loomignore) src/cli/main.ts
    Files on disk
 ```
 
-The pipeline is one-directional.  Each layer reads only from the
-layer above and produces output the next layer consumes — no
-back-edges, no shared mutable state.  This is enforced by file
-structure: `language/` knows nothing about `ir/`, `ir/` knows
-nothing about `generator/`, `generator/<platform>/` knows nothing
-about other platforms, and `system/` composes everything from above.
+**There is no target-backend IR.** Every backend consumes `LoomModel`
+directly. The only secondary IR is `MigrationsIR`, derived once in
+phase ⑧ and shared by every backend that has a database. This is the
+architectural payoff: name resolution, member typing, call-kind
+classification, and inline scaffold expansion all happen exactly once
+(in phase ⑤). Backends never re-resolve.
+
+The pipeline is one-directional. Each phase reads only from the phase
+above and produces output the next phase consumes — no back-edges, no
+shared mutable state. This is enforced by file structure: `language/`
+knows nothing about `ir/`, `ir/` knows nothing about `generator/`,
+`generator/<platform>/` knows nothing about other platforms, and
+`system/` composes everything from above. The one nuance: `system/`
+calls `src/ir/migrations-builder.ts` to derive `MigrationsIR`, so that
+file is currently in `src/ir/` but logically runs at system time. (See
+[`docs/proposals/src-ir-phase-reveal.md`](./proposals/src-ir-phase-reveal.md)
+for a proposal to move it.)
 
 ---
 
-## Layer ① — Lexing, parsing, linking
+## Phase ① — Parse
 
 **Files**
 - `src/language/ddd.langium` — single source-of-truth grammar.
 - `src/language/generated/` — output of `langium generate`: parser,
   AST types, reflection metadata, scope-provider hooks.
 - `src/language/ddd-module.ts` — Langium DI wiring.
-- `src/language/ddd-scope.ts` — custom scope provider.
 - `src/language/main.ts` — LSP server entry.
 
 **Inputs**
 - Raw `.ddd` text via Langium's `LangiumDocuments` service.
 
 **Outputs**
-- A linked `Model` AST node — every cross-reference (`X id`,
-  `partType`, `aggregate`, etc.) has its `.ref` populated.
+- A raw `Model` AST node. Cross-references are **not** populated yet
+  (that's phase ③ after macro expansion).
 - Parse / lex diagnostics on `doc.diagnostics` (severity-tagged).
 
 **Responsibilities**
 - Tokenize the source per the grammar's terminals (`STRING`, `INT`,
   `DECIMAL`, `ID`, comment / whitespace skips).
 - Build the CST and convert to the typed AST.
+
+**Non-responsibilities**
+- No macro expansion — that's phase ②.
+- No linking yet — that's phase ③.
+- No type checking — that's phase ④.
+
+## Phase ② — AST macro expansion
+
+**Files**
+- `src/macros/expander.ts` — the expander itself; runs at
+  `DocumentState.IndexedContent` (before scope computation).
+- `src/macros/registry.ts` — process-global macro registry.
+- `src/macros/api/` — the `defineMacro(...)` authoring API.
+- `src/macros/stdlib/` — stdlib macros: `scaffold`, `auditable`,
+  `softDeletable`, `crudish`, etc.
+
+(NB: as of this writing the macro infrastructure still lives at
+`src/language/ddd-macro-expander.ts`, `src/language/macro-registry.ts`,
+`src/macro-api/`, and `src/stdlib/`. See
+[`docs/proposals/test-layout-and-macro-consolidation.md`](./proposals/test-layout-and-macro-consolidation.md)
+for the proposed consolidation under `src/macros/`. The paths above
+reflect that proposed target.)
+
+**Inputs**
+- Raw AST from phase ① with `with X(...)` clauses present on
+  aggregates / contexts / ui modules.
+
+**Outputs**
+- AST' with macro-synthesised members (Properties, Operations,
+  Aggregates, Pages, etc.) spliced into their host declarations.
+- Macro diagnostics drained via the validator in phase ④.
+
+**Responsibilities**
+- Look up each `with X(...)` invocation in the macro registry,
+  validate its arguments, invoke `expand(...)` inside an origin
+  context, and splice the returned AST nodes into the host.
+- Run *before* scope computation so the synthesised members
+  participate in scoping and validation.
+
+**Non-responsibilities**
+- The macro expander does NOT lower or interpret IR. It is purely
+  an AST → AST' rewrite. Macros that need IR-level introspection
+  (e.g. `with crudish(...)`) inspect the host AST, not the IR.
+
+## Phase ③ — Scope + Link
+
+**Files**
+- `src/language/ddd-scope.ts` — custom scope provider.
+
+**Inputs**
+- AST' from phase ②.
+
+**Outputs**
+- AST'' — every cross-reference (`X id`, `partType`, `aggregate`, etc.)
+  has its `.ref` populated.
+
+**Responsibilities**
 - Run cross-reference linking — the scope provider tells Langium
   which names are visible at each `[Foo:ID]` site.
 - For containment partTypes, the custom scope provider restricts
   the candidate set to entity parts declared in the same aggregate
   (cross-aggregate part references must use `X id`).
 
-**Non-responsibilities** (deliberate)
-- No type checking — that's Layer ②.
-- No semantic shaping — the AST mirrors the grammar 1:1.
-- No name resolution beyond `[Foo:ID]` scoping (e.g., bare-name
-  identifiers in expressions are not resolved here).
+**Non-responsibilities**
+- No semantic shaping — the AST still mirrors the grammar 1:1.
+- No name resolution inside expressions (bare-name identifiers in
+  expressions are resolved in phase ⑤b, not here).
 - No IR construction.
 
 **Contract for downstream layers**
@@ -117,7 +235,7 @@ about other platforms, and `system/` composes everything from above.
 
 ---
 
-## Layer ② — Validation
+## Phase ④ — AST validation
 
 **Files**
 - `src/language/ddd-validator.ts` — semantic checks.
@@ -126,7 +244,7 @@ about other platforms, and `system/` composes everything from above.
   `findOperation`, etc.).
 
 **Inputs**
-- Linked AST from Layer ①.
+- Linked AST from phase ③ (after macro expansion + linking).
 
 **Outputs**
 - Diagnostic entries on `doc.diagnostics` (errors and warnings).
@@ -162,7 +280,7 @@ about other platforms, and `system/` composes everything from above.
 
 ---
 
-## Layer ③ — Lowering (AST → Loom IR)
+## Phase ⑤ — Lowering (AST → Loom IR)
 
 The IR is **platform-neutral, fully resolved**: every name carries
 its `refKind`, every member access carries its `receiverType` and
@@ -177,11 +295,13 @@ resolution per language; the divergent re-implementations were
 painful to keep in sync.  The IR collapses this to a single source
 of truth.
 
-The lowering layer is split into two cooperating modules:
+The lowering layer is split into **three** cooperating modules,
+driven end-to-end by `lowerModel(model: Model): LoomModel`. Each
+sub-pass runs once per `lowerModel` call:
 
-### Layer ③a — Structure layer
+### Phase ⑤a — Structure layer
 
-**File**: `src/ir/lower.ts` (~450 lines).
+**File**: `src/ir/lower.ts` (~1990 lines).
 
 **Responsibilities** — top-down structural walk:
 
@@ -209,22 +329,18 @@ lowerModel
 Each `lower*` function consumes one AST kind and returns the
 matching IR shape.  The structure layer never reaches inside an
 expression — it delegates every expression / statement subtree to
-Layer ③b.
+phase ⑤b.
 
-It also performs two **post-pass derivations** that depend on the
-IR shape:
+It performs one **in-lowering side-effect** before returning:
+`applyPageOriginSideEffects(built)` and then
+`expandInlineScaffoldPrimitiveCalls(built)` (phase ⑤c). Auto-`findAll`,
+react `targets:` module inheritance, and the rest of the cross-cutting
+derivations now live in **phase ⑥ (enrichment)**, not in the structure
+layer.
 
-- **Auto-included `findAll`** — every aggregate gets an implicit
-  `find all(): T[]`.  If a user already declared one of that name,
-  theirs wins.  Mirrors how `findById` is implicit.
-- **React `targets:` module inheritance** — a `platform: react`
-  deployable's `moduleNames` is set to its target deployable's, so
-  every layer that walks `moduleNames` (system file routing, the
-  api-builder) sees the same module surface the backend exposes.
+### Phase ⑤b — Expression layer
 
-### Layer ③b — Expression layer
-
-**File**: `src/ir/lower-expr.ts` (~730 lines).
+**File**: `src/ir/lower-expr.ts` (~1440 lines).
 
 **Responsibilities** — name resolution + member typing + IR
 expression / statement construction:
@@ -257,9 +373,28 @@ lives in the expression layer because expressions reference types
 (via `memberType`); the structure layer pulls `lowerType` in via
 the same import direction.
 
+### Phase ⑤c — Inline scaffold expansion
+
+**File**: `src/ir/walker-primitive-expander.ts` (~1055 lines).
+
+**Why it's a sub-pass of lowering, not its own phase**: `lower.ts`
+calls `expandInlineScaffoldPrimitiveCalls(built)` as the final
+statement of `lowerSystem(...)` (lower.ts:537). The LoomModel
+returned by `lowerModel(...)` already has its page bodies expanded.
+No downstream phase ever sees the un-expanded form.
+
+**Responsibilities**
+- Walk every `page.body: ExprIR` and rewrite the inline scaffold
+  primitives (`scaffoldDetails(of:)`, `scaffoldOperations(of:)`)
+  into their fully-expanded walker-stdlib `ExprIR` form
+  (`Stack { Card { KeyValueRow … } }`, etc.).
+- Pages whose body never uses these primitives are a no-op — the
+  rewriter walks the tree once and returns the same reference when
+  nothing changed.
+
 **Non-responsibilities**
 - No platform-aware decisions (TS vs C# vs React).
-- No string emission — produces typed IR only.
+- No string emission — produces ExprIR only.
 - No I/O.
 
 ---
@@ -327,7 +462,7 @@ mutator without re-walking the env.
 
 ---
 
-## Layer ④ — IR enrichment (wire-shape, auto-finds, associations, react inheritance)
+## Phase ⑥ — IR enrichment (wire-shape, auto-finds, associations, react inheritance)
 
 **File**: `src/ir/enrichments.ts`.
 
@@ -412,7 +547,45 @@ backend.
 
 ---
 
-## Layer ⑤ — Per-platform shaping
+## Phase ⑦ — IR validation
+
+**File**: `src/ir/validate.ts` (~1700 lines), plus
+`src/ir/invariant-classify.ts` (~415 lines) for invariant
+categorisation.
+
+**Inputs**
+- Enriched `LoomModel` from phase ⑥.
+
+**Outputs**
+- `LoomDiagnostic[]` (severity-tagged).  The CLI driver
+  (`src/cli/main.ts`) calls `validateLoomModel(loom)` after
+  enrichment and bails non-zero on any `severity: "error"`.
+
+**Why two validation phases?** Phase ④ runs against the AST and
+catches everything that can be expressed in terms of grammar
+shape, declared types, and Langium references. Phase ⑦ runs
+against the **fully-resolved, multi-file, enriched IR** and
+catches things that need that context:
+
+- Cross-aggregate consistency that crosses Langium document
+  boundaries (a property typed `Order id` referencing an `Order`
+  declared in a different file).
+- Checks that depend on enrichment output (e.g., wire-shape
+  derived field ordering, association metadata).
+- Invariant categorisation (`invariant-classify.ts` buckets
+  invariants into structural / data / interlock categories that
+  some backends consume).
+
+**Non-responsibilities**
+- No mutation of the IR — pure read.
+- No platform-aware checks — IR validation is platform-neutral.
+
+---
+
+## Phase ⑧ — Per-platform code generation
+
+Invoked by phase ⑨ (system orchestration); not a standalone driver
+in the system-mode pipeline.
 
 Each platform has the same module shape (in `src/generator/<platform>/`):
 
@@ -488,12 +661,12 @@ checker validates every data flow from the IR to the rendered string.
 | `pages-emitter.ts` | Page shell: wraps the walker's body TSX with `useForm`/mutation-hook/`useParams`/import declarations the body recorded on the walk context. |
 | `page-objects-builder.ts` / `walker-page-objects.ts` | Per-aggregate Playwright page-object class — keyed off the `data-testid` strings every primitive threads through (`testid:` named arg). |
 
-`pages-builder.ts` is the **deleted** legacy archetype renderer's
-husk, retained only as a utility module the Phoenix LiveView
-pipeline still imports; it is not on the React codegen path.
-
 The React side has no `render-expr.ts` / `render-stmt.ts`: the
 frontend doesn't run domain logic, only consumes the wire shape.
+Page bodies route through `body-walker.ts`, which dispatches every
+walker-stdlib primitive into the active design pack's templates.
+(A legacy `pages-builder.ts` archetype renderer that this section
+previously mentioned no longer exists in tree.)
 
 ### Scaffold expansion (compile-time sugar, not a codegen path)
 
@@ -504,22 +677,28 @@ walker-stdlib pages a user could have hand-written:
 ```
 ui { scaffold modules: Sales }
         │
-        ▼  Pass 1 — AST→AST   src/language/ddd-scaffold-ast-expander.ts
-   synthesised `Page` AST nodes (name, route, menu, and a
-   high-level body call: List { of: } / Form { of: } / Detail { of:, by: } …)
-   each tagged with a `scaffoldOrigin` discriminator
+        ▼  Pass 1 — phase ② macro expansion   src/macros/stdlib/scaffold/
+   The `scaffold` macro (and its sub-macros scaffoldModule /
+   scaffoldContext / scaffoldAggregate / scaffoldView /
+   scaffoldWorkflow) synthesise `Page` AST nodes (name, route, menu,
+   and a high-level body call: List { of: } / Form { of: } /
+   Detail { of:, by: } …) each tagged with a `scaffoldOrigin`
+   discriminator.
         │
-        ▼  Pass 2 — IR rewrite   src/ir/scaffold-expander.ts
-   `lowerSystem` → `expandScaffoldPages`: every page whose
-   `scaffoldOrigin` is recognised gets its `body` replaced with the
-   fully-expanded walker-stdlib `ExprIR` (`expandAggregateList`,
-   `expandAggregateDetail`, `expandWorkflowForm`, …)
+        ▼  Pass 2 — phase ⑤c inline scaffold expansion
+                    src/ir/walker-primitive-expander.ts
+   At the end of `lowerModel`, every page whose body uses the
+   `scaffoldDetails(of:)` / `scaffoldOperations(of:)` primitives gets
+   its `body` rewritten to the fully-expanded walker-stdlib `ExprIR`
+   (`Stack { Card { KeyValueRow … } }`, etc.) via
+   `expandInlineScaffoldPrimitives`.
         │
-        ▼  the ordinary body-walker renders it through the pack
+        ▼  phase ⑧ — the ordinary body-walker renders it through the
+                    active design pack
 ```
 
-The IR expander is the contract for *what a scaffolded page
-contains*.  Per archetype:
+The walker-primitive expander is the contract for *what a scaffolded
+page contains*.  Per archetype:
 
 | Origin | Synthesised body |
 | --- | --- |
@@ -537,13 +716,23 @@ is reachable from an explicit `page <Name> { body: … }` —
 
 ---
 
-## Layer ⑥ — System orchestration (multi-deployable)
+## Phase ⑨ — System orchestration (multi-deployable)
 
-**File**: `src/system/index.ts` plus `src/system/e2e-render.ts`,
-`src/system/ui-e2e-render.ts`.
+**Files**: `src/system/index.ts` (orchestrator entry),
+`src/system/e2e-render.ts`, `src/system/ui-e2e-render.ts`,
+`src/system/wire-spec.ts` (writes `.loom/wire-spec.json` from
+`IR.wireShape`), and `src/ir/migrations-builder.ts` (derives
+`MigrationsIR[]` from an IR snapshot diff).
+
+(NB: `migrations-builder.ts` currently lives in `src/ir/` for
+historical reasons but is only called from
+`src/system/index.ts:116`. See
+[`docs/proposals/src-ir-phase-reveal.md`](./proposals/src-ir-phase-reveal.md)
+for the proposed move to `src/system/`.)
 
 **Inputs**: `LoomModel.systems[]` (each carries modules,
-deployables, and e2e tests).
+deployables, and e2e tests) plus an optional `SnapshotStore` of
+previously-emitted IR snapshots for migration diffing.
 
 **Outputs**: a flat tree of files:
 
@@ -552,7 +741,7 @@ deployables, and e2e tests).
 ├── docker-compose.yml         # postgres + every deployable + healthchecks
 ├── db-init/
 │   └── 00-create-databases.sql # one DB per backend deployable
-├── <deployable-1>/             # full per-platform project (Layer ⑤)
+├── <deployable-1>/             # full per-platform project (phase ⑧)
 ├── <deployable-2>/
 ├── ...
 └── e2e/                        # vitest+fetch DSL e2e (when `test e2e` against a backend)
@@ -570,16 +759,26 @@ web_app/e2e/<System>.ui.spec.ts
 ```
 
 **Responsibilities**
+- **Migration derivation** — call `buildMigrations(sys, snapshots)`
+  first. It builds per-module `SchemaSnapshot`s from the IR, diffs
+  each against the previous snapshot (`diffSchema`), and produces
+  `MigrationsIR[]` with one entry per backend deployable that owns
+  schema. The migrations slice is then passed to each backend
+  emitter so it can write its own migrations file (Drizzle / EF Core
+  / Ecto). `MigrationsIR` is the only secondary IR in the compiler.
 - Per-deployable file routing — call the right backend's
   `generate*ForContexts(contexts, ...)` with the modules each
   deployable declares (and the target's modules for react
-  deployables).
+  deployables) plus its migrations slice.
 - `docker-compose.yml` with a `db` service, per-deployable services
   (depends_on / env / healthcheck per platform), and a `pgdata`
   volume.
 - `db-init/00-create-databases.sql` — one `CREATE DATABASE` per
   backend deployable so EF Core's `EnsureCreated` doesn't race
   against peer backends sharing the same db.
+- `.loom/wire-spec.json` — JSON Schema derived from `IR.wireShape`
+  by `wire-spec.ts`. Diffable, language-agnostic; useful for
+  spotting wire-contract changes between regens.
 - E2E test routing: api tests → vitest+fetch file at
   `<outdir>/e2e/`; UI tests → Playwright spec at
   `<react-deployable>/e2e/<System>.ui.spec.ts`.
@@ -614,18 +813,19 @@ reserved `'ui'` modifier (which would shadow the body's
 
 **Non-responsibilities**
 - The system layer doesn't generate domain code — it only routes
-  and composes outputs from Layer ⑤.
+  and composes outputs from phase ⑧.
 - It doesn't decide platform-internal details (CORS, JSON casing,
   database schema) — those live with the per-platform generators.
 
 ---
 
-## Layer ⑦ — Output writing
+## Phase ⑩ — Output writing
 
 **File**: `src/cli/main.ts`.
 
-**Inputs**: a `Map<path, content>` from Layer ⑤ (legacy mode) or
-Layer ⑥ (system mode).
+**Inputs**: a `Map<path, content>` from phase ⑧ (legacy single-context
+mode: `generate ts` / `generate dotnet`) or phase ⑨ (system mode:
+`generate system`).
 
 **Outputs**: files on disk under the user-specified `--out` directory.
 
@@ -671,7 +871,7 @@ operation confirm() {
 
 Inside `aggregate Order { ..., contains lines: OrderLine[], ... }`.
 
-**After Layer ① (parse + link):**
+**After phases ①–③ (parse + macro expansion + link):**
 
 ```
 Operation:
@@ -691,7 +891,7 @@ Operation:
   ]
 ```
 
-**After Layer ② (validation):**
+**After phase ④ (AST validation):**
 
 - `isMutable` is a known `function` declared on `Order` — OK.
 - `lines.count > 0` → `count` is the collection-op on `OrderLine[]`
@@ -701,7 +901,7 @@ Operation:
 - `emit OrderConfirmed { order, at }` matches the declared event
   shape — OK.
 
-**After Layer ③ (lowering):**
+**After phase ⑤ (lowering):**
 
 ```
 OperationIR:
@@ -742,7 +942,7 @@ Notice **every** name is tagged.  `lines` carries `refKind:
 `refKind: "enum-value"` and its `enumName`.  Backends never have
 to re-resolve.
 
-**After Layer ⑤ (TypeScript backend):**
+**After phase ⑧ (TypeScript backend):**
 
 ```typescript
 public confirm(): void {
@@ -780,7 +980,7 @@ public confirm(): void {
 - `ref { refKind: "enum-value", enumName: "OrderStatus", name:
   "Confirmed" }` → `OrderStatus.Confirmed`.
 
-**After Layer ⑤ (.NET backend):**
+**After phase ⑧ (.NET backend):**
 
 ```csharp
 public void Confirm()
@@ -799,7 +999,7 @@ becomes `_domainEvents.Add`, the event constructor uses named
 arguments.
 
 The fact that both backends produce idiomatic code from the same
-IR is the payoff for fully resolving everything in Layer ③.
+IR is the payoff for fully resolving everything in phase ⑤.
 
 ---
 
@@ -876,17 +1076,25 @@ carries everything needed for code generation.
 
 ## Tests
 
-The vitest suite in `test/` covers each layer:
+The vitest suite under `test/` covers each phase. The directory
+layout mirrors the pipeline (see
+[`docs/proposals/test-layout-and-macro-consolidation.md`](./proposals/test-layout-and-macro-consolidation.md)
+for the in-progress reorg target):
 
-| Suite | Layer(s) covered |
+| Suite (current path) | Phase(s) covered |
 | --- | --- |
-| `parsing.test.ts` | ① parse + link |
-| `validation.test.ts` | ②, plus deployable-level checks |
-| `generator-ts.test.ts` / `generator-dotnet.test.ts` / `generator-react.test.ts` | ⑤ per-platform output |
-| `system.test.ts` | ⑥ multi-deployable orchestration |
-| `cli.test.ts` | ⑦ output writing (`.loomignore`, `--dry-run`) |
-| `generated-build.test.ts` (opt-in `LOOM_TS_BUILD=1`) | ⑤ regression — generated TS compiles under strict tsc |
-| `e2e.test.ts` (opt-in `LOOM_E2E=1`) | full pipeline + content-shape OpenAPI parity + Playwright UI suite |
+| `test/language/parsing.test.ts` | ① parse |
+| `test/macro/expansion.test.ts`, `test/macro/scaffold-equivalence.test.ts` | ② AST macro expansion |
+| `test/language/validation.test.ts` (and the sensitivity / money / type-system tests) | ③ link + ④ AST validation |
+| `test/ir/lower.test.ts`, `test/ir/page-ir.test.ts`, `test/ir/properties.test.ts`, … | ⑤ lowering |
+| `test/ir/enrichments.test.ts`, `test/ir/wire-shape.test.ts`, `test/ir/wire-spec.test.ts` | ⑥ enrichment |
+| `test/ir/multifile-validate.test.ts`, `test/ir/invariant-classify.test.ts` | ⑦ IR validation |
+| `test/system/architecture-*.test.ts`, `test/system/deployable-composition.test.ts`, `test/system/traceability.test.ts` | ⑨ system orchestration |
+| `test/generator/*` (per backend, 63 files) | ⑧ per-platform output |
+| `test/cli/*.test.ts` | ⑩ output writing (`.loomignore`, `--dry-run`) |
+| `test/generator/walker-*.test.ts` (33 files) | ⑧ React body-walker primitives |
+| `LOOM_TS_BUILD=1 npm run test:tsc` | ⑧ regression — generated TS compiles under strict tsc |
+| `LOOM_E2E=1 npm run test:e2e` | full pipeline + content-shape OpenAPI parity + Playwright UI suite |
 
 Generated projects' own type-checking and unit tests serve as the
 integration layer: a `.ddd` with `test` blocks produces a vitest
