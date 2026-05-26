@@ -1,11 +1,11 @@
 import type {
-  AggregateIR,
-  BoundedContextIR,
-  EntityPartIR,
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+  EnrichedEntityPartIR,
+  EnrichedSystemIR,
+  EnrichedValueObjectIR,
   ModuleIR,
-  SystemIR,
   TypeIR,
-  ValueObjectIR,
   WireField,
 } from "../ir/loom-ir.js";
 
@@ -49,7 +49,7 @@ type JsonSchemaProperty =
   | { type: "array"; items: JsonSchemaProperty }
   | { $ref: string };
 
-export function buildWireSpec(sys: SystemIR): WireSpecDoc {
+export function buildWireSpec(sys: EnrichedSystemIR): WireSpecDoc {
   const doc: WireSpecDoc = {
     system: sys.name,
     aggregates: {},
@@ -65,7 +65,7 @@ export function buildWireSpec(sys: SystemIR): WireSpecDoc {
   return doc;
 }
 
-function collectContext(ctx: BoundedContextIR, doc: WireSpecDoc): void {
+function collectContext(ctx: EnrichedBoundedContextIR, doc: WireSpecDoc): void {
   for (const a of ctx.aggregates) {
     doc.aggregates[a.name] = aggregateSchema(a);
     for (const p of a.parts) doc.parts[p.name] = partSchema(p);
@@ -75,16 +75,16 @@ function collectContext(ctx: BoundedContextIR, doc: WireSpecDoc): void {
   }
 }
 
-function aggregateSchema(a: AggregateIR): JsonSchemaObject {
-  return objectSchemaFromWireShape(a.wireShape ?? []);
+function aggregateSchema(a: EnrichedAggregateIR): JsonSchemaObject {
+  return objectSchemaFromWireShape(a.wireShape);
 }
 
-function partSchema(p: EntityPartIR): JsonSchemaObject {
-  return objectSchemaFromWireShape(p.wireShape ?? []);
+function partSchema(p: EnrichedEntityPartIR): JsonSchemaObject {
+  return objectSchemaFromWireShape(p.wireShape);
 }
 
-function valueObjectSchema(v: ValueObjectIR): JsonSchemaObject {
-  return objectSchemaFromWireShape(v.wireShape ?? []);
+function valueObjectSchema(v: EnrichedValueObjectIR): JsonSchemaObject {
+  return objectSchemaFromWireShape(v.wireShape);
 }
 
 function objectSchemaFromWireShape(fields: WireField[]): JsonSchemaObject {
@@ -157,7 +157,7 @@ export function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
 /** Convenience: serialise to a stable, pretty-printed JSON string with
  * a trailing newline.  Stable ordering is guaranteed by the IR
  * (aggregate / part / VO order matches source order). */
-export function renderWireSpec(sys: SystemIR): string {
+export function renderWireSpec(sys: EnrichedSystemIR): string {
   return JSON.stringify(buildWireSpec(sys), null, 2) + "\n";
 }
 

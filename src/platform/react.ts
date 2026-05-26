@@ -7,6 +7,7 @@ const reactPlatform: PlatformSurface = {
   // Frontends are SPAs hitting a peer backend; they own no DB.
   needsDb: false,
   mountsUi: true,
+  isFrontend: true,
   // React generator only emits API hooks — no per-aggregate
   // repository class.  No find-name collisions are possible.
   reservedRepositoryFindNames: new Set(),

@@ -78,7 +78,7 @@ import {
   isView,
   isWorkflow,
 } from "../language/generated/ast.js";
-import { parseBuiltinPlatformRef } from "../platform/registry.js";
+import { parseBuiltinPlatformRef, platformFor } from "../platform/registry.js";
 import type {
   AggregateIR,
   ApiIR,
@@ -98,7 +98,7 @@ import type {
   FunctionIR,
   IdValueType,
   InvariantIR,
-  LoomModel,
+  RawLoomModel,
   MenuBlockIR,
   MenuLinkIR,
   MenuMetaIR,
@@ -207,7 +207,7 @@ function qualifyPlatform(raw: string | undefined): {
 // hierarchical IR built around those expressions.
 // ---------------------------------------------------------------------------
 
-export function lowerModel(model: Model): LoomModel {
+export function lowerModel(model: Model): RawLoomModel {
   const systems: SystemIR[] = [];
   const looseContexts: BoundedContextIR[] = [];
   const rootValueObjects: ValueObjectIR[] = [];
@@ -250,7 +250,7 @@ export function lowerModel(model: Model): LoomModel {
  *  carries its own resolved cross-references; the merge is just an
  *  in-order union of the top-level slices.  Duplicate-name detection
  *  is left to the validator. */
-export function mergeLoomModels(models: LoomModel[]): LoomModel {
+export function mergeLoomModels(models: RawLoomModel[]): RawLoomModel {
   if (models.length === 1) return models[0]!;
   return {
     systems: models.flatMap((m) => m.systems),
@@ -476,7 +476,7 @@ function lowerSystem(sys: System): SystemIR {
     //   - `phoenixLiveView` is fullstack — emit BOTH a UI spec (driven
     //     by Playwright page objects) AND an API spec (driven by
     //     fetch against the deployable's HTTP surface).
-    const isFrontendOnly = targetPlatform === "react" || targetPlatform === "static";
+    const isFrontendOnly = !!targetPlatform && platformFor(targetPlatform).isFrontend;
     const isFullstack = targetPlatform === "phoenixLiveView";
     if (isFrontendOnly) {
       e2eTests.push(lowerE2E(b, e2eEnv, "ui"));
@@ -798,7 +798,7 @@ function lowerDeployable(d: Deployable): DeployableIR {
     platform,
     platformRef,
     moduleNames: moduleBindings.map((b) => b.moduleName).filter(Boolean),
-    port: d.port ?? defaultPort(platform),
+    port: d.port ?? defaultPortFor(platform),
     targetName: d.targets?.ref?.name,
     auth,
     design,
@@ -811,12 +811,16 @@ function lowerDeployable(d: Deployable): DeployableIR {
   };
 }
 
-function defaultPort(platform: Platform | undefined): number {
-  if (platform === "dotnet") return 8080;
-  if (platform === "react") return 3001;
-  if (platform === "static") return 3001;
-  if (platform === "phoenixLiveView") return 4000;
-  return 3000;
+/** Look up a platform's default deployable port via `PlatformSurface.defaultPort`.
+ *  Falls back to 3000 for an unknown / undefined platform (lowering may
+ *  still be running before validation surfaces the bad value). */
+function defaultPortFor(platform: Platform | undefined): number {
+  if (!platform) return 3000;
+  try {
+    return platformFor(platform).defaultPort;
+  } catch {
+    return 3000;
+  }
 }
 
 // ---------------------------------------------------------------------------

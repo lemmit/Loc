@@ -53,7 +53,7 @@ export function schemaFromModule(module: ModuleIR): SchemaSnapshot {
     // one `AssociationIR` per such field, and the schema picks them up
     // here.  `tableForAggregate` / `tableForPart` skip the column at
     // emission time (see `mapField`).
-    for (const assoc of agg.associations ?? []) {
+    for (const assoc of agg.associations!) {
       tables.push(tableForAssociation(assoc, module.name));
     }
   }

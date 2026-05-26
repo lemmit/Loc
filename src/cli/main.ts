@@ -7,7 +7,7 @@ import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { generateDotnet } from "../generator/dotnet/index.js";
 import { enrichLoomModel } from "../ir/enrichments.js";
-import type { LoomModel, TestOutcome } from "../ir/loom-ir.js";
+import type { EnrichedLoomModel, TestOutcome } from "../ir/loom-ir.js";
 import { lowerModel, mergeLoomModels } from "../ir/lower.js";
 import { validateLoomModel } from "../ir/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
@@ -66,8 +66,11 @@ async function parseFile(file: string): Promise<ParseResult> {
 }
 
 interface ProjectParseResult {
-  /** Pre-enriched LoomModel, merged from every reachable document. */
-  loom: LoomModel;
+  /** Enriched LoomModel, merged from every reachable document and run
+   *  through `enrichLoomModel`.  Branded `EnrichedLoomModel` so the
+   *  downstream pipeline (validator, system orchestrator, generators)
+   *  type-rejects an un-enriched IR at the call site. */
+  loom: EnrichedLoomModel;
   diagnostics: string[];
   errorCount: number;
   warningCount: number;
@@ -222,7 +225,7 @@ async function runGenerate(
   // `generate system` is multi-file aware: load the entry's import
   // graph, lower per document, merge.  Legacy single-deployable
   // `generate ts` / `generate dotnet` stay on the single-file path.
-  let loom: LoomModel;
+  let loom: EnrichedLoomModel;
   let legacyModel: Model | undefined; // non-system targets only
   if (target === "system") {
     let projectResult: ProjectParseResult;

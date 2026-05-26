@@ -23,7 +23,7 @@ import { joinDbSetName, joinEntityName } from "./join-entities.js";
 /** Every association declared across an entire context's aggregates,
  *  in stable order (matches Drizzle schema emission). */
 function contextAssociations(ctx: BoundedContextIR): AssociationIR[] {
-  return ctx.aggregates.flatMap((a) => a.associations ?? []);
+  return ctx.aggregates.flatMap((a) => a.associations!);
 }
 
 export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
@@ -89,7 +89,7 @@ export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedCo
   // `List<TargetId>` accessor on the root must be unmapped — without
   // `b.Ignore(...)` EF Core 8's primitive-collection support pins it
   // as a JSON column on the root row, defeating the relational join.
-  const refCollectionIgnores = (agg.associations ?? []).map(
+  const refCollectionIgnores = agg.associations!.map(
     (a) => `        b.Ignore(x => x.${upperFirst(a.fieldName)});`,
   );
   // Emit HasIndex for every aggregate-root column referenced by a

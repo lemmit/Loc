@@ -32,7 +32,7 @@ export function renderSchema(
       tables.push(emitTable(part.name, part.fields, agg.name, ctx, new Set()));
     }
     // Many-to-many join tables for `T id[]` reference collections.
-    for (const assoc of agg.associations ?? []) {
+    for (const assoc of agg.associations!) {
       tables.push(emitJoinTable(assoc));
     }
   }

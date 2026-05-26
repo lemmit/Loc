@@ -528,6 +528,73 @@ export interface LoomModel {
 }
 
 // ---------------------------------------------------------------------------
+// Branded phase types — distinguish the IR shape at two pipeline points.
+//
+//   `RawLoomModel`      — the structural output of `lowerModel`.  Optional
+//                         derivation fields (`wireShape`, `associations`,
+//                         `traceability`, …) are absent.
+//   `EnrichedLoomModel` — the output of `enrichLoomModel`.  Every derived
+//                         field is populated; downstream consumers can
+//                         dereference them without nullability defense.
+//
+// The brand is a phantom property — purely a TypeScript-level
+// discriminator.  Carries zero runtime cost (the value never carries
+// `__phase`).  Mostly catches the "forgot to enrich" mistake at the
+// generator entry point.  See PR #517 for the canary failure mode this
+// shape prevents.
+//
+// `EnrichedAggregateIR` / `EnrichedEntityPartIR` / `EnrichedValueObjectIR`
+// are required-field overlays that mirror the structural types.  An
+// `EnrichedLoomModel` walks down to these via the matching enriched
+// context / module / system shells so a generator that takes an
+// `EnrichedLoomModel` and reads `agg.wireShape` sees a `readonly
+// WireField[]`, no `| undefined`.
+// ---------------------------------------------------------------------------
+
+export type RawLoomModel = LoomModel & { readonly __phase?: "raw" };
+
+export type EnrichedLoomModel = Omit<LoomModel, "systems" | "contexts" | "rootValueObjects"> & {
+  readonly __phase: "enriched";
+  systems: EnrichedSystemIR[];
+  contexts: EnrichedBoundedContextIR[];
+  rootValueObjects: EnrichedValueObjectIR[];
+  /** Always populated post-enrichment. */
+  traceability: TraceabilityIR;
+};
+
+export type EnrichedAggregateIR = AggregateIR & {
+  /** Always populated by `enrichLoomModel`. */
+  wireShape: WireField[];
+  /** Always populated by `enrichLoomModel` (empty when none derived). */
+  associations: AssociationIR[];
+  parts: EnrichedEntityPartIR[];
+};
+
+export type EnrichedEntityPartIR = EntityPartIR & {
+  wireShape: WireField[];
+};
+
+export type EnrichedValueObjectIR = ValueObjectIR & {
+  wireShape: WireField[];
+};
+
+export type EnrichedBoundedContextIR = Omit<
+  BoundedContextIR,
+  "aggregates" | "valueObjects"
+> & {
+  aggregates: EnrichedAggregateIR[];
+  valueObjects: EnrichedValueObjectIR[];
+};
+
+export type EnrichedModuleIR = Omit<ModuleIR, "contexts"> & {
+  contexts: EnrichedBoundedContextIR[];
+};
+
+export type EnrichedSystemIR = Omit<SystemIR, "modules"> & {
+  modules: EnrichedModuleIR[];
+};
+
+// ---------------------------------------------------------------------------
 // Traceability
 // ---------------------------------------------------------------------------
 
