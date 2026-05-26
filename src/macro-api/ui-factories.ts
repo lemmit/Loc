@@ -10,13 +10,14 @@ import type {
   BodyProp,
   BoolLit,
   CallArg,
-  CallExpr,
+  CallSuffix,
   Expression,
   MenuMetaEntry,
   NameRef,
   Page,
   PageMenuMeta,
   PageProp,
+  PostfixChain,
   RouteProp,
   StringLit,
   UiMember,
@@ -59,25 +60,31 @@ export function nameRefExpr(name: string): NameRef {
 /** A named call expression: `List(of: Order)` — `head` is the
  * callee name, `args` is a list of (optional-name, value) pairs.
  * Used to build body-prop calls and any other call-shaped
- * expression in macro output. */
+ * expression in macro output.
+ *
+ * Post grammar-flatten this emits a `PostfixChain` whose head is a
+ * `NameRef(head)` and whose single suffix is a `CallSuffix` carrying
+ * the args. */
 export function callExpr(
   head: string,
   args: Array<{ name?: string; value: Expression }>,
-): CallExpr {
+): PostfixChain {
   const origin = _currentOrigin();
-  const callee = nameRefExpr(head);
+  const callee: NameRef = nameRefExpr(head);
   const callArgs: CallArg[] = args.map(({ name, value }) => {
-    const a = _tag({ $type: "CallArg", name, value } as unknown as CallArg, origin);
+    const a = _tag({ $type: "CallArg", name, value } as CallArg, origin);
     _setContainer(value, a, "value");
     return a;
   });
-  const ce: CallExpr = _tag(
-    { $type: "CallExpr", callee, args: callArgs } as unknown as CallExpr,
+  const suffix: CallSuffix = _tag({ $type: "CallSuffix", args: callArgs } as CallSuffix, origin);
+  callArgs.forEach((a, i) => _setContainer(a, suffix, "args", i));
+  const chain: PostfixChain = _tag(
+    { $type: "PostfixChain", head: callee, suffixes: [suffix] } as PostfixChain,
     origin,
   );
-  _setContainer(callee, ce, "callee");
-  callArgs.forEach((a, i) => _setContainer(a, ce, "args", i));
-  return ce;
+  _setContainer(callee, chain, "head");
+  _setContainer(suffix, chain, "suffixes", 0);
+  return chain;
 }
 
 // ---------------------------------------------------------------------------

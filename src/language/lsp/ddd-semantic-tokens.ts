@@ -11,18 +11,19 @@ import {
   isEventDecl,
   isFunctionDecl,
   isIdType,
-  isMemberAccess,
+  isMemberSuffix,
   isNamedType,
   isNameRef,
   isOperation,
   isParameter,
+  isPostfixChain,
   isProperty,
   isRepository,
   isValueObject,
-  type MemberAccess,
+  type MemberSuffix,
   type NameRef,
 } from "../generated/ast.js";
-import { envForNode, stepIntoNode, typeOf } from "../type-system.js";
+import { envForNode, stepIntoNode, typeAfterSuffix, typeOf } from "../type-system.js";
 
 // ---------------------------------------------------------------------------
 // DddSemanticTokenProvider — layers resolved-meaning colour over the
@@ -63,7 +64,7 @@ export class DddSemanticTokenProvider extends AbstractSemanticTokenProvider {
       acceptor({ node, property: "target", type: SemanticTokenTypes.type });
     } else if (isNameRef(node)) {
       this.highlightNameRef(node, acceptor);
-    } else if (isMemberAccess(node)) {
+    } else if (isMemberSuffix(node)) {
       this.highlightMember(node, acceptor);
     }
   }
@@ -72,8 +73,17 @@ export class DddSemanticTokenProvider extends AbstractSemanticTokenProvider {
     acceptor({ node, property: "name", type: SemanticTokenTypes.variable });
   }
 
-  private highlightMember(node: MemberAccess, acceptor: SemanticTokenAcceptor): void {
-    const decl = stepIntoNode(typeOf(node.receiver, envForNode(node)), node.member);
+  private highlightMember(node: MemberSuffix, acceptor: SemanticTokenAcceptor): void {
+    const chain = node.$container;
+    if (!isPostfixChain(chain)) return;
+    const idx = chain.suffixes.indexOf(node);
+    if (idx < 0) return;
+    const env = envForNode(node);
+    let recvType = typeOf(chain.head, env);
+    for (let i = 0; i < idx; i++) {
+      recvType = typeAfterSuffix(recvType, chain.suffixes[i]!, env);
+    }
+    const decl = stepIntoNode(recvType, node.member);
     const type =
       decl && (isFunctionDecl(decl) || isOperation(decl))
         ? SemanticTokenTypes.method

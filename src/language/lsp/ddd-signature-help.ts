@@ -9,11 +9,11 @@ import {
   type BuilderCall,
   type BuilderEntry,
   type CallArg,
-  type CallExpr,
   isBuilderCall,
-  isCallExpr,
-  isMemberAccess,
-  type MemberAccess,
+  isCallSuffix,
+  isMemberSuffix,
+  isPostfixChain,
+  type PostfixChain,
 } from "../generated/ast.js";
 import { calleeSignature } from "../type-system.js";
 import { buildSignature } from "./render-signature.js";
@@ -40,12 +40,23 @@ export class DddSignatureHelpProvider implements SignatureHelpProvider {
     const leaf = CstUtils.findLeafNodeAtOffset(rootCst, offset);
     const call = enclosingCall(leaf?.astNode);
     if (!call) return undefined;
+    if ("chain" in call) {
+      const sig = calleeSignature(call);
+      if (!sig) return undefined;
+      const suffix = call.chain.suffixes[call.suffixIdx]!;
+      const items = isMemberSuffix(suffix) ? suffix.args : (suffix as { args: CallArg[] }).args;
+      return {
+        signatures: [buildSignature(sig.name, sig.params, sig.ret, "()")],
+        activeSignature: 0,
+        activeParameter: activeParam(items, offset),
+      };
+    }
+    // BuilderCall branch.
     const sig = calleeSignature(call);
     if (!sig) return undefined;
-    const isBuilder = isBuilderCall(call);
-    const items = isBuilder ? call.entries : call.args;
+    const items = call.entries;
     return {
-      signatures: [buildSignature(sig.name, sig.params, sig.ret, isBuilder ? "{}" : "()")],
+      signatures: [buildSignature(sig.name, sig.params, sig.ret, "{}")],
       activeSignature: 0,
       activeParameter: activeParam(items, offset),
     };
@@ -54,12 +65,26 @@ export class DddSignatureHelpProvider implements SignatureHelpProvider {
 
 function enclosingCall(
   node: AstNode | undefined,
-): CallExpr | MemberAccess | BuilderCall | undefined {
+): BuilderCall | { chain: PostfixChain; suffixIdx: number } | undefined {
   let n: AstNode | undefined = node;
   while (n) {
-    if (isCallExpr(n)) return n;
-    if (isMemberAccess(n) && n.call) return n;
     if (isBuilderCall(n)) return n;
+    // A MemberSuffix with `call: true` or a CallSuffix is the unit of
+    // signature help in the postfix world.
+    if (isMemberSuffix(n) && n.call) {
+      const chain = n.$container;
+      if (isPostfixChain(chain)) {
+        const idx = chain.suffixes.indexOf(n);
+        if (idx >= 0) return { chain, suffixIdx: idx };
+      }
+    }
+    if (isCallSuffix(n)) {
+      const chain = n.$container;
+      if (isPostfixChain(chain)) {
+        const idx = chain.suffixes.indexOf(n);
+        if (idx >= 0) return { chain, suffixIdx: idx };
+      }
+    }
     n = n.$container;
   }
   return undefined;

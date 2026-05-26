@@ -944,36 +944,37 @@ MatchArm:
     cond=Expression '=>' value=Expression;
 
 TernaryExpr infers Expression:
-    OrExpr ({infer TernaryExpr.condition=current} '?' thenExpr=Expression ':' elseExpr=Expression)?;
+    OrExpr ({infer TernaryExpr.cond=current} '?' thenExpr=Expression ':' elseExpr=Expression)?;
 
 OrExpr infers Expression:
-    AndExpr ({infer BinaryExpr.left=current} op='||' right=AndExpr)*;
+    AndExpr ({infer BinaryChain.head=current} (ops+='||' rest+=AndExpr)+)?;
 
 AndExpr infers Expression:
-    EqualityExpr ({infer BinaryExpr.left=current} op='&&' right=EqualityExpr)*;
+    EqualityExpr ({infer BinaryChain.head=current} (ops+='&&' rest+=EqualityExpr)+)?;
 
 EqualityExpr infers Expression:
-    ComparisonExpr ({infer BinaryExpr.left=current} op=('=='|'!=') right=ComparisonExpr)*;
+    ComparisonExpr ({infer BinaryChain.head=current} (ops+=('=='|'!=') rest+=ComparisonExpr)+)?;
 
 ComparisonExpr infers Expression:
-    AdditiveExpr ({infer BinaryExpr.left=current} op=('<='|'>='|'<'|'>') right=AdditiveExpr)*;
+    AdditiveExpr ({infer BinaryChain.head=current} (ops+=('<='|'>='|'<'|'>') rest+=AdditiveExpr)+)?;
 
 AdditiveExpr infers Expression:
-    MultiplicativeExpr ({infer BinaryExpr.left=current} op=('+'|'-') right=MultiplicativeExpr)*;
+    MultiplicativeExpr ({infer BinaryChain.head=current} (ops+=('+'|'-') rest+=MultiplicativeExpr)+)?;
 
 MultiplicativeExpr infers Expression:
-    UnaryExpr ({infer BinaryExpr.left=current} op=('*'|'/'|'%') right=UnaryExpr)*;
+    UnaryExpr ({infer BinaryChain.head=current} (ops+=('*'|'/'|'%') rest+=UnaryExpr)+)?;
 
 UnaryExpr infers Expression:
     {infer UnaryExpr} op=('!'|'-') operand=PostfixExpr
   | PostfixExpr;
 
 PostfixExpr infers Expression:
-    PrimaryExpr (
-        {infer MemberAccess.receiver=current} '.' member=MemberName
-          ( call?='(' (args+=CallArg (',' args+=CallArg)*)? ')' )?
-      | {infer CallExpr.callee=current} '(' (args+=CallArg (',' args+=CallArg)*)? ')'
-    )*;
+    PrimaryExpr ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+)?;
+
+PostfixSuffix:
+      {infer MemberSuffix} '.' member=MemberName
+        ( call?='(' (args+=CallArg (',' args+=CallArg)*)? ')' )?
+    | {infer CallSuffix}   '(' (args+=CallArg (',' args+=CallArg)*)? ')';
 
 // Call arguments admit an optional `name:` prefix (Slice 1.5).
 // Positional usage (`Money(10.5, "USD")`) keeps working; named usage

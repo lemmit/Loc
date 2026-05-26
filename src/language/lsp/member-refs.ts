@@ -19,13 +19,14 @@ import {
   isLambda,
   isLetStmt,
   isLValue,
-  isMemberAccess,
+  isMemberSuffix,
   isNameRef,
   isOperation,
+  isPostfixChain,
   isValueObject,
   isWorkflow,
   type LValue,
-  type MemberAccess,
+  type MemberSuffix,
   type NameRef,
   type ValueObject,
 } from "../generated/ast.js";
@@ -35,6 +36,7 @@ import {
   iterateEntityMembers,
   stepInto,
   stepIntoNode,
+  typeAfterSuffix,
   typeOf,
 } from "../type-system.js";
 
@@ -52,9 +54,26 @@ export function isRenameableMember(node: AstNode): boolean {
   return t === "Property" || t === "Containment" || t === "DerivedProp" || t === "FunctionDecl";
 }
 
-/** The CST node of the `.member` identifier token of a member access. */
-export function memberNameCst(ma: MemberAccess): CstNode | undefined {
-  return GrammarUtils.findNodeForProperty(ma.$cstNode, "member");
+/** The CST node of the `.member` identifier token of a member access
+ *  suffix. */
+export function memberNameCst(ms: MemberSuffix): CstNode | undefined {
+  return GrammarUtils.findNodeForProperty(ms.$cstNode, "member");
+}
+
+/** Walk head + prior suffixes of a PostfixChain to compute the
+ *  receiver type at the given MemberSuffix.  Mirrors the same walk
+ *  used by the definition / completion / semantic-tokens providers. */
+function receiverTypeForSuffix(ms: MemberSuffix): DddType | undefined {
+  const chain = ms.$container;
+  if (!isPostfixChain(chain)) return undefined;
+  const idx = chain.suffixes.indexOf(ms);
+  if (idx < 0) return undefined;
+  const env = envForNode(ms);
+  let t = typeOf(chain.head, env);
+  for (let i = 0; i < idx; i++) {
+    t = typeAfterSuffix(t, chain.suffixes[i]!, env);
+  }
+  return t;
 }
 
 /** The CST node of a `NameRef`'s identifier token. */
@@ -66,9 +85,10 @@ export function nameRefCst(nr: NameRef): CstNode | undefined {
  *  declaration via the receiver's type. */
 export function memberDeclAt(cstNode: CstNode): AstNode | undefined {
   const ast = cstNode.astNode;
-  if (isMemberAccess(ast)) {
-    const env = envForNode(ast);
-    return stepIntoNode(typeOf(ast.receiver, env), ast.member);
+  if (isMemberSuffix(ast)) {
+    const recvType = receiverTypeForSuffix(ast);
+    if (!recvType) return undefined;
+    return stepIntoNode(recvType, ast.member);
   }
   if (isNameRef(ast)) {
     return nameRefDecl(ast);
@@ -154,11 +174,14 @@ export function collectMemberUsages(doc: LangiumDocument, target: AstNode): CstN
   if (!root) return [];
   const out: CstNode[] = [];
   for (const node of AstUtils.streamAllContents(root)) {
-    if (isMemberAccess(node)) {
-      const decl = stepIntoNode(typeOf(node.receiver, envForNode(node)), node.member);
-      if (decl === target) {
-        const cst = memberNameCst(node);
-        if (cst) out.push(cst);
+    if (isMemberSuffix(node)) {
+      const recvType = receiverTypeForSuffix(node);
+      if (recvType) {
+        const decl = stepIntoNode(recvType, node.member);
+        if (decl === target) {
+          const cst = memberNameCst(node);
+          if (cst) out.push(cst);
+        }
       }
     } else if (isNameRef(node)) {
       if (nameRefDecl(node) === target) {

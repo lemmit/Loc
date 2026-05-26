@@ -1,8 +1,8 @@
 import { AstUtils, type CstNode, type MaybePromise } from "langium";
 import { DefaultDefinitionProvider } from "langium/lsp";
 import { type DefinitionParams, LocationLink } from "vscode-languageserver";
-import { isMemberAccess } from "../generated/ast.js";
-import { envForNode, stepIntoNode, typeOf } from "../type-system.js";
+import { isMemberSuffix, isPostfixChain } from "../generated/ast.js";
+import { envForNode, stepIntoNode, typeAfterSuffix, typeOf } from "../type-system.js";
 
 // ---------------------------------------------------------------------------
 // DddDefinitionProvider — extends the default with member-access
@@ -33,15 +33,22 @@ export class DddDefinitionProvider extends DefaultDefinitionProvider {
 
   private memberAccessLink(sourceCstNode: CstNode): LocationLink | undefined {
     const ast = sourceCstNode.astNode;
-    if (!isMemberAccess(ast)) return undefined;
-    // The source CST might cover the whole `MemberAccess` node.  The
+    if (!isMemberSuffix(ast)) return undefined;
+    // The source CST might cover the whole MemberSuffix node.  The
     // token under the cursor is what `findDeclarationNodeAtOffset`
-    // resolved to (typically the `member` ID token).  We accept either
-    // — the fallback only fires when the default returned undefined.
+    // resolved to (typically the `member` ID token).
     if (sourceCstNode.text !== ast.member) return undefined;
 
+    const chain = ast.$container;
+    if (!isPostfixChain(chain)) return undefined;
+    const idx = chain.suffixes.indexOf(ast);
+    if (idx < 0) return undefined;
+
     const env = envForNode(ast);
-    const receiverType = typeOf(ast.receiver, env);
+    let receiverType = typeOf(chain.head, env);
+    for (let i = 0; i < idx; i++) {
+      receiverType = typeAfterSuffix(receiverType, chain.suffixes[i]!, env);
+    }
     const targetNode = stepIntoNode(receiverType, ast.member);
     if (!targetNode) return undefined;
 

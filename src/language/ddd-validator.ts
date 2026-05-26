@@ -29,8 +29,9 @@ import {
   type Invariant,
   isAggregate,
   isAssignOrCallStmt,
-  isBinaryExpr,
+  isBinaryChain,
   isBoundedContext,
+  isCallSuffix,
   isContainment,
   isDecLit,
   isDerivedProp,
@@ -40,7 +41,9 @@ import {
   isIntLit,
   isInvariant,
   isLetStmt,
+  isMemberSuffix,
   isOperation,
+  isPostfixChain,
   isPreconditionStmt,
   isPrimitiveType,
   isProperty,
@@ -48,7 +51,7 @@ import {
   isValueObject,
   type LValue,
   type MatchExpr,
-  type MemberAccess,
+  type MemberSuffix,
   type MenuBlock,
   type Model,
   type Module,
@@ -1136,87 +1139,95 @@ export class DddValidator {
   // ---------------------------------------------------------------------------
   private checkBinaryOperands(model: Model, accept: ValidationAcceptor): void {
     for (const node of AstUtils.streamAllContents(model)) {
-      if (!isBinaryExpr(node)) continue;
+      if (!isBinaryChain(node)) continue;
       this.checkSingleBinaryOperands(node, accept);
     }
   }
 
+  /** Validate each fold-step of a binary chain (`a + b + c` → `(a+b)+c`).
+   *  Diagnostics attach with `property: "rest"` and the rhs index so
+   *  the editor underlines the offending right-hand operand. */
   private checkSingleBinaryOperands(
-    bin: import("./generated/ast.js").BinaryExpr,
+    chain: import("./generated/ast.js").BinaryChain,
     accept: ValidationAcceptor,
   ): void {
-    const env = envForNode(bin);
-    let lt = typeOf(bin.left, env);
-    let rt = typeOf(bin.right, env);
-    // Cascade suppression — broken upstream already reports.
-    if (lt.kind === "unknown" || rt.kind === "unknown") return;
-
-    // Literal promotion — mirrors `lowerExpr`'s binary handler.
-    // When one operand is typed as long / decimal / money (the
-    // "anchor"), the other operand's bare numeric literal acts as
-    // that anchor type.  Both sides may have anchor types
-    // (`subtotal + taxRate` — money + decimal); the per-call
-    // `canPromoteAstLitTo` check rejects typed values, so a typed
-    // VALUE opposite an anchor still rejects per the strict gate.
-    const lAnchor = literalPromotionAnchor(lt);
-    const rAnchor = literalPromotionAnchor(rt);
-    if (lAnchor && canPromoteAstLitTo(bin.right, lAnchor)) {
-      rt = T.prim(lAnchor);
-    }
-    if (rAnchor && canPromoteAstLitTo(bin.left, rAnchor)) {
-      lt = T.prim(rAnchor);
-    }
-
-    const op = bin.op;
-
-    // Logical: both operands must be bool.
-    if (op === "&&" || op === "||") {
-      const lBool = lt.kind === "primitive" && lt.name === "bool";
-      const rBool = rt.kind === "primitive" && rt.name === "bool";
-      if (!lBool || !rBool) {
+    const env = envForNode(chain);
+    // Track the left-side type as we fold; the lhs starts as the head's
+    // type, then becomes the result of the previous step.  When a
+    // boolean-result op fires the chain's result is bool — that
+    // doesn't change downstream validity (a chain at this precedence
+    // band stays homogeneous-op).
+    let lt = typeOf(chain.head, env);
+    let leftExprForPromotion: import("./generated/ast.js").Expression | undefined = chain.head;
+    for (let i = 0; i < chain.ops.length; i++) {
+      const op = chain.ops[i]!;
+      const rhsExpr = chain.rest[i]!;
+      let rt = typeOf(rhsExpr, env);
+      // Cascade suppression — broken upstream already reports.
+      if (lt.kind === "unknown" || rt.kind === "unknown") {
+        // Update lt for next step using best-effort arithmeticResult.
+        lt = arithmeticResult(lt, rt, op);
+        leftExprForPromotion = undefined;
+        continue;
+      }
+      // Literal promotion at this fold-step — mirrors lowerExpr.
+      const lAnchor = literalPromotionAnchor(lt);
+      const rAnchor = literalPromotionAnchor(rt);
+      if (lAnchor && canPromoteAstLitTo(rhsExpr, lAnchor)) {
+        rt = T.prim(lAnchor);
+      }
+      if (rAnchor && leftExprForPromotion && canPromoteAstLitTo(leftExprForPromotion, rAnchor)) {
+        lt = T.prim(rAnchor);
+      }
+      const info = { node: chain, property: "rest" as const, index: i };
+      if (op === "&&" || op === "||") {
+        const lBool = lt.kind === "primitive" && lt.name === "bool";
+        const rBool = rt.kind === "primitive" && rt.name === "bool";
+        if (!lBool || !rBool) {
+          accept(
+            "error",
+            `Operator '${op}' requires boolean operands; got '${typeToString(lt)}' and '${typeToString(rt)}'.`,
+            info,
+          );
+        }
+        lt = T.prim("bool");
+        leftExprForPromotion = undefined;
+        continue;
+      }
+      if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
+        if (!comparable(lt, rt)) {
+          accept(
+            "error",
+            `Operator '${op}' cannot compare '${typeToString(lt)}' with '${typeToString(rt)}'. ` +
+              `Operands must be the same type, both numeric (int / long / decimal), both money, ` +
+              `or one a null literal against an optional.`,
+            info,
+          );
+        }
+        lt = T.prim("bool");
+        leftExprForPromotion = undefined;
+        continue;
+      }
+      // Arithmetic: arithmeticResult returns unknown for invalid combos.
+      const result = arithmeticResult(lt, rt, op);
+      if (result.kind === "unknown") {
+        const isMoney = (t: typeof lt) => t.kind === "primitive" && t.name === "money";
+        const moneyHint =
+          isMoney(lt) || isMoney(rt)
+            ? ` Allowed for money: money ± money, money × {int|long|decimal}, money ÷ {int|long|decimal}.`
+            : op === "+"
+              ? ` Numeric arithmetic requires both operands in the int / long / decimal chain; ` +
+                `string concatenation requires both operands 'string'.`
+              : ` Numeric arithmetic requires both operands in the int / long / decimal chain.`;
         accept(
           "error",
-          `Operator '${op}' requires boolean operands; got '${typeToString(lt)}' and '${typeToString(rt)}'.`,
-          { node: bin },
+          `Operator '${op}' has incompatible operand types: ` +
+            `left is '${typeToString(lt)}', right is '${typeToString(rt)}'.${moneyHint}`,
+          info,
         );
       }
-      return;
-    }
-
-    // Comparison: operands must be pairwise comparable.
-    if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
-      if (!comparable(lt, rt)) {
-        accept(
-          "error",
-          `Operator '${op}' cannot compare '${typeToString(lt)}' with '${typeToString(rt)}'. ` +
-            `Operands must be the same type, both numeric (int / long / decimal), both money, ` +
-            `or one a null literal against an optional.`,
-          { node: bin },
-        );
-      }
-      return;
-    }
-
-    // Arithmetic: `arithmeticResult` returns unknown for invalid
-    // combinations — surface the rejection with a per-operator
-    // message that names the closed-arithmetic rules for money
-    // when relevant.
-    const result = arithmeticResult(lt, rt, op);
-    if (result.kind === "unknown") {
-      const isMoney = (t: typeof lt) => t.kind === "primitive" && t.name === "money";
-      const moneyHint =
-        isMoney(lt) || isMoney(rt)
-          ? ` Allowed for money: money ± money, money × {int|long|decimal}, money ÷ {int|long|decimal}.`
-          : op === "+"
-            ? ` Numeric arithmetic requires both operands in the int / long / decimal chain; ` +
-              `string concatenation requires both operands 'string'.`
-            : ` Numeric arithmetic requires both operands in the int / long / decimal chain.`;
-      accept(
-        "error",
-        `Operator '${op}' has incompatible operand types: ` +
-          `left is '${typeToString(lt)}', right is '${typeToString(rt)}'.${moneyHint}`,
-        { node: bin },
-      );
+      lt = result;
+      leftExprForPromotion = undefined;
     }
   }
 
@@ -1378,25 +1389,28 @@ export class DddValidator {
     }
   }
 
-  /** v2 hard cut: reject CallExpr forms that v2 replaces with BuilderCall.
-   *  Specifically, any `Name(args)` where `Name` resolves to a ValueObject
-   *  or EntityPart inside the enclosing context — those constructions must
-   *  use `Name { slot: value, ... }` syntax now. */
+  /** v2 hard cut: reject `Name(args)` invocation forms that v2 replaces
+   *  with BuilderCall.  Post grammar flatten, the AST shape is a
+   *  `PostfixChain` whose first suffix is a `CallSuffix` and whose head
+   *  is a bare `NameRef`.  When `Name` resolves to a ValueObject or
+   *  EntityPart in the enclosing context, those constructions must use
+   *  `Name { slot: value, ... }` syntax now. */
   private checkLegacyConstructorCalls(model: Model, accept: ValidationAcceptor): void {
     for (const node of AstUtils.streamAllContents(model)) {
-      if (node.$type !== "CallExpr") continue;
-      const call = node as import("./generated/ast.js").CallExpr;
-      const callee = call.callee;
-      if (callee.$type !== "NameRef") continue;
-      const name = (callee as import("./generated/ast.js").NameRef).name;
-      const ctx = AstUtils.getContainerOfType(call, isBoundedContext);
+      if (!isPostfixChain(node)) continue;
+      const first = node.suffixes[0];
+      if (!first || !isCallSuffix(first)) continue;
+      const head = node.head;
+      if (head.$type !== "NameRef") continue;
+      const name = (head as import("./generated/ast.js").NameRef).name;
+      const ctx = AstUtils.getContainerOfType(node, isBoundedContext);
       if (!ctx) continue;
       for (const m of ctx.members) {
         if (isValueObject(m) && m.name === name) {
           accept(
             "error",
             `v2 syntax: construct '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
-            { node: call, code: "loom.legacy-vo-call" },
+            { node, code: "loom.legacy-vo-call" },
           );
           break;
         }
@@ -1409,7 +1423,7 @@ export class DddValidator {
               accept(
                 "error",
                 `v2 syntax: construct entity part '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
-                { node: call, code: "loom.legacy-part-call" },
+                { node, code: "loom.legacy-part-call" },
               );
               break;
             }
@@ -1498,19 +1512,21 @@ export class DddValidator {
   }
 
   /** The compiler knows the intrinsic test-matcher surface, so it can
-   *  enforce it: each matcher takes a fixed number of positional args. */
+   *  enforce it: each matcher takes a fixed number of positional args.
+   *  Walks every MemberSuffix in the model (post-grammar-flatten, calls
+   *  on a receiver are MemberSuffix nodes with `call: true`). */
   private checkMatcherArity(model: Model, accept: ValidationAcceptor): void {
     for (const node of AstUtils.streamAllContents(model)) {
-      if (node.$type !== "MemberAccess") continue;
-      const ma = node as MemberAccess;
-      if (!ma.call) continue;
-      const sig = intrinsicMatcherSig(ma.member);
+      if (!isMemberSuffix(node)) continue;
+      const ms = node as MemberSuffix;
+      if (!ms.call) continue;
+      const sig = intrinsicMatcherSig(ms.member);
       if (!sig) continue;
-      if (ma.args.length !== sig.arity) {
+      if (ms.args.length !== sig.arity) {
         accept(
           "error",
-          `matcher '${ma.member}' takes ${sig.arity} argument(s), got ${ma.args.length}.`,
-          { node: ma, property: "args" },
+          `matcher '${ms.member}' takes ${sig.arity} argument(s), got ${ms.args.length}.`,
+          { node: ms, property: "args" },
         );
       }
     }
@@ -1526,22 +1542,18 @@ export class DddValidator {
 
   private checkMatchesCalls(model: Model, accept: ValidationAcceptor): void {
     for (const node of AstUtils.streamAllContents(model)) {
-      if (node.$type !== "MemberAccess") continue;
-      const ma = node as MemberAccess;
-      if (ma.member !== "matches" || !ma.call) continue;
+      if (!isMemberSuffix(node)) continue;
+      const ms = node as MemberSuffix;
+      if (ms.member !== "matches" || !ms.call) continue;
       // `matches` always takes exactly one string-literal argument.
-      if (ma.args.length !== 1) {
+      if (ms.args.length !== 1) {
         accept("error", `'matches' takes exactly one argument (a string-literal regex pattern).`, {
-          node: ma,
+          node: ms,
           property: "args",
         });
         continue;
       }
-      // Call args are CallArg wrappers carrying an
-      // optional `name:` prefix; reach for `.value` to inspect the
-      // expression itself.  `string.matches(<regex>)` is a single-
-      // positional-arg method-call, so `name` should be absent.
-      const argWrap = ma.args[0]!;
+      const argWrap = ms.args[0]!;
       const arg = argWrap.value;
       if (argWrap.name) {
         accept(
@@ -1555,7 +1567,7 @@ export class DddValidator {
         accept(
           "error",
           `'matches' argument must be a string literal — patterns must be known at codegen time.`,
-          { node: ma, property: "args" },
+          { node: ms, property: "args" },
         );
         continue;
       }
@@ -1570,7 +1582,7 @@ export class DddValidator {
           `'matches' pattern is not a valid regular expression: ${
             err instanceof Error ? err.message : String(err)
           }`,
-          { node: ma, property: "args" },
+          { node: ms, property: "args" },
         );
       }
     }
@@ -2194,44 +2206,43 @@ export class DddValidator {
 
     // Walk every Expression in the page (body, title, requires,
     // state inits — anything that can mention a body-ref chain).
+    // Post-flatten: a 3-segment chain `<paramName>.<aggregate>.<op>` is
+    // a single PostfixChain with head=NameRef(paramName) and two
+    // MemberSuffix suffixes.
     for (const node of AstUtils.streamAllContents(p)) {
-      if (node.$type !== "MemberAccess") continue;
-      const ma = node as MemberAccess;
-      // We're looking for the OUTER `.<op>` of a 3-segment chain,
-      // whose receiver is itself `<paramName>.<aggregate>`.
-      // Skip non-three-segment chains (the deeper member or
-      // outer .data accessors aren't the ones being validated).
-      if (ma.receiver?.$type !== "MemberAccess") continue;
-      const inner = ma.receiver as MemberAccess;
-      if (inner.receiver?.$type !== "NameRef") continue;
-      const root = inner.receiver as NameRef;
-      const rootName = root.name as string;
-      if (!apiByParam.has(rootName)) continue; // not an api binding ref
+      if (!isPostfixChain(node)) continue;
+      if (node.suffixes.length < 2) continue;
+      const head = node.head;
+      if (head.$type !== "NameRef") continue;
+      const rootName = (head as NameRef).name as string;
+      if (!apiByParam.has(rootName)) continue;
+      const aggSuffix = node.suffixes[0];
+      const opSuffix = node.suffixes[1];
+      if (!aggSuffix || !isMemberSuffix(aggSuffix)) continue;
+      if (!opSuffix || !isMemberSuffix(opSuffix)) continue;
 
       const apiNode = apiByParam.get(rootName)!;
       const moduleName = apiNode.source?.$refText ?? "";
-      const aggregateName = inner.member as string;
-      const op = ma.member as string;
+      const aggregateName = aggSuffix.member as string;
+      const op = opSuffix.member as string;
 
-      // Find aggregate in the api's source module.
       const moduleNode = apiNode.source?.ref;
       const aggregate = moduleNode ? findAggregateInModule(moduleNode, aggregateName) : undefined;
       if (!aggregate) {
         accept(
           "error",
           `Aggregate '${aggregateName}' not found in api '${apiNode.name}' (module '${moduleName}').`,
-          { node: inner, property: "member" },
+          { node: aggSuffix, property: "member" },
         );
         continue;
       }
 
-      // Validate the operation.
       if (!isValidApiOperation(aggregate, op)) {
         const allowed = listValidApiOperations(aggregate);
         accept(
           "error",
           `Operation '${op}' is not declared on aggregate '${aggregateName}'.  Available: ${allowed.join(", ")}.`,
-          { node: ma, property: "member" },
+          { node: opSuffix, property: "member" },
         );
       }
     }
@@ -2318,20 +2329,29 @@ function isScaffoldOriginPageBody(p: Page): boolean {
   const bodyProp = p.props.find((prop) => prop.$type === "BodyProp");
   if (!bodyProp || bodyProp.$type !== "BodyProp") return false;
   const expr = bodyProp.expr;
-  if (!expr || expr.$type !== "CallExpr") return false;
-  const callee = expr.callee;
-  if (!callee || callee.$type !== "NameRef") return false;
-  if (SCAFFOLD_BODY_CALL_NAMES.has(callee.name)) return true;
+  // Post-flatten: a bare `Name(args)` is a PostfixChain with head=NameRef
+  // and one CallSuffix.  Reach into that shape.
+  if (!expr || !isPostfixChain(expr)) return false;
+  const first = expr.suffixes[0];
+  if (!first || !isCallSuffix(first)) return false;
+  const head = expr.head;
+  if (!head || head.$type !== "NameRef") return false;
+  const headName = (head as NameRef).name;
+  if (SCAFFOLD_BODY_CALL_NAMES.has(headName)) return true;
   // Aggregate-detail pages are emitted as `Stack(scaffoldDetails(of:),
   // …)` — recognise by scanning the Stack's args for a
   // `scaffoldDetails` call (matches the lowering-side discriminator
   // in `inferPageOrigin`).
-  if (callee.name === "Stack") {
-    for (const arg of expr.args) {
+  if (headName === "Stack") {
+    for (const arg of first.args) {
       const v = arg.value;
-      if (!v || v.$type !== "CallExpr") continue;
-      const inner = v.callee;
-      if (inner && inner.$type === "NameRef" && inner.name === "scaffoldDetails") return true;
+      if (!v || !isPostfixChain(v)) continue;
+      const innerFirst = v.suffixes[0];
+      if (!innerFirst || !isCallSuffix(innerFirst)) continue;
+      const innerHead = v.head;
+      if (innerHead && innerHead.$type === "NameRef" && (innerHead as NameRef).name === "scaffoldDetails") {
+        return true;
+      }
     }
   }
   return false;

@@ -55,8 +55,9 @@ import {
   isFunctionDecl,
   isInvariant,
   isLetStmt,
-  isMemberAccess,
+  isMemberSuffix,
   isModule,
+  isPostfixChain,
   isNameRef,
   isObjectLit,
   isOperation,
@@ -1987,13 +1988,18 @@ function matchFactoryCall(
   expr: Expression | undefined,
   aggsByName: Map<string, Aggregate>,
 ): FactoryMatch | undefined {
-  if (!expr || !isMemberAccess(expr) || !expr.call) return undefined;
-  if (expr.member !== "create") return undefined;
-  const recv = expr.receiver;
+  if (!expr || !isPostfixChain(expr)) return undefined;
+  // Factory shape: `<NameRef>.create({...})` — exactly one
+  // MemberSuffix with member==="create" and a call payload.
+  if (expr.suffixes.length !== 1) return undefined;
+  const s = expr.suffixes[0]!;
+  if (!isMemberSuffix(s) || !s.call) return undefined;
+  if (s.member !== "create") return undefined;
+  const recv = expr.head;
   if (!isNameRef(recv)) return undefined;
   if (!aggsByName.has(recv.name)) return undefined;
-  if (expr.args.length !== 1) return undefined;
-  const argWrap = expr.args[0];
+  if (s.args.length !== 1) return undefined;
+  const argWrap = s.args[0];
   // Factory calls take a single object literal positional
   // arg.  Reject the named-arg form here; the caller falls through
   // to a generic call lowering rather than the factory shape.
@@ -2016,15 +2022,20 @@ function matchRepoCall(
   expr: Expression | undefined,
   reposByName: Map<string, Repository>,
 ): RepoMatch | undefined {
-  if (!expr || !isMemberAccess(expr) || !expr.call) return undefined;
-  const recv = expr.receiver;
+  if (!expr || !isPostfixChain(expr)) return undefined;
+  // Repo-call shape: `<NameRef>.<method>(args)` — exactly one
+  // MemberSuffix with a call payload.
+  if (expr.suffixes.length !== 1) return undefined;
+  const s = expr.suffixes[0]!;
+  if (!isMemberSuffix(s) || !s.call) return undefined;
+  const recv = expr.head;
   if (!isNameRef(recv)) return undefined;
   const repo = reposByName.get(recv.name);
   if (!repo) return undefined;
   // Peel CallArg wrappers — repo finds are positional.
   return {
     repo,
-    method: expr.member,
-    args: (expr.args ?? []).map((a) => a.value),
+    method: s.member,
+    args: (s.args ?? []).map((a) => a.value),
   };
 }

@@ -3,6 +3,7 @@ import { AstUtils } from "langium";
 import type {
   Aggregate,
   AggregateMember,
+  BinaryChain,
   BoundedContext,
   BuilderCall,
   EntityPart,
@@ -10,7 +11,10 @@ import type {
   Expression,
   FunctionDecl,
   LValue,
+  MemberSuffix,
   Operation,
+  PostfixChain,
+  PostfixSuffix,
   Property,
   Statement,
   TypeRef,
@@ -19,10 +23,10 @@ import type {
 import {
   isAggregate,
   isAssignOrCallStmt,
-  isBinaryExpr,
+  isBinaryChain,
   isBoolLit,
   isBuilderCall,
-  isCallExpr,
+  isCallSuffix,
   isContainment,
   isDecLit,
   isDerivedProp,
@@ -37,7 +41,7 @@ import {
   isLetStmt,
   isListLit,
   isMatchExpr,
-  isMemberAccess,
+  isMemberSuffix,
   isMoneyLit,
   isNamedType,
   isNameRef,
@@ -46,6 +50,7 @@ import {
   isObjectLit,
   isOperation,
   isParenExpr,
+  isPostfixChain,
   isPreconditionStmt,
   isPrimitiveConversion,
   isPrimitiveType,
@@ -379,6 +384,244 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
 // Expressions
 // ---------------------------------------------------------------------------
 
+/** Per-fold-step money / literal promotion for a binary chain.  When one
+ *  operand is typed as long / decimal / money, the other operand's bare
+ *  numeric literal is rewritten to that operand's literal IR kind so the
+ *  binary node's IR metadata stays type-honest and backends emit the
+ *  right form.  Promotions are one-sided: a typed VALUE never promotes —
+ *  the strict gate (#506) governs that. */
+function promoteMoneyOperands(
+  op: string,
+  leftIR: ExprIR,
+  leftType: TypeIR,
+  rightIR: ExprIR,
+  rightType: TypeIR,
+  rightExpr: Expression,
+  leftExprForPromotion: Expression | undefined,
+  env: Env,
+): { leftIR: ExprIR; leftType: TypeIR; rightIR: ExprIR; rightType: TypeIR } {
+  let outLeft = leftIR;
+  let outLeftT = leftType;
+  let outRight = rightIR;
+  let outRightT = rightType;
+  const lAnchor = literalPromotionAnchor(leftType);
+  const rAnchor = literalPromotionAnchor(rightType);
+  if (lAnchor) {
+    const promoted = tryPromoteNumericLit(rightExpr, lAnchor);
+    if (promoted) {
+      outRight = promoted;
+      outRightT = { kind: "primitive", name: lAnchor };
+    }
+  }
+  if (rAnchor && leftExprForPromotion) {
+    const promoted = tryPromoteNumericLit(leftExprForPromotion, rAnchor);
+    if (promoted) {
+      outLeft = promoted;
+      outLeftT = { kind: "primitive", name: rAnchor };
+    }
+  }
+  // Implicit `string + X` concat: wrap the non-string operand in a
+  // `convert` IR so backends emit `String(x)` / `x.ToString()` /
+  // `to_string(x)` per their existing renderConvert dispatch —
+  // identical to what the explicit `string(x)` form would produce.
+  if (op === "+") {
+    const lStr = outLeftT.kind === "primitive" && outLeftT.name === "string";
+    const rStr = outRightT.kind === "primitive" && outRightT.name === "string";
+    if (lStr && !rStr && isImplicitlyStringifiableIR(outRightT, env)) {
+      outRight = wrapForStringConcat(outRight, outRightT);
+      outRightT = { kind: "primitive", name: "string" };
+    } else if (rStr && !lStr && isImplicitlyStringifiableIR(outLeftT, env)) {
+      outLeft = wrapForStringConcat(outLeft, outLeftT);
+      outLeftT = { kind: "primitive", name: "string" };
+    }
+  }
+  return { leftIR: outLeft, leftType: outLeftT, rightIR: outRight, rightType: outRightT };
+}
+
+/** Pure left-fold of a flat BinaryChain.  Each fold-step applies the
+ *  money / literal promotion (mirrors the validator) and produces a
+ *  binary IR node with its metadata fully populated. */
+function lowerBinaryChain(chain: BinaryChain, env: Env): ExprIR {
+  let acc = lowerExpr(chain.head, env);
+  let accType = inferExprType(chain.head, env);
+  // Only the head operand corresponds to a single AST node usable for
+  // literal-promotion lookup against a right-side anchor.  After the
+  // first fold-step `acc` is a synthetic binary IR node — no
+  // backing AST literal — so subsequent steps only promote the rhs.
+  let headExprForPromotion: Expression | undefined = chain.head;
+  for (let i = 0; i < chain.ops.length; i++) {
+    const op = chain.ops[i]!;
+    const rhsExpr = chain.rest[i]!;
+    let rhsIR = lowerExpr(rhsExpr, env);
+    let rhsType = inferExprType(rhsExpr, env);
+    const promoted = promoteMoneyOperands(
+      op,
+      acc,
+      accType,
+      rhsIR,
+      rhsType,
+      rhsExpr,
+      headExprForPromotion,
+      env,
+    );
+    acc = promoted.leftIR;
+    accType = promoted.leftType;
+    rhsIR = promoted.rightIR;
+    rhsType = promoted.rightType;
+    const resultType = binaryResultType(op, accType, rhsType);
+    acc = {
+      kind: "binary",
+      op,
+      left: acc,
+      right: rhsIR,
+      leftType: accType,
+      resultType,
+    };
+    accType = resultType;
+    // After the first fold-step the lhs is a synthetic node — no AST
+    // literal to promote on the next step.
+    headExprForPromotion = undefined;
+  }
+  return acc;
+}
+
+/** Walk a PostfixChain's suffixes left-to-right, lowering each to its
+ *  IR shape.  Handles two probes that fire only when the head + first
+ *  suffix together form a magic pattern: `permissions.<name>` (rewrites
+ *  to a string literal) and `Aggregate.create(...)` (factory call). */
+function lowerPostfixChain(chain: PostfixChain, env: Env): ExprIR {
+  // Probe: `permissions.<name>` — first suffix is a non-call MemberSuffix
+  // and the head is a `NameRef("permissions")`, and the enclosing
+  // module declared a permissions catalogue.  Rewrites to a plain
+  // string literal carrying the resolved runtime string.
+  const first = chain.suffixes[0];
+  if (
+    first &&
+    isMemberSuffix(first) &&
+    !first.call &&
+    isNameRef(chain.head) &&
+    chain.head.name === "permissions" &&
+    env.modulePermissions
+  ) {
+    const decl = env.modulePermissions.find((d) => d.name === first.member);
+    let permIR: ExprIR;
+    if (decl) {
+      permIR = lit("string", decl.runtimeString);
+    } else {
+      // Unknown permission name — leave a sentinel string so the
+      // validator surfaces a clear diagnostic; downstream rendering
+      // still has a typed expression.
+      permIR = lit("string", `__unknown_permission__:${first.member}`);
+    }
+    let recv = permIR;
+    let recvType: TypeIR = { kind: "primitive", name: "string" };
+    for (let i = 1; i < chain.suffixes.length; i++) {
+      const out = applySuffixToRecv(recv, recvType, chain.suffixes[i]!, env);
+      recv = out.recv;
+      recvType = out.recvType;
+    }
+    return recv;
+  }
+  let recv = lowerExpr(chain.head, env);
+  let recvType = inferExprType(chain.head, env);
+  for (const s of chain.suffixes) {
+    const out = applySuffixToRecv(recv, recvType, s, env);
+    recv = out.recv;
+    recvType = out.recvType;
+  }
+  return recv;
+}
+
+/** Apply one postfix suffix to a receiver IR + type — `MemberSuffix`
+ *  becomes either a `member` (no call) or `method-call` IR; `CallSuffix`
+ *  collapses the receiver into a free / function / VO-ctor `call` IR
+ *  when the receiver is a bare `NameRef`, otherwise a `<expr>` call. */
+function applySuffixToRecv(
+  recv: ExprIR,
+  recvType: TypeIR,
+  suffix: PostfixSuffix,
+  env: Env,
+): { recv: ExprIR; recvType: TypeIR } {
+  if (isCallSuffix(suffix)) {
+    // Hoist `style:` named arg the same way builder-call form does, so
+    // both `Container { style: {...}, ... }` and `Container(style: {...}, ...)`
+    // surface the same IR shape downstream.
+    const styleHoist = hoistStyleArg(suffix.args, env);
+    const callArgs = styleHoist.remainingEntries;
+    const args = callArgs.map((a) => lowerExpr(a.value, env));
+    const argNames = callArgs.map((a) => a.name || undefined);
+    const named = argNames.some((n) => n !== undefined);
+    // When the receiver IR is a `ref` (we lowered a bare NameRef
+    // head), produce the same `call` IR the old CallExpr branch did;
+    // resolution of callKind matches the original semantics.
+    if (recv.kind === "ref") {
+      const callKind = resolveCallKind(recv.name, env);
+      const callIR: ExprIR = {
+        kind: "call",
+        callKind,
+        name: recv.name,
+        args,
+        ...(named ? { argNames } : {}),
+        ...(styleHoist.style ? { style: styleHoist.style } : {}),
+      };
+      // Result type best-effort — a function returns its declared type,
+      // a value-object ctor returns the VO, everything else falls
+      // back to a string placeholder (matches the legacy inferExprType).
+      let resultType: TypeIR = { kind: "primitive", name: "string" };
+      const fn = findFunctionInEnv(env, recv.name);
+      if (fn) resultType = lowerType(fn.returnType);
+      else {
+        const vo = findValueObjectByName(env, recv.name);
+        if (vo) resultType = { kind: "valueobject", name: vo.name };
+      }
+      return { recv: callIR, recvType: resultType };
+    }
+    const callIR: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "<expr>",
+      args,
+      ...(named ? { argNames } : {}),
+      ...(styleHoist.style ? { style: styleHoist.style } : {}),
+    };
+    return { recv: callIR, recvType: { kind: "primitive", name: "string" } };
+  }
+  // MemberSuffix
+  const ms = suffix as MemberSuffix;
+  if (ms.call) {
+    const args = ms.args.map((a) => lowerExpr(a.value, env));
+    const argNames = ms.args.map((a) => a.name || undefined);
+    const collectionOp = isCollectionOp(ms.member);
+    const mcIR: ExprIR = {
+      kind: "method-call",
+      receiver: recv,
+      member: ms.member,
+      args,
+      receiverType: recvType,
+      isCollectionOp: collectionOp,
+      ...(isIntrinsicMatcher(ms.member) ? { isIntrinsicMatcher: true } : {}),
+      ...(argNames.some((n) => n !== undefined) ? { argNames } : {}),
+    };
+    // Result type after a method call — `memberType` handles collection
+    // ops, entity/VO members, and the string `.length` case.
+    const nextType = memberType(recvType, ms.member, env);
+    return { recv: mcIR, recvType: nextType };
+  }
+  // Non-call MemberSuffix — preserve `stepInto` semantics on the IR
+  // node's `memberType` (matches the legacy MemberAccess lowering),
+  // but track the next type using `memberType` so chained access
+  // through array.count etc. continues to type correctly.
+  const stepType = stepInto(recvType, ms.member, env);
+  const memberIR: ExprIR = {
+    kind: "member",
+    receiver: recv,
+    member: ms.member,
+    receiverType: recvType,
+    memberType: stepType,
+  };
+  return { recv: memberIR, recvType: memberType(recvType, ms.member, env) };
+}
+
 export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (!expr) return lit("null", "null");
   if (isStringLit(expr)) return lit("string", expr.value);
@@ -425,73 +668,13 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
       operand: lowerExpr(expr.operand, env),
     };
   }
-  if (isBinaryExpr(expr)) {
-    let leftType = inferExprType(expr.left, env);
-    let rightType = inferExprType(expr.right, env);
-    let left = lowerExpr(expr.left, env);
-    let right = lowerExpr(expr.right, env);
-    // Literal promotion: a bare numeric literal opposite a typed
-    // numeric / money operand is elaborated to that operand's IR
-    // literal kind so the binary's IR metadata stays type-honest
-    // and backends emit the right form (e.g.
-    // `subtotal.plus(new Decimal("0.50"))` for money, `5L` for a
-    // long argument).  One-sided: a typed VALUE opposite the same
-    // type still rejects via the validator's strict gate (#506).
-    // Anchor types (long / decimal / money) on either side pull a
-    // bare numeric literal opposite them up to that type.
-    // `tryPromoteNumericLit` is the AST-literal gate — typed values
-    // never promote (they remain subject to the strict gate).  Both
-    // sides may have anchor types simultaneously
-    // (`subtotal + taxRate` — money + decimal, both typed values);
-    // neither call returns a promotion so nothing changes.
-    const lAnchor = literalPromotionAnchor(leftType);
-    const rAnchor = literalPromotionAnchor(rightType);
-    if (lAnchor) {
-      const promoted = tryPromoteNumericLit(expr.right, lAnchor);
-      if (promoted) {
-        right = promoted;
-        rightType = { kind: "primitive", name: lAnchor };
-      }
-    }
-    if (rAnchor) {
-      const promoted = tryPromoteNumericLit(expr.left, rAnchor);
-      if (promoted) {
-        left = promoted;
-        leftType = { kind: "primitive", name: rAnchor };
-      }
-    }
-    // Implicit `string + X` concat: wrap the non-string operand in a
-    // `convert` IR so backends emit `String(x)` / `x.ToString()` /
-    // `to_string(x)` per their existing renderConvert dispatch —
-    // identical to what the explicit `string(x)` form would produce.
-    // `arithmeticResult` / `binaryResultType` have already accepted
-    // this combination above; the convert wrap is the lowering's
-    // payback.  Same shape both ways means the validator's strict
-    // gate never fires, and backends don't need a separate code path.
-    if (expr.op === "+") {
-      const lStr = leftType.kind === "primitive" && leftType.name === "string";
-      const rStr = rightType.kind === "primitive" && rightType.name === "string";
-      if (lStr && !rStr && isImplicitlyStringifiableIR(rightType, env)) {
-        right = wrapForStringConcat(right, rightType);
-        rightType = { kind: "primitive", name: "string" };
-      } else if (rStr && !lStr && isImplicitlyStringifiableIR(leftType, env)) {
-        left = wrapForStringConcat(left, leftType);
-        leftType = { kind: "primitive", name: "string" };
-      }
-    }
-    return {
-      kind: "binary",
-      op: expr.op,
-      left,
-      right,
-      leftType,
-      resultType: binaryResultType(expr.op, leftType, rightType),
-    };
+  if (isBinaryChain(expr)) {
+    return lowerBinaryChain(expr, env);
   }
   if (isTernaryExpr(expr)) {
     return {
       kind: "ternary",
-      cond: lowerExpr(expr.condition, env),
+      cond: lowerExpr(expr.cond, env),
       then: lowerExpr(expr.thenExpr, env),
       otherwise: lowerExpr(expr.elseExpr, env),
     };
@@ -558,90 +741,8 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (isBuilderCall(expr)) {
     return lowerBuilderCall(expr, env);
   }
-  if (isMemberAccess(expr)) {
-    // `permissions.<name>` magic identifier.  Resolves only when the
-    // enclosing context belongs to a module that declared a
-    // permissions catalogue; the lookup happens at lowering time so
-    // the IR carries the runtime string directly (a plain string
-    // literal) — no new ref kind, no per-platform render branch.
-    // Non-call form only — `permissions.foo()` makes no sense and
-    // falls through to the generic method-call path which will
-    // surface as an unknown-method diagnostic.
-    if (
-      !expr.call &&
-      isNameRef(expr.receiver) &&
-      expr.receiver.name === "permissions" &&
-      env.modulePermissions
-    ) {
-      const decl = env.modulePermissions.find((d) => d.name === expr.member);
-      if (decl) {
-        return lit("string", decl.runtimeString);
-      }
-      // Unknown permission name — leave the receiver unresolved so
-      // the validator surfaces a clear "unknown permission" error;
-      // we still produce a typed expression so downstream rendering
-      // doesn't choke.
-      return lit("string", `__unknown_permission__:${expr.member}`);
-    }
-    const recv = lowerExpr(expr.receiver, env);
-    const recvType = inferExprType(expr.receiver, env);
-    if (expr.call) {
-      // Call args are `CallArg` nodes wrapping an
-      // Expression with an optional `name:` prefix.  Lower the value
-      // and capture the parallel name list; downstream consumers
-      // that don't care about names see the unchanged `args`
-      // shape.
-      const args = expr.args.map((a) => lowerExpr(a.value, env));
-      const argNames = expr.args.map((a) => a.name || undefined);
-      const collectionOp = isCollectionOp(expr.member);
-      return {
-        kind: "method-call",
-        receiver: recv,
-        member: expr.member,
-        args,
-        receiverType: recvType,
-        isCollectionOp: collectionOp,
-        ...(isIntrinsicMatcher(expr.member) ? { isIntrinsicMatcher: true } : {}),
-        ...(argNames.some((n) => n !== undefined) ? { argNames } : {}),
-      };
-    }
-    return {
-      kind: "member",
-      receiver: recv,
-      member: expr.member,
-      receiverType: recvType,
-      memberType: stepInto(recvType, expr.member, env),
-    };
-  }
-  if (isCallExpr(expr)) {
-    const callee = expr.callee;
-    // Hoist `style:` named arg the same way builder-call form does, so
-    // both `Container { style: {...}, ... }` and `Container(style: {...}, ...)`
-    // surface the same IR shape downstream.
-    const styleHoist = hoistStyleArg(expr.args, env);
-    const callArgs = styleHoist.remainingEntries;
-    const args = callArgs.map((a) => lowerExpr(a.value, env));
-    const argNames = callArgs.map((a) => a.name || undefined);
-    const named = argNames.some((n) => n !== undefined);
-    if (isNameRef(callee)) {
-      const callKind = resolveCallKind(callee.name, env);
-      return {
-        kind: "call",
-        callKind,
-        name: callee.name,
-        args,
-        ...(named ? { argNames } : {}),
-        ...(styleHoist.style ? { style: styleHoist.style } : {}),
-      };
-    }
-    return {
-      kind: "call",
-      callKind: "free",
-      name: "<expr>",
-      args,
-      ...(named ? { argNames } : {}),
-      ...(styleHoist.style ? { style: styleHoist.style } : {}),
-    };
+  if (isPostfixChain(expr)) {
+    return lowerPostfixChain(expr, env);
   }
   if (isNameRef(expr)) {
     return resolveNameRef(expr.name, env);
@@ -890,23 +991,31 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     if (expr.op === "!") return { kind: "primitive", name: "bool" };
     return inferExprType(expr.operand, env);
   }
-  if (isBinaryExpr(expr)) {
-    const op = expr.op;
-    if (
-      op === "&&" ||
-      op === "||" ||
-      op === "==" ||
-      op === "!=" ||
-      op === "<" ||
-      op === "<=" ||
-      op === ">" ||
-      op === ">="
-    ) {
-      return { kind: "primitive", name: "bool" };
+  if (isBinaryChain(expr)) {
+    // Left-fold the chain's operator types, mirroring lowerBinaryChain.
+    // Any boolean-typed op short-circuits the whole chain — once you
+    // see a logical / comparison op the result is bool regardless of
+    // subsequent ops (the chain is homogeneous-op per precedence
+    // level, so this is just an early exit).
+    let acc = inferExprType(expr.head, env);
+    for (let i = 0; i < expr.ops.length; i++) {
+      const op = expr.ops[i]!;
+      if (
+        op === "&&" ||
+        op === "||" ||
+        op === "==" ||
+        op === "!=" ||
+        op === "<" ||
+        op === "<=" ||
+        op === ">" ||
+        op === ">="
+      ) {
+        return { kind: "primitive", name: "bool" };
+      }
+      const rhs = inferExprType(expr.rest[i]!, env);
+      acc = binaryResultType(op, acc, rhs);
     }
-    const left = inferExprType(expr.left, env);
-    const right = inferExprType(expr.right, env);
-    return binaryResultType(op, left, right);
+    return acc;
   }
   if (isTernaryExpr(expr)) return inferExprType(expr.thenExpr, env);
   if (isMatchExpr(expr)) {
@@ -925,41 +1034,64 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
   if (isBuilderCall(expr)) {
     return inferBuilderCallType(expr, env);
   }
-  if (isMemberAccess(expr)) {
-    // `permissions.<name>` always types as `string` (matches the
-    // lowering, which rewrites the access to a string literal).
+  if (isPostfixChain(expr)) {
+    // Probe: `permissions.<name>` always types as string.
+    const first = expr.suffixes[0];
     if (
-      !expr.call &&
-      isNameRef(expr.receiver) &&
-      expr.receiver.name === "permissions" &&
+      first &&
+      isMemberSuffix(first) &&
+      !first.call &&
+      isNameRef(expr.head) &&
+      expr.head.name === "permissions" &&
       env.modulePermissions
     ) {
-      return { kind: "primitive", name: "string" };
+      let curType: TypeIR = { kind: "primitive", name: "string" };
+      for (let i = 1; i < expr.suffixes.length; i++) {
+        curType = inferSuffixType(curType, expr.suffixes[i]!, env);
+      }
+      return curType;
     }
-    // Aggregate factory: `X.create(...)` yields an `X` entity.  Without
-    // this a `let order = Order.create({...})` binding types as the
-    // string fallback, so subsequent member access (`order.lines`)
-    // loses its element/collection shape — which, e.g., stops
-    // `order.lines.count` from lowering to `.length`.  `X` is a type
-    // name, not a value, so it only resolves here (not via resolveNameRef).
-    if (expr.call && expr.member === "create" && isNameRef(expr.receiver)) {
-      const target = findEntityByName(env, expr.receiver.name);
+    // Probe: `Aggregate.create(...)` factory — head is `NameRef`
+    // pointing at an aggregate, first suffix is a call MemberSuffix
+    // with member==="create".  Result is the aggregate entity type.
+    let curType: TypeIR;
+    if (
+      first &&
+      isMemberSuffix(first) &&
+      first.call &&
+      first.member === "create" &&
+      isNameRef(expr.head)
+    ) {
+      const target = findEntityByName(env, expr.head.name);
       if (target && isAggregate(target)) {
-        return { kind: "entity", name: target.name };
+        curType = { kind: "entity", name: target.name };
+        for (let i = 1; i < expr.suffixes.length; i++) {
+          curType = inferSuffixType(curType, expr.suffixes[i]!, env);
+        }
+        return curType;
       }
     }
-    const recvType = inferExprType(expr.receiver, env);
-    return memberType(recvType, expr.member, env);
-  }
-  if (isCallExpr(expr)) {
-    const callee = expr.callee;
-    if (isNameRef(callee)) {
-      const fn = findFunctionInEnv(env, callee.name);
-      if (fn) return lowerType(fn.returnType);
-      const vo = findValueObjectByName(env, callee.name);
-      if (vo) return { kind: "valueobject", name: vo.name };
+    curType = inferExprType(expr.head, env);
+    // Free-call collapse: head is NameRef and first suffix is CallSuffix
+    // — the result type is the function's return type / VO type, then
+    // we walk remaining suffixes.
+    if (first && isCallSuffix(first) && isNameRef(expr.head)) {
+      const fn = findFunctionInEnv(env, expr.head.name);
+      if (fn) curType = lowerType(fn.returnType);
+      else {
+        const vo = findValueObjectByName(env, expr.head.name);
+        if (vo) curType = { kind: "valueobject", name: vo.name };
+        else curType = { kind: "primitive", name: "string" };
+      }
+      for (let i = 1; i < expr.suffixes.length; i++) {
+        curType = inferSuffixType(curType, expr.suffixes[i]!, env);
+      }
+      return curType;
     }
-    return { kind: "primitive", name: "string" };
+    for (const s of expr.suffixes) {
+      curType = inferSuffixType(curType, s, env);
+    }
+    return curType;
   }
   if (isNameRef(expr)) {
     const ref = resolveNameRef(expr.name, env);
@@ -1268,6 +1400,20 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
     return { kind: "primitive", name: "int" };
   }
   return { kind: "primitive", name: "string" };
+}
+
+/** Type after applying one postfix suffix to a receiver of type `t`.
+ *  Mirrors `applySuffixToRecv` in the lowering layer, but on TypeIR
+ *  only.  For `CallSuffix` on a non-NameRef receiver the result is a
+ *  string-typed placeholder (matches the legacy CallExpr typing). */
+function inferSuffixType(t: TypeIR, suffix: PostfixSuffix, env: Env): TypeIR {
+  if (isCallSuffix(suffix)) {
+    // Invoking the receiver — without knowing the callee's signature
+    // we fall back to string (matches legacy CallExpr typing).
+    return { kind: "primitive", name: "string" };
+  }
+  const ms = suffix as MemberSuffix;
+  return memberType(t, ms.member, env);
 }
 
 function memberOnEntity(target: Aggregate | EntityPart, name: string): TypeIR {

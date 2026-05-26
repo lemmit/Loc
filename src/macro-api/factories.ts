@@ -17,16 +17,18 @@ import type {
   Aggregate,
   AggregateMember,
   AssignOrCallStmt,
+  CallArg,
   Expression,
   FieldAccess,
   IdType,
   LValue,
-  MemberAccess,
+  MemberSuffix,
   NamedDecl,
   NamedType,
   NameRef,
   Operation,
   Parameter,
+  PostfixChain,
   PrimitiveType,
   Property,
   Statement,
@@ -230,34 +232,44 @@ export function nameRef(name: string): NameRef {
 /** A dotted member-access expression: `receiver.member`.  Used by
  * crudish to build `input.subject` from `input` + "subject".  `args`
  * is the empty array (no call) for property access; pass `call: true`
- * + args to construct a method invocation. */
+ * + args to construct a method invocation.
+ *
+ * Post grammar-flatten this emits a `PostfixChain` whose head is the
+ * receiver and whose single suffix is a `MemberSuffix` carrying the
+ * member name (and the optional call payload). */
 export function memberAccess(
   receiver: Expression,
   member: string,
   opts: { call?: boolean; args?: Expression[] } = {},
-): MemberAccess {
+): PostfixChain {
   const origin = currentOrigin();
   const args = opts.args ?? [];
-  // CallArg wraps each call argument with an optional name; for a
-  // simple positional call this is just an envelope.
-  const callArgs = args.map((a) => {
-    const node = { $type: "CallArg", value: a } as unknown as { $type: string; value: Expression };
+  const callArgs: CallArg[] = args.map((a) => {
+    const node = tag({ $type: "CallArg", value: a } as CallArg, origin);
     setContainer(a, node, "value");
     return node;
   });
-  const ma: MemberAccess = tag(
+  const suffix: MemberSuffix = tag(
     {
-      $type: "MemberAccess",
-      receiver,
+      $type: "MemberSuffix",
       member,
       call: opts.call ?? false,
       args: callArgs,
-    } as unknown as MemberAccess,
+    } as MemberSuffix,
     origin,
   );
-  setContainer(receiver, ma, "receiver");
-  callArgs.forEach((c, i) => setContainer(c, ma, "args", i));
-  return ma;
+  callArgs.forEach((c, i) => setContainer(c, suffix, "args", i));
+  const chain: PostfixChain = tag(
+    {
+      $type: "PostfixChain",
+      head: receiver,
+      suffixes: [suffix],
+    } as PostfixChain,
+    origin,
+  );
+  setContainer(receiver, chain, "head");
+  setContainer(suffix, chain, "suffixes", 0);
+  return chain;
 }
 
 /** An assignment statement: `target := value`.  `target` is a flat
