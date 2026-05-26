@@ -1,6 +1,6 @@
 // Auto-generated.
-import { Routes, Route, Link as RouterLink, useLocation, Outlet } from "{{routerPackage}}";
-import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button, Stack } from "@mantine/core";
+import { Routes, Route, Link as RouterLink, useLocation, useNavigate, Outlet } from "{{routerPackage}}";
+import { AppShell, Box, Burger, Card, Container, Divider, Grid, Group, Title, NavLink, Anchor, Alert, Badge, Button, Image, Stack, Text } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import React from "react";
 {{#each imports}}import {{specifier}} from "{{from}}";
@@ -131,10 +131,30 @@ function AppShellLayout() {
   );
 }
 
-export default function App() {
+{{#each namedLayouts}}
+// Named layout '{{name}}' — declared via `layout {{name}} { … }` in
+// the .ddd source.  Pages with `layout: {{name}}` route through
+// this wrapper instead of the default AppShellLayout.
+function {{name}}Layout() {
+{{#if usesNavigate}}  const navigate = useNavigate();
+{{/if}}  return (
+    <>
+{{#if hasHeader}}      {{{headerJsx}}}
+{{/if}}      <AppErrorBoundary>
+        <Outlet />
+      </AppErrorBoundary>
+{{#if hasFooter}}      {{{footerJsx}}}
+{{/if}}    </>
+  );
+}
+
+{{/each}}export default function App() {
   return (
     <Routes>
 {{#each outOfShellRoutes}}      <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}{{#each namedLayouts}}      <Route element={<{{name}}Layout />}>
+{{#each routes}}        <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}      </Route>
 {{/each}}      <Route element={<AppShellLayout />}>
 {{#each routes}}        <Route path="{{path}}" element={{expr elementJsx}} />
 {{/each}}        <Route path="*" element={<NotFound />} />

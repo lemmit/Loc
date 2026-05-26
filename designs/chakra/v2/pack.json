@@ -31,6 +31,8 @@
     "primitive-group": "primitive-group.hbs",
     "primitive-toolbar": "primitive-toolbar.hbs",
     "primitive-grid": "primitive-grid.hbs",
+    "primitive-section": "primitive-section.hbs",
+    "primitive-sticky": "primitive-sticky.hbs",
     "primitive-container": "primitive-container.hbs",
     "primitive-empty": "primitive-empty.hbs",
     "primitive-button": "primitive-button.hbs",
