@@ -25,8 +25,9 @@ import type {
   FunctionDecl,
   Invariant,
   LValue,
-  MemberAccess,
+  MemberSuffix,
   NameRef,
+  PostfixChain,
   Operation,
   Property,
   Statement,
@@ -89,29 +90,20 @@ function walkExpr(root: AstNode | undefined, cb: (n: AstNode) => void): void {
  *  one of the aggregate's state names. */
 function collectReads(expr: Expression | undefined, stateNames: Set<string>, into: Set<string>): void {
   walkExpr(expr, (n) => {
-    if (n.$type === "MemberAccess") {
-      const ma = n as MemberAccess;
-      // Only count the outermost step on a `this.` chain — `this.x.y.z` reads
-      // field `x`, not `y`/`z` (which are members of the receiver's type).
-      // The walker still descends into the receiver, but a non-`this`
-      // receiver suppresses the read.
-      if (isThisChainTip(ma)) into.add(ma.member);
+    if (n.$type === "PostfixChain") {
+      const pc = n as PostfixChain;
+      // `this.x` / `this.x.y` / `this.x.y.z` all read field `x` — the
+      // first member-suffix on a ThisRef head. Subsequent suffixes
+      // address members of the receiver's type, not aggregate state.
+      if (pc.head?.$type === "ThisRef" && pc.suffixes.length > 0) {
+        const first = pc.suffixes[0];
+        if (first?.$type === "MemberSuffix") into.add((first as MemberSuffix).member);
+      }
     } else if (n.$type === "NameRef") {
       const nr = n as NameRef;
       if (stateNames.has(nr.name)) into.add(nr.name);
     }
   });
-}
-
-/** True when this `MemberAccess` is the outermost `this.X` reference — i.e.
- *  its receiver is a ThisRef (we want `this.x`, but on `this.x.y` we want the
- *  outer access whose receiver is `this.x`'s member-access, NOT this one).
- *
- *  The trick: we read FIELD names off the aggregate, so only single-step
- *  `this.x` counts. The walker descends and re-visits the inner `this.x` of
- *  `this.x.y` — that inner one is the one we record. */
-function isThisChainTip(ma: MemberAccess): boolean {
-  return ma.receiver?.$type === "ThisRef";
 }
 
 /** Top-level segment written by an assign statement: `x := ...` writes `x`;

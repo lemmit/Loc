@@ -4,7 +4,7 @@ import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
 import { lowerModel, mergeLoomModels } from "../../../src/ir/lower.js";
 import { enrichLoomModel } from "../../../src/ir/enrichments.js";
-import type { LoomModel } from "../../../src/ir/loom-ir.js";
+import type { EnrichedLoomModel, LoomModel } from "../../../src/ir/loom-ir.js";
 import { validateLoomModel } from "../../../src/ir/validate.js";
 import { generateSystems, generateSystemsFromLoom } from "../../../src/system/index.js";
 import { captureSnapshots } from "../../../src/system/loomsnap.js";
@@ -133,7 +133,7 @@ function generateFromAst(input: {
   model: Model;
   diagnostics: BuildDiagnostic[];
 }): GenerateResult {
-  let loom: LoomModel;
+  let loom: EnrichedLoomModel;
   try {
     loom = enrichLoomModel(lowerModel(input.model));
   } catch (err) {
@@ -165,7 +165,7 @@ function generateFromLoom(input: {
   loom: LoomModel;
   diagnostics: BuildDiagnostic[];
 }): GenerateResult {
-  let loom: LoomModel;
+  let loom: EnrichedLoomModel;
   try {
     loom = enrichLoomModel(input.loom);
   } catch (err) {
@@ -201,7 +201,7 @@ function loweringError(prior: BuildDiagnostic[], err: unknown): GenerateResult {
   };
 }
 
-function irValidate(loom: LoomModel): BuildDiagnostic[] {
+function irValidate(loom: EnrichedLoomModel): BuildDiagnostic[] {
   return validateLoomModel(loom).map((d) => ({
     severity: d.severity === "error" ? ("error" as const) : ("warning" as const),
     message: d.message,
