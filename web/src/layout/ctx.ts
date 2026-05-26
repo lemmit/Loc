@@ -124,6 +124,11 @@ export interface LayoutCtx {
    *  latter are pushed back into the Monaco model + LSP so all surfaces stay
    *  in sync.  Omitted origin is treated as external (Builder-like). */
   onSourceChange: (text: string, origin?: "editor" | "builder") => void;
+  /** Counter incremented on every editor-originated source change (i.e.
+   *  the user typing in Monaco).  Drives the page-builder's debounced
+   *  live re-seed; builder-originated edits do **not** bump this, so the
+   *  Apply path can't echo-loop into the re-seed. */
+  editorSourceTick: number;
   onDiagnosticsChange: (items: Diagnostic[]) => void;
   scheduleAutoGenerate: () => void;
   /** Imperative handle to the live Monaco model (set while the editor is

@@ -328,6 +328,10 @@ export default function App(): JSX.Element {
   const getAppLog = useCallback((): LogLine[] => appLogRef.current, []);
 
   const sourceRef = useRef<string>(initialSource);
+  // Bumped on every editor-origin onSourceChange (the user typing).  The
+  // page-builder subscribes to this for its debounced text→canvas live
+  // re-seed; bumping on builder edits would echo-loop, so we don't.
+  const [editorSourceTick, setEditorSourceTick] = useState(0);
   const editorHandleRef = useRef<EditorHandle | null>(null);
   const buildClientRef = useRef<LoomBuildClient | null>(null);
   const engineRef = useRef<RuntimeEngine | null>(null);
@@ -949,6 +953,12 @@ export default function App(): JSX.Element {
     engine: engineRef.current,
     onSourceChange: (text, origin) => {
       sourceRef.current = text;
+      // Bump the live-sync tick **only** for editor-origin edits (the user
+      // typing in Monaco).  Builder Apply also flows through here with
+      // origin "builder" — bumping for those would re-seed the canvas
+      // from the just-applied source and clobber the user's craft
+      // selection mid-edit (echo loop).
+      if (origin === "editor") setEditorSourceTick((n) => n + 1);
       const s = sourcesRef.current;
       // URL hash is single-file by design (Stage 3 would generalise
       // it).  Only sync when editing main.ddd so the hash doesn't
@@ -967,6 +977,7 @@ export default function App(): JSX.Element {
       // LSP — keeping the source tab and Problems panel in sync.
       if (origin !== "editor") editorHandleRef.current?.setSource(text);
     },
+    editorSourceTick,
     onDiagnosticsChange: setDiagnostics,
     scheduleAutoGenerate,
     editorHandleRef,

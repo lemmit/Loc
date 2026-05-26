@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { Editor, Frame, useEditor, type SerializedNodes } from "@craftjs/core";
+import { findNodeAtPath, pathOfNode } from "./live-sync";
 import { Box, Button, Drawer, Group, NumberInput, ScrollArea, Select, Stack, Switch, Text, TextInput, Textarea, UnstyledButton } from "@mantine/core";
 
 // Mantine palette names offered in the `color`-kind dropdown (the current value
@@ -82,6 +83,13 @@ function TextField({ label, value, onChange }: { label: string; value: string; o
 
 interface PageBuilderProps {
   initialNodes: SerializedNodes;
+  /** Current seed for the canvas — refreshed on every parse by the parent
+   *  (debounced text→canvas live re-seed).  When this changes the
+   *  `LiveSync` child captures the active selection's structural path,
+   *  calls `actions.deserialize(...)` to swap the tree in place, then
+   *  restores the selection at the same path in the new seed.  Equal by
+   *  reference to `initialNodes` on first render — no-op then. */
+  liveNodes: SerializedNodes;
   pages: string[];
   pageName: string;
   /** Typed option sets for `ref` props (e.g. { aggregate: [...] }). */
@@ -104,10 +112,11 @@ interface PageBuilderProps {
 // Structural page-body editor.  Palette (add) | canvas (arrange/select) |
 // settings (edit props).  "Apply to source" hands the serialized tree back to
 // BuilderPane, which regenerates the `body:` and splices it into `.ddd`.
-export default function PageBuilder({ initialNodes, pages, pageName, options, operations = {}, componentNames = [], diagnostics = [], onSelectPage, onApply, compact = false }: PageBuilderProps): JSX.Element {
+export default function PageBuilder({ initialNodes, liveNodes, pages, pageName, options, operations = {}, componentNames = [], diagnostics = [], onSelectPage, onApply, compact = false }: PageBuilderProps): JSX.Element {
   const editorResolver = useMemo(() => resolverWithComponents(componentNames), [componentNames]);
   return (
     <Editor resolver={editorResolver} key={pageName}>
+      <LiveSync nodes={liveNodes} />
       {compact ? (
         <CompactLayout initialNodes={initialNodes} pages={pages} pageName={pageName} options={options} operations={operations} diagnostics={diagnostics} onSelectPage={onSelectPage} onApply={onApply} />
       ) : (
@@ -129,10 +138,45 @@ export default function PageBuilder({ initialNodes, pages, pageName, options, op
   );
 }
 
+// In-place text→canvas live re-seed.  When `nodes` changes by reference
+// (the parent's debounced parse landed), we capture the active selection's
+// structural path, call `actions.deserialize(nodes)` to swap the tree, and
+// re-select the node at the same path in the new seed.  A path that
+// doesn't resolve any more (the source change moved or removed that node)
+// clears the selection rather than erroring — by design.
+//
+// Skip the first run: `<Frame data={initialNodes}>` does the initial
+// seed, so a same-tree deserialize on mount would clobber craft's
+// selection state.
+function LiveSync({ nodes }: { nodes: SerializedNodes }): null {
+  const { actions, query } = useEditor();
+  const firstRef = useRef(true);
+  useEffect(() => {
+    if (firstRef.current) { firstRef.current = false; return; }
+    // Snapshot the current selection path *before* deserialize.  The
+    // selection event holds the craft node id; we map it to a structural
+    // path so it survives the id reshuffle that deserialize triggers.
+    const selectedId = query.getEvent("selected").first();
+    const currentSerialized = selectedId ? query.getSerializedNodes() : null;
+    const path = selectedId && currentSerialized
+      ? pathOfNode(currentSerialized as unknown as Record<string, { nodes?: string[]; parent?: string | null }>, selectedId)
+      : null;
+    actions.deserialize(nodes);
+    // Re-select at the same path in the freshly-deserialized tree.  An
+    // unresolvable path (node moved or removed) just clears selection.
+    if (path) {
+      const fresh = query.getSerializedNodes();
+      const next = findNodeAtPath(fresh as unknown as Record<string, { nodes?: string[]; parent?: string | null }>, path);
+      if (next && next !== "ROOT") actions.selectNode(next);
+    }
+  }, [nodes, actions, query]);
+  return null;
+}
+
 // Mobile layout: full-width canvas; the palette ("Add") and settings ("Edit")
 // move into bottom drawers reachable from the toolbar.  The settings drawer
 // auto-opens on selection so tap-to-select flows straight into editing.
-function CompactLayout({ initialNodes, pages, pageName, options, operations = {}, diagnostics = [], onSelectPage, onApply }: Omit<PageBuilderProps, "compact">): JSX.Element {
+function CompactLayout({ initialNodes, pages, pageName, options, operations = {}, diagnostics = [], onSelectPage, onApply }: Omit<PageBuilderProps, "compact" | "liveNodes">): JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { selectedId } = useEditor((state) => ({ selectedId: [...state.events.selected][0] }));
