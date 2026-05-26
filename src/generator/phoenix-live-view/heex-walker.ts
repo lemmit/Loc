@@ -55,6 +55,7 @@ import type {
 } from "../../ir/loom-ir.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
+import { heexTarget } from "./heex-target.js";
 
 export type RenderPosition = "template" | "handler";
 
@@ -225,11 +226,15 @@ export function walkBodyToHeex(
   const heex = body ? renderExpr(body, ctx) : `<!-- empty body -->`;
 
   // Helper imports — resolve from used set against declared imports.
-  const aliasLines: string[] = [];
-  for (const decl of ui.helperImports as readonly UiHelperImportIR[]) {
-    if (!ctx.usedHelpers.has(decl.name)) continue;
-    aliasLines.push(elixirAliasForHelper(decl));
-  }
+  // Delegated to `heexTarget.renderHelperImports` (cross-framework
+  // contract — see src/generator/_walker/target.ts).  Caller adds
+  // the 2-space module-body indent that's local to this emission
+  // site; the target returns bare `alias <Module>, as: <Pascal>`
+  // lines so other callers (future Phoenix orchestrators) can use
+  // their own indent.
+  const aliasLines = heexTarget
+    .renderHelperImports(ctx.usedHelpers, ui.helperImports as readonly UiHelperImportIR[])
+    .map((line) => `  ${line}`);
 
   return {
     heex,
@@ -542,13 +547,17 @@ function isStringLit(e: ExprIR): boolean {
 
 function renderMatch(expr: Extract<ExprIR, { kind: "match" }>, ctx: WalkContext): string {
   // `match { p => v; … else => f }` → Elixir `cond do … end`.
-  // Wrapping in `<%= … %>` is the caller's job when the match appears
-  // in template position; in handler position, just the bare cond.
-  const arms = expr.arms
-    .map((a) => `      ${renderExpr(a.cond, ctx)} -> ${renderExpr(a.value, ctx)}`)
-    .join("\n");
-  const elseArm = expr.otherwise ? `\n      true -> ${renderExpr(expr.otherwise, ctx)}` : "";
-  const cond = `cond do\n${arms}${elseArm}\n    end`;
+  // Delegates the bare `cond do … end` shape to `heexTarget.renderMatch`
+  // (cross-framework contract — see src/generator/_walker/target.ts).
+  // The `<%= … %>` template-position wrap stays here because it's
+  // walker-local (HEEx walker tracks `ctx.position`; the target
+  // contract is position-agnostic for match).
+  const arms = expr.arms.map((a) => ({
+    predicate: renderExpr(a.cond, ctx),
+    value: renderExpr(a.value, ctx),
+  }));
+  const elseArm = expr.otherwise ? renderExpr(expr.otherwise, ctx) : undefined;
+  const cond = heexTarget.renderMatch(arms, elseArm);
   return ctx.position === "template" ? `<%= ${cond} %>` : cond;
 }
 
@@ -689,29 +698,31 @@ function renderApiCall(call: ApiCallSite, ctx: WalkContext): string {
 
 function renderNavigate(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   // navigate(<Page>, { customerId: x }) — first arg is the page
-  // reference, second is the params object.
-  // The router uses `live "<route>", <Page>Live`; we lower to
-  // `push_navigate(socket, to: ~p"<route>")`.  Param substitution into
-  // `:param` placeholders happens via Phoenix's `~p` sigil.
+  // reference, second is the params object.  The router uses
+  // `live "<route>", <Page>Live`; lowers to `push_navigate(socket,
+  // to: ~p"<route>")` with param substitution via Phoenix's `~p`
+  // sigil.
+  //
+  // Walker resolves the page → route + params object → arg list,
+  // then delegates the `push_navigate(...)` shape to
+  // `heexTarget.renderNavigate` (cross-framework contract — see
+  // src/generator/_walker/target.ts).  The `args[0].kind !== "ref"`
+  // fallback stays walker-local because it's a parse-time invariant
+  // failure, not a per-target rendering decision.
   const target = expr.args[0];
   const params = expr.args[1];
   if (!target || target.kind !== "ref") {
     return `push_navigate(socket, to: "/")`;
   }
-  // We don't have the target page's route at walker time without a
-  // page registry; emit a comment marker the orchestrator can
-  // post-process if it wants typed routes.  For v0, derive the route
-  // from the page name's snake form — the orchestrator's renderRouter
-  // does the same for scaffolded pages (`live "/<snake>", <Pascal>Live`).
   const routePath = `/${snake(target.name)}`;
-  const queryPairs =
+  const args =
     params && params.kind === "object"
-      ? params.fields
-          .map((f) => `${snake(f.name)}=#{${renderExpr(f.value, { ...ctx, position: "handler" })}}`)
-          .join("&")
-      : "";
-  const route = queryPairs ? `${routePath}?${queryPairs}` : routePath;
-  return `push_navigate(socket, to: ~p"${route}")`;
+      ? params.fields.map((f) => ({
+          name: f.name,
+          value: renderExpr(f.value, { ...ctx, position: "handler" }),
+        }))
+      : [];
+  return heexTarget.renderNavigate(routePath, args);
 }
 
 function renderToast(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
@@ -1565,11 +1576,22 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
   switch (stmt.kind) {
     case "assign": {
       // state.field := value  →  |> assign(:field, value)
-      // Path's first segment is the state field name.
+      // Path's first segment is the state field name.  Delegates
+      // the pipe-assign shape to `heexTarget.renderStateWrite`
+      // (cross-framework contract — see src/generator/_walker/target.ts).
+      // We don't carry the full `StateFieldIR` at this site, so pass
+      // a minimal-shape StateRef — the target's `renderStateWrite`
+      // consumes only the `.name` slot.  When/if the contract grows
+      // a method that consults the field's type, this site threads
+      // the full StateFieldIR via `ctx.page.state` lookup.
       const fieldName = stmt.target.segments[0];
       if (!fieldName) return `# bad assign`;
       const value = renderExpr(stmt.value, { ...ctx, position: "handler" });
-      return `|> assign(:${snake(fieldName)}, ${value})`;
+      const stateRef = {
+        field: { name: fieldName, type: { kind: "primitive" as const, name: "string" as const } },
+        name: fieldName,
+      };
+      return heexTarget.renderStateWrite(stateRef, value);
     }
     case "let": {
       const value = renderExpr(stmt.expr, { ...ctx, position: "handler" });
@@ -1657,20 +1679,10 @@ export function defaultInitFor(t: TypeIR): string {
 // Helpers.
 // ---------------------------------------------------------------------------
 
-function elixirAliasForHelper(decl: UiHelperImportIR): string {
-  // Loom DSL: `import helper formatPrice from "./helpers/price"`.
-  // Phoenix-side: `import <App>Web.Helpers.Price` (the user is
-  // responsible for ensuring that module exists at the named path).
-  // v0 emits an `alias` with the path-derived module name; the user
-  // can override at the convention level.
-  const moduleName = decl.path
-    .replace(/^\.\//, "")
-    .replace(/^\.\.\//g, "")
-    .split("/")
-    .map((seg) => upperFirst(seg.replace(/[^a-zA-Z0-9]/g, "_")))
-    .join(".");
-  return `  alias ${moduleName}, as: ${upperFirst(decl.name)}`;
-}
+// Phoenix-side helper-import emission (`alias <Module>, as: <Pascal>`)
+// moved to `heex-target.ts:renderHelperImports`.  The walker calls
+// the target through the cross-framework contract above; this file
+// no longer carries the path → module name derivation.
 
 function indent(s: string, n: number): string {
   const pad = " ".repeat(n);
