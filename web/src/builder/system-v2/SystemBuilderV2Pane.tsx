@@ -4,7 +4,7 @@
 // node; a breadcrumb up top tracks the path; clicking a drillable node pushes
 // a step. v1 is unchanged and still ships in the "Model" tab.
 
-import { useEffect, useMemo, useState, Fragment, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment, type ReactNode } from "react";
 import { Box, Button, Group, Text } from "@mantine/core";
 import {
   Background,
@@ -66,6 +66,13 @@ import {
 } from "./deployable-edge-rebind";
 import StmtNode, { type StmtNodeData } from "./StmtNode";
 import { buildViewGraph, findAggregate, type ViewGraph, type ViewKind, type ViewPath } from "./view-graph";
+import {
+  clearPersisted,
+  loadPersisted,
+  mergePersistedPositions,
+  savePersisted,
+  type PositionMap,
+} from "./persisted-positions";
 
 const KIND_COLOR: Record<ViewKind, string> = {
   system: "var(--mantine-color-indigo-8)",
@@ -98,9 +105,13 @@ function toRfNodes(
   g: ViewGraph,
   stmtData: Map<string, Record<string, unknown>>,
   constructData: Map<string, ConstructNodeData>,
+  persisted: PositionMap,
 ): Node[] {
   return g.nodes.map((n) => {
     if (n.kind === "stmt") {
+      // Stmt nodes are an auto-layout sequence (operation/workflow flow view);
+      // manual positioning makes no sense, so they're never persisted and stay
+      // non-draggable. Ignore any persisted entry for `stmt:*` ids.
       return {
         id: n.id,
         type: "stmt",
@@ -112,12 +123,18 @@ function toRfNodes(
     }
     const cdata = constructData.get(n.id);
     if (cdata) {
+      // The root banner re-centres over its children on every layout pass —
+      // a user-saved position would fight that. Construct nodes otherwise
+      // honour a persisted override if one exists for this view-path.
+      const useDerived = n.isRoot === true;
+      const overridden = !useDerived ? persisted[n.id] : undefined;
+      const position = overridden ?? { x: n.x, y: n.y };
       return {
         id: n.id,
         type: "construct",
-        position: { x: n.x, y: n.y },
+        position,
         data: cdata as unknown as Record<string, unknown>,
-        draggable: false,
+        draggable: !useDerived,
         selectable: false,
       } satisfies Node;
     }
@@ -687,18 +704,68 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, parsed, path, rev, compact]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(toRfNodes(graph, stmtData, constructData));
+  // Per-view persisted positions. The ref mirrors localStorage for the
+  // current view and is re-read whenever `path` changes (drilling into a new
+  // node, popping the breadcrumb, etc.). `persistedRev` bumps after every
+  // commit so the toRfNodes effect re-spreads the overrides without making
+  // `persistedRef.current` part of the deps array.
+  const persistedRef = useRef<PositionMap>(loadPersisted(path));
+  const [persistedRev, setPersistedRev] = useState(0);
+  useEffect(() => {
+    persistedRef.current = loadPersisted(path);
+    setPersistedRev((r) => r + 1);
+  }, [path]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(toRfNodes(graph, stmtData, constructData, persistedRef.current));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(toRfEdges(graph));
   useEffect(() => {
-    setNodes(toRfNodes(graph, stmtData, constructData));
+    setNodes(toRfNodes(graph, stmtData, constructData, persistedRef.current));
     setEdges(toRfEdges(graph));
-  }, [graph, stmtData, constructData, setNodes, setEdges]);
+    // persistedRev triggers a re-spread after a reset / cross-view restore;
+    // persistedRef.current is otherwise read by reference inside toRfNodes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, stmtData, constructData, persistedRev, setNodes, setEdges]);
 
   const rf = useReactFlow();
   const nodesInitialized = useNodesInitialized();
   useEffect(() => {
     if (nodesInitialized && graph.nodes.length > 0) void rf.fitView({ padding: 0.2 });
   }, [nodesInitialized, graph, rf]);
+
+  /** Persist a node's final position on drag end. Skip stmt nodes (never
+   *  draggable) and the root banner (auto-centred). Same-position drags
+   *  (no-op clicks reported as drag stop) are also skipped to avoid
+   *  growing the storage with redundant entries. */
+  const handleNodeDragStop = useCallback(
+    (_e: unknown, n: Node): void => {
+      if (n.id.startsWith("stmt:")) return;
+      const v = graph.nodes.find((x) => x.id === n.id);
+      if (v?.isRoot) return;
+      const cur = persistedRef.current[n.id];
+      if (cur && cur.x === n.position.x && cur.y === n.position.y) return;
+      const next: PositionMap = { ...persistedRef.current, [n.id]: { x: n.position.x, y: n.position.y } };
+      persistedRef.current = next;
+      savePersisted(path, next);
+      // Re-render so the "Reset layout" overlay appears on the first drag.
+      // (toRfNodes reads positions from React Flow's internal state already —
+      // this bump is only needed to surface `hasPersisted`.)
+      setPersistedRev((r) => r + 1);
+    },
+    [graph, path],
+  );
+
+  /** Reset the persisted layout for the current view and re-apply the pure
+   *  computed positions. Behind a `confirm` so a stray tap doesn't wipe the
+   *  user's arrangement. */
+  const resetLayout = (): void => {
+    if (typeof window !== "undefined" && !window.confirm("Reset positions for this view?")) return;
+    clearPersisted(path);
+    persistedRef.current = {};
+    setPersistedRev((r) => r + 1);
+    void rf.fitView({ padding: 0.2 });
+  };
+
+  const hasPersisted = Object.keys(persistedRef.current).length > 0;
 
   const drill = (id: string): void => {
     const v = graph.nodes.find((x) => x.id === id);
@@ -733,6 +800,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onReconnect={onReconnect}
+          onNodeDragStop={handleNodeDragStop}
           onNodeClick={(_, n) => drill(n.id)}
           fitView
           minZoom={0.1}
@@ -741,6 +809,18 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           <Background />
           <Controls />
         </ReactFlow>
+        {hasPersisted && (
+          <Button
+            size="compact-xs"
+            variant="default"
+            onClick={resetLayout}
+            data-testid="c4system-v2-reset-layout"
+            title="Discard hand-dragged positions for this view and restore the derived layout"
+            style={{ position: "absolute", top: 8, right: 8, zIndex: 5 }}
+          >
+            Reset layout
+          </Button>
+        )}
         {graph.nodes.length === 0 && (
           <Text
             size="xs"

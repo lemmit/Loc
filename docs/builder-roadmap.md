@@ -588,8 +588,19 @@ Phasing:
   for these slots. Node widens to 320/360px while the editor is open. Gated
   by the v2 e2e (Banking invariant `ƒx` opens an editor; Acme repository
   find filter `ƒx` opens an editor).
-- **Phase 5** — polish: per-view positions, search / coverage / grouped layout
-  adapted per zoom level, transitions on drill, mobile passes.
+- ~~**Phase 8 (per-view persisted node positions).**~~ Done: construct
+  nodes are now draggable, and their final position is written to
+  localStorage under `loom-v2-pos-${pathHash}` keyed by node id on
+  `onNodeDragStop`. The pane re-reads the per-view map whenever the
+  breadcrumb path changes, and the `toRfNodes` boundary overlays any
+  persisted entry onto the pure-computed `view-graph` layout — so drags
+  survive source edits + reloads. Stmt rows (auto-laid flow column) and
+  the root banner are excluded. A "Reset layout" overlay button (behind a
+  `confirm`) clears the current view's entries. Gated by
+  `test/system-v2/persisted-positions.test.ts` (pure-helper unit tests)
+  and the v2 e2e (drag → reload → restored → reset → derived).
+- **Phase 5** — polish: search / coverage / grouped layout adapted per zoom
+  level, transitions on drill, mobile passes.
 
 Planned — recommended order:
 
@@ -612,10 +623,10 @@ Planned — recommended order:
 
 All six planned items are now done; the Open list above is the remaining backlog
 (structured bare-call statements, drag-rebind, add target-context picker, nested
-grouping, persisted positions).
+grouping).
 
-Layout polish (slot in opportunistically): drag-to-rebind edges, persisted
-positions, auto-layout (dagre/elk) + nested grouping, add target-context picker.
+Layout polish (slot in opportunistically): drag-to-rebind edges, auto-layout
+(dagre/elk) + nested grouping, add target-context picker.
 
 ## Playground LSP — multi-file workspace
 
