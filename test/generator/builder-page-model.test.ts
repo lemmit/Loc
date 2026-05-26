@@ -4,7 +4,13 @@ import { fileURLToPath } from "node:url";
 import { type AstNode, AstUtils } from "langium";
 import { describe, expect, it } from "vitest";
 import type { BodyProp, Page } from "../../src/language/generated/ast.js";
-import { type BuilderNode, emitBody, enumStateFields, expectedAssignEnum, seedFromBody } from "../../web/src/builder/page/model.js";
+import {
+  type BuilderNode,
+  emitBody,
+  enumStateFields,
+  expectedAssignEnum,
+  seedFromBody,
+} from "../../web/src/builder/page/model.js";
 import { fromCraft, toCraft } from "../../web/src/builder/page/serialize.js";
 import { parseRawResult } from "../_helpers/index.js";
 
@@ -234,7 +240,9 @@ describe("page-builder model — per-position enum inference", () => {
     const page = [...AstUtils.streamAst(r.value)].find((n) => n.$type === "Page") as Page;
     return page;
   };
-  const enums = new Map<string, readonly string[]>([["OrderStatus", ["New", "Confirmed", "Shipped"]]]);
+  const enums = new Map<string, readonly string[]>([
+    ["OrderStatus", ["New", "Confirmed", "Shipped"]],
+  ]);
 
   it("indexes enum-typed state fields by name → enum name", () => {
     const page = pageWith("state { status: OrderStatus notes: string count: int }");

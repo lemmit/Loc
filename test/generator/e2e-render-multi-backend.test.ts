@@ -81,9 +81,15 @@ describe("e2e expansion — multi-backend replay", () => {
     const files = await generateSystemFiles(BANK_THREE_BACKEND);
     const e2e = files.get("e2e/Bank.e2e.test.ts")!;
     // Each replay binds `base` to its own ENDPOINTS entry.
-    expect(e2e).toMatch(/it\("create an account against hono_api"[\s\S]*?const base = ENDPOINTS\.hono_api;/);
-    expect(e2e).toMatch(/it\("create an account against dotnet_api"[\s\S]*?const base = ENDPOINTS\.dotnet_api;/);
-    expect(e2e).toMatch(/it\("create an account against elixir_api"[\s\S]*?const base = ENDPOINTS\.elixir_api;/);
+    expect(e2e).toMatch(
+      /it\("create an account against hono_api"[\s\S]*?const base = ENDPOINTS\.hono_api;/,
+    );
+    expect(e2e).toMatch(
+      /it\("create an account against dotnet_api"[\s\S]*?const base = ENDPOINTS\.dotnet_api;/,
+    );
+    expect(e2e).toMatch(
+      /it\("create an account against elixir_api"[\s\S]*?const base = ENDPOINTS\.elixir_api;/,
+    );
   });
 
   it("Phoenix replay carries the /api prefix; Hono and .NET don't", async () => {

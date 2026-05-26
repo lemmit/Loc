@@ -114,9 +114,7 @@ export function renderE2EFile(sys: SystemIR, modulesByName: Map<string, ModuleIR
       // backend by name (`my test against dotnetApi`).  Single-
       // backend systems still gain the suffix — small fixture
       // churn but consistent semantics.
-      lines.push(
-        ...renderTest(t, ctx, ` against ${serviceSlug(d.name)}`).map((l) => `  ${l}`),
-      );
+      lines.push(...renderTest(t, ctx, ` against ${serviceSlug(d.name)}`).map((l) => `  ${l}`));
       lines.push("");
     }
   }
@@ -199,10 +197,7 @@ function isBackendPlatform(platform: string): boolean {
 /** Resolve `<slug>` (snake_plural of an aggregate name) to the module
  *  that owns the aggregate.  Returns undefined if no module declares
  *  an aggregate whose plural-snake name matches the slug. */
-function findModuleForSlug(
-  slug: string,
-  modulesByName: Map<string, ModuleIR>,
-): string | undefined {
+function findModuleForSlug(slug: string, modulesByName: Map<string, ModuleIR>): string | undefined {
   for (const m of modulesByName.values()) {
     for (const c of m.contexts) {
       for (const a of c.aggregates) {
