@@ -137,10 +137,18 @@ the loom-emitted form lives at the module-function level to avoid a
 `redefining module Inspect.<...>` collision under `mix compile
 --warnings-as-errors`).  Honours `sensitive(...)` field tags by
 substituting `<redacted>` for the value while keeping the field
-name in the structural output.  Never reached by `string(aggregate)`
-or implicit `"x " + aggregate` — the user-facing form is `derived
-display: string = ...` (opt-in), routed through the Loom expression
-layer and the React Select picker.
+name in the structural output.  VO-typed fields are inlined
+structurally one level deep — `price: Money` shows as
+`price: Money(amount: 99, currency: 'USD')` rather than the opaque
+`price: [Money]` placeholder; further nesting (VO inside VO,
+arrays, optionals) falls back to the placeholder so the expression
+stays bounded and self-recursive VO shapes can't cycle.  A
+`sensitive(...)` tag on the parent's VO-typed field redacts the
+whole VO; per-field `sensitive(...)` inside the VO redacts only
+that slot.  Never reached by `string(aggregate)` or implicit
+`"x " + aggregate` — the user-facing form is `derived display:
+string = ...` (opt-in), routed through the Loom expression layer
+and the React Select picker.
 
 **`db/repositories/<aggregate>-repository.ts`** — built by
 `repository-builder.ts`:

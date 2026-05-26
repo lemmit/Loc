@@ -171,12 +171,12 @@ function enrichContext(
     ...rootValueObjects.filter((v) => !ownVoNames.has(v.name)),
   ];
   const enums = [...ctx.enums, ...rootEnums.filter((e) => !ownEnumNames.has(e.name))];
-  const aggregates = ctx.aggregates.map(enrichAggregate);
+  const aggregates = ctx.aggregates.map((a) => enrichAggregate(a, valueObjects));
   const repositories = ensureFindAll(aggregates, ctx.repositories);
   return { ...ctx, valueObjects, enums, aggregates, repositories };
 }
 
-function enrichAggregate(agg: AggregateIR): AggregateIR {
+function enrichAggregate(agg: AggregateIR, contextVOs: ValueObjectIR[]): AggregateIR {
   const parts = agg.parts.map(enrichPart);
   const fields = agg.fields.map(resolveFieldAccess);
   // Synthesize a `derived inspect: string = <structural>` when the user
@@ -184,8 +184,14 @@ function enrichAggregate(agg: AggregateIR): AggregateIR {
   // can emit a `ToString()` / `Inspect` / `util.inspect.custom` hook
   // unconditionally.  See plan
   // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+  //
+  // The VO lookup gives synth visibility into nested fields so a
+  // `price: Money` field can expand to `price: <Money(amount: ...,
+  // currency: '...')>` rather than the opaque `[Money]` placeholder
+  // the first cut emitted.
+  const voLookup = new Map(contextVOs.map((v) => [v.name, v] as const));
   const userInspect = agg.derived.find((d) => d.name === "inspect");
-  const inspectDerived = userInspect ?? synthesizeInspect(agg);
+  const inspectDerived = userInspect ?? synthesizeInspect(agg, voLookup);
   const derived = userInspect ? agg.derived : [...agg.derived, inspectDerived];
   // Compute wireShape on the post-synthesis, post-access-resolution
   // agg so the wire spec is idempotent (second enrichment finds the
@@ -214,7 +220,7 @@ function enrichAggregate(agg: AggregateIR): AggregateIR {
  * non-string operands via `convert` IR for us if needed, but because
  * we control the structure we emit the conversion explicitly so
  * downstream backends see a fully-typed tree from the start. */
-function synthesizeInspect(agg: AggregateIR): DerivedIR {
+function synthesizeInspect(agg: AggregateIR, voLookup: Map<string, ValueObjectIR>): DerivedIR {
   const STRING: TypeIR = { kind: "primitive", name: "string" };
   const lit = (value: string): ExprIR => ({ kind: "literal", lit: "string", value });
   const concat = (left: ExprIR, right: ExprIR): ExprIR => ({
@@ -227,20 +233,81 @@ function synthesizeInspect(agg: AggregateIR): DerivedIR {
   });
   const redacted = lit("<redacted>");
 
-  // Wrap a field-value reference in whatever conversion the implicit-
-  // string-concat rule would have applied, so the tree is fully typed.
-  // Non-stringifiable types (VO, array, optional) fall back to a
-  // structural placeholder — calling host-language `.ToString()` on a
-  // VO would surface the type name (`Domain.ValueObjects.Money`) rather
-  // than the contents, which is rarely useful.  A future iteration can
-  // refine VO inspect via the VO's own derived display.
-  const valueForField = (
-    fieldName: string,
-    fieldType: TypeIR,
-    sensitive: boolean,
-    isQuotedString: boolean,
-  ): ExprIR => {
+  /** Stringify a single primitive/id/enum/string LEAF access node.
+   * Caller picks the access (top-level `ref` to a stored property,
+   * or `member` access through a containing VO).  Out-of-scope
+   * shapes (entity refs, arrays, optionals) return the placeholder
+   * — see the type-shorthand fallback at the bottom. */
+  const stringifyLeaf = (access: ExprIR, fieldType: TypeIR, sensitive: boolean): ExprIR => {
     if (sensitive) return redacted;
+    if (fieldType.kind === "primitive" && fieldType.name === "string") {
+      // Wrap as `'<value>'` — open quote, value, close quote.
+      return concat(concat(lit("'"), access), lit("'"));
+    }
+    if (fieldType.kind === "primitive" || fieldType.kind === "id" || fieldType.kind === "enum") {
+      const fromPrimitive =
+        fieldType.kind === "primitive"
+          ? fieldType.name
+          : fieldType.kind === "id"
+            ? fieldType.valueType
+            : undefined;
+      return { kind: "convert", target: "string", from: fromPrimitive, value: access };
+    }
+    return lit(`[${typeShorthand(fieldType)}]`);
+  };
+
+  /** Inline a VO field's structural inspect: each VO field becomes a
+   * `member` access through `parentRef`, formatted as `VOName(f1:
+   * <v1>, f2: <v2>)`.  Nested VOs / arrays / optionals inside the
+   * inlined VO fall back to a placeholder (depth-1 — keeps the
+   * expression bounded and avoids cycles for self-recursive VO
+   * shapes, which are rare but possible). */
+  const inlineVO = (
+    parentFieldName: string,
+    voType: TypeIR & { kind: "valueobject" },
+    vo: ValueObjectIR,
+  ): ExprIR => {
+    const parentRef: ExprIR = {
+      kind: "ref",
+      name: parentFieldName,
+      refKind: "this-prop",
+      type: voType,
+    };
+    const pieces: ExprIR[] = [lit(`${vo.name}(`)];
+    let first = true;
+    for (const f of vo.fields) {
+      if (!first) pieces.push(lit(", "));
+      pieces.push(lit(`${f.name}: `));
+      const isSensitive = !!f.sensitivity && f.sensitivity.length > 0;
+      const access: ExprIR = {
+        kind: "member",
+        receiver: parentRef,
+        member: f.name,
+        receiverType: voType,
+        memberType: f.type,
+      };
+      pieces.push(stringifyLeaf(access, f.type, isSensitive));
+      first = false;
+    }
+    pieces.push(lit(")"));
+    let expr: ExprIR = pieces[0]!;
+    for (let i = 1; i < pieces.length; i++) {
+      expr = concat(expr, pieces[i]!);
+    }
+    return expr;
+  };
+
+  const valueForField = (fieldName: string, fieldType: TypeIR, sensitive: boolean): ExprIR => {
+    if (sensitive) return redacted;
+    // Single (non-array, non-optional) VO with a known definition →
+    // inline the VO's structural form so debug strings show the
+    // contents rather than `[Money]`.  Sensitive marker on the field
+    // itself was already handled above (redact wholesale); per-VO-
+    // field sensitivity is honoured inside `inlineVO`.
+    if (fieldType.kind === "valueobject") {
+      const vo = voLookup.get(fieldType.name);
+      if (vo) return inlineVO(fieldName, fieldType, vo);
+    }
     // Plain `ref` to a stored property — same shape `lower-expr` would
     // produce for a bare property name inside a derived body.
     const ref: ExprIR = {
@@ -249,29 +316,7 @@ function synthesizeInspect(agg: AggregateIR): DerivedIR {
       refKind: "this-prop",
       type: fieldType,
     };
-    if (isQuotedString) {
-      // Wrap as `'<value>'` — three concats: open quote, value, close.
-      return concat(concat(lit("'"), ref), lit("'"));
-    }
-    if (fieldType.kind === "primitive" && fieldType.name === "string") {
-      return ref;
-    }
-    // Stringifiable primitive / id / enum — emit an explicit `convert`
-    // to string so backends don't have to re-derive the conversion.
-    if (fieldType.kind === "primitive" || fieldType.kind === "id" || fieldType.kind === "enum") {
-      const fromPrimitive =
-        fieldType.kind === "primitive"
-          ? fieldType.name
-          : fieldType.kind === "id"
-            ? fieldType.valueType
-            : undefined;
-      return { kind: "convert", target: "string", from: fromPrimitive, value: ref };
-    }
-    // VO / entity ref / array / optional — emit a placeholder.  The
-    // type name in brackets gives the developer a structural hint
-    // without depending on a host-language `.ToString()` that often
-    // produces garbage for these shapes.
-    return lit(`[${typeShorthand(fieldType)}]`);
+    return stringifyLeaf(ref, fieldType, false);
   };
 
   const pieces: ExprIR[] = [lit(`${agg.name}(`)];
@@ -294,9 +339,8 @@ function synthesizeInspect(agg: AggregateIR): DerivedIR {
 
   // Stored properties.
   for (const f of agg.fields) {
-    const isString = f.type.kind === "primitive" && f.type.name === "string";
     const isSensitive = !!f.sensitivity && f.sensitivity.length > 0;
-    pushField(f.name, valueForField(f.name, f.type, isSensitive, isString && !isSensitive));
+    pushField(f.name, valueForField(f.name, f.type, isSensitive));
   }
 
   // Containments: short structural placeholder.  Recursing into the

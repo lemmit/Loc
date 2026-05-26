@@ -190,6 +190,139 @@ describe("auto-injected `derived inspect`", () => {
     expect(wireNames).not.toContain("inspect");
   });
 
+  it("VO fields are expanded inline structurally — `[Money]` placeholder is gone", async () => {
+    // First-cut synth (PR #524) emitted `[Money]` for any VO-typed
+    // field — the developer saw `Product(price: [Money])` in their
+    // logs.  PR C inlines the VO's own fields through `member`-access
+    // expressions so the debug form shows the contents:
+    //   Product(price: Money(amount: 99, currency: 'USD'))
+    // Depth-1: VO fields whose own type is another VO / array /
+    // optional still fall back to the placeholder, bounding the
+    // expression and ducking cycle hazards on self-recursive VO
+    // shapes.
+    const loom = await buildLoomModel(`
+      context X {
+        valueobject Money {
+          amount: int
+          currency: string
+        }
+        aggregate Product {
+          sku: string
+          price: Money
+        }
+        repository Products for Product { }
+      }
+    `);
+    const p = allAggregates(loom).find((a) => a.name === "Product")!;
+    const seen: string[] = [];
+    const walk = (e: typeof p.inspectDerived.expr): void => {
+      if (e.kind === "binary") {
+        walk(e.left);
+        walk(e.right);
+      } else if (e.kind === "literal") {
+        seen.push(e.value);
+      } else if (e.kind === "convert") {
+        walk(e.value);
+      } else if (e.kind === "member") {
+        seen.push(`member:${e.member}`);
+      } else if (e.kind === "ref") {
+        seen.push(`ref:${e.name}`);
+      } else if (e.kind === "id") {
+        seen.push("id");
+      }
+    };
+    walk(p.inspectDerived!.expr);
+    // Structural envelope of the inlined VO.
+    expect(seen).toContain("Money(");
+    expect(seen).toContain("amount: ");
+    expect(seen).toContain("currency: ");
+    // Member-access through the VO field — both VO fields reachable.
+    expect(seen).toContain("member:amount");
+    expect(seen).toContain("member:currency");
+    // The legacy opaque placeholder is gone.
+    expect(seen).not.toContain("[Money]");
+  });
+
+  it("a sensitive VO field on the parent redacts the whole VO (no inlining leaks fields)", async () => {
+    // `sensitive(...)` on the parent's VO-typed field marks the
+    // ENTIRE VO opaque — inlining the VO's fields would defeat the
+    // redaction contract.  Synth short-circuits to `<redacted>`
+    // before reaching `inlineVO`.
+    const loom = await buildLoomModel(`
+      context X {
+        valueobject Token {
+          value: string
+          algorithm: string
+        }
+        aggregate Session {
+          userId: string
+          authToken: Token sensitive(pii)
+        }
+        repository Sessions for Session { }
+      }
+    `);
+    const s = allAggregates(loom).find((a) => a.name === "Session")!;
+    const seen: string[] = [];
+    const walk = (e: typeof s.inspectDerived.expr): void => {
+      if (e.kind === "binary") {
+        walk(e.left);
+        walk(e.right);
+      } else if (e.kind === "literal") {
+        seen.push(e.value);
+      } else if (e.kind === "member") {
+        seen.push(`member:${e.member}`);
+      }
+    };
+    walk(s.inspectDerived!.expr);
+    expect(seen).toContain("<redacted>");
+    // The VO's internal field names must NOT leak as labels or as
+    // member accesses.
+    expect(seen).not.toContain("value: ");
+    expect(seen).not.toContain("algorithm: ");
+    expect(seen).not.toContain("member:value");
+    expect(seen).not.toContain("member:algorithm");
+  });
+
+  it("sensitive field INSIDE an inlined VO redacts only that field — siblings stay", async () => {
+    // Per-field sensitivity inside a VO survives the inline.  Caller
+    // sees structural slots for non-sensitive siblings; the
+    // sensitive one shows `<redacted>` in place of its value.
+    const loom = await buildLoomModel(`
+      context X {
+        valueobject CardInfo {
+          brand: string
+          number: string sensitive(pii)
+        }
+        aggregate Payment {
+          card: CardInfo
+        }
+        repository Payments for Payment { }
+      }
+    `);
+    const p = allAggregates(loom).find((a) => a.name === "Payment")!;
+    const seen: string[] = [];
+    const walk = (e: typeof p.inspectDerived.expr): void => {
+      if (e.kind === "binary") {
+        walk(e.left);
+        walk(e.right);
+      } else if (e.kind === "literal") {
+        seen.push(e.value);
+      } else if (e.kind === "member") {
+        seen.push(`member:${e.member}`);
+      } else if (e.kind === "convert") {
+        walk(e.value);
+      }
+    };
+    walk(p.inspectDerived!.expr);
+    expect(seen).toContain("CardInfo(");
+    expect(seen).toContain("brand: ");
+    expect(seen).toContain("number: ");
+    // Brand is still reached via member access; number is replaced.
+    expect(seen).toContain("member:brand");
+    expect(seen).not.toContain("member:number");
+    expect(seen).toContain("<redacted>");
+  });
+
   it("sensitive-tagged fields render as `<redacted>` in the synthesized inspect", async () => {
     const loom = await buildLoomModel(`
       context X {

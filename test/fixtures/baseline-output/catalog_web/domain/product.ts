@@ -20,7 +20,7 @@ export class Product {
   get sku(): string { return this._sku; }
   get price(): Money { return this._price; }
   get display(): string { return this._sku; }
-  get inspect(): string { return "Product(" + "id: " + String(this._id) + ", " + "sku: " + "'" + this._sku + "'" + ", " + "price: " + "[Money]" + ")"; }
+  get inspect(): string { return "Product(" + "id: " + String(this._id) + ", " + "sku: " + "'" + this._sku + "'" + ", " + "price: " + "Money(" + "amount: " + String(this._price.amount) + ", " + "currency: " + "'" + this._price.currency + "'" + ")" + ")"; }
   toString(): string { return this.inspect; }
   [Symbol.for("nodejs.util.inspect.custom")](): string { return this.inspect; }
   pullEvents(): Events.DomainEvent[] {
