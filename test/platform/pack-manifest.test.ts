@@ -43,7 +43,7 @@ describe("pack manifest: shellFiles + shellGlobs", () => {
         "components-ui-card.hbs": "// card",
       },
     );
-    const pack = loadPack(dir);
+    const pack = loadPack(dir, { validateRequired: false });
     expect(pack.manifest.shellFiles).toEqual({
       "tailwind-config": "tailwind.config.ts",
     });
@@ -61,7 +61,7 @@ describe("pack manifest: shellFiles + shellGlobs", () => {
       },
       { "page-list.hbs": "// list" },
     );
-    const pack = loadPack(dir);
+    const pack = loadPack(dir, { validateRequired: false });
     expect(pack.manifest.shellFiles).toBeUndefined();
     expect(pack.manifest.shellGlobs).toBeUndefined();
   });
@@ -81,7 +81,7 @@ describe("pack manifest: helpers", () => {
       },
       { "greet.hbs": "{{rename name}}" },
     );
-    const pack = loadPack(dir);
+    const pack = loadPack(dir, { validateRequired: false });
     expect(pack.render("greet", { name: "Foo" })).toBe("Bar");
     // Unknown keys fall through verbatim — matches the lucide helper's
     // contract.  Templates rely on this so an unmapped icon name still
@@ -98,7 +98,7 @@ describe("pack manifest: helpers", () => {
       },
       { "greet.hbs": "hi {{name}}" },
     );
-    const pack = loadPack(dir);
+    const pack = loadPack(dir, { validateRequired: false });
     expect(pack.manifest.helpers).toBeUndefined();
     expect(pack.render("greet", { name: "world" })).toBe("hi world");
   });

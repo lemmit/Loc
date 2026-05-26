@@ -104,7 +104,10 @@ function readSharedSources(format: "tsx" | "heex"): Record<string, string> {
  *  ready-to-use LoadedPack.  Also pulls in the repo-root shared
  *  directories (`vite/`, `api/`, `docker/`) as pack-agnostic
  *  partials available to every loaded pack. */
-export function loadPack(packDir: string): LoadedPack {
+export function loadPack(
+  packDir: string,
+  options: { validateRequired?: boolean } = {},
+): LoadedPack {
   const manifestPath = path.join(packDir, "pack.json");
   if (!fs.existsSync(manifestPath)) {
     throw new Error(
@@ -170,5 +173,12 @@ export function loadPack(packDir: string): LoadedPack {
       sharedSources[logicalName] = fs.readFileSync(path.join(stackDir, file), "utf-8");
     }
   }
-  return compilePack(packDir, manifest, sources, (f) => path.join(packDir, f), sharedSources);
+  return compilePack(
+    packDir,
+    manifest,
+    sources,
+    (f) => path.join(packDir, f),
+    sharedSources,
+    options,
+  );
 }
