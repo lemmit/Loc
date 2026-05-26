@@ -237,6 +237,8 @@ system LoomLanding {
         // ── Vision section ──────────────────────────────────────
         // Phase 6 wraps this in Section { id: "vision", ... } so the
         // nav-bar anchor at the top of the page actually jumps here.
+        Section {
+          id: "vision",
         Container {
           Stack {
             // Kicker label.  Phase 4 / Phase 5 will give us text-transform
@@ -277,12 +279,15 @@ system LoomLanding {
           },
           size: "xl"
         },
+        },
 
         Divider {},
 
         // ── Pipeline section ────────────────────────────────────
         Container {
           Stack {
+        Section {
+          id: "pipeline",
             Text { "HOW IT WORKS" },
             Heading { "From .ddd source to a running stack.", level: 2 },
             Text { "The pipeline is fully type-safe end-to-end.  Validation runs before any generator emits; a --dry-run mode prints the full write plan without touching disk." },
@@ -309,12 +314,15 @@ system LoomLanding {
           },
           size: "xl"
         },
+        },
 
         Divider {},
 
         // ── Platforms section ───────────────────────────────────
         Container {
           Stack {
+        Section {
+          id: "platforms",
             Text { "THREE PLATFORMS, ONE MODEL" },
             Heading { "Idiomatic output. Identical wire shapes.", level: 2 },
             Text { "Every backend produces the same aggregate root, repository, routes, and DTOs — but in the language and framework conventions you'd write by hand." },
@@ -352,12 +360,15 @@ system LoomLanding {
           },
           size: "xl"
         },
+        },
 
         Divider {},
 
         // ── Features section ────────────────────────────────────
         Container {
           Stack {
+        Section {
+          id: "features",
             Text { "WHAT YOU GET" },
             Heading { "One generate. A full deployable stack.", level: 2 },
             Text { "From a single source, ddd generate system emits a runnable multi-deployable system with database init, healthchecks, OpenAPI specs, and end-to-end tests." },
@@ -401,12 +412,15 @@ system LoomLanding {
           },
           size: "xl"
         },
+        },
 
         Divider {},
 
         // ── CLI section ─────────────────────────────────────────
         Container {
           Stack {
+        Section {
+          id: "cli",
             Text { "CLI" },
             Heading { "Three commands. One model. Whatever shape you need.", level: 2 },
             Text { "Generate a single deployable for a focused service, or the full system for an integrated stack.  Watch mode re-runs on save; --dry-run prints the plan with write / skip annotations." },
@@ -446,6 +460,7 @@ system LoomLanding {
             }
           },
           size: "xl"
+        },
         },
 
         Divider {},
