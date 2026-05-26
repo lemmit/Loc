@@ -265,7 +265,11 @@ const PREVIEW_CSP = [
   // each rebuilt bundle as a `<script type="module" src=blob:…>` so
   // the preview refreshes without re-writing the whole document.
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.tailwindcss.com https://cdn.jsdelivr.net",
-  "style-src 'self' 'unsafe-inline'",
+  // jsdelivr allowed in style-src so the highlight.js github-dark
+  // stylesheet (loaded by the CodeBlock primitive's injected head
+  // tags) can apply — script-src already permits the matching
+  // highlight.min.js.
+  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
   "connect-src 'none'",
@@ -453,6 +457,33 @@ ${ESCAPE_END_SCRIPT(importMapJson)}
 </script>
 ${vendorCssLink}
 ${tailwindScripts}
+<!-- highlight.js — for the CodeBlock primitive.  Loaded
+     unconditionally so React-rendered <pre><code class="language-…">
+     blocks get colourised in the Playground preview.  The
+     MutationObserver below re-runs hljs.highlightElement on every
+     code block that appears after first paint, since React mounts
+     after DOMContentLoaded and hljs.highlightAll() alone would
+     miss the entire generated tree. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script>
+  (function () {
+    function apply() {
+      if (!window.hljs) return;
+      var nodes = document.querySelectorAll("pre code:not([data-hljs])");
+      for (var i = 0; i < nodes.length; i++) {
+        try { window.hljs.highlightElement(nodes[i]); } catch (e) {}
+        nodes[i].setAttribute("data-hljs", "1");
+      }
+    }
+    function arm() {
+      apply();
+      new MutationObserver(apply).observe(document.body, { childList: true, subtree: true });
+    }
+    if (document.body) arm();
+    else document.addEventListener("DOMContentLoaded", arm);
+  })();
+</script>
 ${styleTagFor(args.css)}
 <style>
   html, body { margin: 0; padding: 0; height: 100%; }
