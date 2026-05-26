@@ -20,6 +20,17 @@ import { describe, expect, it } from "vitest";
 // `.github/workflows/phoenix-build.yml` runs the same check on every
 // PR that touches the Phoenix generator.
 //
+// Fixtures live under `test/e2e/fixtures/phoenix-build/` — the
+// workflow reads them too (single source of truth, so the workflow
+// stays in sync without manual heredoc edits per language change).
+//
+// CI knob:  `LOOM_PHOENIX_OUT_DIR=<path>` — when set, the test uses
+// `<path>/<fixture-stem>` as the project outDir instead of a per-run
+// tmpdir.  Skips regeneration when `mix.exs` already exists at that
+// path (lets the workflow pre-generate to seed the cache key), and
+// skips the rm-rf cleanup so `deps/` + `_build/` survive for the
+// post-job `actions/cache` save.
+//
 // Network requirement: `mix deps.get` reaches repo.hex.pm.  In a
 // proxy-restricted sandbox the call fails with a TLS handshake
 // error from Erlang's :inets — the Dockerfile bakes proxy CAs via
@@ -32,107 +43,39 @@ import { describe, expect, it } from "vitest";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
 const cli = path.join(repoRoot, "bin", "cli.js");
+const fixturesDir = path.join(here, "fixtures", "phoenix-build");
 
 const ENABLED = process.env.LOOM_PHOENIX_BUILD === "1";
-
-const FIXTURE_DDD = `system AcmeLV {
-  module Sales {
-    context Sales {
-      valueobject Money {
-        amount: decimal
-        currency: string
-      }
-      aggregate Customer {
-        name: string
-        derived display: string = name
-        email: string
-        creditLimit: Money
-        invariant email.length > 0
-        operation adjustCredit(amount: decimal) {
-          precondition amount > 0
-        }
-      }
-      repository Customers for Customer { }
-    }
-  }
-  api SalesApi from Sales
-  ui SalesAdmin with scaffold(modules: [Sales]) { }
-  deployable phoenixApp {
-    platform: phoenixLiveView
-    modules: Sales
-    serves: SalesApi
-    ui: SalesAdmin
-    port: 4000
-  }
-}
-`;
-
-// Reference-collection (`Id<T>[]`) fixture — exercises the m2m join
-// entity + many_to_many relationship + `manage_relationship` mutations
-// + `exists(...)` filter that Phoenix join-table emission produces.
-// Roster's `examples/roster.ddd` is a bare context; wrap it in a
-// phoenixLiveView system the same way `FIXTURE_DDD` does for acme.
-const ROSTER_FIXTURE_DDD = `system Roster {
-  module Roster {
-    context Roster {
-      aggregate Pokemon {
-        species: string
-        derived display: string = species
-        level: int
-        invariant level >= 1
-        invariant level <= 100
-      }
-      aggregate Trainer {
-        name: string
-        derived display: string = name
-        party: Pokemon id[]
-        caught: Pokemon id[]
-        invariant party.count <= 6
-        operation addToParty(pokemon: Pokemon id) {
-          precondition party.count < 6
-          party += pokemon
-          caught += pokemon
-        }
-        operation removeFromParty(pokemon: Pokemon id) {
-          precondition party.count > 0
-          party -= pokemon
-        }
-      }
-      repository Trainers for Trainer {
-        find holdingInParty(pokemon: Pokemon id): Trainer[]
-            where this.party.contains(pokemon)
-      }
-    }
-  }
-  api RosterApi from Roster
-  ui RosterAdmin with scaffold(modules: [Roster]) { }
-  deployable phoenixApp {
-    platform: phoenixLiveView
-    modules: Roster
-    serves: RosterApi
-    ui: RosterAdmin
-    port: 4000
-  }
-}
-`;
 
 describe.skipIf(!ENABLED)(
   "generated Phoenix project compiles against real Ash 3.x (LOOM_PHOENIX_BUILD=1)",
   () => {
     it.each([
-      { name: "acme-lv.ddd", ddd: FIXTURE_DDD },
-      { name: "roster.ddd", ddd: ROSTER_FIXTURE_DDD },
-    ])("$name → mix compile --warnings-as-errors", ({ name, ddd }) => {
-      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-phoenix-"));
-      const dddPath = path.join(outDir, name);
+      { name: "acme-lv.ddd" },
+      // Reference-collection (`Id<T>[]`) fixture — exercises the m2m join
+      // entity + many_to_many relationship + `manage_relationship` mutations
+      // + `exists(...)` filter that Phoenix join-table emission produces.
+      { name: "roster.ddd" },
+    ])("$name → mix compile --warnings-as-errors", ({ name }) => {
+      const fixturePath = path.join(fixturesDir, name);
+      const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
+      const outDir = baseOutDir
+        ? path.join(baseOutDir, name.replace(/\.ddd$/, ""))
+        : fs.mkdtempSync(path.join(os.tmpdir(), "loom-phoenix-"));
+      fs.mkdirSync(outDir, { recursive: true });
       try {
-        fs.writeFileSync(dddPath, ddd);
-        // 1. Generate the project.
-        execSync(`node ${cli} generate system ${dddPath} -o ${outDir}/out`, {
-          stdio: "inherit",
-          cwd: repoRoot,
-        });
         const projDir = path.join(outDir, "out", "phoenix_app");
+        // Skip regeneration when the project already exists at the
+        // expected path — i.e. the CI workflow pre-generated it to
+        // compute the dep-cache key.  Local runs (no env var) always
+        // start from a fresh tmpdir so this branch is the cold path.
+        if (!fs.existsSync(path.join(projDir, "mix.exs"))) {
+          // 1. Generate the project.
+          execSync(`node ${cli} generate system ${fixturePath} -o ${outDir}/out`, {
+            stdio: "inherit",
+            cwd: repoRoot,
+          });
+        }
         expect(fs.existsSync(path.join(projDir, "mix.exs"))).toBe(true);
 
         // 2. mix deps.get + mix compile inside the elixir image.
@@ -149,10 +92,15 @@ describe.skipIf(!ENABLED)(
           },
         );
       } finally {
-        try {
-          fs.rmSync(outDir, { recursive: true, force: true });
-        } catch {
-          /* ignore */
+        // CI-driven runs (LOOM_PHOENIX_OUT_DIR set) MUST leave deps/
+        // and _build/ on disk so `actions/cache` can save them after
+        // the job.  Only clean up the tmpdir variant.
+        if (!baseOutDir) {
+          try {
+            fs.rmSync(outDir, { recursive: true, force: true });
+          } catch {
+            /* ignore */
+          }
         }
       }
     }, 700_000);
