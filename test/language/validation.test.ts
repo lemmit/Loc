@@ -410,6 +410,86 @@ describe("validation", () => {
       expect(errors).toEqual([]);
     });
 
+    it("accepts the recognised layout preset values (default / none)", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page Dash {
+              route: "/dash"
+              layout: default
+              body: f()
+            }
+            page Kiosk {
+              route: "/kiosk"
+              layout: none
+              body: g()
+            }
+          }
+        }
+      `);
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects an unknown layout value on a page", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page X {
+              route: "/x"
+              layout: weird
+              body: f()
+            }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown layout 'weird'/.test(e))).toBe(true);
+    });
+
+    it("rejects two `layout:` properties on the same page using the display name", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page X {
+              route: "/x"
+              layout: none
+              layout: default
+              body: f()
+            }
+          }
+        }
+      `);
+      expect(errors.some((e) => /more than one 'layout' property/.test(e))).toBe(true);
+    });
+
+    it("rejects `layout:` on a scaffold-synthesised page body (e.g. Home / scaffoldList)", async () => {
+      // The body shapes here are the same ones the scaffold stdlib
+      // synthesises (see `src/stdlib/scaffold/_pages.ts`).  v1
+      // refuses `layout:` on these explicitly so the future
+      // named-layout SystemMember (v2) can introduce per-page
+      // chrome selection without a backwards-incompatible meaning
+      // shift.
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page Home {
+              route: "/"
+              layout: none
+              body: Home()
+            }
+            page OrdersList {
+              route: "/orders"
+              layout: default
+              body: scaffoldList(of: Order)
+            }
+          }
+        }
+      `);
+      const matches = errors.filter((e) =>
+        /'layout' is not allowed on scaffold-synthesised pages/.test(e),
+      );
+      expect(matches.length).toBeGreaterThanOrEqual(2);
+    });
+
     it("rejects a menu link to a page declared in a different ui", async () => {
       // page links are real Langium cross-references
       // again now that scaffold expansion runs at the AST level

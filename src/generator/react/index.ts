@@ -181,8 +181,12 @@ export function generateReactForContexts(
   // can mount them.  Pages that override a scaffolded shape at the
   // conventional name keep the conventional path and are routed
   // by the per-aggregate / -workflow / -view loop in
-  // `prepareAppShellVM`.
-  const extraRoutes = ui ? deriveExtraRoutesFromUi(ui) : undefined;
+  // `prepareAppShellVM`.  Pages with `layout: none` go to a
+  // separate `outOfShell` channel that mounts as sibling routes
+  // outside the AppShell chrome.
+  const extraRouteSplit = ui ? deriveExtraRoutesFromUi(ui) : undefined;
+  const extraRoutes = extraRouteSplit?.inShell;
+  const outOfShellRoutes = extraRouteSplit?.outOfShell;
 
   // App.tsx's per-aggregate / -workflow / -view route block emits
   // imports for scaffold-archetype page files (`./pages/<plural>/list`,
@@ -228,6 +232,7 @@ export function generateReactForContexts(
       extraRoutes,
       pack,
       hasScaffoldHome,
+      outOfShellRoutes,
     ),
   );
   // Home is always synthesised by the scaffold expander

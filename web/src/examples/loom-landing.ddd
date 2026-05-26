@@ -1,0 +1,155 @@
+// Loom landing page — exercises the v1 `layout: none` page selector.
+//
+// `/`     — a marketing landing page that opts out of the app chrome
+//           via `layout: none`.  No header.  No sidebar.  Just the
+//           page body, centred and full-bleed.
+//
+// `/app`  — a placeholder "you're in the app" page that keeps the
+//           default chrome so the contrast is visible side-by-side.
+//           Click "Open the app" on the landing → header + sidebar
+//           reappear; "← Back to landing" returns to the bare page.
+//
+// Pack-neutral: switch `design:` on the deployable below to see the
+// same DSL routed through shadcn / mui / chakra.
+
+system LoomLanding {
+
+  // Visual identity — projected by every React pack to its idiom.
+  theme {
+    primary:    "#6366f1"
+    neutral:    "#64748b"
+    radius:     "lg"
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+  }
+
+  // Empty module — the landing has no domain.  An empty context
+  // keeps the api deployable's pipeline non-empty so the playground
+  // preview still has something to bundle and boot.
+  module Empty {
+    context Empty { }
+  }
+
+  ui Landing {
+
+    // ──────────────────────────────────────────────────────────────
+    // The landing page — `layout: none` strips the AppShell entirely.
+    // No header bar, no sidebar, no main padding: the page body
+    // mounts at the top of the React Router tree as a sibling of
+    // the AppShellLayout, not nested inside it.
+    // ──────────────────────────────────────────────────────────────
+    page Home {
+      route:  "/"
+      layout: none
+      title:  "Loom — DDD as code"
+
+      body: Stack(
+
+        // ── Hero ────────────────────────────────────────────────
+        Container(
+          Stack(
+            Heading("Loom", level: 1),
+            Heading("Domain-driven design, as code.", level: 2),
+            Text("Describe your system once in a tiny .ddd source — aggregates, value-objects, events, repositories, workflows, views, APIs, UIs.  Loom generates a runnable multi-deployable tree: TypeScript + Hono, .NET + ASP.NET Core, React + Vite + Mantine, Phoenix LiveView + Ash — all wired together as one docker-compose stack."),
+            Group(
+              Button("Open the app", to: "/app"),
+              Anchor("View on GitHub", to: "https://github.com/lemmit/Loc")
+            )
+          ),
+          size: "md"
+        ),
+
+        Divider(),
+
+        // ── Three feature cards ─────────────────────────────────
+        Container(
+          Stack(
+            Heading("One source of truth", level: 3),
+            Grid(
+              Card("One DSL",
+                Text("Aggregates, value-objects, events, repositories, workflows, views, APIs, UIs — all expressed in a single .ddd source.")
+              ),
+              Card("Four platforms",
+                Text("TypeScript + Hono, .NET + ASP.NET Core, React + Vite + Mantine, Phoenix LiveView + Ash.  Same wire shape across all four.")
+              ),
+              Card("Browser playground",
+                Text("Edit, generate, preview — without leaving the tab.  Backed by the same compiler the CLI uses.")
+              )
+            )
+          ),
+          size: "lg"
+        ),
+
+        Divider(),
+
+        // ── Why-it-matters strip ────────────────────────────────
+        Container(
+          Stack(
+            Heading("Why bother?", level: 3),
+            Stack(
+              Stat("Backends generated",  "3"),
+              Stat("Frontends generated", "1"),
+              Stat("Hand-written glue",   "0")
+            ),
+            Text("Change a field once, propagate to every layer — schema, DTO, repository, form, table, e2e test.  No more out-of-sync clients.")
+          ),
+          size: "lg"
+        ),
+
+        Divider(),
+
+        // ── Footer ──────────────────────────────────────────────
+        Container(
+          Group(
+            Anchor("Playground", to: "/app"),
+            Anchor("GitHub",     to: "https://github.com/lemmit/Loc"),
+            Anchor("Docs",       to: "https://github.com/lemmit/Loc/tree/main/docs")
+          ),
+          size: "lg"
+        )
+      )
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // The in-app page — default chrome.  Header + sidebar reappear.
+    // ──────────────────────────────────────────────────────────────
+    page AppHome {
+      route: "/app"
+      title: "Loom"
+
+      body: Stack(
+        Heading("You're in the app", level: 1),
+        Text("Notice the header up top and the navbar on the left?  This page uses the default layout (chrome on), so it picks up the AppShell wrapper the deployable's design pack emits."),
+        Text("The landing page at \"/\" sets `layout: none` and mounts outside that wrapper — no chrome at all, just the page body."),
+        Anchor("← Back to the landing", to: "/")
+      )
+    }
+
+    // Sidebar — only the in-app page appears.  The landing intentionally
+    // stays out of the nav (it has no chrome to host a sidebar anyway).
+    menu {
+      section "Loom" {
+        link AppHome { label: "App home" }
+      }
+    }
+  }
+
+  // Hono backend — empty surface but required so the playground's
+  // preview pipeline has something to bundle and boot alongside the
+  // React frontend.
+  deployable api {
+    platform: hono
+    modules: Empty
+    port: 3000
+  }
+
+  // React frontend — Mantine pack by default.  Swap `design:` for
+  // `shadcn` / `mui` / `chakra` to route the same DSL through a
+  // different design system.
+  deployable webApp {
+    platform: react
+    targets: api
+    ui: Landing
+    port: 3001
+    design: mantine
+  }
+}

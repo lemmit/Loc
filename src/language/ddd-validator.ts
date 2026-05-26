@@ -1976,6 +1976,33 @@ export class DddValidator {
         }
       }
     }
+
+    // LayoutProp — v1 admits two preset values (`default`, `none`)
+    // and only on explicit user-written pages.  Scaffold-synthesised
+    // pages (Home / aggregate list / detail / etc.) reject the
+    // property pending v2's named-layout SystemMember, which makes
+    // `layout: AdminFrame` on a scaffold page meaningful.
+    const allowedLayoutValues = new Set(["default", "none"]);
+    const scaffolded = isScaffoldOriginPageBody(p);
+    for (const prop of p.props) {
+      if (prop.$type !== "LayoutProp") continue;
+      if (!allowedLayoutValues.has(prop.value)) {
+        accept(
+          "error",
+          `Unknown layout '${prop.value}' on page '${p.name}'.  Recognised values: ${[
+            ...allowedLayoutValues,
+          ].join(", ")}.`,
+          { node: prop, property: "value" },
+        );
+      }
+      if (scaffolded) {
+        accept(
+          "error",
+          `'layout' is not allowed on scaffold-synthesised pages in v1 (page '${p.name}').  Move the layout selector to an explicit page, or wait for v2's named-layout support.`,
+          { node: prop, property: "value" },
+        );
+      }
+    }
   }
 
   private checkMenuBlock(block: MenuBlock, ui: Ui, accept: ValidationAcceptor): void {
@@ -2127,9 +2154,50 @@ function pagePropDisplayName(typeName: string): string {
       return "body";
     case "PageMenuMeta":
       return "menu";
+    case "LayoutProp":
+      return "layout";
     default:
       return typeName;
   }
+}
+
+// Names of body-call expressions produced by the scaffold stdlib
+// (see `src/stdlib/scaffold/_pages.ts`).  Used by the layout
+// validator to refuse `layout:` on scaffold-synthesised pages in
+// v1 — the AST shape is the source of truth here because the
+// validator runs before IR lowering, and `inferPageOrigin`
+// (`src/ir/lower.ts:934`) is the lowering's same-shape mirror.
+const SCAFFOLD_BODY_CALL_NAMES = new Set([
+  "Home",
+  "WorkflowsIndex",
+  "ViewsIndex",
+  "scaffoldList",
+  "scaffoldNewForm",
+  "scaffoldWorkflowForm",
+  "scaffoldViewList",
+]);
+
+function isScaffoldOriginPageBody(p: Page): boolean {
+  const bodyProp = p.props.find((prop) => prop.$type === "BodyProp");
+  if (!bodyProp || bodyProp.$type !== "BodyProp") return false;
+  const expr = bodyProp.expr;
+  if (!expr || expr.$type !== "CallExpr") return false;
+  const callee = expr.callee;
+  if (!callee || callee.$type !== "NameRef") return false;
+  if (SCAFFOLD_BODY_CALL_NAMES.has(callee.name)) return true;
+  // Aggregate-detail pages are emitted as `Stack(scaffoldDetails(of:),
+  // …)` — recognise by scanning the Stack's args for a
+  // `scaffoldDetails` call (matches the lowering-side discriminator
+  // in `inferPageOrigin`).
+  if (callee.name === "Stack") {
+    for (const arg of expr.args) {
+      const v = arg.value;
+      if (!v || v.$type !== "CallExpr") continue;
+      const inner = v.callee;
+      if (inner && inner.$type === "NameRef" && inner.name === "scaffoldDetails") return true;
+    }
+  }
+  return false;
 }
 
 function _singular(selector: string): string {

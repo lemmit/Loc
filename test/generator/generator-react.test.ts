@@ -308,6 +308,79 @@ describe("react generator", () => {
     expect(app).toMatch(/<Route path="\*" element={<NotFound \/>} \/>/);
   });
 
+  describe("per-page `layout:` (v1)", () => {
+    // Inline DSL mirrors `examples/acme.ddd`'s minimum shape — one
+    // module + api + ui + react deployable + hono deployable — so
+    // the react generator runs end-to-end.  Each test adds one
+    // explicit page with the layout selector under test.
+    const buildSrc = (page: string): string => `
+        system Acme {
+          module Sales {
+            context S {
+              aggregate Order { name: string }
+              repository Orders for Order { }
+            }
+          }
+          api SalesApi from Sales
+          ui WebApp with scaffold(modules: [Sales]) {
+            api Sales: SalesApi
+            ${page}
+          }
+          storage primarySql { type: postgres }
+          deployable api {
+            platform: hono
+            modules: Sales { primary: primarySql }
+            serves: SalesApi
+            port: 3001
+          }
+          deployable web_app {
+            platform: static
+            targets: api
+            ui: WebApp { Sales: api }
+            port: 5173
+          }
+        }
+      `;
+
+    it("mounts a `layout: none` page OUTSIDE the AppShell layout-route", async () => {
+      const { generateSystemFiles } = await import("../_helpers/index.js");
+      const files = await generateSystemFiles(
+        buildSrc(`page Kiosk {
+              route: "/kiosk"
+              layout: none
+              body: Heading("Kiosk")
+            }`),
+      );
+      const app = files.get("web_app/src/App.tsx")!;
+      expect(app).toBeDefined();
+      // Layout route extracted; Outlet is the slot.
+      expect(app).toMatch(/function AppShellLayout\(\)/);
+      expect(app).toMatch(/<AppErrorBoundary>\s*<Outlet \/>\s*<\/AppErrorBoundary>/);
+      // The `layout: none` page mounts as a sibling of the
+      // <Route element={<AppShellLayout />}> wrapper — not nested
+      // inside it.
+      const re =
+        /<Route path="\/kiosk" element=\{<Kiosk \/>\} \/>\s*<Route element=\{<AppShellLayout \/>\}>/;
+      expect(app).toMatch(re);
+    });
+
+    it("a `layout: default` page mounts inside the AppShell layout-route alongside scaffold routes", async () => {
+      const { generateSystemFiles } = await import("../_helpers/index.js");
+      const files = await generateSystemFiles(
+        buildSrc(`page Console {
+              route: "/console"
+              layout: default
+              body: Heading("Console")
+            }`),
+      );
+      const app = files.get("web_app/src/App.tsx")!;
+      expect(app).toBeDefined();
+      // Inside the layout-route block (AppShellLayout's <Route>).
+      const layoutBlock = app.split("<Route element={<AppShellLayout />}>")[1] ?? "";
+      expect(layoutBlock).toMatch(/<Route path="\/console" element=\{<Console \/>\} \/>/);
+    });
+  });
+
   describe("design tokens (theme block → Mantine theme)", () => {
     it("emits src/theme.ts with shade ramps + wires MantineProvider when theme is declared", async () => {
       const model = await buildModel("examples/acme.ddd");

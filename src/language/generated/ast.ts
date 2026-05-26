@@ -109,6 +109,7 @@ export type DddKeywordNames =
     | "internal"
     | "invariant"
     | "kafka"
+    | "layout"
     | "let"
     | "link"
     | "long"
@@ -337,7 +338,7 @@ export function isNameRefIdent(item: unknown): item is NameRefIdent {
     return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type PageProp = BodyProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
+export type PageProp = BodyProp | LayoutProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
 
 export const PageProp = 'PageProp';
 
@@ -881,6 +882,18 @@ export const Lambda = 'Lambda';
 
 export function isLambda(item: unknown): item is Lambda {
     return reflection.isInstance(item, Lambda);
+}
+
+export interface LayoutProp extends AstNode {
+    readonly $container: Page;
+    readonly $type: 'LayoutProp';
+    value: string;
+}
+
+export const LayoutProp = 'LayoutProp';
+
+export function isLayoutProp(item: unknown): item is LayoutProp {
+    return reflection.isInstance(item, LayoutProp);
 }
 
 export interface LetStmt extends AstNode {
@@ -1928,6 +1941,7 @@ export type DddAstType = {
     Invariant: Invariant
     LValue: LValue
     Lambda: Lambda
+    LayoutProp: LayoutProp
     LetStmt: LetStmt
     LiteralExpr: LiteralExpr
     MacroArg: MacroArg
@@ -2020,7 +2034,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryExpr, BindEntry, BodyProp, BoolLit, BoundedContext, CallArg, CallExpr, Component, ComponentDecl, Containment, ContextMember, DecLit, Deployable, DerivedProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, LetStmt, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberAccess, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, Module, ModuleBinding, ModuleStorageBinding, MoneyLit, NameRef, NamedDecl, NamedType, NewExpr, NowExpr, NullLit, ObjectFieldInit, ObjectLit, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SensitivityClause, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
+        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryExpr, BindEntry, BodyProp, BoolLit, BoundedContext, CallArg, CallExpr, Component, ComponentDecl, Containment, ContextMember, DecLit, Deployable, DerivedProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, LayoutProp, LetStmt, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberAccess, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, Module, ModuleBinding, ModuleStorageBinding, MoneyLit, NameRef, NamedDecl, NamedType, NewExpr, NowExpr, NullLit, ObjectFieldInit, ObjectLit, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SensitivityClause, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2059,6 +2073,7 @@ export class DddAstReflection extends AbstractAstReflection {
                 return this.isSubtype(Expression, supertype);
             }
             case BodyProp:
+            case LayoutProp:
             case PageMenuMeta:
             case RequiresProp:
             case RouteProp:
@@ -2521,6 +2536,14 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'body' },
                         { name: 'param' },
                         { name: 'stmts', defaultValue: [] }
+                    ]
+                };
+            }
+            case LayoutProp: {
+                return {
+                    name: LayoutProp,
+                    properties: [
+                        { name: 'value' }
                     ]
                 };
             }

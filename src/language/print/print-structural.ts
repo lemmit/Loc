@@ -315,6 +315,8 @@ function printPageProp(node: PageProp): string {
         "menu",
         node.entries.map((e) => `${e.name}: ${printExpr(e.value)}`),
       );
+    case "LayoutProp":
+      return `layout: ${node.value}`;
     default: {
       const exhaustive: never = node;
       throw new Error(`printPageProp: unhandled ${(exhaustive as { $type: string }).$type}`);
