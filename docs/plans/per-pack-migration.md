@@ -4,7 +4,7 @@ Distilled scope for each upcoming Phase 1.X PR. Each section captures
 **what changes in the upstream library** and **what that means for the
 templates this pack ships**. Pair this doc with
 [`adding-a-pack-version.md`](./adding-a-pack-version.md) (the recipe)
-and [`stack-versions-audit.md`](./stack-versions-audit.md) (the
+and [`stack-versions-audit.md`](../audits/stack-versions-audit.md) (the
 version table).
 
 The migration-doc URLs at the top of each section are the canonical

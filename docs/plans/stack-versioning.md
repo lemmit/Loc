@@ -1,10 +1,17 @@
-# Stack versioning
+# Stack versioning (historical design note)
 
-> **Companion to:** [`pack-versioning-plan.md`](./pack-versioning-plan.md)
-> (overall plan + lessons),
-> [`stack-versions-audit.md`](./stack-versions-audit.md) (what we pin),
-> [`per-pack-migration.md`](./per-pack-migration.md) (per-pack scope),
-> [`adding-a-pack-version.md`](./adding-a-pack-version.md) (recipe).
+> **Reference moved.** The factual surface (what a stack is, how a
+> pack picks one, the v1/v2/v3 catalogue, validation rules) is now in
+> the reference doc [`design-packs.md § 2a`](../design-packs.md#2a-stacks-and-how-a-pack-picks-one).
+> The recipe for adding a new pack version is in the same doc.  This
+> file is kept as the historical design note covering bundler-side
+> wiring and the backend-stacks-vs-backend-packages comparison that
+> isn't relevant to the user-facing authoring guide.
+>
+> Companion plan docs in this directory:
+> [`pack-versioning-plan.md`](./pack-versioning-plan.md) (overall plan + lessons),
+> [`per-pack-migration.md`](./per-pack-migration.md) (per-pack scope).
+> The version audit moved to [`../audits/stack-versions-audit.md`](../audits/stack-versions-audit.md).
 
 ## What a stack is
 

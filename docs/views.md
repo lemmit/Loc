@@ -172,8 +172,11 @@ the Customer load).
   `find` already covers this case; views earn parameters when
   they need to join.
 - Pagination / sorting / limit clauses.
-- Multi-hop snowflakes (chain `X id.<Y id>.field`).
 - Aggregations (`count`, `sum`, `avg` over groups).
+
+For limitations specific to joined views (1:1-only follows, no
+optional-Id follows, no explicit join keys), see [Remaining
+limits](#remaining-limits) above.
 
 ## What it generates
 

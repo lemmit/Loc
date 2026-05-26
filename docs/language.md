@@ -119,9 +119,9 @@ Rules:
   Legacy `generate ts` / `generate dotnet` keep their single-file
   semantics.
 
-See [`tools.md`](tools.md) for the CLI side and
-[`multi-file-source.md`](multi-file-source.md) for the design
-rationale.
+See [`tools.md`](tools.md) for the CLI side; the original design
+rationale (stages, work items, deferred cross-context features) is
+preserved at [`plans/multi-file-source.md`](plans/multi-file-source.md).
 
 ### Inside a `system`
 
