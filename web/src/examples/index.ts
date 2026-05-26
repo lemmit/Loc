@@ -220,4 +220,23 @@ export const examples: LoomExample[] = [
   },
 ];
 
-export const defaultExample = examples[0];
+// Default is the Sales System — the canonical full-stack demo with
+// aggregates, repositories, workflows, events, a React UI, AND the
+// requirements that the mobile-requirements e2e relies on (US-001,
+// SOL-001…). Two reasons we DON'T default to `examples[0]` (the
+// multi-file project):
+//
+//  1. The playground LSP runs on an `EmptyFileSystem` and only sees
+//     files pushed via `textDocument/didOpen`. The multi-file example
+//     imports `./shared/money.ddd` which is in the workspace VFS but
+//     never reaches the LSP, so the editor opens with two unresolved-
+//     reference errors and every e2e that begins with
+//     `waitForPlaygroundReady` fails 30s waiting for the "0 errors"
+//     badge.
+//  2. The mobile-requirements specs hard-code US-001 / SOL-001 row
+//     IDs that only exist in sales-system.
+//
+// When the workspace → LSP file-notification path lands, we can flip
+// the default back to the multi-file showcase.
+export const defaultExample =
+  examples.find((e) => e.id === "sales-system") ?? examples[0];
