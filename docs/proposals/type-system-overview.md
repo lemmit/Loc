@@ -65,7 +65,7 @@ Pattern). Together these resolve five real pain points:
                 │   parameter validation + UI         │
                 │   `when <Criterion>` — operation    │
                 │   guard with auto can-<op> endpoint │
-                │   Repo.list(crit, sort?, page?,     │
+                │   Repo.findAll(crit, sort?, page?,     │
                 │   loads?) — generic list queries    │
                 │   + `private workflow` modifier     │
                 │   + workflow-calls-workflow         │
@@ -141,7 +141,7 @@ Pattern). Together these resolve five real pain points:
               (e.g., InsufficientCredit)             → ? propagates
                               │
                               ▼
-              criterion mismatch                     → InvalidCriterionMember
+              criterion mismatch                     → CriterionFailed
               (parameter doesn't satisfy criterion)  → ? propagates
                               │
                               ▼
@@ -189,7 +189,7 @@ context Sales {
   }
 
   # Workflow — application layer. Orchestrates.
-  workflow placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or InvalidCriterionMember or InsufficientCredit transactional {
+  workflow placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or CriterionFailed or InsufficientCredit transactional {
     precondition cmd.totalAmount > 0         # throws → 400
     let order = Order.create({ customerId: cmd.customerId })
     order.place(cmd.lines)?
@@ -243,7 +243,7 @@ load-bearing ones for the implementing agent:
 | D22 | `precondition` — typed or throw | **Throws** at both layers (different status codes) |
 | D24 | Criterion name | Full `criterion` (no abbreviations); replaces earlier `specification` draft |
 | D25 | Criterion bind keyword | `from <Criterion>(args)` |
-| D30 | List query method | Built-in `Repo.list(criterion, sort?, page?, loads?)` |
+| D30 | List query method | Built-in `Repo.findAll(criterion, sort?, page?, loads?)` |
 | D31 | Default load semantics | Whole aggregate by default; `loads:` is optimisation |
 | D27 | Reusable cross-aggregate mutation | `private workflow` + workflow-calls-workflow (no separate `service`) |
 | D25 | `pre` slot accepts | Validators only (pure) |
@@ -263,7 +263,7 @@ Phase ordering (full detail in `implementation-plan.md`):
 8. **A4** (~1 week + fixture re-baseline): find-variant re-shape (`Repo.getById` → `T or NotFound`).
 9. **A5/A6** (~3 weeks): parse + external API + `validate for X` re-shape.
 10. **A7a** (~2 weeks): carrier stdlib helpers.
-11. **Crit1–4** (~5 weeks): criteria + `from`/`when` + `Repo.list` + per-backend emission.
+11. **Crit1–4** (~5 weeks): criteria + `from`/`when` + `Repo.findAll` + per-backend emission.
 12. **Crit5** (~1 week): workflow-calls-workflow + `private workflow`.
 12. **I1–I4** (~7 weeks): aggregate inheritance (can run parallel with the P/A tracks).
 
@@ -283,7 +283,7 @@ point (one coordinated PR; do not split).
 | Where status codes live (and don't) | `exception-less.md` §"API-edge ProblemDetails translation" |
 | Dev vs prod 500 body | `exception-less.md` §"Env-aware internals exposure" |
 | What can be auto-derived from `from <Criterion>(args)` bindings | `criterion.md` §"Use site 1 — `from <Criterion>(args)`" |
-| When to use criterion + Repo.list vs explicit find | `criterion.md` §"Named complex queries" + `docs/workflow.md` |
+| When to use criterion + Repo.findAll vs explicit find | `criterion.md` §"Named complex queries" + `docs/workflow.md` |
 | `private workflow` + workflow-calls-workflow | `criterion.md` §"Workflow-calls-workflow + `private workflow`" |
 | `loads:` semantics and defaults | `load-specifications.md` §"Defaults and call-site `loads:`" |
 | PATCH-style commands | `partial-update.md` |
@@ -330,7 +330,7 @@ docs/proposals/
 ├─ aggregate-inheritance.md      ← state layer
 ├─ payload-transport-layer.md    ← transport layer
 ├─ exception-less.md             ← error/option/?/api-edge translation
-├─ criterion.md                  ← criteria + Repo.list + private workflow
+├─ criterion.md                  ← criteria + Repo.findAll + private workflow
 ├─ partial-update.md             ← PATCH pattern
 ├─ implementation-plan.md        ← delivery plan
 ├─ provenance.md                 ← (existing) value provenance

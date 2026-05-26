@@ -32,7 +32,7 @@ requirements-tracing one.
 | [`partial-update.md`](./partial-update.md) | Partial-update pattern | `command` + `T option` fields for PATCH semantics; supersedes the v0 `Optional<T>` proposal |
 | [`payload-transport-layer.md`](./payload-transport-layer.md) | Structural transport layer | `payload` keyword + five sugar keywords (`event`/`command`/`query`/`response`/`error`); carrier-bounded generics with ML-postfix syntax (`customer page`); both named unions (`payload Foo = A \| B`) and anonymous `or` unions (`A or B`); auto-synthesised aggregate wire payloads |
 | [`exception-less.md`](./exception-less.md) | Exception-less flow | `error` payloads (HTTP-blind in the domain); `option` ML-postfix sugar for `T or none`; `?` propagation operator dispatching on `error`-marked variants; `Repo.getById` re-shape to `T or NotFound`; preconditions throw at both layers (different status codes); api-surface `status <Error> <Code>` mapping + stdlib defaults driving auto-generated RFC 7807 ProblemDetails translation; aggregate-vs-workflow-vs-api layer-aware failure model; no `Result<T, E>` / `Ok` / `Err` wrappers |
-| [`criterion.md`](./criterion.md) | Cross-aggregate domain rules + list queries | `criterion <Name>(args) of T = <bool expr>` (Spring-Data / Evans style pure predicate); bound to parameters via `from <Criterion>(args)`, to operation guards via `when <Criterion>` (canCommand pattern with auto-exposed `can-<op>` endpoint). Plus built-in `Repo.list(criterion, sort?, page?, loads?)` for generic list queries (solves "repository with 40 methods"). Plus `private workflow` modifier + workflow-calls-workflow body extension. Resolves D23. |
+| [`criterion.md`](./criterion.md) | Cross-aggregate domain rules + list queries | `criterion <Name>(args) of T = <bool expr>` (Spring-Data / Evans style pure predicate); bound to parameters via `from <Criterion>(args)`, to operation guards via `when <Criterion>` (canCommand pattern with auto-exposed `can-<op>` endpoint). Plus built-in `Repo.findAll(criterion, sort?, page?, loads?)` for generic list queries (solves "repository with 40 methods"). Plus `private workflow` modifier + workflow-calls-workflow body extension. Resolves D23. |
 | [`implementation-plan.md`](./implementation-plan.md) | Implementation plan | Stacked delivery plan covering all type-system proposals (state layer + transport layer + exception-less + specifications). Phases, dependencies, coordinated migration moments, decisions to pin per phase, risk management |
 
 ## Type-system family — state, transport, exception-less
@@ -66,7 +66,7 @@ Six proposals + an implementation plan reshape Loom's type system:
   [`criterion.md`](./criterion.md). `criterion` declarations
   (parameterised predicates over T, Spring-Data / Evans style)
   bound to parameters via `from <Criterion>(args)`, to operation
-  guards via `when <Criterion>`. Built-in `Repo.list(criterion,
+  guards via `when <Criterion>`. Built-in `Repo.findAll(criterion,
   sort?, page?, loads?)` solves the "repository with 40 methods"
   problem via composition. Plus `private workflow` modifier +
   workflow-calls-workflow body extension for reusable internal

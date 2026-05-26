@@ -18,7 +18,7 @@
 >   bound to parameters via `from <Criterion>(args)`, to operation
 >   guards via `when <Criterion>`. Replaces an earlier
 >   `specification` design that bundled query shaping. Plus
->   `Repo.list(criterion, sort?, page?, loads?)` as built-in
+>   `Repo.findAll(criterion, sort?, page?, loads?)` as built-in
 >   repository method. Plus `private workflow` modifier +
 >   workflow-calls-workflow for reusable mutating orchestration.
 >
@@ -85,7 +85,7 @@ A5: parse + external API as Result      | A1, A2                  | (none)
 A6: validate for X returns Result       | A1, A2, P5              | (none)
 A7a: carrier stdlib helpers             | A1                      | (none)
 A7b: user-declared carrier generics     | A1, A4 (DEFERRED)       | (deferred to v2)
-Crit1-4: criteria + from/when + Repo.list | A1, A2, A6             | (none — feeds D23 resolution)
+Crit1-4: criteria + from/when + Repo.findAll | A1, A2, A6             | (none — feeds D23 resolution)
 Crit5: workflow-calls-workflow + private | A1                       | (independent of Crit1-4; can land any order)
 ```
 
@@ -542,7 +542,7 @@ accumulated errors via the `combine` helper.
 
 Tracked here for completeness. Not v1.
 
-### Track 4 — Criteria + Repo.list + workflow-calls-workflow (Phase Crit)
+### Track 4 — Criteria + Repo.findAll + workflow-calls-workflow (Phase Crit)
 
 Independent of A4 / find-variant re-shape; can land before or after.
 Lands after A6 (`?` propagation + `validate for X` stable).
@@ -576,20 +576,20 @@ Resolves D23. Full spec: [`criterion.md`](./criterion.md).
 #### Crit3 — Auto-injection at api wrappers (~1.5 weeks)
 
 - Wrapper-synthesis lowering: per `from <Criterion>(args)` binding,
-  inject load + check + `InvalidCriterionMember` return.
+  inject load + check + `CriterionFailed` return.
 - Per `when <Criterion>` clause, inject the gate before op invocation;
-  on false → `NotAllowed`. Auto-expose
+  on false → `Disallowed`. Auto-expose
   `GET /aggregates/<agg>/{id}/can-<op>` endpoint.
 - Operation-call lowering: at every `agg.op(args)?` expansion,
   inject the `when` gate (auto-injection at every call site, not
   just api wrappers — consistency rule).
-- Stdlib: `error InvalidCriterionMember { criterion, paramName,
-  id, value } (status 422)`; `error NotAllowed { operation,
+- Stdlib: `error CriterionFailed { criterion, paramName,
+  id, value } (status 422)`; `error Disallowed { operation,
   aggregate, id, reason? } (status 409)`.
 - OpenAPI emission: criterion constraints surface as schema
   extensions; `can-<op>` endpoints documented.
 
-#### Crit4 — Repo.list per-backend (~1.5 weeks)
+#### Crit4 — Repo.findAll per-backend (~1.5 weeks)
 
 - Per-backend translation: criterion → SQL WHERE (per ORM); sort →
   ORDER BY; page → LIMIT/OFFSET; loads → JOINs / SELECT-includes /
@@ -600,7 +600,7 @@ Resolves D23. Full spec: [`criterion.md`](./criterion.md).
 - UI form-generator: auto-derives `<select>` options by executing
   the criterion against the repository at binding sites; React
   form-generator integration.
-- Built-in `Repo.list(criterion, sort?, page?, loads?)` method on
+- Built-in `Repo.findAll(criterion, sort?, page?, loads?)` method on
   every repository (no explicit `find` declaration needed for
   generic list queries).
 
@@ -739,15 +739,21 @@ priority order.
 | D20 | Per-surface mappings beyond the api layer (UI / queue / CLI) | **Out of scope.** UI consumes ProblemDetails like any HTTP client; no language-level UI error-mapping surface. Queue / CLI deferred to v2 when those surfaces become real. | — | — |
 | D21 | Env-aware 500-ProblemDetails body (dev shows internals, prod redacts) | **`LOOM_EXPOSE_INTERNAL_ERRORS` env var; defaults from each backend's native dev/prod check** (TS `NODE_ENV !== "production"`, .NET `IHostEnvironment.IsDevelopment()`, Phoenix `:dev`/`:test`). Catalog event always carries full context; sensitive fields stay redacted even in dev. | A3 | exception-less.md |
 | D22 | Workflow `precondition` — typed return vs throw | **Throws** (pinned, flipped from earlier draft). Preconditions are *guards*, not designed business outcomes — bug-shaped, not user-recoverable. Route translates: aggregate-op `PreconditionViolation` → 500 (env-aware); workflow-level `PreconditionViolation` → 400 (rule text safe to surface). Designed-in business outcomes use typed `or` returns, not `precondition`. | A1 | exception-less.md |
-| D23 | Cross-aggregate domain rule pattern | **Resolved**: `criterion <Name>(args) of T = <bool expr>` declarations bound to parameters via `from <Criterion>(args)` and to operation guards via `when <Criterion>`. Spring-Data / Evans style — pure predicate, composable via `&&`/`||`/`!`. Query shaping (sort, page, loads) is per-call to `Repo.list`, not on the criterion. See [`criterion.md`](./criterion.md). | Phase Crit | criterion.md |
+| D23 | Cross-aggregate domain rule pattern | **Resolved**: `criterion <Name>(args) of T = <bool expr>` declarations bound to parameters via `from <Criterion>(args)` and to operation guards via `when <Criterion>`. Spring-Data / Evans style — pure predicate, composable via `&&`/`||`/`!`. Query shaping (sort, page, loads) is per-call to `Repo.findAll`, not on the criterion. See [`criterion.md`](./criterion.md). | Phase Crit | criterion.md |
 | D24 | Criterion name (full vs abbreviated) | **`criterion`** (pinned). Loom doesn't abbreviate keywords (`view`, `aggregate`, `workflow` are all full). Replaces an earlier `specification` name; "criterion" aligns with Spring Data / Hibernate Criterion convention for the predicate-only construct. | Phase Crit | criterion.md |
 | D25 | Bind keyword (parameter ↔ criterion) | **`from <Criterion>(args)`** (pinned). Reads as "parameter drawn from the set defined by this criterion". | Phase Crit | criterion.md |
-| D26 | Criterion-mismatch error variant | **Generic stdlib `InvalidCriterionMember { criterion, paramName, id, value }`** (default status 422; api-surface override available). Per-criterion custom error variants deferred to v2. | Phase Crit | criterion.md |
+| D26 | Criterion-mismatch error variant | **Generic stdlib `CriterionFailed { criterion, paramName, id, value }`** (default status 422; api-surface override available). Per-criterion custom error variants deferred to v2. | Phase Crit | criterion.md |
 | D27 | Reusable cross-aggregate mutating orchestration | **`private workflow X { ... }`** (reuses existing `private` modifier from `private operation` / `private invariant`). Plus workflow-calls-workflow body extension. No separate `service` keyword. | Crit5 | criterion.md |
 | D28 | Workflow-calls-workflow transactional semantics | **Callee inherits caller's transaction**. If caller is non-transactional, callee's own `transactional` annotation activates its own scope. No nested-savepoint magic; single-level transaction lifetime per top-level workflow call. | Crit5 | criterion.md |
-| D29 | `when <predicate>` clause on aggregate operations (canCommand pattern) | **`operation X(...) when <predicate> { ... }`**. Predicate reads `self` (aggregate-implicit), `currentUser` (ambient), aggregate functions, and criteria. **Parameterless w.r.t. op parameters** (per NakedObjects' split — per-arg checks go through `from <Criterion>` on the parameters). Auto-exposed `GET /aggregates/<agg>/{id}/can-<op>` query alongside the existing POST endpoint. Stdlib `error NotAllowed { operation, aggregate, id, reason? }` default status 409. | Phase Crit | criterion.md |
-| D30 | Repository list query method | **Built-in `Repo.list(criterion, sort?, page?, loads?)`** on every repository (no explicit declaration needed for generic list queries). Solves "repository with 40 methods" via criterion composition + call-site shaping. Spring-Data analog of `JpaSpecificationExecutor.findAll(spec, pageable)`. | Crit4 | criterion.md |
-| D31 | Default load semantics | **Default = whole aggregate** loaded (all own fields, all containments). Cross-aggregate references stay as ids unless `loads:` arg requests eager hydration. `loads:` is optimisation, not requirement. Auto-derivation of `loads:` from result usage is v2. | Crit4 | load-specifications.md |
+| D29 | `when <predicate>` clause on aggregate operations (canCommand pattern) | **`operation X(...) when <predicate> { ... }`**. Predicate reads `self` (aggregate-implicit), `currentUser` (ambient), aggregate functions, and criteria. **Parameterless w.r.t. op parameters** (per NakedObjects' split — per-arg checks go through `from <Criterion>` on the parameters). Auto-exposed `GET /aggregates/<agg>/{id}/can-<op>` query alongside the existing POST endpoint. Stdlib `error Disallowed { operation, aggregate, id, reason? }` default status 409. | Phase Crit | criterion.md |
+| D30 | Repository list query method | **Built-in `Repo.findAll(criterion, sort?, page?, loads?)`** on every repository (no explicit declaration needed for generic list queries). Solves "repository with 40 methods" via criterion composition + call-site shaping. Spring-Data analog of `JpaSpecificationExecutor.findAll(spec, pageable)`. | Crit4 | criterion.md |
+| D31 | Default load semantics | **Default = whole aggregate** loaded (all own fields, all containments). Cross-aggregate references stay as ids unless `loads:` arg requests eager hydration. `loads:` is optional optimisation, not requirement. **v1 has explicit `loads` only; no inference/shape-typing/`is loaded` narrowing in v1** (v2 roadmap). | Crit4 | load-specifications.md |
+| D32 | Repository finds with criteria | **Named `find <name>(args)` declarations on repositories support criterion `where` clauses + `orderBy` + `take` + `skip` + `loads`** — same vocabulary as `findAll`'s call-site args. Named finds are the **stable named** form (e.g., `Orders.latestActive(20)`); `findAll` is the **ad-hoc** form. Both compose with criteria; not substitutes. | Crit4 | criterion.md |
+| D33 | `findAll` without explicit `page:` | **Warning** `loom.findAll-no-page` (not error — some legitimate use cases need full lists). Authors who want bounded reads supply `page: { offset, limit }` explicitly. | Crit4 | criterion.md |
+| D34 | Evaluation order for `requires` (auth) + `when` (state) on same operation | **`requires` first → 403 if unauthorised; `when` second → 409 if state-blocked.** Auth before state-reveal — don't tell an unauthorised caller anything about state. Mirror in the `can-<op>` query. | Crit3 | criterion.md |
+| D35 | `when` clause and aggregate inheritance | **Inherited from abstract operation; applies to every concrete subtype.** Predicate's `self` resolves to the concrete via standard inheritance dispatch (TPH discriminator / TPC table / TPT join). Concrete-subtype `when` override deferred to v2. | Crit3 | criterion.md |
+| D36 | Sort field reference syntax | **Bare names + `asc`/`desc`** (matches `view ... where ...` declarative style + `invariant`/`derived` field-on-self convention). `[name asc, customer.tier desc]` — paths resolve against the criterion's aggregate type. Not lambda-style — lambdas are for in-body collection ops (`.where(x => ...)`), declarative clauses use bare names. | Crit1 | criterion.md |
+| D37 | `Repo.find(criterion)` for single-result | **New built-in** alongside `findAll`. Returns `T or NotFound`. Distinct from id-based `getById(id)` (returns `T or NotFound` via exception-less A4) and `findById(id)` (returns `T option`). Criterion-based vs id-based; both coexist. | Crit4 | criterion.md |
 
 **Workflow**: before starting each phase the implementing agent
 should explicitly confirm the relevant decisions with the
@@ -828,6 +834,21 @@ The three proposals are "done" when:
       transport, framework middleware).
 - [ ] `docs/language.md`, `docs/generators.md`, `docs/technical.md`
       updated for the new surface.
+- [ ] `docs/workflow.md` updated for the body-vocabulary additions:
+      workflow-call expression (`OtherWorkflow(args)?`), `private`
+      modifier on workflow declarations, `Repo.find(criterion)` /
+      `Repo.findAll(criterion, ...)` built-in methods, optional
+      `loads:` argument on `Repo.getById` / `findById` / `find` /
+      `findAll`. Cover transactional inheritance for
+      workflow-calls-workflow. Update body-vocabulary table.
+- [ ] `docs/views.md` updated to note that views may use a criterion
+      as their `from <Criterion>` source (additive to inline `where`).
+- [ ] `docs/auth.md` updated for `requires` + `when` evaluation
+      order on operations: `requires` first (403 if unauthorised),
+      `when` second (409 if state-blocked).
+- [ ] `docs/language.md` repository section updated for named
+      `find <name>(args)` declarations gaining criterion `where`
+      clauses + `orderBy` / `take` / `skip` / `loads`.
 - [ ] At least one fully-worked end-to-end example in `examples/`
       using `option`, anonymous `or` unions, `?`, `error` payloads
       with api-surface `status` mappings (showing ProblemDetails

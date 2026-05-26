@@ -16,7 +16,7 @@ A `criterion` is a named, parameterised, pure predicate over a type
 The same construct also serves as the Spring Data JPA Specification
 analog: criteria translate to SQL (the queryable subset), can
 reference cross-aggregate state via repository lookups, and feed
-into a generic `Repo.list(criterion, sort?, page?, loads?)` method
+into a generic `Repo.findAll(criterion, sort?, page?, loads?)` method
 on every repository.
 
 Three consumers, one declaration:
@@ -30,7 +30,7 @@ Three consumers, one declaration:
    the criterion server-side; an auto-exposed
    `GET /can-<operation>` endpoint lets the UI query the predicate
    without invoking the side-effecting operation.
-3. **Repository list queries** — `Repo.list(<Criterion>, sort?,
+3. **Repository list queries** — `Repo.findAll(<Criterion>, sort?,
    page?, loads?)` from workflow bodies. The criterion drives the
    SQL `WHERE` clause; sort, page, and loads are call-site arguments.
 
@@ -66,7 +66,7 @@ Without criteria + composition, repository finds combinatorial-explode:
 - `findActive()`, `findInRegion(r)`, `findActiveInRegion(r)`,
   `findActiveOrderedByName()`, `findActivePaged(p)`, …
 
-With criteria + `Repo.list`:
+With criteria + `Repo.findAll`:
 
 ```
 criterion ActiveCustomer of Customer = self.active
@@ -187,7 +187,7 @@ subset (same restrictions as view `where` clauses today, per
 | Mutation (`:=`, `+=`, `-=`) | `loom.criterion-impure` |
 | Calls to aggregate operations that mutate | `loom.criterion-impure` |
 | `emit Event { ... }` | `loom.criterion-impure` |
-| `Repo.list` or other non-getById repo methods | `loom.criterion-impure` |
+| `Repo.findAll` or other non-getById repo methods | `loom.criterion-impure` |
 | Workflow calls | `loom.criterion-impure` |
 | Closures / lambdas outside the queryable subset | `loom.criterion-not-queryable` |
 | Op parameter references (when used in `when` clauses) | `loom.when-references-op-param` (at use site) |
@@ -247,7 +247,7 @@ command UpdateCustomer {
 
 | Concern | Auto-derived from criterion |
 |---|---|
-| Server-side validation | Wrapper executes the criterion's predicate against the incoming value. Mismatch → `InvalidCriterionMember` typed error variant (default 422). |
+| Server-side validation | Wrapper executes the criterion's predicate against the incoming value. Mismatch → `CriterionFailed` typed error variant (default 422). |
 | UI dropdown options | Form-generator translates the predicate to a query (`Customer where active`), executes, populates the `<select>` element. Cached when the criterion is parameterless and stable. |
 | Per-form-field live filter | Criteria parameterised by other command fields re-evaluate as the form changes. |
 | OpenAPI schema | Criterion contributes constraints (e.g., `enum:` for finite predicates, `min`/`max` for ranges). |
@@ -262,7 +262,7 @@ lowers to:
 for id in supplierIds:
   let s = Suppliers.getById(id)?   # NotFound if missing
   if !SuppliersForOrderType(orderType).where(s):
-    return InvalidCriterionMember {
+    return CriterionFailed {
       criterion: "SuppliersForOrderType",
       paramName: "supplierIds",
       id: id
@@ -276,7 +276,7 @@ Stdlib `error` payload — same shape as the previous
 
 ```
 # src/stdlib/payloads/errors.ddd
-error InvalidCriterionMember {
+error CriterionFailed {
   criterion: string         # criterion name
   paramName: string         # bound parameter name
   id: string?               # offending id if aggregate
@@ -322,7 +322,7 @@ For each operation with a `when` clause:
 
 | Endpoint | Behaviour |
 |---|---|
-| `POST /aggregates/<agg>/{id}/<op>` | (existing — augmented) Loads aggregate; evaluates `when` predicate; on false → 409 ProblemDetails (`NotAllowed`); on true → runs op + saves + returns result. |
+| `POST /aggregates/<agg>/{id}/<op>` | (existing — augmented) Loads aggregate; evaluates `when` predicate; on false → 409 ProblemDetails (`Disallowed`); on true → runs op + saves + returns result. |
 | `GET /aggregates/<agg>/{id}/can-<op>` | (new) Loads aggregate; evaluates `when` predicate; returns `{ allowed: bool, reason?: string }`. No mutation. Same authorisation as the op. |
 
 ### Response shape for `can-X`
@@ -339,11 +339,11 @@ For each operation with a `when` clause:
 inline expressions; for composite predicates, the first failing
 operand).
 
-### `NotAllowed` error variant
+### `Disallowed` error variant
 
 ```
 # src/stdlib/payloads/errors.ddd
-error NotAllowed {
+error Disallowed {
   operation: string         # "approve"
   aggregate: string         # "Order"
   id: string                # the aggregate id
@@ -367,7 +367,40 @@ override available.
 **Not allowed**:
 
 - Operation parameters (per the NakedObjects-style split: arg-aware checks go through `from <Criterion>(args)` on the parameters, not through `when`). `loom.when-references-op-param`.
-- Inline `Repo.list` calls (use a named criterion / function). `loom.when-inline-list` warning.
+- Inline `Repo.findAll` calls (use a named criterion / function). `loom.when-inline-list` warning.
+
+### Interaction with `requires` (authorization) clauses
+
+An operation can have both `requires` (auth.md authorization gate)
+and `when` (criterion-based state gate). Order of evaluation in
+the synthesised wrapper:
+
+1. **`requires` first** — authorization check (`currentUser.permissions.contains(...)`).
+   On failure → 403 ProblemDetails (per docs/auth.md).
+2. **`when` second** — state-based gate (criterion).
+   On failure → 409 ProblemDetails (`Disallowed`).
+3. **Operation body** — runs only if both gates pass.
+
+Rationale: auth must come first (don't reveal state info to unauthorised
+callers). If a caller doesn't have permission, they get 403 without
+learning whether the state would have allowed the op.
+
+The auto-exposed `can-<op>` query mirrors the same order: `requires`
+auth-check first; on failure → 403. `when` check second; result
+returned as `{ allowed, reason? }`.
+
+### Inheritance and `when` clauses
+
+For aggregate-inheritance (`docs/proposals/aggregate-inheritance.md`):
+a `when` clause declared on an abstract aggregate's operation
+applies to every concrete subtype. The predicate's `self`
+references resolve against the concrete's fields at runtime via
+standard inheritance dispatch (TPH discriminator / TPC table /
+TPT join).
+
+Override semantics (concrete subtype redeclares `when` with
+different predicate) deferred to v2. v1: inherited `when` is
+final.
 
 ### Server-side auto-injection at every operation call site
 
@@ -380,34 +413,95 @@ the lowering pass injects the gate check:
 order.approve()?
 
 # Lowered (when `approve` has `when canApprove`):
-if !order.canApprove { return NotAllowed { operation: "approve", aggregate: "Order", id: order.id } }
+if !order.canApprove { return Disallowed { operation: "approve", aggregate: "Order", id: order.id } }
 order.approve()?
 ```
 
 Authors can't bypass the gate by calling through a non-api path.
 
-## Use site 3 — `Repo.list` (and other repository methods)
+## Use site 3 — `Repo.find` / `Repo.findAll` (and other repository methods)
 
 Every repository gets generic built-in methods that take criteria
 and runtime shaping arguments:
 
 ```
 # Built-in on every repository (no explicit declaration needed):
-Repo.list(
+
+# Single result by criterion (returns T or NotFound):
+Repo.find(
+  criterion: <Criterion of T>,
+  loads?: PathExpression[]
+): T { <load-shape> } or NotFound
+
+# Multi-result by criterion (returns T[]):
+Repo.findAll(
   criterion: <Criterion of T>,
   sort?: SortClause[],
   page?: Page,
   loads?: PathExpression[]
-): T { <load-shape> }[]
+): T { <load-shape> } []
 
-Repo.getById(
-  id: T id,
-  loads?: PathExpression[]
-): T { <load-shape> } or NotFound
+# (existing — augmented with loads:):
+Repo.getById(id: T id, loads?: PathExpression[]): T { <load-shape> } or NotFound
+Repo.findById(id: T id, loads?: PathExpression[]): T { <load-shape> } option
 
-# (existing) Named finds with their declared return types:
+# (existing) Named finds with their declared return types — see below:
 Repo.<name>(args): ...
 ```
+
+`find` / `findAll` are criterion-based (general). `getById` /
+`findById` are id-based (existing). Different surfaces; both
+coexist.
+
+**Warning when `findAll` is called without explicit `page:`**:
+unbounded list reads risk DOSing the system. The validator emits
+`loom.findAll-no-page` (warning, not error — some legitimate
+use cases need full lists). Suggested fix: supply an explicit
+`page: { offset: 0, limit: N }` argument.
+
+### Repository finds can also use criteria
+
+Named repository finds extend with criterion `where` clauses + the
+same shaping clauses as `findAll`:
+
+```
+repository Orders for Order {
+  # Existing: simple where with inline boolean
+  find mine(): Order[] where customerId == currentUser.customerId
+
+  # New: where accepts a criterion (composable):
+  find latestActive(top: int): Order[]
+    where ActiveOrder
+    orderBy createdAt desc
+    take top
+
+  # Composed criteria + paging + loads:
+  find activeInRegion(region: string, top: int): Order[]
+    where ActiveOrder && InRegion(region)
+    orderBy [createdAt desc, customer.name asc]
+    take top
+    loads { customer.address, lines[].product }
+}
+
+# Called from workflows like any other find:
+Orders.latestActive(20)
+Orders.activeInRegion("EU", 50)
+```
+
+Named finds are NOT a substitute for `findAll` — they're the
+**named** form for stable repeatable queries. Use cases:
+
+- Reusable named query that appears in many places (`Orders.latestActive(20)`
+  vs writing the full `findAll(ActiveOrder, sort: [createdAt desc], page: { limit: 20 })`
+  at every call site).
+- Queries that read more naturally as a named verb on the repo.
+
+`findAll` is the **ad-hoc** form for one-off queries composed at
+the call site.
+
+Both compose with the same criterion vocabulary. Authors pick
+based on whether the query has a stable named identity or varies
+per-call.
 
 ### Built-in shape types
 
@@ -424,7 +518,7 @@ These are part of the toolchain's stdlib / built-ins, not user-declared.
 
 ```
 workflow processHighValue(): Order[] {
-  let highValue = Orders.list(
+  let highValue = Orders.findAll(
     HighValueOrder && InRegion("EU"),
     sort: [createdAt desc, total desc],
     page: { offset: 0, limit: 50 },
@@ -582,8 +676,8 @@ Mapping of patterns from various ecosystems onto Loom constructs:
 | Eric Evans Specification Pattern (`isSatisfiedBy`) | `criterion` + composition |
 | Spring Data JPA `Specification<T>` | `criterion` |
 | Hibernate `Criterion` (deprecated) | `criterion` |
-| Hibernate `Criteria` (full query, deprecated) | `Repo.list(criterion, sort?, page?, loads?)` — call-site composition |
-| Ardalis Specification (.NET) — bundled query object | Workflow or extended repository find wrapping `Repo.list(criterion, ...)` |
+| Hibernate `Criteria` (full query, deprecated) | `Repo.findAll(criterion, sort?, page?, loads?)` — call-site composition |
+| Ardalis Specification (.NET) — bundled query object | Workflow or extended repository find wrapping `Repo.findAll(criterion, ...)` |
 | NakedObjects/Causeway `disable<Action>()` | `when <Criterion>` (with auto-exposed `can-<op>`) |
 | NakedObjects/Causeway `validate<Action>(arg)` (per-arg) | `from <Criterion>(args)` on parameter |
 | NakedObjects/Causeway `choices<N><Action>()` (per-arg) | Auto-derived from criterion at the binding site |
@@ -613,7 +707,7 @@ queries, and projections.
   the criterion's predicate against the underlying repository to
   populate `<select>` elements. Caching strategy + revalidation
   rules need to be decided (per-render? per-session? on-demand?).
-- **Per-backend `Repo.list` emission.** TS / Drizzle, .NET / EF Core,
+- **Per-backend `Repo.findAll` emission.** TS / Drizzle, .NET / EF Core,
   Phoenix / Ash each need the generic `list(criterion, sort, page,
   loads)` translation. Existing find emission machinery extends.
 - **Sort and Page literal syntax in the grammar.** `[name asc,
@@ -628,7 +722,7 @@ queries, and projections.
 
 ## Phasing
 
-Single phase: **Phase Crit — Criterion + Repo.list + workflow-calls-workflow**.
+Single phase: **Phase Crit — Criterion + Repo.findAll + workflow-calls-workflow**.
 Lands after exception-less A6 (`?` propagation + `validate for X`
 stable).
 
@@ -655,17 +749,17 @@ stable).
 
 - Wrapper-synthesis lowering: per `from <Criterion>(args)` binding,
   inject load + check loop; on failure, return
-  `InvalidCriterionMember`.
+  `CriterionFailed`.
 - Per `when <Criterion>` clause, inject the gate before op invocation;
-  on failure, return `NotAllowed`.
+  on failure, return `Disallowed`.
 - Auto-expose `GET /aggregates/<agg>/{id}/can-<op>` endpoint per `when`
   clause.
 - Operation-call lowering: at every `agg.op(args)?` expansion, inject
   the `when` gate (consistency).
-- Stdlib: `error InvalidCriterionMember`, `error NotAllowed`.
+- Stdlib: `error CriterionFailed`, `error Disallowed`.
 - OpenAPI emission: criterion constraints surface as schema extensions.
 
-### Crit4 — `Repo.list` per-backend (~1.5 weeks)
+### Crit4 — `Repo.findAll` per-backend (~1.5 weeks)
 
 - Per-backend translation: criterion → SQL WHERE; sort → ORDER BY;
   page → LIMIT/OFFSET; loads → JOINs / SELECT-includes / EntityGraph.
@@ -741,16 +835,16 @@ or after the find-variant re-shape.
 - `src/ir/enrichments.ts`: api-wrapper synthesis pass —
   per-`from`-binding validation loop; per-`when`-clause gate;
   per-operation can-X endpoint emission.
-- `src/stdlib/payloads/errors.ddd`: add `InvalidCriterionMember`,
-  `NotAllowed`.
-- `src/system/error-defaults.ts`: add `InvalidCriterionMember:
-  422`, `NotAllowed: 409`.
+- `src/stdlib/payloads/errors.ddd`: add `CriterionFailed`,
+  `Disallowed`.
+- `src/system/error-defaults.ts`: add `CriterionFailed:
+  422`, `Disallowed: 409`.
 - `src/generator/<platform>/`: emit can-X routes + ProblemDetails
   translation.
 - `src/ir/lower.ts`: operation-call lowering — inject `when` gate
   at every call site.
 
-### Crit4 — Repo.list per-backend
+### Crit4 — Repo.findAll per-backend
 
 - `src/generator/ts/`: criterion → Drizzle query builder; Sort/Page/loads
   translation.
@@ -777,10 +871,10 @@ or after the find-variant re-shape.
   carrier generics + tagged unions; criterion's `or`-typed return
   variants use the same machinery.
 - [`exception-less.md`](./exception-less.md) — `?` propagation;
-  `InvalidCriterionMember` / `NotAllowed` translate to ProblemDetails
+  `CriterionFailed` / `Disallowed` translate to ProblemDetails
   at the api edge.
 - [`load-specifications.md`](./load-specifications.md) — `loads:`
-  argument to `Repo.list` and `Repo.getById` uses path syntax from
+  argument to `Repo.findAll` and `Repo.getById` uses path syntax from
   that proposal; result types are shape-parameterised per its
   shape-typing rules. **Default is whole aggregate; `loads:` is
   optimisation.**
