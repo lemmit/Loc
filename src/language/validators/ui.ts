@@ -3,6 +3,7 @@
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type {
   Api,
+  Layout,
   MenuBlock,
   Model,
   NameRef,
@@ -310,28 +311,33 @@ export function checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
     }
   }
 
-  // LayoutProp — v1 admits two preset values (`default`, `none`)
-  // and only on explicit user-written pages.  Scaffold-synthesised
-  // pages (Home / aggregate list / detail / etc.) reject the
-  // property pending v2's named-layout SystemMember, which makes
-  // `layout: AdminFrame` on a scaffold page meaningful.
-  const allowedLayoutValues = new Set(["default", "none"]);
-  const scaffolded = isScaffoldOriginPageBody(p);
+  // LayoutProp — Phase 8 admits two preset values (`default` /
+  // `none`) plus the name of any `layout <Name> { … }` SystemMember
+  // declared in the same system.  Resolution is system-scope: walk
+  // up the AST to the enclosing System and look for a matching
+  // Layout declaration.
+  //
+  // The v1 restriction "no `layout:` on scaffold-synthesised pages"
+  // is intentionally dropped — named layouts make
+  // `Home: layout AdminFrame` meaningful (a scaffold Home page can
+  // now opt into a custom chrome).
+  void isScaffoldOriginPageBody; // imported but unused after the v1 restriction lifted
+  const system = ui.$container;
+  const declaredLayouts = new Set<string>();
+  if (system?.$type === "System") {
+    for (const m of system.members) {
+      if (m.$type === "Layout") declaredLayouts.add(m.name);
+    }
+  }
   for (const prop of p.props) {
     if (prop.$type !== "LayoutProp") continue;
-    if (!allowedLayoutValues.has(prop.value)) {
+    const v = prop.value;
+    const isPreset = v === "default" || v === "none";
+    if (!isPreset && !declaredLayouts.has(v)) {
+      const known = ["default", "none", ...declaredLayouts].join(", ");
       accept(
         "error",
-        `Unknown layout '${prop.value}' on page '${p.name}'.  Recognised values: ${[
-          ...allowedLayoutValues,
-        ].join(", ")}.`,
-        { node: prop, property: "value" },
-      );
-    }
-    if (scaffolded) {
-      accept(
-        "error",
-        `'layout' is not allowed on scaffold-synthesised pages in v1 (page '${p.name}').  Move the layout selector to an explicit page, or wait for v2's named-layout support.`,
+        `Unknown layout '${v}' on page '${p.name}'.  Recognised: ${known}.`,
         { node: prop, property: "value" },
       );
     }
@@ -433,6 +439,49 @@ export function checkApiBodyRefs(p: Page, ui: Ui, accept: ValidationAcceptor): v
         "error",
         `Operation '${op}' is not declared on aggregate '${aggregateName}'.  Available: ${allowed.join(", ")}.`,
         { node: opSuffix, property: "member" },
+      );
+    }
+  }
+}
+
+/** Phase 8: validate a named `layout <Name> { … }` SystemMember. */
+export function checkLayout(layout: Layout, accept: ValidationAcceptor): void {
+  if (layout.name === "default" || layout.name === "none") {
+    accept(
+      "error",
+      "Layout name '" + layout.name + "' shadows a reserved layout preset.  Pick a different name.",
+      { node: layout, property: "name" },
+    );
+  }
+  let mainCount = 0;
+  const slotCounts = new Map<string, number>();
+  for (const slot of layout.slots) {
+    if (slot.$type === "LayoutMainSlot") {
+      mainCount++;
+      continue;
+    }
+    const slotName = (slot as { name?: string }).name ?? "";
+    slotCounts.set(slotName, (slotCounts.get(slotName) ?? 0) + 1);
+  }
+  if (mainCount === 0) {
+    accept(
+      "error",
+      "Layout '" + layout.name + "' must declare a 'main' slot (the page-body Outlet position).",
+      { node: layout, property: "name" },
+    );
+  } else if (mainCount > 1) {
+    accept(
+      "error",
+      "Layout '" + layout.name + "' declares more than one 'main' slot; keep just the first.",
+      { node: layout, property: "name" },
+    );
+  }
+  for (const [slotName, count] of slotCounts) {
+    if (count > 1) {
+      accept(
+        "error",
+        "Layout '" + layout.name + "' declares more than one '" + slotName + "' slot; keep just the first.",
+        { node: layout, property: "name" },
       );
     }
   }

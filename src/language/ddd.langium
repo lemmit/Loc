@@ -34,7 +34,7 @@ System:
     '}';
 
 SystemMember:
-    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage;
+    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | Layout;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -340,14 +340,42 @@ OgImageProp:
 CanonicalProp:
     'canonical' ':' value=STRING;
 
-// Per-page layout selector.  v1 admits two preset values
-// (`default`, `none`) and is gated by the validator; the bare `ID`
-// shape (rather than a hard keyword enum) reserves the seam for v2,
-// where this position becomes a cross-reference to a named `layout`
-// SystemMember (`layout AdminFrame { ... }`).  Default behaviour
-// (unset) preserves the existing app-shell chrome.
+// Per-page layout selector.  Bare `ID` admits two preset values
+// (`default`, `none`) plus the name of any `layout <Name> { … }`
+// SystemMember declared in the same system.  The validator + lowerer
+// distinguish presets from named refs by the literal value; cross-ref
+// scoping is per-system because layouts are SystemMembers.
 LayoutProp:
     'layout' ':' value=ID;
+
+// Named layout declaration (Phase 8).  A page or ui can opt into a
+// named layout (`layout: AdminFrame`) which lowers to a wrapping
+// React Router layout-route around the page body, similar to v1's
+// `default` AppShell but built from user-defined slots.  Reserved
+// names `default` and `none` cannot be redeclared (validator).
+//
+// Each slot's body is a single Expression evaluated in the same
+// scope as a page body — so it can reference walker-stdlib primitives
+// (Sticky, Container, Group, …), user-declared components, and
+// helper imports.  `main` is a special slot with no body — it marks
+// where React Router's `<Outlet />` lands; every layout must declare
+// exactly one `main`.  Validator enforces.
+Layout:
+    'layout' name=ID '{'
+        slots+=LayoutSlot+
+    '}';
+
+LayoutSlot:
+    LayoutNamedSlot | LayoutMainSlot;
+
+LayoutNamedSlot:
+    name=LayoutSlotName '{' body=Expression '}';
+
+LayoutMainSlot:
+    {infer LayoutMainSlot} 'main';
+
+LayoutSlotName returns string:
+    'header' | 'sidebar' | 'footer';
 
 // Per-page sidebar metadata.  Read by the menu emitter (Slice 6) when
 // no explicit `ui`-level `menu { ... }` block is declared.  Recognised

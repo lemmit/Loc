@@ -124,27 +124,27 @@ function buildBcByWorkflow(ctx: PageEmitContext): Map<string, BoundedContextIR> 
  *  the page-file map; api modules / page objects / shell files stay
  *  in `index.ts`. */
 /** Collect the AppShell `extraRoutes` for non-
- *  conventional explicit pages.  Each one declared in the source
- *  with a body the dispatcher can recognise contributes one
- *  Route + import; conventional overrides (page name matches the
- *  scaffolded shape) are mounted at the conventional route by
- *  the existing per-aggregate / -workflow / -view loops in
- *  `prepareAppShellVM`.
- *
- *  The return value partitions on `page.layout`:
- *    - `inShell`: pages with `layout: default` (or unset) — mounted
- *      inside the AppShell layout-route, alongside the conventional
- *      per-aggregate / -workflow / -view routes.
- *    - `outOfShell`: pages with `layout: none` — mounted as sibling
- *      routes OUTSIDE the AppShell, getting no header / sidebar /
- *      main padding.  Validator gates `layout:` to explicit pages
- *      only in v1, so scaffold-origin pages can never appear here. */
+ *  conventional explicit pages, partitioned by layout selector.
+ *  Three channels:
+ *    - `inShell`: `layout: default` or unset — mounted inside the
+ *      AppShell layout-route alongside conventional scaffold routes.
+ *    - `outOfShell`: `layout: none` — mounted as sibling routes
+ *      OUTSIDE every layout wrapper, getting no chrome at all.
+ *    - `namedLayouts`: Phase 8 — pages with `layout: <Name>` map
+ *      `Name → ExtraPageRoute[]`.  The generator emits one
+ *      `<Name>Layout` wrapper component and routes the bucket
+ *      through it. */
 export function deriveExtraRoutesFromUi(ui: UiIR): {
   inShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[];
   outOfShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[];
+  namedLayouts: Map<string, import("./templating/preparers/app-shell.js").ExtraPageRoute[]>;
 } {
   const inShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
   const outOfShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
+  const namedLayouts = new Map<
+    string,
+    import("./templating/preparers/app-shell.js").ExtraPageRoute[]
+  >();
   // Same name→params map the page emitter builds, so
   // route derivation recognises pages whose body is a user-component
   // invocation.
@@ -154,16 +154,6 @@ export function deriveExtraRoutesFromUi(ui: UiIR): {
   const helperNames = new Set(ui.helperImports.map((h) => h.name));
   for (const page of ui.pages) {
     if (!page.route) continue;
-    // Scaffold-conventional pages keep their AppShell-
-    // managed routes (handled by the per-aggregate / per-workflow
-    // / per-view loop in `prepareAppShellVM`); only EXPLICIT
-    // user-written pages contribute extra routes here.  An
-    // explicit page named identically to a scaffold-synthesised
-    // one (e.g. a hand-written `OrderList`) overrides — the
-    // AppShell loop sees both and keeps the conventional route
-    // active; the explicit page's body simply replaces the
-    // default rendering.  Scaffold-origin pages (anything other than
-    // `custom`) get the per-aggregate page-object treatment below.
     if (page.origin && page.origin.kind !== "custom") continue;
     if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
       const route: import("./templating/preparers/app-shell.js").ExtraPageRoute = {
@@ -173,12 +163,16 @@ export function deriveExtraRoutesFromUi(ui: UiIR): {
       };
       if (page.layout?.kind === "preset" && page.layout.name === "none") {
         outOfShell.push(route);
+      } else if (page.layout?.kind === "named") {
+        const bucket = namedLayouts.get(page.layout.ref) ?? [];
+        bucket.push(route);
+        namedLayouts.set(page.layout.ref, bucket);
       } else {
         inShell.push(route);
       }
     }
   }
-  return { inShell, outOfShell };
+  return { inShell, outOfShell, namedLayouts };
 }
 
 export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, string> {

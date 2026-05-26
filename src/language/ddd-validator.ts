@@ -23,6 +23,7 @@ import {
   checkBuilderCallType,
   checkContext,
   checkDeployable,
+  checkLayout,
   checkLegacyConstructorCalls,
   checkMacroExpansion,
   checkMatchExpressions,
@@ -192,6 +193,8 @@ export class DddValidator {
             checkDeployable(sm as Deployable, deployables as Deployable[], accept);
           } else if (sm.$type === "Ui") {
             checkUi(sm as Ui, m as System, accept);
+          } else if (sm.$type === "Layout") {
+            checkLayout(sm, accept);
           }
         }
       }

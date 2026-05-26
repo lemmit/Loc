@@ -782,6 +782,11 @@ export interface SystemIR {
    *  primary: <Storage>, cache: <Storage>, ... }`.  Reusable across
    *  deployables. */
   storages: StorageIR[];
+  /** Named `layout <Name> { … }` SystemMembers (Phase 8).  Pages
+   *  reference one via `layout: <Name>` — the React generator emits
+   *  one `<Name>Layout` wrapper component per entry and routes
+   *  matching pages through it. */
+  layouts: LayoutIR[];
 }
 
 /** A single typed storage instance.  v0 type enum covers the
@@ -938,13 +943,30 @@ export interface UiApiParamIR {
   apiName: string;
 }
 
-/** Per-page layout selector.  v1 surfaces two presets (`default` —
- *  page is wrapped by the deployable's AppShell chrome; `none` —
- *  page mounts at the top of the router with no chrome at all).
- *  The discriminated-union shape reserves room for a v2
- *  `{ kind: "named"; ref: string }` variant that references a named
- *  `layout` SystemMember without breaking downstream consumers. */
-export type PageLayoutIR = { kind: "preset"; name: "default" | "none" };
+/** Per-page layout selector.  Three discriminator variants:
+ *  - `{ kind: "preset", name: "default" }` — wrapped by the
+ *    deployable's AppShell chrome (the v1 default behaviour).
+ *  - `{ kind: "preset", name: "none" }` — mounted at the top of the
+ *    router with no chrome at all (v1 escape hatch).
+ *  - `{ kind: "named", ref: string }` — wrapped by a named `layout`
+ *    SystemMember declared in the same system (Phase 8).  The
+ *    React generator emits one `<X>Layout` component per declared
+ *    `LayoutIR` and routes pages through the matching layout-route. */
+export type PageLayoutIR =
+  | { kind: "preset"; name: "default" | "none" }
+  | { kind: "named"; ref: string };
+
+/** A named `layout <Name> { … }` SystemMember (Phase 8).  Each slot's
+ *  body is a single page-body-shaped `ExprIR` evaluated against the
+ *  same walker-stdlib + user-component scope as a page body.  The
+ *  `main` slot is implicit — it's the React Router `<Outlet />`
+ *  position; every layout has exactly one `main` (validator enforces). */
+export interface LayoutIR {
+  name: string;
+  header?: ExprIR;
+  sidebar?: ExprIR;
+  footer?: ExprIR;
+}
 
 /** A page declaration: route + parameters + reactive state + body. */
 export interface PageIR {
