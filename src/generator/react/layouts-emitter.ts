@@ -17,11 +17,13 @@ import type { ImportVM } from "./templating/view-models.js";
 interface WalkedSlot {
   jsx: string;
   imports: Map<string, Set<string>>;
+  usesNavigate: boolean;
+  usesRouterLink: boolean;
 }
 
 function walkSlot(body: NonNullable<LayoutIR["header"]>, pack: LoadedPack): WalkedSlot {
-  const { tsx, imports } = walkBodyToTsx(body, pack);
-  return { jsx: tsx, imports };
+  const { tsx, imports, usesNavigate, usesRouterLink } = walkBodyToTsx(body, pack);
+  return { jsx: tsx, imports, usesNavigate, usesRouterLink };
 }
 
 /** Pre-walked named layout — slots rendered to JSX, routes bucket
@@ -35,6 +37,16 @@ export interface PreparedNamedLayout {
   sidebarJsx: string;
   hasFooter: boolean;
   footerJsx: string;
+  /** Any slot uses `Button { to: ... }` (or another walker primitive
+   *  that lowers to a programmatic `navigate(...)` call).  Template
+   *  declares `const navigate = useNavigate()` at the top of the
+   *  wrapper function when set. */
+  usesNavigate: boolean;
+  /** Any slot uses `Anchor { to: ... }` (a `<RouterLink>` wrapper).
+   *  `RouterLink` is already imported by the AppShell shell so this
+   *  flag is informational today; reserved for packs whose shell
+   *  doesn't pre-import it. */
+  usesRouterLink: boolean;
   routes: ExtraPageRoute[];
 }
 
@@ -59,6 +71,8 @@ export function prepareNamedLayouts(
     const header = layout.header ? walkSlot(layout.header, pack) : undefined;
     const sidebar = layout.sidebar ? walkSlot(layout.sidebar, pack) : undefined;
     const footer = layout.footer ? walkSlot(layout.footer, pack) : undefined;
+    let usesNavigate = false;
+    let usesRouterLink = false;
     for (const slot of [header, sidebar, footer]) {
       if (!slot) continue;
       for (const [from, symbols] of slot.imports) {
@@ -66,6 +80,8 @@ export function prepareNamedLayouts(
         for (const sym of symbols) existing.add(sym);
         aggregatedImports.set(from, existing);
       }
+      usesNavigate ||= slot.usesNavigate;
+      usesRouterLink ||= slot.usesRouterLink;
     }
     namedLayouts.push({
       name: layout.name,
@@ -75,6 +91,8 @@ export function prepareNamedLayouts(
       sidebarJsx: sidebar?.jsx ?? "",
       hasFooter: footer !== undefined,
       footerJsx: footer?.jsx ?? "",
+      usesNavigate,
+      usesRouterLink,
       routes: routesByLayout.get(layout.name) ?? [],
     });
   }

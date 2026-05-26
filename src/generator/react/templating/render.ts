@@ -73,6 +73,7 @@ export function renderAppShell(
         sidebarJsx: string;
         hasFooter: boolean;
         footerJsx: string;
+        usesNavigate: boolean;
         routes: import("./preparers/app-shell.js").ExtraPageRoute[];
       }>
     | undefined = undefined,

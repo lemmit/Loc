@@ -60,12 +60,12 @@ system LoomLanding {
               Anchor { "Pipeline",  to: "#pipeline" },
               Anchor { "Platforms", to: "#platforms" },
               Anchor { "CLI",       to: "#cli" },
-              // Anchor (not Button) for the GitHub link — the layout
-              // slot can't host a useNavigate() declaration, so any
-              // programmatic-navigate Button { to: } would emit a
-              // free `navigate` reference here.  Anchor's `to:` lowers
-              // to a plain <RouterLink>, no hook needed.
-              Anchor { "GitHub",    to: "https://github.com/lemmit/loc" }
+              // Button with `to:` lowers to `navigate(...)`.  The
+              // layouts-emitter sees the `usesNavigate` flag on the
+              // walked slot and injects `const navigate = useNavigate()`
+              // at the top of the wrapper function, so this works
+              // inside a layout slot now.
+              Button { "GitHub", to: "https://github.com/lemmit/loc" }
             }
           },
           size: "xl"

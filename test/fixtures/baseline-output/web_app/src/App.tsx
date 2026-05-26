@@ -1,5 +1,5 @@
 // Auto-generated.
-import { Routes, Route, Link as RouterLink, useLocation, Outlet } from "react-router";
+import { Routes, Route, Link as RouterLink, useLocation, useNavigate, Outlet } from "react-router";
 import { AppShell, Box, Burger, Card, Container, Divider, Grid, Group, Title, NavLink, Anchor, Alert, Badge, Button, Image, Stack, Text } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import React from "react";
