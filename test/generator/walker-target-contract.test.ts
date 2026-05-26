@@ -119,18 +119,45 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
     expect(heex).toBe("|> assign(:step, value)");
   });
 
-  it("renderApiCall diverges: TSX hoists via hook var; HEEx calls directly", () => {
+  it("renderApiCall diverges by design: TSX returns var only, HEEx returns full call", () => {
+    // TSX uses React Query — the hook is hoisted via
+    // `renderApiHoisting`; the call site is just the var
+    // reference, and any chained property access (`.data`,
+    // `.mutate(args)`, `.isPending`) comes from the surrounding IR
+    // walk via standard member / method-call rendering.
+    //
+    // HEEx calls the Ash code interface directly; the call site
+    // IS the invocation — no hoisting, no chained access pattern.
     const tsx = tsxTarget.renderApiCall(SAMPLE_API_CALL_MUTATION, "{}");
     const heex = heexTarget.renderApiCall(SAMPLE_API_CALL_MUTATION, "{}");
-    expect(tsx).toMatch(/customerCreate\.mutate\(\{\}\)/);
+    expect(tsx).toBe("customerCreate");
     expect(heex).toMatch(/create_customer!\(\{\}\)/);
   });
 
-  it("renderApiCall: query (`.all`) routes to `.data` (TSX) vs list_*! (HEEx)", () => {
+  it("renderApiCall: query (`.all`) — TSX `customerAll`, HEEx `list_customers!()`", () => {
     const tsx = tsxTarget.renderApiCall(SAMPLE_API_CALL_QUERY, "");
     const heex = heexTarget.renderApiCall(SAMPLE_API_CALL_QUERY, "");
-    expect(tsx).toBe("customerAll.data");
+    expect(tsx).toBe("customerAll");
     expect(heex).toBe("list_customers!()");
+  });
+
+  it("renderApiCall: TSX honours pre-resolved varName override (View-hook shape)", () => {
+    // Views don't follow the aggregate+op formula
+    // (`<viewCamel>View` is per-view, not per-aggregate-op).  The
+    // walker passes the pre-resolved varName through; target
+    // returns it verbatim.
+    const tsx = tsxTarget.renderApiCall(
+      {
+        apiHandle: "",
+        aggregateName: "",
+        operation: "",
+        kind: "query",
+        args: [],
+        varName: "activeOrdersView",
+      },
+      "",
+    );
+    expect(tsx).toBe("activeOrdersView");
   });
 
   it("renderApiHoisting: TSX emits one const-decl per usage, HEEx is empty", () => {

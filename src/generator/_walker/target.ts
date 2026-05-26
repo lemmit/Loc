@@ -142,10 +142,28 @@ export interface WalkerTarget {
 
   // --- API binding seam ---------------------------------------------------
 
-  /** Render an API call site detected during walk.  TSX rewrites to
-   *  the local hook variable (`customerCreate.mutate(...)`); HEEx
-   *  emits the direct context-function call
-   *  (`MyApp.Sales.create_customer!(...)`). */
+  /** Render an API call site as the framework's primary surface.
+   *  The two shipped frameworks diverge structurally by design:
+   *
+   *  TSX rewrites the IR call site to the local hook variable
+   *  (`customerCreate`).  React Query's `useXxx()` is hoisted ONCE
+   *  per component (see `renderApiHoisting`); the resulting var is
+   *  what every call site references.  The surrounding IR walk
+   *  emits any chained property access (`.data` / `.mutate(args)` /
+   *  `.isPending`) via standard member / method-call rendering —
+   *  the contract returns only the var because that's the IR-node-
+   *  level emission.
+   *
+   *  HEEx emits the direct Ash code-interface call
+   *  (`create_customer!(args)`).  LiveView doesn't hoist; every IR
+   *  site invokes the function in-place.  The walker prepends the
+   *  `<App>.<Handle>.` module prefix at the call site after
+   *  delegating to the target — the bare call shape is the target's
+   *  output.
+   *
+   *  Caller passes pre-rendered args as a single string; target
+   *  splices them into framework-appropriate positions.  When TSX
+   *  ignores `renderedArgs` (var-only) the parameter is harmless. */
   renderApiCall(call: ApiCallSite, renderedArgs: string): string;
 
   /** Per-page hoisted bindings — TSX returns the React Query hook
