@@ -26,7 +26,14 @@ describe("template partial composition", () => {
       "primitive-button": "<Button onClick={{expr onClick}}>{{{label}}}</Button>",
       outer: '<div>{{> primitive-button label="Click me" onClick="() => doThing()"}}</div>',
     };
-    const pack = compilePack("/fixture", manifest, sources, (f) => `/fixture/${f}`);
+    const pack = compilePack(
+      "/fixture",
+      manifest,
+      sources,
+      (f) => `/fixture/${f}`,
+      {},
+      { validateRequired: false },
+    );
     const out = pack.render("outer", {});
     expect(out).toBe("<div><Button onClick={() => doThing()}>Click me</Button></div>");
   });
@@ -44,7 +51,14 @@ describe("template partial composition", () => {
       greeting: "Hello {{name}}",
       outer: "{{> greeting}}, {{name}}!",
     };
-    const pack = compilePack("/fixture", manifest, sources, (f) => `/fixture/${f}`);
+    const pack = compilePack(
+      "/fixture",
+      manifest,
+      sources,
+      (f) => `/fixture/${f}`,
+      {},
+      { validateRequired: false },
+    );
     const out = pack.render("outer", { name: "World" });
     expect(out).toBe("Hello World, World!");
   });
@@ -62,7 +76,14 @@ describe("template partial composition", () => {
       greeting: "Hi {{name}}",
       outer: '{{> greeting name="Alice"}} and {{> greeting name="Bob"}}',
     };
-    const pack = compilePack("/fixture", manifest, sources, (f) => `/fixture/${f}`);
+    const pack = compilePack(
+      "/fixture",
+      manifest,
+      sources,
+      (f) => `/fixture/${f}`,
+      {},
+      { validateRequired: false },
+    );
     expect(pack.render("outer", {})).toBe("Hi Alice and Hi Bob");
   });
 });

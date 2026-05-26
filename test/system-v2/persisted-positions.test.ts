@@ -3,11 +3,11 @@ import {
   clearPersisted,
   loadPersisted,
   mergePersistedPositions,
+  type PositionMap,
   parsePositions,
   pathHash,
   savePersisted,
   storageKey,
-  type PositionMap,
 } from "../../web/src/builder/system-v2/persisted-positions.js";
 import type { ViewPath } from "../../web/src/builder/system-v2/view-graph.js";
 

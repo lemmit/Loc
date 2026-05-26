@@ -190,10 +190,7 @@ function enrichContext(
   return { ...ctx, valueObjects, enums, aggregates, repositories };
 }
 
-function enrichAggregate(
-  agg: AggregateIR,
-  contextVOs: ValueObjectIR[],
-): EnrichedAggregateIR {
+function enrichAggregate(agg: AggregateIR, contextVOs: ValueObjectIR[]): EnrichedAggregateIR {
   const parts = agg.parts.map(enrichPart);
   const fields = agg.fields.map(resolveFieldAccess);
   // Synthesize a `derived inspect: string = <structural>` when the user

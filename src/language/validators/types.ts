@@ -86,10 +86,7 @@ export function checkBinaryOperands(model: Model, accept: ValidationAcceptor): v
 /** Validate each fold-step of a binary chain (`a + b + c` → `(a+b)+c`).
  *  Diagnostics attach with `property: "rest"` and the rhs index so
  *  the editor underlines the offending right-hand operand. */
-export function checkSingleBinaryOperands(
-  chain: BinaryChain,
-  accept: ValidationAcceptor,
-): void {
+export function checkSingleBinaryOperands(chain: BinaryChain, accept: ValidationAcceptor): void {
   const env = envForNode(chain);
   // Track the left-side type as we fold; the lhs starts as the head's
   // type, then becomes the result of the previous step.  When a
@@ -327,11 +324,7 @@ export function checkFunction(
   const env = part ? envForPart(agg, part, fn) : envForAggregate(agg, fn);
   const declared = resolveTypeRef(fn.returnType);
   const actual = typeOf(fn.body, env);
-  if (
-    declared.kind !== "unknown" &&
-    actual.kind !== "unknown" &&
-    !isAssignable(actual, declared)
-  ) {
+  if (declared.kind !== "unknown" && actual.kind !== "unknown" && !isAssignable(actual, declared)) {
     accept(
       "error",
       `Function '${fn.name}' returns '${typeToString(actual)}' but is declared to return '${typeToString(declared)}'.`,
@@ -343,4 +336,4 @@ export function checkFunction(
 
 // Re-export DddType so consumers don't have to chase the type-system
 // import surface.
-export type { DddType, Env, AstNode };
+export type { AstNode, DddType, Env };

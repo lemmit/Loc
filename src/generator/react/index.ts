@@ -271,7 +271,14 @@ export function generateReactForContexts(
   // uses code rendering.  Mirrors the `usesMoney` flag for
   // `decimal.js` in `package.json` below.
   const usesCodeBlock = ui ? uiUsesCodeBlock(ui) : false;
-  out.set("index.html", renderShellFile("index-html", { ...prepareIndexHtmlVM(sys, deployable, ui), usesCodeBlock }, pack));
+  out.set(
+    "index.html",
+    renderShellFile(
+      "index-html",
+      { ...prepareIndexHtmlVM(sys, deployable, ui), usesCodeBlock },
+      pack,
+    ),
+  );
   out.set("Dockerfile", renderShellFile("dockerfile", {}, pack));
   out.set(".dockerignore", renderShellFile("dockerignore", {}, pack));
   out.set("certs/.gitkeep", "");
@@ -367,7 +374,11 @@ interface IndexHtmlVM {
 }
 
 function prepareIndexHtmlVM(
-  sys: SystemIR,
+  // Reserved for a future "system-level title fallback" when a
+  // deployable has no `ui:` binding (then the system name becomes
+  // the html title).  Today the deployable-name fallback below is
+  // enough; underscore-prefix signals intentional unused.
+  _sys: SystemIR,
   deployable: DeployableIR,
   ui: UiIR | undefined,
 ): IndexHtmlVM {
@@ -381,11 +392,6 @@ function prepareIndexHtmlVM(
     canonical: metadata?.canonical,
     favicon: deployable.favicon,
   };
-  // `sys` is reserved for a future "system-level title fallback"
-  // when a deployable has no `ui:` binding (then the system name
-  // becomes the html title).  Today the deployable-name fallback
-  // above is enough; reference `sys` so the linter doesn't flag it.
-  void sys;
 }
 
 /** Pick the page whose metadata projects into the shell.  The

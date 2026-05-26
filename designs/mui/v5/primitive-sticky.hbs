@@ -1,0 +1,3 @@
+{{#if hasChildren}}<Box sx=\{{ position: "sticky", top: "{{top}}", zIndex: 100 }}{{{testidAttr}}}>
+{{indent}}{{{childrenBlock}}}
+{{closeIndent}}</Box>{{else}}<Box sx=\{{ position: "sticky", top: "{{top}}", zIndex: 100 }}{{{testidAttr}}} />{{/if}}

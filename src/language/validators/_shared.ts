@@ -191,9 +191,7 @@ export function canPromoteAstLitTo(
  *  that type is the "anchor" a bare numeric literal on the other
  *  side promotes against.  int isn't an anchor — every IntLit
  *  already types as int. */
-export function literalPromotionAnchor(
-  t: DddType,
-): "long" | "decimal" | "money" | null {
+export function literalPromotionAnchor(t: DddType): "long" | "decimal" | "money" | null {
   if (t.kind !== "primitive") return null;
   if (t.name === "long" || t.name === "decimal" || t.name === "money") return t.name;
   return null;

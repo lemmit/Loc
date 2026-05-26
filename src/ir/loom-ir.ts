@@ -578,10 +578,7 @@ export type EnrichedValueObjectIR = ValueObjectIR & {
   wireShape: WireField[];
 };
 
-export type EnrichedBoundedContextIR = Omit<
-  BoundedContextIR,
-  "aggregates" | "valueObjects"
-> & {
+export type EnrichedBoundedContextIR = Omit<BoundedContextIR, "aggregates" | "valueObjects"> & {
   aggregates: EnrichedAggregateIR[];
   valueObjects: EnrichedValueObjectIR[];
 };

@@ -338,11 +338,7 @@ export function checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
   }
 }
 
-export function checkMenuBlock(
-  block: MenuBlock,
-  ui: Ui,
-  accept: ValidationAcceptor,
-): void {
+export function checkMenuBlock(block: MenuBlock, ui: Ui, accept: ValidationAcceptor): void {
   // Rule 8 — every page-link in a menu block must reference a page
   // in the SAME ui.  The grammar's `[Page:ID]` cross-reference
   // resolves globally; we additionally check the resolved page's

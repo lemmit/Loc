@@ -20,6 +20,7 @@
 
 import Handlebars from "handlebars";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { flattenRequired, REQUIRED_PRIMITIVES } from "./required-primitives.js";
 
 /** Output format the pack's templates produce.  `tsx` is the v0
  *  React/Mantine/shadcn case (Handlebars over .hbs files yielding
@@ -236,6 +237,11 @@ export function compilePack(
    *  invoke `{{> primitive-button}}`/`{{> primitive-card}}` etc.
    *  and pick up whatever the loaded pack provides. */
   sharedSources: Record<string, string> = {},
+  /** Compile-time options.  Test fixtures that probe a single
+   *  manifest feature (helpers, shellFiles, …) opt out of the
+   *  required-primitives gate so they don't have to ship the full
+   *  40+ primitive set just to assert one manifest field parses. */
+  options: { validateRequired?: boolean } = {},
 ): LoadedPack {
   registerHelpersOnce();
   registerPackHelpers(manifest);
@@ -304,6 +310,33 @@ export function compilePack(
     });
     templates.set(name, { fn, filePath: `<shared>/${name}.hbs` });
   }
+
+  // Required-primitives gate.  Every built-in pack must satisfy the
+  // tier list for its declared format — `compilePack` throws here if
+  // a primitive declared required (in `required-primitives.ts`)
+  // wasn't satisfied by either `manifest.emits` or `sharedSources`.
+  //
+  // Why not at first `pack.render(...)`: lazy resolution means a pack
+  // missing `primitive-modal` would pass `loadPack` cleanly and only
+  // blow up the first time a user's `.ddd` contained a modal call.
+  // The error surface would be a confusing render-time failure deep
+  // in the walker rather than a load-time message naming the missing
+  // template.  Eager validation costs nothing — we already have the
+  // `templates` map populated.
+  const format = manifest.format ?? "tsx";
+  const required = REQUIRED_PRIMITIVES[format];
+  const validateRequired = options.validateRequired ?? true;
+  const missing = validateRequired
+    ? flattenRequired(required).filter((name) => !templates.has(name))
+    : [];
+  if (missing.length > 0) {
+    throw new Error(
+      `loader: pack ${manifest.name} (format: ${format}): missing required template(s): ${missing.join(", ")}.  ` +
+        `Declare each in pack.json's \`emits\` map (or place a shared default under vite/, api/, docker/) and create the .hbs file.  ` +
+        `See src/generator/_packs/required-primitives.ts for the per-format required set + policy.`,
+    );
+  }
+
   const render = (name: string, context: unknown): string => {
     const t = templates.get(name);
     if (!t) {

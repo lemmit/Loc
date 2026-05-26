@@ -30,6 +30,7 @@ describe("shared template layer", () => {
       { entry: "{{> shared-greeting name='World'}}" },
       (f) => `/p/${f}`,
       { "shared-greeting": "Hello {{name}}" },
+      { validateRequired: false },
     );
     expect(pack.render("entry", {})).toBe("Hello World");
   });
@@ -44,6 +45,7 @@ describe("shared template layer", () => {
       },
       (f) => `/p/${f}`,
       { greeting: "Hello {{name}}" },
+      { validateRequired: false },
     );
     // Pack's `greeting` overrode shared `greeting`.
     expect(pack.render("entry", {})).toBe("Hi Alice");
@@ -69,6 +71,7 @@ describe("shared template layer", () => {
       { "primitive-button": "<MantineBtn>{{label}}</MantineBtn>" },
       (f) => `/m/${f}`,
       sharedTemplates,
+      { validateRequired: false },
     );
     expect(mantineLike.render("page-header", {})).toBe(
       "<header><MantineBtn>Save</MantineBtn></header>",
@@ -87,6 +90,7 @@ describe("shared template layer", () => {
       },
       (f) => `/s/${f}`,
       sharedTemplates,
+      { validateRequired: false },
     );
     expect(shadcnLike.render("page-header", {})).toBe(
       '<header><button className="btn btn-primary">Save</button></header>',
@@ -94,9 +98,14 @@ describe("shared template layer", () => {
   });
 
   it("renderable via pack.render even when not in pack's emits", () => {
-    const pack = compilePack("/p", { ...baseManifest, emits: {} }, {}, (f) => `/p/${f}`, {
-      "shared-only": "Shared content",
-    });
+    const pack = compilePack(
+      "/p",
+      { ...baseManifest, emits: {} },
+      {},
+      (f) => `/p/${f}`,
+      { "shared-only": "Shared content" },
+      { validateRequired: false },
+    );
     expect(pack.render("shared-only", {})).toBe("Shared content");
   });
 });

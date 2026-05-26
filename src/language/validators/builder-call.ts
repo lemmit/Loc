@@ -3,13 +3,7 @@
 // EntityParts.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
-import type {
-  BuilderCall,
-  EntityPart,
-  Model,
-  NameRef,
-  Ui,
-} from "../generated/ast.js";
+import type { BuilderCall, EntityPart, Model, NameRef, Ui } from "../generated/ast.js";
 import {
   isAggregate,
   isBoundedContext,

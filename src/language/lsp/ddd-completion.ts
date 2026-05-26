@@ -20,8 +20,8 @@ import {
   isFunctionDecl,
   isMemberSuffix,
   isNameRef,
-  isPostfixChain,
   isOperation,
+  isPostfixChain,
   isProperty,
   isValueObject,
 } from "../generated/ast.js";

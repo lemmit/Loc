@@ -50,11 +50,10 @@ export function checkTraceability(model: Model, accept: ValidationAcceptor): voi
       } else if (p.name === "status") {
         const name = v?.$type === "NameRef" ? (v as { name: string }).name : undefined;
         if (!name || !STATUSES.has(name)) {
-          accept(
-            "error",
-            `requirement status must be one of Draft, Approved, InProgress, Done.`,
-            { node: p, property: "value" },
-          );
+          accept("error", `requirement status must be one of Draft, Approved, InProgress, Done.`, {
+            node: p,
+            property: "value",
+          });
         }
       } else if (p.name === "title") {
         hasTitle = true;

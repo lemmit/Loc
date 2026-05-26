@@ -3,7 +3,7 @@
 // `lvalueIsDerived` helpers that target type-resolution / derived-
 // rejection logic on the lhs of an assignment.
 
-import { type AstNode, type ValidationAcceptor } from "langium";
+import type { AstNode, ValidationAcceptor } from "langium";
 import type {
   Aggregate,
   AssignOrCallStmt,
@@ -44,11 +44,7 @@ import {
   warnSensitivityDrop,
 } from "./_shared.js";
 
-export function checkOperation(
-  op: Operation,
-  agg: Aggregate,
-  accept: ValidationAcceptor,
-): void {
+export function checkOperation(op: Operation, agg: Aggregate, accept: ValidationAcceptor): void {
   // `audited` instruments the operation's HTTP route handler; a private
   // operation has no route, so the modifier produces no audit record.
   if (op.audited && op.private) {
