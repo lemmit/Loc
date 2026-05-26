@@ -194,7 +194,7 @@ export function generatePhoenixLiveViewProject(
 
 function emitContext(
   appName: string,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   appModule: string,
   out: Map<string, string>,
 ): void {
@@ -235,7 +235,7 @@ function emitContext(
     // context's Ash.Domain like any other resource so the auto-discovery
     // sees it.  Naming flows through `joinEntityName(assoc)` so all four
     // emitters (resource, configuration, domain, migration) stay in sync.
-    for (const assoc of agg.associations!) {
+    for (const assoc of agg.associations) {
       const joinPath = `lib/${appName}/${ctxSnake}/${assoc.joinTable}.ex`;
       out.set(joinPath, renderJoinResource(assoc, contextModule, appModule));
       allResources.push(`${contextModule}.${joinEntityName(assoc)}`);

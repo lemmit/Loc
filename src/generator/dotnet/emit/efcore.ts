@@ -3,6 +3,8 @@ import type {
   AssociationIR,
   BoundedContextIR,
   ContainmentIR,
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   ExprIR,
   FieldIR,
 } from "../../../ir/loom-ir.js";
@@ -22,11 +24,11 @@ import { joinDbSetName, joinEntityName } from "./join-entities.js";
 
 /** Every association declared across an entire context's aggregates,
  *  in stable order (matches Drizzle schema emission). */
-function contextAssociations(ctx: BoundedContextIR): AssociationIR[] {
-  return ctx.aggregates.flatMap((a) => a.associations!);
+function contextAssociations(ctx: EnrichedBoundedContextIR): AssociationIR[] {
+  return ctx.aggregates.flatMap((a) => a.associations);
 }
 
-export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
+export function renderDbContext(ctx: EnrichedBoundedContextIR, ns: string): string {
   const aggUsings = ctx.aggregates.map((a) => `using ${ns}.Domain.${plural(a.name)};`);
   const dbSets = ctx.aggregates.map(
     (a) => `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
@@ -81,7 +83,11 @@ export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
   );
 }
 
-export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedContextIR): string {
+export function renderConfiguration(
+  agg: EnrichedAggregateIR,
+  ns: string,
+  ctx: BoundedContextIR,
+): string {
   const fieldConfigs = agg.fields.flatMap((f) => fieldConfigLines(f, "        ", "b"));
   const containmentLines = agg.contains.flatMap((c) => containmentConfigLines(c, agg));
   // Reference-collection (`Id<T>[]`) fields are persisted via a
@@ -89,7 +95,7 @@ export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedCo
   // `List<TargetId>` accessor on the root must be unmapped — without
   // `b.Ignore(...)` EF Core 8's primitive-collection support pins it
   // as a JSON column on the root row, defeating the relational join.
-  const refCollectionIgnores = agg.associations!.map(
+  const refCollectionIgnores = agg.associations.map(
     (a) => `        b.Ignore(x => x.${upperFirst(a.fieldName)});`,
   );
   // Emit HasIndex for every aggregate-root column referenced by a

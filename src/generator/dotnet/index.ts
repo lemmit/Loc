@@ -155,7 +155,7 @@ function emitProjectFromContexts(
   }
   // DbContext + project shell are emitted once, with all aggregates
   // collected from the union of contexts.
-  const merged: BoundedContextIR = {
+  const merged: EnrichedBoundedContextIR = {
     name: ns,
     enums: contexts.flatMap((c) => c.enums),
     valueObjects: contexts.flatMap((c) => c.valueObjects),
@@ -398,7 +398,7 @@ function emitAggregate(
   // class + its EF Core configuration (composite PK, ordinal, FK
   // converters).  Skipped silently when the aggregate has no
   // `Id<T>[]` fields.
-  for (const assoc of agg.associations!) {
+  for (const assoc of agg.associations) {
     const cls = joinEntityName(assoc);
     out.set(`Infrastructure/Persistence/JoinTables/${cls}.cs`, renderJoinEntity(assoc, ns));
     out.set(
@@ -418,7 +418,7 @@ function emitAggregate(
 // ---------------------------------------------------------------------------
 
 function emitInfrastructure(
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
   usesValidators: boolean,

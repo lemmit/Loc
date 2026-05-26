@@ -5,6 +5,8 @@ import type {
   BoundedContextIR,
   ContainmentIR,
   DerivedIR,
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   EntityPartIR,
   ExprIR,
   FieldIR,
@@ -35,7 +37,7 @@ function isRefCollection(t: TypeIR): boolean {
 // ---------------------------------------------------------------------------
 
 export function emitAggregateResources(
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   appModule: string,
   appSnake: string,
 ): Map<string, string> {
@@ -61,7 +63,7 @@ export function emitAggregateResources(
 // ---------------------------------------------------------------------------
 
 function renderAggregateResource(
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   ctx: BoundedContextIR,
   appModule: string,
   ctxModule: string,

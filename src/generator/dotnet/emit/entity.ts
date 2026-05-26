@@ -1,4 +1,10 @@
-import type { AggregateIR, EntityPartIR, TypeIR } from "../../../ir/loom-ir.js";
+import type {
+  AggregateIR,
+  EnrichedAggregateIR,
+  EnrichedEntityPartIR,
+  EntityPartIR,
+  TypeIR,
+} from "../../../ir/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
@@ -30,15 +36,15 @@ function isRefCollection(t: TypeIR): boolean {
 // ---------------------------------------------------------------------------
 
 export function renderEntity(
-  entity: AggregateIR | EntityPartIR,
+  entity: EnrichedAggregateIR | EnrichedEntityPartIR,
   isRoot: boolean,
   ns: string,
   rootName: string,
   emitTrace = false,
 ): string {
   const isAgg = "operations" in entity;
-  const idValueType = isAgg ? (entity as AggregateIR).idValueType : "guid";
-  const operations = isAgg ? (entity as AggregateIR).operations : [];
+  const idValueType = isAgg ? (entity as EnrichedAggregateIR).idValueType : "guid";
+  const operations = isAgg ? (entity as EnrichedAggregateIR).operations : [];
   const requiredFields = entity.fields.filter((f) => !f.optional);
   const hasExtern = operations.some((o) => o.extern);
   const setterVisibility = hasExtern ? "internal" : "private";
@@ -56,7 +62,7 @@ export function renderEntity(
     // from containment fields (private `_lines` backing).  Entity
     // parts don't have associations, but typing as the union keeps
     // the ctx shape stable across the two callers.
-    agg: isAgg ? (entity as AggregateIR) : undefined,
+    agg: isAgg ? (entity as EnrichedAggregateIR) : undefined,
   };
 
   const propLines: string[] = [];

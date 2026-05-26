@@ -1,4 +1,4 @@
-import type { AggregateIR, FindIR, RepositoryIR, TypeIR } from "../../ir/loom-ir.js";
+import type { EnrichedAggregateIR, FindIR, RepositoryIR, TypeIR } from "../../ir/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { renderCsExpr } from "./render-expr.js";
 
@@ -17,7 +17,7 @@ import { renderCsExpr } from "./render-expr.js";
 // ---------------------------------------------------------------------------
 
 export function buildFindBodies(
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
   usings?: Set<string>,
 ): Array<{ name: string; filterClause: string; projectionClause: string }> {
@@ -29,7 +29,7 @@ export function buildFindBodies(
   }));
 }
 
-function filterClauseFor(find: FindIR, agg: AggregateIR, usings?: Set<string>): string {
+function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR, usings?: Set<string>): string {
   if (find.filter) {
     // `agg` is threaded so the renderer can resolve a
     // `this.<refColl>.contains(param)` predicate to its

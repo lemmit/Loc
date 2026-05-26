@@ -158,7 +158,7 @@ export function generateTypeScriptForContexts(
   // `domain/value-objects.ts`, `domain/events.ts`, `db/schema.ts`,
   // `http/workflows.ts`, `http/views.ts`, and `http/index.ts` all
   // reflect the FULL aggregate / VO / enum / event set.
-  const merged: BoundedContextIR = {
+  const merged: EnrichedBoundedContextIR = {
     name: contexts[0]?.name ?? "merged",
     enums: contexts.flatMap((c) => c.enums),
     valueObjects: contexts.flatMap((c) => c.valueObjects),

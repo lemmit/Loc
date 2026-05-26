@@ -1,4 +1,10 @@
-import type { AggregateIR, AssociationIR, ParamIR, RepositoryIR } from "../../../ir/loom-ir.js";
+import type {
+  AggregateIR,
+  AssociationIR,
+  EnrichedAggregateIR,
+  ParamIR,
+  RepositoryIR,
+} from "../../../ir/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
@@ -44,7 +50,7 @@ export function renderRepositoryInterface(
 }
 
 export function renderRepositoryImpl(
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
   ns: string,
   findBodies: Array<{
@@ -66,7 +72,7 @@ export function renderRepositoryImpl(
   const finds = repo?.finds ?? [];
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const setName = plural(upperFirst(agg.name));
-  const associations = agg.associations!;
+  const associations = agg.associations;
   // Reference-collection (`Id<T>[]`) load + save lines.  Each
   // association is a separate `_db.<JoinDbSet>` whose rows are
   // explicitly queried/inserted/deleted by the repository — we don't
