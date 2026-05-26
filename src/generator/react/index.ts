@@ -192,7 +192,17 @@ export function generateReactForContexts(
   // separate `outOfShell` channel that mounts as sibling routes
   // outside the AppShell chrome.
   const extraRouteSplit = ui ? deriveExtraRoutesFromUi(ui) : undefined;
-  const extraRoutes = extraRouteSplit?.inShell;
+  // Phase 8 step 1: pages with `layout: <Named>` fold into the
+  // `inShell` channel and pick up the default AppShell wrapper.  The
+  // grammar / IR / validator surfaces are complete; visual rendering
+  // of the named layout's header/sidebar/footer slots — walker-driven
+  // emission of `<XLayout>` components per declared layout — is a
+  // Phase 8 step 2 follow-up.
+  const namedRoutes: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
+  if (extraRouteSplit?.namedLayouts) {
+    for (const routes of extraRouteSplit.namedLayouts.values()) namedRoutes.push(...routes);
+  }
+  const extraRoutes = [...(extraRouteSplit?.inShell ?? []), ...namedRoutes];
   const outOfShellRoutes = extraRouteSplit?.outOfShell;
 
   // App.tsx's per-aggregate / -workflow / -view route block emits

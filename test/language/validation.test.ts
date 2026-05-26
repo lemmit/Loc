@@ -560,25 +560,24 @@ describe("validation", () => {
       expect(errors.some((e) => /more than one 'layout' property/.test(e))).toBe(true);
     });
 
-    it("rejects `layout:` on a scaffold-synthesised page body (e.g. Home / scaffoldList)", async () => {
+    it("Phase 8: `layout:` is allowed on scaffold-synthesised pages (v1 restriction lifted)", async () => {
       // The body shapes here are the same ones the scaffold stdlib
-      // synthesises (see `src/stdlib/scaffold/_pages.ts`).  v1
-      // refuses `layout:` on these explicitly so the future
-      // named-layout SystemMember (v2) can introduce per-page
-      // chrome selection without a backwards-incompatible meaning
-      // shift.
+      // synthesises (see `src/stdlib/scaffold/_pages.ts`).  Phase 8
+      // lifts the v1 restriction so a scaffold Home / OrdersList can
+      // opt into a named-layout SystemMember chrome.  The presets
+      // `default` / `none` are similarly admitted on these pages.
       const { errors } = await parse(`
         system S {
           ui WebApp {
             page Home {
               route: "/"
               layout: none
-              body: Home()
+              body: Home {}
             }
             page OrdersList {
               route: "/orders"
               layout: default
-              body: scaffoldList(of: Order)
+              body: scaffoldList { of: Order }
             }
           }
         }
@@ -586,7 +585,7 @@ describe("validation", () => {
       const matches = errors.filter((e) =>
         /'layout' is not allowed on scaffold-synthesised pages/.test(e),
       );
-      expect(matches.length).toBeGreaterThanOrEqual(2);
+      expect(matches).toEqual([]);
     });
 
     it("rejects a menu link to a page declared in a different ui", async () => {

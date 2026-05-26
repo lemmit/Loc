@@ -27,6 +27,9 @@ import type {
   Solution,
   StateField,
   Statement,
+  Layout,
+  LayoutMainSlot,
+  LayoutNamedSlot,
   Storage,
   System,
   Targetable,
@@ -106,6 +109,7 @@ import type {
   ModuleStorageRole,
   OperationIR,
   PageIR,
+  LayoutIR,
   PageLayoutIR,
   PageMetadataIR,
   PageOriginIR,
@@ -512,6 +516,13 @@ function lowerSystem(sys: System): SystemIR {
         type: s.type as StorageKind,
       }),
     );
+  // Named `layout <Name> { … }` SystemMembers (Phase 8).  Each slot's
+  // body is a page-body-shaped expression lowered against the same
+  // env shape pages use.  No params or state — layouts are static
+  // wrappers, not parametric components.
+  const layouts = sys.members
+    .filter((m): m is Layout => m.$type === "Layout")
+    .map((l): LayoutIR => lowerLayout(l));
   const built: SystemIR = {
     name: sys.name,
     modules,
@@ -522,6 +533,7 @@ function lowerSystem(sys: System): SystemIR {
     uis,
     apis,
     storages,
+    layouts,
   };
   // Scaffold expander always runs.  Every page with a
   // recognised `archetype` gets `body` rewritten to a
@@ -840,6 +852,37 @@ function defaultPortFor(platform: Platform | undefined): number {
 //     resolution, etc.
 // ---------------------------------------------------------------------------
 
+function lowerLayout(layout: Layout): LayoutIR {
+  // Each non-main slot is lowered with an empty env — layouts have no
+  // params or state, and the validator rejects refs to anything other
+  // than walker-stdlib primitives + user components + helper imports.
+  const env: Env = { locals: new Map(), user: undefined };
+  let header: ExprIR | undefined;
+  let sidebar: ExprIR | undefined;
+  let footer: ExprIR | undefined;
+  for (const slot of layout.slots) {
+    if (slot.$type === "LayoutMainSlot") {
+      // The `main` slot is the page-body sentinel.  No body to lower —
+      // the React generator emits `<Outlet />` at this position.
+      continue;
+    }
+    const named = slot as LayoutNamedSlot;
+    const body = lowerExpr(named.body, env);
+    switch (named.name) {
+      case "header":
+        header = body;
+        break;
+      case "sidebar":
+        sidebar = body;
+        break;
+      case "footer":
+        footer = body;
+        break;
+    }
+  }
+  return { name: layout.name, header, sidebar, footer };
+}
+
 function lowerUi(ui: Ui): UiIR {
   const pages: PageIR[] = [];
   const components: ComponentIR[] = [];
@@ -926,13 +969,16 @@ function lowerPage(p: Page): PageIR {
         })),
       };
     } else if (prop.$type === "LayoutProp") {
-      // The validator restricts `prop.value` to the v1 preset set
-      // ({"default","none"}) and rejects the property on
-      // scaffold-origin pages; the cast here is safe at any point
-      // the IR is consumed (validator runs before lowering in
-      // production, and the React generator branches only on the
-      // narrower "none" sentinel).
-      layout = { kind: "preset", name: prop.value as "default" | "none" };
+      // Phase 8: bare `ID` value resolves to either the two reserved
+      // presets (`default` / `none`) or the name of a named `layout`
+      // SystemMember declared in the same system.  Validator gates
+      // the resolution — by lowering time, anything that's not a
+      // preset is treated as a named ref (the React generator
+      // partitions pages by ref name).
+      layout =
+        prop.value === "default" || prop.value === "none"
+          ? { kind: "preset", name: prop.value }
+          : { kind: "named", ref: prop.value };
     } else if (prop.$type === "DescriptionProp") {
       description = prop.value;
     } else if (prop.$type === "OgImageProp") {
