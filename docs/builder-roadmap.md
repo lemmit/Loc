@@ -414,14 +414,16 @@ Done:
   diagnostics still apply per leaf. Gated by
   `test/system/system-grouped-layout.test.ts` + e2e.
 - **Edge rebinding by dragging** — dragging a (reconnectable) edge's target
-  endpoint onto another node repoints its reference, reusing `rebindReference`.
-  Scoped to the three single, unambiguous cross-ref edges: a repository's `for`
-  aggregate and a `from` source (view→aggregate, api→module); the owner (edge
-  source) is fixed and an incompatible drop / unparseable rewrite is rejected.
-  Pure `isRebindableEdge` / `rebindEdgeTarget` in `edge-rebind.ts`; wired via
-  React Flow `onReconnect` (`reconnectable: "target"` on those edges, off in
-  grouped mode). Gated by `test/system/system-edge-rebind.test.ts`. (The drag
-  *gesture* isn't e2e-covered — hard to script reliably; the rebind logic is.)
+  endpoint onto another node repoints its reference, reusing `rebindReference`
+  (or `setDeployableTargets` for the `targets` edge). Scoped to the four single,
+  unambiguous cross-ref edges: a repository's `for` aggregate, a `from` source
+  (view→aggregate, api→module), and a deployable's `targets` deployable; the
+  owner (edge source) is fixed and an incompatible drop / unparseable rewrite is
+  rejected. Pure `isRebindableEdge` / `rebindEdgeTarget` in `edge-rebind.ts`;
+  wired via React Flow `onReconnect` (`reconnectable: "target"` on those edges,
+  off in grouped mode). Gated by `test/system/system-edge-rebind.test.ts`. (The
+  drag *gesture* isn't e2e-covered — hard to script reliably; the rebind logic
+  is.)
 - **Mobile layout pass** — on a compact viewport the inspector is a bottom
   drawer opened via the "Inspect / +" button, which used to sit top-right and
   collide with the canvas overlay toolbar (search / toggles wrap full-width on a
@@ -432,9 +434,9 @@ Done:
 
 Open:
 
-- **Drag-rebind for deployable `targets` / `ui`** — these are single refs too,
-  but `ui` is form-sensitive (`setDeployableUi` would convert a compose/block
-  form to sugar), so they stay inspector-only for now.
+- **Drag-rebind for deployable `ui`** — a single ref too, but `setDeployableUi`
+  is form-sensitive (it would convert a compose/block form to sugar), so it
+  stays inspector-only for now.
 - **Multi-valued / derived edges** (`deployable` modules / `serves`, `emits`)
   are inherently not single-drag rebindable — they stay inspector / statement
   editors.

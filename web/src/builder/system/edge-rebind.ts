@@ -1,22 +1,28 @@
+import { setDeployableTargets } from "./deployable-bindings";
 import { rebindReference } from "./rebind";
 
 // ---------------------------------------------------------------------------
 // Repointing a graph edge by dragging its target endpoint onto another node.
 //
 // Only edges that map to a single, unambiguous cross-reference are drag-
-// rebindable: a repository's `for` aggregate, and a `from` source (a view's
-// aggregate, an api's module). All three go through `rebindReference`, which
-// rewrites just the reference token and is parse-guarded. Multi-valued
-// (deployable `modules` / `serves`) and derived (`emits`) edges, and the
-// form-sensitive deployable `targets` / `ui` refs, stay inspector-only.
+// rebindable: a repository's `for` aggregate, a `from` source (a view's
+// aggregate, an api's module), and a deployable's `targets` deployable. The
+// first three go through `rebindReference` (single token rewrite, parse-
+// guarded); `targets` goes through `setDeployableTargets`, which reprints the
+// Deployable from its AST — the deployable's `targets:` slot is a single ref
+// that doesn't change the surrounding form. Multi-valued (deployable `modules`
+// / `serves`) and derived (`emits`) edges stay inspector-only, as does the
+// form-sensitive deployable `ui` ref: `setDeployableUi` can convert between
+// sugar / compose / block forms and so isn't a no-op surgical rewrite.
 // ---------------------------------------------------------------------------
 
 // `${ownerKind}:${label}` → the node kind the new target must be. The owner
 // kind disambiguates the shared `from` label (view vs api).
-const REBINDABLE: Record<string, "aggregate" | "module"> = {
+const REBINDABLE: Record<string, "aggregate" | "module" | "deployable"> = {
   "repository:for": "aggregate",
   "view:from": "aggregate",
   "api:from": "module",
+  "deployable:targets": "deployable",
 };
 
 function splitId(id: string): { kind: string; name: string } {
@@ -44,6 +50,11 @@ export function rebindEdgeTarget(
   if (!expectedTargetKind) return null;
   const target = splitId(newTargetId);
   if (target.kind !== expectedTargetKind) return null;
+  if (owner.kind === "deployable") {
+    // `targets:` is single-ref; `setDeployableTargets` reprints the deployable
+    // without touching the surrounding `modules:` / `serves:` / `ui:` slots.
+    return setDeployableTargets(source, owner.name, target.name);
+  }
   // owner.kind is "repository" | "view" | "api" — all RebindKind.
   return rebindReference(source, owner.kind as "repository" | "view" | "api", owner.name, target.name);
 }
