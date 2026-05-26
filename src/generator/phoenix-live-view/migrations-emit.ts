@@ -53,8 +53,8 @@ function emitInitial(m: MigrationsIR, appModule: string, out: Map<string, string
   //     → BASE + N*10 + parentIndex*10 + partIndex+1
   //   - join      (two cascade FKs — Id<T>[] many-to-many)
   //     → BASE + N*100 + joinIdx
-  // Matches the pre-refactor Phoenix scheme byte-for-byte, including
-  // the gap between parent and part blocks.
+  // Includes an intentional gap between parent and part blocks so
+  // inserts/updates to either tier don't shift the other's numbering.
   const createSteps = m.steps.filter(
     (s): s is Extract<MigrationStep, { op: "createTable" }> => s.op === "createTable",
   );

@@ -917,9 +917,9 @@ function checkMagicCall(
   // Reserved slugs route to system-level orchestration (workflows)
   // or saved queries (views).  `<magicId>.workflows.<name>(...)`
   // resolves to a workflow; `<magicId>.views.<name>(...)` to a view.
-  // Only `ui` invocations of these are wired up to the React UI
-  // generator today; the same reserved slugs validate against `api`
-  // for symmetry — backend-side dispatchers can pick them up later.
+  // The React UI generator wires `ui` invocations; the same reserved
+  // slugs validate against `api` for symmetry so backend-side
+  // dispatchers see a consistent IR shape.
   if (aggregateSlug === "workflows") {
     const wf = contexts
       .flatMap((c) => c.workflows)
@@ -1186,11 +1186,11 @@ function validateWorkflowBody(
           });
           break;
         }
-        // A workflow can't yet call a find whose where
-        // clause references currentUser — the workflow handler
-        // doesn't inject ICurrentUserAccessor, and threading the
-        // user through saves + ops is its own follow-up.  Surface a
-        // friendly error pointing at the alternative (load by id).
+        // A workflow can't call a find whose where clause references
+        // currentUser — the workflow handler doesn't inject
+        // ICurrentUserAccessor, and threading the user through saves +
+        // ops would be a larger reshape.  Surface a friendly error
+        // pointing at the alternative (load by id).
         const calledFind = repo.finds.find((f) => f.name === st.method);
         if (calledFind && findUsesCurrentUser(calledFind)) {
           diags.push({

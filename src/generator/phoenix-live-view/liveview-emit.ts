@@ -306,11 +306,10 @@ function renderMount(
   }
   // @form assignment — one per Form(of:/runs:) call in the page body.
   // For aggregate-of: AshPhoenix.Form.for_create(<Ctx>.<Agg>, :create);
-  // for workflow-runs: a placeholder for_action (workflow form
-  // resolution is wider and tracked separately — see plan §Forms-Wf).
-  // Multiple forms on one page currently collapse to a single @form;
-  // pages with >1 form should split into nested LiveComponents — out
-  // of scope for the basic mount-stub fix.
+  // for workflow-runs: a placeholder for_action (workflow-form
+  // resolution is wider and tracked separately).  Multiple forms on
+  // one page collapse to a single @form; pages with >1 form should
+  // split into nested LiveComponents.
   for (const fb of formBindings) {
     // Operation forms bind to a *loaded* record (`for_update`), so
     // they're assigned in handle_params after @data loads — never

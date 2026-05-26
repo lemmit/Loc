@@ -2,15 +2,14 @@ import type { Aggregate } from "../../macro-api/index.js";
 import { defineMacro } from "../../macro-api/index.js";
 import { pagesForAggregate } from "./_pages.js";
 
-/** Synthesise the three default pages for one aggregate: List,
- * New, Detail.  Same body/route/menu shape as the legacy scaffold
- * keyword for `scaffold aggregates: <Name>`.
+/** Synthesise the three default pages for one aggregate: List, New,
+ * Detail.
  *
  * Composability: the top-level `scaffold` macro and the per-context
- * `scaffoldContext` composer both invoke this leaf via
- * `invokeMacro` so the one-level unfold action exposes per-aggregate
- * granularity — users can drill into a single aggregate's scaffold
- * without flattening the whole UI. */
+ * `scaffoldContext` composer both invoke this leaf via `invokeMacro`
+ * so the one-level unfold action exposes per-aggregate granularity —
+ * users can drill into a single aggregate's scaffold without
+ * flattening the whole UI. */
 export default defineMacro({
   name: "scaffoldAggregate",
   target: "ui",

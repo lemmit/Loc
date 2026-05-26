@@ -188,8 +188,8 @@ function qualifyDesign(raw: string | undefined, fallback: BuiltinPackFamily): st
  *  pin verbatim.  Frontend / unknown (`react`, `static`) → value for
  *  both (no version axis here).  Byte-identical for every existing
  *  source: `family` equals the bareword, so all `platform === "…"`
- *  logic is unchanged; `platformRef` is additive (dispatch still keys
- *  on `platform` for now). */
+ *  logic is unchanged; `platformRef` is additive (dispatch keys
+ *  on `platform`). */
 function qualifyPlatform(raw: string | undefined): {
   family: Platform;
   ref: string;
@@ -496,8 +496,8 @@ function lowerSystem(sys: System): SystemIR {
   // preserves source order so the scaffold expander emits pages in a
   // stable sequence.  Lowering is shallow at this layer: pages,
   // components, scaffolds, and the optional menu block are each turned
-  // into their literal IR shape (no scaffold expansion, no body type
-  // inference yet — those come later in the pipeline).
+  // into their literal IR shape.  Scaffold expansion and body type
+  // inference happen in subsequent passes.
   const uis = sys.members.filter((m): m is Ui => m.$type === "Ui").map((u) => lowerUi(u));
   // Api declarations — system-level peers to module / ui / deployable.
   const apis = sys.members
@@ -1282,8 +1282,8 @@ function lowerAggregate(
 // ---------------------------------------------------------------------------
 // Capability collection — reads structurally from `members[]` (no side
 // tables).  Context-level capabilities, when present, are appended
-// first so per-aggregate ones can override at the validator layer
-// later (today's lowering is pure concatenation).
+// first.  Lowering is pure concatenation; the validator layer is
+// responsible for any per-aggregate override semantics.
 // ---------------------------------------------------------------------------
 
 interface ContextLevelCapabilities {

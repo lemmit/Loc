@@ -36,8 +36,8 @@ export function tryDetectApiHook(expr: ExprIR, ctx: WalkContext): ApiHookUse | n
   // Pattern D: member(ref:<Aggregate>, op) without an
   // api param prefix lifts to the same hook Pattern A produces.
   // Lets UIs without a `api X: Y` binding still get auto-injected
-  // hooks (e.g. legacy `scaffold modules: M` deployables that
-  // never declared api params).
+  // hooks (`scaffold modules: M` deployables that never declared
+  // api params).
   if (
     expr.kind === "member" &&
     expr.receiver.kind === "ref" &&

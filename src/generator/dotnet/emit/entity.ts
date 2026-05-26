@@ -115,8 +115,7 @@ export function renderEntity(
   );
   // Override `ToString()` on aggregate roots to delegate to the
   // `Inspect` derived — gives a useful debug form in exceptions,
-  // debugger watches, Serilog destructuring, etc.  See plan
-  // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+  // debugger watches, Serilog destructuring, etc.
   if (isRoot && entity.derived.some((d) => d.name === "inspect")) {
     derivedLines.push("    public override string ToString() => Inspect;");
   }

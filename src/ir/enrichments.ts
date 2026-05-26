@@ -100,8 +100,8 @@ export function enrichLoomModel(loom: RawLoomModel): EnrichedLoomModel {
  * callers asserts the brand locally where it invokes `wireShapeFor`
  * (see grep "as EnrichedAggregateIR" — five sites).  Threading the
  * brand all the way through `surface.ts` + every `<platform>/emit.ts`
- * + every emitter helper (~224 typed sites) is a follow-up of its
- * own; until that lands, the local casts record the runtime invariant. */
+ * + every emitter helper (~224 typed sites) is a much larger refactor;
+ * the local casts record the runtime invariant in the meantime. */
 export function wireShapeFor(
   entity: EnrichedAggregateIR | EnrichedEntityPartIR | EnrichedValueObjectIR,
 ): WireField[] {
@@ -202,8 +202,7 @@ function enrichAggregate(agg: AggregateIR, contextVOs: ValueObjectIR[]): Enriche
   // Synthesize a `derived inspect: string = <structural>` when the user
   // didn't declare one.  Always-present after enrichment so backends
   // can emit a `ToString()` / `Inspect` / `util.inspect.custom` hook
-  // unconditionally.  See plan
-  // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+  // unconditionally.
   //
   // The VO lookup gives synth visibility into nested fields so a
   // `price: Money` field can expand to `price: <Money(amount: ...,
@@ -363,10 +362,9 @@ function synthesizeInspect(agg: AggregateIR, voLookup: Map<string, ValueObjectIR
     pushField(f.name, valueForField(f.name, f.type, isSensitive));
   }
 
-  // Containments: short structural placeholder.  Recursing into the
-  // contained inspect is a follow-up — keeps this first cut simple
-  // and avoids cycles for self-containing parts (which are rare but
-  // possible).
+  // Containments: short structural placeholder.  Not recursed into —
+  // keeps the inspect string compact and avoids cycles for
+  // self-containing parts (rare but possible).
   for (const c of agg.contains) {
     pushField(c.name, lit(`[${c.partName}${c.collection ? "[]" : ""}]`));
   }
@@ -511,9 +509,8 @@ function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
     // source of truth.  The registry import is safe: `registry.ts`
     // only imports per-platform `Surface` impls (none of which
     // import back into `ir/`), so no cycle.  `platformNeedsDb`
-    // above still mirrors `PlatformSurface.needsDb` inline only
-    // because pulling it through the registry there would force an
-    // identical import — kept consistent as a follow-up.
+    // above mirrors `PlatformSurface.needsDb` inline because routing
+    // it through the registry there would force an identical import.
     if (!platformFor(d.platform).isFrontend || !d.targetName) return d;
     const target = deployables.find((t) => t.name === d.targetName);
     if (!target) return d;

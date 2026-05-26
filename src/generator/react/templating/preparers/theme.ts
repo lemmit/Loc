@@ -1,13 +1,12 @@
 // ---------------------------------------------------------------------------
 // View-model preparer for the design-token theme.
 //
-// Ports the legacy theme-builder.ts logic into the layer-2 idiom:
-// resolve defaults for any tokens the DSL leaves blank, expand
-// shade ramps for the brand + neutral colours, and return a plain
-// JSON ThemeVM that any pack can render against.  The shade-ramp
-// helpers live here (not in a Handlebars helper) so packs that
-// don't need shades — e.g. a future "minimalist" pack that only
-// reads a single base colour — aren't forced to compute them.
+// Resolves defaults for any tokens the DSL leaves blank, expands shade
+// ramps for the brand + neutral colours, and returns a plain JSON
+// ThemeVM that any pack can render against.  The shade-ramp helpers
+// live here (not in a Handlebars helper) so packs that don't need
+// shades — e.g. a "minimalist" pack reading a single base colour —
+// aren't forced to compute them.
 // ---------------------------------------------------------------------------
 
 import type { ThemeIR } from "../../../../ir/loom-ir.js";
@@ -24,9 +23,8 @@ const DEFAULT_PRIMARY_HEX = "#4f46e5";
 const DEFAULT_NEUTRAL_HEX = "#64748b";
 /** Default semantic colours — chosen to read coherently across
  *  light + dark schemes and against the indigo / slate baseline.
- *  Packs may override per-token in future, but the baseline keeps
- *  templates that always emit semantic slots from rendering
- *  blank. */
+ *  The baseline keeps templates that always emit semantic slots
+ *  from rendering blank. */
 const DEFAULT_SECONDARY_HEX = "#6fd1ff";
 const DEFAULT_ACCENT_HEX = "#ffb98a";
 const DEFAULT_SUCCESS_HEX = "#22c55e";
@@ -70,9 +68,7 @@ export function prepareThemeVM(t: ThemeIR | undefined): ThemeVM {
 }
 
 // ---------------------------------------------------------------------------
-// Shade ramp — RGB <-> HSL <-> hex, lightness-stepped.  Identical
-// algorithm to the legacy theme-builder.ts so generated theme.ts
-// files round-trip byte-for-byte.
+// Shade ramp — RGB <-> HSL <-> hex, lightness-stepped.
 // ---------------------------------------------------------------------------
 
 export function generateShades(hex: string): string[] {

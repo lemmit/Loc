@@ -218,7 +218,7 @@ export function generateTypeScriptForContexts(
   emitObservabilityFiles(out);
   // Per-module Postgres migrations + Drizzle journal — emitted whenever
   // the system orchestrator hands us a migrations slice.  Empty slice
-  // (legacy / non-system entry) → no-op.
+  // (non-system entry points) → no-op.
   const hasMigrations = !!(system?.migrations && system.migrations.length > 0);
   if (hasMigrations) {
     emitTypescriptMigrations(system!.migrations!, out);

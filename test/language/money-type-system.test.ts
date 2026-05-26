@@ -1,6 +1,5 @@
-// Phase 0 of the `money` primitive — closed arithmetic semantics and
-// (non-)assignability with the existing numeric primitives.  See
-// `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+// `money` primitive — closed arithmetic semantics and
+// (non-)assignability with the existing numeric primitives.
 //
 // money exists as a primitive distinct from decimal:
 //   money ± money              → money

@@ -290,8 +290,7 @@ export interface AggregateIR {
    * aggregate declared one.  Populated by `enrichLoomModel`.
    * When set, `string(aggregate)` and implicit `string + aggregate`
    * compile by lowering to a member access on this derived; when
-   * unset, both are validator errors.  See plan
-   * `/root/.claude/plans/i-think-we-have-glittery-lecun.md`. */
+   * unset, both are validator errors. */
   displayDerived?: DerivedIR;
   /** Pointer to the `derived inspect: string` field; always populated
    * after enrichment (auto-injected by the `defaultInspect()` macro
@@ -1169,9 +1168,8 @@ export interface DeployableIR {
    *  `BUILTIN_PLATFORM_LATEST`; a pin (`platform: "hono@v4"`) flows
    *  through as written.  For frontend platforms (`react`/`static`)
    *  this equals `platform` (they version via the design/stack axis,
-   *  not here).  The system orchestrator's dispatch stays on
-   *  `platform` for now; it switches to this field once a family has
-   *  >1 version. */
+   *  not here).  The system orchestrator's dispatch keys on `platform`
+   *  while every family has exactly one registered version. */
   platformRef: string;
   /** Names of modules included in this deployable.  For react frontends,
    * inherited from the targeted backend deployable. */

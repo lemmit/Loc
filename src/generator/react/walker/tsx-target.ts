@@ -4,12 +4,11 @@
 // for the contract definition and scope.
 //
 // This module is the *standalone* impl: it lifts the seams the
-// existing inline React walker (`src/generator/react/body-walker.ts`)
-// already implements into the `WalkerTarget` interface so callers
-// — and the cross-target conformance test — can consume them
-// directly.  The walker itself is not yet refactored to delegate
-// here; that's Phase 7's next step (a follow-up PR), gated on the
-// byte-identical fixture suite.
+// inline React walker (`src/generator/react/body-walker.ts`) already
+// implements into the `WalkerTarget` interface so callers — and the
+// cross-target conformance test — can consume them directly.  The
+// walker itself still inlines these seams; the extraction is gated
+// on the byte-identical fixture suite.
 //
 // Mapping (file:line at time of extraction):
 //   renderStateRead   — body-walker.ts:625-633 (ref-case path)
@@ -28,9 +27,10 @@ import type { ExprIR, StateFieldIR, TypeIR } from "../../../ir/loom-ir.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../../_walker/target.js";
 
 /** TSX-flavoured `WalkerTarget`.  Stateless and pure — no walker
- *  context is captured; every method takes the data it needs.  Used
- *  by the future delegating React walker; consumed today only by
- *  the cross-target conformance test (`walker-target-contract.test.ts`). */
+ *  context is captured; every method takes the data it needs.  Consumed
+ *  by the cross-target conformance test
+ *  (`walker-target-contract.test.ts`) that exercises the contract
+ *  shared with `heexTarget`. */
 export const tsxTarget: WalkerTarget = {
   framework: "react",
 
@@ -192,8 +192,8 @@ export const tsxTarget: WalkerTarget = {
 };
 
 // ---------------------------------------------------------------------------
-// Internals — verbatim lifts from the existing inline walker so the
-// future delegating walker produces byte-identical output.
+// Internals — verbatim lifts from the inline walker so a delegating
+// walker produces byte-identical output.
 // ---------------------------------------------------------------------------
 
 /** React-side hook variable name: `<aggCamel><OpPascal>`.  Mirrors

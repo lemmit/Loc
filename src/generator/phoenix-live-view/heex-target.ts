@@ -4,11 +4,10 @@
 // for the contract definition and scope.
 //
 // This module is the *standalone* impl: it lifts the seams the
-// existing inline Phoenix walker (`heex-walker.ts`) already
-// implements into the `WalkerTarget` interface.  The walker itself
-// is not yet refactored to delegate here; that's Phase 7's next
-// step (a follow-up PR), gated on the `mix compile --warnings-as-errors`
-// suite.
+// inline Phoenix walker (`heex-walker.ts`) already implements into the
+// `WalkerTarget` interface.  The walker itself still inlines these
+// seams; the extraction is gated on the
+// `mix compile --warnings-as-errors` suite.
 //
 // Mapping (file:line at time of extraction):
 //   renderStateRead   — heex-walker.ts:253-259 (this/id position branches)

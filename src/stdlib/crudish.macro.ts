@@ -121,7 +121,7 @@ function cloneBase(
   } as unknown as import("../language/generated/ast.js").BaseType;
 }
 
-// Silence the unused-import warning until we wire memberAccess into
-// the input-typed variant in a follow-up commit.
+// Imports are kept available for the input-typed variant; the void
+// references silence the unused-import warning.
 void memberAccess;
 void primType;

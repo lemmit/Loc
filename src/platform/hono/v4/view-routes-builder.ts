@@ -264,8 +264,9 @@ function renderIdReceiver(
 }
 
 /** Local copy of the lowering's `idFollowPath` for emission-time
- *  path checks.  Single source of truth would be nice; for now
- *  this stays small and self-contained. */
+ *  path checks.  Kept small and self-contained rather than sharing
+ *  with the lowering helper, since the emission-time call site
+ *  doesn't need the full lowering env. */
 function idFollowPath(e: ExprIR): string[] | undefined {
   if (e.kind === "ref" && e.type?.kind === "id") return [e.name];
   if (e.kind === "member" && e.receiverType.kind === "id") {

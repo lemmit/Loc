@@ -1033,10 +1033,9 @@ function findApiHandleFor(agg: AggregateIR, ctx: WalkerExpandContext): string | 
   // Caller wires `ctx.ui.apiParams` (handle → apiName) and `sys.apis`
   // (apiName → sourceModule).  `lowerSystem`'s post-processing
   // path is responsible for plumbing those; here we delegate to
-  // a heuristic: the FIRST api param wins.  The acme-order-
-  // explicit.ddd shape uses exactly one param per UI, which is
-  // the realistic case for v0 — multi-api UIs are handled later,
-  // once the validator can prove which api owns which agg.
+  // a heuristic: the FIRST api param wins.  Single-api UIs (the
+  // common case) resolve cleanly; multi-api UIs require validator
+  // proof of which api owns which aggregate to disambiguate.
   const first = ctx.ui.apiParams[0];
   return first?.name ?? null;
 }

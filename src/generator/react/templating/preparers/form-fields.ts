@@ -5,9 +5,9 @@
 // the preparer returns nested children, the renderer walks them in
 // TS so the per-pack templates stay flat.
 //
-// Mirrors the legacy formInput in form-helpers.ts.  Same testid
-// shape, same option-label resolution (X id's display field),
-// same placeholder fallback when an X id's target lacks a display.
+// Shares the testid shape and option-label resolution rules
+// (`X id`'s display field; placeholder fallback when the target
+// lacks a display) with `formInput` in form-helpers.ts.
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR, BoundedContextIR, TypeIR } from "../../../../ir/loom-ir.js";

@@ -18,8 +18,10 @@ import { lowerFirst, plural } from "../../util/naming.js";
 //   - register: native HTML inputs that accept `onChange={(e) => …}` —
 //     `<TextInput {...register("name")} error={errors.name?.message} />`.
 //   - Controller: components whose `onChange` doesn't take a DOM event —
-//     `<NumberInput>`, `<Select>`, `<Switch>`, eventually `<DateTimePicker>`.
-//     Wrapped in `<Controller … render={({ field, fieldState }) => …}/>`.
+//     `<NumberInput>`, `<Select>`, `<Switch>`.  Wrapped in
+//     `<Controller … render={({ field, fieldState }) => …}/>`.  (Datetime
+//     fields use a native `<input type="datetime-local">` rather than a
+//     pack DateTimePicker; see the `case "datetime"` dispatch below.)
 //   - Fieldset: value-object aggregation — emits nested register/Controller
 //     calls with dot-paths (`register("price.amount")`).
 // ---------------------------------------------------------------------------

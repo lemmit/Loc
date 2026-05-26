@@ -1,11 +1,9 @@
 // Display + inspect — reserved-name derived fields and the
 // `string(aggregate)` lowering path.
 //
-// See plan `/root/.claude/plans/i-think-we-have-glittery-lecun.md`
-// for the design rationale (two string forms — user-facing display
-// for Selects / UI labels, developer-facing inspect for host-language
-// debug hooks; never collide because they're reached via different
-// call paths).
+// Two string forms — user-facing `display` for Selects / UI labels,
+// developer-facing `inspect` for host-language debug hooks; never
+// collide because they're reached via different call paths.
 
 import { describe, expect, it } from "vitest";
 import { allAggregates } from "../../src/ir/loom-ir.js";
