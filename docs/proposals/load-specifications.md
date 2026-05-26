@@ -1,123 +1,234 @@
-# Aggregate load specifications — `loads`, inferred shape typing
+# Aggregate load specifications — `loads`, default-whole, future inference
 
 > Status: proposal. Not in `ddd.langium`.
+
+## TL;DR
+
+**v1**: load the **whole aggregate by default** at every call site.
+Authors who want optimisation supply an explicit `loads:` clause
+(operation-side) or `loads:` argument (call-site) to **restrict**
+the load (load only needed paths) or **expand** it (eager-hydrate
+cross-aggregate references).
+
+**v2 roadmap**: compiler-inferred load shapes (compiler walks the
+body to derive the needed paths), interprocedural propagation,
+shape-typing of aggregate values, guard narrowing (`is loaded`).
+Deferred — the inference + propagation machinery is genuinely
+complex; v1 ships with explicit annotations only.
 
 ## Problem
 
 An operation that touches `order.lines[].product.price` needs those
 parts *loaded* before it runs, or it fails at runtime (lazy-load
 exception, or silently wrong on a detached graph). When operations
-compose, the required shape is the **union** of what each step touches.
-Loom should let the compiler **infer the required load shape** from how
-an operation (and everything it calls) uses the aggregate, verify that
-the repository load actually fetched it, and turn a class of runtime
-lazy-load failures into compile-time diagnostics.
+compose, the required shape is the **union** of what each step
+touches. The proposal turns a class of runtime lazy-load failures
+into compile-time diagnostics, **and** keeps simple code simple
+via a sensible default.
 
-This is a static **effect system for loadedness**, not a query
-optimiser. Because an aggregate is a finite tree and the property is
-just "which paths are loaded", it is a structural path-lattice problem —
-**not** a full dependent/refinement-type checker.
+## v1 model
 
-## Surface
+### Default is whole aggregate
 
-The default is **inference**: the author writes nothing, and the
-compiler derives the shape from member accesses. An explicit `loads`
-clause is available to state (or tighten) the requirement and to
-document intent. It reuses Loom's existing path/containment vocabulary:
+If an author writes no `loads` clause on the operation and no
+`loads:` argument at the call site, the repository loads the
+**entire aggregate** — every field, every containment, the full
+owned tree. Cross-aggregate references (`Customer id`,
+`Supplier id[]`, etc.) are loaded as ids only; the referenced
+aggregates are **not** eagerly hydrated unless requested.
+
+This keeps simple code simple. Authors think about load specifications
+only when they care about performance — usually because they want
+to eagerly fetch cross-aggregate references, or strip a load down
+to a subset for high-throughput read paths.
+
+### Explicit `loads` is optional optimisation
+
+Two forms, both opt-in:
+
+**Operation-side `loads` clause** (declarative documentation; rare
+in typical code):
 
 ```ddd
 aggregate Order {
   contains lines: OrderLine[]
   customerId: Customer id
 
-  // Explicit form — declares the shape this operation needs loaded.
-  // `[]` denotes "across the collection", mirroring containment syntax.
-  operation applyPricing()
-    loads Order { lines[].product, customer.address }
-  {
-    // compiler verifies every access below is covered by `loads`
-    lines.sum(l => l.quantity * l.product.price)
+  # No `loads` clause — body uses self.lines (containment), no cross-aggregate.
+  # Default-whole load covers everything; no annotation needed.
+  operation total(): decimal {
+    return self.lines.sum(l => l.quantity * l.unitPrice)
   }
 
-  // No `loads` clause → the compiler infers the shape from the body.
-  operation total() {
-    lines.sum(l => l.quantity * l.product.price)   // infers: lines[].product
+  # `loads` clause — declares cross-aggregate expansion.
+  # Without it, `l.product` would not be loaded; runtime/compile-time error.
+  operation applyPricing() loads Order { lines[].product } {
+    self.lines.forEach(l => l.price := l.quantity * l.product.unitPrice)
   }
 }
 ```
 
-When operations compose, specs **merge**:
+**Call-site `loads:` argument** (on built-in repo methods from
+[`criterion.md`](./criterion.md)):
+
+```ddd
+workflow priceOrders() {
+  # Default-whole load — covers all containments + own fields:
+  let orders = Orders.findAll(HighValueOrder)
+  for o in orders {
+    # ERROR (compile-time) if op needs cross-aggregate path not loaded:
+    o.applyPricing()    # operation declares `loads Order { lines[].product }`
+                        # but workflow's default-whole doesn't include cross-aggregate.
+                        # Either add `loads:` arg or let compiler infer (v2).
+  }
+}
+
+# Fix v1 — explicit `loads:` arg at retrieval:
+workflow priceOrdersV1(): Order[] {
+  let orders = Orders.findAll(
+    HighValueOrder,
+    loads: [self.lines[].product]   # eager-load the cross-aggregate path
+  )
+  for o in orders {
+    o.applyPricing()    # OK — load shape covers applyPricing's needs
+  }
+}
+```
+
+### Three use cases for explicit `loads:`
+
+| Use case | Form | Why |
+|---|---|---|
+| Eager-fetch cross-aggregate refs | `loads: [self.customer.address, self.lines[].product]` | Avoid lazy-load runtime errors; compiler catches missing paths at retrieval call site |
+| Restrict to subset (perf) | `loads: [self.id, self.status]` | High-throughput read path; load only the displayed columns |
+| Documentation contract on operation | `operation foo() loads Order { lines[].product } { ... }` | Reader sees the requirement at the signature; reviewers ask "why?" |
+
+In typical code, no `loads` annotations appear. The default-whole
+covers everything that's part of the aggregate itself. Cross-aggregate
+expansions are the most common opt-in.
+
+### Compile-time checking in v1
+
+When operations declare a `loads` clause and a body accesses paths
+beyond that clause: validator error
+(`loom.loads-incomplete` — author didn't declare a path the body
+uses).
+
+When a retrieval supplies fewer paths than a subsequent operation
+needs (the workflow does `Orders.findAll(criterion, loads: [self.id])`
+and then calls `o.applyPricing()` which needs `[self.lines[].product]`):
+validator error
+(`loom.retrieval-loads-insufficient` — call site needs to supply
+more).
+
+When `loads:` paths reference fields that don't exist:
+`loom.invalid-path`.
+
+These checks are **structural** — straightforward path-set checking.
+They don't require inference; they compare what was declared at
+each site.
+
+### Path-expression syntax
+
+Reuses Loom's existing containment vocabulary:
 
 ```
-operation a()  needs  Order { customer.address }
-operation b()  needs  Order { lines[].product }
-workflow  ab() ⇒ requires  Order { customer.address, lines[].product }
+self.field                    # own field
+self.field.subfield           # nested field
+self.contained[]              # containment collection
+self.contained[].subfield     # collection elements' field
+self.referenced               # cross-aggregate reference (loads the related aggregate)
+self.referenced.field         # cross-aggregate path
 ```
 
-The repository load is then checked (or synthesised) against the merged
-shape, so the call site is guaranteed to fetch what the body uses.
+`[]` marks "across the collection". Same as `contains` syntax. No
+arbitrary filters or lambdas in path expressions — just structural
+paths.
 
-### Shape (loadedness) typing — optional witness
+## v2 roadmap (NOT in v1)
 
-The refined-type idea from the source thread (`Loaded<Order, Spec>`,
-`Order<Loaded(lines.product)>`) is kept as an **internal IR witness**,
-not a user-facing generic — Loom has no generics surface today. The
-language stays declarative (`loads { … }`); the compiler tracks
-loadedness as a path-set attribute on the value and narrows it across
-guards (`if order.lines is loaded then …`).
+The original proposal's vision — compiler-inferred load shapes,
+interprocedural propagation, shape-typing, guard narrowing — lands
+as a v2 follow-up. Sketch of what comes later:
 
-## Language additions
+### Auto-inference (compiler walks the body)
 
-| Addition | Form |
-|---|---|
-| `loads` clause | on `Operation` / `Workflow`: `('loads' shape=ShapeSpec)?` after the parameter list |
-| `ShapeSpec` | `AggName '{' path (',' path)* '}'`; `path` is dotted with `[]` for collections — same vocabulary as `contains` |
-| guard narrowing | `… is loaded` predicate usable in `if`/precondition position to narrow the shape in-branch |
-| inferred specs | no surface; the validator computes them when `loads` is omitted |
+Compiler analyses operation bodies + workflow bodies + the operations
+they call. Derives the minimal load shape. Auto-injects `loads:` at
+retrieval call sites. Author writes nothing; compiler synthesises.
 
-## Lowering & generation
+**Why deferred**: the inference is genuinely complex — interprocedural
+fixpoint over the call graph, loops/recursion, aliasing, polymorphic
+operations over inherited aggregates. Lots of edge cases. Useful but
+not necessary for correctness — v1's explicit annotations cover the
+correctness need; inference is an ergonomic improvement.
 
-An interprocedural, flow-sensitive shape inference with a structural
-path lattice:
+### Shape typing (internal IR)
 
-1. **access-path extraction** — collect every member/containment path
-   the body reads (including inside called operations).
-2. **guard narrowing** — `is loaded` guards add paths in the true
-   branch, occurrence-typing style.
-3. **per-operation summary** — `requires` / `ensures` / `accesses` /
-   `calls`.
-4. **interprocedural fixpoint** — propagate and merge summaries across
-   the call graph.
-5. **shape algebra** — union / subsumption / normalisation over the
-   aggregate's path tree (`customer.address` + `customer.address.city`
-   → one normalised subtree).
-6. **load synthesis** — map the normalised shape to a backend fetch
-   plan: EF Core `.Include().ThenInclude()`, a SQL join tree, or an API
-   expansion clause.
-7. **verification** — every downstream access must be covered; on
-   failure, emit a diagnostic pointing at the offending access, the
-   operation that requires it, and the missing path — at compile time,
-   instead of a runtime lazy-load failure.
+Aggregate values carry their loaded shape as an IR-level attribute:
+`Order { lines[].product }` vs `Order { * }`. The compiler tracks
+the shape through assignments, parameter passing, return values.
+Subsequent operations are checked against the shape.
 
-The hard parts are interprocedural summaries, loops/recursion,
-aliasing, and good diagnostics — *not* the type theory.
+**Why deferred**: requires a real type-system extension. The path
+lattice (subsumption, normalisation) is straightforward but
+implementing it across every IR pass is real work.
+
+### Guard narrowing (`is loaded` predicate)
+
+```
+if order.lines is loaded then
+  let total = order.lines.sum(l => l.subtotal)
+else
+  # alternative path
+```
+
+Branch-sensitive shape narrowing — occurrence-typing style. The
+true branch has `lines` loaded; the false branch doesn't.
+
+**Why deferred**: niche; most code doesn't need it. Adds occurrence-typing
+machinery for a small ergonomic win.
+
+### Composition of `loads:` across composed criteria
+
+When `Customers.findAll(ActiveCustomers && InRegion("EU"))` is
+written, today's model treats the two criteria as a single
+boolean. With shape-typing, each criterion could contribute its
+own load hints (e.g., a criterion that references
+`customer.recentOrders[]` declares it as a load dependency). The
+union would compose into the retrieval's effective load shape.
+
+**Why deferred**: speculative — no clear use case yet. Revisit when
+inference (above) lands.
+
+## Open questions
+
+- **Whether the synthesised load plan is always inferred or can be
+  hand-written too** (v1: hand-written via explicit `loads`; v2:
+  inference auto-derives + supplements).
+- **Loops, recursion, aliasing, dynamic path construction** — v2
+  concerns for inference.
+- **Polymorphic operations over many aggregate shapes** — interacts
+  with aggregate inheritance; needs careful design.
+- **Interaction with data-policy row/field filtering**, since both
+  wrap `Repo.load` — see the supplementary note.
 
 ## Feeds provenance
 
 This layer is designed to interoperate with
-[value provenance](./provenance.md): the repository-load trace records
-*what shape was requested*, the evaluation trace records *what paths
-were actually used*, so Explain can show both the declared requirement
-and the realised access path.
+[value provenance](./provenance.md): the repository-load trace
+records *what shape was requested*, the evaluation trace records
+*what paths were actually used*, so Explain can show both the
+declared requirement and the realised access path.
 
-## Open questions
+## Cross-references
 
-- Concrete keyword spelling: `loads` (chosen here to avoid colliding
-  with the existing `requires` authorization gate) vs `require loaded`
-  from the source thread.
-- Whether the synthesised load plan is always inferred or can be
-  hand-written too (both implied).
-- Loops, recursion, aliasing, dynamic path construction, and
-  polymorphic operations over many aggregate shapes.
-- Interaction with data-policy row/field filtering, since both wrap
-  `Repo.load` — see the supplementary note.
+- [`criterion.md`](./criterion.md) — built-in repository methods
+  (`getById` / `findById` / `find` / `findAll`) take `loads:` as
+  an optional argument using the path-expression syntax defined
+  here.
+- [`exception-less.md`](./exception-less.md) — `?` propagation
+  composes with `loads:` shape failures (compile-time diagnostic).
+- [`aggregate-inheritance.md`](./aggregate-inheritance.md) — load
+  shapes over abstract aggregates: `loads Party { contact.email }`
+  applies to every concrete subtype that shares the `contact` path.
