@@ -8,6 +8,7 @@ import {
   isCleanDiff,
   normalisePath,
   type OpenApiSpec,
+  pathParamSignatures,
   requiredSet,
   schemaNames,
 } from "./openapi-normalize.js";
@@ -304,6 +305,7 @@ describe("openapi-normalize", () => {
       expect(diff.onlySchemasOther).toEqual([]);
       expect(diff.fieldDiffs).toEqual([]);
       expect(diff.requiredDiffs).toEqual([]);
+      expect(diff.paramTypeDiffs).toEqual([]);
       expect(isCleanDiff(diff)).toBe(true);
     });
 
@@ -427,6 +429,125 @@ describe("openapi-normalize", () => {
       // The names should appear verbatim in the human-readable diff line.
       expect(diff.fieldDiffs[0]).toContain("only-hono=");
       expect(diff.fieldDiffs[0]).toContain("only-phoenix=");
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // pathParamSignatures + paramTypeDiffs dimension
+  // ---------------------------------------------------------------------
+
+  describe("pathParamSignatures + paramTypeDiffs", () => {
+    const withIdParam = (paramSchema: { type?: string; format?: string }): OpenApiSpec => ({
+      paths: {
+        "/products/{id}": {
+          get: {
+            parameters: [{ in: "path", name: "id", schema: paramSchema }],
+            responses: {
+              "200": {
+                content: {
+                  "application/json": { schema: { type: "object" } },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    it("captures the type + format of a path parameter", () => {
+      const sigs = pathParamSignatures(withIdParam({ type: "string", format: "uuid" }));
+      expect(sigs.get("GET /products/{id}")).toBe("string:uuid");
+    });
+
+    it("captures type-only when no format declared", () => {
+      const sigs = pathParamSignatures(withIdParam({ type: "string" }));
+      expect(sigs.get("GET /products/{id}")).toBe("string");
+    });
+
+    it("emits an empty signature for ops with no path params", () => {
+      const spec: OpenApiSpec = {
+        paths: {
+          "/products": {
+            get: {
+              responses: { "200": { content: { "application/json": { schema: {} } } } },
+            },
+          },
+        },
+      };
+      expect(pathParamSignatures(spec).get("GET /products")).toBe("");
+    });
+
+    it("ignores query / header parameters (in != 'path')", () => {
+      const spec: OpenApiSpec = {
+        paths: {
+          "/products/{id}": {
+            get: {
+              parameters: [
+                { in: "path", name: "id", schema: { type: "string", format: "uuid" } },
+                { in: "query", name: "limit", schema: { type: "integer" } },
+                { in: "header", name: "x-trace-id", schema: { type: "string" } },
+              ],
+              responses: { "200": { content: { "application/json": { schema: {} } } } },
+            },
+          },
+        },
+      };
+      // Only the path param ends up in the signature.
+      expect(pathParamSignatures(spec).get("GET /products/{id}")).toBe("string:uuid");
+    });
+
+    it("uses sorted-name order so backend emission order doesn't trip the diff", () => {
+      // Two path params in different emit orders.  Sorted-name keeps
+      // the signature stable.
+      const refSpec: OpenApiSpec = {
+        paths: {
+          "/orders/{orderId}/lines/{lineId}": {
+            get: {
+              parameters: [
+                { in: "path", name: "orderId", schema: { type: "string", format: "uuid" } },
+                { in: "path", name: "lineId", schema: { type: "integer" } },
+              ],
+              responses: { "200": { content: { "application/json": { schema: {} } } } },
+            },
+          },
+        },
+      };
+      const otherSpec: OpenApiSpec = {
+        paths: {
+          "/orders/{orderId}/lines/{lineId}": {
+            get: {
+              parameters: [
+                { in: "path", name: "lineId", schema: { type: "integer" } },
+                { in: "path", name: "orderId", schema: { type: "string", format: "uuid" } },
+              ],
+              responses: { "200": { content: { "application/json": { schema: {} } } } },
+            },
+          },
+        },
+      };
+      const refSigs = pathParamSignatures(refSpec);
+      const otherSigs = pathParamSignatures(otherSpec);
+      // normalisePath collapses {orderId} / {lineId} to {id} both times,
+      // so the keys agree.  Signatures match by sorted name.
+      const key = "GET /orders/{id}/lines/{id}";
+      expect(refSigs.get(key)).toBe(otherSigs.get(key));
+    });
+
+    it("diffSpecs flags path-param TYPE drift on the op intersection", () => {
+      const ref: OpenApiSpec = withIdParam({ type: "string", format: "uuid" });
+      const other: OpenApiSpec = withIdParam({ type: "string" }); // Phoenix's current shape
+      const diff = diffSpecs({ name: "hono", spec: ref }, { name: "phoenix", spec: other });
+      expect(diff.paramTypeDiffs).toEqual([
+        "GET /products/{id}: hono=[string:uuid], phoenix=[string]",
+      ]);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("diffSpecs paramTypeDiffs is empty when shapes agree", () => {
+      const ref: OpenApiSpec = withIdParam({ type: "string", format: "uuid" });
+      const other: OpenApiSpec = withIdParam({ type: "string", format: "uuid" });
+      const diff = diffSpecs({ name: "hono", spec: ref }, { name: "dotnet", spec: other });
+      expect(diff.paramTypeDiffs).toEqual([]);
     });
   });
 });
