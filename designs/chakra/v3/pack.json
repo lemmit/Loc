@@ -63,6 +63,8 @@
     "primitive-query-view": "primitive-query-view.hbs",
     "primitive-key-value-row": "primitive-key-value-row.hbs",
     "primitive-modal": "primitive-modal.hbs",
+    "primitive-code-block": "primitive-code-block.hbs",
+    "primitive-icon": "primitive-icon.hbs",
     "form-op-decls": "form-op-decls.hbs",
     "form-op-module": "form-op-module.hbs"
   },
@@ -482,6 +484,22 @@
         "from": "../lib/toaster",
         "named": [
           "toaster"
+        ]
+      }
+    ],
+    "primitive-code-block": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Box"
+        ]
+      }
+    ],
+    "primitive-icon": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Box"
         ]
       }
     ]

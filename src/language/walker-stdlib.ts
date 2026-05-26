@@ -69,6 +69,10 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
   "Alert",
   "QueryView",
   "Modal",
+  // Code rendering — syntax-highlighted via highlight.js CDN at runtime.
+  "CodeBlock",
+  // SVG icon — either a builtin name or a custom `svg:` literal.
+  "Icon",
   // Named-leaf form variants (post-#512).
   "CreateForm",
   "OperationForm",

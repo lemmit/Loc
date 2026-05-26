@@ -67,6 +67,8 @@ import {
   emitQueryView,
   emitUserComponent,
 } from "./walker/primitives/controls.js";
+import { emitCodeBlock } from "./walker/primitives/code-block.js";
+import { emitIcon } from "./walker/primitives/icon.js";
 import {
   emitAlert,
   emitBadge,
@@ -198,6 +200,13 @@ export interface WalkResult {
    *  shell to declare `const <localVar> = <hookName>(<idExpr>)` at
    *  function top and import the hook from `<prefix>api/<aggCamel>`. */
   actionMutations: ActionMutationState[];
+  /** True when any walked node emitted a `CodeBlock`
+   *  primitive.  The React generator's orchestrator aggregates this
+   *  across every page in the deployable and threads the result into
+   *  the shell's `index.html` template, which conditionally injects
+   *  the highlight.js CDN + auto-init script.  Pages without
+   *  CodeBlock skip the CDN payload entirely. */
+  usesCodeBlock: boolean;
 }
 
 /** `Action(<instance>.<op>, then?)` — a button bound to an aggregate
@@ -287,6 +296,8 @@ export const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "QueryView",
   "KeyValueRow",
   "Modal",
+  "CodeBlock",
+  "Icon",
 ]);
 
 export function isWalkableLayoutBody(
@@ -406,6 +417,7 @@ export function walkBodyToTsx(
     collectedTestids: new Set(),
     helperImports: helperNameToPath,
     usedHelpers: new Set(),
+    usesCodeBlock: false,
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -422,6 +434,7 @@ export function walkBodyToTsx(
     actionMutations: ctx.actionMutations,
     collectedTestids: ctx.collectedTestids,
     usedHelpers: ctx.usedHelpers,
+    usesCodeBlock: ctx.usesCodeBlock,
   };
 }
 
@@ -518,6 +531,11 @@ export interface Sink {
    *  shell emits one import line per used helper; declared-but-
    *  unused helpers don't pollute the page TSX. */
   usedHelpers: Set<string>;
+  /** True when a `CodeBlock { … }` primitive emitted from this body.
+   *  Read by the React orchestrator (aggregated across all pages)
+   *  to drive conditional injection of the highlight.js CDN payload
+   *  into the shell's `index.html`. */
+  usesCodeBlock: boolean;
 }
 
 /** The combined context the shared core threads. Structurally
@@ -763,6 +781,10 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
       return emitBadge(call, ctx, depth);
     case "Divider":
       return emitDivider(call, ctx, depth);
+    case "CodeBlock":
+      return emitCodeBlock(call, ctx, depth);
+    case "Icon":
+      return emitIcon(call, ctx, depth);
     default: {
       // Names not in the stdlib dispatch table fall
       // through to user-component invocation when they match a
@@ -823,6 +845,7 @@ export function propagateChildFlags(parent: WalkContext, child: WalkContext): vo
   if (child.usesRouterLink) parent.usesRouterLink = true;
   if (child.usesState) parent.usesState = true;
   if (child.usesChildren) parent.usesChildren = true;
+  if (child.usesCodeBlock) parent.usesCodeBlock = true;
   for (const f of child.formOfs) {
     if (!parent.formOfs.includes(f)) parent.formOfs.push(f);
   }

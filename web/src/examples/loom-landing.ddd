@@ -118,35 +118,15 @@ system LoomLanding {
               Badge { "49 unit tests · opt-in e2e" }
             },
 
-            // ── Hero code card placeholder ────────────────────────
-            // Phase 3 replaces this Card+Text combo with a real
-            // CodeBlock { language: "typescript", source: "...", title: "orders.ddd" }
-            // that loads highlight.js from CDN and renders coloured tokens.
-            Card { "orders.ddd",
-              Stack {
-                Text { "aggregate Order {" },
-                Text { "  customerId: string" },
-                Text { "  status: OrderStatus" },
-                Text { "  placedAt: datetime" },
-                Text { "  contains lines: OrderLine[]" },
-                Text { "" },
-                Text { "  derived total: Money =" },
-                Text { "    Money(lines.sum(l => l.subtotal.amount), \"USD\")" },
-                Text { "" },
-                Text { "  invariant lines.count > 0 when status == Confirmed" },
-                Text { "" },
-                Text { "  operation confirm() {" },
-                Text { "    precondition isMutable()" },
-                Text { "    precondition lines.count > 0" },
-                Text { "    status := Confirmed" },
-                Text { "    emit OrderConfirmed { order: id, at: now() }" },
-                Text { "  }" },
-                Text { "}" },
-                Text { "" },
-                Text { "// Three deployables, one stack:" },
-                Text { "deployable api    { platform: dotnet, modules: Sales, port: 8080 }" },
-                Text { "deployable webApp { platform: react,  targets: api,   port: 3001 }" }
-              }
+            // ── Hero code card ──────────────────────────────────
+            // Phase 3 closed the syntax-highlighting gap.  This
+            // CodeBlock loads highlight.js from CDN and renders the
+            // source with coloured tokens — same setup `docs/build.mjs`
+            // already uses for the markdown pages.
+            CodeBlock {
+              language: "typescript",
+              title:    "orders.ddd",
+              source:   "aggregate Order {\n  customerId: string\n  status: OrderStatus\n  placedAt: datetime\n  contains lines: OrderLine[]\n\n  derived total: Money =\n    Money(lines.sum(l => l.subtotal.amount), \"USD\")\n\n  invariant lines.count > 0 when status == Confirmed\n\n  operation confirm() {\n    precondition isMutable()\n    precondition lines.count > 0\n    status := Confirmed\n    emit OrderConfirmed { order: id, at: now() }\n  }\n}\n\n// Three deployables, one stack:\ndeployable api    { platform: dotnet, modules: Sales, port: 8080 }\ndeployable webApp { platform: react,  targets: api,   port: 3001 }"
             }
           },
           size: "xl"
@@ -283,25 +263,31 @@ system LoomLanding {
             Text { "From a single source, ddd generate system emits a runnable multi-deployable system with database init, healthchecks, OpenAPI specs, and end-to-end tests." },
 
             // Six feature cards — 3x2 on the real page.
-            // Each starts with an Icon glyph (emoji placeholder until
-            // Phase 3 ships Icon(name:) with a builtin set).
+            // Phase 3 closed the Icon gap; each card now leads with a
+            // proper SVG glyph from the builtin set.
             Grid {
-              Card { "⬢  Aggregate roots, faithfully",
+              Card {
+                Group { Icon { name: "cube", size: "md" }, Heading { "Aggregate roots, faithfully", level: 4 } },
                 Text { "Private state, factories, invariant checks, derived properties, and emitted domain events — in every backend." }
               },
-              Card { "≡  Repositories with finds",
+              Card {
+                Group { Icon { name: "list", size: "md" }, Heading { "Repositories with finds", level: 4 } },
                 Text { "find-by-id, save, find-all, plus user-declared finds — with full master-detail load and event dispatch." }
               },
-              Card { "→  HTTP routes & DTOs",
+              Card {
+                Group { Icon { name: "arrow-right", size: "md" }, Heading { "HTTP routes & DTOs", level: 4 } },
                 Text { "Wire-shape DTOs identical across backends so the OpenAPI cross-check passes byte-for-byte." }
               },
-              Card { "▦  List / detail / create UI",
+              Card {
+                Group { Icon { name: "grid", size: "md" }, Heading { "List / detail / create UI", level: 4 } },
                 Text { "Mantine tables and modal forms, React Query hooks, Zod-validated request bodies — per aggregate, automatically." }
               },
-              Card { "✓  Playwright page-objects",
+              Card {
+                Group { Icon { name: "check", size: "md" }, Heading { "Playwright page-objects", level: 4 } },
                 Text { "One class per page, keyed off stable data-testid attributes.  Write top-down UI tests without crafting selectors." }
               },
-              Card { "⇄  Wired stack out of the box",
+              Card {
+                Group { Icon { name: "code", size: "md" }, Heading { "Wired stack out of the box", level: 4 } },
                 // Phase 4 inline emphasis — the original landing has
                 // `docker compose up -d` as a `<code class="mono-chip">`
                 // chip; route the equivalent through InlineCode.

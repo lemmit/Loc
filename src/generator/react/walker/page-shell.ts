@@ -188,6 +188,7 @@ export function renderCustomLayoutPage(
       collectedTestids: new Set(),
       helperImports: new Map(),
       usedHelpers: new Set(),
+      usesCodeBlock: false,
     };
     const titleExpr = emitExpr(title, titleCtx);
     // emitExpr may have added to usedParams; reflect title's state
@@ -667,6 +668,7 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     collectedTestids: new Set(),
     helperImports: new Map(),
     usedHelpers: new Set(),
+    usesCodeBlock: false,
   };
   return emitExpr(expr, dummy);
 }
