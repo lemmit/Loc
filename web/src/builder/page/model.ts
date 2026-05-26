@@ -368,21 +368,29 @@ function seedStmt(s: Statement): BuilderNode {
   if (s.$type === "LetStmt") {
     return { name: "Stmt", props: { kind: "let", name: s.name, value: s.expr.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
   }
-  // `navigate(<page>, { …params })` — a bare call to the UI navigation
-  // primitive: structure it into a target-page picker + a params object so the
-  // page is editable from a dropdown rather than a verbatim row.
+  // `navigate(<page>, <params?>)` — a bare call to the UI navigation
+  // primitive: structure it into a target-page picker + an optional positional
+  // params expression so the page is editable from a dropdown rather than a
+  // verbatim row.  Loom's `navigate` takes a NameRef for its page argument; a
+  // non-NameRef first arg (very rare) falls through to the verbatim bare row so
+  // we don't risk a structural mismatch on round-trip.  Object-literal params
+  // (`{ id: order.id }`) don't parse in page-expression position — only domain
+  // bodies admit object literals — so params is one positional expression; users
+  // who want object-literal params hand-write the bare statement.
   if (s.$type === "AssignOrCallStmt" && !s.op && s.target.call && s.target.head === "navigate" && s.target.tail.length === 0) {
     const to = s.target.args[0];
-    return {
-      name: "Stmt",
-      props: {
-        kind: "navigate",
-        to: to ? (to.$type === "NameRef" ? to.name : printExpr(to)) : "",
-        params: s.target.args[1] ? printExpr(s.target.args[1]) : "",
-        ...ext,
-      },
-      children: [],
-    };
+    if (to && to.$type === "NameRef") {
+      return {
+        name: "Stmt",
+        props: {
+          kind: "navigate",
+          to: to.name,
+          params: s.target.args[1] ? printExpr(s.target.args[1]) : "",
+          ...ext,
+        },
+        children: [],
+      };
+    }
   }
   return { name: "Stmt", props: { src: s.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
 }

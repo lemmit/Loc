@@ -343,6 +343,17 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(emitBody(node)).toContain("navigate(Home)");
   });
 
+  it("falls back to a bare stmt when navigate's target is not a NameRef", () => {
+    // Loom's `navigate` takes a NameRef page; a non-NameRef first arg shouldn't
+    // be structured (we'd have no safe round-trip), so we keep the original
+    // source verbatim instead of crashing or producing a malformed nav row.
+    const node = seed('Button { "Go", onClick: e => {\n  navigate(pickPage(x))\n} }');
+    const handler = node.children.find((c) => c.slot === "onClick")!;
+    expect(handler.children[0].name).toBe("Stmt");
+    expect(handler.children[0].props.kind).toBeUndefined();
+    expect(handler.children[0].props.src).toBe("navigate(pickPage(x))");
+  });
+
   it("structures `let` and keeps a bare call verbatim, both round-tripping", () => {
     const node = seed(
       'Button { "Go", onClick: e => {\n  let total = order.total + 1\n  refresh(order)\n} }',
