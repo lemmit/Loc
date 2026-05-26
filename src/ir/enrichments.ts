@@ -69,6 +69,7 @@ export function enrichLoomModel(loom: RawLoomModel): EnrichedLoomModel {
     contexts: loom.contexts.map((c) => enrichContext(c, enrichedRootVOs, rootEnums)),
     rootValueObjects: enrichedRootVOs,
     rootEnums,
+    components: loom.components,
     requirements: loom.requirements,
     solutions: loom.solutions,
     testCases: loom.testCases,

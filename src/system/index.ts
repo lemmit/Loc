@@ -102,7 +102,7 @@ export function generateSystemsFromLoom(
 
 function emitSystem(
   sys: EnrichedSystemIR,
-  _loom: EnrichedLoomModel,
+  loom: EnrichedLoomModel,
   out: Map<string, string>,
   options: { emitTrace?: boolean; snapshots: SnapshotStore },
 ): void {
@@ -127,6 +127,7 @@ function emitSystem(
     emitDeployable(sys, d, contexts, out, {
       emitTrace: options.emitTrace,
       migrations: ownedMigrations,
+      topLevelComponents: loom.components,
     });
   }
 
@@ -241,7 +242,11 @@ function emitDeployable(
   d: DeployableIR,
   contexts: BoundedContextIR[],
   out: Map<string, string>,
-  options: { emitTrace?: boolean; migrations?: MigrationsIR[] } = {},
+  options: {
+    emitTrace?: boolean;
+    migrations?: MigrationsIR[];
+    topLevelComponents?: import("../ir/loom-ir.js").ComponentIR[];
+  } = {},
 ): void {
   const emitTrace = !!options.emitTrace;
   // Per-deployable folder uses a lowercase slug (Docker requires
@@ -258,6 +263,7 @@ function emitDeployable(
     sys,
     migrations: options.migrations,
     emitTrace,
+    topLevelComponents: options.topLevelComponents,
   });
   for (const [relPath, content] of files) {
     out.set(`${sub}/${relPath}`, content);

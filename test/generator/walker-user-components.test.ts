@@ -222,4 +222,75 @@ describe("user-defined components", () => {
     // for a user component).  Check there's no `WelcomeBox`-shaped file.
     expect(componentFiles.find((k) => /WelcomeBox|Foo|Bar/.test(k))).toBeUndefined();
   });
+
+  it("top-level component (declared as a ModelMember) is reachable from every ui", async () => {
+    // A bare `component Hero(...)` at the file root — outside any
+    // `system { … }` — flows into `LoomModel.components` and the
+    // React emitter merges it into the per-ui name→params map.
+    // Pages can invoke it by bare name; one `src/components/<Name>.tsx`
+    // is emitted per ui that references the component.
+    const files = await buildAndGenerate(`
+      component Hero(title: string) {
+        body: Card { title, Text { "shared library" } }
+      }
+
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          page Home {
+            route: "/"
+            body: Hero("Welcome")
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const hero = files.get("web/src/components/Hero.tsx");
+    expect(hero).toBeDefined();
+    expect(hero).toMatch(/export interface HeroProps \{\n\s+title: string;\n\}/);
+    expect(hero).toMatch(/<Title order=\{3\}>\{title\}<\/Title>/);
+    const home = files.get("web/src/pages/home.tsx")!;
+    expect(home).toMatch(/import Hero from "\.\.\/components\/Hero";/);
+    expect(home).toMatch(/<Hero title="Welcome" \/>/);
+  });
+
+  it("ui-scope component overrides a same-named top-level component", async () => {
+    // Resolution precedence: a `component X(...)` inside the ui wins
+    // over a top-level `component X(...)` declared at the model root.
+    // Only the ui-scope body emits.
+    const files = await buildAndGenerate(`
+      component Hero(title: string) {
+        body: Text { "top-level: " + title }
+      }
+
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          component Hero(title: string) {
+            body: Text { "ui-scope: " + title }
+          }
+          page Home {
+            route: "/"
+            body: Hero("World")
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const hero = files.get("web/src/components/Hero.tsx")!;
+    expect(hero).toMatch(/"ui-scope: "/);
+    expect(hero).not.toMatch(/"top-level: "/);
+  });
 });

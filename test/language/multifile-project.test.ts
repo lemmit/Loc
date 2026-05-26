@@ -95,6 +95,41 @@ describe("multi-file project loader", () => {
     expect(allContextNames).toContain("Orders");
   });
 
+  it("a top-level component declared in one file is visible from another", async () => {
+    // Top-level components live alongside root VOs / enums.  They
+    // travel through the same import-graph walk + `mergeLoomModels`
+    // path, so a `.ddd` becomes a shared component library that
+    // every importing system's pages can invoke by bare name.
+    writeProject(tmp, {
+      "main.ddd": `
+        import "./components.ddd"
+        system X {
+          module M { context C { } }
+          ui Web {
+            page Home {
+              route: "/"
+              body: Hero("Welcome")
+            }
+          }
+          deployable api { platform: hono, modules: M }
+          deployable web { platform: static, targets: api, ui: Web, port: 3001 }
+        }
+      `,
+      "components.ddd": `
+        component Hero(title: string) {
+          body: Card { title }
+        }
+      `,
+    });
+
+    const services = createDddServices(NodeFileSystem);
+    const { all } = await loadProject(URI.file(path.join(tmp, "main.ddd")), services.shared);
+    expect(collectErrors(all)).toEqual([]);
+
+    const merged = mergeLoomModels(all.map((d) => lowerModel(d.parseResult.value as Model)));
+    expect(merged.components.map((c) => c.name)).toEqual(["Hero"]);
+  });
+
   it("resolves a root-level VO referenced from another file", async () => {
     writeProject(tmp, {
       "main.ddd": `

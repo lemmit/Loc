@@ -11,8 +11,8 @@ const reactPlatform: PlatformSurface = {
   // React generator only emits API hooks — no per-aggregate
   // repository class.  No find-name collisions are possible.
   reservedRepositoryFindNames: new Set(),
-  emitProject({ contexts, sys, deployable }): Map<string, string> {
-    return generateReactForContexts(contexts, sys, deployable);
+  emitProject({ contexts, sys, deployable, topLevelComponents }): Map<string, string> {
+    return generateReactForContexts(contexts, sys, deployable, { topLevelComponents });
   },
   composeService({ deployable, sys }): ComposeServiceShape {
     const target = sys.deployables.find((t) => t.name === deployable.targetName);

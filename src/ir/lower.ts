@@ -46,6 +46,7 @@ import {
   isAggregate,
   isAssignOrCallStmt,
   isBoundedContext,
+  isComponent,
   isContainment,
   isDeployable,
   isDerivedProp,
@@ -216,6 +217,7 @@ export function lowerModel(model: Model): RawLoomModel {
   const looseContexts: BoundedContextIR[] = [];
   const rootValueObjects: ValueObjectIR[] = [];
   const rootEnums: EnumIR[] = [];
+  const components: ComponentIR[] = [];
   const requirements: RequirementIR[] = [];
   const solutions: SolutionIR[] = [];
   const testCases: TestCaseIR[] = [];
@@ -230,6 +232,7 @@ export function lowerModel(model: Model): RawLoomModel {
     else if (isBoundedContext(m)) looseContexts.push(lowerContext(m));
     else if (isValueObject(m)) rootValueObjects.push(lowerValueObject(m, rootEnv));
     else if (isEnumDecl(m)) rootEnums.push(lowerEnum(m));
+    else if (isComponent(m)) components.push(lowerComponent(m));
     else if (isRequirement(m)) requirements.push(lowerRequirement(m));
     else if (isSolution(m)) solutions.push(lowerSolution(m));
     else if (isTestCase(m)) testCases.push(lowerTestCase(m));
@@ -239,6 +242,7 @@ export function lowerModel(model: Model): RawLoomModel {
     contexts: looseContexts,
     rootValueObjects,
     rootEnums,
+    components,
     requirements,
     solutions,
     testCases,
@@ -261,6 +265,7 @@ export function mergeLoomModels(models: RawLoomModel[]): RawLoomModel {
     contexts: models.flatMap((m) => m.contexts),
     rootValueObjects: models.flatMap((m) => m.rootValueObjects),
     rootEnums: models.flatMap((m) => m.rootEnums),
+    components: models.flatMap((m) => m.components),
     requirements: models.flatMap((m) => m.requirements),
     solutions: models.flatMap((m) => m.solutions),
     testCases: models.flatMap((m) => m.testCases),

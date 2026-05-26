@@ -32,7 +32,7 @@ export type DddServices = LangiumServices & DddAddedServices;
 
 export const DddModule: Module<DddServices, PartialLangiumServices & DddAddedServices> = {
   validation: {
-    DddValidator: () => new DddValidator(),
+    DddValidator: (services) => new DddValidator(services as DddServices),
   },
   references: {
     ScopeProvider: (services: LangiumServices) => new DddScopeProvider(services),

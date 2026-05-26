@@ -25,6 +25,8 @@ import actionShowcaseSource from "./action-showcase.ddd?raw";
 import multifileMainSource from "./multifile-main.ddd?raw";
 import multifileSharedMoneySource from "./multifile-shared-money.ddd?raw";
 import multifileSharedCurrencySource from "./multifile-shared-currency.ddd?raw";
+import multifileLandingSource from "./multifile-landing.ddd?raw";
+import multifileMarketingLibSource from "./multifile-marketing-lib.ddd?raw";
 
 export interface LoomExample {
   id: string;
@@ -67,6 +69,16 @@ export const examples: LoomExample[] = [
     },
     blurb:
       "Tiny Hono backend that imports a root-level Money valueobject and Currency enum from sibling files — exercises the multi-file workspace + tabs strip.",
+  },
+  {
+    id: "multifile-landing",
+    label: "Multi-file project (shared component library)",
+    source: multifileLandingSource,
+    files: {
+      "multifile-marketing-lib.ddd": multifileMarketingLibSource,
+    },
+    blurb:
+      "Landing page that imports a marketing component library (Hero / FeatureCard / CtaSection / Footer) declared as top-level `component`s in a sibling .ddd — same scope as root-level value objects and enums.",
   },
   // Storybook entries lead with the discriminator (pack name or
   // "components") so the eye lands on what makes each one different,

@@ -416,6 +416,22 @@ describe("page metamodel — grammar smoke tests", () => {
     expect(errors).toEqual([]);
   });
 
+  it("parses a top-level `component` declared as a `ModelMember`", async () => {
+    // Top-level components live outside any `system { … }` so a
+    // `.ddd` file becomes a shared component library.  Multi-file
+    // imports make them visible workspace-wide; the parser admits
+    // the declaration form at the model root unchanged.
+    const { errors, model } = await parseSnippet(`
+      component Hero(eyebrow: string, title: string) {
+        body: Stack { eyebrow, title }
+      }
+    `);
+    expect(errors).toEqual([]);
+    const comp = model.members.find((m) => m.$type === "Component");
+    expect(comp).toBeDefined();
+    expect((comp as { name: string }).name).toBe("Hero");
+  });
+
   it("parses a `page` with a `layout:` property (preset names)", async () => {
     // Grammar admits any ID at the layout position; the validator
     // restricts the v1 value set.  Both presets parse without error

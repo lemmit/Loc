@@ -1,0 +1,48 @@
+// Shared marketing component library — top-level `component`
+// declarations that any importing `.ddd` file can drop into a page
+// body by bare name.
+//
+// No `system { ... }` wrapper: a `.ddd` file can be a pure library.
+// Loom's multi-file import graph (`import "./marketing-lib.ddd"`)
+// makes every reachable top-level component visible workspace-wide,
+// in the same global scope as root-level value objects and enums.
+//
+// See multifile-landing.ddd for a system that consumes these.
+
+component Hero(eyebrow: string, title: string, subtitle: string, ctaLabel: string, ctaTo: string) {
+  body: Container {
+    Stack {
+      Badge { eyebrow },
+      Heading { title, level: 1 },
+      Text { subtitle },
+      Button { ctaLabel, to: ctaTo, variant: primary }
+    }
+  }
+}
+
+component FeatureCard(title: string, body: string) {
+  body: Card {
+    Stack {
+      Heading { title, level: 3 },
+      Text { body }
+    }
+  }
+}
+
+component CtaSection(title: string, subtitle: string, ctaLabel: string, ctaTo: string) {
+  body: Section {
+    Stack {
+      Heading { title, level: 2 },
+      Text { subtitle },
+      Button { ctaLabel, to: ctaTo, variant: primary }
+    }
+  }
+}
+
+component Footer(copyright: string) {
+  body: Section {
+    Stack {
+      Text { copyright }
+    }
+  }
+}
