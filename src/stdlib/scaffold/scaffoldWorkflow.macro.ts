@@ -2,8 +2,7 @@ import type { Workflow } from "../../macro-api/index.js";
 import { defineMacro } from "../../macro-api/index.js";
 import { pageForWorkflow } from "./_pages.js";
 
-/** Synthesise the default form page for one workflow.  Same shape
- * as `scaffold workflows: <Name>` in the legacy expander.  Leaf of
+/** Synthesise the default form page for one workflow.  Leaf of
  * the scaffold-macro family. */
 export default defineMacro({
   name: "scaffoldWorkflow",

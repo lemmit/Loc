@@ -398,8 +398,7 @@ function renderFormOfWiring(
  *  request type + RHF + notifications + modals manager), and
  *  `moduleScope` (the `<Op>Form` component — own `useForm`, op-
  *  param inputs — plus the `open<Op>Modal` opener the trigger
- *  button calls).  Mirrors the deleted legacy operation-modal
- *  renderer's contract. */
+ *  button calls). */
 function renderFormOpWiring(
   state: OperationFormState,
   pack: LoadedPack,

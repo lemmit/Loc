@@ -477,9 +477,9 @@ function emitShellFiles(
 
   // lib/<app>_web/components/core_components.ex — minimal stub so
   // the html_helpers macro's `import ...CoreComponents` resolves.
-  // Standard Phoenix 1.7 generators ship a much richer module; we
-  // emit just the empty wrapper for now since LiveView pages
-  // reference components by full module path.
+  // Standard Phoenix 1.7 generators ship a much richer module; an
+  // empty wrapper suffices because generated LiveView pages reference
+  // components by full module path, not the imported aliases.
   out.set(`lib/${appName}_web/components/core_components.ex`, renderCoreComponents(appModule));
 
   // lib/<app>_web/components/layouts.ex

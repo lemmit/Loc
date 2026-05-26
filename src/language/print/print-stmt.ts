@@ -2,9 +2,9 @@ import type { LValue, Statement } from "../generated/ast.js";
 import { printExpr, registerStatementPrinter } from "./print-expr.js";
 
 // ---------------------------------------------------------------------------
-// AST → `.ddd` source printer for statements (lambda block bodies, and later
-// operation / workflow bodies).  See `print-expr.ts` for the round-trip
-// rationale.
+// AST → `.ddd` source printer for statements (lambda block bodies;
+// operation / workflow bodies route through the same printer when
+// needed).  See `print-expr.ts` for the round-trip rationale.
 // ---------------------------------------------------------------------------
 
 export function printStmt(node: Statement): string {

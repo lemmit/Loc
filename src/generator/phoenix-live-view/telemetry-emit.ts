@@ -29,12 +29,12 @@ import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 //     Ash doesn't expose a printable expression on the telemetry payload.
 //   - `value_computed.value` is left as `nil`; Ash's `[:ash, :change, :stop]`
 //     event doesn't surface the computed attribute value.
-//   - All validation events land on `invariant_evaluated` for now —
+//   - All validation events land on `invariant_evaluated`;
 //     distinguishing action-scoped `precondition_evaluated` from
 //     resource-scoped `invariant_evaluated` requires inspecting span
-//     context that raw :telemetry doesn't carry; the catalog field
-//     contract is preserved (`aggregate`, `op`, `expr`, `passed`) so a
-//     later refinement is additive.
+//     context that raw :telemetry doesn't carry.  The catalog field
+//     contract (`aggregate`, `op`, `expr`, `passed`) is preserved so
+//     a later refinement remains additive.
 //
 // Lifecycle:
 //   The module is plugged into the application supervision tree

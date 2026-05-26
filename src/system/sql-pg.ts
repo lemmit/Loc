@@ -113,11 +113,10 @@ export function renderPgType(t: ColumnType): string {
   }
 }
 
-/** Lowercase identifier with double-quoting only when reserved.  The
- *  migration builder already snake-cases everything, so the produced
- *  names are valid bare identifiers in Postgres; the quote path is for
- *  the rare reserved-name edge case (`user`, `order`, …) — TODO when a
- *  fixture exercises it. */
+/** Lowercase identifier passthrough.  The migration builder already
+ *  snake-cases everything, so the produced names are valid bare
+ *  identifiers in Postgres.  Reserved-name edge cases (`user`, `order`,
+ *  …) would need double-quoting; no current fixture exercises them. */
 function ident(name: string): string {
   return name;
 }

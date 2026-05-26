@@ -14,11 +14,10 @@
 // workspace where `@loom/backend-hono-v4` is symlinked under
 // `node_modules/@loom/backend-hono-v4` resolves `hono@v4` through
 // the fs source to the *same* `honoPlatform` instance the in-tree
-// source returns — so `===` identity holds and every
-// downstream resolver is unaffected.  A later step would replace the
-// in-tree lookup with `await import(pkg.main)`'s default export, at which
-// point the workspace symlink becomes the true source of code, not
-// just the source of the manifest.
+// source returns — so `===` identity holds and every downstream
+// resolver is unaffected.  Only the manifest is honoured from the
+// symlinked package; the surface still comes from the in-tree default
+// set (paired by family@version).
 //
 // Composition with the in-tree default (in-tree fills any
 // family@version the fs walk didn't find) is done in
@@ -126,7 +125,6 @@ export async function discoverBackendsFs(rootDir: string): Promise<DiscoveredBac
     if (!match) {
       // Discovered manifest with no matching in-tree code: silently
       // skip so unknown installed packages don't break resolution.
-      // (A later step could resolve these via dynamic `import(pkg)`.)
       continue;
     }
     out.push({ manifest, surface: match.surface });

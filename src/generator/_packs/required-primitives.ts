@@ -95,13 +95,12 @@ const SHARED_PRIMITIVES: readonly string[] = [
 ];
 
 // Primitives required only in TSX packs.  Three slots `ashPhoenix/v3`
-// doesn't ship today:
-//   - `primitive-code-block`  — page-metamodel Phase 3 (#581).
-//   - `primitive-icon`        — page-metamodel Phase 3 (#581).
-//   - `primitive-modal`       — `heex-walker.ts` currently renders a
-//                                placeholder; promoting this to the
-//                                HEEx required set requires backfilling
-//                                ashPhoenix v3 (recommended follow-up).
+// doesn't ship:
+//   - `primitive-code-block`  — not in the HEEx pack.
+//   - `primitive-icon`        — not in the HEEx pack.
+//   - `primitive-modal`       — `heex-walker.ts` renders a placeholder;
+//                                promoting this to the HEEx required
+//                                set requires backfilling ashPhoenix v3.
 const TSX_ONLY_PRIMITIVES: readonly string[] = [
   "primitive-code-block",
   "primitive-icon",

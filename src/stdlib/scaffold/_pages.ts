@@ -1,10 +1,9 @@
 // Shared page-generation helpers for the scaffold macro family.
 //
 // Each `scaffold<X>` macro (scaffoldAggregate / scaffoldWorkflow /
-// scaffoldView / scaffold) reaches into these to emit the same page
-// shapes the legacy `scaffold` keyword expander produced.  Keeping
-// them in one place means the per-archetype leaf macros and the
-// top-level composer all stay byte-equivalent.
+// scaffoldView / scaffold) reaches into these to emit canonical page
+// shapes.  Keeping them in one place means the per-archetype leaf
+// macros and the top-level composer share one source of truth.
 
 import type { Aggregate, Page, View, Workflow } from "../../macro-api/index.js";
 import { boolLit, callExpr, nameRefExpr, page, stringLit } from "../../macro-api/index.js";
@@ -19,8 +18,7 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
       route: `/${pluralSnake}`,
       // Canonical body primitive — expands inline to the full
       // Breadcrumbs/Toolbar/QueryView/Table tree via
-      // `expandInlineScaffoldPrimitives`.  Replaces the legacy
-      // `List(of:)` archetype marker.
+      // `expandInlineScaffoldPrimitives`.
       body: callExpr("scaffoldList", [{ name: "of", value: nameRefExpr(aggName) }]),
       menu: {
         section: stringLit("Aggregates"),
@@ -31,8 +29,7 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
       name: `${aggName}New`,
       route: `/${pluralSnake}/new`,
       // Canonical body primitive — expands to Stack(Breadcrumbs,
-      // Heading, Card(CreateForm(of:))).  Replaces the legacy
-      // `Form(creates:)` archetype marker.
+      // Heading, Card(CreateForm(of:))).
       body: callExpr("scaffoldNewForm", [{ name: "of", value: nameRefExpr(aggName) }]),
       menu: { hidden: boolLit(true) },
     }),
@@ -49,8 +46,8 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
       //     this slot with custom JSX doesn't disturb operations.
       //   * scaffoldOperations(of: <Agg>) — Group(Modal × N), one
       //     per public operation.  Auto-fans at lowering time, so
-      //     adding `operation reactivate()` to the aggregate later
-      //     makes its modal appear without touching this page.
+      //     adding `operation reactivate()` to the aggregate makes
+      //     its modal appear without touching this page.
       body: callExpr("Stack", [
         {
           value: callExpr("scaffoldDetails", [{ name: "of", value: nameRefExpr(aggName) }]),
@@ -58,9 +55,8 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
         {
           value: callExpr("scaffoldOperations", [{ name: "of", value: nameRefExpr(aggName) }]),
         },
-        // Match the legacy archetype expansion's testid on the
-        // outer Stack so the e2e page-objects can still anchor on
-        // `<plural>-detail` without source-level changes.
+        // testid on the outer Stack — the e2e page-objects anchor
+        // on `<plural>-detail`.
         { name: "testid", value: stringLit(`${pluralSnake}-detail`) },
       ]),
       menu: { hidden: boolLit(true) },
@@ -73,8 +69,7 @@ export function pageForWorkflow(wf: Workflow): Page {
     name: `${pascal(wf.name)}Workflow`,
     route: `/workflows/${snake(wf.name)}`,
     // Canonical body primitive — expands to Stack(Breadcrumbs,
-    // Heading, Card(WorkflowForm(runs:))).  Replaces the legacy
-    // `Form(runs:)` archetype marker.
+    // Heading, Card(WorkflowForm(runs:))).
     body: callExpr("scaffoldWorkflowForm", [{ name: "runs", value: nameRefExpr(wf.name) }]),
     menu: {
       section: stringLit("Workflows"),
@@ -88,9 +83,7 @@ export function pageForView(v: View): Page {
     name: `${v.name}View`,
     route: `/views/${snake(v.name)}`,
     // Canonical body primitive — expands to Heading + QueryView
-    // wrapping a Paper-framed Table over the view's projected
-    // rows.  Replaces the legacy `List(of: view <X>)` archetype
-    // marker (the `view ` prefix detection is no longer needed).
+    // wrapping a Paper-framed Table over the view's projected rows.
     body: callExpr("scaffoldViewList", [{ name: "of", value: nameRefExpr(v.name) }]),
     menu: {
       section: stringLit("Views"),
@@ -132,8 +125,8 @@ export function viewsIndexPage(): Page {
   });
 }
 
-// Naming utilities — duplicated from the legacy expander so scaffold
-// output stays byte-identical with the legacy code path's tests.
+// Naming utilities — kept module-local so the helpers don't pull in
+// the wider `util/naming` dep graph.
 
 function snake(s: string): string {
   return s

@@ -257,8 +257,7 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
   // `String(x)` / `${x}` interpolation, and `util.inspect.custom` for
   // `console.log` + Node debugger inspection.  Both return the same
   // structural form so library consumers see a consistent debug
-  // representation regardless of the call shape.  See plan
-  // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+  // representation regardless of the call shape.
   if (e.derived.some((d) => d.name === "inspect")) {
     getters.push(`  toString(): string { return this.inspect; }`);
     getters.push(`  [Symbol.for("nodejs.util.inspect.custom")](): string { return this.inspect; }`);

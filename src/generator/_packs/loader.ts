@@ -13,9 +13,9 @@
 // templates in via Vite's `import.meta.glob`).
 //
 // Loading is eager: every template named in the manifest is compiled
-// up front.  A missing template is a generation-time error (no
-// fallback chain — see plan), naming the missing key explicitly so
-// pack authors can fix it.
+// up front.  A missing template is a generation-time error — no
+// fallback chain — naming the missing key explicitly so pack authors
+// can fix it.
 // ---------------------------------------------------------------------------
 
 import Handlebars from "handlebars";

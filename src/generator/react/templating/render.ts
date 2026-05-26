@@ -1,14 +1,11 @@
 // ---------------------------------------------------------------------------
 // Render orchestrator for the template-pack rendering layer.
 //
-// The legacy archetype renderers (renderListPage,
-// renderDetailPage, renderNewPage, renderViewTablePage,
-// renderWorkflowForm, renderWorkflowsIndex, renderViewsIndex,
-// renderOperationModal, renderPartTable) were deleted.  All page
-// emission now routes through `body-walker.ts` driven by the
+// Page emission routes through `body-walker.ts` driven by the
 // walker-primitive expander in `src/ir/walker-primitive-expander.ts`.
+// This module owns the project-shell and theme/app-shell renderers
+// that sit alongside the body walker:
 //
-// What remains:
 //   - `renderShellFile`  — pack helper for project-shell files
 //                          (api/client.ts, api/config.ts,
 //                          src/lib/format.tsx, package.json,
@@ -16,10 +13,9 @@
 //   - `renderTheme`      — `src/theme.ts` from the theme block.
 //   - `renderAppShell`   — `src/App.tsx`.
 //   - `renderMain`       — `src/main.tsx`.
-//   - `renderHome`       — kept for callers that still want a
-//                          `homeRenderer` callback shape; the
-//                          scaffold expander now synthesises Home
-//                          directly so this is rarely exercised.
+//   - `renderHome`       — callback shape for callers wiring a
+//                          `homeRenderer`; the scaffold expander
+//                          synthesises Home directly in the common path.
 //   - `renderFormField`  — drives the per-field input templates
 //                          (`field-input-*.hbs`); used by the
 //                          walker's `Form(of: <Agg>)` emission.

@@ -109,11 +109,10 @@ function exprIsTranslatable(
     }
     case "call":
       // Free / function / private-operation / VO-ctor calls:
-      //   - VO ctors are translatable when every arg is (used in
-      //     refine bodies that reconstruct the VO inside JS — but
-      //     we currently only emit refines on already-typed
-      //     fields, so leave VO ctors as non-translatable for
-      //     21.A; can be lifted later).
+      //   - VO ctors would be translatable when every arg is
+      //     (refine bodies could reconstruct the VO inside JS), but
+      //     refines today only run on already-typed fields, so VO
+      //     ctors are conservatively non-translatable.
       //   - The others read aggregate state.
       return false;
     case "lambda": {

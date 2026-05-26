@@ -102,30 +102,25 @@ function renderAggregateResource(
     ":updated_at",
   ];
 
-  // `inspect` derived → public `def inspect(record)` module function
-  // (PR #524 → #537 → #546 → this).
+  // `inspect` derived → public `def inspect(record)` module function.
   //
-  // PR #524 auto-injects a structural `derived inspect: string = ...` on
-  // every aggregate; the .NET and TS backends emit it as `ToString()` /
-  // `[util.inspect.custom]` so debugger output / exception messages
+  // Enrichment auto-injects a structural `derived inspect: string = ...`
+  // on every aggregate; the .NET and TS backends emit it as `ToString()`
+  // / `[util.inspect.custom]` so debugger output / exception messages
   // honour `sensitive(...)` redaction.
   //
-  // The earlier Phoenix path emitted `defimpl Inspect, for: <Module>`,
-  // which collided with Ash 3.x's auto-derived Inspect protocol impl
-  // (`warning: redefining module Inspect.<App>.<Ctx>.<Agg>` under
-  // `--warnings-as-errors`).  #546 dropped the emission, leaving
-  // Phoenix without the redaction-aware debug form the plan promised.
+  // Phoenix emits this as a regular **module function** rather than a
+  // `defimpl Inspect`: a protocol impl would collide with Ash 3.x's
+  // auto-derived Inspect (`warning: redefining module
+  // Inspect.<App>.<Ctx>.<Agg>` under `--warnings-as-errors`).  Callers
+  // invoke it explicitly (`Customer.inspect(record)` from Logger / IEx)
+  // instead of relying on `Kernel.inspect/1`.  No collision because the
+  // two live in different modules (`MyApp.Catalog.Customer.inspect/1`
+  // vs `Inspect.MyApp.Catalog.Customer.inspect/2`).
   //
-  // This restores it as a regular **module function** rather than a
-  // protocol impl: callers invoke it explicitly (`Customer.inspect(record)`
-  // from Logger / IEx) instead of relying on `Kernel.inspect/1`.  No
-  // collision with Ash's auto-Inspect because they live in different
-  // modules (`MyApp.Catalog.Customer.inspect/1` vs
-  // `Inspect.MyApp.Catalog.Customer.inspect/2`).
-  //
-  // The `expr()`-DSL constraint that originally bit `calculate :inspect`
-  // (Ash `expr()` doesn't admit `<>` / `to_string/1`) doesn't apply
-  // here — module-function bodies are native Elixir.
+  // Implemented as a module function rather than an Ash `calculate
+  // :inspect`: Ash's `expr()` DSL doesn't admit `<>` / `to_string/1`,
+  // but module-function bodies are native Elixir.
   const inspectDerived = agg.derived.find((d) => d.name === "inspect");
   const inspectFn = inspectDerived
     ? `\n  def inspect(record) do\n    ${renderExpr(inspectDerived.expr, renderCtx)}\n  end\n`

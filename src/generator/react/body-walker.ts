@@ -987,10 +987,10 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
 // walker/api-hooks.ts; emitExpr/walk call into them.
 
 /** Render a `StmtIR` as a TS statement string (with a trailing
- *  semicolon).  v0 supports the subset that matters for click
- *  handlers: state mutation (`:=`, `+=`, `-=`), let-binding, and
- *  bare expression statements.  emit / call statements fall
- *  through to a comment for now. */
+ *  semicolon).  Supports the subset that matters for click handlers:
+ *  state mutation (`:=`, `+=`, `-=`), let-binding, and bare expression
+ *  statements.  emit / call statements fall through to a comment —
+ *  the frontend doesn't run domain logic. */
 export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
   switch (stmt.kind) {
     case "assign": {

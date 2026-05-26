@@ -10,9 +10,7 @@
 //
 //   2. No explicit menu block → returns `undefined`.  Caller falls
 //      back to the hardcoded sidebar in
-//      `prepareAppShellVM(aggregates, workflows, views, …)` —
-//      byte-equivalent to the original sidebar output for the bulk-
-//      scaffold case (the byte-equivalence acceptance gate).
+//      `prepareAppShellVM(aggregates, workflows, views, …)`.
 //
 // What this emitter covers:
 // - Explicit `ui.menu` overrides emit the user's exact section
@@ -20,16 +18,13 @@
 // - External links render as anchor tags so `link "Docs" -> "url"`
 //   produces a clickable navigation entry (no React Router).
 // - Per-link auth — when the underlying page has a `requires`
-//   clause, the rendered link wraps in a permission gate (deferred
-//   to future `useAuth` plumbing; currently emits the link
-//   unconditionally).
+//   clause, the rendered link would wrap in a permission gate; this
+//   awaits `useAuth` plumbing and currently emits the link
+//   unconditionally.
 //
-// What this emitter intentionally doesn't yet handle:
-// - Per-page `menuMeta` as the *default* sidebar driver.  The
-//   default still goes through main's hardcoded grouping so that
-//   the bulk-scaffold byte-equivalence holds without churning the
-//   expander or the AppShell preparer.  A future change unifies the
-//   default path on the page-IR.
+// Per-page `menuMeta` is not consulted as the default sidebar driver;
+// the default sidebar still flows through the hardcoded grouping in
+// `prepareAppShellVM`.
 
 import type { PageIR, UiIR } from "../../ir/loom-ir.js";
 import { plural, snake } from "../../util/naming.js";
@@ -37,8 +32,7 @@ import type { NavEntryVM, NavSectionVM } from "./templating/view-models.js";
 
 /** Build sidebar `navSections` from a ui's explicit `menu { … }`
  *  block.  Returns `undefined` when the ui has no menu block — the
- *  caller keeps the legacy hardcoded grouping in that case
- *  (byte-equivalence guarantee for the bulk-scaffold case). */
+ *  caller falls back to the default hardcoded grouping. */
 export function deriveSidebarFromUi(ui: UiIR): NavSectionVM[] | undefined {
   if (ui.menu) {
     return ui.menu.sections.map(
@@ -57,10 +51,9 @@ export function deriveSidebarFromUi(ui: UiIR): NavSectionVM[] | undefined {
   //
   // Restricted to `source === "explicit"` so scaffold-synthesised
   // pages (which carry default menuMeta from the scaffold expander)
-  // don't pre-empt the legacy hardcoded grouping in app-shell.ts.
-  // The default path stays byte-equivalent for the bulk-scaffold
-  // case; explicit pages opt into this driver by declaring a
-  // `menu { … }` block.
+  // don't pre-empt the default hardcoded grouping in app-shell.ts.
+  // Explicit pages opt into this driver by declaring a `menu { … }`
+  // block.
   const eligible = ui.pages.filter(
     (p) => p.source === "explicit" && p.menuMeta && !readMenuMetaBool(p, "hidden"),
   );

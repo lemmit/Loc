@@ -128,9 +128,8 @@ export function checkTheme(block: ThemeBlock, accept: ValidationAcceptor): void 
   ]);
   const knownRadius = new Set(["none", "sm", "md", "lg", "xl"]);
   const knownColorSchemes = new Set(["light", "dark", "auto"]);
-  // Hex colors: #RGB, #RRGGBB, or #RRGGBBAA.  Everything else
-  // ("blue" / "rgb(...)" / "var(--brand)") can be supported later
-  // if a user asks; rejecting here keeps the surface tight
+  // Hex colors: #RGB, #RRGGBB, or #RRGGBBAA.  Named colors,
+  // `rgb(...)`, and CSS vars are rejected to keep the surface tight
   // and the Mantine shade-ramp generator simple.
   const hexColor = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
   const seen = new Set<string>();

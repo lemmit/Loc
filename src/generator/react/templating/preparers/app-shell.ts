@@ -1,10 +1,9 @@
 // ---------------------------------------------------------------------------
 // View-model preparer for App.tsx — the application shell that hosts
 // the sidebar navigation, header bar, error boundary, and React
-// Router routes.  Mirrors the legacy appTsx() in
-// src/generator/react/index.ts: per-aggregate List/New/Detail page
-// imports + matching routes; per-workflow form-page imports + routes;
-// per-view table-page imports + routes; sidebar entries grouped by
+// Router routes.  Produces per-aggregate List/New/Detail page imports
+// + matching routes, per-workflow form-page imports + routes, per-view
+// table-page imports + routes, and sidebar entries grouped by
 // construct kind.
 //
 // The preparer's job is to flatten these decisions into typed
@@ -42,8 +41,8 @@ export function prepareAppShellVM(
   /** When the deployable's `ui:` block declares an explicit
    *  `menu { … }`, the caller derives `navSections` from that block
    *  (via `deriveSidebarFromUi`) and passes them here.  When
-   *  undefined the legacy hardcoded grouping (Aggregates / Workflows /
-   *  Views) is used — byte-equivalent to the original sidebar output. */
+   *  undefined the default hardcoded grouping (Aggregates / Workflows /
+   *  Views) is used. */
   sidebarOverride?: NavSectionVM[],
   /** Explicit pages with non-conventional names emit
    *  at `src/pages/<name-snake>.tsx`.  The caller hands their
@@ -55,7 +54,7 @@ export function prepareAppShellVM(
   /** Whether the ui's scaffold expander produced a synthesised
    *  `Home` page.  When false the import is skipped to avoid a
    *  dangling reference (explicit-page-only uis emit no Home file).
-   *  Default true preserves legacy behaviour for callers without a ui. */
+   *  Default true is the safe assumption for callers without a ui. */
   hasScaffoldHome: boolean = true,
   /** Explicit pages with `layout: none` — mounted OUTSIDE the
    *  AppShell chrome as sibling routes to the layout-route.

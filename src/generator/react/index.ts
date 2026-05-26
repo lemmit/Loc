@@ -94,8 +94,7 @@ export function generateReactForContexts(
 
   // Page metamodel routing.  Every React deployable declares a
   // `ui:` binding (validator rule `loom.react-deployable-missing-ui`
-  // enforces this) — the legacy "no-ui → per-aggregate fallback"
-  // path was removed.  `ui` is the resolved UiIR; if a programmatic
+  // enforces this).  `ui` is the resolved UiIR; if a programmatic
   // IR bypasses the validator and produces a react deployable with
   // no `uiName`, that's a bug — fail loudly here rather than emit
   // a half-formed project.

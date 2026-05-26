@@ -119,8 +119,7 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
       checkDerived(m, envForAggregate(agg), accept);
       // Reserved-name derived fields — `display` (user-facing label) and
       // `inspect` (developer-facing debug form).  Both must be `string`;
-      // at most one of each per aggregate.  See plan
-      // `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
+      // at most one of each per aggregate.
       if (m.name === "display" || m.name === "inspect") {
         const slot = m.name === "display" ? displayDerived : inspectDerived;
         if (slot) {

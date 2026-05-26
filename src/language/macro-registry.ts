@@ -11,9 +11,9 @@
 //      up the compiled output.  This avoids any runtime
 //      TypeScript dependency in the toolchain itself.
 //
-// Registration is process-global today.  If we later need
-// per-workspace isolation (e.g. two open projects with different
-// macro libraries), this becomes a per-services-container map.
+// Registration is process-global.  Per-workspace isolation (two
+// open projects with different macro libraries) would require a
+// per-services-container map.
 
 import type { MacroDefinition } from "../macro-api/define.js";
 

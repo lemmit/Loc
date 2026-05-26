@@ -13,12 +13,12 @@ import type { PlatformSurface } from "./surface.js";
 // Backend packages (see docs/backend-packages.md): the registry
 // resolves a backend by `family@version`, with a defaults map
 // so a bareword `platform: hono` keeps resolving to a concrete
-// version.  Today every backend family has exactly ONE registered
-// version, aliased to the same surface object that the bareword
-// returned before — so this is byte-identical: every resolution
-// path yields the identical `PlatformSurface` instance it always
-// has.  The grammar/lowering already wires `platform: "hono@v4"`
-// pins; a second version per family can be added later.
+// version.  Every backend family currently has exactly ONE registered
+// version, aliased to the same surface object the bareword returns
+// — so the resolution paths yield identical `PlatformSurface` instances
+// regardless of whether the source pins a version.  The grammar/lowering
+// wires `platform: "hono@v4"` pins, so additional per-family versions
+// slot in by registering them in `versionedPlatforms`.
 //
 // Adding a new platform: write the surface implementation, register
 // it in `platforms` (+ `versionedPlatforms` if it's a backend

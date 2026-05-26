@@ -12,10 +12,11 @@
 //     per-request child logger).
 //
 // Per-backend renderers consume this catalog — Hono/pino in
-// `render-hono.ts`; .NET (`ILogger`) and Phoenix (`Logger`) later — so
-// the same event surfaces with the same level + fields on every backend.
-// A log consumer (dashboard, alert, `jq` query) sees one schema.  This
-// is the `wireShape` pattern applied to logs.
+// `render-hono.ts`, .NET (`ILogger`) in `render-dotnet.ts`, Phoenix
+// (`Logger`) in `render-phoenix.ts` — so the same event surfaces with
+// the same level + fields on every backend.  A log consumer (dashboard,
+// alert, `jq` query) sees one schema.  This is the `wireShape` pattern
+// applied to logs.
 //
 // Stability: treat the catalog like a wire contract — additive changes
 // (new events, new optional fields) are safe; renaming / removing

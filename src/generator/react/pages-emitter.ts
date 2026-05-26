@@ -3,32 +3,25 @@
 // Walks `ui.pages` (after scaffold expansion: explicit pages + scaffold
 // rewrites + shared Home / WorkflowsIndex / ViewsIndex) and emits one
 // TSX file per page, dispatching by `archetype.kind` to the
-// existing per-archetype builders.  This is the byte-equivalence
-// layer for the bulk-scaffold case — every legacy direct-walk
-// invocation routes through here.
+// per-archetype builders.  Single entry point for page emission from
+// the React index orchestrator.
 //
 // What this emitter does:
-// - Replaces the per-aggregate / per-workflow / per-view PAGE
-//   emission loops in `src/generator/react/index.ts` with one call
-//   to `emitPagesForUi`.
-// - Reuses the existing builders (`renderListPage`, `buildNewPage`,
-//   `buildDetailPage`, `buildWorkflowFormPage`, `buildViewTablePage`,
-//   `buildWorkflowsIndexPage`, `buildViewsIndexPage`, `homeTsx`)
-//   verbatim — byte-equivalence comes for free.
+// - Page emission via one call to `emitPagesForUi`.
+// - Dispatches to `renderListPage`, `buildNewPage`, `buildDetailPage`,
+//   `buildWorkflowFormPage`, `buildViewTablePage`,
+//   `buildWorkflowsIndexPage`, `buildViewsIndexPage`, `homeTsx`.
 //
 // What this emitter intentionally doesn't touch:
 // - Per-aggregate api modules (`src/api/<agg>.ts`) — emitted by
-//   `index.ts` via the existing aggregate iteration.
+//   `index.ts` via the aggregate iteration.
 // - Per-aggregate / per-workflow / per-view Playwright page objects
-//   under `e2e/pages/` — a follow-up reroutes those to walk the page IR.
+//   under `e2e/pages/` — emitted alongside, not from here.
 // - Project shell (App.tsx, main.tsx, vite.config.ts, package.json,
 //   theme, smoke spec) — orthogonal to the page metamodel.
 //
-// What this emitter intentionally doesn't yet handle:
-// - Explicit pages (`source: "explicit"`).  The closed-stdlib
-//   component emitter is part of the broader page-emitter work; the
-//   bulk-scaffold case has no explicit pages, so they are silently
-//   skipped here and a follow-up will wire them in.
+// Explicit pages (`source: "explicit"`) flow through the closed-stdlib
+// component emission path, not the per-archetype dispatch below.
 
 import type {
   AggregateIR,
@@ -61,7 +54,7 @@ export interface PageEmitContext {
    *  → ctx lookup. */
   contextsByName: Map<string, BoundedContextIR>;
   /** Loaded design pack.  Used by the list-page renderer; other
-   *  archetypes use the legacy procedural builders. */
+   *  archetypes use the procedural per-archetype builders. */
   pack: LoadedPack;
 }
 
@@ -74,8 +67,8 @@ export interface PageEmitContext {
  *    src/pages/orders/list.tsx       → "../../"
  *    src/pages/views/active_orders/x → "../../../"
  *
- *  Robust to the legacy `src/` prefix that some emitter call sites
- *  pass; the leading "src/" segment is stripped before counting. */
+ *  Strips a leading `src/` segment before counting, since some call
+ *  sites pass paths rooted at the project root rather than `src/`. */
 function computeSrcImportPrefix(emitPath: string): string {
   let path = emitPath;
   if (path.startsWith("src/")) path = path.slice(4);
@@ -363,11 +356,10 @@ function stmtUsesCodeBlock(stmt: import("../../ir/loom-ir.js").StmtIR): boolean 
 //   view-list
 //     → `e2e/pages/views/<snake-name>.ts` per view
 //
-// Output is byte-identical to the legacy aggregate-walked path for
-// the bulk-scaffold case — same file paths, same content (the
-// existing `buildPageObjectModule` / `buildWorkflowPageObject` /
-// `buildViewPageObject` builders are reused verbatim).  The reroute
-// is purely structural: page-IR drives iteration, builders unchanged.
+// Iteration is driven by page IR; per-aggregate / per-workflow /
+// per-view builders (`buildPageObjectModule` /
+// `buildWorkflowPageObject` / `buildViewPageObject`) produce the
+// actual file content.
 // ---------------------------------------------------------------------------
 
 export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string, string> {
@@ -380,7 +372,7 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
     // Only scaffold-origin pages dispatch to the
     // per-aggregate / per-workflow / per-view page-object
     // builders.  Custom-origin (user-written) pages get the
-    // walker-side per-page page-object emitted later.
+    // walker-side per-page page-object emitted separately.
     const origin = page.origin;
     if (!origin || origin.kind === "custom") continue;
     switch (origin.kind) {
@@ -388,8 +380,8 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
       case "aggregate-new":
       case "aggregate-detail": {
         // One file per aggregate, regardless of how many of its
-        // archetypes appear — the legacy `buildPageObjectModule`
-        // covers ListPage / NewPage / DetailPage classes in one go.
+        // archetypes appear — `buildPageObjectModule` covers
+        // ListPage / NewPage / DetailPage classes in one go.
         if (seenAggregates.has(origin.aggregateName)) break;
         seenAggregates.add(origin.aggregateName);
         const agg = ctx.aggregatesByName.get(origin.aggregateName);

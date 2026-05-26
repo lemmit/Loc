@@ -83,7 +83,8 @@ export function generateDotnet(
  * System-mode entry: emits a single .NET project from a pre-filtered
  * list of contexts under the chosen namespace.  When emitting for a
  * deployable, the namespace is the deployable name.  When called with
- * a single context, the namespace is that context's name (legacy).
+ * a single context (non-system entry point), the namespace is that
+ * context's name.
  *
  * `system` (when present) carries the system-wide user-claim shape +
  * the deployable's auth setting — the entry threads them into the
@@ -185,9 +186,9 @@ function emitProjectFromContexts(
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
-  // Per-module Postgres migrations — empty `migrations` (legacy
-  // callers / non-system mode) → no-op.  Emitted before the project
-  // shell so Program.cs sees `hasMigrations` and adds the
+  // Per-module Postgres migrations — empty `migrations` (non-system
+  // entry points) → no-op.  Emitted before the project shell so
+  // Program.cs sees `hasMigrations` and adds the
   // `Database.Migrate()` startup call.
   const hasMigrations = !!(system?.migrations && system.migrations.length > 0);
   if (hasMigrations) {

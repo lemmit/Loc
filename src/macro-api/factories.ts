@@ -200,9 +200,9 @@ export function param(name: string, type: TypeRef): Parameter {
 }
 
 /** An operation declaration.  `body` is a (possibly empty) array
- * of statements.  Statement factories will be added when crudish
- * lands; for now, `operation(...)` with `body: []` is enough for
- * trait macros that only need to declare operations. */
+ * of statements.  Trait macros that only need to declare operations
+ * pass `body: []`; statement-building factories live alongside
+ * `operation(...)` for macros that synthesise bodies. */
 export function operation(
   name: string,
   params: Parameter[],

@@ -1001,9 +1001,9 @@ function findPascalArg(
 
 /** Emit a `<.input>` for a single aggregate field.  Picks the HTML
  *  input type from the IR type and labels it from a humanized name.
- *  T id references fall through to a text input for now — a proper
- *  select-with-options requires loading T's list at mount time and
- *  is out of scope here (see follow-up plan §Form-of-Id). */
+ *  `T id` references fall through to a text input — a proper
+ *  select-with-options requires loading T's list at mount time, which
+ *  is out of scope here. */
 function renderFieldInputForField(f: { name: string; type: TypeIR }, formAssign = "form"): string {
   const fieldName = snake(f.name);
   const label = humanize(f.name);

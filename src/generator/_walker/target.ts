@@ -24,16 +24,16 @@
 // each of the seams above; the rest (pack dispatch, attribute
 // formatting, lambda traversal) stays in the shared walker.
 //
-// CURRENT STATE: the contract has TWO implementations.
+// The contract has two implementations:
 //
 //   - `src/generator/react/walker/tsx-target.ts`            → `tsxTarget`
 //   - `src/generator/phoenix-live-view/heex-target.ts`      → `heexTarget`
 //
-// Both validate the interface end-to-end.  The walkers
-// (`body-walker.ts` for React, `heex-walker.ts` for Phoenix) still
-// inline their seam implementations — the next Phase 7 step
-// refactors each walker to delegate to its respective target,
-// gated on the byte-identical fixture suite (React) and
+// Both validate the interface end-to-end through the cross-target
+// conformance test.  The walkers (`body-walker.ts` for React,
+// `heex-walker.ts` for Phoenix) inline their seam implementations
+// directly; extracting them behind these targets is gated on the
+// byte-identical fixture suite (React) and
 // `mix compile --warnings-as-errors` (Phoenix).
 //
 // SCOPE DECISION (kept at 9 methods).  The contract covers the
