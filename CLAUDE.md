@@ -128,7 +128,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 | `api/`, `vite/`, `docker/` | Top-level `.hbs` snippets — boilerplate for generated projects (API client, vite config, dockerfile). |
 | `examples/`, `web/src/examples/` | Sample `.ddd` files. CI's `generated-react-build.yml` matrix iterates `examples/acme.ddd` + everything under `web/src/examples/` × every design pack. |
 | `test/fixtures/` | **Excluded from vitest discovery** in `vitest.config.ts`. These are byte-for-byte snapshots of generated output used as regression fixtures (capture script: `scripts/capture-baseline-fixture.mjs`); the `.test.ts` files inside are not part of this project's test surface. |
-| `docs/` | Reference docs. Build the landing+playground page via `node docs/build.mjs`. Deployed by `.github/workflows/pages.yml` to GitHub Pages. |
+| `docs/` | Reference docs (top-level), plus `plans/` (in-flight design notes), `audits/` (snapshot-in-time empirical audits), and `proposals/` (unadopted designs). `docs/README.md` is the canonical index. Build the landing+docs site via `node docs/build.mjs` (recurses into `plans/` + `audits/`). Deployed by `.github/workflows/pages.yml` to GitHub Pages. |
 | `experience_gathered.md` | Running retrospective of design decisions and gotchas. **Worth reading before non-trivial changes** — covers Langium grammar gotchas, the Handlebars-removal rationale, Mantine + Playwright findings, IR design trade-offs. |
 
 ## Conventions
@@ -166,11 +166,19 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 
 ## Further reading
 
-- `docs/language.md` — formal language reference.
-- `docs/generators.md` — per-platform feature matrix.
-- `docs/technical.md` — pipeline architecture (the canonical, detailed version of the summary above).
-- `docs/architecture.md` — system-level composition model (api/storage/ui/deployable layers).
+`docs/README.md` is the canonical doc index — start there. The most useful entries when working on the toolchain:
+
+- `docs/language.md` — formal language reference (declarations, types, expressions, statements, validation rules).
 - `docs/page-metamodel.md` — page DSL surface (pages, components, scaffolding, state, match, lambdas).
-- `docs/traceability.md` — requirement / solution / testCase artifacts and the generated `.loom/` coverage + gaps reports.
+- `docs/architecture.md` — system-level composition model (api/storage/ui/deployable layers).
+- `docs/generators.md` — per-platform feature matrix — what each backend emits, file-by-file.
+- `docs/platforms.md` — the backend registry, `family@version` pinning, `PlatformSurface` contract.
+- `docs/design-packs.md` — design-pack authoring guide (manifest, stacks, required emits, recipe for new versions).
+- `docs/technical.md` — pipeline architecture (the canonical, detailed version of the summary above).
 - `docs/tools.md` — CLI, `.loomignore`, watch mode, Docker workflow, OpenAPI parity check, proxy CAs.
-- `experience_gathered.md` — gotchas log; read before non-trivial work.
+
+Per-feature reference docs — `docs/auth.md`, `views.md`, `workflow.md`, `extern.md`, `capabilities.md` (filter/stamp/implements), `scaffold-macros.md` (the macro stdlib), `provenance.md` (provenanced fields + ddd snapshot), `observability.md`, `traceability.md`, `conformance.md`, `migrations-design.md`.
+
+`docs/plans/` and `docs/audits/` hold in-flight design notes and historical snapshots; do not treat them as authoritative for what ships today. `docs/proposals/` holds proposals not yet adopted.
+
+`experience_gathered.md` — gotchas log; read before non-trivial work.
