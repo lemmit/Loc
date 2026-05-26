@@ -97,7 +97,15 @@ jobs:
       # the job cap.
       - name: Pre-build npm-tarball mirror
         working-directory: web
-        run: npm run build:npm-mirror
+        run: |
+          npm run build:npm-mirror
+          echo "::group::npm mirror summary"
+          echo "manifest entries: $(jq 'length' public/npm-mirror/manifest.json)"
+          echo "tarball count:    $(ls public/npm-mirror/*.tgz 2>/dev/null | wc -l)"
+          echo "total size:       $(du -sh public/npm-mirror/ | cut -f1)"
+          echo "first 5 frontend packages (jq):"
+          jq -r 'to_entries[] | select(.key | test("react|mantine|chakra|mui|emotion")) | .key' public/npm-mirror/manifest.json | head -5 || echo "  (none — mirror is backend-only, bug!)"
+          echo "::endgroup::"
 
       # Cache the Playwright browser binaries (~100MB) keyed off the
       # @playwright/test version; re-installs only when Playwright

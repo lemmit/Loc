@@ -23,6 +23,19 @@ test("chakra@v3 preview boots without runtime errors", async ({ page }) => {
     errors.push(`pageerror: ${err.message}`);
   });
 
+  // Diagnostic: count which side of the install path the bundle worker hit
+  // for each tarball — same-origin mirror vs external registry. Logged at
+  // the end so we can compare against the mirror manifest size (printed by
+  // the workflow's mirror-build step) and see whether the bundle is
+  // actually using the prebuilt mirror or falling back to the registry.
+  const mirrorHits: string[] = [];
+  const registryHits: string[] = [];
+  page.on("request", (req) => {
+    const u = req.url();
+    if (u.includes("/npm-mirror/")) mirrorHits.push(u);
+    else if (u.includes("registry.npmjs.org") || u.includes(".tgz")) registryHits.push(u);
+  });
+
   await page.goto("/");
   await waitForPlaygroundReady(page);
 
@@ -43,10 +56,22 @@ test("chakra@v3 preview boots without runtime errors", async ({ page }) => {
     );
   }
 
+  const tBundleStart = Date.now();
   await page.getByTestId("btn-bundle").click();
-  await expect(
-    page.getByText(/bundled .*KB in \d+ ms \(\d+ deps fetched\)/),
-  ).toBeVisible({ timeout: 300_000 });
+  try {
+    await expect(
+      page.getByText(/bundled .*KB in \d+ ms \(\d+ deps fetched\)/),
+    ).toBeVisible({ timeout: 300_000 });
+  } finally {
+    // Always log the install-path breakdown — even on bundle timeout — so
+    // we can tell whether the mirror is being used at all.
+    console.log(
+      `[chakra-v3] bundle phase: ${Date.now() - tBundleStart}ms; mirror hits=${mirrorHits.length}, registry hits=${registryHits.length}`,
+    );
+    if (registryHits.length > 0 && registryHits.length <= 20) {
+      console.log("[chakra-v3] sample registry hits:", registryHits.slice(0, 10));
+    }
+  }
 
   await page.getByTestId("btn-boot").click();
   await expect(page.getByTestId("backend-status")).toHaveText("booted", {
