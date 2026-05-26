@@ -8,9 +8,9 @@
 
 Loom's type system is reshaped along two parallel axes — **state**
 (aggregates) and **transport** (payloads) — plus a coherent
-**exception-less flow** built on top, plus **specifications** for
-the cross-aggregate domain rule layer (Specification Pattern).
-Together these resolve five real pain points:
+**exception-less flow** built on top, plus **criteria** for the
+cross-aggregate domain rule layer (Spring-Data / Evans Specification
+Pattern). Together these resolve five real pain points:
 
 1. **No generic payloads** — no `T page`, no `T envelope`, no way to
    compose response shapes. Forces per-aggregate macros for every
@@ -57,14 +57,19 @@ Together these resolve five real pain points:
                 └──────────────────────────────────┘ │
                               │                      │
                               ▼ consumes             │
-                ┌─ specification.md ────────────────┐ │
-                │   specification <Name>(args) of T │─┘
-                │   query / check / enumerate forms  │
-                │   `from <Spec>(args)` parameter    │
-                │   binding drives validation + UI    │
+                ┌─ criterion.md ────────────────────┐ │
+                │   criterion <Name>(args) of T      │─┘
+                │   pure predicate; Spring-Data /    │
+                │   Evans Specification Pattern      │
+                │   `from <Criterion>(args)` —       │
+                │   parameter validation + UI         │
+                │   `when <Criterion>` — operation    │
+                │   guard with auto can-<op> endpoint │
+                │   Repo.list(crit, sort?, page?,     │
+                │   loads?) — generic list queries    │
                 │   + `private workflow` modifier     │
                 │   + workflow-calls-workflow         │
-                └────────────────────────────────────┘
+                └─────────────────────────────────────┘
 
                 ┌─ partial-update.md ───────────┐
                 │   pattern: command + option   │     (sits adjacent
@@ -136,8 +141,8 @@ Together these resolve five real pain points:
               (e.g., InsufficientCredit)             → ? propagates
                               │
                               ▼
-              specification mismatch                 → InvalidSpecMember
-              (parameter not in spec's set)          → ? propagates
+              criterion mismatch                     → InvalidCriterionMember
+              (parameter doesn't satisfy criterion)  → ? propagates
                               │
                               ▼
               workflow precondition violation        → throws → 400
@@ -158,15 +163,12 @@ context Sales {
   error InsufficientCredit { requested: decimal, available: decimal }
   error SupplierUnable    { supplierId: Supplier id, orderType: OrderType }
 
-  # Specification — pure parameterised predicate over Supplier.
-  # Composes existing named repo find (Suppliers.canFulfill).
-  specification SuppliersForOrderType(orderType: OrderType) of Supplier {
-    query: Suppliers.canFulfill(orderType)
-  }
+  # Criterion — pure parameterised predicate over Supplier.
+  # Spring-Data / Evans Specification Pattern.
+  criterion SuppliersForOrderType(orderType: OrderType) of Supplier =
+    self.canFulfill(orderType)
 
-  specification ActiveCustomers of Customer {
-    query: Customers.findActive()
-  }
+  criterion ActiveCustomers of Customer = self.active
 
   # Aggregate — pure domain. Cannot load other aggregates.
   aggregate Order {
@@ -178,7 +180,7 @@ context Sales {
     }
   }
 
-  # Command — fields bound to specs via `from`.
+  # Command — fields bound to criteria via `from`.
   command PlaceOrder {
     customerId:  Customer id   from ActiveCustomers
     orderType:   OrderType
@@ -187,7 +189,7 @@ context Sales {
   }
 
   # Workflow — application layer. Orchestrates.
-  workflow placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or InvalidSpecMember or InsufficientCredit transactional {
+  workflow placeOrder(cmd: PlaceOrderCommand): OrderId or NotFound or InvalidCriterionMember or InsufficientCredit transactional {
     precondition cmd.totalAmount > 0         # throws → 400
     let order = Order.create({ customerId: cmd.customerId })
     order.place(cmd.lines)?
@@ -239,8 +241,10 @@ load-bearing ones for the implementing agent:
 | D18 | Status mapping home | In the api surface as `status <Error> <Code>` lines |
 | D21 | 500 body shape — dev vs prod | `LOOM_EXPOSE_INTERNAL_ERRORS` env var |
 | D22 | `precondition` — typed or throw | **Throws** at both layers (different status codes) |
-| D24 | Specification name | Full `specification` (no abbreviations) |
-| D25 | Spec bind keyword | `from <Spec>(args)` |
+| D24 | Criterion name | Full `criterion` (no abbreviations); replaces earlier `specification` draft |
+| D25 | Criterion bind keyword | `from <Criterion>(args)` |
+| D30 | List query method | Built-in `Repo.list(criterion, sort?, page?, loads?)` |
+| D31 | Default load semantics | Whole aggregate by default; `loads:` is optimisation |
 | D27 | Reusable cross-aggregate mutation | `private workflow` + workflow-calls-workflow (no separate `service`) |
 | D25 | `pre` slot accepts | Validators only (pure) |
 | D26 | Validator auto-injection | At every call site of the protected op |
@@ -259,8 +263,8 @@ Phase ordering (full detail in `implementation-plan.md`):
 8. **A4** (~1 week + fixture re-baseline): find-variant re-shape (`Repo.getById` → `T or NotFound`).
 9. **A5/A6** (~3 weeks): parse + external API + `validate for X` re-shape.
 10. **A7a** (~2 weeks): carrier stdlib helpers.
-11. **Spec1–4** (~4.5 weeks): specifications + `from` binding.
-12. **W1** (~1 week): workflow-calls-workflow + `private workflow`.
+11. **Crit1–4** (~5 weeks): criteria + `from`/`when` + `Repo.list` + per-backend emission.
+12. **Crit5** (~1 week): workflow-calls-workflow + `private workflow`.
 12. **I1–I4** (~7 weeks): aggregate inheritance (can run parallel with the P/A tracks).
 
 Phases P3+P4 (~6 weeks) are the foundation; A1+A2+A3 (~6 weeks) are the
@@ -278,9 +282,10 @@ point (one coordinated PR; do not split).
 | Why preconditions throw (both layers) | `exception-less.md` §"Preconditions throw — at both layers" |
 | Where status codes live (and don't) | `exception-less.md` §"API-edge ProblemDetails translation" |
 | Dev vs prod 500 body | `exception-less.md` §"Env-aware internals exposure" |
-| What can be auto-derived from `from <Spec>(args)` bindings | `specification.md` §"What the synthesised application layer does" |
-| When to use specification vs workflow | `specification.md` §"What this collapses" + `docs/workflow.md` |
-| `private workflow` + workflow-calls-workflow | `specification.md` §"Workflow-calls-workflow (related extension)" |
+| What can be auto-derived from `from <Criterion>(args)` bindings | `criterion.md` §"Use site 1 — `from <Criterion>(args)`" |
+| When to use criterion + Repo.list vs explicit find | `criterion.md` §"Named complex queries" + `docs/workflow.md` |
+| `private workflow` + workflow-calls-workflow | `criterion.md` §"Workflow-calls-workflow + `private workflow`" |
+| `loads:` semantics and defaults | `load-specifications.md` §"Defaults and call-site `loads:`" |
 | PATCH-style commands | `partial-update.md` |
 | Abstract aggregates / storage strategies | `aggregate-inheritance.md` |
 
@@ -325,7 +330,7 @@ docs/proposals/
 ├─ aggregate-inheritance.md      ← state layer
 ├─ payload-transport-layer.md    ← transport layer
 ├─ exception-less.md             ← error/option/?/api-edge translation
-├─ specification.md              ← cross-aggregate domain rules + private workflow
+├─ criterion.md                  ← criteria + Repo.list + private workflow
 ├─ partial-update.md             ← PATCH pattern
 ├─ implementation-plan.md        ← delivery plan
 ├─ provenance.md                 ← (existing) value provenance

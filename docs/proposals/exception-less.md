@@ -1120,15 +1120,19 @@ check) work unchanged because the spec stays JSON-shaped.
   variant-name-tagged identity rule, `error` sugar keyword, and
   anonymous-`or`-unions construct are all pinned there because this
   doc depends on them.
-- [`specification.md`](./specification.md) — adds **specifications**
-  (parameterised predicates / sets over a type) bound to parameters
-  via `from <Spec>(args)`. One declaration drives input validation
-  + UI options + OpenAPI constraints. Resolves the "cross-aggregate
-  domain rule" question this doc doesn't fully address — specs
-  carry that load via the synthesised application-layer wrapper.
-  Also adds `private workflow` (reusing the existing `private`
-  modifier from `private operation` / `private invariant`) plus
-  workflow-calls-workflow for reusable mutating orchestration.
+- [`criterion.md`](./criterion.md) — adds **criteria**
+  (parameterised pure predicates over a type; Spring-Data / Evans
+  Specification Pattern) bound to parameters via
+  `from <Criterion>(args)` and to operation guards via
+  `when <Criterion>` (canCommand pattern with auto-exposed
+  `can-<op>` query endpoints). Also adds built-in
+  `Repo.list(criterion, sort?, page?, loads?)` for generic list
+  queries (solves "repository with 40 methods"). Resolves the
+  "cross-aggregate domain rule" question this doc doesn't fully
+  address. Also adds `private workflow` (reusing the existing
+  `private` modifier from `private operation` /
+  `private invariant`) plus workflow-calls-workflow for reusable
+  mutating orchestration.
 - [`aggregate-inheritance.md`](./aggregate-inheritance.md) — sister
   proposal to the upstream. Unaffected by this doc; aggregates stay
   nominal and concrete.

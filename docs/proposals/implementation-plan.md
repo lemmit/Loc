@@ -13,13 +13,14 @@
 >   wrapper), `?` propagation, API-edge ProblemDetails translation
 >   (per-api `status` mapping + stdlib defaults), find-variant
 >   re-shape.
-> - [`specification.md`](./specification.md) — `specification`
->   declarations (parameterised predicates / sets over T) bound to
->   parameters via `from <Spec>(args)`. Replaces an earlier
->   validator+service split with one construct that drives input
->   validation + UI options + OpenAPI constraints. Plus `private
->   workflow` modifier + workflow-calls-workflow for reusable
->   mutating orchestration.
+> - [`criterion.md`](./criterion.md) — `criterion` declarations
+>   (parameterised predicates over T, Spring-Data / Evans style)
+>   bound to parameters via `from <Criterion>(args)`, to operation
+>   guards via `when <Criterion>`. Replaces an earlier
+>   `specification` design that bundled query shaping. Plus
+>   `Repo.list(criterion, sort?, page?, loads?)` as built-in
+>   repository method. Plus `private workflow` modifier +
+>   workflow-calls-workflow for reusable mutating orchestration.
 >
 > Read all of these before starting. This doc covers ordering,
 > coordination points, risk management, and decision pins.
@@ -84,8 +85,8 @@ A5: parse + external API as Result      | A1, A2                  | (none)
 A6: validate for X returns Result       | A1, A2, P5              | (none)
 A7a: carrier stdlib helpers             | A1                      | (none)
 A7b: user-declared carrier generics     | A1, A4 (DEFERRED)       | (deferred to v2)
-Spec1-4: specifications + `from` binding | A1, A2, A6              | (none — feeds D23 resolution)
-W1: workflow-calls-workflow + private    | A1                       | (independent of Spec; can land any order)
+Crit1-4: criteria + from/when + Repo.list | A1, A2, A6             | (none — feeds D23 resolution)
+Crit5: workflow-calls-workflow + private | A1                       | (independent of Crit1-4; can land any order)
 ```
 
 Letters: **P** = payload-transport-layer, **I** = aggregate-inheritance,
@@ -541,55 +542,71 @@ accumulated errors via the `combine` helper.
 
 Tracked here for completeness. Not v1.
 
-### Track 4 — Specifications + workflow-calls-workflow (Phases Spec + W)
+### Track 4 — Criteria + Repo.list + workflow-calls-workflow (Phase Crit)
 
 Independent of A4 / find-variant re-shape; can land before or after.
 Lands after A6 (`?` propagation + `validate for X` stable).
-Resolves D23. Full spec: [`specification.md`](./specification.md).
+Resolves D23. Full spec: [`criterion.md`](./criterion.md).
 
-#### Spec1 — Grammar + IR (~1 week)
+#### Crit1 — Grammar + IR (~1 week)
 
-- Grammar: `specification <Name>(<Param>*) of <T> { query: /
-  check: / enumerate: / default: }` declaration; `from <Spec>(args)`
-  binding clause on `Parameter` and `CommandFieldDecl`.
-- IR: `SpecificationDeclIR`; `FromBindingIR` on parameter / field
-  IRs.
+- Grammar: `criterion <Name>(<Param>*) of <T> = <bool expr>` and
+  `criterion <Name>(<Param>*) of <T> { where: <bool expr> }`
+  declarations; `from <Criterion>(args)` clause on Parameter /
+  CommandField; `when <expr>` clause on Operation.
+- Built-in shape types: `SortClause`, `Sort`, `Page`,
+  `PathExpression` (for `loads:` arg, syntax shared with
+  load-specifications.md).
+- IR: `CriterionDeclIR`; `FromBindingIR` on Parameter / CommandField;
+  `WhenClauseIR` on Operation.
 
-#### Spec2 — Body lowering + derivation + purity (~1 week)
+#### Crit2 — Body purity + composition (~1 week)
 
-- Walker checks `query` / `check` / `enumerate` / `default`
-  bodies. Rejects mutation, aggregate-op calls that mutate,
-  `emit`, workflow calls (`loom.specification-impure`).
-- Derivation: query → check, enumerate → check.
-- Spec composition + cycle detection
-  (`loom.specification-cycle`).
+- Walker checks `where:` body constraints; rejects mutation,
+  aggregate-op calls that mutate, `emit`, workflow calls
+  (`loom.criterion-impure`), non-queryable forms
+  (`loom.criterion-not-queryable`).
+- Composition operators `&&` / `||` / `!` on criteria yield
+  combined criterion IR.
+- Cycle detection: criteria referencing each other
+  (`loom.criterion-cycle`).
+- `when` clause expression validator: `loom.when-references-op-param`,
+  `loom.when-inline-list`.
 
-#### Spec3 — Auto-injection at api wrappers (~1.5 weeks)
+#### Crit3 — Auto-injection at api wrappers (~1.5 weeks)
 
-- Wrapper-synthesis lowering: per `from <Spec>(args)` binding,
-  inject the loop + check + `InvalidSpecMember` return at step 3
-  of the api wrapper pipeline.
-- Stdlib payload: `error InvalidSpecMember { spec, paramName, id,
-  value }` (default status 422).
-- OpenAPI emission: include per-spec constraints as schema
-  extensions.
-- UI metadata: per-spec, expose enumerate / range / default for
-  Builder + React form-generator consumption.
+- Wrapper-synthesis lowering: per `from <Criterion>(args)` binding,
+  inject load + check + `InvalidCriterionMember` return.
+- Per `when <Criterion>` clause, inject the gate before op invocation;
+  on false → `NotAllowed`. Auto-expose
+  `GET /aggregates/<agg>/{id}/can-<op>` endpoint.
+- Operation-call lowering: at every `agg.op(args)?` expansion,
+  inject the `when` gate (auto-injection at every call site, not
+  just api wrappers — consistency rule).
+- Stdlib: `error InvalidCriterionMember { criterion, paramName,
+  id, value } (status 422)`; `error NotAllowed { operation,
+  aggregate, id, reason? } (status 409)`.
+- OpenAPI emission: criterion constraints surface as schema
+  extensions; `can-<op>` endpoints documented.
 
-#### Spec4 — Per-backend emission (~1 week)
+#### Crit4 — Repo.list per-backend (~1.5 weeks)
 
-- TS / .NET / Phoenix render specification declarations as named
-  functions (parameter list + return type + body).
-- Auto-injection at api wrappers: per-backend, mechanical.
-- UI consumer integration: React form-generator reads spec
-  metadata; renders inputs accordingly.
+- Per-backend translation: criterion → SQL WHERE (per ORM); sort →
+  ORDER BY; page → LIMIT/OFFSET; loads → JOINs / SELECT-includes /
+  EntityGraph (uses path syntax from `load-specifications.md`).
+- TS / Drizzle: typed query builder.
+- .NET / EF Core: IQueryable chain.
+- Phoenix / Ash: Ash query DSL.
+- UI form-generator: auto-derives `<select>` options by executing
+  the criterion against the repository at binding sites; React
+  form-generator integration.
+- Built-in `Repo.list(criterion, sort?, page?, loads?)` method on
+  every repository (no explicit `find` declaration needed for
+  generic list queries).
 
-**Spec total: ~4.5 weeks.** Independent of A4; can ship before
-or after.
+#### Crit5 — workflow-calls-workflow + `private workflow` (~1 week)
 
-#### W1 — workflow-calls-workflow + `private workflow` (~1 week)
-
-Independent of Spec1-4; can ship before or after.
+Independent of Crit1-4; can ship before or after.
 
 - Grammar: workflow-call expression (`OtherWorkflow(args)`) in
   workflow body; `private` modifier on workflow declaration
@@ -598,14 +615,15 @@ Independent of Spec1-4; can ship before or after.
 - IR: `WorkflowCallStmtIR`; `isPrivate: boolean` on `WorkflowIR`.
 - Validator: workflow-call cycle detection (`loom.workflow-cycle`);
   visibility check — private workflows skipped from api
-  auto-exposure.
+  auto-exposure (`loom.private-workflow-exposed`).
 - Transactional inheritance: lowering pass implements the
-  caller-callee transaction shape per `specification.md`
+  caller-callee transaction shape per `criterion.md`
   §"Transactional semantics".
 - Per-backend emission: workflow-calls-workflow lowers to direct
   function call (TS / Phoenix) or Mediator handler call (.NET).
 
-**W1 total: ~1 week.**
+**Crit total: ~6 weeks** (Crit1-4 ~5; Crit5 ~1). Independent of
+A4; can ship before or after.
 
 ## Coordinated migration moments
 
@@ -721,13 +739,15 @@ priority order.
 | D20 | Per-surface mappings beyond the api layer (UI / queue / CLI) | **Out of scope.** UI consumes ProblemDetails like any HTTP client; no language-level UI error-mapping surface. Queue / CLI deferred to v2 when those surfaces become real. | — | — |
 | D21 | Env-aware 500-ProblemDetails body (dev shows internals, prod redacts) | **`LOOM_EXPOSE_INTERNAL_ERRORS` env var; defaults from each backend's native dev/prod check** (TS `NODE_ENV !== "production"`, .NET `IHostEnvironment.IsDevelopment()`, Phoenix `:dev`/`:test`). Catalog event always carries full context; sensitive fields stay redacted even in dev. | A3 | exception-less.md |
 | D22 | Workflow `precondition` — typed return vs throw | **Throws** (pinned, flipped from earlier draft). Preconditions are *guards*, not designed business outcomes — bug-shaped, not user-recoverable. Route translates: aggregate-op `PreconditionViolation` → 500 (env-aware); workflow-level `PreconditionViolation` → 400 (rule text safe to surface). Designed-in business outcomes use typed `or` returns, not `precondition`. | A1 | exception-less.md |
-| D23 | Cross-aggregate domain rule pattern | **Resolved**: `specification <Name>(args) of T { query/check/enumerate }` declarations bound to parameters via `from <Spec>(args)`. One declaration drives validation + UI + OpenAPI. Replaces an earlier validator+service split. See [`specification.md`](./specification.md). | Phase Spec | specification.md |
-| D24 | Specification name (full vs abbreviated) | **`specification`** (pinned). Loom doesn't abbreviate keywords (`view`, `aggregate`, `workflow` are all full). | Phase Spec | specification.md |
-| D25 | Bind keyword (parameter ↔ specification) | **`from <Spec>(args)`** (pinned). Reads as "parameter drawn from the specified set". | Phase Spec | specification.md |
-| D26 | Spec-mismatch error variant | **Generic stdlib `InvalidSpecMember { spec, paramName, id, value }`** (default status 422; api-surface override available). Per-spec custom error variants deferred to v2. | Phase Spec | specification.md |
-| D27 | Reusable cross-aggregate mutating orchestration | **`private workflow X { ... }`** (reuses existing `private` modifier from `private operation` / `private invariant`). Plus workflow-calls-workflow body extension. No separate `service` keyword. | W1 | specification.md |
-| D28 | Workflow-calls-workflow transactional semantics | **Callee inherits caller's transaction**. If caller is non-transactional, callee's own `transactional` annotation activates its own scope. No nested-savepoint magic; single-level transaction lifetime per top-level workflow call. | W1 | specification.md |
-| D29 | `when <predicate>` clause on aggregate operations (canCommand pattern) | **`operation X(...) when <predicate> { ... }`**. Predicate reads `self` (aggregate-implicit), `currentUser` (ambient), aggregate functions, and specs (Form A = `of <Aggregate>` with implicit `self`; Form B = `of bool` with explicit args). **Parameterless w.r.t. op parameters** (per NakedObjects' split — per-arg checks go through `from <Spec>` on the parameters). Auto-exposed `GET /aggregates/<agg>/{id}/can-<op>` query alongside the existing POST endpoint. Stdlib `error NotAllowed { operation, aggregate, id, reason? }` default status 409. | Phase G | specification.md |
+| D23 | Cross-aggregate domain rule pattern | **Resolved**: `criterion <Name>(args) of T = <bool expr>` declarations bound to parameters via `from <Criterion>(args)` and to operation guards via `when <Criterion>`. Spring-Data / Evans style — pure predicate, composable via `&&`/`||`/`!`. Query shaping (sort, page, loads) is per-call to `Repo.list`, not on the criterion. See [`criterion.md`](./criterion.md). | Phase Crit | criterion.md |
+| D24 | Criterion name (full vs abbreviated) | **`criterion`** (pinned). Loom doesn't abbreviate keywords (`view`, `aggregate`, `workflow` are all full). Replaces an earlier `specification` name; "criterion" aligns with Spring Data / Hibernate Criterion convention for the predicate-only construct. | Phase Crit | criterion.md |
+| D25 | Bind keyword (parameter ↔ criterion) | **`from <Criterion>(args)`** (pinned). Reads as "parameter drawn from the set defined by this criterion". | Phase Crit | criterion.md |
+| D26 | Criterion-mismatch error variant | **Generic stdlib `InvalidCriterionMember { criterion, paramName, id, value }`** (default status 422; api-surface override available). Per-criterion custom error variants deferred to v2. | Phase Crit | criterion.md |
+| D27 | Reusable cross-aggregate mutating orchestration | **`private workflow X { ... }`** (reuses existing `private` modifier from `private operation` / `private invariant`). Plus workflow-calls-workflow body extension. No separate `service` keyword. | Crit5 | criterion.md |
+| D28 | Workflow-calls-workflow transactional semantics | **Callee inherits caller's transaction**. If caller is non-transactional, callee's own `transactional` annotation activates its own scope. No nested-savepoint magic; single-level transaction lifetime per top-level workflow call. | Crit5 | criterion.md |
+| D29 | `when <predicate>` clause on aggregate operations (canCommand pattern) | **`operation X(...) when <predicate> { ... }`**. Predicate reads `self` (aggregate-implicit), `currentUser` (ambient), aggregate functions, and criteria. **Parameterless w.r.t. op parameters** (per NakedObjects' split — per-arg checks go through `from <Criterion>` on the parameters). Auto-exposed `GET /aggregates/<agg>/{id}/can-<op>` query alongside the existing POST endpoint. Stdlib `error NotAllowed { operation, aggregate, id, reason? }` default status 409. | Phase Crit | criterion.md |
+| D30 | Repository list query method | **Built-in `Repo.list(criterion, sort?, page?, loads?)`** on every repository (no explicit declaration needed for generic list queries). Solves "repository with 40 methods" via criterion composition + call-site shaping. Spring-Data analog of `JpaSpecificationExecutor.findAll(spec, pageable)`. | Crit4 | criterion.md |
+| D31 | Default load semantics | **Default = whole aggregate** loaded (all own fields, all containments). Cross-aggregate references stay as ids unless `loads:` arg requests eager hydration. `loads:` is optimisation, not requirement. Auto-derivation of `loads:` from result usage is v2. | Crit4 | load-specifications.md |
 
 **Workflow**: before starting each phase the implementing agent
 should explicitly confirm the relevant decisions with the
@@ -784,7 +804,7 @@ For the implementing agent:
 | Payload transport (P1–P5) | 10 | P3+P4 are the bulk (~6 of 10) |
 | Aggregate inheritance (I1–I4) | 7 | Independent track; can run parallel |
 | Exception-less (A1–A7a) | 11.5 | A1+A2+A3 stack together (~5.5); A4 is the migration spike |
-| Specifications (Spec1–4) + W1 | 5.5 | Independent of A4; lands after A6 |
+| Criteria (Crit1–4) + Crit5 (workflow-calls) | 6 | Independent of A4; lands after A6 |
 | **Total** | **~33 weeks of focused work** | Parallel work can compress to ~20-24 calendar weeks |
 
 Parallelism: a second implementer can take Track 2 (aggregate

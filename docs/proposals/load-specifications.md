@@ -102,6 +102,105 @@ path lattice:
 The hard parts are interprocedural summaries, loops/recursion,
 aliasing, and good diagnostics — *not* the type theory.
 
+## Defaults and call-site `loads:` (added)
+
+**Default is whole aggregate.** If an author writes no `loads`
+clause and no `loads:` argument at the call site, the repository
+loads the **entire aggregate** — every field, every containment,
+the full owned tree. Cross-aggregate references (`Customer id`,
+`Supplier id[]`, etc.) are loaded as ids only; the referenced
+aggregates are not eagerly hydrated unless requested.
+
+**`loads` is optimisation, not requirement**: an explicit `loads`
+clause / argument either restricts (load less than the whole for
+read-only scenarios) or expands (eager-hydrate cross-aggregate
+references the body will traverse).
+
+This default keeps simple code simple. Authors only think about
+load specifications when they care about performance — usually
+expanding to cross-aggregate references they want to eagerly fetch,
+or stripping down to a subset for high-throughput read paths.
+
+### Call-site `loads:` argument
+
+`loads:` is available as a runtime argument to the built-in
+repository methods introduced by [`criterion.md`](./criterion.md):
+
+```
+# Whole aggregate (default):
+let order = Orders.getById(orderId)?
+# order's shape: Order { * } — all fields, all containments
+
+# Restricted shape (read-only optimisation):
+let summary = Orders.getById(orderId, loads: [self.id, self.customerId, self.status])?
+# summary's shape: Order { id, customerId, status } — only those paths
+
+# Expanded shape (eager-load related aggregates):
+let order = Orders.getById(orderId, loads: [self.lines[].product, self.customer.address])?
+# order's shape: Order { *, lines[].product, customer.address }
+```
+
+`Repo.list` accepts the same argument:
+
+```
+workflow listForPricing(): Order[] {
+  return Orders.list(
+    HighValueOrder,
+    sort: [createdAt desc],
+    page: { offset: 0, limit: 50 },
+    loads: [self.lines[].product, self.customer.address]
+  )
+}
+```
+
+The path-expression syntax (`self.lines[].product`,
+`self.customer.address`) is the same vocabulary as the operation-side
+`loads` clause defined in the previous sections. The retrieval side
+just adds explicit call-site supply.
+
+### Composition with operations
+
+When a body calls operations that have their own `loads` clauses
+declared, the compiler ensures the load shape from the retrieval
+covers the operations' requirements:
+
+```
+aggregate Order {
+  operation applyPricing() loads Order { lines[].product } { ... }
+  operation finalize()     loads Order { lines[].product, customer.address } { ... }
+}
+
+workflow priceOrders() {
+  # Default-whole load (no `loads:`) — covers everything; OK:
+  let orders = Orders.list(HighValueOrder)
+  for o in orders { o.applyPricing()  /* OK */ ; o.finalize()  /* OK */ }
+
+  # Restricted load — must cover what's called:
+  let summaries = Orders.list(HighValueOrder, loads: [self.id, self.status])
+  for s in summaries {
+    s.applyPricing()  # ERROR: requires lines[].product, not loaded
+  }
+
+  # Expanded load — eagerly fetches cross-aggregate for finalize():
+  let fullOrders = Orders.list(HighValueOrder, loads: [self.lines[].product, self.customer.address])
+  for o in fullOrders { o.finalize()  /* OK */ }
+}
+```
+
+### Auto-derivation (v2 — flagged)
+
+The proposal already describes inference for operation-level
+`loads` clauses (compiler walks the body, derives the shape). A
+future v2 extension applies the same inference to **call-site**
+`loads:` arguments: the compiler analyses the result's downstream
+usage (operations called, paths accessed) and synthesises the
+optimal `loads:` arg automatically. v1 ships with explicit
+`loads:` where optimisation matters; default-whole otherwise.
+
+Naming for this v2 step: "load-shape inference at retrieval sites"
+or "automatic eager-loading optimisation". Authors who don't care
+get correct (whole) loads; authors who do care annotate explicitly.
+
 ## Feeds provenance
 
 This layer is designed to interoperate with
