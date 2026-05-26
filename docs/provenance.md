@@ -74,16 +74,33 @@ step whenever your provenance rules change.
 For every Hono deployable that contains at least one `provenanced`
 field, the generator emits:
 
-- `domain/provenance.ts` — a small runtime SDK with `recordTrace(...)`
-  for writing trace records and a snapshot loader that reads the
-  latest `.loom/snapshots/*.loomsnap.json` at startup.
-- A `recordTrace(...)` call placed after each `provenanced`
-  assignment in the relevant operation.  The call records the active
-  `snapshotId`, the operation, and the input values.
+- `domain/provenance.ts` — a small module declaring the `ProvLineage`
+  type (`{ snapshotId; target; inputs; computedValue }`) consumed by
+  every other generated file.
+- A per-aggregate **co-located backing field** `_<field>_provenance:
+  ProvLineage | null` for each provenanced property, plus a private
+  `_provTraces: ProvLineage[]` buffer on the aggregate class.
+- **Inline trace capture** at every `provenanced` write site.  The
+  generator wraps the assignment with code that snapshots the RHS
+  leaf inputs *before* the write (so a self-referential `x := x + n`
+  records the pre-write value), performs the write, builds a
+  `ProvLineage` value (rule snapshot id + inputs + post-write
+  computed value), and routes it both to the backing field
+  (current lineage, persisted on the row) and to `_provTraces`
+  (drained into a history table by the route handler inside the
+  save transaction).
+- A `drainProv(): ProvLineage[]` method on the aggregate that
+  empties the buffer after a save.
 
-A trace record carries enough to answer "why is `order.total` equal
-to N?": the snapshot it came from (and therefore the formula), and
-the inputs that fed it.
+A persisted trace carries enough to answer "why is `order.total`
+equal to N?": the `snapshotId` it came from (and therefore the
+formula), and the inputs that fed it.
+
+There is no separate `recordTrace(...)` function — the trace
+capture is inlined statement-by-statement.  See
+`src/generator/typescript/render-stmt.ts` (the `withTrace` wrapper)
+and `src/generator/typescript/emit/aggregate.ts` (the field +
+buffer + `drainProv` plumbing).
 
 ## Other backends
 

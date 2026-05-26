@@ -56,13 +56,23 @@ context Sales {
 
 ### Backend emission
 
-- **Hono / Drizzle** — every generated `select` adds the predicate
-  via `.where(...)` on top of the user's query filters.
-- **.NET / EF Core** — one `HasQueryFilter(...)` per capability is
-  emitted in `OnModelCreating`, applied to every entity whose
-  `implements` matched.
-- **Phoenix / Ash** — the predicate becomes a default scope on the
-  Ash resource.
+- **.NET / EF Core** — every aggregate that has any propagated
+  `contextFilters` gets one `b.HasQueryFilter(x => …)` per filter
+  inside its `EntityConfiguration.Configure(...)` method.  Emission
+  is per-entity-type (EF Core's `HasQueryFilter` is per-entity by
+  design); the filter applies to *every* query of that aggregate
+  regardless of whether the aggregate names a capability via
+  `implements` — the capability-grouping step happened earlier, in
+  the lowerer's propagation pass.  See
+  `src/generator/dotnet/emit/efcore.ts`.
+- **Hono / Drizzle** and **Phoenix / Ash** — context filters are
+  **not yet wired through the query layer**.  The IR carries
+  `contextFilters` on every aggregate, but the Drizzle repository
+  builder and the Phoenix Ecto schemas don't currently consume
+  them, so soft-delete is enforced only on `dotnet` deployables.
+  Hand-writing the predicate inside individual `repository find`
+  bodies (or as a per-aggregate `filter` in the source) covers the
+  same ground in the meantime.
 
 ## `stamp <event> { … }`
 
@@ -96,10 +106,22 @@ macro for the macro-generated equivalent.
 
 ### Backend emission
 
-The stamps fire **before** validation in every backend.  Workflows
-that call `aggregate.create(...)` / `aggregate.update(...)` get the
-stamps too — the assignment happens inside the constructor / mutator,
-so there's no path that skips them.
+- **.NET / EF Core** — context stamps are emitted as a
+  `SaveChangesInterceptor` (`AuditableInterceptor`) registered on
+  the `DbContext`.  The interceptor fires during `SaveChangesAsync`
+  with a per-entity-type switch — one arm per aggregate that has
+  any stamping rules — and applies the `onCreate` / `onUpdate`
+  assignments based on `entry.State`.  The interceptor body
+  renders through the same expression machinery operation bodies
+  use, so `currentUser` / `now()` / etc. resolve normally.  See
+  `src/generator/dotnet/emit/auditable-interceptor.tpl.ts`.  Note
+  that this means stamps fire at *save time*, after the operation
+  body has already run.
+- **Hono** and **Phoenix** — context stamps are **not yet wired
+  through to runtime**.  The IR carries `contextStamps` on every
+  aggregate but the Drizzle and Ecto codegens don't consume them.
+  Hand-writing the stamps inside operation bodies (or using the
+  `audit` macro under .NET-only deployment) is the workaround.
 
 ## `implements "<name>"`
 
@@ -116,16 +138,14 @@ aggregate Order {
 }
 ```
 
-Backends translate the name by convention:
-
-- **.NET** — adds an `I` prefix and emits a marker interface
-  (`ISoftDeletable`).  One shared block per name in
-  `OnModelCreating` (e.g. one `HasQueryFilter` loop for every
-  `ISoftDeletable`).
-- **Hono / TS** — may emit a type alias (advisory; the wire shape
-  carries the field anyway).
-- **Phoenix / Ash** — capability names map to Ash extensions or
-  resource flags depending on the capability.
+The IR records `implements` names on the aggregate (the
+`implementsCapabilities` field) and uses them at lowering time to
+decide which context-scope `filter for "<name>"` / `stamp for
+"<name>"` declarations propagate onto this aggregate.  After
+propagation the `implements` list is informational — none of the
+current backends compile it to marker interfaces, type aliases, or
+runtime tags.  It survives in the IR for tooling (validators, diff
+tools) and for future capability-aware backend logic.
 
 ## Propagation rules
 

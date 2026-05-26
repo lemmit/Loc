@@ -525,16 +525,42 @@ Or by absolute path:
 design: /opt/loom-packs/your-pack
 ```
 
-Or by built-in name (only Mantine + shadcn today):
+Or by built-in name — bareword resolves to the family's latest
+version, `family@version` pins explicitly:
 
 ```
-design: mantine
-design: shadcn
+design: mantine                  // → mantine@v9 (current default)
+design: "mantine@v7"             // pinned to v7
+design: shadcn                   // → shadcn@v4
+design: "mui@v5"
+design: chakra                   // → chakra@v3
+design: ashPhoenix               // forced for phoenixLiveView platform
 ```
 
-The loader walks up from each .ddd file's location to anchor relative
-paths; built-in names short-circuit and resolve under the repo's
-`designs/` directory.
+The five shipped families: `mantine` (v7, v9), `shadcn` (v3, v4),
+`mui` (v5, v7), `chakra` (v2, v3), `ashPhoenix` (v3).  The current
+bareword defaults live in `BUILTIN_PACK_LATEST` in
+`src/generator/_packs/builtin-formats.ts`.
+
+The loader (`src/generator/_packs/loader-fs.ts:resolvePackDir`)
+resolves identifiers in this order:
+
+1. **Built-in family** — any name matching a registered family
+   (with optional `@version`) resolves under
+   `<repo>/designs/<family>/<version>/`.
+2. **Absolute path** — `design: "/opt/loom-packs/my-pack"` is used
+   verbatim.
+3. **Relative path** — anything else (e.g. `design: "./my-pack"`,
+   `design: "../shared/my-pack"`) is anchored against the directory
+   the `.ddd` source file lives in.
+
+Custom packs follow the same `pack.json` + emits contract as
+built-in ones — see [§ 2](#2-the-packjson-manifest).  Stack
+selection (`"stack": "vN"`) is required for `tsx` custom packs;
+the loader still resolves the named stack from the repo's
+`stacks/` directory.  Custom packs whose `format` is `heex` go
+through the same path but bind against `designs/ashPhoenix/`'s
+emit set.
 
 ## 11. Worked example — minimal pack skeleton
 

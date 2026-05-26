@@ -60,6 +60,7 @@ context Sales {
 | Form | Meaning |
 | --- | --- |
 | `precondition Expr` | Workflow-level guard.  Failure → 400 (`DomainException` / `DomainError`). |
+| `requires Expr` | Authorization guard.  Same syntactic shape as `precondition`, but failure → 403 (`ForbiddenException` / `ForbiddenError`).  Use this for `currentUser`-based permission checks; use `precondition` for business-rule checks. |
 | `let x = Agg.create({ field: expr, ... })` | Factory call.  Saved at workflow exit. |
 | `let x = Repo.getById(idExpr)` | Load by id; throws `AggregateNotFound` (→ 404) if missing.  Result is non-nullable. |
 | `let x = Repo.<find>(args)` | Call any repo-declared find whose return is a single non-nullable aggregate.  Arrays / nullables are not yet supported in workflow bodies. |

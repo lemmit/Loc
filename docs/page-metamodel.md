@@ -520,7 +520,15 @@ Ui:
     '}';
 
 UiMember:
-    Page | Component | Scaffold | MenuBlock;
+    UiApiParam | UiHelperImport | Page | Component | MenuBlock;
+
+// 3a. UI api parameter — local handle on a system-level `api` contract.
+UiApiParam:
+    'api' name=ID ':' contract=[Api:ID];
+
+// 3b. Pack-author-supplied helper import (TS function exposed to pages).
+UiHelperImport:
+    'import' 'helper' name=ID 'from' path=STRING;
 
 // 4. Page
 Page:
@@ -561,12 +569,19 @@ StateBlock:
 StateField:
     name=ID ':' type=TypeRef ('=' init=Expression)?;
 
-// 7. Scaffold
-Scaffold:
-    'scaffold' selector=ScaffoldSelector ':' targets+=ID (',' targets+=ID)* ','?;
-
-ScaffoldSelector returns string:
-    'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
+// 7. Scaffold — NOTE: no longer a grammar rule.  Earlier versions of
+// the page metamodel parsed `scaffold modules: A, B` as a first-class
+// UiMember.  The shipping grammar removes that production; scaffolding
+// is now an AST-phase macro applied via the universal `with` clause on
+// the host UI block:
+//
+//   ui WebApp with scaffold(modules: [Sales, Catalog]) { ... }
+//
+// The macro expands to the same set of Page nodes the old grammar rule
+// produced.  See docs/scaffold-macros.md for the full surface
+// (scaffold / scaffoldModule / scaffoldContext / scaffoldAggregate /
+// scaffoldWorkflow / scaffoldView) and the `with` syntax in
+// docs/language.md.
 
 // 8. Menu
 MenuBlock:
