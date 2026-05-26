@@ -281,7 +281,9 @@ test("edits infra construct properties (deployable platform, storage type)", asy
 test("edits a repository find's parameters", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
-  await selectExample(page, /Fullstack \.NET \(Banking\)/);
+  // Banking System exposes the `repository Accounts` with the multi-param
+  // `byHolder(holder: Customer id)` find that this spec edits.
+  await selectExample(page, /Banking System/);
 
   await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
