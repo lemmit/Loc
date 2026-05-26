@@ -36,7 +36,15 @@ const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"
 
 /** Infrastructure endpoints that aren't part of the public contract. */
 function isInfraPath(p: string): boolean {
-  return p === "/health" || p === "/openapi.json" || p.startsWith("/swagger");
+  // /ready joins /health: both are probe endpoints (k8s livenessProbe /
+  // readinessProbe).  .NET's `app.MapGet` auto-registers them in the
+  // OpenAPI doc; Hono uses raw `app.get(...)` and skips registration;
+  // Phoenix's OpenApiSpex emitter doesn't surface them.  All three
+  // back-ends serve the endpoints at runtime — we just filter them out
+  // of the parity diff because they're infrastructure, not contract.
+  return (
+    p === "/health" || p === "/ready" || p === "/openapi.json" || p.startsWith("/swagger")
+  );
 }
 
 /**
