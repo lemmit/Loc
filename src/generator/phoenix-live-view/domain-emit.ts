@@ -81,17 +81,7 @@ function renderAggregateResource(
   // emit below is unloaded by default and would surface as nil — so
   // it's intentionally absent from the wire shape until the caller
   // explicitly loads it).
-  //
-  // The `?? []` is a defense for fixture-constructed raw aggregates: tests
-  // in `test/generator/phoenix-live-view-pipeline.test.ts` (the "Ash validate
-  // clause emission (domain-emit unit)" and "Jason.Encoder defimpl emission
-  // (domain-emit unit)" describe blocks) build minimal `BoundedContextIR`
-  // literals and call `emitAggregateResources` without running them through
-  // `enrichLoomModel`, so `agg.associations` is `undefined` at runtime.
-  // Every production path enriches first and populates it as `[]` or the
-  // derived list.  When those test fixtures are migrated to enriched IR,
-  // this fallback can drop.
-  const associations = agg.associations ?? [];
+  const associations = agg.associations;
   const persistedFields = agg.fields.filter((f) => !isRefCollection(f.type));
 
   // Field list for the `defimpl Jason.Encoder` block: :id, persisted

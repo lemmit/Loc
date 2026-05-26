@@ -171,10 +171,10 @@ function platformNeedsDb(p: Platform): boolean {
   return p === "dotnet" || p === "hono" || p === "phoenixLiveView";
 }
 
-function enrichContext(
+export function enrichContext(
   ctx: BoundedContextIR,
-  rootValueObjects: EnrichedValueObjectIR[],
-  rootEnums: EnumIR[],
+  rootValueObjects: EnrichedValueObjectIR[] = [],
+  rootEnums: EnumIR[] = [],
 ): EnrichedBoundedContextIR {
   // Fold the ambient root-level VOs / enums into the context's
   // effective set so every per-context emitter sees them as if they
