@@ -199,6 +199,47 @@ export function emitText(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   });
 }
 
+/** `Bold { "..." }` — inline strong-emphasis span.  Same shape as
+ *  `emitText`; lowers to the pack-specific `<strong>` equivalent. */
+export function emitBold(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
+  const text = firstPositionalContent(call, ctx) ?? '""';
+  void depth;
+  return renderPrimitive(ctx, "primitive-bold", {
+    text: unwrapTextLiteral(text),
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** `Italic { "..." }` — inline emphasis span.  Same shape as
+ *  `emitText`; lowers to the pack-specific `<em>` equivalent. */
+export function emitItalic(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const text = firstPositionalContent(call, ctx) ?? '""';
+  void depth;
+  return renderPrimitive(ctx, "primitive-italic", {
+    text: unwrapTextLiteral(text),
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** `InlineCode { "..." }` — inline `<code>` span for mono-styled
+ *  terms (e.g. `.ddd`, `docker compose`) embedded in running prose. */
+export function emitInlineCode(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const text = firstPositionalContent(call, ctx) ?? '""';
+  void depth;
+  return renderPrimitive(ctx, "primitive-inline-code", {
+    text: unwrapTextLiteral(text),
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
 export function emitKeyValueRow(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,

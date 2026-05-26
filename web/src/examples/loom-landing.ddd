@@ -87,9 +87,17 @@ system LoomLanding {
             Heading { "Weave a domain model.", level: 1 },
             Heading { "Generate the whole system.", level: 1 },
 
-            // Subtitle.  Phase 4 will let us render `.ddd` and
-            // `docker compose` as InlineCode rather than plain text.
-            Text { "Loom is a high-descriptive DSL for Domain-Driven Design.  Write aggregates, value objects, invariants, and operations in .ddd — and mechanically generate a runnable TypeScript + .NET + React system, wired together as one docker compose stack." },
+            // Subtitle.  Phase 4 closed the inline-emphasis gap, so
+            // `.ddd` and `docker compose` here render as InlineCode
+            // chips inside a Group — the same mono-styled spans the
+            // hand-written landing at docs/index.html shows.
+            Group {
+              Text { "Loom is a high-descriptive DSL for Domain-Driven Design.  Write aggregates, value objects, invariants, and operations in " },
+              InlineCode { ".ddd" },
+              Text { " — and mechanically generate a runnable TypeScript + .NET + React system, wired together as one " },
+              InlineCode { "docker compose" },
+              Text { " stack." }
+            },
 
             // CTA cluster.  Phase 5 brings variants + icon slots so
             // the primary button reads "Try in browser →" with an
@@ -160,7 +168,20 @@ system LoomLanding {
             // page; Phase 6's responsive Grid lands "cols: [2, 1, 1]".
             Grid {
               Card { "Domain-first, not framework-first",
-                Text { "You write aggregates, invariants, operations, events, repositories — concepts from Domain-Driven Design, not from a web framework.  The framework choice is a deployable attribute, not a design constraint." }
+                // Inline emphasis primitives (Phase 4): `Bold` wraps
+                // the list of DDD concepts; `Italic` italicises the
+                // discipline name — mirrors the <strong>/<em> spans
+                // in docs/index.html.
+                Stack {
+                  Group {
+                    Text { "You write " },
+                    Bold { "aggregates, invariants, operations, events, repositories" },
+                    Text { " — concepts from " },
+                    Italic { "Domain-Driven Design" },
+                    Text { ", not from a web framework." }
+                  },
+                  Text { "The framework choice is a deployable attribute, not a design constraint." }
+                }
               },
               Card { "Mechanical, not magical",
                 Text { "Lowering goes through a fully-resolved IR, then per-platform Handlebars templates plus procedural builders.  Generated output is idiomatic enough to read, debug, and grep — not framework lock-in." }
@@ -280,7 +301,14 @@ system LoomLanding {
                 Text { "One class per page, keyed off stable data-testid attributes.  Write top-down UI tests without crafting selectors." }
               },
               Card { "⇄  Wired stack out of the box",
-                Text { "docker-compose.yml with Postgres, every deployable, healthchecks, and a db-init SQL bootstrap — docker compose up -d and you're running." }
+                // Phase 4 inline emphasis — the original landing has
+                // `docker compose up -d` as a `<code class="mono-chip">`
+                // chip; route the equivalent through InlineCode.
+                Group {
+                  Text { "docker-compose.yml with Postgres, every deployable, healthchecks, and a db-init SQL bootstrap — " },
+                  InlineCode { "docker compose up -d" },
+                  Text { " and you're running." }
+                }
               }
             }
           },

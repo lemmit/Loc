@@ -102,11 +102,14 @@ import { emitTable } from "./walker/primitives/table.js";
 import {
   emitAnchor,
   emitAvatar,
+  emitBold,
   emitDateDisplay,
   emitEmpty,
   emitEnumBadge,
   emitHeading,
   emitImage,
+  emitInlineCode,
+  emitItalic,
   emitKeyValueRow,
   emitLoader,
   emitMoney,
@@ -261,6 +264,9 @@ export const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Slot",
   "Heading",
   "Text",
+  "Bold",
+  "Italic",
+  "InlineCode",
   "Button",
   "Card",
   "Stat",
@@ -737,6 +743,12 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
       return emitHeading(call, ctx, depth);
     case "Text":
       return emitText(call, ctx, depth);
+    case "Bold":
+      return emitBold(call, ctx, depth);
+    case "Italic":
+      return emitItalic(call, ctx, depth);
+    case "InlineCode":
+      return emitInlineCode(call, ctx, depth);
     case "Button":
       return emitButton(call, ctx, depth);
     case "Action":
