@@ -11,6 +11,7 @@ import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { buildApiModule } from "./api-builder.js";
+import { prepareNamedLayouts } from "./layouts-emitter.js";
 import { deriveSidebarFromUi } from "./menu-emitter.js";
 import {
   deriveExtraRoutesFromUi,
@@ -192,18 +193,18 @@ export function generateReactForContexts(
   // separate `outOfShell` channel that mounts as sibling routes
   // outside the AppShell chrome.
   const extraRouteSplit = ui ? deriveExtraRoutesFromUi(ui) : undefined;
-  // Phase 8 step 1: pages with `layout: <Named>` fold into the
-  // `inShell` channel and pick up the default AppShell wrapper.  The
-  // grammar / IR / validator surfaces are complete; visual rendering
-  // of the named layout's header/sidebar/footer slots — walker-driven
-  // emission of `<XLayout>` components per declared layout — is a
-  // Phase 8 step 2 follow-up.
-  const namedRoutes: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
-  if (extraRouteSplit?.namedLayouts) {
-    for (const routes of extraRouteSplit.namedLayouts.values()) namedRoutes.push(...routes);
-  }
-  const extraRoutes = [...(extraRouteSplit?.inShell ?? []), ...namedRoutes];
+  const extraRoutes = extraRouteSplit?.inShell;
   const outOfShellRoutes = extraRouteSplit?.outOfShell;
+  // Phase 8 step 2: walk each declared `layout <Name>` referenced by
+  // a page in this ui into pre-built `NamedLayoutVM`s (slot JSX +
+  // route bucket + the imports the slot JSX needs).  The shell
+  // template renders one `<XLayout>` component + matching
+  // `<Route element={<XLayout />}>` block per entry.
+  const layoutPrep = ui
+    ? prepareNamedLayouts(ui, sys, pack, extraRouteSplit?.namedLayouts ?? new Map())
+    : { namedLayouts: [], extraImports: [] };
+  const namedLayouts = layoutPrep.namedLayouts;
+  const layoutImports = layoutPrep.extraImports;
 
   // App.tsx's per-aggregate / -workflow / -view route block emits
   // imports for scaffold-archetype page files (`./pages/<plural>/list`,
@@ -250,6 +251,8 @@ export function generateReactForContexts(
       pack,
       hasScaffoldHome,
       outOfShellRoutes,
+      namedLayouts,
+      layoutImports,
     ),
   );
   // Home is always synthesised by the scaffold expander

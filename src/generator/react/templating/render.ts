@@ -62,6 +62,21 @@ export function renderAppShell(
   pack: LoadedPack,
   hasScaffoldHome: boolean = true,
   outOfShellRoutes: import("./preparers/app-shell.js").ExtraPageRoute[] | undefined = undefined,
+  /** Phase 8 step 2: pre-built named-layout VMs (slot JSX + route
+   *  buckets), and the deduped pack imports those slots need. */
+  namedLayouts:
+    | ReadonlyArray<{
+        name: string;
+        hasHeader: boolean;
+        headerJsx: string;
+        hasSidebar: boolean;
+        sidebarJsx: string;
+        hasFooter: boolean;
+        footerJsx: string;
+        routes: import("./preparers/app-shell.js").ExtraPageRoute[];
+      }>
+    | undefined = undefined,
+  layoutImports: ReadonlyArray<{ specifier: string; from: string }> | undefined = undefined,
 ): string {
   return pack.render("app-shell", {
     ...prepareAppShellVM(
@@ -73,6 +88,8 @@ export function renderAppShell(
       extraRoutes,
       hasScaffoldHome,
       outOfShellRoutes,
+      namedLayouts,
+      layoutImports,
     ),
     // Router 7 (stack v3) renamed the package react-router-dom →
     // react-router; library mode keeps the v6 API so only the

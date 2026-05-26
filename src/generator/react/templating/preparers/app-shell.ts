@@ -61,10 +61,27 @@ export function prepareAppShellVM(
    *  AppShell chrome as sibling routes to the layout-route.
    *  Imports go into the shared `imports` channel so each component
    *  appears once regardless of which shell branch routes it.
-   *  Phoenix LiveView ignores this channel today; see TODO below.
-   *  TODO(layout-v2): when v2 introduces named layouts the
-   *  partition becomes per-layout-name, not a single binary split. */
+   *  Phoenix LiveView ignores this channel today. */
   outOfShellRoutes?: ExtraPageRoute[],
+  /** Phase 8 step 2: pre-built named-layout VMs from `layouts-emitter.ts`.
+   *  Each entry already has its slot JSX walked + its route bucket
+   *  populated.  The preparer flattens the per-entry routes into
+   *  `RouteVM[]` and threads the VM list into `AppShellVM.namedLayouts`
+   *  for the template to iterate. */
+  namedLayouts?: ReadonlyArray<{
+    name: string;
+    hasHeader: boolean;
+    headerJsx: string;
+    hasSidebar: boolean;
+    sidebarJsx: string;
+    hasFooter: boolean;
+    footerJsx: string;
+    routes: ExtraPageRoute[];
+  }>,
+  /** Phase 8 step 2: extra imports the named-layout JSX needs.
+   *  Already deduped by the layouts-emitter; the preparer appends
+   *  them to the shared `imports` list. */
+  layoutImports?: ReadonlyArray<{ specifier: string; from: string }>,
 ): AppShellVM {
   const imports: ImportVM[] = [];
   const routes: RouteVM[] = [];
@@ -211,11 +228,39 @@ export function prepareAppShellVM(
     navSections.push({ label: "Views", entries });
   }
 
+  // Phase 8 step 2 — flatten the pre-walked named-layout VMs into
+  // the AppShellVM channel + extend the import list.  Routes inside
+  // a named layout are routed via `<Route element={<NameLayout />}>
+  // <Route .../>… </Route>` in the template; the page-component
+  // imports for those routes are appended to the shared `imports`
+  // list (so e.g. `<Home />` resolves regardless of which channel
+  // routes it).
+  const namedLayoutsVM = (namedLayouts ?? []).map((nl) => ({
+    name: nl.name,
+    hasHeader: nl.hasHeader,
+    headerJsx: nl.headerJsx,
+    hasSidebar: nl.hasSidebar,
+    sidebarJsx: nl.sidebarJsx,
+    hasFooter: nl.hasFooter,
+    footerJsx: nl.footerJsx,
+    routes: nl.routes.map((r) => ({
+      path: r.route,
+      elementJsx: `<${r.componentName} />`,
+    })),
+  }));
+  for (const nl of namedLayouts ?? []) {
+    for (const route of nl.routes) {
+      imports.push({ specifier: route.componentName, from: route.importFrom });
+    }
+  }
+  for (const imp of layoutImports ?? []) imports.push(imp);
+
   return {
     systemNameHuman: humanize(systemName),
     imports,
     routes,
     outOfShellRoutes: outOfShellRoutesVM,
+    namedLayouts: namedLayoutsVM,
     navSections: sidebarOverride ?? navSections,
   };
 }
