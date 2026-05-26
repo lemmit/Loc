@@ -241,7 +241,10 @@ function renderApiSpec(
       }`);
   }
 
-  // Aggregate CRUD paths: GET /<plural>, GET /<plural>/:id, POST /<plural>
+  // Aggregate CRUD paths: GET /<plural>, GET /<plural>/{id}, POST /<plural>
+  // Note: path-template parameters use the OpenAPI `{id}` syntax (not the
+  // Plug-router `:id` form), matching the Hono/.NET emitters so the
+  // conformance parity diff treats them as the same operation.
   // Plus per-op and per-find paths derived from the aggregate's
   // public operations and repository finds.
   for (const { ctx, agg } of allAggregates) {
@@ -280,7 +283,7 @@ function renderApiSpec(
           }
         }
       }`,
-      `      "/${aggSlug}/:id" => %OpenApiSpex.PathItem{
+      `      "/${aggSlug}/{id}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "Get ${agg.name} by id",
           operationId: "get_${snake(agg.name)}_by_id",
