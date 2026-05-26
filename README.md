@@ -250,14 +250,35 @@ for details.
 
 ## Documentation
 
+[`docs/README.md`](docs/README.md) is the canonical doc index — a
+short signposted reading list across language, generators, features,
+tooling, and internals.  The headline reference docs:
+
 | Doc | Contents |
 | --- | --- |
 | [`docs/language.md`](docs/language.md) | Formal language reference — declarations, types, expressions, statements, validation rules, e2e test syntax. |
-| [`docs/generators.md`](docs/generators.md) | Per-platform feature matrix — what each backend emits, file-by-file, with side-by-side comparisons. |
-| [`docs/technical.md`](docs/technical.md) | Architecture: AST → IR → templates, design rationale, how to extend the language or add a backend. |
+| [`docs/page-metamodel.md`](docs/page-metamodel.md) | The `ui` / `page` / `component` / `scaffold` surface and the closed walker-stdlib primitive set. |
+| [`docs/architecture.md`](docs/architecture.md) | System-level composition — `module`, `deployable`, `api`, `storage`, `ui` and how they wire together. |
+| [`docs/generators.md`](docs/generators.md) | Per-platform feature matrix — what each backend emits, file-by-file. |
 | [`docs/tools.md`](docs/tools.md) | CLI usage, `.loomignore`, watch mode, migration workflow, Docker, Playwright UI tests, OpenAPI cross-check, proxy CAs. |
-| [`docs/conformance.md`](docs/conformance.md) | Cross-generator conformance harness — the nine OpenAPI dimensions the parity gate diffs, how to read a divergence report, how to add a tenth dimension. |
-| [`docs/license-faq.md`](docs/license-faq.md) | Plain-English answers to "is this OK to use in production?" — generator vs. generated-code licensing, what counts as Competing Use, OSI considerations. |
+| [`docs/technical.md`](docs/technical.md) | Pipeline architecture: AST → IR → backend emit; design rationale; how to extend the language or add a backend. |
+
+Per-feature references — [`auth.md`](docs/auth.md),
+[`views.md`](docs/views.md), [`workflow.md`](docs/workflow.md),
+[`extern.md`](docs/extern.md),
+[`observability.md`](docs/observability.md),
+[`traceability.md`](docs/traceability.md),
+[`conformance.md`](docs/conformance.md),
+[`migrations-design.md`](docs/migrations-design.md) — and the design-pack
+authoring guides at [`design-system-packs.md`](docs/design-system-packs.md),
+[`stack-versioning.md`](docs/stack-versioning.md),
+[`adding-a-pack-version.md`](docs/adding-a-pack-version.md).
+[`license-faq.md`](docs/license-faq.md) covers usage terms.
+
+In-flight design work lives under [`docs/plans/`](docs/plans/) and
+[`docs/proposals/`](docs/proposals/); empirical snapshots live under
+[`docs/audits/`](docs/audits/) — none of these are authoritative for
+what ships today.
 
 Plus [`experience_gathered.md`](experience_gathered.md) — running
 retrospective of design choices and gotchas; worth reading before

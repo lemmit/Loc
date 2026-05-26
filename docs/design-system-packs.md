@@ -420,7 +420,7 @@ and shadcn output for the same DDL.
 ## 9. Architectural rules
 
 These rules constrain pack authorship and the shared-template layer
-both.  See `docs/pack-equivalence-audit.md` for the empirical evidence
+both.  See [`audits/pack-equivalence-audit.md`](./audits/pack-equivalence-audit.md) for the empirical evidence
 behind them.
 
 1. **Low-level design-system-dependent templates stay per-pack and
@@ -507,7 +507,7 @@ the contract is satisfied.
 
 ## 12. References
 
-- `docs/pack-equivalence-audit.md` — what's shared vs per-pack, with
+- [`audits/pack-equivalence-audit.md`](./audits/pack-equivalence-audit.md) — what's shared vs per-pack, with
   evidence
 - `src/generator/react/templating/loader.ts` — pure compile core
 - `src/generator/react/templating/loader-fs.ts` — Node FS adapter

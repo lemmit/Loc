@@ -2,7 +2,7 @@
 
 > **Status:** Phase 0, Phase 0.5 (A + B), and Phase 1.2 (mantine@v9) shipped.
 > See [`stack-versioning.md`](./stack-versioning.md) for the stack
-> architecture, [`stack-versions-audit.md`](./stack-versions-audit.md)
+> architecture, [`stack-versions-audit.md`](../audits/stack-versions-audit.md)
 > for the rolling version audit, [`per-pack-migration.md`](./per-pack-migration.md)
 > for the per-pack scope of remaining Phase 1 PRs, and
 > [`adding-a-pack-version.md`](./adding-a-pack-version.md) for the
