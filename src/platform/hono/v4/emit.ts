@@ -24,6 +24,7 @@ import {
   type BoundedContextIR,
   contextUsesMoney,
   type DeployableIR,
+  type EnrichedBoundedContextIR,
   type FieldIR,
   type RepositoryIR,
   type SystemIR,
@@ -128,7 +129,7 @@ export function generateTypeScript(
  * skip the auth path entirely.
  */
 export function generateTypeScriptForContexts(
-  contexts: BoundedContextIR[],
+  contexts: EnrichedBoundedContextIR[],
   pins: BackendPins,
   system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
   options: { emitTrace?: boolean } = {},
@@ -157,7 +158,7 @@ export function generateTypeScriptForContexts(
   // `domain/value-objects.ts`, `domain/events.ts`, `db/schema.ts`,
   // `http/workflows.ts`, `http/views.ts`, and `http/index.ts` all
   // reflect the FULL aggregate / VO / enum / event set.
-  const merged: BoundedContextIR = {
+  const merged: EnrichedBoundedContextIR = {
     name: contexts[0]?.name ?? "merged",
     enums: contexts.flatMap((c) => c.enums),
     valueObjects: contexts.flatMap((c) => c.valueObjects),

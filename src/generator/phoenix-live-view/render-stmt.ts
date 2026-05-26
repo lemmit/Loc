@@ -9,7 +9,7 @@ import { type RenderCtx, relationshipNameFor, renderExpr } from "./render-expr.j
 function isRefCollPath(p: PathIR, ctx: RenderCtx): boolean {
   if (p.segments.length === 0 || !ctx.agg) return false;
   const head = p.segments[0]!;
-  return ctx.agg.associations!.some((a) => a.fieldName === head);
+  return ctx.agg.associations.some((a) => a.fieldName === head);
 }
 
 // ---------------------------------------------------------------------------

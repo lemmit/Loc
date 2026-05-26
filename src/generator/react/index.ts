@@ -3,6 +3,8 @@ import {
   type BoundedContextIR,
   contextUsesMoney,
   type DeployableIR,
+  type EnrichedAggregateIR,
+  type EnrichedBoundedContextIR,
   type PageIR,
   type SystemIR,
   type UiIR,
@@ -66,7 +68,7 @@ export interface GenerateReactOptions {
 }
 
 export function generateReactForContexts(
-  contexts: BoundedContextIR[],
+  contexts: EnrichedBoundedContextIR[],
   sys: SystemIR,
   deployable: DeployableIR,
   options: GenerateReactOptions = {},
@@ -79,7 +81,7 @@ export function generateReactForContexts(
   const apiBaseUrl = options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
 
   // Per-aggregate api modules + pages.
-  const aggregates: Array<{ agg: AggregateIR; ctx: BoundedContextIR }> = [];
+  const aggregates: Array<{ agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }> = [];
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) aggregates.push({ agg, ctx });
   }

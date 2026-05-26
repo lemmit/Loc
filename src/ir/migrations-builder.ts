@@ -4,6 +4,9 @@ import { plural, snake, upperFirst } from "../util/naming.js";
 import type {
   AggregateIR,
   AssociationIR,
+  EnrichedAggregateIR,
+  EnrichedModuleIR,
+  EnrichedSystemIR,
   EntityPartIR,
   FieldIR,
   IdValueType,
@@ -41,7 +44,7 @@ import type {
  *  scheme so existing fixtures stay byte-stable across the refactor. */
 export const BASE_TIMESTAMP = "20260101000000";
 
-export function schemaFromModule(module: ModuleIR): SchemaSnapshot {
+export function schemaFromModule(module: EnrichedModuleIR): SchemaSnapshot {
   const tables: TableShape[] = [];
   for (const agg of collectAggregates(module)) {
     tables.push(tableForAggregate(agg, module.name));
@@ -53,7 +56,7 @@ export function schemaFromModule(module: ModuleIR): SchemaSnapshot {
     // one `AssociationIR` per such field, and the schema picks them up
     // here.  `tableForAggregate` / `tableForPart` skip the column at
     // emission time (see `mapField`).
-    for (const assoc of agg.associations!) {
+    for (const assoc of agg.associations) {
       tables.push(tableForAssociation(assoc, module.name));
     }
   }
@@ -155,7 +158,10 @@ function diffTable(prev: TableShape, next: TableShape, steps: MigrationStep[]): 
   }
 }
 
-export function buildMigrations(sys: SystemIR, snapshots: SnapshotStore): MigrationsIR[] {
+export function buildMigrations(
+  sys: EnrichedSystemIR,
+  snapshots: SnapshotStore,
+): MigrationsIR[] {
   const out: MigrationsIR[] = [];
   for (const m of sys.modules) {
     if (!m.migrationsOwner) continue;
@@ -203,8 +209,8 @@ export function buildMigrations(sys: SystemIR, snapshots: SnapshotStore): Migrat
 // schemaFromModule helpers
 // ---------------------------------------------------------------------------
 
-function collectAggregates(module: ModuleIR): AggregateIR[] {
-  const acc: AggregateIR[] = [];
+function collectAggregates(module: EnrichedModuleIR): EnrichedAggregateIR[] {
+  const acc: EnrichedAggregateIR[] = [];
   const ctxs = [...module.contexts].sort((a, b) => a.name.localeCompare(b.name));
   for (const ctx of ctxs) {
     const aggs = [...ctx.aggregates].sort((a, b) => a.name.localeCompare(b.name));

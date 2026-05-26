@@ -72,3 +72,15 @@ export {
   routeProp,
   stringLit,
 } from "./ui-factories.js";
+// Typed AST-node builders.  Most macro authors don't need these —
+// the named factories above produce already-tagged-and-wired
+// nodes.  Re-exported here for the few macros (e.g. `crudish`'s
+// type-cloning helper) that hand-build raw AST fragments and want
+// the structural-typing aid without resorting to `as-unknown-as`
+// casts.
+export {
+  mkIdType,
+  mkNamedType,
+  mkPrimitiveType,
+  mkTypeRef,
+} from "./_mk.js";

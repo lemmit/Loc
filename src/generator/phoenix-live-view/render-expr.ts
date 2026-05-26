@@ -1,4 +1,10 @@
-import type { AggregateIR, BinOp, ExprIR, TypeIR } from "../../ir/loom-ir.js";
+import type {
+  AggregateIR,
+  BinOp,
+  EnrichedAggregateIR,
+  ExprIR,
+  TypeIR,
+} from "../../ir/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -27,7 +33,7 @@ export interface RenderCtx {
    *  to in-memory `Enum.member?` — the validator only admits the
    *  membership form inside repository `where` clauses, so other
    *  emission contexts (derived, invariant) shouldn't reach it. */
-  agg?: AggregateIR;
+  agg?: EnrichedAggregateIR;
 }
 
 const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };
@@ -217,7 +223,7 @@ function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>, ctx: Rend
   ) {
     const fieldName = refCollectionFieldName(e.receiver);
     if (fieldName) {
-      const assoc = ctx.agg.associations!.find((a) => a.fieldName === fieldName);
+      const assoc = ctx.agg.associations.find((a) => a.fieldName === fieldName);
       if (assoc) {
         const rel = relationshipNameFor(ctx.agg, fieldName);
         // The arg is typically a `ref` to the find's named parameter;

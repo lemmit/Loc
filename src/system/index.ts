@@ -1,13 +1,11 @@
 import { E2E_FIXTURES_TS } from "../generator/react/index.js";
 import { enrichLoomModel } from "../ir/enrichments.js";
 import type {
-  BoundedContextIR,
   DeployableIR,
   EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedModuleIR,
   EnrichedSystemIR,
-  ModuleIR,
   SystemIR,
 } from "../ir/loom-ir.js";
 import { lowerModel } from "../ir/lower.js";
@@ -226,9 +224,9 @@ const E2E_TSCONFIG_JSON =
 
 function collectContextsFor(
   d: DeployableIR,
-  modulesByName: Map<string, ModuleIR>,
-): BoundedContextIR[] {
-  const out: BoundedContextIR[] = [];
+  modulesByName: Map<string, EnrichedModuleIR>,
+): EnrichedBoundedContextIR[] {
+  const out: EnrichedBoundedContextIR[] = [];
   for (const name of d.moduleNames) {
     const mod = modulesByName.get(name);
     if (!mod) continue;
@@ -240,7 +238,7 @@ function collectContextsFor(
 function emitDeployable(
   sys: SystemIR,
   d: DeployableIR,
-  contexts: BoundedContextIR[],
+  contexts: EnrichedBoundedContextIR[],
   out: Map<string, string>,
   options: {
     emitTrace?: boolean;

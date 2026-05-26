@@ -1,6 +1,7 @@
 import type {
   AggregateIR,
-  BoundedContextIR,
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   FindIR,
   RepositoryIR,
   TypeIR,
@@ -47,9 +48,9 @@ import { renderCreateValidator, renderOperationValidator } from "./validator-emi
 // ---------------------------------------------------------------------------
 
 export function emitCqrs(
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
   options?: { routePrefix?: string; emitTrace?: boolean },
@@ -76,8 +77,8 @@ export function emitCqrs(
 // ---------------------------------------------------------------------------
 
 function emitResponseDtos(
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
   ns: string,
   aggFolder: string,
   out: Map<string, string>,
@@ -117,7 +118,7 @@ function emitResponseDtos(
 
 function emitRequestDtos(
   agg: AggregateIR,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   ns: string,
   aggFolder: string,
   out: Map<string, string>,
@@ -213,7 +214,7 @@ function emitCreateCommandAndHandler(
 
 function emitOperationCommandsAndHandlers(
   agg: AggregateIR,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   ns: string,
   aggFolder: string,
   out: Map<string, string>,
@@ -434,8 +435,8 @@ public sealed class ${stubName} : ${args.ifaceName}
 // ---------------------------------------------------------------------------
 
 function emitGetByIdQueryAndHandler(
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
   ns: string,
   aggFolder: string,
   out: Map<string, string>,
@@ -470,9 +471,9 @@ function emitGetByIdQueryAndHandler(
 // ---------------------------------------------------------------------------
 
 function emitFindQueriesAndHandlers(
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   ns: string,
   aggFolder: string,
   out: Map<string, string>,
@@ -511,8 +512,8 @@ function emitFindQueriesAndHandlers(
 
 function buildFindHandlerBody(
   find: FindIR,
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
   usesUser: boolean = false,
 ): string {
   const baseArgs = find.params.map((p) => `q.${upperFirst(p.name)}`);
@@ -557,7 +558,7 @@ function renderResponseReturnType(t: TypeIR, agg: AggregateIR): string {
 function emitController(
   agg: AggregateIR,
   repo: RepositoryIR | undefined,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   requiredFields: AggregateIR["fields"],
   ns: string,
   out: Map<string, string>,

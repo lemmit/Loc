@@ -21,7 +21,6 @@ import type {
   FindIR,
   LoomModel,
   ModuleIR,
-  Platform,
   RawLoomModel,
   RepositoryIR,
   SystemIR,
@@ -92,17 +91,13 @@ export function enrichLoomModel(loom: RawLoomModel): EnrichedLoomModel {
  * compile error.  The earlier raw-union overload + `!` non-null
  * cast is gone — every production caller flows enriched IR through.
  *
- * Note on the brand cascade: the surface contract still types
- * `emitProject(contexts: BoundedContextIR[])`, and the symmetric
- * `system/index.ts` helpers (`collectContextsFor`, `emitDeployable`)
- * use the raw structural type, so internal emitters that walk
- * `ctx.aggregates[i]` see `AggregateIR | EntityPartIR` at compile
- * time even though the runtime value is enriched.  Each of those
- * callers asserts the brand locally where it invokes `wireShapeFor`
- * (see grep "as EnrichedAggregateIR" — five sites).  Threading the
- * brand all the way through `surface.ts` + every `<platform>/emit.ts`
- * + every emitter helper (~224 typed sites) is a much larger refactor;
- * the local casts record the runtime invariant in the meantime. */
+ * Brand cascade: `PlatformSurface.emitProject` now takes
+ * `EnrichedBoundedContextIR[]`, and the per-platform entry points
+ * (`generate<Plat>ForContexts`) + per-aggregate helpers
+ * (`buildApiModule`, `renderPartResponseSchema`, etc.) thread the
+ * enriched brand inward, so every caller of `wireShapeFor` is
+ * type-checked at the call site — no `as Enriched...` local casts
+ * remain. */
 export function wireShapeFor(
   entity: EnrichedAggregateIR | EnrichedEntityPartIR | EnrichedValueObjectIR,
 ): WireField[] {
@@ -152,9 +147,9 @@ function enrichSystem(
 //   3. Failing both, leave `migrationsOwner` undefined — no backend
 //      emits migrations for the module (frontend-only modules, etc.).
 //
-// Hardcoded `platformNeedsDb` list mirrors the `PlatformSurface.needsDb`
-// flags in `src/platform/registry.ts` — kept in sync manually because
-// `enrichments.ts` is platform-agnostic and can't import from registry.
+// Database-bearing platforms are read from `PlatformSurface.needsDb` via
+// `platformFor()` — single source of truth, mirrors the `isFrontend` check
+// in `applyTargetsInheritance` below.
 // ---------------------------------------------------------------------------
 
 function assignMigrationsOwner(m: EnrichedModuleIR, deployables: DeployableIR[]): EnrichedModuleIR {
@@ -165,20 +160,16 @@ function assignMigrationsOwner(m: EnrichedModuleIR, deployables: DeployableIR[])
   );
   if (explicit) return { ...m, migrationsOwner: explicit.name };
   const implicit = deployables.find(
-    (d) => d.moduleNames.includes(m.name) && platformNeedsDb(d.platform),
+    (d) => d.moduleNames.includes(m.name) && platformFor(d.platform).needsDb,
   );
   if (implicit) return { ...m, migrationsOwner: implicit.name };
   return m;
 }
 
-function platformNeedsDb(p: Platform): boolean {
-  return p === "dotnet" || p === "hono" || p === "phoenixLiveView";
-}
-
-function enrichContext(
+export function enrichContext(
   ctx: BoundedContextIR,
-  rootValueObjects: EnrichedValueObjectIR[],
-  rootEnums: EnumIR[],
+  rootValueObjects: EnrichedValueObjectIR[] = [],
+  rootEnums: EnumIR[] = [],
 ): EnrichedBoundedContextIR {
   // Fold the ambient root-level VOs / enums into the context's
   // effective set so every per-context emitter sees them as if they
@@ -509,9 +500,9 @@ function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
     // Routed through `PlatformSurface.isFrontend` so there is one
     // source of truth.  The registry import is safe: `registry.ts`
     // only imports per-platform `Surface` impls (none of which
-    // import back into `ir/`), so no cycle.  `platformNeedsDb`
-    // above mirrors `PlatformSurface.needsDb` inline because routing
-    // it through the registry there would force an identical import.
+    // import back into `ir/`), so no cycle.  The `needsDb` check in
+    // `assignMigrationsOwner` above is routed through the same
+    // registry — no hardcoded platform-name lists remain.
     if (!platformFor(d.platform).isFrontend || !d.targetName) return d;
     const target = deployables.find((t) => t.name === d.targetName);
     if (!target) return d;

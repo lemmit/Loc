@@ -1,6 +1,7 @@
 import {
   type AggregateIR,
   type BoundedContextIR,
+  type EnrichedBoundedContextIR,
   exprUsesCurrentUser,
   operationUsesCurrentUser,
   type WorkflowIR,
@@ -36,7 +37,7 @@ import { renderCsExpr, renderCsType } from "./render-expr.js";
 const INDENT = "        ";
 
 export function emitWorkflows(
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
   options?: { routePrefix?: string },
@@ -102,7 +103,7 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
 // Request DTO — wire-shape parameter record.
 // ---------------------------------------------------------------------------
 
-function renderRequestDto(wf: WorkflowIR, ctx: BoundedContextIR, ns: string): string {
+function renderRequestDto(wf: WorkflowIR, ctx: EnrichedBoundedContextIR, ns: string): string {
   const params = wf.params
     .map((p) => `${wireType(p.type, ctx, "request")} ${upperFirst(p.name)}`)
     .join(", ");
@@ -162,7 +163,7 @@ function renderHandler(
   wf: WorkflowIR,
   usage: WorkflowUsage,
   ns: string,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
 ): string {
   const cmdName = `${upperFirst(wf.name)}Command`;
   const handlerName = `${upperFirst(wf.name)}Handler`;
@@ -338,7 +339,7 @@ function csIsolationLevel(level: import("../../ir/loom-ir.js").IsolationLevel): 
 function renderStatement(
   st: WorkflowStmtIR,
   renderArg: (e: import("../../ir/loom-ir.js").ExprIR) => string,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   usage: WorkflowUsage,
 ): string[] {
   void usage;
@@ -486,7 +487,7 @@ function renderExprWithCmdParams(
 // Controller — one class per context exposing every workflow as a POST.
 // ---------------------------------------------------------------------------
 
-function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: string): string {
+function renderController(ctx: EnrichedBoundedContextIR, ns: string, routePrefix?: string): string {
   const className = `${ctx.name}WorkflowsController`;
   const route = `${routePrefix ?? ""}workflows`;
   // Tracks namespaces the wire→domain coercion reaches into beyond the

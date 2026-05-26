@@ -1,7 +1,7 @@
 import type {
-  BoundedContextIR,
   ComponentIR,
   DeployableIR,
+  EnrichedBoundedContextIR,
   Platform,
   SystemIR,
 } from "../ir/loom-ir.js";
@@ -74,9 +74,16 @@ export interface PlatformSurface {
    * against `find.name` directly. */
   readonly reservedRepositoryFindNames: ReadonlySet<string>;
   /** All files for one deployable's project, paths relative to the
-   * deployable's folder under `<outdir>/`. */
+   * deployable's folder under `<outdir>/`.
+   *
+   * Contexts are typed as `EnrichedBoundedContextIR[]` because the
+   * system orchestrator (`src/system/index.ts`) only ever invokes
+   * `emitProject` after `enrichLoomModel` has run.  Threading the brand
+   * through the surface lets each platform's `wireShapeFor` callers see
+   * enriched aggregates / parts at compile time, without local
+   * `as Enriched...` casts. */
   emitProject(args: {
-    contexts: BoundedContextIR[];
+    contexts: EnrichedBoundedContextIR[];
     deployable: DeployableIR;
     sys: SystemIR;
     /** Per-deployable slice of `buildMigrations(sys, snapshots)` — only
