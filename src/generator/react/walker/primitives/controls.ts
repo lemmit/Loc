@@ -18,11 +18,13 @@ import {
   walk,
 } from "../../body-walker.js";
 import { renderPrimitive } from "../context.js";
+import { lookupBuiltinIcon } from "../icons.js";
 import {
   boolNamed,
   lambdaArg,
   namedArgValue,
   positionalArgs,
+  stringNamed,
   unwrapTextLiteral,
 } from "../shared/args.js";
 
@@ -92,6 +94,21 @@ export function emitButton(
   // injection so the local hook var is available at page-top).
   const disabled = anyNamedArgExpr(call, "disabled", ctx);
   const loading = anyNamedArgExpr(call, "loading", ctx);
+  // Phase 5 — variant + icon slot.  `variant: "primary" | "secondary"
+  // | "ghost"` maps to each pack's idiomatic rank ("filled" / "outline"
+  // / "subtle" on Mantine, "default" / "outline" / "ghost" on shadcn).
+  // `icon:` + `iconPosition:` lets a button display an SVG glyph from
+  // the builtin Icon set (or an inline svg via `iconSvg:`).
+  const variant = stringNamed(call, "variant");
+  const icon = stringNamed(call, "icon");
+  const iconSvg = stringNamed(call, "iconSvg");
+  const iconPosition = stringNamed(call, "iconPosition") ?? "right";
+  // Resolve a builtin icon name to its inline SVG so the template
+  // doesn't need to know the registry.  Custom SVG passes through.
+  let resolvedIconSvg: string | undefined = iconSvg;
+  if (!resolvedIconSvg && icon) {
+    resolvedIconSvg = lookupBuiltinIcon(icon);
+  }
   return renderPrimitive(ctx, "primitive-button", {
     label: unwrapTextLiteral(label),
     onClick: onClickHandler,
@@ -100,6 +117,11 @@ export function emitButton(
     hasDisabled: disabled !== undefined,
     loading,
     hasLoading: loading !== undefined,
+    variant,
+    hasVariant: variant !== undefined,
+    iconSvg: resolvedIconSvg,
+    hasIcon: resolvedIconSvg !== undefined,
+    iconPosition,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });

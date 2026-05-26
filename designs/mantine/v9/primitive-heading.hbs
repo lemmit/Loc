@@ -1,1 +1,1 @@
-<Title order={{expr level}}{{{testidAttr}}}{{{styleAttr}}}>{{{text}}}</Title>
+<Title order={{expr level}}{{#if hasSize}} size="{{size}}"{{/if}}{{#if hasGradient}} style=\{{ backgroundImage: "{{{gradient}}}", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent"{{#if hasWeight}}, fontWeight: {{weight}}{{/if}} }}{{else}}{{#if hasWeight}} style=\{{ fontWeight: {{weight}} }}{{/if}}{{/if}}{{{testidAttr}}}{{{styleAttr}}}>{{{text}}}</Title>

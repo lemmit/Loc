@@ -192,9 +192,23 @@ export function emitHeading(
   const text = firstPositionalContent(call, ctx) ?? '"Heading"';
   const level = numericNamed(call, "level") ?? 2;
   void depth;
+  // Phase 5 — explicit typography control decoupled from semantic level.
+  // `size:` overrides the level's default size; `weight:` sets the
+  // font weight; `gradient:` applies a CSS gradient as the text fill
+  // via `background: <gradient>; background-clip: text; color:
+  // transparent` on the rendered element.
+  const size = stringNamed(call, "size");
+  const weight = numericNamed(call, "weight");
+  const gradient = stringNamed(call, "gradient");
   return renderPrimitive(ctx, "primitive-heading", {
     text: unwrapTextLiteral(text),
     level,
+    size,
+    hasSize: size !== undefined,
+    weight,
+    hasWeight: weight !== undefined,
+    gradient,
+    hasGradient: gradient !== undefined,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });
