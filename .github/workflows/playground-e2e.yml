@@ -54,16 +54,14 @@ concurrency:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    # Job cap.  Playwright per-test timeout is 4min × ~24 tests; a
-    # stuck pipeline could otherwise burn well past this.  Bumped
-    # from 10 → 30 once stack v3 (React 19) + Tailwind 4 + the new
-    # pack majors landed (cold esm.sh fetches got heavier).  Bumped
-    # 30 → 45 after the four `*-preview-runtime` specs (chakra-v3,
-    # mantine-v9, shadcn-v4, mui-v7) started reliably taking 3min
-    # each AND retrying on any iframe flake — that's ~24min just
-    # for the bundle/boot tests under the 1 retry, leaving < 6min
-    # for the other 19 specs and routinely tripping the cap.
-    timeout-minutes: 45
+    # Job cap.  History:
+    #   10 → 30 (stack v3, Tailwind 4, cold esm.sh fetches got heavier)
+    #   30 → 45 (preview-runtime started reliably hitting 3min × retries)
+    #   45 → 75 (diagnostic round: bumped per-test cap to 12min so we can
+    #            tell whether the bundle is just slow vs genuinely stuck.
+    #            5 preview-runtime/runtime specs × up-to-12min × 2 retries
+    #            / 2 workers ≈ 60min worst case — 75 leaves a margin)
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v6
 

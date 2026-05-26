@@ -81,14 +81,14 @@ test("editor → shadcn-design system → preview boots", async ({ page }) => {
   await test.step("Bundle", async () => {
     await page.getByTestId("btn-bundle").click();
     await expect(page.getByText(/bundled .*KB in \d+ ms \(\d+ deps fetched\)/)).toBeVisible({
-      timeout: 300_000,
+      timeout: 600_000,
     });
   });
 
   await test.step("Boot", async () => {
     await page.getByTestId("btn-boot").click();
     await expect(page.getByTestId("backend-status")).toHaveText("booted", {
-      timeout: 300_000,
+      timeout: 600_000,
     });
   });
 

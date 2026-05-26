@@ -78,7 +78,7 @@ test("chakra@v3 preview boots without runtime errors", async ({ page }) => {
   try {
     await expect(
       page.getByText(/bundled .*KB in \d+ ms \(\d+ deps fetched\)/),
-    ).toBeVisible({ timeout: 300_000 });
+    ).toBeVisible({ timeout: 600_000 });
   } finally {
     // Always log the install-path breakdown — even on bundle timeout — so
     // we can tell what the worker actually did with its 5 minutes.
@@ -108,7 +108,7 @@ test("chakra@v3 preview boots without runtime errors", async ({ page }) => {
 
   await page.getByTestId("btn-boot").click();
   await expect(page.getByTestId("backend-status")).toHaveText("booted", {
-    timeout: 300_000,
+    timeout: 600_000,
   });
 
   // Preview is always mounted in the four-region shell — no tab to click.
