@@ -22,6 +22,7 @@ import type {
   AggregateIR,
   BoundedContextIR,
   DeployableIR,
+  EnumIR,
   PageIR,
   SystemIR,
   TypeIR,
@@ -70,6 +71,11 @@ export function emitLiveViewPages(args: {
   // "PhoenixApp.Sales" — used by the LiveView mount stub to build
   // `AshPhoenix.Form.for_create(PhoenixApp.Sales.Customer, :create)`.
   const contextModuleByAggName = new Map<string, string>();
+  // Workspace-wide enum registry — threaded into the walker so
+  // `Form(of: Agg)` with enum-typed fields renders `<.input
+  // type="select" options={...}>` instead of the legacy text input.
+  // Built once across every loaded context.
+  const enumsByName = new Map<string, EnumIR>();
   for (const ctx of contexts) {
     const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
     for (const agg of ctx.aggregates) {
@@ -77,6 +83,7 @@ export function emitLiveViewPages(args: {
       contextByAggName.set(agg.name, ctx);
       contextModuleByAggName.set(agg.name, ctxModule);
     }
+    for (const en of ctx.enums) enumsByName.set(en.name, en);
   }
 
   // Walk each user component once to capture its `Action` bindings +
@@ -91,7 +98,7 @@ export function emitLiveViewPages(args: {
       body: c.body,
       source: "explicit",
     } as PageIR;
-    const w = walkBodyToHeex(c.body, synthPage, ui, appModule, aggregatesByName);
+    const w = walkBodyToHeex(c.body, synthPage, ui, appModule, aggregatesByName, enumsByName);
     componentInfo.set(c.name, {
       actionBindings: w.actionBindings,
       usedComponents: w.usedComponents,
@@ -109,6 +116,7 @@ export function emitLiveViewPages(args: {
       appModule,
       ui,
       aggregatesByName,
+      enumsByName,
       contextModuleByAggName,
       componentInfo,
     });
@@ -136,7 +144,7 @@ export function emitLiveViewPages(args: {
   if (ui.components.length > 0) {
     out.set(
       `lib/${appName}_web/components/ui_components.ex`,
-      renderUiComponents({ ui, appModule, aggregatesByName }),
+      renderUiComponents({ ui, appModule, aggregatesByName, enumsByName }),
     );
   }
 
@@ -150,6 +158,8 @@ interface RenderArgs {
   appModule: string;
   ui: UiIR;
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
+  /** Workspace-wide enum registry — drives form select-input dispatch. */
+  enumsByName: ReadonlyMap<string, EnumIR>;
   /** Module-qualified name of the bounded context an aggregate lives in,
    *  keyed by aggregate PascalCase name.  Used to build the Ash
    *  `for_create(<Ctx>.<Agg>, :create)` call in mount/3. */
@@ -221,6 +231,7 @@ function renderLiveView(a: RenderArgs): string {
     appModule,
     ui,
     aggregatesByName,
+    enumsByName,
     contextModuleByAggName,
     componentInfo,
   } = a;
@@ -233,7 +244,7 @@ function renderLiveView(a: RenderArgs): string {
   // populated with a walker-stdlib ExprIR tree.  The walker produces
   // handle_event clauses and alias lines from helper imports the body
   // actually references.
-  const walked = walkBodyToHeex(page.body, page, ui, appModule, aggregatesByName);
+  const walked = walkBodyToHeex(page.body, page, ui, appModule, aggregatesByName, enumsByName);
   const heex = walked.heex;
   const handlers: HandleEventClause[] = walked.handlers;
   const aliasLines: string[] = walked.aliasLines;
@@ -539,8 +550,9 @@ function renderUiComponents(args: {
   ui: UiIR;
   appModule: string;
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
+  enumsByName: ReadonlyMap<string, EnumIR>;
 }): string {
-  const { ui, appModule, aggregatesByName } = args;
+  const { ui, appModule, aggregatesByName, enumsByName } = args;
   const webModule = `${appModule}Web`;
   const defs = ui.components.map((c) => {
     const synthPage = {
@@ -550,7 +562,7 @@ function renderUiComponents(args: {
       body: c.body,
       source: "explicit",
     } as PageIR;
-    const walked = walkBodyToHeex(c.body, synthPage, ui, appModule, aggregatesByName);
+    const walked = walkBodyToHeex(c.body, synthPage, ui, appModule, aggregatesByName, enumsByName);
     const attrLines = c.params
       .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)
       .join("\n");
