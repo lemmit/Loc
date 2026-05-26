@@ -1,4 +1,4 @@
-import type { BuilderEntry, CallArg, Expression, Statement } from "../../../../src/language/generated/ast.js";
+import type { BuilderEntry, CallArg, Expression, Page, StateBlock, Statement } from "../../../../src/language/generated/ast.js";
 import { printExpr } from "../../../../src/language/print/index.js";
 
 // ---------------------------------------------------------------------------
@@ -564,4 +564,54 @@ export function emitBody(node: BuilderNode): string {
   // v2: walker primitives and user-component invocations both emit as
   // builder-calls `Name { entries }`.  Empty-slot placeholder is `Name {}`.
   return parts.length === 0 ? `${node.name} {}` : `${node.name} { ${parts.join(", ")} }`;
+}
+
+// ---------------------------------------------------------------------------
+// Per-position type inference (kept narrow on purpose).
+//
+// The page builder offers enum-case dropdowns for state-field *defaults* (the
+// State panel). The next-tightest enum-typed position is a handler-block
+// assignment value: `state { status: OrderStatus }` + `status := ⟨value⟩`.
+//
+// Inference is *local* — no full type system. A statement-row's structured
+// `target` is consulted: if it's a bare identifier matching a declared state
+// field whose declared base type is an enum present in the enums map, the
+// settings panel renders a dropdown of that enum's cases. Anything else
+// (member-access targets like `draft.status`, non-state-field idents, or
+// non-enum-typed fields) falls through to the existing free-text input — no
+// regression on existing flows. Dropdowns always keep the current value
+// selectable, so a hand-written expression like `someFn()` isn't clobbered
+// when the picker is shown.
+// ---------------------------------------------------------------------------
+
+/** Map each enum-typed state field of a page to its declared enum name. Bare
+ *  state-field names (the only shape inference handles) consult this map.
+ *  Skips fields whose declared base isn't a named type (primitives, ids) and
+ *  fields whose named base isn't present in the supplied `enums` map. */
+export function enumStateFields(page: Page, enums: ReadonlyMap<string, readonly string[]>): Map<string, string> {
+  const out = new Map<string, string>();
+  const sb = page.props.find((p): p is StateBlock => p.$type === "StateBlock");
+  if (!sb) return out;
+  for (const f of sb.fields) {
+    // A `NamedType` base carries a cross-reference (`target.$refText` is the
+    // declared identifier); consult its name without needing the linker, then
+    // intersect with the supplied enums map. PrimitiveType/IdType are ignored.
+    const base = (f.type as unknown as { base?: { $type?: string; target?: { $refText?: string } } }).base;
+    if (base?.$type !== "NamedType") continue;
+    const name = base.target?.$refText;
+    if (typeof name === "string" && enums.has(name)) out.set(f.name, name);
+  }
+  return out;
+}
+
+/** For a structured `Stmt` row with `kind: "assign"`, return the expected enum
+ *  name when the target is a bare identifier of an enum-typed state field;
+ *  null otherwise. Member-access targets (`draft.status`) deliberately fall
+ *  through — inferring a nested field's type would need a full type pass. */
+export function expectedAssignEnum(target: string, enumFields: ReadonlyMap<string, string>): string | null {
+  // A bare ident is letter/underscore-led and contains no whitespace, dot,
+  // bracket, or call paren. Conservatively reject anything else.
+  const t = target.trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(t)) return null;
+  return enumFields.get(t) ?? null;
 }

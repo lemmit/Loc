@@ -6,7 +6,7 @@ import type { LayoutCtx } from "../layout/ctx";
 import type { BodyProp, Component, EnumDecl, Expression, Page } from "../../../src/language/generated/ast.js";
 import { parseDdd } from "./parse";
 import { spliceNode } from "./edit-engine";
-import { seedFromBody, emitBody, type BuilderNode } from "./page/model";
+import { seedFromBody, emitBody, enumStateFields, type BuilderNode } from "./page/model";
 import { toCraft, fromCraft } from "./page/serialize";
 import { availableTypes } from "./system/fields";
 import PageBuilder from "./page/PageBuilder";
@@ -176,6 +176,14 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [pageName, setPageName] = useState<string>("");
   const current = pages.find((p) => p.name === pageName) ?? pages[0];
 
+  // Local enum-type inference for assignment values: { stateFieldName → enumName }
+  // for the current page's enum-typed state fields. Empty when the body is a
+  // `component` (no `state {}` block) or no state field is enum-typed.
+  const pageEnumFields = useMemo(
+    () => (current?.page ? enumStateFields(current.page, enumCases) : new Map<string, string>()),
+    [current, enumCases],
+  );
+
   // LSP diagnostics that fall within the current body's source range — surfaced
   // on the canvas so the builder flags problems without leaving for the
   // Problems panel.
@@ -273,6 +281,8 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           options={options}
           operations={operations}
           componentNames={componentNames}
+          enumCases={enumCases}
+          pageEnumFields={pageEnumFields}
           diagnostics={bodyDiagnostics}
           onSelectPage={setPageName}
           onApply={handleApply}

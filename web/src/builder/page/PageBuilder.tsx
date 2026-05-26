@@ -7,7 +7,7 @@ import { Box, Button, Drawer, Group, NumberInput, ScrollArea, Select, Stack, Swi
 // is always included too, so custom colours round-trip).
 const PALETTE = ["blue", "red", "green", "yellow", "grape", "teal", "gray", "orange", "cyan", "pink", "violet", "indigo", "lime"];
 import { resolver, resolverWithComponents } from "./components";
-import { PALETTE_PRIMITIVES, SINGLE_CHILD_NODES, defaultNode, propFields, syntheticDefaultProps, type PrimitiveName } from "./model";
+import { PALETTE_PRIMITIVES, SINGLE_CHILD_NODES, defaultNode, expectedAssignEnum, propFields, syntheticDefaultProps, type PrimitiveName } from "./model";
 import { parseDdd } from "../parse";
 import type { Diagnostic } from "../../lsp/protocol";
 
@@ -100,6 +100,13 @@ interface PageBuilderProps {
   /** User-defined `component` names in scope, registered in the craft resolver
    *  so calls to them render as editable nodes. */
   componentNames?: string[];
+  /** Enum name → its declared cases (drives the typed-picker for assignment
+   *  values whose target is an enum-typed state field). */
+  enumCases?: ReadonlyMap<string, readonly string[]>;
+  /** State field name → enum name, for the current page's enum-typed state
+   *  fields. Bare-ident assignment targets matching a key here render the
+   *  value cell as an enum-case dropdown. */
+  pageEnumFields?: ReadonlyMap<string, string>;
   /** LSP diagnostics scoped to this body, shown as a problems bar. */
   diagnostics?: Diagnostic[];
   onSelectPage: (name: string) => void;
@@ -112,13 +119,13 @@ interface PageBuilderProps {
 // Structural page-body editor.  Palette (add) | canvas (arrange/select) |
 // settings (edit props).  "Apply to source" hands the serialized tree back to
 // BuilderPane, which regenerates the `body:` and splices it into `.ddd`.
-export default function PageBuilder({ initialNodes, liveNodes, pages, pageName, options, operations = {}, componentNames = [], diagnostics = [], onSelectPage, onApply, compact = false }: PageBuilderProps): JSX.Element {
+export default function PageBuilder({ initialNodes, liveNodes, pages, pageName, options, operations = {}, componentNames = [], enumCases, pageEnumFields, diagnostics = [], onSelectPage, onApply, compact = false }: PageBuilderProps): JSX.Element {
   const editorResolver = useMemo(() => resolverWithComponents(componentNames), [componentNames]);
   return (
     <Editor resolver={editorResolver} key={pageName}>
       <LiveSync nodes={liveNodes} />
       {compact ? (
-        <CompactLayout initialNodes={initialNodes} pages={pages} pageName={pageName} options={options} operations={operations} diagnostics={diagnostics} onSelectPage={onSelectPage} onApply={onApply} />
+        <CompactLayout initialNodes={initialNodes} pages={pages} pageName={pageName} options={options} operations={operations} enumCases={enumCases} pageEnumFields={pageEnumFields} diagnostics={diagnostics} onSelectPage={onSelectPage} onApply={onApply} />
       ) : (
         <Box style={{ display: "flex", flexDirection: "column", height: "100%" }}>
           <Toolbar pages={pages} pageName={pageName} onSelectPage={onSelectPage} onApply={onApply} />
@@ -130,7 +137,7 @@ export default function PageBuilder({ initialNodes, liveNodes, pages, pageName, 
                 <Frame data={initialNodes} />
               </Box>
             </ScrollArea>
-            <SettingsPanel options={options} operations={operations} />
+            <SettingsPanel options={options} operations={operations} enumCases={enumCases} pageEnumFields={pageEnumFields} />
           </Box>
         </Box>
       )}
@@ -176,7 +183,7 @@ function LiveSync({ nodes }: { nodes: SerializedNodes }): null {
 // Mobile layout: full-width canvas; the palette ("Add") and settings ("Edit")
 // move into bottom drawers reachable from the toolbar.  The settings drawer
 // auto-opens on selection so tap-to-select flows straight into editing.
-function CompactLayout({ initialNodes, pages, pageName, options, operations = {}, diagnostics = [], onSelectPage, onApply }: Omit<PageBuilderProps, "compact" | "liveNodes">): JSX.Element {
+function CompactLayout({ initialNodes, pages, pageName, options, operations = {}, enumCases, pageEnumFields, diagnostics = [], onSelectPage, onApply }: Omit<PageBuilderProps, "compact" | "liveNodes">): JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { selectedId } = useEditor((state) => ({ selectedId: [...state.events.selected][0] }));
@@ -206,7 +213,7 @@ function CompactLayout({ initialNodes, pages, pageName, options, operations = {}
         <PaletteContent onAdded={() => setPaletteOpen(false)} />
       </Drawer>
       <Drawer opened={settingsOpen} onClose={() => setSettingsOpen(false)} position="bottom" size="65%" title="Edit" data-testid="c4builder-settings-drawer">
-        <SettingsContent options={options} operations={operations} />
+        <SettingsContent options={options} operations={operations} enumCases={enumCases} pageEnumFields={pageEnumFields} />
       </Drawer>
     </Box>
   );
@@ -305,7 +312,7 @@ function Palette(): JSX.Element {
   );
 }
 
-function SettingsContent({ options, operations = {} }: { options: Record<string, string[]>; operations?: Record<string, string[]> }): JSX.Element {
+function SettingsContent({ options, operations = {}, enumCases, pageEnumFields }: { options: Record<string, string[]>; operations?: Record<string, string[]>; enumCases?: ReadonlyMap<string, readonly string[]>; pageEnumFields?: ReadonlyMap<string, string> }): JSX.Element {
   const { id, name, props, childNames, actions, query } = useEditor((state) => {
     const selected = [...state.events.selected][0];
     const node = selected ? state.nodes[selected] : undefined;
@@ -377,11 +384,36 @@ function SettingsContent({ options, operations = {} }: { options: Record<string,
       )}
       {id && name === "Stmt" && props.kind === "assign" && (
         // Assignment statement: target / op / value as separate controls.
-        <>
-          <TextInput size="xs" mb={4} label="target" value={String(props.target ?? "")} data-testid="c4builder-prop-target" styles={{ input: { fontFamily: "monospace" } }} onChange={(e) => set("target", e.currentTarget.value)} />
-          <Select size="xs" mb={4} label="op" data={[":=", "+=", "-="]} value={String(props.op ?? ":=")} allowDeselect={false} data-testid="c4builder-prop-op-assign" onChange={(v) => v && set("op", v)} />
-          <Textarea size="xs" mb="xs" label="value" autosize minRows={1} value={String(props.value ?? "")} data-testid="c4builder-prop-value" styles={{ input: { fontFamily: "monospace" } }} error={props.value && !isValidExpr(String(props.value)) ? "Invalid expression" : undefined} onChange={(e) => set("value", e.currentTarget.value)} />
-        </>
+        // When the target is a bare ident of an enum-typed state field, the
+        // value cell becomes an enum-case dropdown (per-position type inference,
+        // bounded to bare state-field idents — see model.ts:expectedAssignEnum).
+        // Current value is always selectable so a hand-written expression
+        // (`someFn()`) survives if the picker is shown.
+        (() => {
+          const expectedEnum = pageEnumFields ? expectedAssignEnum(String(props.target ?? ""), pageEnumFields) : null;
+          const cases = expectedEnum && enumCases ? enumCases.get(expectedEnum) : undefined;
+          return (
+            <>
+              <TextInput size="xs" mb={4} label="target" value={String(props.target ?? "")} data-testid="c4builder-prop-target" styles={{ input: { fontFamily: "monospace" } }} onChange={(e) => set("target", e.currentTarget.value)} />
+              <Select size="xs" mb={4} label="op" data={[":=", "+=", "-="]} value={String(props.op ?? ":=")} allowDeselect={false} data-testid="c4builder-prop-op-assign" onChange={(v) => v && set("op", v)} />
+              {cases ? (
+                <Select
+                  size="xs"
+                  mb="xs"
+                  label="value"
+                  clearable
+                  searchable
+                  data={[...new Set([...cases, props.value].filter((c): c is string => typeof c === "string" && c !== ""))]}
+                  value={props.value != null && props.value !== "" ? String(props.value) : null}
+                  data-testid="c4builder-prop-value"
+                  onChange={(v) => set("value", v ?? "")}
+                />
+              ) : (
+                <Textarea size="xs" mb="xs" label="value" autosize minRows={1} value={String(props.value ?? "")} data-testid="c4builder-prop-value" styles={{ input: { fontFamily: "monospace" } }} error={props.value && !isValidExpr(String(props.value)) ? "Invalid expression" : undefined} onChange={(e) => set("value", e.currentTarget.value)} />
+              )}
+            </>
+          );
+        })()
       )}
       {id && name === "Stmt" && props.kind === "let" && (
         // `let` binding: name / value as separate controls.
@@ -508,10 +540,10 @@ function SettingsContent({ options, operations = {} }: { options: Record<string,
   );
 }
 
-function SettingsPanel({ options, operations = {} }: { options: Record<string, string[]>; operations?: Record<string, string[]> }): JSX.Element {
+function SettingsPanel({ options, operations = {}, enumCases, pageEnumFields }: { options: Record<string, string[]>; operations?: Record<string, string[]>; enumCases?: ReadonlyMap<string, readonly string[]>; pageEnumFields?: ReadonlyMap<string, string> }): JSX.Element {
   return (
     <Box style={{ width: 240, minWidth: 240, borderLeft: "1px solid var(--mantine-color-dark-4)", padding: 8, overflow: "auto" }}>
-      <SettingsContent options={options} operations={operations} />
+      <SettingsContent options={options} operations={operations} enumCases={enumCases} pageEnumFields={pageEnumFields} />
     </Box>
   );
 }
