@@ -83,18 +83,40 @@ export function renderE2EFile(sys: SystemIR, modulesByName: Map<string, ModuleIR
   lines.push("");
   lines.push(`describe(${JSON.stringify(`${sys.name} e2e`)}, () => {`);
   for (const t of apiTests) {
-    const d = sys.deployables.find((x) => x.name === t.deployableName);
-    if (!d) continue;
-    const contexts = collectContextsFor(d, modulesByName);
-    const ctx: RenderCtx = {
-      deployable: d,
-      contexts,
-      locals: new Set(),
-      usedLetNames: collectUsedLetNames(t.statements),
-      apiBasePath: apiBasePath(d.platform),
-    };
-    lines.push(...renderTest(t, ctx).map((l) => `  ${l}`));
-    lines.push("");
+    const declared = sys.deployables.find((x) => x.name === t.deployableName);
+    if (!declared) continue;
+    // Multi-backend replay: each `test e2e "..." against <deployable>`
+    // block runs against every BACKEND deployable in the system whose
+    // `moduleNames` covers every aggregate the test body references
+    // — not just the named one.  Catches behavioral divergences
+    // (response shape, validation order, error format) the OpenAPI
+    // parity check can't see (Hono returning `{ id }` while .NET
+    // returned a full DTO was the original retro case).
+    //
+    // The declared deployable is always included; if it isn't
+    // compatible with its own test body (referenced aggregates not
+    // in its modules), `findAggregateBySlug` would already throw at
+    // render time.  Frontend deployables are always excluded —
+    // there's no API to call.
+    const referenced = collectReferencedAggregateSlugs(t.statements);
+    const compatible = compatibleBackends(referenced, sys.deployables, modulesByName, declared);
+    for (const d of compatible) {
+      const contexts = collectContextsFor(d, modulesByName);
+      const ctx: RenderCtx = {
+        deployable: d,
+        contexts,
+        locals: new Set(),
+        usedLetNames: collectUsedLetNames(t.statements),
+        apiBasePath: apiBasePath(d.platform),
+      };
+      // Suffix the test name with the backend it ran against so
+      // failures in a multi-backend run point to the diverging
+      // backend by name (`my test against dotnetApi`).  Single-
+      // backend systems still gain the suffix — small fixture
+      // churn but consistent semantics.
+      lines.push(...renderTest(t, ctx, ` against ${serviceSlug(d.name)}`).map((l) => `  ${l}`));
+      lines.push("");
+    }
   }
   lines.push(`});`);
   return lines.join("\n") + "\n";
@@ -112,15 +134,111 @@ function collectContextsFor(
   return out;
 }
 
-function renderTest(t: TestE2EIR, ctx: RenderCtx): string[] {
+function renderTest(t: TestE2EIR, ctx: RenderCtx, nameSuffix = ""): string[] {
   const out: string[] = [];
-  out.push(`it(${JSON.stringify(t.name)}, async () => {`);
+  out.push(`it(${JSON.stringify(t.name + nameSuffix)}, async () => {`);
   out.push(`  const base = ENDPOINTS.${serviceSlug(ctx.deployable.name)};`);
   for (const s of t.statements) {
     const rendered = renderE2EStmt(s, ctx);
     if (rendered) out.push(...rendered.split("\n").map((l) => `  ${l}`));
   }
   out.push(`});`);
+  return out;
+}
+
+/** Walk every ExprIR reachable from a test statement, collecting
+ *  the aggregate slugs invoked through the magic `api.<slug>.<method>(...)`
+ *  shape.  Drives the multi-backend replay in `renderE2EFile` — a
+ *  deployable is compatible with this test only if every collected
+ *  slug's owning module is in `deployable.moduleNames`. */
+function collectReferencedAggregateSlugs(statements: readonly TestStmtIR[]): Set<string> {
+  const slugs = new Set<string>();
+  const visit = (e: ExprIR): void => {
+    const call = matchApiCall(e);
+    if (call) slugs.add(call.aggregateSlug);
+    // Recurse regardless — the api call's args may carry further
+    // api.* receivers (`api.x.op(api.y.create(...).id)` etc.).
+    if (e.kind === "member") visit(e.receiver);
+    else if (e.kind === "method-call") {
+      visit(e.receiver);
+      for (const a of e.args) visit(a);
+    } else if (e.kind === "call") {
+      for (const a of e.args) visit(a);
+    } else if (e.kind === "lambda") {
+      if (e.body) visit(e.body);
+    } else if (e.kind === "new" || e.kind === "object") {
+      for (const f of e.fields) visit(f.value);
+    } else if (e.kind === "paren") visit(e.inner);
+    else if (e.kind === "unary") visit(e.operand);
+    else if (e.kind === "binary") {
+      visit(e.left);
+      visit(e.right);
+    } else if (e.kind === "ternary") {
+      visit(e.cond);
+      visit(e.then);
+      visit(e.otherwise);
+    }
+  };
+  for (const s of statements) {
+    if (s.kind === "expect" || s.kind === "expect-throws") visit(s.expr);
+    else if (s.kind === "let") visit(s.expr);
+    else if (s.kind === "expression") visit(s.expr);
+    else if (s.kind === "call") for (const a of s.args) visit(a);
+  }
+  return slugs;
+}
+
+/** A backend platform serves a queryable HTTP API.  Mirrors the
+ *  `isFrontend` check in `src/ir/enrichments.ts:509`. */
+function isBackendPlatform(platform: string): boolean {
+  return platform !== "react" && platform !== "static";
+}
+
+/** Resolve `<slug>` (snake_plural of an aggregate name) to the module
+ *  that owns the aggregate.  Returns undefined if no module declares
+ *  an aggregate whose plural-snake name matches the slug. */
+function findModuleForSlug(slug: string, modulesByName: Map<string, ModuleIR>): string | undefined {
+  for (const m of modulesByName.values()) {
+    for (const c of m.contexts) {
+      for (const a of c.aggregates) {
+        if (snake(plural(a.name)) === slug) return m.name;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Select every backend deployable whose `moduleNames` covers each
+ *  referenced aggregate's owning module.  The `declared` deployable
+ *  (the one named in `against <name>`) is always included even when
+ *  `referenced` is empty — that case is a test that does no api
+ *  calls, only `expect`s, and should still run somewhere.  Output is
+ *  deduplicated and stably ordered by `sys.deployables` declaration
+ *  order so the emitted file is reproducible. */
+function compatibleBackends(
+  referenced: Set<string>,
+  deployables: readonly DeployableIR[],
+  modulesByName: Map<string, ModuleIR>,
+  declared: DeployableIR,
+): DeployableIR[] {
+  const requiredModules = new Set<string>();
+  for (const slug of referenced) {
+    const mod = findModuleForSlug(slug, modulesByName);
+    if (mod) requiredModules.add(mod);
+    // No module owns the slug → the existing `findAggregateBySlug`
+    // check at render time produces a precise error.  Skip here so
+    // the declared deployable still runs and surfaces it.
+  }
+  const out: DeployableIR[] = [];
+  for (const d of deployables) {
+    if (!isBackendPlatform(d.platform)) continue;
+    const covers = [...requiredModules].every((m) => d.moduleNames.includes(m));
+    if (covers) out.push(d);
+  }
+  // Always include the declared deployable, even if it didn't pass
+  // the cover-check (consistent with the existing single-backend
+  // behaviour where render errors there are surfaced precisely).
+  if (!out.some((d) => d.name === declared.name)) out.push(declared);
   return out;
 }
 

@@ -48,14 +48,28 @@ async function __getQuery(url: string, params: Record<string, unknown>): Promise
 }
 
 describe("Acme e2e", () => {
-  it("create a product, look it up by id", async () => {
+  it("create a product, look it up by id against api", async () => {
     const base = ENDPOINTS.api;
     const p = await __post(`${base}/products`, ({ sku: "WIDGET-1", price: ({ amount: 9.99, currency: "USD" }) }));
     const read = await __get(`${base}/products/${p.id}`);
     expect(read.sku).toBe("WIDGET-1");
   });
 
-  it("create then confirm an order with one line", async () => {
+  it("create a product, look it up by id against catalog_web", async () => {
+    const base = ENDPOINTS.catalog_web;
+    const p = await __post(`${base}/products`, ({ sku: "WIDGET-1", price: ({ amount: 9.99, currency: "USD" }) }));
+    const read = await __get(`${base}/products/${p.id}`);
+    expect(read.sku).toBe("WIDGET-1");
+  });
+
+  it("create a product, look it up by id against catalog_api", async () => {
+    const base = ENDPOINTS.catalog_api;
+    const p = await __post(`${base}/products`, ({ sku: "WIDGET-1", price: ({ amount: 9.99, currency: "USD" }) }));
+    const read = await __get(`${base}/products/${p.id}`);
+    expect(read.sku).toBe("WIDGET-1");
+  });
+
+  it("create then confirm an order with one line against api", async () => {
     const base = ENDPOINTS.api;
     const prod = await __post(`${base}/products`, ({ sku: "WIDGET-2", price: ({ amount: 5.00, currency: "USD" }) }));
     const ord = await __post(`${base}/orders`, ({ customerId: "cust-001", status: "Draft", placedAt: "2024-01-01T00:00:00Z" }));
@@ -66,7 +80,7 @@ describe("Acme e2e", () => {
     expect(read.lines.length).toBe(1);
   });
 
-  it("by_customer query returns matching orders", async () => {
+  it("by_customer query returns matching orders against api", async () => {
     const base = ENDPOINTS.api;
     await __post(`${base}/orders`, ({ customerId: "cust-002", status: "Draft", placedAt: "2024-01-02T00:00:00Z" }));
     const list = await __getQuery(`${base}/orders/by_customer`, ({ customerId: "cust-002" }));
