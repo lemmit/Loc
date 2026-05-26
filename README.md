@@ -270,9 +270,7 @@ Per-feature references — [`auth.md`](docs/auth.md),
 [`traceability.md`](docs/traceability.md),
 [`conformance.md`](docs/conformance.md),
 [`migrations-design.md`](docs/migrations-design.md) — and the design-pack
-authoring guides at [`design-system-packs.md`](docs/design-system-packs.md),
-[`stack-versioning.md`](docs/stack-versioning.md),
-[`adding-a-pack-version.md`](docs/adding-a-pack-version.md).
+authoring guide at [`design-packs.md`](docs/design-packs.md).
 [`license-faq.md`](docs/license-faq.md) covers usage terms.
 
 In-flight design work lives under [`docs/plans/`](docs/plans/) and

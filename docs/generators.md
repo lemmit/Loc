@@ -531,15 +531,14 @@ Picking a pack also locks in a **stack** (a coherent React + router +
 Zod + Vite + TypeScript dep bundle).  Each pack version declares its
 stack in its `pack.json`; the bundler reads that declaration and
 emits the matching `package.json`.  See
-[`stack-versioning.md`](stack-versioning.md) and
-[`design-system-packs.md`](design-system-packs.md) for the full pack
-authoring surface.
+[`design-packs.md`](design-packs.md) for the full pack authoring
+surface, including the stack catalogue (v1/v2/v3) and the recipe for
+adding a new pack version.
 
 A bareword `design: "mantine"` resolves to the family's current default
 version; pinning is via `family@version` (e.g. `design: "mui@v5"`).
-`design-system-packs.md` lists the authoring contract; the per-version
-folder under `designs/<family>/<vN>/` is what the bundler actually
-loads.
+The per-version folder under `designs/<family>/<vN>/` is what the
+bundler actually loads.
 
 ---
 

@@ -33,9 +33,7 @@ These cover a single language feature each.  Each one is self-contained.
 
 | Doc | When to read |
 | --- | --- |
-| [`design-system-packs.md`](design-system-packs.md) | You're authoring a design pack (Mantine / shadcn / MUI / Chakra / ashPhoenix). Covers manifest, required emits, template language, stacks, adding a version. |
-| [`stack-versioning.md`](stack-versioning.md) | You want to know what a "stack" is and how packs declare one. *(Note: most of this is being absorbed into `design-system-packs.md`.)* |
-| [`adding-a-pack-version.md`](adding-a-pack-version.md) | Step-by-step recipe to fork a pack and add a new version. |
+| [`design-packs.md`](design-packs.md) | You're authoring a design pack (Mantine / shadcn / MUI / Chakra / ashPhoenix). Covers manifest, stacks (v1/v2/v3 framework baselines), required emits, template language, validation, and the recipe for adding a new pack version. |
 
 ## Internals
 

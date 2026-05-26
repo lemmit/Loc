@@ -569,14 +569,214 @@ no external components to import.  No `shellFiles` / `shellGlobs` /
 This would still produce a working app: ugly, but type-correct, and
 the contract is satisfied.
 
-## 12. References
+## 12. Adding a new pack version — recipe
 
-- [`audits/pack-equivalence-audit.md`](./audits/pack-equivalence-audit.md) — what's shared vs per-pack, with
-  evidence
-- `src/generator/react/templating/loader.ts` — pure compile core
-- `src/generator/react/templating/loader-fs.ts` — Node FS adapter
-- `web/src/build/loader-vfs.ts` — playground VFS adapter
-- `designs/mantine/`, `designs/shadcn/` — reference implementations
+When a pack family ships a new major (e.g. Mantine 8 → 9), fork the
+directory rather than mutating the existing one.  The recipe is
+mechanical; the upstream library's own migration guide is doing the
+real thinking.
+
+### Step 1 — Audit before forking
+
+Read the upstream migration guide.  Then grep the existing pack's
+templates for every deprecated / renamed API.  **No match = no
+template change needed** in that area; the migration is
+package-json-only.
+
+```bash
+# Search for prop renames documented in the upstream migration guide.
+grep -nE 'color=|isOpen=|gutter=|in=|spacing=' designs/<family>/<vOld>/*.hbs
+
+# Search for components that were renamed or removed.
+grep -nE '<Divider|<Modal|<Drawer\b' designs/<family>/<vOld>/*.hbs
+
+# Search for hooks whose signature changed.
+grep -nE 'useToast|useDisclosure|useFullscreen' designs/<family>/<vOld>/*.hbs
+
+# Search for upstream package imports that may have moved subpaths.
+grep -nE "from \"@<family>/" designs/<family>/<vOld>/*.hbs
+```
+
+### Step 2 — Fork the directory
+
+```bash
+cp -r designs/<family>/<vOld> designs/<family>/<vNew>
+# Bump the manifest's `version` field to match the directory.
+sed -i 's/"version": "<vOld>"/"version": "<vNew>"/' \
+  designs/<family>/<vNew>/pack.json
+```
+
+The loader cross-checks `pack.json`'s `version` against the parent
+directory name and throws on mismatch.  The cross-check catches
+copy-paste forks that leave the manifest stale.
+
+### Step 3 — Pick a stack
+
+The cross-cutting framework deps (React, react-router, zod, Vite, TS)
+live in `stacks/<id>/`, not in each pack.  Decide which stack the new
+pack version targets (see [§ 2a](#2a-stacks-and-how-a-pack-picks-one)):
+
+- A pack version that requires **React 19 + RR 7 + zod 4** declares `"stack": "v3"`.
+- A pack version that requires **React 19 + RR 6 + zod 3** declares `"stack": "v2"`.
+- A pack version still on **React 18** declares `"stack": "v1"`.
+- If the framework baseline you need doesn't exist yet, create a new
+  stack first (see [§ 2a — Adding a new stack](#adding-a-new-stack)).
+
+Then `designs/<family>/<vNew>/package-json.hbs` carries **only the
+pack-specific deps**, with the framework deps pulled in via the
+stack partials:
+
+```handlebars
+{
+  ...
+  "dependencies": {
+{{> stack-package-deps}},
+    "@<family>/core": "^<newMajor>.0.0",
+    ... pack-specific deps only ...
+  },
+  "devDependencies": {
+{{> stack-package-devdeps}}
+  }
+}
+```
+
+If a pack needs an extra devDep the stack doesn't supply (shadcn's
+`@types/node`, say), append it after the partial.
+
+### Step 4 — Apply template changes
+
+For each row in your Step-1 worklist, edit the templates.  Mechanical
+piece (boolean prop renames, component renames) are amenable to
+`sed -i` or the upstream codemod (chakra and mui ship them).
+Compound-component restructuring (Chakra v3) is hand-work.
+
+**Always emit named-import `createRoot` in `main.hbs`**:
+
+```tsx
+// CORRECT — works under both React 18 and 19:
+import { createRoot } from "react-dom/client";
+createRoot(document.getElementById("root")!).render(<App />);
+
+// WRONG under React 19 — type-checks but explodes at runtime:
+import ReactDOM from "react-dom/client";
+ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
+```
+
+### Step 5 — Register the new version
+
+Add the qualified name to `src/generator/_packs/builtin-formats.ts`:
+
+```ts
+export const BUILTIN_PACK_FORMATS = {
+  // ... existing entries ...
+  "<family>@<vNew>": "tsx",  // or "heex" for ash-style packs
+} as const satisfies Record<string, "tsx" | "heex">;
+```
+
+**Don't flip `BUILTIN_PACK_LATEST` in the same PR** — that's a
+separate "promote" PR paired with refreshing the byte-equivalence
+fixture under `test/fixtures/baseline-output/`.
+
+### Step 6 — Add the version to the test matrix
+
+`test/generated-react-build.test.ts`:
+
+```ts
+const PACKS: readonly PackSpec[] = [
+  // ... existing entries ...
+  { family: "<family>", version: "<vNew>" },
+];
+```
+
+`.github/workflows/generated-react-build.yml`:
+
+```yaml
+pack: ["mantine@v7", "mantine@v9", "shadcn@v3", "shadcn@v4", ..., "<family>@<vNew>"]
+```
+
+### Step 7 — Add a pinned storybook example to the playground
+
+So the in-browser dropdown can demo old + new side-by-side:
+
+```bash
+cp web/src/examples/storybook-<family>.ddd \
+   web/src/examples/storybook-<family>-<vNew>.ddd
+# Rewrite the `design:` slot to the pinned form.
+sed -i 's/design: <family>/design: "<family>@<vNew>"/' \
+  web/src/examples/storybook-<family>-<vNew>.ddd
+```
+
+Register it in `web/src/examples/index.ts`.
+
+### Step 8 — Verify
+
+```bash
+# Unit suite — should still pass clean.
+npm test
+
+# The new shard must pass both tsc --noEmit AND vite build.
+LOOM_REACT_BUILD_CASE="web/src/examples/sales-system.ddd:<family>@<vNew>" \
+  npx vitest run test/generated-react-build.test.ts
+
+# Sanity-check at least one other shard didn't regress.
+LOOM_REACT_BUILD_CASE="web/src/examples/sales-system.ddd:<family>@<vOld>" \
+  npx vitest run test/generated-react-build.test.ts
+
+# Playground build clean.
+cd web && npm run build
+
+# Playground e2e — at least the editor + workspace-persistence + the
+# new pinned-storybook spec.
+PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npx playwright test \
+  e2e/editor.spec.ts \
+  e2e/workspace-persistence.spec.ts \
+  e2e/<family>-versions-pinned.spec.ts
+```
+
+**The `vite build` step inside the shard is non-negotiable** — it
+catches class-shape mismatches `tsc --noEmit` lets through.
+
+### Step 9 — Promote to default (follow-up PR)
+
+In a separate PR after the new version has soaked:
+
+1. Flip `BUILTIN_PACK_LATEST.<family>` from `<vOld>` to `<vNew>` in
+   `src/generator/_packs/builtin-formats.ts`.
+2. Regenerate the byte-equivalence baseline:
+
+   ```bash
+   node scripts/capture-baseline-fixture.mjs
+   ```
+
+3. Update `test/loader-vfs.test.ts`'s bareword expectation:
+
+   ```ts
+   expect(resolvePackDir("<family>")).toBe("/designs/<family>/<vNew>");
+   ```
+
+### Anti-patterns to avoid
+
+| anti-pattern | why |
+| --- | --- |
+| Skipping `vite build` in CI to "save time" | tsc lets type-correct-but-runtime-broken code through |
+| Skipping the runtime preview e2e for a new stack | only the runtime gate catches regressions that type-check + bundle |
+| Re-stating React / router / zod / Vite / TS deps in `package-json.hbs` | the stack abstraction exists precisely to prevent this drift |
+| Flipping `BUILTIN_PACK_LATEST` in the same PR as the new pack | byte-equivalence fixture goes stale; two unrelated changes in one diff |
+| Keeping `forwardRef` wrappers / `<Context.Provider>` "for symmetry with v7" | new pack versions are clean breaks — no compat shims inside one pack |
+| Adopting `react-router-dom` (v6 name) in new packs targeting an RR-7 stack | v7 renamed to `react-router` |
+| Letting `manifest.version` (or `manifest.stack`) drift from reality | loader throws on version/dir mismatch; a wrong `stack` resolves the wrong framework deps |
+| Externalising React for a React-19 stack | the duplicate-`ReactSharedInternals` bug — React-19 stacks inline React on purpose |
+
+## 13. References
+
+- [`audits/pack-equivalence-audit.md`](./audits/pack-equivalence-audit.md) — what's shared vs per-pack, with evidence
+- [`plans/per-pack-migration.md`](./plans/per-pack-migration.md) — per-library historical migration notes (mantine→v9, mui→v7, chakra→v3, shadcn→v4)
+- `src/generator/_packs/loader.ts` — pure compile core
+- `src/generator/_packs/loader-fs.ts` — Node FS adapter
+- `src/generator/_packs/loader-vfs.ts` — playground VFS adapter
+- `src/generator/_packs/builtin-formats.ts` — built-in pack format map + bareword defaults
+- `stacks/<id>/` — stack definitions (`v1`, `v2`, `v3`)
+- `designs/<family>/<version>/` — reference implementations
 - `test/generated-react-build.test.ts` — the static-validation gate
 - `test/pack-manifest.test.ts` — manifest-shape contract tests
 - `test/template-shared-layer.test.ts` — shared-source contract tests
