@@ -176,10 +176,21 @@ export interface WalkerTarget {
    *  `push_navigate(socket, to: ~p"/path")` with args interpolated
    *  into the route.  `routeTemplate` is the target page's route
    *  with `:param` placeholders; `args` is the rendered argument
-   *  map. */
+   *  map.
+   *
+   *  `stateExpr` is an escape hatch for the case where the source's
+   *  second `navigate(...)` arg is not an object literal that
+   *  decomposes cleanly into `{name, value}` pairs (e.g.
+   *  `navigate(Page, someRef)` where `someRef` resolves to a
+   *  pre-built state object).  When supplied, the target embeds
+   *  the pre-rendered expression directly and IGNORES `args` —
+   *  TSX emits `navigate("/path", { state: <stateExpr> })`; HEEx
+   *  falls back to the args-empty `push_navigate` (Phoenix routes
+   *  can't interpolate an arbitrary expression into a `~p` sigil). */
   renderNavigate(
     routeTemplate: string,
     args: ReadonlyArray<{ name: string; value: string }>,
+    stateExpr?: string,
   ): string;
 
   // --- Type-default seam --------------------------------------------------

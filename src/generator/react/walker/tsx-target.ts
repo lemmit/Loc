@@ -176,7 +176,14 @@ export const tsxTarget: WalkerTarget = {
   renderNavigate(
     routeTemplate: string,
     args: ReadonlyArray<{ name: string; value: string }>,
+    stateExpr?: string,
   ): string {
+    // Escape hatch: a non-object-literal second arg (the source's
+    // `navigate(Page, someExpr)` shape) flows through pre-rendered.
+    // Takes precedence over `args` — caller picks one path.
+    if (stateExpr !== undefined) {
+      return `navigate(${JSON.stringify(routeTemplate)}, { state: ${stateExpr} })`;
+    }
     if (args.length === 0) {
       return `navigate(${JSON.stringify(routeTemplate)})`;
     }

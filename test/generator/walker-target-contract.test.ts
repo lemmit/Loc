@@ -166,6 +166,30 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
     expect(heex).toBe('push_navigate(socket, to: ~p"/orders")');
   });
 
+  it("renderNavigate stateExpr escape hatch: TSX wraps verbatim, HEEx falls back to args-empty", () => {
+    // Source like `navigate(Page, someRef)` where someRef is a
+    // ref/method-call/etc. rather than an object literal.  The
+    // contract's stateExpr param embeds the pre-rendered expression
+    // as the `state:` value (TSX) and is opaque to HEEx routing
+    // (no way to embed an arbitrary expr into a ~p sigil's query
+    // string), so HEEx falls back to the args-empty push_navigate.
+    const tsx = tsxTarget.renderNavigate("/orders", [], "myStateObj");
+    const heex = heexTarget.renderNavigate("/orders", [], "myStateObj");
+    expect(tsx).toBe('navigate("/orders", { state: myStateObj })');
+    expect(heex).toBe('push_navigate(socket, to: ~p"/orders")');
+  });
+
+  it("renderNavigate stateExpr takes precedence over args[]", () => {
+    // When both are supplied, the contract reserves stateExpr as
+    // the escape hatch — it wins.  Callers pick one or the other.
+    const tsx = tsxTarget.renderNavigate(
+      "/orders",
+      [{ name: "ignored", value: "1" }],
+      "overrideState",
+    );
+    expect(tsx).toBe('navigate("/orders", { state: overrideState })');
+  });
+
   it("defaultInitFor diverges on optional: TSX `undefined`, HEEx `nil`", () => {
     const ty = { kind: "optional" as const, inner: { kind: "primitive" as const, name: "string" } };
     expect(tsxTarget.defaultInitFor(ty)).toBe("undefined");
