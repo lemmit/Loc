@@ -282,6 +282,7 @@ Both backends bypass auth on these paths so docker-compose health
 checks, OpenAPI clients, and Swagger UI work without tokens:
 
 - `/health`
+- `/ready`
 - `/openapi.json`
 - `/swagger` (and any `/swagger/...` subpath)
 

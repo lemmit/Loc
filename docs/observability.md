@@ -17,7 +17,7 @@ always present:
 | Key | Type | Notes |
 |---|---|---|
 | `ts` | ISO-8601 timestamp string | UTC, millisecond precision |
-| `level` | `"trace"` / `"debug"` / `"info"` / `"warning"` / `"error"` | Phoenix spells it `warning` |
+| `level` | `"trace"` / `"debug"` / `"info"` / `"warn"` / `"error"` | The emitted JSON value is `"warn"` on every backend; Phoenix's `Logger` API method happens to be named `warning(...)`, but the field in the JSON payload is `"warn"`. |
 | `event` | string | The catalog identity (see below) |
 | `request_id` | string | Per-request UUID; missing on boot-time lines |
 
@@ -44,12 +44,12 @@ migration.
 | Level | Meaning | Examples |
 |---|---|---|
 | `error` | System fault — needs operator action | `internal_error`, `extern_handler_threw`, `migration_failed` |
-| `warning` | Client/domain fault, recoverable | `domain_error`, `forbidden`, `not_found`, `db_disconnected` |
+| `warn` | Client/domain fault, recoverable | `domain_error`, `forbidden`, `not_found`, `db_disconnected` |
 | `info` | Business narrative — what the app did | `request_start`, `request_end`, `server_listening`, `aggregate_created`, `workflow_started` |
 | `debug` | Mechanism — live-prod diagnosis | `aggregate_loaded`, `repository_save`, `find_executed`, `health_ok` |
 | `trace` | Fine detail — generate-time opt-in (`--trace`) | `tx_begin`, `wire_in`, `invariant_evaluated` |
 
-Filter to `warning` and you see only faults. Filter to `info` and you
+Filter to `warn` and you see only faults. Filter to `info` and you
 see the domain narrative without the noise. The `--trace` switch is the
 only way to inject trace lines into domain methods (kept off by default
 so the default artefact stays pure).
@@ -73,7 +73,32 @@ The full list lives in `src/generator/_obs/log-events.ts`. Highlights:
 `domain_error`, `forbidden`, `not_found`.
 
 **System faults** (error):
-`internal_error`, `extern_handler_threw`, `migration_failed`.
+`internal_error`, `extern_handler_threw`, `migration_failed`,
+`db_error`.
+
+**Database lifecycle** (info / warn / error):
+`db_connecting`, `db_connected`, `db_disconnected` (warn),
+`db_pool_exhausted` (warn), `db_error` (error).
+
+**Migrations** (info / error):
+`migrations_starting`, `migration_applied`, `migrations_complete`,
+`migration_failed` (error).
+
+**Auth and audit** (info / debug):
+`auth_enabled`, `audit_recorded` (debug), `provenance_recorded`
+(debug).
+
+**Transactions and child sync** (trace):
+`tx_begin`, `tx_commit`, `tx_rollback`, `child_synced`.
+
+**Health** (info / debug):
+`health_ok`, `health_degraded`.
+
+**Extern lifecycle** (debug):
+`extern_handlers_registered`.
+
+This list is an excerpt of what the catalog ships; the file
+`src/generator/_obs/log-events.ts` is authoritative.
 
 **Domain trace** (opt-in via `--trace`):
 `invariant_evaluated`, `precondition_evaluated`, `value_computed`.
@@ -99,7 +124,7 @@ same catalog identity.
 docker compose logs -f api | jq -C .
 
 # Just failures and their messages.
-docker compose logs api | jq 'select(.level == "warning" or .level == "error") | {ts, event, message}'
+docker compose logs api | jq 'select(.level == "warn" or .level == "error") | {ts, event, message}'
 
 # Slowest 10 requests.
 docker compose logs api | jq -c 'select(.event == "request_end") | {path, duration_ms, status}' | sort -t: -k2 -rn | head
