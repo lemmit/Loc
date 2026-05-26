@@ -273,10 +273,12 @@ Per-feature references — [`auth.md`](docs/auth.md),
 [`traceability.md`](docs/traceability.md),
 [`conformance.md`](docs/conformance.md),
 [`migrations-design.md`](docs/migrations-design.md) — plus
-[`platforms.md`](docs/platforms.md) for the backend registry and
+[`platforms.md`](docs/platforms.md) for the backend registry,
 [`design-packs.md`](docs/design-packs.md) for the design-pack
-authoring guide.  [`license-faq.md`](docs/license-faq.md) covers
-usage terms.
+authoring guide, [`macro-api.md`](docs/macro-api.md) for the macro
+authoring surface, and [`loom-artifacts.md`](docs/loom-artifacts.md)
+for the `.loom/` derived-artifact directory.
+[`license-faq.md`](docs/license-faq.md) covers usage terms.
 
 In-flight design work lives under [`docs/plans/`](docs/plans/) and
 [`docs/proposals/`](docs/proposals/); empirical snapshots live under

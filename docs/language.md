@@ -133,6 +133,10 @@ preserved at [`plans/multi-file-source.md`](plans/multi-file-source.md).
 | `context Name { … }` | Allowed directly inside a system; treated as if it were in an implicit `_default` module. |
 | `test e2e "name" against <deployable> { … }` | End-to-end test that runs against the named deployable's HTTP API; lowers to a vitest file at the system output root. |
 | `user { id: string, role: string, … }` | System-wide JWT-claim shape decoded by the verifier hook.  At most one per system; required when any deployable opts in via `auth: required`.  The `currentUser` magic identifier in operation / workflow / view-bind expressions is typed against this shape.  See [`auth.md`](auth.md). |
+| `theme { primary: "#…", radius: "md", … }` | System-wide visual identity — design tokens consumed by every React (and Phoenix LiveView) deployable in this system.  At most one per system.  Colour properties (`primary`, `secondary`, `accent`, `success`, `warning`, `error`, `neutral`) accept CSS hex values (`#RGB` / `#RRGGBB` / `#RRGGBBAA`).  `radius` is one of `none / sm / md / lg / xl`.  `fontFamily` and `fontFamilyMono` are free-form strings.  `colorScheme` is `light / dark / auto`.  Unknown property names and invalid values are validator errors. |
+| `api Name from Module` | First-class API contract derived from `Module`'s domain (aggregates expose `all / byId / create / update / delete`, repositories expose their finds, workflows expose mutations, views expose queries).  Backend deployables `serves:` an api; UIs reference one via `api X: <ApiName>` parameters.  See [`architecture.md`](architecture.md). |
+| `storage Name { type: postgres\|redis\|kafka\|… }` | Typed storage instance reusable across deployables.  v0 fully supports `postgres`; other types parse but don't activate generator output.  See [`architecture.md`](architecture.md). |
+| `ui Name { … }` | Block of pages, components, menu, and api parameters that a deployable binds via `ui:`.  See [`page-metamodel.md`](page-metamodel.md). |
 
 A module may appear in any number of deployables — its code is inlined
 into each.  For v1 there is no shared-library / npm-workspace shape;
@@ -246,7 +250,7 @@ Inside an aggregate or an `entity` part:
 
 | Form | Notes |
 | --- | --- |
-| `name: TypeRef [provenanced] [sensitive(tags)] [check Expr]` | Property, with optional modifiers. `provenanced` records assignment lineage (below); `sensitive(...)` tags the field for log-redaction / inspect; `check Expr` is a per-field validation predicate. |
+| `name: TypeRef [provenanced] [sensitive(tags)] [access] [check Expr]` | Property, with optional modifiers (in this order). `provenanced` records assignment lineage (below); `sensitive(...)` tags the field for log-redaction / inspect; `access` is one of `immutable / managed / token / internal / secret` (default: `editable` — see [Field access modifiers](#field-access-modifiers) below); `check Expr` is a per-field validation predicate. |
 | `contains name: PartName[]` | Containment of a part declared within the same aggregate; collection. |
 | `contains name: PartName` | Containment, single (required). |
 | `contains name: PartName?` | Containment, single (optional) — the part may be absent at runtime; serialised as a nullable wire field.  `[]?` is rejected: an empty collection already encodes absence. |
@@ -302,6 +306,86 @@ TypeScript/Hono feature; other backends parse the keyword but emit no trace
 code. See `examples/provenance.ddd` for a runnable backend example and the
 `Provenance System` playground example for the same domain as a Hono + React
 system.
+
+### Field access modifiers
+
+Every property gets an **access modifier** that governs how it
+participates in input DTOs, the update wire shape, and view / API
+read exposure.  The grammar form is
+
+```
+name: TypeRef [provenanced] [sensitive(...)] [immutable|managed|token|internal|secret]
+```
+
+The default — no keyword — is `editable`.  The five keywords (and
+the implicit `editable`) form this matrix:
+
+| Modifier | Client read | In `create(...)` input | In `update(...)` input | In view payloads |
+|---|---|---|---|---|
+| `editable` *(default)* | ✓ | ✓ | ✓ | ✓ |
+| `immutable` | ✓ | ✓ | ✗ (server rejects) | ✓ |
+| `managed` | ✓ | ✗ (server owns it) | ✗ | ✓ |
+| `token` | ✓ | ✗ | ✓ (echoed unchanged, like `id`/`version`) | ✓ |
+| `internal` | ✗ (never exposed via API) | ✗ | ✗ | ✓ (views may project it) |
+| `secret` | ✗ (never disclosed) | ✓ | ✓ (write-only) | ✗ |
+
+Examples:
+
+```ddd
+aggregate User {
+  email: string                            // editable (default)
+  createdAt: datetime managed              // server stamps it
+  passwordHash: string secret              // accepted on create + update; never sent back
+  version: int token                       // round-tripped for optimistic concurrency
+  isDeleted: bool internal                 // hidden from clients; views may read
+  slug: string immutable                   // set once at creation, never updated
+}
+```
+
+The aggregate's synthetic `id` is hardcoded to `token` access — it's
+read-only from the client's perspective but must be echoed on
+update.  `X id` foreign-key references default to `editable` (the
+client supplies them on create) regardless of the target's identity
+access.  Reference-collection fields (`T id[]`) are persisted via a
+join table and follow the default.
+
+The macro stdlib uses these modifiers to scope its emissions:
+`auditable` declares `createdAt`/`updatedAt` as `managed`,
+`softDeletable` declares `isDeleted` as `internal`.  The
+`writableUpdateFields` macro helper consumes the modifier matrix
+when synthesising `crudish`'s `update` operation — see
+[`scaffold-macros.md`](scaffold-macros.md).
+
+### Sensitivity tags
+
+`sensitive(tag1, tag2, ...)` marks a property as carrying sensitive
+data.  Tags are free identifiers; nothing in the compiler treats
+them specially today — they are opaque metadata reserved for
+external tooling (audit reports, log redaction policies, schema
+discovery for compliance).
+
+Conventional tag names (not enforced):
+
+| Tag | Meaning |
+|---|---|
+| `pii` | Personally identifiable information (name, email, phone, address). |
+| `phi` | Protected health information (HIPAA-adjacent). |
+| `cred` | Credentials (passwords, API keys, tokens). |
+| `audited` | The field's value lineage should be retained for audit. |
+
+```ddd
+aggregate Patient {
+  fullName: string sensitive(pii)
+  diagnosis: string sensitive(pii, phi)
+  ssn: string sensitive(pii, audited) secret    // sensitive + secret access
+}
+```
+
+A field's `derived inspect` output redacts sensitive fields by
+default — the auto-generated structural form prints
+`<redacted>` for any property carrying any sensitivity tag.  A
+user-supplied `derived inspect = …` is rendered verbatim; the user
+opts out of redaction by writing their own debug form.
 
 ### Type references
 
