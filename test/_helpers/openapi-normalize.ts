@@ -180,6 +180,61 @@ export function normalisePath(p: string): string {
   return p.replace(/\{[^}]+\}/g, "{id}").replace(/\/+$/, "") || "/";
 }
 
+/**
+ * Per-operation path-parameter type signature.  Captures what
+ * `normalisePath` deliberately discards (the actual parameter type +
+ * format) so the parity diff can catch drift like:
+ *   Phoenix: { type: string }
+ *   Hono:    { type: string, format: uuid }
+ *
+ * Each operation's signature is the ordered list of path-parameter
+ * declarations joined by `,`.  Two backends' parameters are matched
+ * positionally on the normalised path (so `/p/{productId}` and
+ * `/p/{id}` align — same shape `/p/{id}` after normalisation, same
+ * positional binding).
+ *
+ * Operations with no path parameters get an empty-signature entry so
+ * "spec declares but other omits" surfaces as a mismatch, not just an
+ * absence.
+ */
+export function pathParamSignatures(spec: OpenApiSpec): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [p, item] of Object.entries(spec.paths ?? {})) {
+    if (isInfraPath(p)) continue;
+    for (const [m, raw] of Object.entries(item)) {
+      const method = m.toUpperCase();
+      if (!HTTP_METHODS.includes(method)) continue;
+      const op = raw as {
+        parameters?: Array<{
+          in?: string;
+          name?: string;
+          schema?: { type?: string; format?: string };
+        }>;
+      };
+      // Path parameters in the OpenAPI sense — `in: "path"` only.
+      // Query / header params are not part of the URL shape; comparing
+      // those would belong to a different dimension.
+      const sigs = (op.parameters ?? [])
+        .filter((q) => q.in === "path")
+        // Stable ordering: the spec emits them in URL order, but
+        // Swashbuckle / OpenApiSpex don't guarantee that — sort by
+        // name to make the diff order-independent.
+        .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
+        .map((q) => {
+          const t = q.schema?.type ?? "any";
+          const f = q.schema?.format ? `:${q.schema.format}` : "";
+          // Anonymise param name — what we care about cross-backend is
+          // the TYPE shape; matching by name would just resurface
+          // the `{id}` vs `{productId}` non-issue normalisePath solves.
+          return `${t}${f}`;
+        })
+        .join(",");
+      out.set(`${method} ${normalisePath(p)}`, sigs);
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Cross-backend parity diff (pure)
 //
@@ -211,6 +266,10 @@ export interface ParityDiff {
   fieldDiffs: string[];
   /** Per-schema `required: [...]` drift on the intersection. */
   requiredDiffs: string[];
+  /** Per-op path-parameter type drift on the intersection (e.g. one
+   * backend declares `{type: string}`, another `{type: string, format:
+   * uuid}`). */
+  paramTypeDiffs: string[];
 }
 
 /**
@@ -276,6 +335,22 @@ export function diffSpecs(
     }
   }
 
+  // Per-op path-parameter type drift on the op intersection.  Catches
+  // shape drift `normalisePath` deliberately hides (e.g., one backend
+  // declaring `{type: string}` for `id`, another declaring `{type:
+  // string, format: uuid}` — same URL shape, different contract).
+  const refParams = pathParamSignatures(ref.spec);
+  const otherParams = pathParamSignatures(other.spec);
+  const paramTypeDiffs: string[] = [];
+  for (const op of refParams.keys()) {
+    if (!otherParams.has(op)) continue;
+    const refSig = refParams.get(op) ?? "";
+    const otherSig = otherParams.get(op) ?? "";
+    if (refSig !== otherSig) {
+      paramTypeDiffs.push(`${op}: ${ref.name}=[${refSig}], ${other.name}=[${otherSig}]`);
+    }
+  }
+
   return {
     refName: ref.name,
     otherName: other.name,
@@ -286,6 +361,7 @@ export function diffSpecs(
     onlySchemasOther,
     fieldDiffs,
     requiredDiffs,
+    paramTypeDiffs,
   };
 }
 
@@ -298,6 +374,7 @@ export function isCleanDiff(diff: ParityDiff): boolean {
     diff.onlySchemasRef.length === 0 &&
     diff.onlySchemasOther.length === 0 &&
     diff.fieldDiffs.length === 0 &&
-    diff.requiredDiffs.length === 0
+    diff.requiredDiffs.length === 0 &&
+    diff.paramTypeDiffs.length === 0
   );
 }

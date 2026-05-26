@@ -336,6 +336,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
           console.warn(`  schemas only on ${refName}:`, diff.onlySchemasRef);
         if (diff.fieldDiffs.length) console.warn("  fields:", diff.fieldDiffs);
         if (diff.requiredDiffs.length) console.warn("  required:", diff.requiredDiffs);
+        if (diff.paramTypeDiffs.length) console.warn("  path-param types:", diff.paramTypeDiffs);
       }
 
       if (STRICT_PARITY) {
@@ -347,6 +348,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         expect(diff.onlySchemasOther, `schemas only on ${otherName} (${pair})`).toEqual([]);
         expect(diff.fieldDiffs, `field-set drift (${pair})`).toEqual([]);
         expect(diff.requiredDiffs, `required-set drift (${pair})`).toEqual([]);
+        expect(diff.paramTypeDiffs, `path-param type drift (${pair})`).toEqual([]);
       }
     }
 
