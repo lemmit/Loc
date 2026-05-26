@@ -4,7 +4,6 @@
 // path-sort comparator, and whether the scaffold-depth prefix rewrite
 // applies — so each is a thin adapter over groupedImportLines.
 
-import type { UiHelperImportIR } from "../../../ir/loom-ir.js";
 import type { ApiHookUse, ImportMap } from "../body-walker.js";
 
 /** Code-unit (default `Array.prototype.sort`) string ordering. */
@@ -69,24 +68,7 @@ export function renderApiHookImports(
   return groupedImportLines(byPath, byCodeUnit, srcImportPrefix);
 }
 
-/** Render `import { … } from "…"` lines for every
- *  UI-declared helper actually used in the body.  Helpers
- *  sharing an import path collapse into one line; paths are
- *  sorted for deterministic output. */
-export function renderHelperImports(
-  usedHelpers: Set<string>,
-  declared: ReadonlyArray<UiHelperImportIR>,
-): string {
-  if (usedHelpers.size === 0) return "";
-  const byPath = new Map<string, Set<string>>();
-  for (const h of declared) {
-    if (!usedHelpers.has(h.name)) continue;
-    let names = byPath.get(h.path);
-    if (!names) {
-      names = new Set();
-      byPath.set(h.path, names);
-    }
-    names.add(h.name);
-  }
-  return groupedImportLines(byPath, byCodeUnit, "../");
-}
+// Helper-import emission (`import { fn } from "../helpers/x"`) moved
+// to `walker/tsx-target.ts:renderHelperImports`.  Walker call sites
+// now delegate to the target through the cross-framework contract
+// at src/generator/_walker/target.ts.

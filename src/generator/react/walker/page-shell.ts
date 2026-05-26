@@ -28,7 +28,7 @@ import type {
 } from "../body-walker.js";
 import { emitExpr, walkBodyToTsx } from "../body-walker.js";
 import { idTargetHookVar } from "../form-helpers.js";
-import { renderApiHookImports, renderHelperImports, renderImportLines } from "./import-lines.js";
+import { renderApiHookImports, renderImportLines } from "./import-lines.js";
 import { indentJsx } from "./shared/args.js";
 import { tsxTarget } from "./tsx-target.js";
 
@@ -218,7 +218,15 @@ export function renderCustomLayoutPage(
   // helper actually referenced in the body.  Lines grouped per
   // path so two helpers from the same module dedupe to one
   // import line; paths sorted for deterministic output.
-  const helperImportLines = renderHelperImports(usedHelpers, helperImports);
+  // Delegated to `tsxTarget.renderHelperImports` — see
+  // `src/generator/_walker/target.ts`.  The target returns one
+  // line per import; this site re-attaches the trailing newline
+  // matching the existing splice into the import block template.
+  const helperImportLines =
+    tsxTarget
+      .renderHelperImports(usedHelpers, helperImports)
+      .map((l) => `${l}\n`)
+      .join("");
   // Api hook declarations, emitted at page-top right
   // before the JSX return.  Each unique `<param>.<aggregate>.<op>`
   // becomes one `const <var> = use<Op><Aggregate>(args?);` line.
