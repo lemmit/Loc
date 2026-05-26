@@ -155,38 +155,38 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
       const aggSnake = snake(agg.name);
       const aggPlural = snake(plural(agg.name));
 
-      // GET /aggregates/<plural>  → list
+      // GET /<plural>  → list
       apiRoutes.push({
         method: "get",
-        path: `/aggregates/${aggPlural}`,
+        path: `/${aggPlural}`,
         controller: "AggregatesController",
         action: `:list_${aggPlural}`,
       });
-      // POST /aggregates/<plural>  → create
+      // POST /<plural>  → create
       apiRoutes.push({
         method: "post",
-        path: `/aggregates/${aggPlural}`,
+        path: `/${aggPlural}`,
         controller: "AggregatesController",
         action: `:create_${aggSnake}`,
       });
-      // GET /aggregates/<plural>/:id  → get
+      // GET /<plural>/:id  → get
       apiRoutes.push({
         method: "get",
-        path: `/aggregates/${aggPlural}/:id`,
+        path: `/${aggPlural}/:id`,
         controller: "AggregatesController",
         action: `:get_${aggSnake}`,
       });
-      // PATCH /aggregates/<plural>/:id  → update
+      // PATCH /<plural>/:id  → update
       apiRoutes.push({
         method: "patch",
-        path: `/aggregates/${aggPlural}/:id`,
+        path: `/${aggPlural}/:id`,
         controller: "AggregatesController",
         action: `:update_${aggSnake}`,
       });
-      // DELETE /aggregates/<plural>/:id  → destroy
+      // DELETE /<plural>/:id  → destroy
       apiRoutes.push({
         method: "delete",
-        path: `/aggregates/${aggPlural}/:id`,
+        path: `/${aggPlural}/:id`,
         controller: "AggregatesController",
         action: `:destroy_${aggSnake}`,
       });
@@ -416,19 +416,19 @@ function renderAggregateActions(
     ? `    ${renderPhoenixLogCall("wireIn", [{ name: "keys", valueExpr: "Map.keys(params)" }])}\n`
     : "";
 
-  return `  @doc "GET /api/aggregates/${aggPlural}"
+  return `  @doc "GET /api/${aggPlural}"
   def list_${aggPlural}(conn, _params) do
     records = ${contextModule}.list_${aggPlural}!()
     json(conn, records)
   end
 
-  @doc "GET /api/aggregates/${aggPlural}/:id"
+  @doc "GET /api/${aggPlural}/:id"
   def get_${aggSnake}(conn, %{"id" => id}) do
     record = ${contextModule}.get_${aggSnake}!(id)
     json(conn, record)
   end
 
-  @doc "POST /api/aggregates/${aggPlural}"
+  @doc "POST /api/${aggPlural}"
   def create_${aggSnake}(conn, params) do
 ${wireInCreate}    record = ${contextModule}.create_${aggSnake}!(params)
     ${renderPhoenixLogCall("aggregateCreated", [
@@ -440,14 +440,14 @@ ${wireInCreate}    record = ${contextModule}.create_${aggSnake}!(params)
     |> json(record)
   end
 
-  @doc "PATCH /api/aggregates/${aggPlural}/:id"
+  @doc "PATCH /api/${aggPlural}/:id"
   def update_${aggSnake}(conn, %{"id" => id} = params) do
 ${wireInUpdate}    attrs = Map.drop(params, ["id"])
     record = ${contextModule}.update_${aggSnake}!(id, attrs)
     json(conn, record)
   end
 
-  @doc "DELETE /api/aggregates/${aggPlural}/:id"
+  @doc "DELETE /api/${aggPlural}/:id"
   def destroy_${aggSnake}(conn, %{"id" => id}) do
     ${contextModule}.destroy_${aggSnake}!(id)
     send_resp(conn, 204, "")
