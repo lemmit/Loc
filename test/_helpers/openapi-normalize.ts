@@ -42,9 +42,7 @@ function isInfraPath(p: string): boolean {
   // Phoenix's OpenApiSpex emitter doesn't surface them.  All three
   // back-ends serve the endpoints at runtime — we just filter them out
   // of the parity diff because they're infrastructure, not contract.
-  return (
-    p === "/health" || p === "/ready" || p === "/openapi.json" || p.startsWith("/swagger")
-  );
+  return p === "/health" || p === "/ready" || p === "/openapi.json" || p.startsWith("/swagger");
 }
 
 /**
