@@ -59,66 +59,9 @@ import type {
   WorkflowIR,
 } from "../../ir/loom-ir.js";
 import type { LoadedPack } from "../_packs/loader.js";
+import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { registerApiHook, tryDetectApiHook } from "./walker/api-hooks.js";
-import {
-  emitAction,
-  emitButton,
-  emitIdLink,
-  emitQueryView,
-  emitUserComponent,
-} from "./walker/primitives/controls.js";
-import { emitCodeBlock } from "./walker/primitives/code-block.js";
-import { emitIcon } from "./walker/primitives/icon.js";
-import {
-  emitAlert,
-  emitBadge,
-  emitBreadcrumbs,
-  emitDivider,
-  emitPaper,
-  emitSkeleton,
-  emitSlot,
-  emitStat,
-} from "./walker/primitives/display.js";
-import {
-  emitCreateForm,
-  emitModal,
-  emitOperationForm,
-  emitWorkflowForm,
-} from "./walker/primitives/forms.js";
-import {
-  emitField,
-  emitNumberField,
-  emitPasswordField,
-  emitToggle,
-} from "./walker/primitives/inputs.js";
-import {
-  emitCard,
-  emitContainer,
-  emitGrid,
-  emitGroup,
-  emitSection,
-  emitStack,
-  emitSticky,
-  emitTabs,
-  emitToolbar,
-} from "./walker/primitives/layout.js";
-import { emitTable } from "./walker/primitives/table.js";
-import {
-  emitAnchor,
-  emitAvatar,
-  emitBold,
-  emitDateDisplay,
-  emitEmpty,
-  emitEnumBadge,
-  emitHeading,
-  emitImage,
-  emitInlineCode,
-  emitItalic,
-  emitKeyValueRow,
-  emitLoader,
-  emitMoney,
-  emitText,
-} from "./walker/primitives/text.js";
+import { emitUserComponent } from "./walker/primitives/controls.js";
 import { describeReceiver, escapeJsxText, positionalArgs } from "./walker/shared/args.js";
 
 /** Per-source named-import map — `from` module → set of named
@@ -250,12 +193,25 @@ export interface ApiHookUse {
   argsRendered: string[];
 }
 
-/** Component names the walker recognises.  Used by the page
- *  emitter to fast-fail dispatch when a body is neither a scaffold
- *  archetype nor a layout primitive — those pages stay silent.
- *  Exported so the conformance completeness guard
+/** Component names the React walker accepts as the TOP-LEVEL `body:`
+ *  of a page or component.  Used by `isWalkableLayoutBody` to fast-
+ *  fail dispatch when a body is neither a scaffold archetype nor a
+ *  layout primitive — those pages stay silent.  Exported so the
+ *  conformance completeness guard
  *  (`test/conformance/showcase-completeness.test.ts`) can assert the
- *  showcase fixture exercises every walker primitive. */
+ *  showcase fixture exercises every walker primitive.
+ *
+ *  Note: this is a STRICT SUBSET of the registry's layout-group TSX
+ *  renderers — `Action` and a few others (`For`, `List`, `Detail`,
+ *  `MasterDetail`) have valid TSX renderers but are not meaningful
+ *  as top-level page bodies (Action is a button child of a Toolbar;
+ *  the archetype names lower to `custom` page origins instead of
+ *  driving the walker).  Kept as a hand-list so editing one
+ *  primitive in the registry doesn't accidentally promote it to
+ *  page-body-eligible.  The completeness test
+ *  (`test/language/walker-stdlib-completeness.test.ts`) pins the
+ *  language-side admissibility sets against the registry; this set
+ *  is a different concern (page-body eligibility) and stays here. */
 export const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Stack",
   "Group",
@@ -700,118 +656,35 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
 }
 
 function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
-  switch (call.name) {
-    case "Stack":
-      return emitStack(call, ctx, depth);
-    case "Group":
-      return emitGroup(call, ctx, depth);
-    case "Grid":
-      return emitGrid(call, ctx, depth);
-    case "Container":
-      return emitContainer(call, ctx, depth);
-    case "Section":
-      return emitSection(call, ctx, depth);
-    case "Sticky":
-      return emitSticky(call, ctx, depth);
-    case "Tabs":
-      return emitTabs(call, ctx, depth);
-    case "Table":
-      return emitTable(call, ctx, depth);
-    case "Money":
-      return emitMoney(call, ctx, depth);
-    case "DateDisplay":
-      return emitDateDisplay(call, ctx, depth);
-    case "EnumBadge":
-      return emitEnumBadge(call, ctx, depth);
-    case "IdLink":
-      return emitIdLink(call, ctx, depth);
-    case "CreateForm":
-      return emitCreateForm(call, ctx, depth);
-    case "OperationForm":
-      return emitOperationForm(call, ctx, depth);
-    case "WorkflowForm":
-      return emitWorkflowForm(call, ctx, depth);
-    case "Breadcrumbs":
-      return emitBreadcrumbs(call, ctx, depth);
-    case "Paper":
-      return emitPaper(call, ctx, depth);
-    case "Skeleton":
-      return emitSkeleton(call, ctx, depth);
-    case "Alert":
-      return emitAlert(call, ctx, depth);
-    case "QueryView":
-      return emitQueryView(call, ctx, depth);
-    case "KeyValueRow":
-      return emitKeyValueRow(call, ctx, depth);
-    case "Toolbar":
-      return emitToolbar(call, ctx, depth);
-    case "Empty":
-      return emitEmpty(call, ctx, depth);
-    case "Field":
-      return emitField(call, ctx, depth);
-    case "NumberField":
-      return emitNumberField(call, ctx, depth);
-    case "PasswordField":
-      return emitPasswordField(call, ctx, depth);
-    case "Toggle":
-      return emitToggle(call, ctx, depth);
-    case "Loader":
-      return emitLoader(call, ctx, depth);
-    case "Anchor":
-      return emitAnchor(call, ctx, depth);
-    case "Image":
-      return emitImage(call, ctx, depth);
-    case "Avatar":
-      return emitAvatar(call, ctx, depth);
-    case "Slot":
-      return emitSlot(call, ctx, depth);
-    case "Heading":
-      return emitHeading(call, ctx, depth);
-    case "Text":
-      return emitText(call, ctx, depth);
-    case "Bold":
-      return emitBold(call, ctx, depth);
-    case "Italic":
-      return emitItalic(call, ctx, depth);
-    case "InlineCode":
-      return emitInlineCode(call, ctx, depth);
-    case "Button":
-      return emitButton(call, ctx, depth);
-    case "Action":
-      return emitAction(call, ctx, depth);
-    case "Card":
-      return emitCard(call, ctx, depth);
-    case "Modal":
-      return emitModal(call, ctx, depth);
-    case "Stat":
-      return emitStat(call, ctx, depth);
-    case "Badge":
-      return emitBadge(call, ctx, depth);
-    case "Divider":
-      return emitDivider(call, ctx, depth);
-    case "CodeBlock":
-      return emitCodeBlock(call, ctx, depth);
-    case "Icon":
-      return emitIcon(call, ctx, depth);
-    default: {
-      // Names not in the stdlib dispatch table fall
-      // through to user-component invocation when they match a
-      // registered ComponentIR.
-      if (ctx.userComponents.has(call.name)) {
-        return emitUserComponent(call, ctx, depth);
-      }
-      // UI-declared helper imports (`import helper
-      // <name> from "..."`) emit as plain JS calls in JSX-child
-      // position (brace-wrapped).  The shell adds the matching
-      // import line once `usedHelpers` is populated.
-      if (ctx.helperImports.has(call.name)) {
-        ctx.usedHelpers.add(call.name);
-        const args = call.args.map((a) => emitExpr(a, ctx)).join(", ");
-        return `{${call.name}(${args})}`;
-      }
-      return `{/* unknown layout component: ${call.name} */}`;
-    }
+  // Typed walker-primitive dispatch — the registry at
+  // src/generator/_walker/registry.ts owns the per-target renderer
+  // table.  Adding a primitive is one edit there (plus the renderer
+  // function); the language-side admissibility sets are pinned to
+  // the same registry by the completeness test.
+  const def = WALKER_PRIMITIVES[call.name];
+  if (def?.tsx) return def.tsx(call, ctx, depth);
+  // Names not in the stdlib dispatch table fall through to user-
+  // component invocation when they match a registered ComponentIR.
+  if (ctx.userComponents.has(call.name)) {
+    return emitUserComponent(call, ctx, depth);
   }
+  // UI-declared helper imports (`import helper <name> from "..."`)
+  // emit as plain JS calls in JSX-child position (brace-wrapped).
+  // The shell adds the matching import line once `usedHelpers` is
+  // populated.
+  if (ctx.helperImports.has(call.name)) {
+    ctx.usedHelpers.add(call.name);
+    const args = call.args.map((a) => emitExpr(a, ctx)).join(", ");
+    return `{${call.name}(${args})}`;
+  }
+  // Registered primitive without a TSX renderer (e.g. `For`, `List`,
+  // `Detail` — source-admissible but unimplemented by the React
+  // walker).  Surface a comment so the gap is visible in generated
+  // output rather than silently producing nothing useful.
+  if (def) {
+    return `{/* ${call.name}: not supported by the React walker yet */}`;
+  }
+  return `{/* unknown layout component: ${call.name} */}`;
 }
 
 // Layout primitives (Stack, Group, Grid, Container, Tabs) live in
