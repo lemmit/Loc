@@ -27,6 +27,7 @@ import {
   stringNamed,
   unwrapTextLiteral,
 } from "../shared/args.js";
+import { tsxTarget } from "../tsx-target.js";
 
 export function emitIdLink(
   call: ExprIR & { kind: "call" },
@@ -192,10 +193,16 @@ export function emitAction(
 }
 
 /** Render an `Action`'s `then:` effect — the JS run after the
- *  mutation resolves.  `navigate(<Page>, { …params })` lowers to a
- *  React-Router `navigate("/<page-snake>", { state: { … } })` call
- *  (the page-ref → route slug derivation mirrors the Phoenix walker);
- *  any other expression falls through to `emitExpr`. */
+ *  mutation resolves.  `navigate(<Page>, { …params })` delegates
+ *  to `tsxTarget.renderNavigate` (cross-framework contract — see
+ *  src/generator/_walker/target.ts); any other expression falls
+ *  through to `emitExpr`.
+ *
+ *  The page-ref → route slug derivation stays walker-local (it
+ *  reads `ctx.pageRoutes` which is a walker concern); the contract
+ *  consumes a pre-resolved route template.  The `usesNavigate`
+ *  side-effect (drives the shell's `useNavigate` import) also stays
+ *  walker-local. */
 function emitActionThen(then: ExprIR, ctx: WalkContext): string {
   if (then.kind === "call" && then.name === "navigate") {
     const pageRef = then.args[0];
@@ -205,10 +212,13 @@ function emitActionThen(then: ExprIR, ctx: WalkContext): string {
         : "/";
     ctx.usesNavigate = true;
     const stateArg = then.args[1];
-    if (stateArg) {
-      return `navigate(${JSON.stringify(route)}, { state: ${emitExpr(stateArg, ctx)} })`;
-    }
-    return `navigate(${JSON.stringify(route)})`;
+    // Source's second arg is rendered as an opaque expression
+    // (`navigate(Page, someRef)` / `navigate(Page, computeState())`).
+    // The contract's `stateExpr` escape hatch wraps it as the
+    // `state:` value verbatim; the args[] path is reserved for the
+    // future kv-decomposed shape.
+    const stateExpr = stateArg ? emitExpr(stateArg, ctx) : undefined;
+    return tsxTarget.renderNavigate(route, [], stateExpr);
   }
   return emitExpr(then, ctx);
 }

@@ -129,7 +129,15 @@ export const heexTarget: WalkerTarget = {
   renderNavigate(
     routeTemplate: string,
     args: ReadonlyArray<{ name: string; value: string }>,
+    _stateExpr?: string,
   ): string {
+    // HEEx cannot embed an arbitrary expression into a `~p` sigil's
+    // query string — the sigil is compile-time interpolated against
+    // a known route template.  When the contract supplies
+    // `stateExpr` (TSX escape hatch), Phoenix falls back to the
+    // args-empty `push_navigate`; the source's pre-built state
+    // object is opaque to the route.  Callers needing a richer
+    // shape route through `handle_event` instead.
     if (args.length === 0) {
       return `push_navigate(socket, to: ~p"${routeTemplate}")`;
     }
