@@ -181,6 +181,97 @@ export function normalisePath(p: string): string {
 }
 
 /**
+ * Resolve a schema reference to its component name.  Returns the bare
+ * `<Name>` from `#/components/schemas/<Name>` (the OpenAPI 3 convention
+ * all three backends emit), or `null` for non-component refs (inline
+ * schemas, malformed `$ref`).  Used by `requestBodySchemas` /
+ * `responseBodySchemas` to surface schema-binding drift between
+ * backends.
+ */
+function schemaRefName(
+  schema: { $ref?: string; type?: string; items?: { $ref?: string } } | undefined,
+): string | null {
+  if (!schema) return null;
+  // Direct ref: response body schema points at a named component.
+  if (schema.$ref) {
+    const m = schema.$ref.match(/^#\/components\/schemas\/(.+)$/);
+    return m ? (m[1] ?? null) : null;
+  }
+  // Array wrapper: `{ type: array, items: { $ref: ... } }`.  Annotated
+  // with the array marker so the diff distinguishes single-item from
+  // collection bodies at a glance (`array<ProjectResponse>` reads
+  // differently from `ProjectResponse`).
+  if (schema.type === "array" && schema.items?.$ref) {
+    const m = schema.items.$ref.match(/^#\/components\/schemas\/(.+)$/);
+    return m ? `array<${m[1]}>` : null;
+  }
+  // Inline / non-ref shape: no single schema name to compare.
+  return null;
+}
+
+/**
+ * Per-operation request body schema reference.  Maps each op to the
+ * component schema its `requestBody` points at — `CreateProductRequest`,
+ * `RenameRequest`, etc.  Drift here catches the case where two backends
+ * agree the op exists and accepts a body, but disagree on which schema
+ * the body conforms to (e.g., one wired to `CreateProductRequest`, the
+ * other accidentally to `UpdateProductRequest`).
+ *
+ * Ops with no request body get an empty-string entry; ops with an inline
+ * schema (not a `$ref`) get an empty string too — backends don't usually
+ * inline request schemas, so empty-vs-named drift is its own signal.
+ */
+export function requestBodySchemas(spec: OpenApiSpec): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [p, item] of Object.entries(spec.paths ?? {})) {
+    if (isInfraPath(p)) continue;
+    for (const [m, raw] of Object.entries(item)) {
+      const method = m.toUpperCase();
+      if (!HTTP_METHODS.includes(method)) continue;
+      const op = raw as {
+        requestBody?: {
+          content?: Record<string, { schema?: { $ref?: string; type?: string } }>;
+        };
+      };
+      const schema = op.requestBody?.content?.["application/json"]?.schema;
+      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema) ?? "");
+    }
+  }
+  return out;
+}
+
+/**
+ * Per-operation 2xx response body schema reference.  Complements
+ * `collectResponseShapes` (which classifies array/object/nullable) by
+ * also identifying WHICH named component the response references.  Two
+ * backends agreeing on "returns an array" but disagreeing on what's
+ * inside the array would be silently OK under cardinality alone; this
+ * makes the array element schema explicit (`array<ProjectResponse>`).
+ *
+ * Ops with no 2xx body or an inline schema get an empty-string entry.
+ */
+export function responseBodySchemas(spec: OpenApiSpec): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [p, item] of Object.entries(spec.paths ?? {})) {
+    if (isInfraPath(p)) continue;
+    for (const [m, raw] of Object.entries(item)) {
+      const method = m.toUpperCase();
+      if (!HTTP_METHODS.includes(method)) continue;
+      const op = raw as {
+        responses?: Record<
+          string,
+          { content?: Record<string, { schema?: { $ref?: string; type?: string } }> }
+        >;
+      };
+      const ok = op.responses?.["200"] ?? op.responses?.["201"];
+      const schema = ok?.content?.["application/json"]?.schema;
+      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema) ?? "");
+    }
+  }
+  return out;
+}
+
+/**
  * Per-operation path-parameter type signature.  Captures what
  * `normalisePath` deliberately discards (the actual parameter type +
  * format) so the parity diff can catch drift like:
@@ -270,6 +361,16 @@ export interface ParityDiff {
    * backend declares `{type: string}`, another `{type: string, format:
    * uuid}`). */
   paramTypeDiffs: string[];
+  /** Per-op request-body schema drift on the intersection — two
+   * backends agreeing the op exists but pointing the body at
+   * different component schemas (e.g. `CreateProductRequest` vs
+   * `UpdateProductRequest`). */
+  requestBodyDiffs: string[];
+  /** Per-op response-body schema drift on the intersection — e.g.
+   * `array<ProjectResponse>` vs `array<ProjectListItem>`.  Complements
+   * `cardMismatches` (which catches array-vs-object drift) by also
+   * catching same-cardinality, different-payload drift. */
+  responseBodyDiffs: string[];
 }
 
 /**
@@ -351,6 +452,39 @@ export function diffSpecs(
     }
   }
 
+  // Per-op request-body schema-ref drift.  Catches "op exists on both
+  // sides but each points its body at a different component schema" —
+  // a class of mistake the schema-set + per-schema field diffs can't
+  // detect because both schemas exist and both are internally fine.
+  const refRequest = requestBodySchemas(ref.spec);
+  const otherRequest = requestBodySchemas(other.spec);
+  const requestBodyDiffs: string[] = [];
+  for (const op of refRequest.keys()) {
+    if (!otherRequest.has(op)) continue;
+    const r = refRequest.get(op) ?? "";
+    const o = otherRequest.get(op) ?? "";
+    if (r !== o) {
+      requestBodyDiffs.push(`${op}: ${ref.name}=${r || "(none)"}, ${other.name}=${o || "(none)"}`);
+    }
+  }
+
+  // Per-op response-body schema-ref drift.  Complements cardMismatches
+  // (which catches array-vs-object) by also catching same-cardinality,
+  // different-payload drift (e.g. `array<ProjectResponse>` vs
+  // `array<Project>` — identical cardinality, drift in the element
+  // type).
+  const refResponse = responseBodySchemas(ref.spec);
+  const otherResponse = responseBodySchemas(other.spec);
+  const responseBodyDiffs: string[] = [];
+  for (const op of refResponse.keys()) {
+    if (!otherResponse.has(op)) continue;
+    const r = refResponse.get(op) ?? "";
+    const o = otherResponse.get(op) ?? "";
+    if (r !== o) {
+      responseBodyDiffs.push(`${op}: ${ref.name}=${r || "(none)"}, ${other.name}=${o || "(none)"}`);
+    }
+  }
+
   return {
     refName: ref.name,
     otherName: other.name,
@@ -362,6 +496,8 @@ export function diffSpecs(
     fieldDiffs,
     requiredDiffs,
     paramTypeDiffs,
+    requestBodyDiffs,
+    responseBodyDiffs,
   };
 }
 
@@ -375,6 +511,8 @@ export function isCleanDiff(diff: ParityDiff): boolean {
     diff.onlySchemasOther.length === 0 &&
     diff.fieldDiffs.length === 0 &&
     diff.requiredDiffs.length === 0 &&
-    diff.paramTypeDiffs.length === 0
+    diff.paramTypeDiffs.length === 0 &&
+    diff.requestBodyDiffs.length === 0 &&
+    diff.responseBodyDiffs.length === 0
   );
 }
