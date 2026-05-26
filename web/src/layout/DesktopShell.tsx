@@ -1,5 +1,5 @@
 import { Box, Group as MGroup, SegmentedControl, Text, UnstyledButton } from "@mantine/core";
-import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 
 // The visual Builder pulls in craft.js + a main-thread Langium parse; lazily
 // loaded so neither lands in the main chunk until the Builder tab is opened.
@@ -124,6 +124,16 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
   const leftRef = usePanelRef();
   const rightRef = usePanelRef();
   const bottomRef = usePanelRef();
+  // Lazy-mount-then-keep for the Builder pane: false until the user first
+  // opens the Builder tab, then permanently true so the builder mounts
+  // once and stays mounted via a display toggle (preserving craft state
+  // + powering the live re-seed across tab switches).  Same flag pattern
+  // could apply to the Model panes but isn't needed yet.
+  const [builderEverMounted, setBuilderEverMounted] = useState(centerView === "builder");
+  useEffect(() => {
+    if (centerView === "builder") setBuilderEverMounted(true);
+  }, [centerView]);
+
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [bottomCollapsed, setBottomCollapsed] = useState(false);
@@ -264,10 +274,14 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                   <Box style={{ flex: 1, minHeight: 0, display: centerView === "source" ? "flex" : "none" }}>
                     <EditorPane ctx={ctx} />
                   </Box>
-                  {/* Mounted only while active so it re-parses the current
-                      source on each switch (vs the editor's display-toggle). */}
-                  {centerView === "builder" && (
-                    <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
+                  {/* Lazy-mounted on first activation, then kept mounted via
+                      a display toggle (same pattern as the editor above) so
+                      the builder's craft state — the current selection, the
+                      open settings inputs — survives a tab switch.  This is
+                      also what lets the debounced text→canvas live re-seed
+                      pick up edits the user makes in the Source tab. */}
+                  {builderEverMounted && (
+                    <Box style={{ flex: 1, minHeight: 0, display: centerView === "builder" ? "flex" : "none" }}>
                       <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading builder…</Text></Box>}>
                         <BuilderPane ctx={ctx} />
                       </Suspense>

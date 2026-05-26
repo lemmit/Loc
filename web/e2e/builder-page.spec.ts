@@ -509,3 +509,79 @@ test("structures a navigate() statement with a target-page picker", async ({ pag
   await expect.poll(model).toContain("navigate(Console)");
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+// ---------------------------------------------------------------------------
+// Continuous text→canvas live sync.  Today re-seeds on tab activation; the
+// live-sync path debounces source-tab edits (~350ms) and re-seeds in place
+// (craft `actions.deserialize`), preserving the current canvas selection by
+// its structural path through the body tree.
+// ---------------------------------------------------------------------------
+
+const LIVE_SYNC_SOURCE = `system S {
+  ui U {
+    page P {
+      body: Stack {
+        Heading { "Original" },
+        Text { "Sibling" }
+      }
+    }
+  }
+}`;
+
+test("live sync — text edit in Source reflects on the canvas without losing selection", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await setSource(page, LIVE_SYNC_SOURCE);
+
+  // Open the builder once so it mounts; from this point it stays mounted
+  // (display toggle) so the live re-seed has a craft Editor to drive.
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // Select the sibling Text; its data-selected attribute drives the test
+  // assertion below (we don't need to look at the outline colour).
+  const sibling = page.getByTestId("c4node-Text").filter({ hasText: "Sibling" });
+  await sibling.first().click();
+  await expect(sibling.first()).toHaveAttribute("data-selected", "1");
+
+  // Switch to the source tab and edit just the heading's literal — a
+  // text-only edit that doesn't reshape the tree, so the sibling Text
+  // stays at the same structural path (the live sync's selection-
+  // preservation path resolves it in the re-seeded tree).
+  const newSource = LIVE_SYNC_SOURCE.replace('"Original"', '"Updated heading"');
+  await setSource(page, newSource);
+
+  // Back to the builder.  Within the debounce window the canvas re-seeds
+  // and shows the new heading text; the sibling Text is still selected.
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4node-Heading").filter({ hasText: "Updated heading" }).first()).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByTestId("c4node-Text").filter({ hasText: "Sibling" }).first()).toHaveAttribute("data-selected", "1");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
+test("live sync — typing in Source updates the canvas without re-creating nodes (selection survives)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await setSource(page, LIVE_SYNC_SOURCE);
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // Select the Heading this time (a nested child of Stack).
+  const heading = page.getByTestId("c4node-Heading").filter({ hasText: "Original" });
+  await heading.first().click();
+  await expect(heading.first()).toHaveAttribute("data-selected", "1");
+
+  // Edit the Text's literal in source (tree shape unchanged, only a leaf's
+  // string-literal content flips) — the selected Heading stays at its
+  // path through the tree, so it survives the re-seed selected.
+  const newSource = LIVE_SYNC_SOURCE.replace('"Sibling"', '"Sibling EDITED"');
+  await setSource(page, newSource);
+
+  await page.getByTestId("doc-tab-builder").click();
+  // Sibling Text reflects the new content...
+  await expect(page.getByTestId("c4node-Text").filter({ hasText: "Sibling EDITED" }).first()).toBeVisible({ timeout: 5_000 });
+  // ...and the selection is still on the original Heading.
+  await expect(page.getByTestId("c4node-Heading").filter({ hasText: "Original" }).first()).toHaveAttribute("data-selected", "1");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});

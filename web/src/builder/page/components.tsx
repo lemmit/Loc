@@ -117,7 +117,7 @@ function makeContainer(name: PrimitiveName): ComponentType<{ children?: ReactNod
       .map(String);
     const diag = props.__diag ? String(props.__diag) : undefined;
     return (
-      <div ref={ref} data-testid={`c4node-${name}`} title={diag} data-diag={diag ? "1" : undefined} style={{ ...boxStyle(selected, diag != null), background: "var(--mantine-color-dark-6)" }}>
+      <div ref={ref} data-testid={`c4node-${name}`} title={diag} data-diag={diag ? "1" : undefined} data-selected={selected ? "1" : undefined} style={{ ...boxStyle(selected, diag != null), background: "var(--mantine-color-dark-6)" }}>
         <div style={{ fontSize: 10, color: "var(--mantine-color-dimmed)", marginBottom: 4 }}>
           {extras.length ? `${name}: ${extras.join(" · ")}` : name}
         </div>
@@ -142,7 +142,7 @@ function makeLeaf(name: PrimitiveName): ComponentType<Props> {
     const { ref, selected } = useBox();
     const diag = props.__diag ? String(props.__diag) : undefined;
     return (
-      <div ref={ref} data-testid={`c4node-${name}`} title={diag} data-diag={diag ? "1" : undefined} style={boxStyle(selected, diag != null)}>
+      <div ref={ref} data-testid={`c4node-${name}`} title={diag} data-diag={diag ? "1" : undefined} data-selected={selected ? "1" : undefined} style={boxStyle(selected, diag != null)}>
         {renderLeaf(name, props as Props)}
         {children}
       </div>
@@ -169,7 +169,7 @@ export function Opaque({ raw }: { raw?: string }): JSX.Element {
   const { ref, selected, props } = useBox();
   const diag = props.__diag ? String(props.__diag) : undefined;
   return (
-    <div ref={ref} data-testid="c4node-Opaque" title={diag} data-diag={diag ? "1" : undefined} style={{ ...boxStyle(selected, diag != null), fontFamily: "monospace", fontSize: 11, color: "var(--mantine-color-dimmed)", whiteSpace: "pre-wrap" }}>
+    <div ref={ref} data-testid="c4node-Opaque" title={diag} data-diag={diag ? "1" : undefined} data-selected={selected ? "1" : undefined} style={{ ...boxStyle(selected, diag != null), fontFamily: "monospace", fontSize: 11, color: "var(--mantine-color-dimmed)", whiteSpace: "pre-wrap" }}>
       {raw || "…"}
     </div>
   );

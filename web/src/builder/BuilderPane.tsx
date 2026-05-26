@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Group, Text } from "@mantine/core";
 import { AstUtils } from "langium";
 import type { SerializedNodes } from "@craftjs/core";
@@ -117,10 +117,47 @@ function annotateDiagnostics(tree: BuilderNode, diagnostics: readonly { range: {
   }
 }
 
+// Debounce window for the text→canvas live re-seed.  300ms is the lower
+// bound the task gave; long enough to coalesce a typing storm in Monaco,
+// short enough that an edit feels "live" to the user watching the canvas.
+const LIVE_SYNC_DEBOUNCE_MS = 350;
+
 export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // Bumped on Apply to re-read the (mutated) source and re-seed the canvas.
   const [rev, setRev] = useState(0);
-  const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
+  // Debounced mirror of `ctx.editorSourceTick`.  Bumped after the user
+  // has stopped typing for `LIVE_SYNC_DEBOUNCE_MS`; that drives the live
+  // canvas re-seed (separate from `rev`, which is the Apply-path counter
+  // that fully remounts the craft Editor — the live path mustn't remount,
+  // or the user's selection / open inputs would tear down).
+  //
+  // The very first editor tick observed by this BuilderPane instance is
+  // captured in `firstSeenTickRef` and ignored: the initial canvas seed
+  // already reflects whatever source the user typed before opening the
+  // builder, so re-running the seed on that pre-mount tick would clobber
+  // a selection / settings-panel edit the user started during the
+  // debounce window after switching tabs.  Only ticks that *advance*
+  // beyond that baseline schedule a re-seed.
+  const [liveTick, setLiveTick] = useState(0);
+  const firstSeenTickRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (firstSeenTickRef.current === null) {
+      firstSeenTickRef.current = ctx.editorSourceTick;
+      return;
+    }
+    if (ctx.editorSourceTick <= firstSeenTickRef.current) return;
+    const t = window.setTimeout(() => setLiveTick((n) => n + 1), LIVE_SYNC_DEBOUNCE_MS);
+    return () => window.clearTimeout(t);
+  }, [ctx.editorSourceTick]);
+  // `rev` re-reads on Apply (full remount); `liveTick` re-reads on the
+  // debounced editor change (in-place re-seed inside PageBuilder).  Don't
+  // depend on `ctx` here — ctx is a fresh object every App render, but the
+  // underlying source only changes when one of these counters bumps, and
+  // re-parsing on every render makes `liveNodes` a new reference each
+  // time, which would echo into a deserialize that clobbers the user's
+  // in-flight settings-panel edits.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const parsed = useMemo(() => parseDdd(ctx.getSource()), [rev, liveTick]);
   const pages = useMemo(() => collectBodies(parsed.ast), [parsed]);
   const options = useMemo(() => collectOptions(parsed.ast), [parsed]);
   const operations = useMemo(() => collectOperations(parsed.ast), [parsed]);
@@ -148,15 +185,59 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     return ctx.diagnostics.filter((d) => d.range.start.line <= r.end.line && d.range.end.line >= r.start.line);
   }, [ctx.diagnostics, current]);
 
-  const initialNodes = useMemo<SerializedNodes | null>(
+  // The canvas seed for the *current* parse.  Diagnostics are annotated
+  // afterwards on a clone — we deliberately keep them **out** of the
+  // memo's dependency set so the seed's reference is stable across
+  // diagnostic refreshes (which the LSP runs out-of-band of source
+  // changes).  Otherwise every diagnostic refresh would cause the
+  // LiveSync deserialize to fire and clobber the user's in-flight
+  // settings-panel edits.
+  const seedNodes = useMemo<SerializedNodes | null>(
     () => {
       if (!current) return null;
+      return toCraft(seedFromBody(current.expr, components));
+    },
+    [current, components],
+  );
+  // Diagnostics overlay — annotate a separate copy so it doesn't disturb
+  // the canonical seed.  `initialNodes` (below) is what `<Frame>` consumes,
+  // and craft only honours its initial value, so a diagnostic-only refresh
+  // doesn't reach the canvas — that's acceptable: the diagnostics bar at
+  // the top of the canvas (separate component) updates immediately, and
+  // per-node red outlines surface on the next live re-seed / Apply.
+  const annotatedNodes = useMemo<SerializedNodes | null>(
+    () => {
+      if (!current || !seedNodes) return null;
       const tree = seedFromBody(current.expr, components);
       annotateDiagnostics(tree, bodyDiagnostics);
       return toCraft(tree);
     },
-    [current, components, bodyDiagnostics],
+    [current, components, seedNodes, bodyDiagnostics],
   );
+
+  // `initialNodes` is the **first** seed for the current Editor mount (i.e.
+  // the current page + Apply-rev pair).  It's what `<Frame data={...}>`
+  // consumes; craft ignores subsequent `data` changes, so a live re-seed
+  // can't go through here — see `liveNodes` below.  We snapshot the very
+  // first non-null annotated seed and pin it via a ref so live updates
+  // don't bleed into the Frame's data and trigger a Frame remount.
+  const mountKey = `${current?.name ?? ""}:${rev}`;
+  const initialNodesRef = useRef<{ key: string; nodes: SerializedNodes } | null>(null);
+  if (annotatedNodes && initialNodesRef.current?.key !== mountKey) {
+    initialNodesRef.current = { key: mountKey, nodes: annotatedNodes };
+  }
+  const initialNodes = initialNodesRef.current?.key === mountKey ? initialNodesRef.current.nodes : null;
+  // `liveNodes` is the *current* seed (no diagnostic overlay — see the
+  // memo above), refreshed only when the source actually changed.  Passed
+  // to PageBuilder's `LiveSync` child, which calls
+  // `actions.deserialize(...)` in-place (preserving the user's selection
+  // across the re-seed).
+  //
+  // `liveNodes` follows `seedNodes` once any source change has landed
+  // after mount; until then it points at `initialNodes` so a deserialize
+  // can't fire spuriously.  The `firstSeenTickRef` guard above ensures
+  // the first liveTick bump after mount is one we actually want.
+  const liveNodes = liveTick > 0 ? seedNodes : initialNodes;
 
   if (parsed.parserErrors.length > 0) {
     return <Message>Source has syntax errors — fix them in the editor to use the builder.</Message>;
@@ -186,6 +267,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         <PageBuilder
           key={`${current.name}:${rev}`}
           initialNodes={initialNodes}
+          liveNodes={liveNodes ?? initialNodes}
           pages={pages.map((p) => p.name)}
           pageName={current.name}
           options={options}

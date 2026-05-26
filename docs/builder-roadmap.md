@@ -115,6 +115,19 @@ text stays the source of truth.
   bottom drawers, reached via the consolidated Code tab's SegmentedControl
   (`PageBuilder.tsx` / `SystemBuilderPane.tsx`, `ctx.isDesktop`). Gated by
   `web/e2e/mobile-builder.spec.ts`.
+- **Continuous text→canvas live sync**: a debounced (~350ms) re-seed wired off
+  a new `ctx.editorSourceTick` counter (bumped only on `origin === "editor"`
+  edits — builder Apply doesn't echo-loop). BuilderPane now stays mounted via
+  a display toggle (same pattern the editor uses) so a tab switch doesn't tear
+  craft state down, and a `<LiveSync>` child inside the craft `<Editor>`
+  captures the active selection's **structural path** (chain of child indices
+  through the body tree), calls `actions.deserialize(seed)` in-place, and
+  re-selects the node at the same path in the new seed; an unresolvable path
+  (the source change moved or removed that node) clears the selection rather
+  than erroring. Pure `findNodeAtPath` / `pathOfNode` helpers in
+  `web/src/builder/page/live-sync.ts`; gated by
+  `test/generator/builder-page-live-sync.test.ts` and two e2es in
+  `web/e2e/builder-page.spec.ts` ("live sync — …").
 
 ## Open — expression / domain-logic surface
 
@@ -143,8 +156,8 @@ text stays the source of truth.
 
 ## Open — editing UX
 
-- **Continuous text→canvas live sync** (today re-seeds on tab switch, not per
-  keystroke) — needs debounce + canvas selection preservation.
+Done: **Continuous text→canvas live sync** — see Done above (debounce + path-
+keyed selection preservation, BuilderPane kept mounted via display toggle).
 
 Done: **drag-to-add / drag-reorder** — palette items wire craft's `create`
 connector (drag onto a canvas to create; click still adds to the selected/top
