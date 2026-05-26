@@ -843,3 +843,102 @@ or not.
   (`aggWithDerived` local).  Also: filter `inspect` out of the
   wire-fields loop so even user-written `derived inspect` doesn't
   leak to DTOs.
+
+## Cross-generator conformance harness (parity follow-ups)
+
+The 3-way OpenAPI parity test (`test/e2e/e2e.test.ts`,
+`test/_helpers/openapi-normalize.ts`) landed in #401 as REPORT-ONLY:
+each Phoenix↔Hono / Phoenix↔.NET / Hono↔.NET diff was logged but the
+job stayed green.  Closing the showcase divergences took four
+sequenced PRs (A → D) plus three side fixes; each surfaced a category
+of footgun worth documenting.
+
+- **Layered failures stay hidden behind earlier blockers.**
+  PR #524 hard-broke the `Property` grammar's `display` modifier but
+  missed migrating `examples/showcase.ddd` (added 12 min earlier in
+  #401) and an inline fixture in `phoenix-build.yml`.  Both files
+  parsed-error at `node bin/cli.js generate`, so every downstream
+  failure was invisible.  Fix in #529 + #541.  Lesson: a hard grammar
+  break needs a corpus sweep, not just an "in-tree fixtures
+  migrated" claim.  Cheap mitigation: run `bin/cli.js parse <file>`
+  across every `.ddd` in the repo (incl. workflow inline heredocs)
+  in the same commit that changes a Property production.
+
+- **`mix compile --warnings-as-errors` makes every warning a release
+  gate.**  Once #541 unblocked the parse step, the Phoenix
+  workflow's strict-mode compile surfaced two real warnings that
+  blocked every PR touching the generator:
+
+  1. `Igniter.Inflex.{pluralize,singularize}/1` + `Owl.IO.input/1`
+     undefined.  `ash_postgres`'s `lib/resource_generator/spec.ex`
+     references these at compile time; they're optional deps for
+     `mix ash_postgres.gen.resources` and don't get pulled by
+     `mix deps.get --only prod`.  Fix in #546: declare them in the
+     generated `mix.exs` with `runtime: false` — resolves the
+     references without inflating the application start sequence.
+
+  2. `redefining module Inspect.<App>.<Ctx>.<Agg>`.  PR #537 emitted
+     a `defimpl Inspect, for: <Module>` after each resource's
+     `defmodule` close to render the synthesised `derived inspect`
+     body.  `use Ash.Resource` already emits an `Inspect` impl for
+     the resource struct; the two collide at compile time.  The
+     final fix routes the expression body through a public
+     `def inspect(record)` **module function** on the resource
+     (`MyApp.Catalog.Customer.inspect/1`) rather than the Inspect
+     protocol — different namespace, same body, no collision.  IEx
+     / Logger keep Ash's struct Inspect output; callers wanting the
+     custom string invoke `<Mod>.inspect(record)` explicitly (the
+     same call shape .NET's `ToString()` / TS's `toString()` use).
+
+  Lesson on protocols: when adding an explicit `defimpl Protocol,
+  for: <Struct>` to a struct produced by a macro you don't control,
+  test against `--warnings-as-errors` BEFORE committing to that
+  protocol surface.  Picking a NON-protocol channel (here: a regular
+  module function) when the macro-controlled struct owns the
+  protocol slot sidesteps the entire collision class.
+
+- **Plug router syntax (`:id`) vs OpenAPI path-template syntax
+  (`{id}`) are different.**  The OpenApiSpex emitter happily renders
+  `"/<plural>/:id"` as a path key — valid Elixir, invalid OpenAPI 3.
+  Hono and .NET both emit `{id}`, so the parity harness reports a
+  full set of "ops only on phoenix" / "ops missing on phoenix"
+  even though the same operation exists on both sides.  Fix in #540:
+  use `{id}` in the OpenAPI spec, keep `:id` in `router.ex`.
+  Lesson: an OpenAPI emitter is documenting an HTTP contract, not
+  the router's internal pattern — the two namespaces happen to
+  overlap visually but follow different rules.
+
+- **Runtime wire shape ≠ OpenAPI spec property names.**  PR C
+  (#544) added a per-resource `defimpl Jason.Encoder` that camelizes
+  atom keys at runtime — `created_at` → `createdAt` on the wire.
+  But `openapi-emit.ts` still snake-cased property names in the
+  spec, advertising `created_at` to clients while the response said
+  `createdAt`.  Strict parity caught it as a field-set drift.
+  Fix in C's follow-up commit: emit the source-level (camelCase)
+  identifier as the OpenApiSpex property key.  Lesson: when two
+  emitters describe the same wire — one declarative (spec) and one
+  imperative (runtime) — they need to share the casing decision,
+  not converge accidentally.
+
+- **`/ready` is contract from .NET's POV, infrastructure from
+  Hono's.**  .NET's `app.MapGet("/ready", ...)` auto-registers the
+  endpoint in the OpenAPI document; Hono's `app.get(...)` skips
+  registration entirely (no `app.openapi(createRoute(...))`).
+  Same backend behaviour at runtime, different doc surface.  The
+  harness's `isInfraPath` filter excluded `/health` but not
+  `/ready`, so strict mode tripped on a benign divergence.  Fix in
+  D (#547): `/ready` joins `/health` in the infra filter.  Lesson:
+  the normalisation helper is the right place to encode "what's
+  PART of the contract" — the per-backend emitters shouldn't have
+  to coordinate on which endpoints to suppress from their specs.
+
+- **The 4-PR cadence (A → B → C → D) paid off.**  Each PR closed
+  one diff category in REPORT-ONLY mode; the D flip to
+  `LOOM_E2E_STRICT_PARITY=1` waited until the diff list was
+  literally empty across the showcase.  Sequencing rationale:
+  every intermediate PR has to keep the parity job green (in
+  report mode it always is), so the gate flip becomes a one-line
+  YAML change instead of a coordinated multi-PR merge.  Same
+  pattern works for any "log it now, gate it later" rollout —
+  the report-only phase doubles as a regression baseline.
+
