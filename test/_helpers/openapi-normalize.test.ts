@@ -8,6 +8,7 @@ import {
   isCleanDiff,
   normalisePath,
   type OpenApiSpec,
+  operationIds,
   pathParamSignatures,
   requestBodySchemas,
   requiredSet,
@@ -310,6 +311,7 @@ describe("openapi-normalize", () => {
       expect(diff.paramTypeDiffs).toEqual([]);
       expect(diff.requestBodyDiffs).toEqual([]);
       expect(diff.responseBodyDiffs).toEqual([]);
+      expect(diff.operationIdDiffs).toEqual([]);
       expect(isCleanDiff(diff)).toBe(true);
     });
 
@@ -667,6 +669,69 @@ describe("openapi-normalize", () => {
       expect(diff.requestBodyDiffs).toEqual([
         "POST /products: hono=CreateProductRequest, dotnet=(none)",
       ]);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // operationIds + operationIdDiffs dimension
+  // ---------------------------------------------------------------------
+
+  describe("operationIds + operationIdDiffs", () => {
+    const opWithId = (id: string | undefined): OpenApiSpec => ({
+      paths: {
+        "/products": {
+          get: {
+            ...(id !== undefined ? { operationId: id } : {}),
+            responses: { "200": { content: { "application/json": { schema: {} } } } },
+          },
+        },
+      },
+    });
+
+    it("operationIds extracts the declared id per op", () => {
+      const ids = operationIds(opWithId("listProducts"));
+      expect(ids.get("GET /products")).toBe("listProducts");
+    });
+
+    it("operationIds returns empty string when op omits operationId", () => {
+      const ids = operationIds(opWithId(undefined));
+      expect(ids.get("GET /products")).toBe("");
+    });
+
+    it("operationIds skips infra paths (/health, /openapi.json, /swagger)", () => {
+      const spec: OpenApiSpec = {
+        paths: {
+          "/health": { get: { operationId: "healthcheck" } },
+          "/products": { get: { operationId: "listProducts" } },
+        },
+      };
+      const ids = operationIds(spec);
+      expect(ids.has("GET /health")).toBe(false);
+      expect(ids.get("GET /products")).toBe("listProducts");
+    });
+
+    it("diffSpecs flags operationId drift between backends", () => {
+      const ref = opWithId("listProducts");
+      const other = opWithId("getAllProducts");
+      const diff = diffSpecs({ name: "hono", spec: ref }, { name: "dotnet", spec: other });
+      expect(diff.operationIdDiffs).toEqual([
+        "GET /products: hono=listProducts, dotnet=getAllProducts",
+      ]);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("diffSpecs surfaces (none) when one side omits operationId", () => {
+      const ref = opWithId("listProducts");
+      const other = opWithId(undefined);
+      const diff = diffSpecs({ name: "hono", spec: ref }, { name: "dotnet", spec: other });
+      expect(diff.operationIdDiffs).toEqual(["GET /products: hono=listProducts, dotnet=(none)"]);
+    });
+
+    it("diffSpecs operationIdDiffs is empty when ids match", () => {
+      const ref = opWithId("listProducts");
+      const other = opWithId("listProducts");
+      const diff = diffSpecs({ name: "hono", spec: ref }, { name: "dotnet", spec: other });
+      expect(diff.operationIdDiffs).toEqual([]);
     });
   });
 });

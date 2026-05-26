@@ -241,6 +241,30 @@ export function requestBodySchemas(spec: OpenApiSpec): Map<string, string> {
 }
 
 /**
+ * Per-operation `operationId` string.  OpenAPI's operationId is the
+ * stable identifier client-codegen tools (NSwag, openapi-generator,
+ * Heyapi, etc.) use to name generated functions.  Drift here breaks
+ * codegen consumers that expect a stable handle even when paths or
+ * payloads change in compatible ways.
+ *
+ * Ops without an operationId get an empty string — surfaces as drift
+ * if one backend declares an id and another omits it.
+ */
+export function operationIds(spec: OpenApiSpec): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [p, item] of Object.entries(spec.paths ?? {})) {
+    if (isInfraPath(p)) continue;
+    for (const [m, raw] of Object.entries(item)) {
+      const method = m.toUpperCase();
+      if (!HTTP_METHODS.includes(method)) continue;
+      const op = raw as { operationId?: string };
+      out.set(`${method} ${normalisePath(p)}`, op.operationId ?? "");
+    }
+  }
+  return out;
+}
+
+/**
  * Per-operation 2xx response body schema reference.  Complements
  * `collectResponseShapes` (which classifies array/object/nullable) by
  * also identifying WHICH named component the response references.  Two
@@ -371,6 +395,11 @@ export interface ParityDiff {
    * `cardMismatches` (which catches array-vs-object drift) by also
    * catching same-cardinality, different-payload drift. */
   responseBodyDiffs: string[];
+  /** Per-op `operationId` drift on the intersection — the stable
+   * identifier client-codegen tools use to name generated functions.
+   * Drift here breaks consumers that key on the id (NSwag,
+   * openapi-generator, Heyapi). */
+  operationIdDiffs: string[];
 }
 
 /**
@@ -485,6 +514,23 @@ export function diffSpecs(
     }
   }
 
+  // Per-op operationId drift.  Same op on both sides, but each
+  // declares a different `operationId` — or one side omits it
+  // entirely.  Client-codegen tools (NSwag, openapi-generator)
+  // generate function names from this; drift here forces consumers
+  // to keep a per-backend rename table.
+  const refOpIds = operationIds(ref.spec);
+  const otherOpIds = operationIds(other.spec);
+  const operationIdDiffs: string[] = [];
+  for (const op of refOpIds.keys()) {
+    if (!otherOpIds.has(op)) continue;
+    const r = refOpIds.get(op) ?? "";
+    const o = otherOpIds.get(op) ?? "";
+    if (r !== o) {
+      operationIdDiffs.push(`${op}: ${ref.name}=${r || "(none)"}, ${other.name}=${o || "(none)"}`);
+    }
+  }
+
   return {
     refName: ref.name,
     otherName: other.name,
@@ -498,6 +544,7 @@ export function diffSpecs(
     paramTypeDiffs,
     requestBodyDiffs,
     responseBodyDiffs,
+    operationIdDiffs,
   };
 }
 
@@ -513,6 +560,7 @@ export function isCleanDiff(diff: ParityDiff): boolean {
     diff.requiredDiffs.length === 0 &&
     diff.paramTypeDiffs.length === 0 &&
     diff.requestBodyDiffs.length === 0 &&
-    diff.responseBodyDiffs.length === 0
+    diff.responseBodyDiffs.length === 0 &&
+    diff.operationIdDiffs.length === 0
   );
 }
