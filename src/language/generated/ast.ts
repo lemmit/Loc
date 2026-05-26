@@ -63,6 +63,7 @@ export type DddKeywordNames =
     | "body"
     | "bool"
     | "cache"
+    | "canonical"
     | "chakra"
     | "check"
     | "clickhouse"
@@ -75,6 +76,7 @@ export type DddKeywordNames =
     | "decimal"
     | "deployable"
     | "derived"
+    | "description"
     | "design"
     | "dotnet"
     | "e2e"
@@ -90,6 +92,7 @@ export type DddKeywordNames =
     | "expectThrows"
     | "extern"
     | "false"
+    | "favicon"
     | "filter"
     | "find"
     | "for"
@@ -125,6 +128,7 @@ export type DddKeywordNames =
     | "mysql"
     | "now"
     | "null"
+    | "ogImage"
     | "onCreate"
     | "onUpdate"
     | "operation"
@@ -283,10 +287,10 @@ export function isLiteralExpr(item: unknown): item is LiteralExpr {
     return reflection.isInstance(item, LiteralExpr);
 }
 
-export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'component' | 'contains' | 'contexts' | 'design' | 'events' | 'framework' | 'id' | 'immutable' | 'internal' | 'link' | 'managed' | 'menu' | 'modules' | 'money' | 'page' | 'permissions' | 'primary' | 'route' | 'search' | 'secret' | 'section' | 'state' | 'static' | 'targets' | 'title' | 'token' | 'ui' | 'views' | 'workflows' | string;
+export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'contains' | 'contexts' | 'description' | 'design' | 'events' | 'favicon' | 'framework' | 'id' | 'immutable' | 'internal' | 'link' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'route' | 'search' | 'secret' | 'section' | 'state' | 'static' | 'targets' | 'title' | 'token' | 'ui' | 'views' | 'workflows' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'id' | 'modules' | 'permissions' | 'ui' | 'views' | 'workflows' | string;
@@ -331,13 +335,13 @@ export function isNamedDecl(item: unknown): item is NamedDecl {
     return reflection.isInstance(item, NamedDecl);
 }
 
-export type NameRefIdent = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'component' | 'contains' | 'contexts' | 'design' | 'events' | 'filter' | 'framework' | 'immutable' | 'implements' | 'internal' | 'link' | 'managed' | 'menu' | 'modules' | 'money' | 'page' | 'permissions' | 'primary' | 'route' | 'search' | 'secret' | 'section' | 'stamp' | 'state' | 'static' | 'targets' | 'title' | 'token' | 'ui' | 'views' | 'workflows' | string;
+export type NameRefIdent = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'contains' | 'contexts' | 'description' | 'design' | 'events' | 'favicon' | 'filter' | 'framework' | 'immutable' | 'implements' | 'internal' | 'link' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'route' | 'search' | 'secret' | 'section' | 'stamp' | 'state' | 'static' | 'targets' | 'title' | 'token' | 'ui' | 'views' | 'workflows' | string;
 
 export function isNameRefIdent(item: unknown): item is NameRefIdent {
-    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type PageProp = BodyProp | LayoutProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
+export type PageProp = BodyProp | CanonicalProp | DescriptionProp | LayoutProp | OgImageProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
 
 export const PageProp = 'PageProp';
 
@@ -600,6 +604,18 @@ export function isCallExpr(item: unknown): item is CallExpr {
     return reflection.isInstance(item, CallExpr);
 }
 
+export interface CanonicalProp extends AstNode {
+    readonly $container: Page;
+    readonly $type: 'CanonicalProp';
+    value: string;
+}
+
+export const CanonicalProp = 'CanonicalProp';
+
+export function isCanonicalProp(item: unknown): item is CanonicalProp {
+    return reflection.isInstance(item, CanonicalProp);
+}
+
 export interface Component extends AstNode {
     readonly $container: Ui;
     readonly $type: 'Component';
@@ -647,6 +663,7 @@ export interface Deployable extends AstNode {
     readonly $type: 'Deployable';
     auth?: AuthMode;
     design?: DesignPack;
+    favicon?: string;
     moduleBindings: Array<ModuleBinding>;
     name: LooseName;
     platform: Platform;
@@ -676,6 +693,18 @@ export const DerivedProp = 'DerivedProp';
 
 export function isDerivedProp(item: unknown): item is DerivedProp {
     return reflection.isInstance(item, DerivedProp);
+}
+
+export interface DescriptionProp extends AstNode {
+    readonly $container: Page;
+    readonly $type: 'DescriptionProp';
+    value: string;
+}
+
+export const DescriptionProp = 'DescriptionProp';
+
+export function isDescriptionProp(item: unknown): item is DescriptionProp {
+    return reflection.isInstance(item, DescriptionProp);
 }
 
 export interface EmitField extends AstNode {
@@ -1278,6 +1307,18 @@ export function isObjectLit(item: unknown): item is ObjectLit {
     return reflection.isInstance(item, ObjectLit);
 }
 
+export interface OgImageProp extends AstNode {
+    readonly $container: Page;
+    readonly $type: 'OgImageProp';
+    value: string;
+}
+
+export const OgImageProp = 'OgImageProp';
+
+export function isOgImageProp(item: unknown): item is OgImageProp {
+    return reflection.isInstance(item, OgImageProp);
+}
+
 export interface Operation extends AstNode {
     readonly $container: Aggregate;
     readonly $type: 'Operation';
@@ -1412,7 +1453,7 @@ export interface Property extends AstNode {
     readonly $type: 'Property';
     access?: FieldAccess;
     check?: Expression;
-    name: 'immutable' | 'internal' | 'managed' | 'money' | 'secret' | 'token' | string;
+    name: 'canonical' | 'description' | 'favicon' | 'immutable' | 'internal' | 'managed' | 'money' | 'ogImage' | 'secret' | 'token' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;
@@ -1927,6 +1968,7 @@ export type DddAstType = {
     BuilderEntry: BuilderEntry
     CallArg: CallArg
     CallExpr: CallExpr
+    CanonicalProp: CanonicalProp
     Component: Component
     ComponentDecl: ComponentDecl
     Containment: Containment
@@ -1934,6 +1976,7 @@ export type DddAstType = {
     DecLit: DecLit
     Deployable: Deployable
     DerivedProp: DerivedProp
+    DescriptionProp: DescriptionProp
     EmitField: EmitField
     EmitStmt: EmitStmt
     EntityPart: EntityPart
@@ -1987,6 +2030,7 @@ export type DddAstType = {
     NullLit: NullLit
     ObjectFieldInit: ObjectFieldInit
     ObjectLit: ObjectLit
+    OgImageProp: OgImageProp
     Operation: Operation
     Page: Page
     PageMenuMeta: PageMenuMeta
@@ -2047,7 +2091,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryExpr, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallExpr, Component, ComponentDecl, Containment, ContextMember, DecLit, Deployable, DerivedProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, LayoutProp, LetStmt, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberAccess, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, Module, ModuleBinding, ModuleStorageBinding, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SensitivityClause, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
+        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryExpr, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallExpr, CanonicalProp, Component, ComponentDecl, Containment, ContextMember, DecLit, Deployable, DerivedProp, DescriptionProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, LayoutProp, LetStmt, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberAccess, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, Module, ModuleBinding, ModuleStorageBinding, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SensitivityClause, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2086,7 +2130,10 @@ export class DddAstReflection extends AbstractAstReflection {
                 return this.isSubtype(Expression, supertype);
             }
             case BodyProp:
+            case CanonicalProp:
+            case DescriptionProp:
             case LayoutProp:
+            case OgImageProp:
             case PageMenuMeta:
             case RequiresProp:
             case RouteProp:
@@ -2359,6 +2406,14 @@ export class DddAstReflection extends AbstractAstReflection {
                     ]
                 };
             }
+            case CanonicalProp: {
+                return {
+                    name: CanonicalProp,
+                    properties: [
+                        { name: 'value' }
+                    ]
+                };
+            }
             case Component: {
                 return {
                     name: Component,
@@ -2395,6 +2450,7 @@ export class DddAstReflection extends AbstractAstReflection {
                     properties: [
                         { name: 'auth' },
                         { name: 'design' },
+                        { name: 'favicon' },
                         { name: 'moduleBindings', defaultValue: [] },
                         { name: 'name' },
                         { name: 'platform' },
@@ -2414,6 +2470,14 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'expr' },
                         { name: 'name' },
                         { name: 'type' }
+                    ]
+                };
+            }
+            case DescriptionProp: {
+                return {
+                    name: DescriptionProp,
+                    properties: [
+                        { name: 'value' }
                     ]
                 };
             }
@@ -2813,6 +2877,14 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: ObjectLit,
                     properties: [
                         { name: 'fields', defaultValue: [] }
+                    ]
+                };
+            }
+            case OgImageProp: {
+                return {
+                    name: OgImageProp,
+                    properties: [
+                        { name: 'value' }
                     ]
                 };
             }

@@ -434,8 +434,28 @@ export class DddValidator {
   }
 
   private checkTheme(block: ThemeBlock, accept: ValidationAcceptor): void {
-    const knownNames = new Set(["primary", "neutral", "radius", "fontFamily"]);
+    // Colour tokens (validated as hex) — palette + semantic slots.
+    const colorNames = new Set([
+      "primary",
+      "secondary",
+      "accent",
+      "success",
+      "warning",
+      "error",
+      "neutral",
+    ]);
+    // Non-colour tokens — each has its own per-property validator
+    // below (radius enum, fontFamily/fontFamilyMono free-form,
+    // colorScheme enum).
+    const knownNames = new Set([
+      ...colorNames,
+      "radius",
+      "fontFamily",
+      "fontFamilyMono",
+      "colorScheme",
+    ]);
     const knownRadius = new Set(["none", "sm", "md", "lg", "xl"]);
+    const knownColorSchemes = new Set(["light", "dark", "auto"]);
     // Hex colors: #RGB, #RRGGBB, or #RRGGBBAA.  Everything else
     // ("blue" / "rgb(...)" / "var(--brand)") can be supported later
     // if a user asks; rejecting here keeps the surface tight
@@ -462,7 +482,7 @@ export class DddValidator {
       }
       seen.add(p.name);
       // (3) Per-property value validation.
-      if (p.name === "primary" || p.name === "neutral") {
+      if (colorNames.has(p.name)) {
         if (!hexColor.test(p.value)) {
           accept(
             "error",
@@ -478,11 +498,19 @@ export class DddValidator {
             { node: p, property: "value" },
           );
         }
+      } else if (p.name === "colorScheme") {
+        if (!knownColorSchemes.has(p.value)) {
+          accept(
+            "error",
+            `theme 'colorScheme' must be one of ${[...knownColorSchemes].join(" | ")}; got '${p.value}'.`,
+            { node: p, property: "value" },
+          );
+        }
       }
-      // fontFamily is a free-form string — pass-through to the
-      // Mantine theme.  No validation beyond "non-empty"; a typo'd
-      // family name silently falls through to the OS fallback at
-      // runtime, which is acceptable.
+      // fontFamily / fontFamilyMono are free-form strings —
+      // pass-through to the Mantine theme.  No validation beyond
+      // "non-empty"; a typo'd family name silently falls through
+      // to the OS fallback at runtime, which is acceptable.
     }
   }
 
@@ -2259,6 +2287,12 @@ function pagePropDisplayName(typeName: string): string {
       return "menu";
     case "LayoutProp":
       return "layout";
+    case "DescriptionProp":
+      return "description";
+    case "OgImageProp":
+      return "ogImage";
+    case "CanonicalProp":
+      return "canonical";
     default:
       return typeName;
   }

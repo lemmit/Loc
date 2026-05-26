@@ -3,8 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Loom-generated app</title>
-  </head>
+    <title>{{title}}</title>
+{{#if description}}    <meta name="description" content="{{description}}" />
+{{/if}}{{#if ogImage}}    <meta property="og:image" content="{{ogImage}}" />
+{{/if}}{{#if canonical}}    <link rel="canonical" href="{{canonical}}" />
+{{/if}}{{#if favicon}}    <link rel="icon" href="{{favicon}}" />
+{{/if}}  </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

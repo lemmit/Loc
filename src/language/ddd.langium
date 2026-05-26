@@ -134,6 +134,11 @@ Deployable:
         ('port' ':' port=INT ','?)?
         ('auth' ':' auth=AuthMode ','?)?
         ('design' ':' design=DesignPack ','?)?
+        // Optional favicon path — relative to the .ddd source file.
+        // The React generator copies the referenced file into
+        // `public/favicon.<ext>` and the index.html shell emits a
+        // `<link rel="icon" href="/favicon.<ext>">`.
+        ('favicon' ':' favicon=STRING ','?)?
     '}';
 
 // Slice 11.26 — frontend composition.  `ui: WebApp { Sales: salesApi
@@ -306,7 +311,8 @@ Page:
     '}';
 
 PageProp:
-      RouteProp | TitleProp | RequiresProp | StateBlock | BodyProp | PageMenuMeta | LayoutProp;
+      RouteProp | TitleProp | RequiresProp | StateBlock | BodyProp | PageMenuMeta | LayoutProp
+    | DescriptionProp | OgImageProp | CanonicalProp;
 
 RouteProp:
     'route' ':' value=STRING;
@@ -319,6 +325,20 @@ RequiresProp:
 
 BodyProp:
     'body' ':' expr=Expression;
+
+// Page metadata props — projected into the generated `index.html`
+// shell as standard SEO / social-graph meta tags.  All three are
+// plain string literals (not Expression) — static metadata, no
+// state interpolation.  Validator enforces uniqueness; lowering
+// stores them under `PageIR.metadata`.
+DescriptionProp:
+    'description' ':' value=STRING;
+
+OgImageProp:
+    'ogImage' ':' value=STRING;
+
+CanonicalProp:
+    'canonical' ':' value=STRING;
 
 // Per-page layout selector.  v1 admits two preset values
 // (`default`, `none`) and is gated by the validator; the bare `ID`
@@ -737,7 +757,9 @@ FieldAccess returns string:
 // the `FieldAccess` slot below.  See `LooseName` and `NameRefIdent`
 // for the same admission in parameter / expression positions.
 Property:
-    name=(ID | 'money' | 'immutable' | 'managed' | 'token' | 'internal' | 'secret')
+    name=(ID | 'money' | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
+        // Phase 2 page-metadata + favicon keywords — soft in property position.
+        | 'description' | 'ogImage' | 'canonical' | 'favicon')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -811,7 +833,11 @@ LooseName returns string:
     // slot of `Property`; everywhere else (parameter names, field
     // names, property bindings) they're admitted as identifiers so
     // adding them in this PR does not break any user code.
-    | 'immutable' | 'managed' | 'token' | 'internal' | 'secret';
+    | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
+    // Phase 2 page-metadata + favicon keywords.  Admitted as soft so
+    // user code can still name fields `description`, `ogImage`,
+    // `canonical`, `favicon`.
+    | 'description' | 'ogImage' | 'canonical' | 'favicon';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1129,7 +1155,12 @@ NameRefIdent returns string:
        | 'design' | 'targets' | 'bind'
        | 'primary' | 'cache' | 'search' | 'events' | 'bi'
        | 'filter' | 'stamp' | 'implements'
-       | 'immutable' | 'managed' | 'token' | 'internal' | 'secret';
+       | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
+       // Phase 2 page-metadata + favicon keywords admitted as NameRef
+       // so expressions can read a field named `description`,
+       // `ogImage`, etc. (e.g. `description != null` in a derived
+       // property — see showcase.ddd).
+       | 'description' | 'ogImage' | 'canonical' | 'favicon';
 
 // ---------------------------------------------------------------------------
 // Terminals

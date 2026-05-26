@@ -754,6 +754,18 @@ export interface ThemeIR {
    *  10-shade ramp from this hex and registers it as the project's
    *  `primaryColor`. */
   primary?: string;
+  /** Secondary brand colour — used by packs that ship a second
+   *  named accent (e.g. CSS `--color-secondary`).  Optional. */
+  secondary?: string;
+  /** Accent colour — third accent slot (e.g. highlight chips,
+   *  callouts).  Optional. */
+  accent?: string;
+  /** Success semantic colour (positive feedback / confirmations). */
+  success?: string;
+  /** Warning semantic colour (cautions, non-blocking notices). */
+  warning?: string;
+  /** Error semantic colour (destructive actions, validation errors). */
+  error?: string;
   /** Neutral / gray palette source.  Mantine emitter sets
    *  `colors.gray` to a 10-shade ramp from this hex, which Mantine
    *  uses for muted text, borders, dimmed backgrounds, etc. */
@@ -764,6 +776,14 @@ export interface ThemeIR {
    *  is responsible for ensuring the named fonts are available
    *  (web font import, system fallback chain). */
   fontFamily?: string;
+  /** Monospace font stack — used for code blocks, ID displays,
+   *  and other tabular content.  Same pass-through semantics as
+   *  `fontFamily`. */
+  fontFamilyMono?: string;
+  /** Initial colour scheme — `"light"`, `"dark"`, or `"auto"`
+   *  (follow system preference).  Packs that support theme
+   *  toggling read this as the boot-time default. */
+  colorScheme?: "light" | "dark" | "auto";
 }
 
 /** System-level `user { ... }` block.  Each field carries an
@@ -909,6 +929,23 @@ export interface PageIR {
    *  v2-named-layout-inheritance posture (a ui-level layout supplies
    *  the default when the page doesn't declare one). */
   layout?: PageLayoutIR;
+  /** Optional static page metadata projected into the generated
+   *  `index.html` shell — `<meta name="description">`,
+   *  `<meta property="og:image">`, and `<link rel="canonical">`.
+   *  All three are plain string literals (no state / param
+   *  interpolation), so we carry them verbatim rather than as
+   *  `ExprIR`.  Only the route-`/` page (or the first page when
+   *  no `/` exists) contributes metadata to the shell. */
+  metadata?: PageMetadataIR;
+}
+
+/** Static page metadata — SEO + social-graph tags written into
+ *  the generated `index.html`.  All fields optional; absent fields
+ *  produce no markup. */
+export interface PageMetadataIR {
+  description?: string;
+  ogImage?: string;
+  canonical?: string;
 }
 
 /** Provenance for a page's body shape.  Scaffold-emitted pages carry
@@ -1118,6 +1155,12 @@ export interface DeployableIR {
    *  redis }`).  Bare-list form (`modules: Sales, Marketing`)
    *  produces entries with empty `storages` arrays. */
   moduleBindings: ModuleBindingIR[];
+  /** Optional favicon path — relative to the source `.ddd` file.
+   *  Carried verbatim through lowering; the React generator
+   *  resolves the path, copies the referenced file into
+   *  `public/favicon.<ext>`, and emits a corresponding
+   *  `<link rel="icon">` in the generated `index.html`. */
+  favicon?: string;
 }
 
 /** A single UI-parameter binding on a frontend deployable.

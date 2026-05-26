@@ -317,6 +317,12 @@ function printPageProp(node: PageProp): string {
       );
     case "LayoutProp":
       return `layout: ${node.value}`;
+    case "DescriptionProp":
+      return `description: ${quote(node.value)}`;
+    case "OgImageProp":
+      return `ogImage: ${quote(node.value)}`;
+    case "CanonicalProp":
+      return `canonical: ${quote(node.value)}`;
     default: {
       const exhaustive: never = node;
       throw new Error(`printPageProp: unhandled ${(exhaustive as { $type: string }).$type}`);
