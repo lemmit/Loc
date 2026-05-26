@@ -22,6 +22,19 @@ import type {
   StringLit,
   UiMember,
 } from "../language/generated/ast.js";
+import {
+  mkBodyProp,
+  mkBoolLit,
+  mkCallArg,
+  mkCallSuffix,
+  mkMenuMetaEntry,
+  mkNameRef,
+  mkPage,
+  mkPageMenuMeta,
+  mkPostfixChain,
+  mkRouteProp,
+  mkStringLit,
+} from "./_mk.js";
 import { _currentOrigin, _setContainer, _tag } from "./factories-internals.js";
 
 // ---------------------------------------------------------------------------
@@ -33,7 +46,7 @@ import { _currentOrigin, _setContainer, _tag } from "./factories-internals.js";
  * behavior — see CLAUDE.md's gotcha list and re-quote on emission). */
 export function stringLit(value: string): StringLit {
   const origin = _currentOrigin();
-  return _tag({ $type: "StringLit", value } as unknown as StringLit, origin);
+  return _tag(mkStringLit({ $type: "StringLit", value }), origin);
 }
 
 /** A boolean literal expression.  The grammar surfaces these as
@@ -41,7 +54,7 @@ export function stringLit(value: string): StringLit {
  * the parser doesn't coerce; we pass it through as-is. */
 export function boolLit(value: boolean): BoolLit {
   const origin = _currentOrigin();
-  return _tag({ $type: "BoolLit", value: String(value) } as unknown as BoolLit, origin);
+  return _tag(mkBoolLit({ $type: "BoolLit", value: value ? "true" : "false" }), origin);
 }
 
 /** A bare name reference, suitable for use in expression positions
@@ -50,7 +63,7 @@ export function boolLit(value: boolean): BoolLit {
  * re-exported here so ui-macro authors don't import from two files. */
 export function nameRefExpr(name: string): NameRef {
   const origin = _currentOrigin();
-  return _tag({ $type: "NameRef", name } as unknown as NameRef, origin);
+  return _tag(mkNameRef({ $type: "NameRef", name }), origin);
 }
 
 // ---------------------------------------------------------------------------
@@ -72,14 +85,14 @@ export function callExpr(
   const origin = _currentOrigin();
   const callee: NameRef = nameRefExpr(head);
   const callArgs: CallArg[] = args.map(({ name, value }) => {
-    const a = _tag({ $type: "CallArg", name, value } as CallArg, origin);
+    const a = _tag(mkCallArg({ $type: "CallArg", name, value }), origin);
     _setContainer(value, a, "value");
     return a;
   });
-  const suffix: CallSuffix = _tag({ $type: "CallSuffix", args: callArgs } as CallSuffix, origin);
+  const suffix: CallSuffix = _tag(mkCallSuffix({ $type: "CallSuffix", args: callArgs }), origin);
   callArgs.forEach((a, i) => _setContainer(a, suffix, "args", i));
   const chain: PostfixChain = _tag(
-    { $type: "PostfixChain", head: callee, suffixes: [suffix] } as PostfixChain,
+    mkPostfixChain({ $type: "PostfixChain", head: callee, suffixes: [suffix] }),
     origin,
   );
   _setContainer(callee, chain, "head");
@@ -94,13 +107,13 @@ export function callExpr(
 /** The `route: "/orders/:id"` prop on a page. */
 export function routeProp(value: string): RouteProp {
   const origin = _currentOrigin();
-  return _tag({ $type: "RouteProp", value } as unknown as RouteProp, origin);
+  return _tag(mkRouteProp({ $type: "RouteProp", value }), origin);
 }
 
 /** The `body: <expr>` prop on a page.  Wraps any Expression. */
 export function bodyProp(expr: Expression): BodyProp {
   const origin = _currentOrigin();
-  const bp: BodyProp = _tag({ $type: "BodyProp", expr } as unknown as BodyProp, origin);
+  const bp: BodyProp = _tag(mkBodyProp({ $type: "BodyProp", expr }), origin);
   _setContainer(expr, bp, "expr");
   return bp;
 }
@@ -110,7 +123,7 @@ export function bodyProp(expr: Expression): BodyProp {
 function menuMetaEntry(name: string, value: Expression): MenuMetaEntry {
   const origin = _currentOrigin();
   const e: MenuMetaEntry = _tag(
-    { $type: "MenuMetaEntry", name, value } as unknown as MenuMetaEntry,
+    mkMenuMetaEntry({ $type: "MenuMetaEntry", name, value }),
     origin,
   );
   _setContainer(value, e, "value");
@@ -124,7 +137,7 @@ export function pageMenuMeta(entries: Record<string, Expression>): PageMenuMeta 
   const origin = _currentOrigin();
   const entryNodes = Object.entries(entries).map(([k, v]) => menuMetaEntry(k, v));
   const meta: PageMenuMeta = _tag(
-    { $type: "PageMenuMeta", entries: entryNodes } as unknown as PageMenuMeta,
+    mkPageMenuMeta({ $type: "PageMenuMeta", entries: entryNodes }),
     origin,
   );
   entryNodes.forEach((e, i) => _setContainer(e, meta, "entries", i));
@@ -149,12 +162,12 @@ export function page(opts: {
   props.push(bodyProp(opts.body));
   if (opts.menu) props.push(pageMenuMeta(opts.menu));
   const p: Page = _tag(
-    {
+    mkPage({
       $type: "Page",
       name: opts.name,
       params: [],
       props,
-    } as unknown as Page,
+    }),
     origin,
   );
   props.forEach((prop, i) => _setContainer(prop, p, "props", i));
