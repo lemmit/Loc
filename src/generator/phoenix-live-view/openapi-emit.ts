@@ -241,6 +241,23 @@ function renderApiSpec(
       }`);
   }
 
+  // Map the aggregate's `idValueType` to the OpenAPI path-param schema
+  // shape Hono and .NET emit.  Without this, every `:id` parameter
+  // landed as plain `{type: :string}`, which surfaces in the parity
+  // diff as `path-param types: hono=[string:uuid] phoenix=[string]`
+  // (caught by `pathParamSignatures` in test/_helpers/openapi-normalize.ts).
+  function idParamSchema(idValueType: string): string {
+    switch (idValueType) {
+      case "guid":
+        return "%OpenApiSpex.Schema{type: :string, format: :uuid}";
+      case "int":
+      case "long":
+        return "%OpenApiSpex.Schema{type: :integer}";
+      default:
+        return "%OpenApiSpex.Schema{type: :string}";
+    }
+  }
+
   // Aggregate CRUD paths: GET /<plural>, GET /<plural>/{id}, POST /<plural>
   // Note: path-template parameters use the OpenAPI `{id}` syntax (not the
   // Plug-router `:id` form), matching the Hono/.NET emitters so the
@@ -289,7 +306,7 @@ function renderApiSpec(
           operationId: "get_${snake(agg.name)}_by_id",
           tags: ["${aggSlug}"],
           parameters: [
-            %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: %OpenApiSpex.Schema{type: :string}}
+            %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
           ],
           responses: %{
             200 => %OpenApiSpex.Response{
@@ -313,7 +330,7 @@ function renderApiSpec(
           operationId: "${opSnake}_${snake(agg.name)}",
           tags: ["${aggSlug}"],
           parameters: [
-            %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: %OpenApiSpex.Schema{type: :string}}
+            %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
           ],
           requestBody: %OpenApiSpex.RequestBody{
             required: true,
