@@ -130,7 +130,7 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
     const tsx = tsxTarget.renderApiCall(SAMPLE_API_CALL_QUERY, "");
     const heex = heexTarget.renderApiCall(SAMPLE_API_CALL_QUERY, "");
     expect(tsx).toBe("customerAll.data");
-    expect(heex).toBe("list_customers()");
+    expect(heex).toBe("list_customers!()");
   });
 
   it("renderApiHoisting: TSX emits one const-decl per usage, HEEx is empty", () => {

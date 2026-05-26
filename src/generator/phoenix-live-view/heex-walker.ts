@@ -676,41 +676,33 @@ function isApiHandle(name: string, ctx: WalkContext): boolean {
 }
 
 function renderApiCall(call: ApiCallSite, ctx: WalkContext): string {
-  // Code-interface convention:
-  //   .create  → create_<single>!(args)
-  //   .update  → update_<single>!(record, args)
-  //   .delete  → destroy_<single>!(record)
-  //   .all     → list_<plural>!()
-  //   .byId(x) → get_<single>!(x)
-  //   <op>     → <op>_<single>!(record, args)
   // The api handle resolves to a backend that hosts a `<App>.<Ctx>`
   // module; v0 emits `<AppModule>.<Handle>.<fn>(...)` since the
   // handle name and context name match in acme.ddd (`Sales`).
+  //
+  // The bare `<fn>(<args>)` shape — including the op→fn naming
+  // convention and the crude pluralisation — is delegated to
+  // `heexTarget.renderApiCall` (cross-framework contract — see
+  // src/generator/_walker/target.ts).  The `<AppModule>.<Handle>.`
+  // prefix stays walker-local because it's a Phoenix-orchestration
+  // concern (which module the resource lives in), not a per-target
+  // rendering decision.
   const handle = upperFirst(call.apiHandle);
-  const single = snake(call.aggregateName);
-  const args = call.args.map((a) => renderExpr(a, ctx)).join(", ");
-  let fn: string;
-  switch (call.operation) {
-    case "create":
-      fn = `create_${single}!`;
-      break;
-    case "update":
-      fn = `update_${single}!`;
-      break;
-    case "delete":
-    case "destroy":
-      fn = `destroy_${single}!`;
-      break;
-    case "all":
-      fn = `list_${snake(call.aggregateName)}s!`; // crude plural
-      break;
-    case "byId":
-      fn = `get_${single}!`;
-      break;
-    default:
-      fn = `${snake(call.operation)}_${single}!`;
-  }
-  return `${ctx.appModule}.${handle}.${fn}(${args})`;
+  const renderedArgs = call.args.map((a) => renderExpr(a, ctx)).join(", ");
+  const bare = heexTarget.renderApiCall(
+    {
+      apiHandle: call.apiHandle,
+      aggregateName: call.aggregateName,
+      operation: call.operation,
+      // ApiCallSite.kind isn't consulted by heexTarget.renderApiCall —
+      // the bare-fn naming is op-driven, not query-vs-mutation.  Pass
+      // a structural placeholder.
+      kind: "query",
+      args: call.args,
+    },
+    renderedArgs,
+  );
+  return `${ctx.appModule}.${handle}.${bare}`;
 }
 
 // ---------------------------------------------------------------------------
