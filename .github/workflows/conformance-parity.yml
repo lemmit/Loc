@@ -7,11 +7,12 @@ name: Conformance parity (per-PR)
 # their OpenAPI specs three ways (ops / response cardinality / shared
 # field sets).
 #
-# Parity is REPORT-ONLY by default (LOOM_E2E_STRICT_PARITY unset): the
-# job logs divergences but stays green, because the backends are known
-# to diverge today (e.g. Phoenix namespaces aggregate CRUD under
-# `/aggregates/<plural>`).  Flip the env to `1` here once the
-# generators are reconciled to make divergence a hard failure.
+# Parity runs in STRICT mode: LOOM_E2E_STRICT_PARITY=1 turns each
+# diff the harness reports into a hard `expect(...).toBe(...)` assertion.
+# Flipped after the parity series (PRs A → C) closed the original
+# showcase divergences (path namespacing, per-op + per-find routes,
+# wire-shape casing); the gate now catches future generator drift on
+# any of the three backends at PR time.
 #
 # Path-filtered to changes that can affect generated backend output so
 # it doesn't run on docs-only PRs.  Branch protection (repo settings)
@@ -84,6 +85,13 @@ jobs:
         env:
           LOOM_E2E: '1'
           LOOM_E2E_PARITY_ONLY: '1'
+          # Strict mode: every divergence the harness logs becomes a hard
+          # `expect(...).toBe(...)` assertion (see test/e2e/e2e.test.ts).
+          # Gate flipped to strict after PRs A → C closed the three
+          # showcase divergences (path namespacing, per-op + per-find
+          # routes, wire-shape casing).  Future generator drift on any
+          # backend now fails this per-PR job.
+          LOOM_E2E_STRICT_PARITY: '1'
         run: npx vitest run test/e2e/e2e.test.ts
 
       # On any failure above, surface the compose diagnostics the e2e test
