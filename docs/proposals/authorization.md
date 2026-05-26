@@ -1,9 +1,112 @@
 # Loom Authorization Model — DataKey, dataPolicy & Operation Policies
 
 > **Status:** Design proposal (no implementation yet).
-> **Supersedes & consolidates:** `policies.txt`, `policies-supplementary-note.md`.
+> **Supersedes & consolidates:** `docs/proposals/policies-supplementary-note.md`
+> and the earlier `policies.txt` working notes (not checked in).
 > **Scope:** all domain-logic backends (.NET/EF Core, TypeScript/Hono,
 > Phoenix/Ash); React consumes the resulting wire shape only.
+> **⚠ Needs reconciliation with [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md).** See [§0](#0-reconciliation-needed-with-multi-tenancy-design-note) below.
+
+---
+
+## 0. Reconciliation needed with `multi-tenancy-design-note.md`
+
+This proposal was drafted before
+[`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md) landed on
+`main`. The two documents independently introduce **the same keyword
+(`crossTenant`)** and **overlapping mechanisms** for tenant scoping. They are
+not in conflict on intent — both want default-on isolation with an explicit
+opt-out for shared reference data — but they need to be merged before either
+ships to grammar. Capturing the overlap honestly so neither proposal gets
+implemented in isolation:
+
+### What overlaps
+
+| Concern | `multi-tenancy-design-note.md` (canonical for tenancy) | This doc (§2 *DataKey & tenancy*) |
+|---|---|---|
+| Where the tenant claim is declared | `tenancy by user.tenantId` at `system` level | Same intent, implicit via `dataKey` claim |
+| Default scoping | Tenant-scoped by default (fail closed) | Tenant floor on every reachability filter (fail closed) |
+| `crossTenant` aggregate modifier | **Defined here.** Marks aggregates that aren't tenant-owned (shared reference data) | **Also defined here** with the same name and intent |
+| `Tenant` registry mode | New `platform` mode (role-gated, not tenant-scoped) | Not addressed |
+| Persisted column | `TenantId` (auto-stamped, indexed) | `dataKey` (materialized path, off-`wireShape`) |
+| Enforcement seam (.NET) | EF `HasQueryFilter` global filter | Same seam |
+
+The keyword collision on `crossTenant` is the urgent part — two proposals on
+`main` cannot both *introduce* the same grammar token.
+
+### What's genuinely new in this doc beyond multi-tenancy
+
+The multi-tenancy note gives us a **flat** tenant id per row. This doc's value
+on top of that is:
+
+- **Hierarchical sub-tenant scoping** (`Self` / `Children` / `Descendants` /
+  `Parent` / `Ancestors`) — a flat `TenantId` column doesn't express
+  parent/child orgs, but the policies grammar leans on those directions
+  heavily. `DataKey` as a materialized path (`{rootTenantId}.{parentId}.…`)
+  is what makes ancestor/descendant checks pure prefix arithmetic.
+- **The `policy {}` block itself** — `data {}` reachability, parameterized
+  operation/view/workflow gates, field masking. None of this is in scope for
+  the multi-tenancy note.
+
+So the substantive contribution is the policy machinery; the tenancy half of
+this doc was reinventing what multi-tenancy already nailed down.
+
+### Coping options
+
+**A. Layered (recommended).** Multi-tenancy owns the **flat** tenancy
+primitive (`tenancy by`, `crossTenant`, `platform`, `TenantId` column +
+filter, claim plumbing). This doc *consumes* those primitives and adds
+`DataKey` as a **hierarchical extension**: the leftmost segment of a
+`DataKey` is exactly the `TenantId` multi-tenancy already auto-stamps; the
+extra segments encode org hierarchy and are only needed when a `policy {}`
+references `Children`/`Descendants`/`Parent`. Single tenant feature, single
+`crossTenant` keyword (defined by multi-tenancy), and `DataKey` becomes
+opt-in for hierarchical scoping rather than a parallel mechanism. **§2 of
+this doc is rewritten to reference multi-tenancy instead of redefining
+it.** Cleanest separation of concerns and matches the existing layering
+philosophy ("authorization is infrastructure").
+
+**B. Merge into one doc.** Fold both proposals into a single
+`tenancy-and-authorization.md`. Pros: no cross-doc coupling, easier to read
+end-to-end. Cons: the multi-tenancy note is already on `main`; merging
+means rewriting both; and the docs *do* describe separate-stage concerns
+(claim plumbing vs. predicate evaluation) that benefit from staying
+factored.
+
+**C. Pick one model, drop the other.**
+- *Drop `DataKey`, keep flat `TenantId`*: simpler, but the policies
+  grammar's `Self`/`Children`/`Descendants` directions lose their meaning —
+  org hierarchy would have to be expressed as ordinary aggregate
+  relationships, with `exists` predicates instead of prefix arithmetic.
+  Performance pattern changes (subquery vs. index scan on a `LIKE
+  'root.parent.%'`).
+- *Drop the flat `TenantId`, keep `DataKey`*: forces multi-tenancy
+  consumers (who only want flat B2B isolation) to carry a path column they
+  don't need, and complicates the EF global filter (path prefix check vs.
+  equality check). Worse default for the common case.
+
+**D. Coexist explicitly.** Both columns persisted (`TenantId` + `DataKey`),
+both filters applied. Redundant data but trivially backward-compatible.
+Likely temporary if it happens at all.
+
+### Recommendation
+
+Go with **option A**. Concretely:
+1. Delete the `crossTenant` definition from §2 of this doc; cite
+   `multi-tenancy-design-note.md` as the owner.
+2. Make `DataKey` itself **opt-in** at the aggregate header (`aggregate
+   Order hierarchical { … }` or similar — naming TBD) so flat-tenancy
+   aggregates pay no cost.
+3. Specify that `DataKey`'s leftmost segment **is** the `TenantId`
+   multi-tenancy auto-stamps — one source of truth for the tenant claim,
+   no double-stamping.
+4. The `policy { data { allow read on Descendants } }` direction-vocabulary
+   only compiles for aggregates declared hierarchical; on flat aggregates,
+   `Self` is the only valid direction (and it's just `TenantId == claim`).
+
+This needs explicit agreement before either proposal moves to grammar; the
+sections below describe the policy block in the form that will survive the
+reconciliation regardless of which option is chosen.
 
 ---
 
@@ -20,10 +123,11 @@ Loom (`loc-ddd-dsl`, CLI `ddd`) already ships *partial* authorization:
 
 What it lacks: **record-level access control, tenancy, and field-level masking.**
 This proposal adds those as a coherent layer that *extends* the existing
-primitives rather than duplicating them. The earlier research
-(`policies.txt`, the supplementary note) explored a Salesforce/Dataverse-style
-`dataPolicy`/`operationPolicy` split and a function-style policy DSL; this
-document reconciles both into one model shaped to Loom's actual architecture.
+primitives rather than duplicating them. The earlier research (the
+supplementary note and the prior `policies.txt` working draft) explored a
+Salesforce/Dataverse-style `dataPolicy`/`operationPolicy` split and a
+function-style policy DSL; this document reconciles both into one model shaped
+to Loom's actual architecture.
 
 The design was settled collaboratively. Key reframings from the raw research:
 - **DataKey is ambient infrastructure**, not opt-in; built from tenant ids.
@@ -228,7 +332,7 @@ subsystem:
 3. **Ad-hoc shares** → model an ordinary `Share` aggregate and query it the same
    way (typed, CRUD, UI, audit for free).
 
-The `policies.txt` generic `PolicyRelation` table is **dropped** — it added a
+The earlier draft's generic `PolicyRelation` table is **dropped** — it added a
 parallel subsystem without the benefits of a real aggregate. (Optional later
 sugar: `principal is X of resource` over a named relation, lowering to the same
 `exists`.)
