@@ -6,6 +6,8 @@ import {
   fieldSet,
   normalisePath,
   type OpenApiSpec,
+  requiredSet,
+  schemaNames,
 } from "./openapi-normalize.js";
 
 describe("openapi-normalize", () => {
@@ -147,6 +149,91 @@ describe("openapi-normalize", () => {
       expect(shapes.get("GET /products")).toBe("array");
       expect(shapes.get("POST /products")).toBe("object");
       expect(shapes.get("GET /products/by_sku")).toBe("nullable");
+    });
+  });
+
+  describe("schemaNames", () => {
+    it("returns every component schema by name", () => {
+      const spec: OpenApiSpec = {
+        components: {
+          schemas: {
+            ProductResponse: { type: "object" },
+            CreateProductRequest: { type: "object" },
+            ProductListResponse: { type: "array" },
+          },
+        },
+      };
+      const names = schemaNames(spec);
+      expect(names).toEqual(
+        new Set(["ProductResponse", "CreateProductRequest", "ProductListResponse"]),
+      );
+    });
+
+    it("filters framework-emitted noise (Swashbuckle error envelopes)", () => {
+      // .NET (Swashbuckle) emits a `ProblemDetails` schema even when no
+      // application code references it.  The other two backends don't.
+      // Filtering here keeps the parity diff focused on app-authored
+      // contracts instead of framework boilerplate.
+      const spec: OpenApiSpec = {
+        components: {
+          schemas: {
+            ProductResponse: { type: "object" },
+            ProblemDetails: { type: "object" },
+            ValidationProblemDetails: { type: "object" },
+            HttpValidationProblemDetails: { type: "object" },
+          },
+        },
+      };
+      expect(schemaNames(spec)).toEqual(new Set(["ProductResponse"]));
+    });
+
+    it("returns empty set when no schemas declared", () => {
+      expect(schemaNames({} as OpenApiSpec)).toEqual(new Set());
+      expect(schemaNames({ components: {} } as OpenApiSpec)).toEqual(new Set());
+    });
+  });
+
+  describe("requiredSet", () => {
+    it("returns the required-field list as a Set", () => {
+      const spec: OpenApiSpec = {
+        components: {
+          schemas: {
+            CreateProductRequest: {
+              type: "object",
+              properties: { name: {}, sku: {}, description: {} },
+              // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
+              required: ["name", "sku"],
+            } as any,
+          },
+        },
+      };
+      expect(requiredSet(spec, "CreateProductRequest")).toEqual(new Set(["name", "sku"]));
+    });
+
+    it("strips `_provenance` co-located fields (TS-only wire extension)", () => {
+      const spec: OpenApiSpec = {
+        components: {
+          schemas: {
+            ProductResponse: {
+              type: "object",
+              // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
+              required: ["id", "name", "name_provenance"],
+            } as any,
+          },
+        },
+      };
+      // `_provenance` companion fields are filtered the same way fieldSet
+      // filters them — TS persists lineage, the others don't, so they
+      // shouldn't surface as a required-set divergence.
+      expect(requiredSet(spec, "ProductResponse")).toEqual(new Set(["id", "name"]));
+    });
+
+    it("returns empty set when schema has no required clause", () => {
+      const spec: OpenApiSpec = {
+        components: { schemas: { ProductResponse: { type: "object" } } },
+      };
+      expect(requiredSet(spec, "ProductResponse")).toEqual(new Set());
+      expect(requiredSet(spec, "Nonexistent")).toEqual(new Set());
     });
   });
 });

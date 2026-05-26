@@ -61,6 +61,40 @@ export function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
   return new Set(Object.keys(schema.properties).filter((k) => !k.endsWith("_provenance")));
 }
 
+/**
+ * All named component schemas in a spec, minus framework-emitted noise
+ * (e.g. Swashbuckle's `ProblemDetails`, OpenApiSpex's internal types) that
+ * isn't part of the cross-backend contract.  Used by the parity diff to
+ * automatically pick up new shared schemas — request bodies, list
+ * responses, view responses — as the showcase grows, rather than relying
+ * on a hardcoded "schemas to check" list that goes stale.
+ */
+export function schemaNames(spec: OpenApiSpec): Set<string> {
+  // Skip framework-only schemas: Swashbuckle and OpenApiSpex emit a small
+  // pool of envelope / error types that the application never authors.
+  // Their presence in one backend's spec but not another's would otherwise
+  // surface as parity noise.
+  const FRAMEWORK_SCHEMAS = new Set([
+    // Swashbuckle (.NET) error envelopes
+    "ProblemDetails",
+    "ValidationProblemDetails",
+    "HttpValidationProblemDetails",
+  ]);
+  return new Set(
+    Object.keys(spec.components?.schemas ?? {}).filter((n) => !FRAMEWORK_SCHEMAS.has(n)),
+  );
+}
+
+/**
+ * Required-field set for a named component schema.  Each backend emits a
+ * `required: [...]` array on object schemas; drift here is a contract
+ * change clients would notice (a field flipping required → optional).
+ */
+export function requiredSet(spec: OpenApiSpec, schemaName: string): Set<string> {
+  const schema = spec.components?.schemas?.[schemaName] as { required?: string[] } | undefined;
+  return new Set((schema?.required ?? []).filter((k) => !k.endsWith("_provenance")));
+}
+
 /** Build a `Set<"METHOD path">` from an OpenAPI spec's `paths`. */
 export function collectOps(spec: OpenApiSpec): Set<string> {
   const out = new Set<string>();
