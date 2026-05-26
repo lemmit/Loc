@@ -59,6 +59,7 @@ import {
   renderBreadcrumbs as renderBreadcrumbsHeex,
   renderButton as renderButtonHeex,
   renderCard as renderCardHeex,
+  renderCodeBlock as renderCodeBlockHeex,
   renderContainer as renderContainerHeex,
   renderDateDisplay as renderDateDisplayHeex,
   renderEmpty as renderEmptyHeex,
@@ -67,13 +68,16 @@ import {
   renderGrid as renderGridHeex,
   renderGroup as renderGroupHeex,
   renderHeading as renderHeadingHeex,
+  renderIcon as renderIconHeex,
   renderIdLink as renderIdLinkHeex,
   renderKeyValueRow as renderKeyValueRowHeex,
   renderModal as renderModalHeex,
   renderPaper as renderPaperHeex,
   renderQueryView as renderQueryViewHeex,
+  renderSection as renderSectionHeex,
   renderSkeleton as renderSkeletonHeex,
   renderStack as renderStackHeex,
+  renderSticky as renderStickyHeex,
   renderTableColumn as renderTableColumnHeex,
   renderTable as renderTableHeex,
   renderText as renderTextHeex,
@@ -225,8 +229,18 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   // --- Phase 6 — semantic anchor target + sticky-position wrapper -------
   // HEEx renderer is intentionally absent: the Phoenix walker falls
   // through to the visible "not supported" comment.
-  Section: { group: "layout", admissibleInSource: true, tsx: emitSection },
-  Sticky: { group: "layout", admissibleInSource: true, tsx: emitSticky },
+  Section: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitSection,
+    heex: renderSectionHeex,
+  },
+  Sticky: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitSticky,
+    heex: renderStickyHeex,
+  },
   // --- Inputs (TSX-only; HEEx renders inputs via Form-level dispatch) ----
   Field: { group: "layout", admissibleInSource: true, tsx: emitField },
   NumberField: { group: "layout", admissibleInSource: true, tsx: emitNumberField },
@@ -294,8 +308,18 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   // --- Phase 3 — code/icon primitives ------------------------------------
   // HEEx renderer is intentionally absent: the Phoenix walker falls
   // through to the visible "not supported" comment.
-  CodeBlock: { group: "layout", admissibleInSource: true, tsx: emitCodeBlock },
-  Icon: { group: "layout", admissibleInSource: true, tsx: emitIcon },
+  CodeBlock: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitCodeBlock,
+    heex: renderCodeBlockHeex,
+  },
+  Icon: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitIcon,
+    heex: renderIconHeex,
+  },
   // --- Named-leaf form variants (post-#512) ------------------------------
   CreateForm: {
     group: "layout",

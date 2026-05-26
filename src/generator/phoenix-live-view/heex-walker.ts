@@ -1422,6 +1422,142 @@ export function renderContainer(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Container!, expr, ctx);
 }
 
+/** `Section(...children, id: "anchor")` → `<section id="anchor">…</section>`.
+ *  Semantic anchor target for in-page navigation (matches the TSX
+ *  `<section>` element exactly — same HTML semantics, no Phoenix-
+ *  specific wrapping).  `id:` and `testid:` are extracted as
+ *  attributes; positional children render through the standard child
+ *  pipeline. */
+export function renderSection(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  let id: string | undefined;
+  let testid = "";
+  const positional: ExprIR[] = [];
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (!name) {
+      positional.push(arg);
+    } else if (name === "id" && arg.kind === "literal") {
+      id = arg.value;
+    } else if (name === "testid" && arg.kind === "literal") {
+      testid = arg.value;
+    }
+  }
+  const idAttr = id ? ` id="${id}"` : "";
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const childrenHeex = positional.map((c) => renderChild(c, ctx)).join("\n");
+  if (childrenHeex.length === 0) {
+    return `<section${idAttr}${testidAttr} />`;
+  }
+  return `<section${idAttr}${testidAttr}>\n${indent(childrenHeex, 2)}\n</section>`;
+}
+
+/** `Sticky(...children, top: "0")` → `<div style="position: sticky; top: 0; z-index: 100">…</div>`.
+ *  Pins the wrapped content on scroll.  `top:` defaults to `"0"`
+ *  matching the TSX `Sticky` primitive's default; the `z-index: 100`
+ *  matches the Mantine pack's inline style.  `testid:` extracted
+ *  the same way as `renderSection`. */
+export function renderSticky(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  let top = "0";
+  let testid = "";
+  const positional: ExprIR[] = [];
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (!name) {
+      positional.push(arg);
+    } else if (name === "top" && arg.kind === "literal") {
+      top = arg.value;
+    } else if (name === "testid" && arg.kind === "literal") {
+      testid = arg.value;
+    }
+  }
+  const style = `style="position: sticky; top: ${top}; z-index: 100"`;
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const childrenHeex = positional.map((c) => renderChild(c, ctx)).join("\n");
+  if (childrenHeex.length === 0) {
+    return `<div ${style}${testidAttr} />`;
+  }
+  return `<div ${style}${testidAttr}>\n${indent(childrenHeex, 2)}\n</div>`;
+}
+
+/** `CodeBlock("source", title?: "…", language?: "ts")` →
+ *  `<pre class="loom-code-block"><code class="language-ts">source</code></pre>`.
+ *  With an optional `title:`, wraps the `<pre>` in a `<div>` with a
+ *  title bar — matches the Mantine pack's `<pre>` + title pattern.
+ *  Source content is HTML-escaped to keep markup safe (the source
+ *  IS user code; entities are part of valid display). */
+export function renderCodeBlock(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  _ctx: WalkContext,
+): string {
+  let source = "";
+  let title: string | undefined;
+  let language = "";
+  let testid = "";
+  const positional: ExprIR[] = [];
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (!name) {
+      positional.push(arg);
+    } else if (name === "title" && arg.kind === "literal") {
+      title = arg.value;
+    } else if (name === "language" && arg.kind === "literal") {
+      language = arg.value;
+    } else if (name === "testid" && arg.kind === "literal") {
+      testid = arg.value;
+    }
+  }
+  if (positional[0]?.kind === "literal") source = positional[0].value;
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const langClass = language ? ` class="language-${language}"` : "";
+  const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (title) {
+    return (
+      `<div class="loom-code-block"${testidAttr}>\n` +
+      `  <div class="loom-code-block-title">${title}</div>\n` +
+      `  <pre><code${langClass}>${escaped}</code></pre>\n` +
+      `</div>`
+    );
+  }
+  return `<pre class="loom-code-block"${testidAttr}><code${langClass}>${escaped}</code></pre>`;
+}
+
+/** `Icon(name: "github", size: "md")` or `Icon(svg: "<svg…>")` →
+ *  `<span class="loom-icon loom-icon-md">…svg…</span>`.  The SVG
+ *  content is emitted verbatim — Loom's IR has already resolved
+ *  either the builtin-name lookup or the user-supplied literal
+ *  before the walker sees it (matches the TSX path at
+ *  `walker/primitives/icon.ts:32`). */
+export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  let name: string | undefined;
+  let customSvg: string | undefined;
+  let size: string | undefined;
+  let testid = "";
+  for (let i = 0; i < expr.args.length; i++) {
+    const argName = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (argName === "name" && arg.kind === "literal") name = arg.value;
+    else if (argName === "svg" && arg.kind === "literal") customSvg = arg.value;
+    else if (argName === "size" && arg.kind === "literal") size = arg.value;
+    else if (argName === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  // User-supplied SVG wins; falls back to the builtin registry (same
+  // precedence as the TSX emitter at `walker/primitives/icon.ts:32`).
+  // Walker doesn't import the registry today — pages that pass `name:`
+  // without `svg:` against an unknown builtin surface as an empty
+  // icon.  Acceptable for v0; a future change can import the registry
+  // and emit a `<!-- unknown icon: <name> -->` comment for unresolved
+  // names matching the TSX shape.
+  void name;
+  void ctx;
+  const svg = customSvg ?? "";
+  const sizeClass = size ? ` loom-icon-${size}` : "";
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  return `<span class="loom-icon${sizeClass}"${testidAttr}>${svg}</span>`;
+}
+
 function renderPrimitive(
   spec: PrimitiveSpec,
   expr: Extract<ExprIR, { kind: "call" }>,
