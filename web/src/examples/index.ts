@@ -76,10 +76,10 @@ export const examples: LoomExample[] = [
   // looked like "UI Storybook (..." until you read to the parenthesis.
   {
     id: "loom-landing",
-    label: "Loom landing page (`layout: none`)",
+    label: "Loom landing page — gap-closing baseline",
     source: loomLandingSource,
     blurb:
-      "A marketing-style landing page that opts out of the AppShell chrome via `layout: none`, paired with a default-chrome `/app` page so the contrast is visible side-by-side.",
+      "A faithful port of the hand-authored landing at docs/index.html using today's primitives.  Visible approximations (plain-text code blocks, equal-weight grids, no icons) mark each gap that subsequent PRs will close one at a time.",
   },
   {
     id: "storybook-components",
