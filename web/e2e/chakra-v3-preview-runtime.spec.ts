@@ -46,11 +46,11 @@ test("chakra@v3 preview boots without runtime errors", async ({ page }) => {
   await page.getByTestId("btn-bundle").click();
   await expect(
     page.getByText(/bundled .*KB in \d+ ms \(\d+ deps fetched\)/),
-  ).toBeVisible({ timeout: 180_000 });
+  ).toBeVisible({ timeout: 300_000 });
 
   await page.getByTestId("btn-boot").click();
   await expect(page.getByTestId("backend-status")).toHaveText("booted", {
-    timeout: 180_000,
+    timeout: 300_000,
   });
 
   // Preview is always mounted in the four-region shell — no tab to click.

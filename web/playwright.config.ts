@@ -16,7 +16,12 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   // Whole-test timeout: bundle + WASM + first dispatch take time.
-  timeout: 240_000,
+  // The `*-preview-runtime` specs (chakra-v3, mantine-v9, mui-v7, shadcn)
+  // can spend 3-4 minutes on the in-browser npm-install bundle alone —
+  // 240s was tight enough that any CDN latency tipped them over. 480s
+  // gives ~5min of headroom for bundle + ~3min for boot + ~1min preview
+  // without making a stuck spec wildly expensive.
+  timeout: 480_000,
   expect: { timeout: 60_000 },
   // No retries by default — we want a clean signal locally.  CI
   // can opt in via PWTEST_RETRIES.
