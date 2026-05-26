@@ -589,13 +589,30 @@ export interface OperationFormState extends FormStateBase {
 }
 
 export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
-  // Api hook injection (JSX-child position).
-  // Detect `<param>.<aggregate>.<op>` rooted at a UiApiParam.
-  // In JSX-child position, the local hook var is brace-wrapped.
+  // Api hook injection (JSX-child position).  Detect
+  // `<param>.<aggregate>.<op>` rooted at a UiApiParam; register
+  // the hook for hoisting (renderApiHoisting consumes
+  // ctx.usedApiHooks); delegate the call-site emission shape to
+  // tsxTarget.renderApiCall (cross-framework contract — see
+  // src/generator/_walker/target.ts).  TSX's contract semantics
+  // is var-only — the surrounding member / method-call IR walk
+  // emits any chained `.data` / `.mutate(args)` / `.isPending`.
+  // JSX-child position wraps the result in braces.
   const hookUse = tryDetectApiHook(expr, ctx);
   if (hookUse) {
     registerApiHook(hookUse, ctx);
-    return `{${hookUse.varName}}`;
+    const rendered = tsxTarget.renderApiCall(
+      {
+        apiHandle: "",
+        aggregateName: "",
+        operation: "",
+        kind: "query",
+        args: [],
+        varName: hookUse.varName,
+      },
+      "",
+    );
+    return `{${rendered}}`;
   }
   switch (expr.kind) {
     case "call":
@@ -828,13 +845,25 @@ export function extendLambdaParams(
 export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
   // Api hook injection.  Detect `<param>.<aggregate>.<op>`
   // (with optional method-call args) rooted at a UiApiParam ref.
-  // When matched, register a hook usage on the context and return
-  // the local hook variable name; the shell emits the
-  // `const <var> = use<Op><Aggregate>(args)` declaration at page-top.
+  // When matched, register a hook usage on the context and
+  // delegate the call-site emission shape to tsxTarget.renderApiCall.
+  // The shell emits the `const <var> = use<Op><Aggregate>(args)`
+  // declaration at page-top via renderApiHoisting (delegated in #625).
+  // Expression position — no JSX brace wrap.
   const hookUse = tryDetectApiHook(expr, ctx);
   if (hookUse) {
     registerApiHook(hookUse, ctx);
-    return hookUse.varName;
+    return tsxTarget.renderApiCall(
+      {
+        apiHandle: "",
+        aggregateName: "",
+        operation: "",
+        kind: "query",
+        args: [],
+        varName: hookUse.varName,
+      },
+      "",
+    );
   }
   switch (expr.kind) {
     case "literal":

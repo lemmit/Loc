@@ -77,17 +77,21 @@ export const tsxTarget: WalkerTarget = {
 
   // --- API binding seam ---------------------------------------------------
 
-  /** TSX rewrites the call site to the local hook variable produced
-   *  by `renderApiHoisting`.  Reads (`all`/`byId`/finders) → access
-   *  `.data`; mutations (`create`/`update`/`delete`/op) → `.mutate(args)`. */
-  renderApiCall(call: ApiCallSite, renderedArgs: string): string {
-    const varName = hookVarName(call.aggregateName, call.operation);
-    if (call.kind === "query") {
-      // Reads expose `varName.data` — caller decides whether to
-      // chain `.field` / `.filter(...)` etc.
-      return `${varName}.data`;
-    }
-    return `${varName}.mutate(${renderedArgs})`;
+  /** TSX rewrites the IR call site to the local hook variable
+   *  produced by `renderApiHoisting`.  See the contract docs at
+   *  `src/generator/_walker/target.ts` for the full rationale —
+   *  the short version: React Query hoists `useXxx()` ONCE per
+   *  component, every call site references the resulting var, and
+   *  any chained access (`.data`, `.mutate(args)`, `.isPending`)
+   *  comes from the surrounding IR walk via the standard
+   *  member / method-call codepath.  The contract returns ONLY
+   *  the var name — the IR-node-level emission.
+   *
+   *  `renderedArgs` is unused (TSX never invokes the hook at the
+   *  call site).  Kept in the signature for cross-target shape
+   *  symmetry with HEEx. */
+  renderApiCall(call: ApiCallSite, _renderedArgs: string): string {
+    return call.varName ?? hookVarName(call.aggregateName, call.operation);
   },
 
   /** Hoist one `const <var> = useXxx(args);` line per unique hook
