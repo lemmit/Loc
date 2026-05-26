@@ -504,6 +504,43 @@ the dropdown), `.fill()` for text inputs, `.click()` toggles for
 bools, slice-to-`YYYY-MM-DDTHH:mm` for datetime — and walks
 nested VO fields.
 
+### Design pack selection
+
+The file map above is for the default `design: "mantine"`.  Picking a
+different pack swaps the rendered component library, the
+`package.json` dep set, and the theme bootstrapping — the rest of the
+project (routing, RQ hooks, page objects, smoke tests) is identical.
+
+| Family | Path | Versions shipped | Component library | Latest (bareword resolves to) |
+|---|---|---|---|---|
+| `mantine` | `designs/mantine/` | v7, v9 | `@mantine/*` | `mantine@v9` |
+| `shadcn` | `designs/shadcn/` | v3, v4 | Tailwind + Radix primitives | `shadcn@v4` |
+| `mui` | `designs/mui/` | v5, v7 | `@mui/material` | `mui@v7` |
+| `chakra` | `designs/chakra/` | v2, v3 | `@chakra-ui/react` | `chakra@v3` |
+| `ashPhoenix` | `designs/ashPhoenix/` | v3 | HEEx components — Phoenix LiveView only | `ashPhoenix@v3` |
+
+Pack selection per platform when `design:` is omitted:
+
+| Platform | Default family |
+|---|---|
+| `react`, `static`, fullstack `dotnet` (with `ui:`) | `mantine` |
+| `phoenixLiveView` | `ashPhoenix` (forced — only HEEx pack supported) |
+| `hono`, backend-only `dotnet` | none (no UI mount) |
+
+Picking a pack also locks in a **stack** (a coherent React + router +
+Zod + Vite + TypeScript dep bundle).  Each pack version declares its
+stack in its `pack.json`; the bundler reads that declaration and
+emits the matching `package.json`.  See
+[`stack-versioning.md`](stack-versioning.md) and
+[`design-system-packs.md`](design-system-packs.md) for the full pack
+authoring surface.
+
+A bareword `design: "mantine"` resolves to the family's current default
+version; pinning is via `family@version` (e.g. `design: "mui@v5"`).
+`design-system-packs.md` lists the authoring contract; the per-version
+folder under `designs/<family>/<vN>/` is what the bundler actually
+loads.
+
 ---
 
 ## Phoenix LiveView fullstack (`platform: phoenixLiveView`)

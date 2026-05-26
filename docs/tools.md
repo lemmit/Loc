@@ -17,13 +17,15 @@ the native database tooling (Drizzle Kit and EF Core migrations).
 
 ## CLI
 
-The `ddd` binary lives at `bin/cli.js` and exposes three sub-commands:
+The `ddd` binary lives at `bin/cli.js` and exposes five sub-commands:
 
 ```bash
 ddd parse <file.ddd>                              # parse + validate
-ddd generate ts <file.ddd> -o <outdir>            # emit a single TypeScript project
-ddd generate dotnet <file.ddd> -o <outdir>        # emit a single .NET project
+ddd generate ts <file.ddd> -o <outdir>            # emit a single TypeScript project (legacy)
+ddd generate dotnet <file.ddd> -o <outdir>        # emit a single .NET project (legacy)
 ddd generate system <file.ddd> -o <outdir>        # emit every deployable + docker-compose.yml
+ddd verify <file.ddd> --results <results.json>    # join test results onto the requirements graph
+ddd snapshot <file.ddd> -o <outdir>               # capture provenance rule snapshots
 ```
 
 `generate ts` / `generate dotnet` work on **legacy** sources (bare
@@ -46,8 +48,8 @@ The CLI walks the import graph transitively, registers every
 reachable document with the Langium workspace, and produces a single
 project from the merged model.  See
 [`language.md`](language.md#multi-file-projects-import-and-root-level-shared-types)
-for the language surface; the design rationale is in
-[`multi-file-source.md`](multi-file-source.md).
+for the language surface; the original design rationale is preserved
+at [`plans/multi-file-source.md`](plans/multi-file-source.md).
 
 `generate ts` / `generate dotnet` remain single-file: they read just
 the file you point them at, no import-graph walking.
@@ -60,12 +62,32 @@ project the .NET namespace and `.csproj` keep the capitalised form.
 
 | Flag | Applies to | Effect |
 | --- | --- | --- |
-| `-o, --out <dir>` | `generate ts`, `generate dotnet` | Output directory.  Created if missing. |
-| `-w, --watch` | `generate ts`, `generate dotnet` | Re-run the generator whenever the source `.ddd` file changes. |
-| `--dry-run` | `generate ts`, `generate dotnet` | List every path that would be written, plus any paths skipped via `.loomignore`.  Writes nothing. |
+| `-o, --out <dir>` | every `generate`, `verify`, `snapshot` | Output directory.  Created if missing.  Required on `generate system`, `generate ts`, `generate dotnet`, and `snapshot`; optional on `verify` (defaults to the `.ddd` file's directory). |
+| `-w, --watch` | every `generate` | Re-run the generator whenever the source `.ddd` file changes (see [Watch mode](#watch-mode) below). |
+| `--dry-run` | every `generate`, `snapshot` | List every path that would be written (plus any paths skipped via `.loomignore`).  Writes nothing. |
+| `--trace` | every `generate` | Emit trace-level domain instrumentation (`value_computed`, `precondition_evaluated`, …) into the generated project.  Off by default — see [`observability.md`](observability.md). |
 
 `ddd parse` exits non-zero if the source has errors.  `ddd generate`
 runs validation first and refuses to emit if there are any errors.
+
+### `verify` and `snapshot`
+
+`ddd verify` joins a JSON of test results onto the requirements graph
+built from `requirement` / `solution` / `testCase` declarations, writes
+`.loom/verification.json` + `.loom/verification.md` under `--out`, and
+sets a non-zero exit code if `--require-all` is set and any requirement
+remains unverified, or if `--min <pct>` is set and the verified
+percentage is below it.  `--json` also prints the verification JSON to
+stdout.  See [`traceability.md`](traceability.md) for the artefact
+format.
+
+`ddd snapshot` captures one immutable `<ts>-<guid>.loomsnap.json` per
+system under `<out>/.loom/snapshots/`, recording the current provenance
+rules for every `provenanced` field.  Run it as an explicit prebuild
+step whenever your provenance rules change; the generated runtime
+loads the latest snapshot at startup so live writes preserve full
+history.  See [`language.md`](language.md) for the `provenanced`
+keyword.
 
 ---
 

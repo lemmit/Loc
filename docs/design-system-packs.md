@@ -38,8 +38,9 @@ templates the pack inherits for free — see §6.
 ```json
 {
   "name": "mantine",
-  "version": "0.1.0",
+  "version": "v9",
   "format": "tsx",
+  "stack": "v3",
   "emits": { "<logical-name>": "<file-name.hbs>", ... },
   "imports": { "<logical-name>": [{ "from": "...", "named": [...] }], ... },
   "shellFiles": { "<logical-name>": "<output-path>" },
@@ -47,6 +48,12 @@ templates the pack inherits for free — see §6.
   "helpers": { "lucide": { "IconPlus": "Plus", ... } }
 }
 ```
+
+A pack manifest declares **what to emit** (`emits`, `shellFiles`,
+`shellGlobs`), **what to import** in the emitted code (`imports`,
+`helpers`), and **which cross-cutting stack** to ride (`stack`).  The
+stack carries React / router / Zod / Vite versions; see [§ 2a Stacks
+and how a pack picks one](#2a-stacks-and-how-a-pack-picks-one) below.
 
 ### `format`
 
@@ -132,6 +139,63 @@ Pack-specific lookup tables consulted by helpers in templates.  Today
 the only registered helper is `lucide`, used by the shadcn pack to
 translate Tabler-style icon names from the DSL (`IconPlus`) to
 Lucide's names (`Plus`).
+
+### `stack` — required for `tsx` packs
+
+Identifier of the **stack** the pack rides — a coherent React +
+router + Zod + Vite + TypeScript dep bundle shipped under
+`stacks/<id>/` at the repo root.  This separates *what UI library you
+use* (the pack) from *what underlying runtime you build against*
+(the stack).  See [§ 2a](#2a-stacks-and-how-a-pack-picks-one).
+
+## 2a. Stacks and how a pack picks one
+
+Multiple pack families (mantine / shadcn / mui / chakra) all run on
+React.  Rather than each pack restating its React / router / Zod /
+Vite versions independently — which used to drift and cause
+upgrade pain — the project ships a small set of **stacks** under
+`stacks/<id>/` and every pack declares which one it rides.
+
+| Stack | React | Router | Zod | TypeScript | Vite | Used by |
+|---|---|---|---|---|---|---|
+| `v1` | 18 | `react-router-dom@^6` | 3 | 5.7 | 5 | (none currently — older pack versions historically rode it) |
+| `v2` | 19.2 | `react-router-dom@^6` | 3 | 5.7 | 5 | (intermediate) |
+| `v3` | 19.2 | `react-router@^7` | 4 | 5.7 | 5 | every pack version currently shipped |
+
+Each stack ships:
+
+```
+stacks/<id>/
+├── stack.json                  # id, description, deps map, bundler hints
+├── stack-package-deps.hbs      # dep names + ranges injected into the pack's package.json
+└── stack-package-devdeps.hbs   # devDep names + ranges injected into the pack's package.json
+```
+
+`stack.json` also carries **bundler hints** consumed by the playground
+sandbox (`rdcShim`, `importmapReactDomQuery`) so an in-browser preview
+of the same pack stays consistent with what the generated `npm install`
+would produce.
+
+### How `stack` flows through the pipeline
+
+1. Pack manifest declares `"stack": "v3"`.
+2. The pack loader (`src/generator/_packs/`) resolves
+   `stacks/v3/stack.json` + the two `*.hbs` snippets.
+3. When the bundler renders the pack's `package-json.hbs`, it
+   injects the stack's deps/devDeps into the emitted `package.json` —
+   the pack's own `package-json.hbs` only lists *pack-specific* deps
+   (e.g. `@mantine/core`, not `react`).
+4. The same stack id is forwarded into the React generator so seams
+   that swap by stack (e.g. `react-router-dom` vs `react-router`) pick
+   the right import path.
+
+### Authoring rule
+
+A pack version's `package-json.hbs` MUST NOT restate framework deps
+already covered by its stack (`react`, `react-dom`, `react-router*`,
+`zod`, `typescript`, `vite`).  Restating them creates drift between
+the package.json the bundler emits and the stack's intent.  The
+validation step ([§ 8](#8-validating-your-pack)) flags overlap.
 
 ## 3. Required emits
 
