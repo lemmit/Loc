@@ -34,6 +34,20 @@ export interface ThemeVM {
   brandShades: string[];
   /** 10-shade neutral / surface colour ramp, same indexing scheme. */
   neutralShades: string[];
+  /** 10-shade secondary brand ramp.  Only populated when the DSL
+   *  `theme { secondary: ... }` token is set; otherwise mirrors
+   *  `brandShades` so packs that always read `secondaryShades` get
+   *  a sensible baseline. */
+  secondaryShades: string[];
+  /** 10-shade accent ramp (third accent slot). */
+  accentShades: string[];
+  /** Semantic 10-shade ramps — success / warning / error.  Each
+   *  defaults to a pack-agnostic green / amber / red when the DSL
+   *  leaves the token blank, so packs that always project these
+   *  slots get a coherent baseline. */
+  successShades: string[];
+  warningShades: string[];
+  errorShades: string[];
   /** Default border radius for primitives — "xs" / "sm" / "md" /
    *  "lg" / "xl".  Mantine reads it directly; shadcn maps to
    *  `--radius` CSS variable. */
@@ -44,6 +58,10 @@ export interface ThemeVM {
   fontFamily: string;
   /** Monospace font-family for code / id displays. */
   fontFamilyMonospace: string;
+  /** Initial colour scheme — `"light"`, `"dark"`, or `"auto"`.
+   *  Packs that support theme toggling read this as the boot-time
+   *  default. */
+  colorScheme: "light" | "dark" | "auto";
 }
 
 /** A single import statement to emit at the top of a generated

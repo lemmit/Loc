@@ -107,6 +107,7 @@ import type {
   OperationIR,
   PageIR,
   PageLayoutIR,
+  PageMetadataIR,
   PageOriginIR,
   ParamIR,
   PermissionDeclIR,
@@ -645,6 +646,21 @@ function lowerTheme(block: ThemeBlock): ThemeIR {
       case "primary":
         out.primary = value;
         break;
+      case "secondary":
+        out.secondary = value;
+        break;
+      case "accent":
+        out.accent = value;
+        break;
+      case "success":
+        out.success = value;
+        break;
+      case "warning":
+        out.warning = value;
+        break;
+      case "error":
+        out.error = value;
+        break;
       case "neutral":
         out.neutral = value;
         break;
@@ -661,6 +677,14 @@ function lowerTheme(block: ThemeBlock): ThemeIR {
         break;
       case "fontFamily":
         out.fontFamily = value;
+        break;
+      case "fontFamilyMono":
+        out.fontFamilyMono = value;
+        break;
+      case "colorScheme":
+        if (value === "light" || value === "dark" || value === "auto") {
+          out.colorScheme = value;
+        }
         break;
       // Unknown property names land in the validator's reject path;
       // we silently drop them here so the IR shape stays clean.
@@ -782,6 +806,7 @@ function lowerDeployable(d: Deployable): DeployableIR {
     serves,
     uiBindings,
     moduleBindings,
+    favicon: d.favicon,
   };
 }
 
@@ -856,6 +881,9 @@ function lowerPage(p: Page): PageIR {
   let body: ExprIR | undefined;
   let menuMeta: MenuMetaIR | undefined;
   let layout: PageLayoutIR | undefined;
+  let description: string | undefined;
+  let ogImage: string | undefined;
+  let canonical: string | undefined;
   const state: StateFieldIR[] = [];
   // Page-scoped env: route params + state fields bind as locals so
   // `inferExprType` resolves their refs to their declared types
@@ -900,7 +928,21 @@ function lowerPage(p: Page): PageIR {
       // production, and the React generator branches only on the
       // narrower "none" sentinel).
       layout = { kind: "preset", name: prop.value as "default" | "none" };
+    } else if (prop.$type === "DescriptionProp") {
+      description = prop.value;
+    } else if (prop.$type === "OgImageProp") {
+      ogImage = prop.value;
+    } else if (prop.$type === "CanonicalProp") {
+      canonical = prop.value;
     }
+  }
+  // Static metadata projected into the `index.html` shell.  Only
+  // emitted when at least one metadata prop is present so consumers
+  // can branch on `page.metadata` truthiness rather than checking
+  // each field individually.
+  let metadata: PageMetadataIR | undefined;
+  if (description !== undefined || ogImage !== undefined || canonical !== undefined) {
+    metadata = { description, ogImage, canonical };
   }
   // Pass-1 AST-to-AST scaffold expansion populates
   // synthesised pages with body expressions like
@@ -921,6 +963,7 @@ function lowerPage(p: Page): PageIR {
     source: inferred.kind === "custom" ? "explicit" : "scaffold",
     origin: inferred,
     layout,
+    metadata,
   };
 }
 
