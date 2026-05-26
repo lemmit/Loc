@@ -3,8 +3,8 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AstNode, AstUtils } from "langium";
 import { describe, expect, it } from "vitest";
-import type { BodyProp } from "../../src/language/generated/ast.js";
-import { type BuilderNode, emitBody, seedFromBody } from "../../web/src/builder/page/model.js";
+import type { BodyProp, Page } from "../../src/language/generated/ast.js";
+import { type BuilderNode, emitBody, enumStateFields, expectedAssignEnum, seedFromBody } from "../../web/src/builder/page/model.js";
 import { fromCraft, toCraft } from "../../web/src/builder/page/serialize.js";
 import { parseRawResult } from "../_helpers/index.js";
 
@@ -219,6 +219,61 @@ describe("page-builder model — user-defined component calls", () => {
     expect(detail.name).toBe("Lambda");
     expect(detail.children[0].name).toBe("OrderPanel");
     expect(detail.children[0].props.order).toBe("o");
+  });
+});
+
+describe("page-builder model — per-position enum inference", () => {
+  // Inference is local: an enum-typed state-field bare-ident assignment target
+  // gets an enum-case picker for its value; everything else stays free text.
+  // We parse a real page with a `state {}` block and consult `enumStateFields`
+  // against an `enums` map (the same shape `BuilderPane.collectEnums` builds).
+  const pageWith = (stateBody: string): Page => {
+    const doc = `system S { context C { enum OrderStatus { New, Confirmed, Shipped } } ui U { page P { ${stateBody} body: Text { "x" } } } }`;
+    const r = parseRawResult(doc);
+    expect(r.parserErrors).toEqual([]);
+    const page = [...AstUtils.streamAst(r.value)].find((n) => n.$type === "Page") as Page;
+    return page;
+  };
+  const enums = new Map<string, readonly string[]>([["OrderStatus", ["New", "Confirmed", "Shipped"]]]);
+
+  it("indexes enum-typed state fields by name → enum name", () => {
+    const page = pageWith("state { status: OrderStatus notes: string count: int }");
+    const fields = enumStateFields(page, enums);
+    expect(fields.size).toBe(1);
+    expect(fields.get("status")).toBe("OrderStatus");
+  });
+
+  it("skips state fields whose named base isn't in the enums map", () => {
+    // `Order` is a named type (an aggregate id-ref shape elsewhere); without an
+    // entry in the enums map it must not be claimed by the inference.
+    const page = pageWith("state { o: OrderStatus x: Order }");
+    const fields = enumStateFields(page, enums);
+    expect([...fields.keys()].sort()).toEqual(["o"]);
+  });
+
+  it("returns an empty map for a page with no state block", () => {
+    const page = pageWith("");
+    expect(enumStateFields(page, enums).size).toBe(0);
+  });
+
+  it("returns the expected enum for a bare-ident assignment target", () => {
+    const fields = new Map([["status", "OrderStatus"]]);
+    expect(expectedAssignEnum("status", fields)).toBe("OrderStatus");
+    // Trims incidental whitespace from the structured target field.
+    expect(expectedAssignEnum("  status  ", fields)).toBe("OrderStatus");
+  });
+
+  it("declines non-bare-ident targets (member access, calls, empty)", () => {
+    const fields = new Map([["status", "OrderStatus"]]);
+    expect(expectedAssignEnum("draft.status", fields)).toBeNull();
+    expect(expectedAssignEnum("draft[status]", fields)).toBeNull();
+    expect(expectedAssignEnum("set()", fields)).toBeNull();
+    expect(expectedAssignEnum("", fields)).toBeNull();
+  });
+
+  it("returns null for an unknown bare ident (not a state field)", () => {
+    const fields = new Map([["status", "OrderStatus"]]);
+    expect(expectedAssignEnum("notAField", fields)).toBeNull();
   });
 });
 

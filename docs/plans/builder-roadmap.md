@@ -123,6 +123,18 @@ text stays the source of truth.
   default renders as a dropdown of the enum's cases (collected from the source by
   `BuilderPane`; the current value is always selectable so a hand-written default
   isn't clobbered) instead of a free-text input.
+- **Enum-case picker for assignment values**: a structured assignment row whose
+  target is a *bare-identifier* matching an enum-typed state field renders its
+  value cell as a dropdown of that enum's cases (current value always selectable;
+  fall-through to the validated free-text textarea otherwise). Per-position type
+  inference is intentionally bounded — only bare-ident assignment targets of an
+  enum-typed `state {}` field. Member-access targets (`draft.status`), non-state
+  idents, and non-enum types stay as free text (no full type pass). Predicate-arm
+  `match` conds aren't covered: the grammar's `match` carries no scrutinee, so a
+  single-position picker doesn't fit there. Helpers: `enumStateFields` /
+  `expectedAssignEnum` in `web/src/builder/page/model.ts`; wired through
+  `BuilderPane` → `PageBuilder` → the assign-row settings. Gated by
+  `test/generator/builder-page-model.test.ts` and `web/e2e/builder-page.spec.ts`.
 - **Mobile Builder + Model tabs**: both builders have a narrow-viewport layout —
   full-width canvas, palette/settings (page) and inspector (model) move into
   bottom drawers, reached via the consolidated Code tab's SegmentedControl
@@ -148,9 +160,11 @@ text stays the source of truth.
   structured (see Done above); other bare calls keep a validated single-row
   editor (a call is one expression, so structuring buys little beyond the
   validation now in place).
-- **More typed pickers**: enum-case values are offered for state-field defaults;
-  enum-valued *expressions elsewhere* (assignment values, `match` conds) still
-  edit as free text (would need per-position type inference).
+- **`match` arm cond enum picker** — predicate-arms `match` has no scrutinee in
+  the grammar (conds are general boolean expressions like `status == Confirmed`),
+  so a single-position picker doesn't fit. Lifting this would mean structuring
+  the cond into `lhs op rhs` rows and inferring the lhs's type; out of scope
+  here.
 - **`match` arm cond caveat** — the grammar misparses a *bare-identifier* arm
   cond (`ready => …`) as a lambda, so such conds must be comparisons/calls. Emit
   reproduces the original (valid) cond, so round-trip is safe; the "+ arm"

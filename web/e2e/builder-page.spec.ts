@@ -472,6 +472,45 @@ test("offers enum cases as the default for an enum-typed state field", async ({ 
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
+const ENUM_ASSIGN_SOURCE = `system S {
+  context C {
+    enum OrderStatus { New, Confirmed, Shipped }
+  }
+  ui U {
+    page P {
+      state { status: OrderStatus = New }
+      body: Button("Confirm", onClick: e => {
+        status := New
+      })
+    }
+  }
+}`;
+
+test("offers enum cases for an assignment whose target is an enum state field", async ({ page }) => {
+  // Per-position type inference: a bare-ident assignment target matching an
+  // enum-typed state field gets a case dropdown for its value, mirroring the
+  // state-default picker.
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await setSource(page, ENUM_ASSIGN_SOURCE);
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // Drill into the handler's structured assignment row (status := New).
+  await page.getByTestId("c4node-Stmt").first().click();
+  await expect(page.getByTestId("c4builder-prop-target")).toHaveValue("status");
+
+  // Value cell is a Select (not a free-text textarea) — pick a different case.
+  await page.getByTestId("c4builder-prop-value").click();
+  await page.getByRole("option", { name: "Confirmed" }).click();
+
+  await page.getByTestId("c4builder-apply").click();
+  const model = () => page.evaluate(() => (window as unknown as { __loomGetSource: () => string }).__loomGetSource());
+  await expect.poll(model).toContain("status := Confirmed");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
 const NAV_SOURCE = `system S {
   ui U {
     page Home { body: Text("home") }
