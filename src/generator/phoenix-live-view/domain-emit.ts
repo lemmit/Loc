@@ -16,6 +16,7 @@ import type {
 } from "../../ir/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { renderJasonEncoderImpl } from "./jason-camel-emit.js";
 import { joinEntityName } from "./join-resource-emit.js";
 import { type RenderCtx, relationshipNameFor, renderAshType, renderExpr } from "./render-expr.js";
 import { renderElixirStatements } from "./render-stmt.js";
@@ -81,13 +82,15 @@ function renderAggregateResource(
   const associations = agg.associations ?? [];
   const persistedFields = agg.fields.filter((f) => !isRefCollection(f.type));
 
-  // Build the @derive field list: :id, persisted fields only, timestamps.
-  const deriveFields = [
+  // Field list for the `defimpl Jason.Encoder` block: :id, persisted
+  // fields only, timestamps.  Reference-collection fields are excluded
+  // (lazy-loaded via the join table; would surface as nil otherwise).
+  const wireAtoms = [
     ":id",
     ...persistedFields.map((f) => `:${snake(f.name)}`),
     ":inserted_at",
     ":updated_at",
-  ].join(", ");
+  ];
 
   // NOTE on the `inspect` derived (PR #524 + PR #537 lineage):
   //
@@ -109,8 +112,13 @@ function renderAggregateResource(
   // the model so downstream emitters (.NET ToString, TS toString)
   // still consume it.
 
+  // camelCase wire-shape Jason encoder.  Pairs with the resource
+  // module — same struct, separate protocol impl.  Cross-backend
+  // parity: matches Hono / .NET key casing without per-resource
+  // duplication of the conversion fn.
+  const jasonImpl = renderJasonEncoderImpl(moduleName, wireAtoms, appModule);
+
   return `defmodule ${moduleName} do
-  @derive {Jason.Encoder, only: [${deriveFields}]}
   use Ash.Resource,
     domain: ${ctxModule},
     data_layer: AshPostgres.DataLayer
@@ -127,7 +135,8 @@ function renderAggregateResource(
   end
 ${renderRelationships(agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${renderHelperFunctions(agg.functions, renderCtx)}
 end
-`;
+
+${jasonImpl}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +156,18 @@ function renderEntityPartResource(
   const parentFk = `${snake(part.parentName)}_id`;
 
   const renderCtx: RenderCtx = { thisName: "record", contextModule: ctxModule };
+
+  // camelCase wire-shape Jason encoder (matches aggregate behaviour).
+  // Excludes the parent FK from the wire — parts are embedded under
+  // their parent's containment list, so the parent reference is
+  // implicit, same as Hono / .NET strip it from the DTO.
+  const partAtoms = [
+    ":id",
+    ...part.fields.map((f) => `:${snake(f.name)}`),
+    ":inserted_at",
+    ":updated_at",
+  ];
+  const jasonImpl = renderJasonEncoderImpl(moduleName, partAtoms, appModule);
 
   return `defmodule ${moduleName} do
   use Ash.Resource,
@@ -178,7 +199,8 @@ ${renderValidations(part.invariants, renderCtx, new Set(part.fields.map((f) => f
     end
   end
 ${renderHelperFunctions(part.functions, renderCtx)}end
-`;
+
+${jasonImpl}`;
 }
 
 // ---------------------------------------------------------------------------

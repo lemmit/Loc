@@ -461,8 +461,15 @@ function renderProperties(fields: Array<{ name: string; type: TypeIR; optional: 
   const propsLines: string[] = [];
   const requiredAtoms: string[] = [];
 
+  // Field names land in the spec as the source-level identifier from the
+  // `.ddd` source (camelCase by convention, e.g. `createdAt`,
+  // `pipelineCount`).  The runtime wire shape — produced by the
+  // per-resource `defimpl Jason.Encoder` introduced in PR C — emits the
+  // same casing, so the spec and the response body agree.  Snake-casing
+  // here would re-introduce the divergence the parity harness reports
+  // as `only-phoenix=[created_at,...]`.
   for (const f of fields) {
-    const key = snake(f.name);
+    const key = f.name;
     const schema = openApiType(f.type);
     propsLines.push(`      ${key}: ${schema}`);
     if (!f.optional) requiredAtoms.push(`:${key}`);
