@@ -89,33 +89,25 @@ function renderAggregateResource(
     ":updated_at",
   ].join(", ");
 
-  // Inspect protocol implementation: inlines the `inspect` derived's
-  // expression body as native Elixir.  Two reasons we can't go through
-  // an Ash `calculate :inspect, :string, expr(...)`:
-  //   1. Ash's `expr()` DSL doesn't admit `<>` or `to_string/1` — the
-  //      synthesised structural form uses both.
-  //   2. `defimpl Inspect.inspect/2` is invoked synchronously during
-  //      exception serialisation / Logger / IEx; calling `Ash.load/2`
-  //      from inside it is fragile (re-entrant DB access, potential
-  //      Inspect loops on errors).
-  // Inlining renders against the struct's stored attributes directly —
-  // safe because the auto-synthesised inspect references only `id` and
-  // stored fields (both present on the struct without `Ash.load`).
-  // User-written `derived inspect` is the same story so long as the
-  // body sticks to stored fields; references to other calculations
-  // (e.g. `display`) would need explicit loading, which is on the
-  // user — same caveat applies to any Inspect impl in Elixir.
-  // See plan `/root/.claude/plans/i-think-we-have-glittery-lecun.md`.
-  const inspectDerived = agg.derived.find((d) => d.name === "inspect");
-  const inspectImpl = inspectDerived
-    ? `
-defimpl Inspect, for: ${moduleName} do
-  def inspect(record, _opts) do
-    ${renderExpr(inspectDerived.expr, renderCtx)}
-  end
-end
-`
-    : "";
+  // NOTE on the `inspect` derived (PR #524 + PR #537 lineage):
+  //
+  // Earlier iterations emitted a `defimpl Inspect, for: <Module> do … end`
+  // block that inlined the user-written / auto-synthesised inspect
+  // expression body as native Elixir.  Ash 3.x's `use Ash.Resource`
+  // macro auto-derives its own `Inspect` impl for the resource struct,
+  // which collides with our explicit `defimpl` and surfaces under
+  // `--warnings-as-errors` (the `phoenix-build` workflow uses it) as:
+  //
+  //   warning: redefining module Inspect.<App>.<Ctx>.<Agg>
+  //
+  // Until Ash exposes an opt-out for its auto-Inspect derive (or we
+  // route the synthesised body through a non-Inspect channel like a
+  // dedicated `inspect/1` helper on the resource module), dropping
+  // the emission is the only way to keep mix compile clean.  Ash's
+  // default Inspect output (`%<App>.<Ctx>.<Agg>{id: …, name: …}`) is
+  // adequate for debugging; the `derived inspect` IR node remains in
+  // the model so downstream emitters (.NET ToString, TS toString)
+  // still consume it.
 
   return `defmodule ${moduleName} do
   @derive {Jason.Encoder, only: [${deriveFields}]}
@@ -135,7 +127,7 @@ end
   end
 ${renderRelationships(agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${renderHelperFunctions(agg.functions, renderCtx)}
 end
-${inspectImpl}`;
+`;
 }
 
 // ---------------------------------------------------------------------------

@@ -2190,25 +2190,32 @@ describe("Ash 3.x compile-correctness regressions", () => {
     expect(domain).not.toMatch(/action: :all\b/);
   });
 
-  it("inspect derived emits `defimpl Inspect`, NOT an Ash `calculate :inspect, ..., expr(...)`", async () => {
-    // Ash's `expr()` DSL doesn't admit string concat (`<>`) or
-    // `to_string/1`, both of which the auto-synthesised inspect body
-    // uses.  The emitter must route inspect through a `defimpl Inspect`
-    // block (native Elixir) rather than the calculations block.
-    // Regression for PR #524's Phoenix CI failure.
+  it("inspect derived does NOT render to Phoenix (Ash auto-derives Inspect)", async () => {
+    // The `derived inspect` IR node stays in the model (consumed by
+    // .NET ToString + TS toString) but the Phoenix backend renders
+    // NEITHER a `calculate :inspect, :string, expr(...)` NOR a
+    // `defimpl Inspect, for: <Module>` block.  Two layered constraints:
+    //
+    //   1. Ash's `expr()` DSL doesn't admit string concat (`<>`) or
+    //      `to_string/1`, both of which the auto-synthesised inspect
+    //      body uses — so `calculate :inspect` won't compile.
+    //      (PR #524's original Phoenix CI failure.)
+    //   2. `defimpl Inspect, for: <Module>` collides with the Inspect
+    //      protocol impl that Ash 3.x's `use Ash.Resource` macro
+    //      auto-derives for the resource struct, surfacing under
+    //      `mix compile --warnings-as-errors` as:
+    //        warning: redefining module Inspect.<Module>
+    //      (Surfaced after #541 unblocked the phoenix-build workflow.)
+    //
+    // Until Ash exposes an opt-out for its Inspect auto-derive (or we
+    // route the synthesised body through a non-Inspect channel such as
+    // a dedicated `inspect/1` helper), neither path is viable.  Ash's
+    // default `%<Module>{...}` Inspect output is adequate for
+    // debugging.
     const files = await buildFormFixture();
     const customer = files.get("phoenix_app/lib/phoenix_app/sales/customer.ex")!;
-    // Must not have a `calculate :inspect, ...` line — that would put
-    // string-concat operators inside `expr()`, which won't compile.
     expect(customer).not.toMatch(/calculate :inspect/);
-    // Must have a `defimpl Inspect, for: ..., do def inspect(record, _opts) do <body> end end` block.
-    expect(customer).toMatch(
-      /defimpl Inspect, for: PhoenixApp\.Sales\.Customer do\s+def inspect\(record, _opts\) do/,
-    );
-    // The body must reference the struct's stored attributes via
-    // `record.<field>` and use native Elixir string concat (`<>`).
-    expect(customer).toMatch(/record\.id/);
-    expect(customer).toMatch(/<>/);
+    expect(customer).not.toMatch(/defimpl Inspect, for: PhoenixApp\.Sales\.Customer/);
   });
 });
 
