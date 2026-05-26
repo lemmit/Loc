@@ -26,7 +26,7 @@ public sealed class Product
     }
 
     public string Display => this.Sku;
-    public string Inspect => "Product(" + "id: " + this.Id.ToString() + ", " + "sku: " + "'" + this.Sku + "'" + ", " + "price: " + "[Money]" + ")";
+    public string Inspect => "Product(" + "id: " + this.Id.ToString() + ", " + "sku: " + "'" + this.Sku + "'" + ", " + "price: " + "Money(" + "amount: " + this.Price.Amount.ToString(System.Globalization.CultureInfo.InvariantCulture) + ", " + "currency: " + "'" + this.Price.Currency + "'" + ")" + ")";
     public override string ToString() => Inspect;
 
     public IReadOnlyList<IDomainEvent> PullEvents()
