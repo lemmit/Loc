@@ -37,6 +37,27 @@ import type {
 } from "../language/generated/ast.js";
 import { isProperty } from "../language/generated/ast.js";
 import {
+  mkAssignOrCallStmt,
+  mkCallArg,
+  mkFilterDecl,
+  mkIdType,
+  mkImplementsDecl,
+  mkLValue,
+  mkMemberSuffix,
+  mkNamedType,
+  mkNameRef,
+  mkNullLit,
+  mkOperation,
+  mkParameter,
+  mkPostfixChain,
+  mkPrimitiveType,
+  mkProperty,
+  mkStampDecl,
+  mkThisRef,
+  mkTypeRef,
+  mkUnaryExpr,
+} from "./_mk.js";
+import {
   _currentOrigin,
   _setContainer,
   _tag,
@@ -72,17 +93,14 @@ export function primType(
   opts: { array?: boolean; optional?: boolean } = {},
 ): TypeRef {
   const origin = currentOrigin();
-  const prim: PrimitiveType = tag(
-    { $type: "PrimitiveType", name } as unknown as PrimitiveType,
-    origin,
-  );
+  const prim: PrimitiveType = tag(mkPrimitiveType({ $type: "PrimitiveType", name }), origin);
   const ref: TypeRef = tag(
-    {
+    mkTypeRef({
       $type: "TypeRef",
       base: prim,
       array: opts.array ?? false,
       optional: opts.optional ?? false,
-    } as unknown as TypeRef,
+    }),
     origin,
   );
   setContainer(prim, ref, "base");
@@ -97,19 +115,19 @@ export function idRef(
 ): TypeRef {
   const origin = currentOrigin();
   const idType: IdType = tag(
-    {
+    mkIdType({
       $type: "IdType",
       target: makeRef<NamedDecl>(targetName),
-    } as unknown as IdType,
+    }),
     origin,
   );
   const ref: TypeRef = tag(
-    {
+    mkTypeRef({
       $type: "TypeRef",
       base: idType,
       array: opts.array ?? false,
       optional: opts.optional ?? false,
-    } as unknown as TypeRef,
+    }),
     origin,
   );
   setContainer(idType, ref, "base");
@@ -123,16 +141,16 @@ export function namedType(
 ): TypeRef {
   const origin = currentOrigin();
   const nt: NamedType = tag(
-    { $type: "NamedType", target: makeRef<NamedDecl>(targetName) } as unknown as NamedType,
+    mkNamedType({ $type: "NamedType", target: makeRef<NamedDecl>(targetName) }),
     origin,
   );
   const ref: TypeRef = tag(
-    {
+    mkTypeRef({
       $type: "TypeRef",
       base: nt,
       array: opts.array ?? false,
       optional: opts.optional ?? false,
-    } as unknown as TypeRef,
+    }),
     origin,
   );
   setContainer(nt, ref, "base");
@@ -160,13 +178,13 @@ export function field(
 ): Property {
   const origin = currentOrigin();
   const prop: Property = tag(
-    {
+    mkProperty({
       $type: "Property",
       name,
       type,
       provenanced: opts.provenanced ?? false,
       ...(opts.access ? { access: opts.access } : {}),
-    } as unknown as Property,
+    }),
     origin,
   );
   setContainer(type, prop, "type");
@@ -176,7 +194,7 @@ export function field(
 /** A parameter on an operation. */
 export function param(name: string, type: TypeRef): Parameter {
   const origin = currentOrigin();
-  const p: Parameter = tag({ $type: "Parameter", name, type } as unknown as Parameter, origin);
+  const p: Parameter = tag(mkParameter({ $type: "Parameter", name, type }), origin);
   setContainer(type, p, "type");
   return p;
 }
@@ -193,7 +211,7 @@ export function operation(
 ): Operation {
   const origin = currentOrigin();
   const op: Operation = tag(
-    {
+    mkOperation({
       $type: "Operation",
       name,
       params,
@@ -201,7 +219,7 @@ export function operation(
       private: opts.private ?? false,
       extern: opts.extern ?? false,
       audited: opts.audited ?? false,
-    } as unknown as Operation,
+    }),
     origin,
   );
   params.forEach((p, i) => setContainer(p, op, "params", i));
@@ -226,7 +244,7 @@ export function operation(
  * just like a user-typed identifier. */
 export function nameRef(name: string): NameRef {
   const origin = currentOrigin();
-  return tag({ $type: "NameRef", name } as unknown as NameRef, origin);
+  return tag(mkNameRef({ $type: "NameRef", name }), origin);
 }
 
 /** A dotted member-access expression: `receiver.member`.  Used by
@@ -245,26 +263,26 @@ export function memberAccess(
   const origin = currentOrigin();
   const args = opts.args ?? [];
   const callArgs: CallArg[] = args.map((a) => {
-    const node = tag({ $type: "CallArg", value: a } as CallArg, origin);
+    const node = tag(mkCallArg({ $type: "CallArg", value: a }), origin);
     setContainer(a, node, "value");
     return node;
   });
   const suffix: MemberSuffix = tag(
-    {
+    mkMemberSuffix({
       $type: "MemberSuffix",
       member,
       call: opts.call ?? false,
       args: callArgs,
-    } as MemberSuffix,
+    }),
     origin,
   );
   callArgs.forEach((c, i) => setContainer(c, suffix, "args", i));
   const chain: PostfixChain = tag(
-    {
+    mkPostfixChain({
       $type: "PostfixChain",
       head: receiver,
       suffixes: [suffix],
-    } as PostfixChain,
+    }),
     origin,
   );
   setContainer(receiver, chain, "head");
@@ -285,22 +303,22 @@ export function assignStmtPath(path: string[], value: Expression): AssignOrCallS
   if (path.length === 0) throw new Error("assignStmtPath requires at least one segment");
   const origin = currentOrigin();
   const lv: LValue = tag(
-    {
+    mkLValue({
       $type: "LValue",
       head: path[0]!,
       tail: path.slice(1),
       call: false,
       args: [],
-    } as unknown as LValue,
+    }),
     origin,
   );
   const stmt: AssignOrCallStmt = tag(
-    {
+    mkAssignOrCallStmt({
       $type: "AssignOrCallStmt",
       target: lv,
       op: ":=",
       value,
-    } as unknown as AssignOrCallStmt,
+    }),
     origin,
   );
   setContainer(lv, stmt, "target");
@@ -466,10 +484,7 @@ export function viewsIn(
  * the grammar's `(op='!' | op='-') operand=Expression` shape. */
 export function not(operand: Expression): UnaryExpr {
   const origin = currentOrigin();
-  const u: UnaryExpr = tag(
-    { $type: "UnaryExpr", op: "!", operand } as unknown as UnaryExpr,
-    origin,
-  );
+  const u: UnaryExpr = tag(mkUnaryExpr({ $type: "UnaryExpr", op: "!", operand }), origin);
   setContainer(operand, u, "operand");
   return u;
 }
@@ -479,10 +494,7 @@ export function not(operand: Expression): UnaryExpr {
  * `isThisRef(expr)` branch in `lower-expr.ts:377`. */
 export function thisRef(): import("../language/generated/ast.js").ThisRef {
   const origin = currentOrigin();
-  return tag(
-    { $type: "ThisRef" } as unknown as import("../language/generated/ast.js").ThisRef,
-    origin,
-  );
+  return tag(mkThisRef({ $type: "ThisRef" }), origin);
 }
 
 /** `null` literal.  Loom's grammar models this as a `NullLit` with
@@ -491,10 +503,10 @@ export function thisRef(): import("../language/generated/ast.js").ThisRef {
 export function nullLit(): import("../language/generated/ast.js").NullLit {
   const origin = currentOrigin();
   return tag(
-    {
+    mkNullLit({
       $type: "NullLit",
       value: "null",
-    } as unknown as import("../language/generated/ast.js").NullLit,
+    }),
     origin,
   );
 }
@@ -528,15 +540,15 @@ export function contextFilter(
 ): FilterDeclAst & AggregateMember {
   const origin = currentOrigin();
   const node: FilterDeclAst = tag(
-    {
+    mkFilterDecl({
       $type: "FilterDecl",
       expr: predicate,
       ...(opts.capability !== undefined ? { capability: opts.capability } : {}),
-    } as unknown as FilterDeclAst,
+    }),
     origin,
   );
   setContainer(predicate, node, "expr");
-  return node as unknown as FilterDeclAst & AggregateMember;
+  return node as FilterDeclAst & AggregateMember;
 }
 
 /** One field/value pair inside a `stamp onCreate { ... }` /
@@ -574,16 +586,16 @@ function buildStamp(
   const origin = currentOrigin();
   const stmts = assignments.map((a) => assignStmt(a.field, a.value));
   const node: StampDeclAst = tag(
-    {
+    mkStampDecl({
       $type: "StampDecl",
       event,
       assignments: stmts,
       ...(capability !== undefined ? { capability } : {}),
-    } as unknown as StampDeclAst,
+    }),
     origin,
   );
   stmts.forEach((s, i) => setContainer(s, node, "assignments", i));
-  return node as unknown as StampDeclAst & AggregateMember;
+  return node as StampDeclAst & AggregateMember;
 }
 
 /** Construct an `implements "<name>"` aggregate / context member —
@@ -593,11 +605,8 @@ function buildStamp(
  * block per name (e.g. one HasQueryFilter loop in OnModelCreating). */
 export function implementsCapability(name: string): ImplementsDeclAst & AggregateMember {
   const origin = currentOrigin();
-  const node: ImplementsDeclAst = tag(
-    { $type: "ImplementsDecl", name } as unknown as ImplementsDeclAst,
-    origin,
-  );
-  return node as unknown as ImplementsDeclAst & AggregateMember;
+  const node: ImplementsDeclAst = tag(mkImplementsDecl({ $type: "ImplementsDecl", name }), origin);
+  return node as ImplementsDeclAst & AggregateMember;
 }
 
 // ---------------------------------------------------------------------------
