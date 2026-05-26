@@ -10,20 +10,16 @@ name: .NET observability events (runtime e2e)
 # State.Event scope key, IHostApplicationLifetime callbacks racing,
 # duration_ms losing its integer type at the framework boundary.
 #
-# Triggers narrowly: only when the .NET generator, the catalog, the
-# shared renderer, or this workflow itself changes.  Other PRs don't
-# pay the postgres-pull + dotnet-restore cost (~2-3min cold, ~30s warm).
+# Triggers `push: main` + manual dispatch only — NOT per-PR.  This is a
+# regression net, not a PR gate: the unit-pipeline tests + conformance
+# parity catch the structural bugs; this catches the runtime-only ones.
+# Per-PR cost was a full docker postgres + dotnet restore + boot (~3-5min
+# cold).  When something does slip past the fast gates, the post-merge
+# `push: main` run surfaces it the same day; revert is faster than
+# paying the docker-pull tax on every PR touching the .NET generator.
 on:
   push:
     branches: [main]
-    paths:
-      - 'src/generator/dotnet/**'
-      - 'src/generator/_obs/**'
-      - 'src/platform/dotnet.ts'
-      - 'test/e2e/observability-events-dotnet.test.ts'
-      - 'package.json'
-      - '.github/workflows/dotnet-obs-e2e.yml'
-  pull_request:
     paths:
       - 'src/generator/dotnet/**'
       - 'src/generator/_obs/**'
@@ -35,6 +31,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   dotnet-obs-e2e:

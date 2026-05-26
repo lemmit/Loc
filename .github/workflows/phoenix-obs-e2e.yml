@@ -11,21 +11,14 @@ name: Phoenix observability events (runtime e2e)
 # :telemetry handler from Bite 1 not bridging endpoint events to the
 # catalog identity.
 #
-# Triggers narrowly: only when the Phoenix generator, the catalog, the
-# shared renderer, or this workflow itself changes.  Other PRs don't
-# pay the hex deps + Ash compile cost (~5-8min cold, ~90s warm).
+# Triggers `push: main` + manual dispatch only — NOT per-PR.  Sibling
+# to dotnet-obs-e2e / hono-obs-e2e; same rationale (regression net,
+# not a PR gate).  Phoenix specifically was the heaviest of the three:
+# hex deps + Ash 3.x compile + postgres pull at 5-8min cold.  Catching
+# runtime regressions one merge later is acceptable.
 on:
   push:
     branches: [main]
-    paths:
-      - 'src/generator/phoenix-live-view/**'
-      - 'src/generator/_obs/**'
-      - 'src/platform/phoenix-live-view.ts'
-      - 'designs/ashPhoenix/**'
-      - 'test/e2e/observability-events-phoenix.test.ts'
-      - 'package.json'
-      - '.github/workflows/phoenix-obs-e2e.yml'
-  pull_request:
     paths:
       - 'src/generator/phoenix-live-view/**'
       - 'src/generator/_obs/**'
@@ -38,6 +31,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   phoenix-obs-e2e:

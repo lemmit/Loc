@@ -1,15 +1,33 @@
 name: Generated React TSX build
 
-# For each example .ddd × each design pack (mantine / shadcn / mui /
-# chakra), generate the React project, `npm install`, and
-# `tsc --noEmit` it.  Catches generator drift that compiles the TS
-# backend cleanly but breaks the generated TSX (missing imports,
-# wrong prop types, JSX namespace issues) — invisible to the IR-
-# level tests but breaks at user time.
+# For each {example .ddd × design pack@version} cell, generate the React
+# project, `npm install`, and `tsc --noEmit` it.  Catches generator
+# drift that compiles the TS backend cleanly but breaks the generated
+# TSX (missing imports, wrong prop types, JSX namespace issues) —
+# invisible to the IR-level tests but breaks at user time.
 #
-# Each {example × pack} case runs as its own runner via a job matrix.
-# Wall time per case is ~30s (npm install dominates); the full sweep
-# completes in parallel rather than ~5min sequential.
+# Matrix policy (configured by the `configure` job below):
+#
+#   - `pull_request` events    →  8-cell slice: showcase.ddd against
+#                                  every pack@version.  showcase is
+#                                  the feature-comprehensive
+#                                  conformance fixture (#401) and
+#                                  exercises the broadest generator
+#                                  surface.  Misses per-example drift
+#                                  (storybook-mantine / -shadcn,
+#                                  loom-landing, banking, …) — caught
+#                                  one merge later by:
+#
+#   - `push: main` /            →  full 88-cell Cartesian.  Heavy, but
+#     `workflow_dispatch`           it's the regression safety net.
+#                                   `workflow_dispatch` runs full too
+#                                   so a maintainer can force the
+#                                   sweep on a branch if a PR-time
+#                                   slim cell smelled suspicious.
+#
+# Each cell runs as its own runner via a job matrix.  Wall time per
+# cell is ~30s (npm install dominates); the full sweep completes in
+# parallel rather than ~5min sequential.
 
 on:
   push:
@@ -45,35 +63,45 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: generated-react-build-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Pick the matrix shape based on the event.  Output is JSON consumed
+  # by the matrix job below via `fromJSON`.  Costs ~5 seconds of runner
+  # time — negligible against the 88 cells we skip on a typical PR.
+  configure:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        run: |
+          # Pack list is identical in both branches; declared once.
+          PACKS='["mantine@v7","mantine@v9","shadcn@v3","shadcn@v4","mui@v5","mui@v7","chakra@v2","chakra@v3"]'
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Slim PR slice — 8 cells.  showcase.ddd × every pack
+            # family@version.  showcase is the feature-comprehensive
+            # cross-generator conformance fixture (#401), so this
+            # catches nearly all pack-template / generator drift.
+            # Per-example drift on the other 10 examples is deferred
+            # to the push:main sweep below.
+            EXAMPLES='["examples/showcase.ddd"]'
+          else
+            # Full Cartesian — push:main and workflow_dispatch.  88 cells.
+            EXAMPLES='["examples/acme.ddd","examples/showcase.ddd","web/src/examples/banking-system.ddd","web/src/examples/inventory-system.ddd","web/src/examples/provenance-system.ddd","web/src/examples/sales-system.ddd","web/src/examples/storefront-system.ddd","web/src/examples/storybook-mantine.ddd","web/src/examples/storybook-shadcn.ddd","web/src/examples/storybook-components.ddd","web/src/examples/action-showcase.ddd"]'
+          fi
+          echo "matrix={\"example\":$EXAMPLES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
+
   matrix:
+    needs: configure
     runs-on: ubuntu-latest
     strategy:
       # Surface every broken cell rather than aborting the matrix on
       # the first red shard — easier to triage cross-pack regressions
       # when CI shows the full set.
       fail-fast: false
-      matrix:
-        example:
-          - examples/acme.ddd
-          - examples/showcase.ddd
-          - web/src/examples/banking-system.ddd
-          - web/src/examples/inventory-system.ddd
-          - web/src/examples/provenance-system.ddd
-          - web/src/examples/sales-system.ddd
-          - web/src/examples/storefront-system.ddd
-          - web/src/examples/storybook-mantine.ddd
-          - web/src/examples/storybook-shadcn.ddd
-          - web/src/examples/storybook-components.ddd
-          - web/src/examples/action-showcase.ddd
-        # Phase 0 of pack versioning: shard keys carry the explicit
-        # `family@version` so each cell tests a specific pack version,
-        # not "whatever BUILTIN_PACK_LATEST resolves to today".  Phase
-        # 1.X PRs (mantine@v9, chakra@v3, …) append entries here.
-        pack: ["mantine@v7", "mantine@v9", "shadcn@v3", "shadcn@v4", "mui@v5", "mui@v7", "chakra@v2", "chakra@v3"]
+      matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
     # Per-shard timeout: generate + npm install + tsc fit comfortably
     # under 10min; the matrix gives every shard its own runner so the
     # total wall time is min(shard times) ≈ one shard, not their sum.

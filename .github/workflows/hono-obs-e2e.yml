@@ -10,19 +10,15 @@ name: Hono observability events (runtime e2e)
 # sidecar.  Cost is dominated by the `npm install` of the generated
 # project's deps (~60-90s with cache, ~3-4min cold).
 #
-# Triggers narrowly: only when the Hono generator, the catalog, the
-# shared renderer, or this workflow itself changes.
+# Triggers `push: main` + manual dispatch only — NOT per-PR.  Sibling
+# to dotnet-obs-e2e / phoenix-obs-e2e; same rationale (regression net,
+# not a PR gate).  Three concurrent obs-e2e runs on every Hono / .NET /
+# Phoenix-touching PR added up to a docker / runner burst exactly of
+# the shape anti-abuse heuristics watch for on public repos.  Catching
+# runtime regressions one merge later is acceptable.
 on:
   push:
     branches: [main]
-    paths:
-      - 'src/generator/typescript/**'
-      - 'src/platform/hono/**'
-      - 'src/generator/_obs/**'
-      - 'test/e2e/observability-events.test.ts'
-      - 'package.json'
-      - '.github/workflows/hono-obs-e2e.yml'
-  pull_request:
     paths:
       - 'src/generator/typescript/**'
       - 'src/platform/hono/**'
@@ -34,6 +30,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   hono-obs-e2e:
