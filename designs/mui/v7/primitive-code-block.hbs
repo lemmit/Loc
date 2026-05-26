@@ -1,0 +1,4 @@
+{{#if hasTitle}}<Box className="loom-code-block" sx=\{{ borderRadius: 1, border: 1, borderColor: "divider", overflow: "hidden" }}{{{testidAttr}}}>
+<Box className="loom-code-block-title" sx=\{{ px: 2, py: 1, fontSize: "0.75rem", color: "text.secondary", borderBottom: 1, borderColor: "divider" }}>{{title}}</Box>
+<Box component="pre" sx=\{{ m: 0, p: 2, overflowX: "auto", fontSize: "0.875rem" }}><code className="language-{{language}}">{{{source}}}</code></Box>
+</Box>{{else}}<Box component="pre" className="loom-code-block" sx=\{{ m: 0, p: 2, borderRadius: 1, border: 1, borderColor: "divider", overflowX: "auto", fontSize: "0.875rem" }}{{{testidAttr}}}><code className="language-{{language}}">{{{source}}}</code></Box>{{/if}}

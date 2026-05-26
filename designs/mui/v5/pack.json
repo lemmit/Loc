@@ -62,6 +62,8 @@
     "primitive-query-view": "primitive-query-view.hbs",
     "primitive-key-value-row": "primitive-key-value-row.hbs",
     "primitive-modal": "primitive-modal.hbs",
+    "primitive-code-block": "primitive-code-block.hbs",
+    "primitive-icon": "primitive-icon.hbs",
     "form-op-decls": "form-op-decls.hbs",
     "form-op-module": "form-op-module.hbs"
   },
@@ -505,6 +507,22 @@
         "from": "notistack",
         "named": [
           "enqueueSnackbar"
+        ]
+      }
+    ],
+    "primitive-code-block": [
+      {
+        "from": "@mui/material",
+        "named": [
+          "Box"
+        ]
+      }
+    ],
+    "primitive-icon": [
+      {
+        "from": "@mui/material",
+        "named": [
+          "Box"
         ]
       }
     ]

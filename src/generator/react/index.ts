@@ -12,7 +12,12 @@ import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { buildApiModule } from "./api-builder.js";
 import { deriveSidebarFromUi } from "./menu-emitter.js";
-import { deriveExtraRoutesFromUi, emitPageObjectsForUi, emitPagesForUi } from "./pages-emitter.js";
+import {
+  deriveExtraRoutesFromUi,
+  emitPageObjectsForUi,
+  emitPagesForUi,
+  uiUsesCodeBlock,
+} from "./pages-emitter.js";
 import { renderAppShell, renderMain, renderShellFile, renderTheme } from "./templating/render.js";
 import { allViews, buildViewsApiModule, hasAnyView } from "./view-builder.js";
 import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflow-builder.js";
@@ -259,7 +264,14 @@ export function generateReactForContexts(
   out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));
   out.set("tsconfig.node.json", renderShellFile("tsconfig-node", {}, pack));
   out.set("vite.config.ts", renderShellFile("vite-config", {}, pack));
-  out.set("index.html", renderShellFile("index-html", prepareIndexHtmlVM(sys, deployable, ui), pack));
+  // Pages that use the `CodeBlock { ... }` primitive need the
+  // highlight.js CDN payload injected into the shell HTML — every
+  // page's CDN tags are identical, so a single per-deployable
+  // detect-once / inject-once gate keeps the HTML lean when no page
+  // uses code rendering.  Mirrors the `usesMoney` flag for
+  // `decimal.js` in `package.json` below.
+  const usesCodeBlock = ui ? uiUsesCodeBlock(ui) : false;
+  out.set("index.html", renderShellFile("index-html", { ...prepareIndexHtmlVM(sys, deployable, ui), usesCodeBlock }, pack));
   out.set("Dockerfile", renderShellFile("dockerfile", {}, pack));
   out.set(".dockerignore", renderShellFile("dockerignore", {}, pack));
   out.set("certs/.gitkeep", "");

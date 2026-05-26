@@ -125,8 +125,13 @@ export function escapeJsxText(s: string): string {
   // `}` are expression delimiters; `<` and `>` are tag delimiters
   // (TS1382 fires on a literal `>` in JSX text, even when it's an
   // arithmetic comparison or a lambda arrow inside a code snippet).
+  // `&` must be escaped first so we don't double-escape the entity
+  // refs the other replacements introduce.  CodeBlock source strings
+  // can contain `&` (and `&&` / `&=`) so this fourth char matters
+  // when arbitrary code is rendered into a `<pre><code>` block.
   // Apostrophes / quotes are fine inside JSX text.
   return s
+    .replace(/&/g, "&amp;")
     .replace(/\{/g, "&#123;")
     .replace(/\}/g, "&#125;")
     .replace(/</g, "&lt;")

@@ -1,0 +1,4 @@
+{{#if hasTitle}}<div className="loom-code-block"{{{testidAttr}}}>
+<div className="loom-code-block-title">{{title}}</div>
+<pre><code className="language-{{language}}">{{{source}}}</code></pre>
+</div>{{else}}<pre className="loom-code-block"{{{testidAttr}}}><code className="language-{{language}}">{{{source}}}</code></pre>{{/if}}

@@ -62,6 +62,8 @@
     "primitive-query-view": "primitive-query-view.hbs",
     "primitive-key-value-row": "primitive-key-value-row.hbs",
     "primitive-modal": "primitive-modal.hbs",
+    "primitive-code-block": "primitive-code-block.hbs",
+    "primitive-icon": "primitive-icon.hbs",
     "form-op-decls": "form-op-decls.hbs",
     "form-op-module": "form-op-module.hbs"
   },

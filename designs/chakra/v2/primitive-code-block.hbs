@@ -1,0 +1,4 @@
+{{#if hasTitle}}<Box className="loom-code-block" borderRadius="md" borderWidth="1px" overflow="hidden"{{{testidAttr}}}>
+<Box className="loom-code-block-title" px={4} py={2} fontSize="xs" color="gray.500" borderBottomWidth="1px">{{title}}</Box>
+<Box as="pre" m={0} p={4} overflowX="auto" fontSize="sm"><code className="language-{{language}}">{{{source}}}</code></Box>
+</Box>{{else}}<Box as="pre" className="loom-code-block" m={0} p={4} borderRadius="md" borderWidth="1px" overflowX="auto" fontSize="sm"{{{testidAttr}}}><code className="language-{{language}}">{{{source}}}</code></Box>{{/if}}

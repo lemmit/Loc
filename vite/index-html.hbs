@@ -8,6 +8,9 @@
 {{/if}}{{#if ogImage}}    <meta property="og:image" content="{{ogImage}}" />
 {{/if}}{{#if canonical}}    <link rel="canonical" href="{{canonical}}" />
 {{/if}}{{#if favicon}}    <link rel="icon" href="{{favicon}}" />
+{{/if}}{{#if usesCodeBlock}}    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" />
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+    <script>document.addEventListener('DOMContentLoaded', () => window.hljs && window.hljs.highlightAll());</script>
 {{/if}}  </head>
   <body>
     <div id="root"></div>
