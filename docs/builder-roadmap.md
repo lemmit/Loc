@@ -103,9 +103,22 @@ text stays the source of truth.
   lowering, not as Langium cross-references).
 - **Structured `let` + validated statement rows**: a `let x = …` handler
   statement seeds as a structured row (name / reparse-validated value), and the
-  verbatim fallback row (bare calls / `navigate(…)` / anything unmodelled) now
-  reparse-validates and flags an "Invalid statement". (`emit` isn't a page-handler
-  statement — it's domain-side, edited in the system/workflow builder.)
+  verbatim fallback row (bare calls / anything unmodelled) now reparse-validates
+  and flags an "Invalid statement". (`emit` isn't a page-handler statement —
+  it's domain-side, edited in the system/workflow builder.)
+- **Structured `navigate(…)` statement**: a `navigate(<page>, <params?>)` bare
+  call in a handler block seeds as a structured `Stmt` row — a **target-page
+  picker** (dropdown of source-collected page names) plus an optional
+  reparse-validated **params** expression — mirroring the `let`/assignment
+  structuring (`seedStmt`/`emitBody` in `web/src/builder/page/model.ts`, settings
+  panel in `PageBuilder.tsx`). A non-NameRef first arg (very rare) falls through
+  to the verbatim bare row so round-trip stays safe. Object-literal params
+  (`{ id: order.id }`) aren't supported — object literals don't parse in page
+  expression position (only domain bodies admit them) — so params is a single
+  positional expression; users wanting object-literal route params hand-write
+  the bare statement. `navigate(…)` in *expression* position (e.g. inside an
+  `Action(then: …)`) stays out of reach until `Action` is structurally
+  recognised (it currently round-trips as Opaque).
 - **Enum-case default picker**: in the State panel, an enum-typed state field's
   default renders as a dropdown of the enum's cases (collected from the source by
   `BuilderPane`; the current value is always selectable so a hand-written default
@@ -118,21 +131,10 @@ text stays the source of truth.
 
 ## Open — expression / domain-logic surface
 
-- **Per-statement structure** — assignment and `let` are structured; bare
-  calls / `navigate(…)` keep a validated single-row editor (a call is one
-  expression, so structuring buys little beyond the validation now in place).
-- **Structured `navigate(…)` statement** — a `navigate(<page>, <params?>)` bare
-  call in a handler block seeds as a structured `Stmt` row: a **target-page
-  picker** (dropdown of the source's page names, collected by `BuilderPane`) + an
-  optional reparse-validated **params** expression. Mirrors the `let`/assignment
-  statement structuring (`seedStmt`/`emitBody` in `page/model.ts`, the settings
-  form in `PageBuilder.tsx`). Gated by `test/builder-page-model.test.ts` + e2e.
-  Caveat: the **object-literal** params form (`{ customerId: … }`) isn't supported
-  — object literals don't parse in the page expression grammar (only in domain
-  bodies), so params are a single positional expression; supporting object-literal
-  route params would need a grammar change. `navigate(…)` in expression position
-  (e.g. inside an `Action(then: …)`) is also still out of reach until `Action` is
-  recognised (it currently round-trips as Opaque).
+- **Per-statement structure** — assignment, `let`, and `navigate(…)` are
+  structured (see Done above); other bare calls keep a validated single-row
+  editor (a call is one expression, so structuring buys little beyond the
+  validation now in place).
 - **More typed pickers**: enum-case values are offered for state-field defaults;
   enum-valued *expressions elsewhere* (assignment values, `match` conds) still
   edit as free text (would need per-position type inference).
