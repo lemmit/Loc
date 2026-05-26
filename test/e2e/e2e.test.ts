@@ -302,40 +302,58 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       expect(collectOps(spec).size, `${name} emits at least one operation`).toBeGreaterThan(0);
     }
 
-    // Compare each backend against Hono as the reference.  `diffSpecs`
-    // is pure — see test/_helpers/openapi-normalize.test.ts for the
-    // unit-test coverage of each divergence class.
-    let cleanVsRef = true;
-    for (const name of ["dotnet", "phoenix"] as const) {
-      const diff = diffSpecs({ name: "hono", spec: specs.hono }, { name, spec: specs[name] });
+    // Compare each pair of backends.  Three pairs total — hono↔dotnet,
+    // hono↔phoenix, dotnet↔phoenix.  The third pair catches drift
+    // where two non-Hono backends diverge from each other in a way
+    // that's NOT a Hono divergence (e.g., both Phoenix and .NET
+    // shipping a contract change Hono hasn't picked up yet).  Without
+    // the direct pair we'd see two "ref drift" reports that don't
+    // make their joint relationship explicit.
+    //
+    // `diffSpecs` is pure — see test/_helpers/openapi-normalize.test.ts
+    // for the unit-test coverage of each divergence class.
+    const pairs: Array<[keyof typeof specs, keyof typeof specs]> = [
+      ["hono", "dotnet"],
+      ["hono", "phoenix"],
+      ["dotnet", "phoenix"],
+    ];
+    let cleanOverall = true;
+    for (const [refName, otherName] of pairs) {
+      const diff = diffSpecs(
+        { name: refName, spec: specs[refName] },
+        { name: otherName, spec: specs[otherName] },
+      );
 
       if (!isCleanDiff(diff)) {
-        cleanVsRef = false;
-        console.warn(`[parity] hono ↔ ${name} divergence (finding):`);
-        if (diff.onlyOther.length) console.warn(`  ops only on ${name}:`, diff.onlyOther);
-        if (diff.onlyRef.length) console.warn(`  ops missing on ${name}:`, diff.onlyRef);
+        cleanOverall = false;
+        console.warn(`[parity] ${refName} ↔ ${otherName} divergence (finding):`);
+        if (diff.onlyOther.length) console.warn(`  ops only on ${otherName}:`, diff.onlyOther);
+        if (diff.onlyRef.length) console.warn(`  ops only on ${refName}:`, diff.onlyRef);
         if (diff.cardMismatches.length) console.warn("  cardinality:", diff.cardMismatches);
         if (diff.onlySchemasOther.length)
-          console.warn(`  schemas only on ${name}:`, diff.onlySchemasOther);
+          console.warn(`  schemas only on ${otherName}:`, diff.onlySchemasOther);
         if (diff.onlySchemasRef.length)
-          console.warn(`  schemas missing on ${name}:`, diff.onlySchemasRef);
+          console.warn(`  schemas only on ${refName}:`, diff.onlySchemasRef);
         if (diff.fieldDiffs.length) console.warn("  fields:", diff.fieldDiffs);
         if (diff.requiredDiffs.length) console.warn("  required:", diff.requiredDiffs);
       }
 
       if (STRICT_PARITY) {
-        expect(diff.onlyRef, `ops missing on ${name}`).toEqual([]);
-        expect(diff.onlyOther, `ops only on ${name}`).toEqual([]);
-        expect(diff.cardMismatches, `cardinality drift on ${name}`).toEqual([]);
-        expect(diff.onlySchemasRef, `schemas missing on ${name}`).toEqual([]);
-        expect(diff.onlySchemasOther, `schemas only on ${name}`).toEqual([]);
-        expect(diff.fieldDiffs, `field-set drift on ${name}`).toEqual([]);
-        expect(diff.requiredDiffs, `required-set drift on ${name}`).toEqual([]);
+        const pair = `${refName} ↔ ${otherName}`;
+        expect(diff.onlyRef, `ops only on ${refName} (${pair})`).toEqual([]);
+        expect(diff.onlyOther, `ops only on ${otherName} (${pair})`).toEqual([]);
+        expect(diff.cardMismatches, `cardinality drift (${pair})`).toEqual([]);
+        expect(diff.onlySchemasRef, `schemas only on ${refName} (${pair})`).toEqual([]);
+        expect(diff.onlySchemasOther, `schemas only on ${otherName} (${pair})`).toEqual([]);
+        expect(diff.fieldDiffs, `field-set drift (${pair})`).toEqual([]);
+        expect(diff.requiredDiffs, `required-set drift (${pair})`).toEqual([]);
       }
     }
 
-    if (cleanVsRef) {
-      console.info("[parity] all three backends agree on ops / cardinality / shared fields.");
+    if (cleanOverall) {
+      console.info(
+        "[parity] all three backends agree across all three pairs (ops / cardinality / schemas / fields / required).",
+      );
     }
   }, 120_000);
 });
