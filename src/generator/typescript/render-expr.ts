@@ -344,6 +344,11 @@ export function renderTsType(t: TypeIR): string {
       return `${renderTsType(t.element)}[]`;
     case "optional":
       return `${renderTsType(t.inner)} | null`;
+    case "slot":
+      // `slot` is a UI-only param marker; the backend never sees one
+      // on an aggregate / VO / entity field.  Validator rejects
+      // misuse — throwing here keeps the assumption explicit.
+      throw new Error("renderTsType: 'slot' type is UI-only and should not reach the backend.");
   }
 }
 

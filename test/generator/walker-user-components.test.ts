@@ -260,6 +260,58 @@ describe("user-defined components", () => {
     expect(home).toMatch(/<Hero title="Welcome" \/>/);
   });
 
+  it("slot-typed params accept any walker expression from the caller", async () => {
+    // PR B: a `slot`-typed param renders as `ReactNode` in the
+    // generated component's Props interface; in the body, a bare ref
+    // emits as a JSX expression `{paramName}`.  At call sites, the
+    // walker walks the arg expression in the CALLER'S env (so refs
+    // like `name` resolve against the page's params, not the
+    // component's) and brace-wraps the resulting JSX into the prop
+    // slot.
+    const files = await buildAndGenerate(`
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          component DetailView(heading: slot, primaryAction: slot) {
+            body: Stack { heading, primaryAction }
+          }
+          page Home(name: string) {
+            route: "/:name"
+            body: DetailView {
+              heading: Heading { "Hello " + name, level: 2 },
+              primaryAction: Button { "Click " + name }
+            }
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const dv = files.get("web/src/components/DetailView.tsx")!;
+    expect(dv).toBeDefined();
+    // ReactNode in scope + slot params typed.
+    expect(dv).toMatch(/import type \{ ReactNode \} from "react";/);
+    expect(dv).toMatch(
+      /export interface DetailViewProps \{\n\s+heading: ReactNode;\n\s+primaryAction: ReactNode;\n\}/,
+    );
+    // Body: bare slot refs render as JSX expressions.
+    expect(dv).toMatch(/\{heading\}/);
+    expect(dv).toMatch(/\{primaryAction\}/);
+
+    // Caller side: slot args walked as JSX, brace-wrapped into the prop.
+    const home = files.get("web/src/pages/home.tsx")!;
+    expect(home).toBeDefined();
+    expect(home).toMatch(
+      /<DetailView heading=\{[\s\S]*?<Title order=\{2\}>\{\("Hello " \+ name\)\}<\/Title>[\s\S]*?\}/,
+    );
+    expect(home).toMatch(/primaryAction=\{[\s\S]*?<Button[\s\S]*?Click[\s\S]*?\}/);
+  });
+
   it("ui-scope component overrides a same-named top-level component", async () => {
     // Resolution precedence: a `component X(...)` inside the ui wins
     // over a top-level `component X(...)` declared at the model root.

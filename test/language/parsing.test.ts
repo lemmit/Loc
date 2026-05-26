@@ -416,6 +416,23 @@ describe("page metamodel — grammar smoke tests", () => {
     expect(errors).toEqual([]);
   });
 
+  it("parses a `component` param typed as `slot`", async () => {
+    // PR B: slot is a element-shaped param marker — values flow as
+    // JSX from the caller, a bare ref in the body renders the
+    // expression at that position.  Only meaningful on component
+    // params; the validator pins the position restriction.
+    const { errors } = await parseSnippet(`
+      system S {
+        ui WebApp {
+          component DetailView(heading: slot, primaryAction: slot) {
+            body: Stack { heading, primaryAction }
+          }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+  });
+
   it("parses a top-level `component` declared as a `ModelMember`", async () => {
     // Top-level components live outside any `system { … }` so a
     // `.ddd` file becomes a shared component library.  Multi-file

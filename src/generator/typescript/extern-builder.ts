@@ -160,6 +160,10 @@ function wireTsType(t: TypeIR): string {
       return `${wireTsType(t.element)}[]`;
     case "optional":
       return `${wireTsType(t.inner)} | null`;
+    case "slot":
+      throw new Error(
+        "wireTsType: 'slot' type is UI-only and should not appear on an extern operation parameter.",
+      );
   }
 }
 

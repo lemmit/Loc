@@ -46,3 +46,19 @@ component Footer(copyright: string) {
     }
   }
 }
+
+// Generic structural component with `slot`-typed params (PR B).  Each
+// slot accepts any walker expression at the call site — the caller's
+// scope wins (so `currentUser` / route params / aggregate refs all
+// resolve against the page, not the component).  The component just
+// arranges the pieces; the caller decides what each piece looks like.
+component DetailView(heading: slot, summary: slot, primaryAction: slot, secondaryAction: slot) {
+  body: Stack {
+    heading,
+    summary,
+    Toolbar {
+      primaryAction,
+      secondaryAction
+    }
+  }
+}
