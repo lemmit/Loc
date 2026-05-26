@@ -30,11 +30,17 @@ test("New Requirement wizard creates a fresh block and selects it", async ({ pag
 
   await page.getByTestId("doc-tab-requirements").click();
   await page.getByTestId("req-new-requirement").click();
-  await expect(page.getByTestId("req-wizard-requirement")).toBeVisible();
+  // The Mantine Modal root the wizard's `data-testid` lands on has a zero
+  // box (it's the overlay container), so we wait on a guaranteed-visible
+  // child — the ID input — to confirm the wizard rendered.
+  const idInput = page.getByTestId("req-wizard-id");
+  await expect(idInput).toBeVisible({ timeout: 10_000 });
 
-  // The ID is required + must validate (letter / ticket form).
-  await page.getByTestId("req-wizard-id").locator("input").fill("US-999");
-  await page.getByTestId("req-wizard-title").locator("input").fill("New story via wizard");
+  // The ID is required + must validate (letter / ticket form). Mantine
+  // forwards `data-testid` directly to the <input>, so we don't drill
+  // through a `.locator("input")` child here.
+  await idInput.fill("US-999");
+  await page.getByTestId("req-wizard-title").fill("New story via wizard");
   await page.getByTestId("req-wizard-requirement-create").click();
 
   // The new requirement shows up in the tree and is auto-selected, with
@@ -42,9 +48,14 @@ test("New Requirement wizard creates a fresh block and selects it", async ({ pag
   await expect(page.getByTestId("req-row-US-999")).toBeVisible({ timeout: 5_000 });
   await expect(page.getByTestId("req-detail-US-999")).toBeVisible();
 
-  // And the underlying source carries the new block.
-  await page.getByTestId("doc-tab-source").click();
-  await expect(page.getByText("requirement US-999 {")).toBeVisible({ timeout: 5_000 });
+  // And the underlying source carries the new block. The wizard appends at
+  // the end of the file — outside Monaco's virtualised viewport — so we read
+  // the editor model via the `__loomGetSource` test hook rather than relying
+  // on DOM text search, which only sees the lines currently rendered.
+  const source = await page.evaluate(
+    () => (window as unknown as { __loomGetSource: () => string }).__loomGetSource(),
+  );
+  expect(source).toContain("requirement US-999 {");
 });
 
 test("requirement rows show a live verdict pill from the shared test-results state", async ({
@@ -69,7 +80,9 @@ test("editing a requirement title saves it back to the source", async ({ page })
 
   await page.getByTestId("doc-tab-requirements").click();
   await page.getByTestId("req-row-US-001").click();
-  const titleInput = page.getByTestId("req-form-title").locator("input");
+  // Mantine's TextInput forwards `data-testid` to the inner <input>, so the
+  // testid resolves to the input directly — no `.locator("input")` needed.
+  const titleInput = page.getByTestId("req-form-title");
   await expect(titleInput).toBeVisible();
   await titleInput.fill("User can log in (updated by form)");
   await page.getByTestId("req-form-save").click();
