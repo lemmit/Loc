@@ -31,6 +31,9 @@ import type {
   Solution,
   StateBlock,
   Statement,
+  Layout,
+  LayoutMainSlot,
+  LayoutNamedSlot,
   Storage,
   System,
   TestBlock,
@@ -128,6 +131,8 @@ export function printStructural(node: AstNode): string {
       return printApi(node as Api);
     case "Storage":
       return printStorage(node as Storage);
+    case "Layout":
+      return printLayout(node as Layout);
     case "BoundedContext":
       return printBoundedContext(node as BoundedContext);
     case "EnumDecl":
@@ -228,6 +233,22 @@ function printUserBlock(node: UserBlock): string {
     "user",
     node.fields.map((f) => `${f.name}: ${printTypeRef(f.type)}`),
   );
+}
+
+function printLayout(node: Layout): string {
+  // Layout slots emit one block per non-main slot + a single bare
+  // `main` keyword.  Slot bodies route through printExpr (same as
+  // page body printing).
+  const items: string[] = [];
+  for (const slot of node.slots) {
+    if (slot.$type === "LayoutMainSlot") {
+      items.push("main");
+    } else {
+      const named = slot as LayoutNamedSlot;
+      items.push(block(named.name, [printExpr(named.body)]));
+    }
+  }
+  return block(`layout ${node.name}`, items);
 }
 
 function printStorage(node: Storage): string {

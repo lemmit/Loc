@@ -42,6 +42,55 @@ system LoomLanding {
     context Empty { }
   }
 
+  // ──────────────────────────────────────────────────────────────
+  // Named layout — Phase 8 SystemMember.  Pages with
+  // `layout: LandingFrame` are wrapped by the React Router
+  // layout-route this declares: header on top, page body in the
+  // <Outlet /> (the implicit `main` slot), footer on the bottom.
+  // ──────────────────────────────────────────────────────────────
+  layout LandingFrame {
+    header {
+      Sticky {
+        top: "0",
+        Container {
+          Group {
+            Heading { "Loom", level: 3 },
+            Group {
+              Anchor { "Vision",    to: "#vision" },
+              Anchor { "Pipeline",  to: "#pipeline" },
+              Anchor { "Platforms", to: "#platforms" },
+              Anchor { "CLI",       to: "#cli" },
+              // Anchor (not Button) for the GitHub link — the layout
+              // slot can't host a useNavigate() declaration, so any
+              // programmatic-navigate Button { to: } would emit a
+              // free `navigate` reference here.  Anchor's `to:` lowers
+              // to a plain <RouterLink>, no hook needed.
+              Anchor { "GitHub",    to: "https://github.com/lemmit/loc" }
+            }
+          },
+          size: "xl"
+        }
+      }
+    }
+    main
+    footer {
+      Container {
+        Group {
+          Text { "© Loom contributors · FSL-1.1-Apache-2.0" },
+          Group {
+            Anchor { "Language",      to: "https://github.com/lemmit/loc/blob/main/docs/language.md" },
+            Anchor { "Generators",    to: "https://github.com/lemmit/loc/blob/main/docs/generators.md" },
+            Anchor { "Architecture",  to: "https://github.com/lemmit/loc/blob/main/docs/technical.md" },
+            Anchor { "Observability", to: "https://github.com/lemmit/loc/blob/main/docs/observability.md" },
+            Anchor { "Tools",         to: "https://github.com/lemmit/loc/blob/main/docs/tools.md" },
+            Anchor { "GitHub",        to: "https://github.com/lemmit/loc" }
+          }
+        },
+        size: "xl"
+      }
+    }
+  }
+
   ui Landing {
 
     // ──────────────────────────────────────────────────────────────
@@ -80,6 +129,13 @@ system LoomLanding {
       }
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // Named layout — Phase 8 lifts the sticky header + footer out of
+    // the page body into a `layout LandingFrame { … }` SystemMember.
+    // Every page that opts in with `layout: LandingFrame` gets the
+    // same nav + footer chrome wrapping the page body.
+    // ──────────────────────────────────────────────────────────────
+
     component Footer(copyright: string) {
       body: Container {
         Group {
@@ -98,36 +154,17 @@ system LoomLanding {
     }
 
     // ──────────────────────────────────────────────────────────────
-    // The landing page — `layout: none` strips the AppShell entirely.
+    // The landing page — wrapped by the `LandingFrame` named layout
+    // declared above (Phase 8).  The sticky nav + footer chrome is
+    // pulled OUT of the page body into the layout's slots; the page
+    // body now carries only the content sections.
     // ──────────────────────────────────────────────────────────────
     page Home {
       route:  "/"
-      layout: none
+      layout: LandingFrame
       title:  "Loom — a DSL that weaves Domain-Driven systems"
 
       body: Stack {
-
-        // ── Header / nav bar ────────────────────────────────────
-        // Phase 6 closed the sticky-positioning gap; the nav bar pins
-        // to the top on scroll.
-        Sticky {
-          top: "0",
-          Container {
-            Group {
-              Heading { "Loom", level: 3 },
-              Group {
-                Anchor { "Vision",    to: "#vision" },
-                Anchor { "Pipeline",  to: "#pipeline" },
-                Anchor { "Platforms", to: "#platforms" },
-                Anchor { "CLI",       to: "#cli" },
-                Button { "GitHub", to: "https://github.com/lemmit/loc" }
-              }
-            },
-            size: "xl"
-          }
-        },
-
-        Divider {},
 
         // ── Hero ────────────────────────────────────────────────
         // The real landing's hero is a two-column grid: copy on the
@@ -428,26 +465,9 @@ system LoomLanding {
           size: "xl"
         },
 
-        Divider {},
-
-        // ── Footer ──────────────────────────────────────────────
-        // Multi-column footer is a Group with two children today;
-        // Phase 7's builtin Footer compound component will make this
-        // a single declarative call.
-        Container {
-          Group {
-            Text { "© Loom contributors · FSL-1.1-Apache-2.0" },
-            Group {
-              Anchor { "Language",       to: "https://github.com/lemmit/loc/blob/main/docs/language.md" },
-              Anchor { "Generators",     to: "https://github.com/lemmit/loc/blob/main/docs/generators.md" },
-              Anchor { "Architecture",   to: "https://github.com/lemmit/loc/blob/main/docs/technical.md" },
-              Anchor { "Observability",  to: "https://github.com/lemmit/loc/blob/main/docs/observability.md" },
-              Anchor { "Tools",          to: "https://github.com/lemmit/loc/blob/main/docs/tools.md" },
-              Anchor { "GitHub",         to: "https://github.com/lemmit/loc" }
-            }
-          },
-          size: "xl"
-        }
+        // (Footer was previously inline at the bottom of the body —
+        // Phase 8 moves it into the `LandingFrame` layout's footer
+        // slot, rendered automatically around every page that opts in.)
       }
     }
 
