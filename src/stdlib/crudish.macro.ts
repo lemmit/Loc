@@ -2,6 +2,10 @@ import {
   assignStmt,
   defineMacro,
   memberAccess,
+  mkIdType,
+  mkNamedType,
+  mkPrimitiveType,
+  mkTypeRef,
   nameRef,
   operation,
   param,
@@ -86,14 +90,16 @@ export default defineMacro({
 function cloneType(
   t: import("../language/generated/ast.js").TypeRef,
 ): import("../language/generated/ast.js").TypeRef {
-  const base = t.base;
-  const cloned: import("../language/generated/ast.js").TypeRef = {
+  const cloned = mkTypeRef({
     $type: "TypeRef",
     array: t.array,
     optional: t.optional,
-    base: cloneBase(base),
-  } as unknown as import("../language/generated/ast.js").TypeRef;
-  const inner = cloned.base as unknown as Record<string, unknown>;
+    base: cloneBase(t.base),
+  });
+  // Re-parent the base node: $container metadata is required by
+  // Langium's AST invariants but not in the AstLiteral input contract,
+  // so we set it on the freshly-built node post-construction.
+  const inner = cloned.base as { $container?: unknown; $containerProperty?: unknown };
   inner.$container = cloned;
   inner.$containerProperty = "base";
   return cloned;
@@ -103,22 +109,23 @@ function cloneBase(
   b: import("../language/generated/ast.js").BaseType,
 ): import("../language/generated/ast.js").BaseType {
   if (b.$type === "PrimitiveType") {
-    return {
-      $type: "PrimitiveType",
-      name: b.name,
-    } as unknown as import("../language/generated/ast.js").BaseType;
+    return mkPrimitiveType({ $type: "PrimitiveType", name: b.name });
   }
   if (b.$type === "IdType") {
-    return {
+    return mkIdType({
       $type: "IdType",
-      target: { $refText: b.target.$refText },
-    } as unknown as import("../language/generated/ast.js").BaseType;
+      target: { $refText: b.target.$refText } as import("langium").Reference<
+        import("../language/generated/ast.js").Aggregate
+      >,
+    });
   }
   // NamedType
-  return {
+  return mkNamedType({
     $type: "NamedType",
-    target: { $refText: (b as { target: { $refText: string } }).target.$refText },
-  } as unknown as import("../language/generated/ast.js").BaseType;
+    target: { $refText: (b as { target: { $refText: string } }).target.$refText } as import(
+      "langium"
+    ).Reference<import("../language/generated/ast.js").NamedDecl>,
+  });
 }
 
 // Imports are kept available for the input-typed variant; the void
