@@ -12,6 +12,12 @@ import type {
   WireField,
 } from "../../ir/loom-ir.js";
 import { forApiRead, forCreateInput } from "../../ir/wire-projection.js";
+import {
+  peelCollection,
+  peelNullable,
+  type WirePrimitive,
+  wireTypeInfo,
+} from "../../ir/wire-types.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { ApiRoute } from "./api-emit.js";
 
@@ -417,56 +423,51 @@ end
 // Schema module renderers
 // ---------------------------------------------------------------------------
 
+/** Wire-primitive → OpenApiSpex %Schema{} literal.  Money crosses as
+ *  `{type: string, format: decimal}` for cross-backend wire parity
+ *  (see `.loom/wire-spec.json`).  Datetime is `:'date-time'`, guid is
+ *  `:uuid`, decimal is `:float`. */
+const OPENAPI_PRIMITIVE: Record<WirePrimitive, string> = {
+  int: "%OpenApiSpex.Schema{type: :integer}",
+  long: "%OpenApiSpex.Schema{type: :integer}",
+  decimal: "%OpenApiSpex.Schema{type: :number, format: :float}",
+  money: "%OpenApiSpex.Schema{type: :string, format: :decimal}",
+  string: "%OpenApiSpex.Schema{type: :string}",
+  bool: "%OpenApiSpex.Schema{type: :boolean}",
+  datetime: "%OpenApiSpex.Schema{type: :string, format: :'date-time'}",
+  guid: "%OpenApiSpex.Schema{type: :string, format: :uuid}",
+};
+
+/** Id value-type → OpenApiSpex %Schema{} literal.  Mirrors the
+ *  path-param schema used by `idParamSchema` above. */
+const OPENAPI_ID_VALUE: Record<string, string> = {
+  guid: "%OpenApiSpex.Schema{type: :string, format: :uuid}",
+  int: "%OpenApiSpex.Schema{type: :integer}",
+  long: "%OpenApiSpex.Schema{type: :integer}",
+  string: "%OpenApiSpex.Schema{type: :string}",
+};
+
 /** Map a TypeIR to an OpenApiSpex %Schema{} literal snippet. */
 function openApiType(t: TypeIR): string {
-  switch (t.kind) {
+  const info = wireTypeInfo(t, "response");
+  // Nullable rides on the parent property (`required[]`), not the
+  // child schema — peel through.
+  if (info.isNullable) return openApiType(peelNullable(t));
+  if (info.isCollection) {
+    return `%OpenApiSpex.Schema{type: :array, items: ${openApiType(peelCollection(t))}}`;
+  }
+  switch (info.refKind) {
     case "primitive":
-      switch (t.name) {
-        case "int":
-        case "long":
-          return "%OpenApiSpex.Schema{type: :integer}";
-        case "decimal":
-          return "%OpenApiSpex.Schema{type: :number, format: :float}";
-        case "money":
-          // Cross-backend wire parity with Hono / .NET: `{type: string,
-          // format: decimal}` is the canonical money encoding declared
-          // in `.loom/wire-spec.json`.
-          return "%OpenApiSpex.Schema{type: :string, format: :decimal}";
-        case "string":
-          return "%OpenApiSpex.Schema{type: :string}";
-        case "guid":
-          return "%OpenApiSpex.Schema{type: :string, format: :uuid}";
-        case "bool":
-          return "%OpenApiSpex.Schema{type: :boolean}";
-        case "datetime":
-          return "%OpenApiSpex.Schema{type: :string, format: :'date-time'}";
-      }
-    // eslint-disable-next-line no-fallthrough
+      return OPENAPI_PRIMITIVE[info.primitive!];
     case "id":
-      switch (t.valueType) {
-        case "guid":
-          return "%OpenApiSpex.Schema{type: :string, format: :uuid}";
-        case "int":
-        case "long":
-          return "%OpenApiSpex.Schema{type: :integer}";
-        case "string":
-          return "%OpenApiSpex.Schema{type: :string}";
-      }
-    // eslint-disable-next-line no-fallthrough
+      return OPENAPI_ID_VALUE[info.idValueType!]!;
     case "enum":
-      // Enums travel as strings on the wire
+      // Enums travel as strings on the wire.
       return "%OpenApiSpex.Schema{type: :string}";
-    case "valueobject":
-      // Reference the VO schema module
-      return `%OpenApiSpex.Reference{"$ref": "#/components/schemas/${t.name}"}`;
+    case "valueObject":
+      return `%OpenApiSpex.Reference{"$ref": "#/components/schemas/${info.base}"}`;
     case "entity":
-      // Reference the entity part schema module
-      return `%OpenApiSpex.Reference{"$ref": "#/components/schemas/${t.name}Response"}`;
-    case "array":
-      return `%OpenApiSpex.Schema{type: :array, items: ${openApiType(t.element)}}`;
-    case "optional":
-      // OpenAPI optionality is expressed at the parent property level (not in required[])
-      return openApiType(t.inner);
+      return `%OpenApiSpex.Reference{"$ref": "#/components/schemas/${info.base}Response"}`;
   }
 }
 

@@ -8,62 +8,78 @@ import type {
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
 import { forApiRead } from "../../ir/wire-projection.js";
+import {
+  peelCollection,
+  peelNullable,
+  type WirePrimitive,
+  wireTypeInfo,
+} from "../../ir/wire-types.js";
 import { upperFirst } from "../../util/naming.js";
-import { renderCsType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Wire-shape DTO mapping helpers.
 //
 // These functions translate between the IR's domain types (with `X id`,
 // value objects, enums) and the wire-shape primitive types used in
-// Request / Response DTOs.  Two directions:
+// Request / Response DTOs.  Four entry points:
 //
-//   - `wireType(t, ctx, "request" | "response")` — the C# type that
-//     should appear on a DTO record property.
-//   - `wireToCommandArgument(expr, t, ctx)` — given a wire-shaped C#
-//     expression, build the domain-typed argument expression for a
-//     Command's constructor.
-//   - `projectToResponse(expr, t, ctx)` — given a domain expression,
-//     project to its wire-shape Response counterpart.
+//   - `wireType(t, ctx, dir)` — the C# type that appears on a DTO record
+//     property.
+//   - `wireToCommandArgument(expr, t, ctx)` — wire-shaped C# expression
+//     → domain-typed argument expression for a Command constructor.
+//   - `projectToResponse(expr, t, ctx)` — domain expression → wire-shape
+//     Response counterpart.
 //   - `projectEntityExpr(expr, entity, ctx)` — full entity → Response
 //     projection (used by query handlers).
+//
+// All `TypeIR.kind` discrimination lives in `src/ir/wire-types.ts`;
+// the helpers below consume `wireTypeInfo` and emit C# strings.
 // ---------------------------------------------------------------------------
 
-/**
- * What a type looks like in JSON / on the wire (primitives only).
- * `dir` selects the suffix for nested DTOs: `Request` for inputs,
- * `Response` for outputs.
- */
+/** Wire-primitive → C# JSON-on-the-wire type.  Datetime and money cross
+ *  the wire as strings (ISO 8601 Z-suffixed; InvariantCulture-formatted
+ *  decimal) for cross-backend parity with Hono and Phoenix. */
+const CS_WIRE_PRIMITIVE: Record<WirePrimitive, string> = {
+  int: "int",
+  long: "long",
+  decimal: "decimal",
+  money: "string",
+  string: "string",
+  bool: "bool",
+  datetime: "string",
+  guid: "Guid",
+};
+
+/** C# DTO property type for a `TypeIR`.  `dir` selects the suffix for
+ *  nested value-object DTOs (`Request` for inputs, `Response` for
+ *  outputs); entities always nest as `<Name>Response`. */
 export function wireType(t: TypeIR, ctx: BoundedContextIR, dir: "request" | "response"): string {
   void ctx;
-  switch (t.kind) {
+  const info = wireTypeInfo(t, dir);
+  let s: string;
+  switch (info.refKind) {
     case "primitive":
-      // Datetime crosses the wire as an ISO string on both backends so
-      // the cross-platform JSON contract stays symmetric and clients
-      // don't have to care which platform served the response.  The
-      // command-argument helpers below parse / format around this.
-      if (t.name === "datetime") return "string";
-      // money crosses as a precise-decimal string (OpenAPI
-      // `{type: string, format: decimal}`).  The DTO property is
-      // typed `string`; `wireToCommandArgument` parses it to
-      // `System.Decimal`, `projectToResponse` re-formats with
-      // `ToString(CultureInfo.InvariantCulture)`.  Per-field
-      // serialisation contract — non-money decimals stay JSON numbers.
-      if (t.name === "money") return "string";
-      return renderCsType(t);
+      s = CS_WIRE_PRIMITIVE[info.primitive!];
+      break;
     case "id":
-      return csIdValueClrType("guid");
+      // Pre-existing divergence: every id crosses the .NET wire as
+      // `Guid`, regardless of `idValueType`.  Hono mirrors this; the
+      // OpenAPI emitter honours the typed value for path params.
+      s = csIdValueClrType("guid");
+      break;
     case "enum":
-      return "string";
-    case "valueobject":
-      return `${t.name}${dir === "request" ? "Request" : "Response"}`;
+      s = "string";
+      break;
+    case "valueObject":
+      s = `${info.base}${dir === "request" ? "Request" : "Response"}`;
+      break;
     case "entity":
-      return `${t.name}Response`;
-    case "array":
-      return `IReadOnlyList<${wireType(t.element, ctx, dir)}>`;
-    case "optional":
-      return `${wireType(t.inner, ctx, dir)}?`;
+      s = `${info.base}Response`;
+      break;
   }
+  if (info.isCollection) s = `IReadOnlyList<${s}>`;
+  if (info.isNullable) s = `${s}?`;
+  return s;
 }
 
 /** Map a wire-shaped expression to a domain-typed argument for a command. */
@@ -73,59 +89,68 @@ export function wireToCommandArgument(
   ctx: BoundedContextIR,
   usings?: Set<string>,
 ): string {
-  switch (t.kind) {
+  const info = wireTypeInfo(t, "request");
+  if (info.isNullable) {
+    return `(${expr} is null ? null : ${wireToCommandArgument(`${expr}!`, peelNullable(t), ctx, usings)})`;
+  }
+  if (info.isCollection) {
+    return `${expr}.Select(__e => ${wireToCommandArgument("__e", peelCollection(t), ctx, usings)}).ToList()`;
+  }
+  switch (info.refKind) {
     case "primitive":
-      if (t.name === "datetime") {
+      if (info.primitive === "datetime") {
         // Wire is a string; coerce to UTC DateTime regardless of whether
-        // the caller sent a Z-suffixed value (most clients) or a naive
-        // datetime-local string (browser <input type="datetime-local">).
-        // CultureInfo + DateTimeStyles live in System.Globalization,
-        // outside the SDK's implicit-usings set — record the dependency
-        // so the file emitter adds the directive.
+        // the caller sent a Z-suffixed value or a naive datetime-local
+        // string.  CultureInfo + DateTimeStyles live in
+        // System.Globalization, outside the SDK's implicit-usings set.
         usings?.add("System.Globalization");
         return `DateTime.Parse(${expr}, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)`;
       }
-      if (t.name === "money") {
-        // Wire string → System.Decimal.  InvariantCulture so a comma
-        // vs. dot locale on the server doesn't flip the parse.
+      if (info.primitive === "money") {
+        // Wire string → System.Decimal.  InvariantCulture so a locale's
+        // comma-vs-dot doesn't flip the parse.
         usings?.add("System.Globalization");
         return `decimal.Parse(${expr}, CultureInfo.InvariantCulture)`;
       }
       return expr;
     case "id":
-      return `new ${t.targetName}Id(${expr})`;
+      return `new ${info.idTarget}Id(${expr})`;
     case "enum":
-      return `Enum.Parse<${t.name}>(${expr})`;
-    case "valueobject": {
-      const vo = ctx.valueObjects.find((v) => v.name === t.name);
+      return `Enum.Parse<${info.base}>(${expr})`;
+    case "valueObject": {
+      const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return expr;
       const args = vo.fields
         .map((f) => wireToCommandArgument(`${expr}.${upperFirst(f.name)}`, f.type, ctx, usings))
         .join(", ");
-      return `new ${t.name}(${args})`;
+      return `new ${info.base}(${args})`;
     }
     case "entity":
       return expr;
-    case "array":
-      return `${expr}.Select(__e => ${wireToCommandArgument("__e", t.element, ctx, usings)}).ToList()`;
-    case "optional":
-      return `(${expr} is null ? null : ${wireToCommandArgument(`${expr}!`, t.inner, ctx, usings)})`;
   }
 }
 
 /** Project a domain expression to its wire-shape Response. */
 export function projectToResponse(domainExpr: string, t: TypeIR, ctx: BoundedContextIR): string {
-  switch (t.kind) {
+  const info = wireTypeInfo(t, "response");
+  if (info.isNullable) {
+    // C# doesn't narrow `T?` to `T` after `is null` test; unwrap
+    // explicitly: value types use `.Value`, reference types use `!`.
+    const innerT = peelNullable(t);
+    const unwrap = csIsValueType(innerT) ? `${domainExpr}.Value` : `${domainExpr}!`;
+    return `(${domainExpr} is null ? null : ${projectToResponse(unwrap, innerT, ctx)})`;
+  }
+  if (info.isCollection) {
+    return `${domainExpr}.Select(__e => ${projectToResponse("__e", peelCollection(t), ctx)}).ToList()`;
+  }
+  switch (info.refKind) {
     case "primitive":
-      if (t.name === "datetime") {
-        // Round-trip ISO 8601 with Z suffix — matches the Hono wire so
-        // clients see one shape regardless of which backend served them.
+      if (info.primitive === "datetime") {
+        // ISO 8601 with Z suffix — matches Hono so clients see one shape.
         return `${domainExpr}.ToUniversalTime().ToString("o")`;
       }
-      if (t.name === "money") {
-        // System.Decimal → wire string.  InvariantCulture so a comma
-        // vs. dot locale doesn't drift across servers.  Cross-backend
-        // parity with Hono's `Decimal.toString()` shape.
+      if (info.primitive === "money") {
+        // System.Decimal → wire string, InvariantCulture for stability.
         return `${domainExpr}.ToString(System.Globalization.CultureInfo.InvariantCulture)`;
       }
       return domainExpr;
@@ -133,48 +158,41 @@ export function projectToResponse(domainExpr: string, t: TypeIR, ctx: BoundedCon
       return `${domainExpr}.Value`;
     case "enum":
       return `${domainExpr}.ToString()`;
-    case "valueobject": {
-      const vo = ctx.valueObjects.find((v) => v.name === t.name);
+    case "valueObject": {
+      const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return domainExpr;
       const args = vo.fields
         .map((f) => projectToResponse(`${domainExpr}.${upperFirst(f.name)}`, f.type, ctx))
         .join(", ");
-      return `new ${t.name}Response(${args})`;
+      return `new ${info.base}Response(${args})`;
     }
     case "entity": {
       const part =
         ctx.aggregates
           .flatMap((a) => a.parts.map((p) => ({ part: p, agg: a })))
-          .find((x) => x.part.name === t.name) ??
-        ctx.aggregates.map((a) => ({ part: a, agg: a })).find((x) => x.part.name === t.name);
+          .find((x) => x.part.name === info.base) ??
+        ctx.aggregates.map((a) => ({ part: a, agg: a })).find((x) => x.part.name === info.base);
       if (!part) return domainExpr;
       return projectEntityExpr(domainExpr, part.part, ctx);
-    }
-    case "array":
-      return `${domainExpr}.Select(__e => ${projectToResponse("__e", t.element, ctx)}).ToList()`;
-    case "optional": {
-      // After `is null ? null : …` C# doesn't narrow `T?` to `T`,
-      // so calls like `dt.ToUniversalTime()` on `DateTime?` fail
-      // with CS1061.  Unwrap explicitly per inner type: value types
-      // use `.Value`; reference types use `!` to suppress the
-      // nullable warning while keeping the same expression text.
-      const unwrap = csIsValueType(t.inner) ? `${domainExpr}.Value` : `${domainExpr}!`;
-      return `(${domainExpr} is null ? null : ${projectToResponse(unwrap, t.inner, ctx)})`;
     }
   }
 }
 
-/** Convert a domain-typed expression to its wire-shape Request
- *  form.  Symmetric with `projectToResponse` (Id → `.Value`,
- *  enum → `.ToString()`, datetime → ISO string), but value-object
- *  fields wrap in `<VO>Request` rather than `<VO>Response` because
- *  they nest into request DTOs.  Used by extern dispatch (auto
- *  Mediator handler + workflow op-call) to construct an
- *  `<Op>Request` from the surrounding domain values. */
+/** Convert a domain-typed expression to its wire-shape Request form.
+ *  Symmetric with `projectToResponse` but wraps VOs as `<VO>Request`. */
 export function domainToRequestExpr(domainExpr: string, t: TypeIR, ctx: BoundedContextIR): string {
-  switch (t.kind) {
+  const info = wireTypeInfo(t, "request");
+  if (info.isNullable) {
+    const innerT = peelNullable(t);
+    const unwrap = csIsValueType(innerT) ? `${domainExpr}.Value` : `${domainExpr}!`;
+    return `(${domainExpr} is null ? null : ${domainToRequestExpr(unwrap, innerT, ctx)})`;
+  }
+  if (info.isCollection) {
+    return `${domainExpr}.Select(__e => ${domainToRequestExpr("__e", peelCollection(t), ctx)}).ToList()`;
+  }
+  switch (info.refKind) {
     case "primitive":
-      if (t.name === "datetime") {
+      if (info.primitive === "datetime") {
         return `${domainExpr}.ToUniversalTime().ToString("o")`;
       }
       return domainExpr;
@@ -182,47 +200,35 @@ export function domainToRequestExpr(domainExpr: string, t: TypeIR, ctx: BoundedC
       return `${domainExpr}.Value`;
     case "enum":
       return `${domainExpr}.ToString()`;
-    case "valueobject": {
-      const vo = ctx.valueObjects.find((v) => v.name === t.name);
+    case "valueObject": {
+      const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return domainExpr;
       const args = vo.fields
         .map((f) => domainToRequestExpr(`${domainExpr}.${upperFirst(f.name)}`, f.type, ctx))
         .join(", ");
-      return `new ${t.name}Request(${args})`;
+      return `new ${info.base}Request(${args})`;
     }
     case "entity":
       return domainExpr;
-    case "array":
-      return `${domainExpr}.Select(__e => ${domainToRequestExpr("__e", t.element, ctx)}).ToList()`;
-    case "optional": {
-      // See projectToResponse's optional case — same CS1061 trap
-      // when the inner is a value type (e.g. `DateTime?`).
-      const unwrap = csIsValueType(t.inner) ? `${domainExpr}.Value` : `${domainExpr}!`;
-      return `(${domainExpr} is null ? null : ${domainToRequestExpr(unwrap, t.inner, ctx)})`;
-    }
   }
 }
 
-/** True when `t` lowers to a C# value type (`struct` / `record
- *  struct` / primitive enum), so a `T?` field is `Nullable<T>` and
- *  must be unwrapped with `.Value` before any method call.  Reference
- *  types (record classes for VOs, sealed classes for entities, `List`
- *  for arrays) can use the null-forgiving `!` operator instead. */
+/** True when `t` lowers to a C# value type — `T?` is `Nullable<T>` and
+ *  must be unwrapped with `.Value` before any method call.  `string`
+ *  and `List<T>` are reference types; everything else (primitives, ids,
+ *  enums) is a value type. */
 function csIsValueType(t: TypeIR): boolean {
-  switch (t.kind) {
+  const info = wireTypeInfo(t, "response");
+  if (info.isCollection) return false;
+  switch (info.refKind) {
     case "primitive":
-      // `string` is the only reference-type primitive — others (int, long,
-      // decimal, bool, datetime, guid, money) lower to value types.
-      return t.name !== "string";
+      return info.primitive !== "string";
     case "id":
     case "enum":
       return true;
-    case "valueobject":
+    case "valueObject":
     case "entity":
-    case "array":
       return false;
-    case "optional":
-      return csIsValueType(t.inner);
   }
 }
 
@@ -231,12 +237,10 @@ export function projectEntityExpr(
   entity: AggregateIR | EntityPartIR,
   ctx: BoundedContextIR,
 ): string {
-  // Single canonical walk — `entity.wireShape` is populated by
-  // `enrichLoomModel` (src/ir/enrichments.ts).  Each wire field
-  // maps to one positional argument on `new <Ent>Response(...)`,
-  // in the same order both response Zod schemas (Hono / React)
-  // emit.  `forApiRead` strips `internal` and `secret` fields so
-  // the projected response shape matches the DTO record's params.
+  // `entity.wireShape` is populated by `enrichLoomModel`.  Each wire
+  // field maps to one positional argument on `new <Ent>Response(...)`,
+  // in the same order the Hono / React Zod schemas emit.  `forApiRead`
+  // strips `internal` and `secret` fields.
   const fields = forApiRead(wireShapeFor(entity));
   const args: string[] = [];
   for (const wf of fields) {
@@ -249,7 +253,7 @@ export function projectEntityExpr(
       if (!part) continue;
       const accessor = `${domainExpr}.${upperFirst(wf.name)}`;
       args.push(
-        wf.type.kind === "array"
+        wireTypeInfo(wf.type, "response").isCollection
           ? `${accessor}.Select(__e => ${projectEntityExpr("__e", part, ctx)}).ToList()`
           : projectEntityExpr(accessor, part, ctx),
       );
@@ -270,7 +274,7 @@ export function entityResponseParams(part: EntityPartIR, ctx: BoundedContextIR):
 
 function responseRecordParams(ent: AggregateIR | EntityPartIR, ctx: BoundedContextIR): string {
   // Drop `internal` / `secret` fields so the C# record's param list
-  // matches what `projectEntityExpr` actually projects.
+  // matches what `projectEntityExpr` projects.
   const fields = forApiRead(wireShapeFor(ent));
   const idValueType = isPart(ent) ? ent.parentIdValueType : ent.idValueType;
   const parts: string[] = [];
@@ -285,14 +289,12 @@ function responseRecordParams(ent: AggregateIR | EntityPartIR, ctx: BoundedConte
 }
 
 function isPart(ent: AggregateIR | EntityPartIR): ent is EntityPartIR {
-  // EntityPartIR carries `parentName`; AggregateIR doesn't.
   return "parentName" in ent;
 }
 
 function containmentPartName(t: TypeIR): string | undefined {
-  if (t.kind === "entity") return t.name;
-  if (t.kind === "array" && t.element.kind === "entity") return t.element.name;
-  return undefined;
+  const inner = peelCollection(t);
+  return inner.kind === "entity" ? inner.name : undefined;
 }
 
 /** Set of value objects reachable from an aggregate's surface. */
