@@ -387,7 +387,10 @@ function validateReactIdReferences(sys: SystemIR, diags: LoomDiagnostic[]): void
     // backend-only dotnet deployable would trigger spurious
     // Id-reachability errors against the (then irrelevant) UI.
     if (!platformFor(d.platform).mountsUi) continue;
-    if (d.platform === "dotnet" && !d.uiName) continue;
+    // Dual-mode platforms (dotnet) with no `ui:` are backend-only —
+    // skip the UI-reachability walk.  `mountsUi && !isFrontend` is the
+    // dual-mode shape today (frontend-only platforms always declare ui).
+    if (!d.uiName && !platformFor(d.platform).isFrontend) continue;
     // Aggregates mounted by this deployable's `moduleNames` set —
     // UI generators only emit per-aggregate hooks/queries for
     // these; anything outside is unreachable.
