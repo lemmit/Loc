@@ -348,6 +348,10 @@ function drizzleColumnLinesForName(
       return [`${fieldName}: text("${colName}")${not}, // arrays not supported as inline columns`];
     case "optional":
       return drizzleColumnLinesForName(fieldName, inner.inner, true, ctx);
+    case "slot":
+      throw new Error(
+        "drizzleColumnLinesForName: 'slot' type is UI-only and should not reach the schema emitter.",
+      );
   }
 }
 

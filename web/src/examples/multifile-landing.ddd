@@ -55,7 +55,12 @@ system MultiFileLanding {
         Stack {
           Heading { "Features", level: 1 },
           Text { "Top-level components live alongside root-level value objects and enums — visible workspace-wide through the same import-graph walk." },
-          Button { "Back home", to: "/" }
+          DetailView {
+            heading: Heading { "Slot-typed params", level: 2 },
+            summary: Text { "DetailView accepts JSX for every slot — the caller decides what each piece looks like, and refs in the slot expressions resolve in the CALLER'S scope, not the component's." },
+            primaryAction: Button { "Back home", to: "/", variant: primary },
+            secondaryAction: Button { "Open library", to: "/", variant: outline }
+          }
         }
       }
     }

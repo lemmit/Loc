@@ -105,6 +105,8 @@ function typeName(t: TypeIR): string {
       return `${typeName(t.element)}[]`;
     case "optional":
       return `${typeName(t.inner)}?`;
+    case "slot":
+      return "slot";
   }
 }
 

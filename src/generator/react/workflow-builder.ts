@@ -252,5 +252,9 @@ function zodForRequest(t: TypeIR): string {
       return `z.array(${zodForRequest(t.element)})`;
     case "optional":
       return `${zodForRequest(t.inner)}.nullish()`;
+    case "slot":
+      throw new Error(
+        "zodForRequest: 'slot' type is UI-only and should not reach a workflow request schema.",
+      );
   }
 }

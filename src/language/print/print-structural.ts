@@ -621,6 +621,9 @@ function printTypeRef(node: TypeRef): string {
     case "PrimitiveType":
       s = base.name;
       break;
+    case "SlotType":
+      s = "slot";
+      break;
     case "IdType":
       s = `${base.target.$refText} id`;
       break;

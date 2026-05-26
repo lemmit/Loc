@@ -497,6 +497,8 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
       return `{:array, ${renderAshType(t.element, contextModule)}}`;
     case "optional":
       return renderAshType(t.inner, contextModule);
+    case "slot":
+      throw new Error("renderAshType: 'slot' type is UI-only and should not reach the backend.");
   }
 }
 

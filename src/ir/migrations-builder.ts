@@ -380,6 +380,10 @@ function mapTypeToColumn(t: TypeIR): {
     }
     case "optional":
       return mapTypeToColumn(t.inner);
+    case "slot":
+      throw new Error(
+        "mapTypeToColumn: 'slot' type is UI-only and should not reach the migrations builder.",
+      );
   }
 }
 

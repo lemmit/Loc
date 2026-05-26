@@ -355,6 +355,11 @@ export function emitUserComponent(
   // param count are JSX children — wrapped between the open and
   // close tags so the component receives them via the `children`
   // prop.  Named args still go to props regardless of position.
+  //
+  // `slot`-typed params (PR B) take any walker expression as a
+  // value and the arg renders as JSX in the caller's scope, brace-
+  // wrapped into the prop position (`prop={<Heading … />}`) — see
+  // attrValue's slot branch below.
   const params = ctx.userComponents.get(call.name) ?? [];
   ctx.usedUserComponents.add(call.name);
   const argNames = call.argNames ?? [];
@@ -371,8 +376,10 @@ export function emitUserComponent(
   let nextParamCursor = 0;
   for (let i = 0; i < call.args.length; i++) {
     const arg = call.args[i]!;
-    if (argNames[i] !== undefined) {
-      attrs.push(`${argNames[i]}=${attrValue(arg, ctx)}`);
+    const namedTarget = argNames[i];
+    if (namedTarget !== undefined) {
+      const param = params.find((p) => p.name === namedTarget);
+      attrs.push(`${namedTarget}=${attrValue(arg, ctx, depth, param?.type.kind === "slot")}`);
       continue;
     }
     // Advance the cursor past any params that were already filled
@@ -383,7 +390,7 @@ export function emitUserComponent(
     const param = params[nextParamCursor];
     if (param) {
       nextParamCursor += 1;
-      attrs.push(`${param.name}=${attrValue(arg, ctx)}`);
+      attrs.push(`${param.name}=${attrValue(arg, ctx, depth, param.type.kind === "slot")}`);
     } else {
       // No more declared params — extra positional arg becomes a
       // JSX child.
@@ -401,11 +408,22 @@ export function emitUserComponent(
 }
 
 /** Render an ExprIR as a JSX attribute value.
- *  String literals → `"text"` (quoted attr); everything else →
- *  `{<emitExpr>}` (brace-wrapped JS expression). */
-function attrValue(expr: ExprIR, ctx: WalkContext): string {
-  if (expr.kind === "literal" && expr.lit === "string") {
+ *  String literals → `"text"` (quoted attr); for a slot-typed param,
+ *  the arg is walked as JSX in the caller's scope and brace-wrapped
+ *  so the JSX element flows in as a `ReactNode` prop value; everything
+ *  else → `{<emitExpr>}` (brace-wrapped JS expression). */
+function attrValue(expr: ExprIR, ctx: WalkContext, depth: number, isSlot: boolean): string {
+  if (!isSlot && expr.kind === "literal" && expr.lit === "string") {
     return JSON.stringify(expr.value);
+  }
+  if (isSlot) {
+    // Slot args walk in the caller's env — `order.confirm` /
+    // `navigate(Home)` / referenced state and route-params resolve
+    // against the caller's scope, not the component's.  Any walker
+    // flags raised inside (usesNavigate, usesRouterLink, …) propagate
+    // through `ctx` directly since we walk against the same context.
+    const jsx = walk(expr, ctx, depth + 1);
+    return `{${jsx}}`;
   }
   return `{${emitExpr(expr, ctx)}}`;
 }

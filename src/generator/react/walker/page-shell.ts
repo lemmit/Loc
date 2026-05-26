@@ -570,10 +570,12 @@ export function renderUserComponentFile(
       ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
       : "";
   const reactImport = usesState ? `import { useState } from "react";\n` : "";
-  // Components that reference Slot() get a
-  // `children` prop on top of their declared params.  React's
-  // type is imported lazily.
-  const reactTypesImport = usesChildren ? `import type { ReactNode } from "react";\n` : "";
+  // Components that reference Slot() or declare a `slot`-typed
+  // param get `ReactNode` in scope — Slot() emits `{children}` and
+  // slot params are typed as `ReactNode`.
+  const hasSlotParam = params.some((p) => p.type.kind === "slot");
+  const needsReactNode = usesChildren || hasSlotParam;
+  const reactTypesImport = needsReactNode ? `import type { ReactNode } from "react";\n` : "";
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((n) => `import ${n} from "./${n}";\n`)
@@ -582,13 +584,18 @@ export function renderUserComponentFile(
   // Slot()-using components also get a `children` field.  An
   // aggregate-typed param (`order: Order`) gets the aggregate's wire
   // DTO type (`OrderResponse`, imported from its api module) so member
-  // accesses like `order.id` / `order.customerId` typecheck; other
+  // accesses like `order.id` / `order.customerId` typecheck;
+  // slot-typed params (`heading: slot`) render as `ReactNode` so the
+  // caller can drop any walker expression into the prop; other
   // params fall back to the route-param `string` shape.
   const dtoImports = new Map<string, string>(); // DTO type → api module
   const propType = (p: ParamIR): string => {
     if (p.type.kind === "entity" && aggregatesByName.has(p.type.name)) {
       dtoImports.set(`${p.type.name}Response`, `../api/${lowerFirst(p.type.name)}`);
       return `${p.type.name}Response`;
+    }
+    if (p.type.kind === "slot") {
+      return "ReactNode";
     }
     return typeRefAsTsString(p);
   };
