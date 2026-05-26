@@ -19,6 +19,7 @@ import storybookMuiV7Source from "./storybook-mui-v7.ddd?raw";
 import storybookChakraSource from "./storybook-chakra.ddd?raw";
 import storybookChakraV3Source from "./storybook-chakra-v3.ddd?raw";
 import storybookComponentsSource from "./storybook-components.ddd?raw";
+import loomLandingSource from "./loom-landing.ddd?raw";
 import dotnetBackendSource from "./dotnet-backend.ddd?raw";
 import actionShowcaseSource from "./action-showcase.ddd?raw";
 import multifileMainSource from "./multifile-main.ddd?raw";
@@ -73,6 +74,13 @@ export const examples: LoomExample[] = [
   // "UI Storybook (Mantine, aggregate-CRUD)" pattern made MUI / Chakra
   // entries hard to spot in a narrow mobile dropdown — they all
   // looked like "UI Storybook (..." until you read to the parenthesis.
+  {
+    id: "loom-landing",
+    label: "Loom landing page (`layout: none`)",
+    source: loomLandingSource,
+    blurb:
+      "A marketing-style landing page that opts out of the AppShell chrome via `layout: none`, paired with a default-chrome `/app` page so the contrast is visible side-by-side.",
+  },
   {
     id: "storybook-components",
     label: "Components storybook (single page)",
