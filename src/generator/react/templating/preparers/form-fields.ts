@@ -136,4 +136,3 @@ function errorAccess(path: string): string {
   const parts = path.split(".");
   return `errors.${parts.join("?.")}?.message`;
 }
-
