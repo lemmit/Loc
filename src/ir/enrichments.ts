@@ -21,7 +21,6 @@ import type {
   FindIR,
   LoomModel,
   ModuleIR,
-  Platform,
   RawLoomModel,
   RepositoryIR,
   SystemIR,
@@ -148,9 +147,9 @@ function enrichSystem(
 //   3. Failing both, leave `migrationsOwner` undefined — no backend
 //      emits migrations for the module (frontend-only modules, etc.).
 //
-// Hardcoded `platformNeedsDb` list mirrors the `PlatformSurface.needsDb`
-// flags in `src/platform/registry.ts` — kept in sync manually because
-// `enrichments.ts` is platform-agnostic and can't import from registry.
+// Database-bearing platforms are read from `PlatformSurface.needsDb` via
+// `platformFor()` — single source of truth, mirrors the `isFrontend` check
+// in `applyTargetsInheritance` below.
 // ---------------------------------------------------------------------------
 
 function assignMigrationsOwner(m: EnrichedModuleIR, deployables: DeployableIR[]): EnrichedModuleIR {
@@ -161,14 +160,10 @@ function assignMigrationsOwner(m: EnrichedModuleIR, deployables: DeployableIR[])
   );
   if (explicit) return { ...m, migrationsOwner: explicit.name };
   const implicit = deployables.find(
-    (d) => d.moduleNames.includes(m.name) && platformNeedsDb(d.platform),
+    (d) => d.moduleNames.includes(m.name) && platformFor(d.platform).needsDb,
   );
   if (implicit) return { ...m, migrationsOwner: implicit.name };
   return m;
-}
-
-function platformNeedsDb(p: Platform): boolean {
-  return p === "dotnet" || p === "hono" || p === "phoenixLiveView";
 }
 
 export function enrichContext(
@@ -505,9 +500,9 @@ function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
     // Routed through `PlatformSurface.isFrontend` so there is one
     // source of truth.  The registry import is safe: `registry.ts`
     // only imports per-platform `Surface` impls (none of which
-    // import back into `ir/`), so no cycle.  `platformNeedsDb`
-    // above mirrors `PlatformSurface.needsDb` inline because routing
-    // it through the registry there would force an identical import.
+    // import back into `ir/`), so no cycle.  The `needsDb` check in
+    // `assignMigrationsOwner` above is routed through the same
+    // registry — no hardcoded platform-name lists remain.
     if (!platformFor(d.platform).isFrontend || !d.targetName) return d;
     const target = deployables.find((t) => t.name === d.targetName);
     if (!target) return d;
