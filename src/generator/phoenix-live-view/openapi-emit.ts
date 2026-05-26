@@ -4,8 +4,8 @@ import type {
   BoundedContextIR,
   DeployableIR,
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
-  EntityPartIR,
   FieldIR,
   ParamIR,
   SystemIR,
@@ -43,7 +43,7 @@ import type { ApiRoute } from "./api-emit.js";
 // ---------------------------------------------------------------------------
 
 export interface OpenApiEmitArgs {
-  contexts: BoundedContextIR[];
+  contexts: EnrichedBoundedContextIR[];
   deployable: DeployableIR;
   sys: SystemIR;
   /** snake_case application name, e.g. "phoenix_app" */
@@ -74,12 +74,15 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
   const webModule = `${appModule}Web`;
 
   // Collect all aggregates, workflows, views across all contexts.
-  const allAggregates: Array<{ ctx: BoundedContextIR; agg: AggregateIR }> = [];
+  const allAggregates: Array<{ ctx: EnrichedBoundedContextIR; agg: EnrichedAggregateIR }> = [];
   const allWorkflows: Array<{
-    ctx: BoundedContextIR;
+    ctx: EnrichedBoundedContextIR;
     wf: import("../../ir/loom-ir.js").WorkflowIR;
   }> = [];
-  const allViews: Array<{ ctx: BoundedContextIR; view: import("../../ir/loom-ir.js").ViewIR }> = [];
+  const allViews: Array<{
+    ctx: EnrichedBoundedContextIR;
+    view: import("../../ir/loom-ir.js").ViewIR;
+  }> = [];
 
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) allAggregates.push({ ctx, agg });
@@ -195,9 +198,12 @@ function renderApiSpec(
   webModule: string,
   _apiSnake: string,
   apiPascal: string,
-  allAggregates: Array<{ ctx: BoundedContextIR; agg: AggregateIR }>,
-  allWorkflows: Array<{ ctx: BoundedContextIR; wf: import("../../ir/loom-ir.js").WorkflowIR }>,
-  allViews: Array<{ ctx: BoundedContextIR; view: import("../../ir/loom-ir.js").ViewIR }>,
+  allAggregates: Array<{ ctx: EnrichedBoundedContextIR; agg: EnrichedAggregateIR }>,
+  allWorkflows: Array<{
+    ctx: EnrichedBoundedContextIR;
+    wf: import("../../ir/loom-ir.js").WorkflowIR;
+  }>,
+  allViews: Array<{ ctx: EnrichedBoundedContextIR; view: import("../../ir/loom-ir.js").ViewIR }>,
 ): string {
   const specModule = `${webModule}.Api.${apiPascal}Spec`;
   const schemasModule = `${webModule}.Api.Schemas`;
@@ -544,21 +550,19 @@ function renderValueObjectSchema(vo: ValueObjectIR, webModule: string): string {
   return renderSchemaModule(moduleName, vo.name, fields);
 }
 
-function renderPartResponseSchema(part: EntityPartIR, webModule: string): string {
+function renderPartResponseSchema(part: EnrichedEntityPartIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.${part.name}Response`;
   // `forApiRead` drops `internal` and `secret` fields from the OpenAPI
   // response schema so it matches what the Phoenix LiveView controller
   // actually serves — same contract the .NET / Hono / React backends
-  // follow.  Local brand cast — see `wireShapeFor`'s docstring on the
-  // brand-cascade gap.
-  const wireFields = forApiRead(wireShapeFor(part as EnrichedEntityPartIR));
+  // follow.
+  const wireFields = forApiRead(wireShapeFor(part));
   return renderSchemaModule(moduleName, `${part.name}Response`, wireFieldsToProps(wireFields));
 }
 
-function renderAggregateResponseSchema(agg: AggregateIR, webModule: string): string {
+function renderAggregateResponseSchema(agg: EnrichedAggregateIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.${agg.name}Response`;
-  // Local brand cast — see `wireShapeFor`'s docstring on the brand-cascade gap.
-  const wireFields = forApiRead(wireShapeFor(agg as EnrichedAggregateIR));
+  const wireFields = forApiRead(wireShapeFor(agg));
   return renderSchemaModule(moduleName, `${agg.name}Response`, wireFieldsToProps(wireFields));
 }
 
@@ -630,7 +634,7 @@ function renderWorkflowRequestSchema(
 
 function renderViewResponseSchema(
   view: import("../../ir/loom-ir.js").ViewIR,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   webModule: string,
 ): string {
   const schemaName = `${upperFirst(view.name)}Response`;
@@ -650,8 +654,7 @@ function renderViewResponseSchema(
     // for API exposure — drops `internal` and `secret` fields.
     const sourceAgg = ctx.aggregates.find((a) => a.name === view.aggregateName);
     if (sourceAgg) {
-      // Local brand cast — see `wireShapeFor`'s docstring on the brand-cascade gap.
-      const wireFields = forApiRead(wireShapeFor(sourceAgg as EnrichedAggregateIR));
+      const wireFields = forApiRead(wireShapeFor(sourceAgg));
       fields = wireFieldsToProps(wireFields);
     } else {
       fields = [];

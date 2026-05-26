@@ -92,17 +92,13 @@ export function enrichLoomModel(loom: RawLoomModel): EnrichedLoomModel {
  * compile error.  The earlier raw-union overload + `!` non-null
  * cast is gone — every production caller flows enriched IR through.
  *
- * Note on the brand cascade: the surface contract still types
- * `emitProject(contexts: BoundedContextIR[])`, and the symmetric
- * `system/index.ts` helpers (`collectContextsFor`, `emitDeployable`)
- * use the raw structural type, so internal emitters that walk
- * `ctx.aggregates[i]` see `AggregateIR | EntityPartIR` at compile
- * time even though the runtime value is enriched.  Each of those
- * callers asserts the brand locally where it invokes `wireShapeFor`
- * (see grep "as EnrichedAggregateIR" — five sites).  Threading the
- * brand all the way through `surface.ts` + every `<platform>/emit.ts`
- * + every emitter helper (~224 typed sites) is a much larger refactor;
- * the local casts record the runtime invariant in the meantime. */
+ * Brand cascade: `PlatformSurface.emitProject` now takes
+ * `EnrichedBoundedContextIR[]`, and the per-platform entry points
+ * (`generate<Plat>ForContexts`) + per-aggregate helpers
+ * (`buildApiModule`, `renderPartResponseSchema`, etc.) thread the
+ * enriched brand inward, so every caller of `wireShapeFor` is
+ * type-checked at the call site — no `as Enriched...` local casts
+ * remain. */
 export function wireShapeFor(
   entity: EnrichedAggregateIR | EnrichedEntityPartIR | EnrichedValueObjectIR,
 ): WireField[] {
