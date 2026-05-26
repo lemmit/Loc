@@ -50,11 +50,20 @@ export function prepareFormFieldVM(
 
   if (inner.kind === "id") {
     const target = aggregatesByName.get(inner.targetName);
-    const displayFieldName = target ? simpleDisplayFieldName(target) : undefined;
-    if (!target || !displayFieldName) {
+    // The Select picker reads the option label off the wire `display`
+    // field — backends emit the `derived display: string = ...`
+    // expression as a JSON field on the response DTO, so the picker
+    // doesn't need to know the underlying source expression shape.
+    // Compound displays (`firstName + " " + lastName`), member-access
+    // displays (`address.city`), and conditional displays all work
+    // because the server evaluates them and ships the resolved string.
+    // Text-input fallback only when there's truly no display to read
+    // — target unresolved (cross-module ref to an aggregate the
+    // context doesn't see) or target has no `derived display` at all.
+    if (!target || !target.displayDerived) {
       const reason = !target
         ? `${inner.targetName} id: target aggregate not found`
-        : `Aggregate '${inner.targetName}' has no 'derived display' or its display is not a single-field reference — declare 'derived display: string = <field>' to enable a Select picker for ${inner.targetName} id.`;
+        : `Aggregate '${inner.targetName}' has no 'derived display' — declare 'derived display: string = <expr>' to enable a Select picker for ${inner.targetName} id.`;
       return {
         template: "field-input-id-text",
         path,
@@ -71,7 +80,7 @@ export function prepareFormFieldVM(
       testId,
       errorExpr,
       hookVar: idTargetHookVar(target),
-      displayField: displayFieldName,
+      displayField: "display",
     };
   }
 
@@ -128,16 +137,3 @@ function errorAccess(path: string): string {
   return `errors.${parts.join("?.")}?.message`;
 }
 
-/** Resolve the underlying wire field name for a target aggregate's
- * `derived display: string` — but only when the display expression is a
- * single bare property reference (`derived display: string = name`).
- * Compound displays (`= firstName + " " + lastName`) need a function-
- * shape rendering on the React side; that's a follow-up.  Returns
- * `undefined` when no display is declared or it's compound. */
-function simpleDisplayFieldName(agg: AggregateIR): string | undefined {
-  const d = agg.displayDerived;
-  if (!d) return undefined;
-  const e = d.expr;
-  if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
-  return undefined;
-}
