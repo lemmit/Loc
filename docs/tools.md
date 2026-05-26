@@ -506,21 +506,29 @@ The opt-in `LOOM_E2E_CA_DIR` environment variable (used by
 ### Cross-platform OpenAPI parity check
 
 When the same module is hosted on more than one deployable across
-different platforms (e.g. `Catalog` served by both a .NET and a Hono
-deployable), the e2e additionally diffs the two OpenAPI specs to
-catch generator drift.  Both backends self-describe via their
-framework-native OpenAPI emitter:
+different platforms (Hono, .NET, Phoenix), the e2e additionally diffs
+their OpenAPI specs three ways to catch generator drift. Each backend
+self-describes via its framework-native OpenAPI emitter:
 
 | Platform | Library              | Endpoint                        |
 | -------- | -------------------- | ------------------------------- |
 | .NET     | Swashbuckle.AspNetCore | `/swagger/v1/swagger.json`    |
 | Hono     | `@hono/zod-openapi`    | `/openapi.json`               |
+| Phoenix  | OpenApiSpex           | `/api/openapi.json`           |
 
-The check fetches both, builds a `Set<"METHOD path">` from each, and
-asserts equality (after normalising path templates so `{id}` and
-`:id` collapse).  Infrastructure routes (`/health`, `/openapi.json`,
-`/swagger/...`) are excluded from the diff so the comparison stays
-focused on aggregate routes.
+The check fetches all three, runs `diffSpecs(ref, other) → ParityDiff`
+(pure helper in `test/_helpers/openapi-normalize.ts`) for every backend
+pair (`hono ↔ dotnet`, `hono ↔ phoenix`, `dotnet ↔ phoenix`), and
+reports any divergence across nine dimensions: ops sets, response
+cardinality, schemas sets, per-schema field/required-set drift,
+path-param types, request- and response-body schema refs, and
+operationIds.
+
+The CI workflow (`.github/workflows/conformance-parity.yml`) runs in
+**strict mode** (`LOOM_E2E_STRICT_PARITY=1`): each divergence is a hard
+`expect(...).toBe(...)` assertion. Local `npm run test:e2e` defaults to
+report-only — the divergence list logs as `console.warn` but the test
+passes either way.
 
 Why framework-native rather than emitting OpenAPI from the IR:
 
@@ -532,5 +540,6 @@ Why framework-native rather than emitting OpenAPI from the IR:
   generator's output looks like normal hand-written code rather than
   carrying a bespoke OpenAPI emitter.
 
-If the diff fails, the test logs the offending operations so you
-can see exactly which routes drifted on which platform.
+For the full dimension reference, how to read a divergence report,
+and the checklist for adding a tenth dimension, see
+[`conformance.md`](conformance.md).
