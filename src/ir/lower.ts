@@ -761,14 +761,13 @@ function lowerDeployable(d: Deployable): DeployableIR {
     d.uiCompose?.ref?.ref?.name ??
     d.uiBlock?.ref?.ref?.name ??
     undefined;
-  const design =
-    platform === "react" || platform === "static"
-      ? qualifyDesign(d.design, "mantine")
-      : platform === "phoenixLiveView"
-        ? qualifyDesign(d.design, "ashPhoenix")
-        : platform === "dotnet" && uiName
-          ? qualifyDesign(d.design, "mantine")
-          : undefined;
+  const design = platformFor(platform).isFrontend
+    ? qualifyDesign(d.design, "mantine")
+    : platform === "phoenixLiveView"
+      ? qualifyDesign(d.design, "ashPhoenix")
+      : platform === "dotnet" && uiName
+        ? qualifyDesign(d.design, "mantine")
+        : undefined;
   // Page-metamodel UI binding.  The grammar accepts two
   // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
   // (full block).  Both lower to the same `uiName` + optional
@@ -786,7 +785,7 @@ function lowerDeployable(d: Deployable): DeployableIR {
     (uiName
       ? platform === "phoenixLiveView"
         ? "phoenixLiveView"
-        : platform === "react" || platform === "static" || platform === "dotnet"
+        : platformFor(platform).isFrontend || platform === "dotnet"
           ? "react"
           : undefined
       : undefined);
