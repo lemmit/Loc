@@ -24,6 +24,9 @@ These cover a single language feature each.  Each one is self-contained.
 | [`views.md`](views.md) | `view` declarations, joined ("snowflake") views via `X id` follows. |
 | [`workflow.md`](workflow.md) | `workflow` blocks, transactional vs non-transactional, isolation levels, event drain semantics. |
 | [`extern.md`](extern.md) | `extern` operations and their per-backend handler registries. |
+| [`capabilities.md`](capabilities.md) | `filter`, `stamp`, `implements` — cross-aggregate behaviours like soft-delete and audit. |
+| [`scaffold-macros.md`](scaffold-macros.md) | The `scaffold`, `crudish`, `audit`, and `softDelete` macros — what they expand to. |
+| [`provenance.md`](provenance.md) | `provenanced` field modifier, the `ddd snapshot` capture step, and the Hono runtime trace SDK. |
 | [`observability.md`](observability.md) | The catalog envelope, per-backend log emission, the catalog extension surface. |
 | [`traceability.md`](traceability.md) | `requirement` / `solution` / `testCase` artefacts and the generated coverage report. |
 | [`conformance.md`](conformance.md) | The cross-generator OpenAPI parity harness — the nine dimensions, strict vs report-only mode. |
@@ -33,6 +36,7 @@ These cover a single language feature each.  Each one is self-contained.
 
 | Doc | When to read |
 | --- | --- |
+| [`platforms.md`](platforms.md) | You want to know which `platform:` values exist, how `family@version` pins resolve, and what the `PlatformSurface` contract is. |
 | [`design-packs.md`](design-packs.md) | You're authoring a design pack (Mantine / shadcn / MUI / Chakra / ashPhoenix). Covers manifest, stacks (v1/v2/v3 framework baselines), required emits, template language, validation, and the recipe for adding a new pack version. |
 
 ## Internals

@@ -266,12 +266,17 @@ tooling, and internals.  The headline reference docs:
 Per-feature references — [`auth.md`](docs/auth.md),
 [`views.md`](docs/views.md), [`workflow.md`](docs/workflow.md),
 [`extern.md`](docs/extern.md),
+[`capabilities.md`](docs/capabilities.md),
+[`scaffold-macros.md`](docs/scaffold-macros.md),
+[`provenance.md`](docs/provenance.md),
 [`observability.md`](docs/observability.md),
 [`traceability.md`](docs/traceability.md),
 [`conformance.md`](docs/conformance.md),
-[`migrations-design.md`](docs/migrations-design.md) — and the design-pack
-authoring guide at [`design-packs.md`](docs/design-packs.md).
-[`license-faq.md`](docs/license-faq.md) covers usage terms.
+[`migrations-design.md`](docs/migrations-design.md) — plus
+[`platforms.md`](docs/platforms.md) for the backend registry and
+[`design-packs.md`](docs/design-packs.md) for the design-pack
+authoring guide.  [`license-faq.md`](docs/license-faq.md) covers
+usage terms.
 
 In-flight design work lives under [`docs/plans/`](docs/plans/) and
 [`docs/proposals/`](docs/proposals/); empirical snapshots live under
