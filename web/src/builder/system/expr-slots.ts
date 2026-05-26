@@ -571,3 +571,127 @@ export async function exprHints(source: string, slot: ExprSlot): Promise<ExprHin
 export async function memberCandidates(source: string, slot: ExprSlot): Promise<Map<string, string[]>> {
   return (await exprHints(source, slot)).members;
 }
+
+// ---------------------------------------------------------------------------
+// Match-arm enum-case picker (option A).
+//
+// Predicate-style `match` arms have no scrutinee — each cond is a general
+// expression. The common shape is `<expr> == EnumCase` / `<expr> != EnumCase`,
+// for which we can fill the editor's leaf at the non-enum-typed side with the
+// enum's cases. Anything else (nested `&&`, set-membership, …) falls through
+// to free text.
+//
+// Paths mirror `collectHints` exactly so the editor's `ctx.get(path)` lookup
+// hits the right leaf. A cond wrapped in parens unwraps via `i`, then the
+// single-op chain's left is at `L`, right at `R`.
+// ---------------------------------------------------------------------------
+
+function asEnumCases(t: ReturnType<typeof typeOf>): readonly string[] | null {
+  if (t.kind !== "enum") return null;
+  return t.ref.values.map((v) => v.name);
+}
+
+// Peel ParenExpr wrappers off a match-arm cond, tracking the path the editor
+// uses to reach each layer. Returns the unwrapped node and its path.
+function unwrapParens(expr: Expression, path: string): { node: Expression; path: string } {
+  let cur = expr;
+  let p = path;
+  while (cur.$type === "ParenExpr") {
+    cur = (cur as ParenExpr).inner;
+    p = `${p}i`;
+  }
+  return { node: cur, path: p };
+}
+
+function collectEnumPicker(node: Expression | undefined, path: string, out: Map<string, readonly string[]>): void {
+  if (!node) return;
+  switch (node.$type) {
+    case "MatchExpr": {
+      const m = node as MatchExpr;
+      m.arms.forEach((a, i) => {
+        if (a.cond) considerArmCond(a.cond, `${path}m${i}c`, out);
+        // Arm values can also contain nested matches.
+        if (a.value) collectEnumPicker(a.value, `${path}m${i}v`, out);
+      });
+      if (m.elseExpr) collectEnumPicker(m.elseExpr, `${path}me`, out);
+      return;
+    }
+    case "BinaryChain": {
+      const b = node as BinaryChain;
+      const n = b.ops.length;
+      if (n === 0) { collectEnumPicker(b.head, path, out); return; }
+      // Walk the left-fold the same way collectBinaryChainHints does so we
+      // recurse into nested matches under arbitrary operands.
+      collectEnumPicker(b.rest[n - 1]!, `${path}R`, out);
+      let lhsPath = `${path}L`;
+      for (let i = n - 2; i >= 0; i--) {
+        collectEnumPicker(b.rest[i]!, `${lhsPath}R`, out);
+        lhsPath = `${lhsPath}L`;
+      }
+      collectEnumPicker(b.head, lhsPath, out);
+      return;
+    }
+    case "UnaryExpr":
+      collectEnumPicker((node as UnaryExpr).operand, `${path}o`, out);
+      return;
+    case "ParenExpr":
+      collectEnumPicker((node as ParenExpr).inner, `${path}i`, out);
+      return;
+    case "TernaryExpr": {
+      const t = node as TernaryExpr;
+      collectEnumPicker(t.cond, `${path}?c`, out);
+      collectEnumPicker(t.thenExpr, `${path}?t`, out);
+      collectEnumPicker(t.elseExpr, `${path}?e`, out);
+      return;
+    }
+    case "Lambda": {
+      const l = node as Lambda;
+      if (l.body) collectEnumPicker(l.body, `${path}b`, out);
+      return;
+    }
+    case "BuilderCall":
+      (node as BuilderCall).entries.forEach((e, i) => collectEnumPicker(e.value, `${path}f${i}`, out));
+      return;
+    case "ObjectLit":
+      (node as ObjectLit).fields.forEach((f, i) => collectEnumPicker(f.value, `${path}f${i}`, out));
+      return;
+    // PostfixChain etc. don't carry nested matches under positions the
+    // editor exposes as picker-able leaves — drop through.
+  }
+}
+
+// If a match-arm cond is `<lhs> == <rhs>` (or `!=`), type each side; the
+// non-enum operand's leaf gets the enum's cases. The cond's path is the
+// editor's match-arm cond path; paren wrappers add `i` segments.
+function considerArmCond(cond: Expression, condPath: string, out: Map<string, readonly string[]>): void {
+  // Recurse into the arm's value-side and any nested matches inside the cond
+  // first so we don't miss a `match { foo => match { … } }`.
+  const { node, path } = unwrapParens(cond, condPath);
+  if (node.$type !== "BinaryChain") return;
+  const b = node as BinaryChain;
+  if (b.ops.length !== 1) return;
+  const op = b.ops[0]!;
+  if (op !== "==" && op !== "!=") return;
+  const env = envForNode(b);
+  const lhsCases = asEnumCases(typeOf(b.head, env));
+  const rhsCases = asEnumCases(typeOf(b.rest[0]!, env));
+  // The OTHER operand gets the picker; if both type as enum (the usual
+  // `status == Confirmed` shape, where both reference the enum), each
+  // side gets the cases of the enum the other resolved to.
+  if (rhsCases) out.set(`${path}L`, rhsCases);
+  if (lhsCases) out.set(`${path}R`, lhsCases);
+}
+
+/** Per-leaf enum-case candidates for a slot's expression — keyed by the
+ *  editor's canonical structural path. Covers the top-level `lhs == EnumCase`
+ *  / `lhs != EnumCase` shape of `match` arm conds; nested conjunctions and
+ *  set-membership fall through to free text. Async — builds a linked
+ *  document so types/refs resolve. */
+export async function enumPickerCandidates(source: string, slot: ExprSlot): Promise<Map<string, readonly string[]>> {
+  const out = new Map<string, readonly string[]>();
+  const model = await linkedModelFor(source);
+  if (!model) return out;
+  const expr = slotExpr(model, slot);
+  if (expr) collectEnumPicker(expr, "", out);
+  return out;
+}
