@@ -9,7 +9,9 @@ import {
   normalisePath,
   type OpenApiSpec,
   pathParamSignatures,
+  requestBodySchemas,
   requiredSet,
+  responseBodySchemas,
   schemaNames,
 } from "./openapi-normalize.js";
 
@@ -306,6 +308,8 @@ describe("openapi-normalize", () => {
       expect(diff.fieldDiffs).toEqual([]);
       expect(diff.requiredDiffs).toEqual([]);
       expect(diff.paramTypeDiffs).toEqual([]);
+      expect(diff.requestBodyDiffs).toEqual([]);
+      expect(diff.responseBodyDiffs).toEqual([]);
       expect(isCleanDiff(diff)).toBe(true);
     });
 
@@ -548,6 +552,121 @@ describe("openapi-normalize", () => {
       const other: OpenApiSpec = withIdParam({ type: "string", format: "uuid" });
       const diff = diffSpecs({ name: "hono", spec: ref }, { name: "dotnet", spec: other });
       expect(diff.paramTypeDiffs).toEqual([]);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // requestBodySchemas + responseBodySchemas + per-op schema-ref diffs
+  // ---------------------------------------------------------------------
+
+  describe("requestBodySchemas + responseBodySchemas", () => {
+    const opWithBodies = (
+      requestRef: string | null,
+      responseRef: string | null,
+      responseArray = false,
+    ): OpenApiSpec => ({
+      paths: {
+        "/products": {
+          post: {
+            ...(requestRef
+              ? {
+                  requestBody: {
+                    content: {
+                      "application/json": {
+                        schema: { $ref: `#/components/schemas/${requestRef}` },
+                      },
+                    },
+                  },
+                }
+              : {}),
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: responseArray
+                      ? {
+                          type: "array",
+                          items: {
+                            $ref: `#/components/schemas/${responseRef ?? "Anonymous"}`,
+                          },
+                        }
+                      : responseRef
+                        ? { $ref: `#/components/schemas/${responseRef}` }
+                        : { type: "object" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    it("requestBodySchemas extracts the component name from $ref", () => {
+      const refs = requestBodySchemas(opWithBodies("CreateProductRequest", null));
+      expect(refs.get("POST /products")).toBe("CreateProductRequest");
+    });
+
+    it("requestBodySchemas returns empty string when no body", () => {
+      const refs = requestBodySchemas(opWithBodies(null, null));
+      expect(refs.get("POST /products")).toBe("");
+    });
+
+    it("responseBodySchemas annotates array wrappers", () => {
+      const refs = responseBodySchemas(opWithBodies(null, "ProductResponse", true));
+      expect(refs.get("POST /products")).toBe("array<ProductResponse>");
+    });
+
+    it("responseBodySchemas extracts singular component refs", () => {
+      const refs = responseBodySchemas(opWithBodies(null, "ProductResponse", false));
+      expect(refs.get("POST /products")).toBe("ProductResponse");
+    });
+
+    it("responseBodySchemas returns empty string for inline schemas", () => {
+      const refs = responseBodySchemas(opWithBodies(null, null, false));
+      expect(refs.get("POST /products")).toBe("");
+    });
+
+    it("diffSpecs flags request-body schema-ref drift", () => {
+      const ref = opWithBodies("CreateProductRequest", "ProductResponse");
+      const other = opWithBodies("UpdateProductRequest", "ProductResponse");
+      const diff = diffSpecs({ name: "hono", spec: ref }, { name: "dotnet", spec: other });
+      expect(diff.requestBodyDiffs).toEqual([
+        "POST /products: hono=CreateProductRequest, dotnet=UpdateProductRequest",
+      ]);
+      expect(diff.responseBodyDiffs).toEqual([]);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("diffSpecs flags response-body schema-ref drift (same cardinality, different element)", () => {
+      // Both backends return an array — cardMismatches stays clean —
+      // but the element schemas differ.  Without responseBodyDiffs
+      // this would be invisible.
+      const ref = opWithBodies(null, "ProductResponse", true);
+      const other = opWithBodies(null, "ProductListItem", true);
+      const diff = diffSpecs({ name: "hono", spec: ref }, { name: "dotnet", spec: other });
+      expect(diff.cardMismatches).toEqual([]);
+      expect(diff.responseBodyDiffs).toEqual([
+        "POST /products: hono=array<ProductResponse>, dotnet=array<ProductListItem>",
+      ]);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("diffSpecs request/response diffs are empty when refs match", () => {
+      const ref = opWithBodies("CreateProductRequest", "ProductResponse", true);
+      const other = opWithBodies("CreateProductRequest", "ProductResponse", true);
+      const diff = diffSpecs({ name: "hono", spec: ref }, { name: "dotnet", spec: other });
+      expect(diff.requestBodyDiffs).toEqual([]);
+      expect(diff.responseBodyDiffs).toEqual([]);
+    });
+
+    it("diffSpecs surfaces (none) when one side has a body and the other doesn't", () => {
+      const ref = opWithBodies("CreateProductRequest", null);
+      const other = opWithBodies(null, null);
+      const diff = diffSpecs({ name: "hono", spec: ref }, { name: "dotnet", spec: other });
+      expect(diff.requestBodyDiffs).toEqual([
+        "POST /products: hono=CreateProductRequest, dotnet=(none)",
+      ]);
     });
   });
 });
