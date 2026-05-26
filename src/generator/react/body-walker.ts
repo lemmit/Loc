@@ -63,6 +63,7 @@ import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { registerApiHook, tryDetectApiHook } from "./walker/api-hooks.js";
 import { emitUserComponent } from "./walker/primitives/controls.js";
 import { describeReceiver, escapeJsxText, positionalArgs } from "./walker/shared/args.js";
+import { tsxTarget } from "./walker/tsx-target.js";
 
 /** Per-source named-import map — `from` module → set of named
  *  exports the page needs from it.  Replaces the old single-source
@@ -627,9 +628,18 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       }
       // Refs that match a state field name emit the
       // same way; the shell brings them into scope via `useState`.
+      // Delegated to tsxTarget.renderStateRead — see
+      // `src/generator/_walker/target.ts`.  TSX is position-invariant
+      // (template == handler), but we pass the JSX-child position
+      // for clarity at the call site; the brace wrap is JSX-child
+      // syntax and stays here.
       if (ctx.stateNames.has(expr.name)) {
         ctx.usesState = true;
-        return `{${expr.name}}`;
+        const stateRef = {
+          field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
+          name: expr.name,
+        };
+        return `{${tsxTarget.renderStateRead(stateRef, "template")}}`;
       }
       return `{/* ref: ${expr.name} */}`;
     case "ternary": {
@@ -842,7 +852,13 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       }
       if (ctx.stateNames.has(expr.name)) {
         ctx.usesState = true;
-        return expr.name;
+        // Delegated to tsxTarget.renderStateRead — expression
+        // position (no JSX braces) for handler context.
+        const stateRef = {
+          field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
+          name: expr.name,
+        };
+        return tsxTarget.renderStateRead(stateRef, "handler");
       }
       if (ctx.paramNames.has(expr.name)) {
         ctx.usedParams.add(expr.name);
@@ -982,8 +998,16 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       if (seg.length === 1 && ctx.stateNames.has(seg[0]!)) {
         ctx.usesState = true;
         const name = seg[0]!;
-        const setter = "set" + name[0]!.toUpperCase() + name.slice(1);
-        return `${setter}(${emitExpr(stmt.value, ctx)});`;
+        // Delegate the `setName(value)` shape to tsxTarget — see
+        // `src/generator/_walker/target.ts` for the contract.  The
+        // trailing `;` is statement-position context that lives at
+        // the call site (target produces the expression form so
+        // other callers can compose).
+        const stateRef = {
+          field: { name, type: { kind: "primitive" as const, name: "string" as const } },
+          name,
+        };
+        return `${tsxTarget.renderStateWrite(stateRef, emitExpr(stmt.value, ctx))};`;
       }
       return unsupportedPageStmt(
         `assignment to '${seg.join(".")}'`,
@@ -996,14 +1020,21 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       // `kind: "add"` / `kind: "remove"` in the IR (the same
       // kinds collection-mutations use; for scalar state fields
       // they're compound additions/subtractions).  Walker emits
-      // `setCount(count + 1)` / `setCount(count - 1)`.
+      // `setCount(count + 1)` / `setCount(count - 1)` — compose
+      // tsxTarget.renderStateRead (the bare name `count`) with
+      // renderStateWrite (the `setCount(...)` shape).
       const seg = stmt.target.segments;
       if (seg.length === 1 && ctx.stateNames.has(seg[0]!)) {
         ctx.usesState = true;
         const name = seg[0]!;
-        const setter = "set" + name[0]!.toUpperCase() + name.slice(1);
         const op = stmt.kind === "add" ? "+" : "-";
-        return `${setter}(${name} ${op} ${emitExpr(stmt.value, ctx)});`;
+        const stateRef = {
+          field: { name, type: { kind: "primitive" as const, name: "string" as const } },
+          name,
+        };
+        const read = tsxTarget.renderStateRead(stateRef, "handler");
+        const value = `${read} ${op} ${emitExpr(stmt.value, ctx)}`;
+        return `${tsxTarget.renderStateWrite(stateRef, value)};`;
       }
       return unsupportedPageStmt(
         `'${stmt.kind === "add" ? "+=" : "-="}' on '${seg.join(".")}'`,
@@ -1215,7 +1246,13 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
     }
     if (ctx.stateNames.has(expr.name)) {
       ctx.usesState = true;
-      return `{${expr.name}}`;
+      // Delegated to tsxTarget.renderStateRead — JSX text position
+      // (brace-wrapped for inline interpolation).
+      const stateRef = {
+        field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
+        name: expr.name,
+      };
+      return `{${tsxTarget.renderStateRead(stateRef, "template")}}`;
     }
     // Unresolved ref in text position emits a JSX
     // comment so the user sees the unresolved name in the

@@ -30,6 +30,7 @@ import { emitExpr, walkBodyToTsx } from "../body-walker.js";
 import { idTargetHookVar } from "../form-helpers.js";
 import { renderApiHookImports, renderHelperImports, renderImportLines } from "./import-lines.js";
 import { indentJsx } from "./shared/args.js";
+import { tsxTarget } from "./tsx-target.js";
 
 /** Map each aggregate-typed param to its aggregate name, so the
  *  walker can resolve `Action(<param>.<op>)` (the lowering env is
@@ -701,27 +702,12 @@ function stateTypeAsTsString(type: TypeIR): string {
 }
 
 /** Default initial value for a state field that doesn't declare an
- *  `=` initializer.  Mirrors the spec §6 zero-value table. */
+ *  `=` initializer.  Delegated to `tsxTarget.defaultInitFor` —
+ *  see `src/generator/_walker/target.ts` for the contract.  The
+ *  per-type zero-value table now lives next to the rest of TSX
+ *  framework-specific rendering.  Spec §6 still pins the values. */
 function zeroValueForType(type: TypeIR): string {
-  if (type.kind === "primitive") {
-    switch (type.name) {
-      case "int":
-      case "long":
-      case "decimal":
-        return "0";
-      case "money":
-        return 'new Decimal("0")';
-      case "bool":
-        return "false";
-      case "string":
-      case "datetime":
-      case "guid":
-        return '""';
-    }
-  }
-  if (type.kind === "id" || type.kind === "enum") return '""';
-  if (type.kind === "optional") return "undefined";
-  return "undefined";
+  return tsxTarget.defaultInitFor(type);
 }
 
 /** Render a `ParamIR` (route param) as the TS type the
