@@ -3,6 +3,8 @@ import type {
   AggregateIR,
   BoundedContextIR,
   DeployableIR,
+  EnrichedAggregateIR,
+  EnrichedEntityPartIR,
   EntityPartIR,
   FieldIR,
   ParamIR,
@@ -547,14 +549,16 @@ function renderPartResponseSchema(part: EntityPartIR, webModule: string): string
   // `forApiRead` drops `internal` and `secret` fields from the OpenAPI
   // response schema so it matches what the Phoenix LiveView controller
   // actually serves — same contract the .NET / Hono / React backends
-  // follow.
-  const wireFields = forApiRead(wireShapeFor(part));
+  // follow.  Local brand cast — see `wireShapeFor`'s docstring on the
+  // brand-cascade gap.
+  const wireFields = forApiRead(wireShapeFor(part as EnrichedEntityPartIR));
   return renderSchemaModule(moduleName, `${part.name}Response`, wireFieldsToProps(wireFields));
 }
 
 function renderAggregateResponseSchema(agg: AggregateIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.${agg.name}Response`;
-  const wireFields = forApiRead(wireShapeFor(agg));
+  // Local brand cast — see `wireShapeFor`'s docstring on the brand-cascade gap.
+  const wireFields = forApiRead(wireShapeFor(agg as EnrichedAggregateIR));
   return renderSchemaModule(moduleName, `${agg.name}Response`, wireFieldsToProps(wireFields));
 }
 
@@ -646,7 +650,8 @@ function renderViewResponseSchema(
     // for API exposure — drops `internal` and `secret` fields.
     const sourceAgg = ctx.aggregates.find((a) => a.name === view.aggregateName);
     if (sourceAgg) {
-      const wireFields = forApiRead(wireShapeFor(sourceAgg));
+      // Local brand cast — see `wireShapeFor`'s docstring on the brand-cascade gap.
+      const wireFields = forApiRead(wireShapeFor(sourceAgg as EnrichedAggregateIR));
       fields = wireFieldsToProps(wireFields);
     } else {
       fields = [];

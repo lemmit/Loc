@@ -3,6 +3,8 @@ import type {
   AggregateIR,
   AssociationIR,
   BoundedContextIR,
+  EnrichedAggregateIR,
+  EnrichedEntityPartIR,
   EntityPartIR,
   FieldIR,
   FindIR,
@@ -231,8 +233,9 @@ function wireProjectionEntity(
   // with the route's response Zod schema and the .NET DTO.  Single
   // canonical walk populated by `enrichLoomModel`.  `forApiRead`
   // strips `internal` and `secret` fields so the wire output matches
-  // the response schema's field set.
-  const fields = forApiRead(wireShapeFor(ent));
+  // the response schema's field set.  Local brand cast — see
+  // `wireShapeFor`'s docstring on the brand-cascade gap.
+  const fields = forApiRead(wireShapeFor(ent as EnrichedAggregateIR | EnrichedEntityPartIR));
   const parts: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {

@@ -4,6 +4,8 @@ import {
   type AggregateIR,
   aggregateUsesMoney,
   type BoundedContextIR,
+  type EnrichedAggregateIR,
+  type EnrichedEntityPartIR,
   type EntityPartIR,
   type EnumIR,
   type InvariantIR,
@@ -315,8 +317,9 @@ function emitResponseSchema(
   // field list, so Zod schemas line up field-for-field with what
   // the wire actually carries.  `forApiRead` strips `internal` and
   // `secret` fields so the React response schema matches what the
-  // .NET and Hono backends actually serve.
-  const fields = forApiRead(wireShapeFor(ent));
+  // .NET and Hono backends actually serve.  Local brand cast — see
+  // `wireShapeFor`'s docstring on the brand-cascade gap.
+  const fields = forApiRead(wireShapeFor(ent as EnrichedAggregateIR | EnrichedEntityPartIR));
   void ctx;
   void isAgg;
   for (const wf of fields) {
