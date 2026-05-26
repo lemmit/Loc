@@ -24,19 +24,41 @@
 // each of the seams above; the rest (pack dispatch, attribute
 // formatting, lambda traversal) stays in the shared walker.
 //
-// CURRENT STATE: this module DEFINES the contract.  The TSX walker
-// (src/generator/react/body-walker.ts) currently inlines its own
-// implementations of these seams — the byte-identical-output gate
-// keeps that path unchanged.  Remaining work:
+// CURRENT STATE: the contract has TWO implementations.
 //
-//   - implement `heexTarget` for Phoenix LiveView module emission,
-//     which validates this interface against a real second consumer
-//     before the React walker is refactored to delegate to
-//     `tsxTarget`.
-//   - a follow-up cleanup extracts the React walker's inline seams
-//     into `tsxTarget` and switches `body-walker.ts` to consume the
-//     abstract `WalkerTarget`.  Acceptance gate is still byte-identical
-//     TSX output against the existing fixture suite.
+//   - `src/generator/react/walker/tsx-target.ts`            → `tsxTarget`
+//   - `src/generator/phoenix-live-view/heex-target.ts`      → `heexTarget`
+//
+// Both validate the interface end-to-end.  The walkers
+// (`body-walker.ts` for React, `heex-walker.ts` for Phoenix) still
+// inline their seam implementations — the next Phase 7 step
+// refactors each walker to delegate to its respective target,
+// gated on the byte-identical fixture suite (React) and
+// `mix compile --warnings-as-errors` (Phoenix).
+//
+// SCOPE DECISION (kept at 9 methods).  The contract covers the
+// CROSS-FRAMEWORK lowering seams a new frontend (Vue / Svelte /
+// Blazor) must implement to reuse the shared walker core.  Out of
+// scope deliberately:
+//
+//   - Position-dependent `this`/`id` rendering — HEEx oddity; JSX
+//     frameworks render identically in template + handler.
+//   - Toast / put_flash — framework-private rendering surface.
+//   - User-component invocation — handled inline per framework
+//     (JSX <Comp /> vs LiveView functional component).
+//   - Collection-op rendering (`xs.map(...)`, `xs.sum(...)`) —
+//     React uses native JS collection methods; HEEx uses Enum.*
+//     idioms.  No shared lowering, no contract.
+//   - Lambda hoisting — JSX inlines lambdas; HEEx hoists to
+//     handle_event clauses.  Framework-shaped.
+//
+// Adding any of the above to `WalkerTarget` would extend interface
+// surface for zero new-frontend benefit (the 4 deferred items
+// outside HEEx are all framework-private rendering details, not
+// shared lowering decisions).  Honours the retro's "backends stay
+// idiomatic" principle: shared semantics live in the IR + walker
+// core; framework-flavoured emission stays in framework-flavoured
+// code.
 // ---------------------------------------------------------------------------
 
 import type { ExprIR, StateFieldIR, TypeIR } from "../../ir/loom-ir.js";
