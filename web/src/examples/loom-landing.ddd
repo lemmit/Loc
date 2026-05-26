@@ -87,10 +87,15 @@ system LoomLanding {
             // Eyebrow chip.  Phase 5 will add Badge(variant: "eyebrow", glow: true).
             Badge { "Langium-based DSL · Source-available" },
 
-            // Hero title — two lines.  Phase 5 will add a `gradient:`
-            // named arg so the second line picks up the brand gradient.
+            // Hero title — two lines.  Phase 5 closed the gradient gap:
+            // the second line picks up the brand gradient via the
+            // `gradient:` named arg.
             Heading { "Weave a domain model.", level: 1 },
-            Heading { "Generate the whole system.", level: 1 },
+            Heading {
+              "Generate the whole system.",
+              level:    1,
+              gradient: "linear-gradient(120deg, #b58cff 0%, #6fd1ff 50%, #ffb98a 100%)"
+            },
 
             // Subtitle.  Phase 4 closed the inline-emphasis gap, so
             // `.ddd` and `docker compose` here render as InlineCode
@@ -104,14 +109,15 @@ system LoomLanding {
               Text { " stack." }
             },
 
-            // CTA cluster.  Phase 5 brings variants + icon slots so
+            // CTA cluster.  Phase 5 closed the variant + icon gap, so
             // the primary button reads "Try in browser →" with an
-            // arrow icon.
+            // arrow icon; secondary and ghost ranks distinguish the
+            // remaining actions.
             Group {
-              Button  { "Try in browser",        to: "/app" },
-              Button  { "Get started",           to: "#cli" },
-              Button  { "View on GitHub",        to: "https://github.com/lemmit/loc" },
-              Anchor  { "Language reference",    to: "https://github.com/lemmit/loc/blob/main/docs/language.md" }
+              Button { "Try in browser",     to: "/app",                                             variant: "primary",   icon: "arrow-right", iconPosition: "right" },
+              Button { "Get started",        to: "#cli",                                             variant: "secondary" },
+              Button { "View on GitHub",     to: "https://github.com/lemmit/loc",                    variant: "secondary", icon: "github",      iconPosition: "left"  },
+              Anchor { "Language reference", to: "https://github.com/lemmit/loc/blob/main/docs/language.md" }
             },
 
             // Meta pips — three quick claims with a leading dot glyph.

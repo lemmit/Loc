@@ -281,6 +281,11 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
       ? unwrapTextLiteral(renderTextContent(titleArg, ctx) ?? '""')
       : undefined;
   const contentJsx = contentExpr ? walk(contentExpr, ctx, depth + 1) : undefined;
+  // Phase 5 — visual rank.  `variant: "raised" | "flat" | "outline"`
+  // picks the card's elevation idiom per pack.  `shadow: "sm" | "md"
+  // | "lg" | "none"` overrides the variant's default shadow level.
+  const variant = stringNamed(call, "variant");
+  const shadow = stringNamed(call, "shadow");
   return renderPrimitive(ctx, "primitive-card", {
     hasTitle: titleText !== undefined,
     titleText,
@@ -288,6 +293,10 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     contentJsx,
     indent,
     closeIndent,
+    variant,
+    hasVariant: variant !== undefined,
+    shadow,
+    hasShadow: shadow !== undefined,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });
