@@ -316,8 +316,6 @@ function zodForRow(t: TypeIR, enumValues: Map<string, string[]>): string {
     case "optional":
       return `${zodForRow(t.inner, enumValues)}.nullish()`;
     case "slot":
-      throw new Error(
-        "zodForRow: 'slot' type is UI-only and should not reach a view-row schema.",
-      );
+      throw new Error("zodForRow: 'slot' type is UI-only and should not reach a view-row schema.");
   }
 }

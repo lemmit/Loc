@@ -230,8 +230,6 @@ export function wireTypeInfo(t: TypeIR, dir: WireDirection): WireTypeInfo {
         dir,
       };
     case "slot":
-      throw new Error(
-        "wireTypeInfo: 'slot' type is UI-only and has no wire representation.",
-      );
+      throw new Error("wireTypeInfo: 'slot' type is UI-only and has no wire representation.");
   }
 }
