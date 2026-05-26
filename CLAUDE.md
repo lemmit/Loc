@@ -63,9 +63,9 @@ The single most important fact: **layers are strictly one-directional and enforc
 ```
 .ddd → ① parse → ② macro expand → ③ scope/link → ④ AST validate → ⑤ lower → ⑥ enrich → ⑦ IR validate → ⑧ per-platform codegen → ⑨ system compose + migration derive → ⑩ write
         src/language/generated/    src/macros/    src/language/    src/language/   src/ir/lower*  src/ir/      src/ir/         src/generator/<plat>/    src/system/                       src/cli/main.ts
-                                   (proposed;     ddd-scope.ts     ddd-validator   + walker-      enrichments  validate.ts                              + src/ir/migrations-builder.ts
-                                   currently in                    + type-system     primitive-                                                          (called from system, not ir)
-                                   src/language/)                                    expander.ts
+                                   (proposed;     ddd-scope.ts     validators/     + walker-      enrichments  validate.ts                              + src/ir/migrations-builder.ts
+                                   currently in                    + type-system   primitive-                                                            (called from system, not ir)
+                                   src/language/)                                  expander.ts
 ```
 
 - `language/` knows nothing about `ir/`.
@@ -108,7 +108,7 @@ The four backends and their entry points are registered in `src/platform/registr
 
 ### React page rendering — the body walker
 
-Page bodies in the `ui` DSL are written in a closed primitive library (`List`/`Detail`/`Form`/`MasterDetail`/`Stack`/`Heading`/`Button`/`Card`/`Toolbar`/`match`/lambdas/`state := …`). The canonical registry of those primitives lives in `src/language/walker-stdlib.ts` — the validator consults it to reject typos, and contributors adding a primitive register it there. The renderer lives in `src/generator/react/body-walker.ts` and dispatches per-primitive through the active **design pack** (`designs/mantine|shadcn|mui|chakra/`, plus `designs/ashPhoenix/` for Phoenix HEEx). The `walker-*.test.ts` files (~30 of them) each cover one primitive or rendering concern; if you change the walker, expect to touch one of these.
+Page bodies in the `ui` DSL are written in a closed primitive library (`List`/`Detail`/`Form`/`MasterDetail`/`Stack`/`Heading`/`Button`/`Card`/`Toolbar`/`match`/lambdas/`state := …`). The dispatch registry lives in `src/generator/_walker/registry.ts`; `src/language/walker-stdlib.ts` holds the name-only mirror consumed by the validator (pinned by `walker-stdlib-completeness.test.ts`). Contributors adding a primitive register it in both places — the test gates the mirror. The renderer lives in `src/generator/react/body-walker.ts` and dispatches per-primitive through the active **design pack** (`designs/mantine|shadcn|mui|chakra/`, plus `designs/ashPhoenix/` for Phoenix HEEx). The `walker-*.test.ts` files (~30 of them) each cover one primitive or rendering concern; if you change the walker, expect to touch one of these.
 
 The framework-specific seams (state read/write syntax, helper imports, navigation, API call lowering, `match` rendering) are framework-shaped and cannot be expressed as pack templates. `src/generator/_walker/target.ts` **defines** the `WalkerTarget` contract that captures them — but as of writing it is contract-only: the TSX walker (`src/generator/react/body-walker.ts`) inlines its own implementations of these seams, and the byte-identical-output gate keeps that path unchanged. Remaining work is implementing `heexTarget` for Phoenix LiveView (validates the interface against a real second consumer) and then extracting the React walker's inline seams into `tsxTarget`. Acceptance gate is byte-identical fixture output.
 
@@ -144,7 +144,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 
 **Adding a language feature:**
 1. Edit `src/language/ddd.langium`; `npm run langium:generate`.
-2. Update `ddd-scope.ts` / `ddd-validator.ts` / `type-system.ts` as needed.
+2. Update `ddd-scope.ts` / `src/language/validators/<themed>.ts` / `type-system.ts` as needed.
 3. Add IR node in `loom-ir.ts`; lower it in `lower.ts` (structure) or `lower-expr.ts` (expr/stmt/type).
 4. Extend `render-expr.ts` / `render-stmt.ts` for every domain-logic backend.
 5. Extend `emit/*.ts` (or `*-emit.ts` on Phoenix) or a `*-builder.ts` per backend.
@@ -155,7 +155,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 1. Implement `PlatformSurface` in `src/platform/<backend>.ts`; register in `src/platform/registry.ts`.
 2. If the backend serves a wire shape, read `agg.wireShape` etc. directly from the IR — do not recompute.
 3. If it runs domain logic, implement `render-expr.ts` / `render-stmt.ts` honouring `refKind` / `callKind` / `isCollectionOp`.
-4. If a new `platform:` keyword is added, also extend the `Platform` rule in `ddd.langium`, the `Platform` type in `loom-ir.ts`, and `checkDeployable` in `ddd-validator.ts` (see the `'react'` and `'phoenixLiveView'` additions for the pattern).
+4. If a new `platform:` keyword is added, also extend the `Platform` rule in `ddd.langium`, the `Platform` type in `loom-ir.ts`, and `checkDeployable` in `src/language/validators/deployable.ts` (see the `'react'` and `'phoenixLiveView'` additions for the pattern).
 
 ## CI surface (what each workflow gates)
 
