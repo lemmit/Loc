@@ -1,0 +1,462 @@
+// Deployable-composition checks: platform validity, design-pack
+// compatibility, ui-compose bindings, serves list, per-module
+// storage map.
+
+import type { ValidationAcceptor } from "langium";
+import {
+  BUILTIN_PACK_LATEST,
+  builtinVersionsForFamily,
+  packFormatForBuiltin,
+  parseBuiltinDesignRef,
+} from "../../generator/_packs/builtin-formats.js";
+import {
+  backendVersionsForFamily,
+  isRegisteredBackendRef,
+  parseBuiltinPlatformRef,
+} from "../../platform/registry.js";
+import type { Deployable } from "../generated/ast.js";
+import {
+  builtinPackNamesForFormat,
+  expectedFrameworkFor,
+  expectedPackFormatFor,
+  FRONTEND_KEYWORDS,
+  platformMountsUi,
+  platformOwnsBackend,
+} from "./data/platform-rules.js";
+
+void BUILTIN_PACK_LATEST;
+
+export function checkDeployable(
+  d: Deployable,
+  siblings: Deployable[],
+  accept: ValidationAcceptor,
+): void {
+  // Page-metamodel UI binding rules (3, 4).
+  // Rule 3: only platforms that mount a UI admit `ui:` — `react`,
+  //         `static`, and `phoenixLiveView` (fullstack Ash + Phoenix).
+  // Rule 4: every `static` deployable must declare `ui:` (otherwise
+  //         it has nothing to serve).
+  checkDeployablePlatform(d, accept);
+  const hasUiBinding = !!(d.uiSugar || d.uiCompose || d.uiBlock);
+  if (hasUiBinding && !platformMountsUi(d.platform)) {
+    accept(
+      "error",
+      `'ui:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenixLiveView', 'dotnet'); got '${d.platform}'.`,
+      {
+        node: d,
+        property: d.uiSugar ? "uiSugar" : d.uiCompose ? "uiCompose" : "uiBlock",
+      },
+    );
+  }
+  if (d.platform === "static" && !hasUiBinding) {
+    accept(
+      "error",
+      `Static deployable '${d.name}' must declare a 'ui:' binding — there is nothing to serve without one.`,
+      { node: d, property: "name" },
+    );
+  }
+  // Rule 13: framework values must match the deployable's platform.
+  // `react`/`static` mount the `react` framework; `phoenixLiveView`
+  // mounts the `phoenixLiveView` framework.  The grammar enum admits
+  // both values; this rule rejects cross-pairing
+  // (e.g. `platform: react` + `framework: phoenixLiveView`).
+  const framework = d.uiBlock?.framework;
+  if (framework && d.uiBlock) {
+    const expected = expectedFrameworkFor(d.platform, hasUiBinding);
+    if (expected && framework !== expected) {
+      accept(
+        "error",
+        `Framework '${framework}' does not match platform '${d.platform}' (expected '${expected}'). Drop the framework override or align it with the platform.`,
+        {
+          node: d.uiBlock,
+          property: "framework",
+          code: "loom.framework-mismatch",
+          data: { expected },
+        },
+      );
+    }
+  }
+
+  // Rule 14: design-pack format must match the framework the deployable
+  // renders against.  TSX packs (mantine/shadcn/mui/chakra) need a
+  // `react` framework; HEEx packs (ashPhoenix) need `phoenixLiveView`.
+  // Without this rule, a mismatched pair (e.g. `platform: react,
+  // design: ashPhoenix`) lowers cleanly and explodes at generation
+  // time with a confusing "template not registered" error.  Custom
+  // packs (any name not in BUILTIN_PACK_FORMATS) get a warning
+  // instead — the validator can't read their `pack.json` to know the
+  // format, but a typo should still surface loudly.
+  checkDeployableDesignPack(d, hasUiBinding, framework, accept);
+
+  // Existing rules — react/static both behave like frontends.
+  if (d.platform === "react" || d.platform === "static") {
+    const target = d.targets?.ref;
+    if (!target) {
+      accept(
+        "error",
+        `Frontend deployable '${d.name}' must declare 'targets: <backend-deployable>'.`,
+        { node: d, property: "name" },
+      );
+      return;
+    }
+    if (target.platform === "react" || target.platform === "static") {
+      accept(
+        "error",
+        `Frontend deployable '${d.name}' cannot target another frontend ('${target.name}'). Pick a 'dotnet' or 'hono' deployable.`,
+        { node: d, property: "targets" },
+      );
+    }
+    if ((d.moduleBindings ?? []).length > 0) {
+      accept(
+        "warning",
+        `Frontend deployable '${d.name}' inherits modules from its target '${target.name}'; the explicit 'modules:' list is ignored.`,
+        { node: d, property: "moduleBindings" },
+      );
+    }
+    void siblings;
+  } else {
+    if (d.targets) {
+      accept(
+        "error",
+        `'targets:' is only valid on a 'platform: react' or 'platform: static' deployable.`,
+        { node: d, property: "targets" },
+      );
+    }
+  }
+
+  // Explicit api composition checks.
+  checkDeployableServes(d, accept);
+  checkDeployableUiCompose(d, accept);
+  checkDeployableModuleStorages(d, accept);
+}
+
+/** Validate the `platform:` value now that the grammar admits an
+ *  arbitrary STRING (for `family@version` pins).  Mirrors
+ *  `checkDeployableDesignPack`'s version error:
+ *
+ *    - backend bareword (`hono`) / frontend keyword
+ *      (`react`/`static`) → always fine.
+ *    - backend pin (`"hono@v4"`) → the version must be a
+ *      registered surface, else error listing the available pins.
+ *    - anything else (`"frobnicator"`, a typo'd quoted platform)
+ *      → unknown-platform error (the grammar enum used to reject
+ *      these; the STRING alternative no longer does). */
+export function checkDeployablePlatform(d: Deployable, accept: ValidationAcceptor): void {
+  const raw = d.platform;
+  if (raw == null) return;
+  const parsed = parseBuiltinPlatformRef(raw);
+  if (parsed == null) {
+    // Not a backend family — only the frontend keywords remain
+    // valid.  (Bareword `react`/`static` and their quoted forms.)
+    if (!FRONTEND_KEYWORDS.has(raw)) {
+      accept(
+        "error",
+        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'hono', 'react', 'static', 'phoenixLiveView' (backends also accept a pinned form, e.g. 'hono@v4').`,
+        { node: d, property: "platform" },
+      );
+    }
+    return;
+  }
+  // Backend.  A pin (`@version` in the source) must resolve to a
+  // registered surface; a bareword always resolves (latest).
+  const isPinned = raw.includes("@");
+  if (isPinned && !isRegisteredBackendRef(parsed.qualified)) {
+    const available = backendVersionsForFamily(parsed.family);
+    accept(
+      "error",
+      `Platform '${raw}' on deployable '${d.name}' — no version '${parsed.version}' of backend '${parsed.family}'. Available: ${available.map((v) => `'${parsed.family}@${v}'`).join(", ")}.`,
+      { node: d, property: "platform" },
+    );
+  }
+}
+
+/** Rule 14 — design-pack format must match the deployable's
+ *  framework.  Three cases:
+ *    1. `design:` set to a built-in name (mantine/shadcn/mui/chakra/
+ *       ashPhoenix) whose format doesn't match the deployable's
+ *       framework → error.  Suggests the valid built-ins for the
+ *       framework's format so the fix is one rename away.
+ *    2. `design:` set to a custom path (anything not in the
+ *       built-in map) → warning.  The validator is sync + IO-free,
+ *       so it can't read the custom pack's `pack.json` to check the
+ *       format; the warning surfaces the unchecked surface so a
+ *       typo still gets attention.
+ *    3. `design:` set on a deployable with no UI mount and on a
+ *       platform that doesn't render UI either → warning that the
+ *       value is dropped at lowering and has no effect. */
+export function checkDeployableDesignPack(
+  d: Deployable,
+  hasUiBinding: boolean,
+  explicitFramework: string | undefined,
+  accept: ValidationAcceptor,
+): void {
+  if (d.design == null) return;
+  // Case 3 — design set on a non-UI deployable.  Lowering at
+  // ir/lower.ts:481 silently drops `design` for non-react/static/
+  // phoenixLiveView platforms, so a hono+design or dotnet+design
+  // (no `ui:`) combination silently does nothing today.  Warn
+  // before the silent drop costs the user a debugging session.
+  if (!hasUiBinding && !platformMountsUi(d.platform)) {
+    accept(
+      "warning",
+      `Design pack '${d.design}' set on deployable '${d.name}' (platform '${d.platform}' has no UI mount) — value is ignored at generation.`,
+      { node: d, property: "design" },
+    );
+    return;
+  }
+  const framework = explicitFramework ?? expectedFrameworkFor(d.platform, hasUiBinding);
+  const expectedFormat = expectedPackFormatFor(framework);
+  // Parse the slot value into {family, version, qualified}.
+  // Bareword (`mantine`) and pinned
+  // (`mantine@v7`) forms both produce a parsed ref pointing at a
+  // built-in family; custom paths (`./design/foo`) parse to null and
+  // fall through to Case 2.  Distinguishing "known family, unknown
+  // version" from "custom path" lets us emit a distinctive error
+  // listing available versions instead of a generic warning.
+  const parsedRef = parseBuiltinDesignRef(d.design);
+  if (parsedRef == null) {
+    // Case 2 — custom pack path.  Skip the strict check but warn
+    // loudly so a misspelt built-in name (or a custom pack that
+    // ships the wrong format) doesn't slip through silently.
+    accept(
+      "warning",
+      `Custom design pack '${d.design}' on deployable '${d.name}' — format compatibility with framework '${framework ?? "(none)"}' is not checked at parse time; ensure its pack.json declares format '${expectedFormat ?? "tsx"}'.`,
+      { node: d, property: "design" },
+    );
+    return;
+  }
+  const actualFormat = packFormatForBuiltin(d.design);
+  if (actualFormat == null) {
+    // Case 1b — built-in family known but the pinned version isn't
+    // registered (e.g. user wrote `design: "mantine@v999"`).  List
+    // the available versions so the fix is a one-character edit.
+    const available = builtinVersionsForFamily(parsedRef.family);
+    accept(
+      "error",
+      `Design pack '${d.design}' on deployable '${d.name}' — no version '${parsedRef.version}' of pack family '${parsedRef.family}'. Available: ${available.map((v) => `'${parsedRef.family}@${v}'`).join(", ")}.`,
+      { node: d, property: "design" },
+    );
+    return;
+  }
+  // Case 1a — built-in pack version exists but its format doesn't
+  // match the deployable's framework.
+  if (expectedFormat && actualFormat !== expectedFormat) {
+    accept(
+      "error",
+      `Design pack '${d.design}' is a ${actualFormat} pack but framework '${framework}' renders ${expectedFormat}. Use one of: ${builtinPackNamesForFormat(expectedFormat)}.`,
+      { node: d, property: "design" },
+    );
+  }
+}
+
+/** `modules: <M> { primary: <Storage>, ... }`
+ *  per-module storage map validations.
+ *    - Each storage ref must resolve.
+ *    - No duplicate role within one module's brace block.
+ *    - Brace blocks only valid on backend platforms (frontends
+ *      don't persist anything; the storage map there is a smell).
+ *    - Each module must have AT LEAST a `primary:` storage when
+ *      its aggregates persist.  v0 relaxation: only enforce
+ *      `primary:` when the brace block is non-empty (so existing
+ *      bare `modules: Sales` deployables keep working).  Bare
+ *      list still defaults to "no explicit storage; use generator
+ *      defaults". */
+export function checkDeployableModuleStorages(
+  d: Deployable,
+  accept: ValidationAcceptor,
+): void {
+  const isBackend = platformOwnsBackend(d.platform);
+  for (const mb of d.moduleBindings ?? []) {
+    const block = mb.storages ?? [];
+    if (block.length === 0) continue; // bare-list form
+    if (!isBackend) {
+      accept(
+        "error",
+        `'modules: <M> { ... }' storage block is only valid on a backend deployable (got platform '${d.platform}').`,
+        { node: mb, property: "name" },
+      );
+      continue;
+    }
+    const seenRoles = new Set<string>();
+    let hasPrimary = false;
+    for (const sb of block) {
+      const role = sb.role;
+      if (seenRoles.has(role)) {
+        accept(
+          "error",
+          `Module '${mb.name?.$refText}' on deployable '${d.name}' binds role '${role}' more than once.`,
+          { node: sb, property: "role" },
+        );
+      } else {
+        seenRoles.add(role);
+      }
+      if (role === "primary") hasPrimary = true;
+      if (!sb.storage?.ref) {
+        accept(
+          "error",
+          `Module '${mb.name?.$refText}' on deployable '${d.name}' references undeclared storage '${sb.storage?.$refText ?? "<missing>"}' for role '${role}'.`,
+          { node: sb, property: "storage" },
+        );
+      }
+    }
+    if (!hasPrimary) {
+      accept(
+        "error",
+        `Module '${mb.name?.$refText}' on deployable '${d.name}' must include a 'primary: <storage>' binding (transactional persistence).`,
+        { node: mb, property: "name" },
+      );
+    }
+  }
+}
+
+/** `serves:` validations.
+ *    - Only valid on platforms that own a backend (dotnet, hono,
+ *      phoenixLiveView).  Frontend-only platforms (react, static)
+ *      have no api surface to serve.
+ *    - Each api ref must resolve.
+ *    - No duplicate api names within one deployable's serves list. */
+export function checkDeployableServes(d: Deployable, accept: ValidationAcceptor): void {
+  if (!d.serves || d.serves.length === 0) return;
+  if (!platformOwnsBackend(d.platform)) {
+    accept(
+      "error",
+      `'serves:' is only valid on a backend deployable (dotnet, hono, phoenixLiveView).  Got platform '${d.platform}'.`,
+      { node: d, property: "serves" },
+    );
+    return;
+  }
+  const seen = new Set<string>();
+  for (const ref of d.serves) {
+    const name = ref?.$refText ?? "";
+    if (!ref?.ref) {
+      accept(
+        "error",
+        `Deployable '${d.name}' serves undeclared api '${name}'.  Declare 'api ${name} from <Module>' at system scope.`,
+        { node: d, property: "serves" },
+      );
+      continue;
+    }
+    if (seen.has(name)) {
+      accept(
+        "error",
+        `Deployable '${d.name}' lists api '${name}' more than once in its 'serves:' list.`,
+        { node: d, property: "serves" },
+      );
+    } else {
+      seen.add(name);
+    }
+  }
+}
+
+/** `ui: WebApp { Sales: salesApi, ... }` compose-block
+ *  validations.  Each binding maps a UI api parameter (declared as
+ *  `api Sales: SalesApi` in the ui block) to a backend deployable
+ *  that supplies its contract.  The rule applies to any deployable
+ *  that mounts a UI (`platformMountsUi`) — split frontends (react /
+ *  static) AND fullstack backends (phoenixLiveView, fullstack dotnet);
+ *  in the fullstack case the deployable can be both source and
+ *  target of its own bindings (it serves the api it consumes).
+ *    - Each binding's `name` must match a UiApiParam in the ui.
+ *    - Each binding's `source` must resolve AND `serves:` the
+ *      param's declared api.
+ *    - No duplicate param bindings.
+ *    - Every UI api param must have a matching binding (no
+ *      param left unbound). */
+export function checkDeployableUiCompose(
+  d: Deployable,
+  accept: ValidationAcceptor,
+): void {
+  const ui = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
+  if (!ui) return;
+
+  // Collect declared UI api params (param name → required api name).
+  const requiredParams = new Map<string, string>();
+  for (const m of ui.members) {
+    if (m.$type !== "UiApiParam") continue;
+    const apiName = m.apiRef?.$refText ?? "";
+    if (apiName) requiredParams.set(m.name, apiName);
+  }
+
+  if (requiredParams.size === 0) {
+    // UI has no api params — extra ui-compose bindings are pointless.
+    const bindings = d.uiCompose?.bindings ?? [];
+    for (const b of bindings) {
+      accept(
+        "error",
+        `Deployable '${d.name}' binds parameter '${b.name}' on ui '${ui.name}' but the ui declares no 'api ${b.name}: <Api>' parameter.`,
+        { node: b, property: "name" },
+      );
+    }
+    return;
+  }
+
+  // UI has api params → must use the compose-block form.
+  if (!d.uiCompose) {
+    const paramList = [...requiredParams.entries()]
+      .map(([n, a]) => `${n}: <backend serving ${a}>`)
+      .join(", ");
+    accept(
+      "error",
+      `Deployable '${d.name}' deploys ui '${ui.name}' which declares api parameters; supply bindings via 'ui: ${ui.name} { ${paramList} }'.`,
+      { node: d, property: "name" },
+    );
+    return;
+  }
+
+  const bindings = d.uiCompose.bindings ?? [];
+  const seenNames = new Set<string>();
+  const boundNames = new Set<string>();
+  for (const b of bindings) {
+    const paramName = b.name;
+    const sourceName = b.source?.$refText ?? "";
+    if (seenNames.has(paramName)) {
+      accept(
+        "error",
+        `Deployable '${d.name}' binds ui parameter '${paramName}' more than once.`,
+        { node: b, property: "name" },
+      );
+      continue;
+    }
+    seenNames.add(paramName);
+
+    const requiredApi = requiredParams.get(paramName);
+    if (!requiredApi) {
+      accept(
+        "error",
+        `Deployable '${d.name}' binds parameter '${paramName}' on ui '${ui.name}' but the ui declares no 'api ${paramName}: <Api>' parameter.`,
+        { node: b, property: "name" },
+      );
+      continue;
+    }
+    boundNames.add(paramName);
+
+    if (!b.source?.ref) {
+      accept(
+        "error",
+        `Deployable '${d.name}' references undeclared source deployable '${sourceName}' in 'ui: ${ui.name} { ${paramName}: ${sourceName} }'.`,
+        { node: b, property: "source" },
+      );
+      continue;
+    }
+    const source = b.source.ref;
+    const sourceServes = (source.serves ?? []).some((r) => r?.$refText === requiredApi);
+    if (!sourceServes) {
+      accept(
+        "error",
+        `Deployable '${sourceName}' does not 'serves: ${requiredApi}' — required to fill ui parameter '${paramName}: ${requiredApi}' on '${ui.name}'.`,
+        { node: b, property: "source" },
+      );
+    }
+  }
+
+  // Every UI api param must be bound.
+  for (const [name, apiName] of requiredParams) {
+    if (!boundNames.has(name)) {
+      accept(
+        "error",
+        `Deployable '${d.name}' is missing a binding for ui parameter '${name}: ${apiName}' on ui '${ui.name}'.`,
+        { node: d, property: "name" },
+      );
+    }
+  }
+}
