@@ -1,4 +1,10 @@
-import type { CallArg, Expression, MemberAccess } from "../generated/ast.js";
+import type {
+  CallArg,
+  Expression,
+  PostfixChain,
+  PostfixSuffix,
+} from "../generated/ast.js";
+import { isCallSuffix, isMemberSuffix } from "../generated/ast.js";
 
 // ---------------------------------------------------------------------------
 // AST → `.ddd` source printer for expressions.
@@ -48,14 +54,12 @@ export function printExpr(node: Expression): string {
       return `(${printExpr(node.inner)})`;
     case "UnaryExpr":
       return `${node.op}${printExpr(node.operand)}`;
-    case "BinaryExpr":
-      return `${printExpr(node.left)} ${node.op} ${printExpr(node.right)}`;
+    case "BinaryChain":
+      return printBinaryChain(node);
     case "TernaryExpr":
-      return `${printExpr(node.condition)} ? ${printExpr(node.thenExpr)} : ${printExpr(node.elseExpr)}`;
-    case "MemberAccess":
-      return printMemberAccess(node);
-    case "CallExpr":
-      return `${printExpr(node.callee)}(${printArgs(node.args)})`;
+      return `${printExpr(node.cond)} ? ${printExpr(node.thenExpr)} : ${printExpr(node.elseExpr)}`;
+    case "PostfixChain":
+      return printPostfixChain(node);
     case "Lambda":
       return printLambda(node);
     case "BuilderCall":
@@ -81,9 +85,33 @@ export function printExpr(node: Expression): string {
   }
 }
 
-function printMemberAccess(node: MemberAccess): string {
-  const base = `${printExpr(node.receiver)}.${node.member}`;
-  return node.call ? `${base}(${printArgs(node.args)})` : base;
+function printBinaryChain(
+  node: Extract<Expression, { $type: "BinaryChain" }>,
+): string {
+  let out = printExpr(node.head);
+  for (let i = 0; i < node.ops.length; i++) {
+    out = `${out} ${node.ops[i]} ${printExpr(node.rest[i]!)}`;
+  }
+  return out;
+}
+
+function printPostfixChain(node: PostfixChain): string {
+  let out = printExpr(node.head);
+  for (const s of node.suffixes) {
+    out = appendSuffix(out, s);
+  }
+  return out;
+}
+
+function appendSuffix(base: string, s: PostfixSuffix): string {
+  if (isMemberSuffix(s)) {
+    const head = `${base}.${s.member}`;
+    return s.call ? `${head}(${printArgs(s.args)})` : head;
+  }
+  if (isCallSuffix(s)) {
+    return `${base}(${printArgs(s.args)})`;
+  }
+  return base;
 }
 
 function printArgs(args: CallArg[]): string {

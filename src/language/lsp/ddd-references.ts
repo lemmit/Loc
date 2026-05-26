@@ -42,7 +42,7 @@ export class DddReferencesProvider extends DefaultReferencesProvider {
     );
     if (!leaf) return undefined;
     const declared = this.references.findDeclaration(leaf);
-    if (declared && declared.$type !== "MemberAccess") return declared;
+    if (declared && declared.$type !== "MemberSuffix") return declared;
     return memberDeclAt(leaf);
   }
 }

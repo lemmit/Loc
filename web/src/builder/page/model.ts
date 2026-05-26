@@ -250,7 +250,13 @@ function readProp(kind: PropKind, e: Expression): string | number | null {
   if (kind === "int") return e.$type === "IntLit" ? e.value : null;
   // A bare identifier (`Order`) or a qualified ref (`Sales.Order`); both emit
   // verbatim, and the latter shows up as the current value in the dropdown.
-  if (kind === "ref") return e.$type === "NameRef" ? e.name : e.$type === "MemberAccess" ? printExpr(e) : null;
+  // Post grammar-flatten, `Sales.Order` parses as a PostfixChain whose first
+  // suffix is a MemberSuffix; we accept that shape for the ref kind.
+  if (kind === "ref") {
+    if (e.$type === "NameRef") return e.name;
+    if (e.$type === "PostfixChain") return printExpr(e);
+    return null;
+  }
   if (e.$type === "Lambda" || e.$type === "MatchExpr") return null;
   return printExpr(e);
 }
@@ -410,16 +416,22 @@ function seedNode(expr: Expression, components: ReadonlyMap<string, readonly str
     return { name: "Match", props: {}, children };
   }
   // v2: BuilderCall (`Name { slot: value, ... }`) is the canonical surface for
-  // walker primitives and user components.  v1 CallExpr (`Name(arg, ...)`) is
-  // still accepted by the grammar so legacy fragments keep parsing.
+  // walker primitives and user components.  Legacy `Name(args)` (post grammar
+  // flatten: a PostfixChain with NameRef head + single CallSuffix) is still
+  // accepted so older fragments keep parsing.
   let name: string;
   let args: ReadonlyArray<CallArg | BuilderEntry>;
   if (expr.$type === "BuilderCall") {
     name = expr.type;
     args = expr.entries;
-  } else if (expr.$type === "CallExpr" && expr.callee.$type === "NameRef") {
-    name = expr.callee.name;
-    args = expr.args;
+  } else if (
+    expr.$type === "PostfixChain" &&
+    expr.suffixes.length === 1 &&
+    expr.suffixes[0]!.$type === "CallSuffix" &&
+    expr.head.$type === "NameRef"
+  ) {
+    name = expr.head.name;
+    args = (expr.suffixes[0] as { args: CallArg[] }).args;
   } else {
     return opaque(expr);
   }

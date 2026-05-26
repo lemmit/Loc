@@ -4,15 +4,17 @@ import type { PrimitiveName } from "../ir/loom-ir.js";
 import type {
   Aggregate,
   BaseType,
-  CallExpr,
+  BinaryChain,
   EntityPart,
   EnumDecl,
   Expression,
   FunctionDecl,
   Lambda,
-  MemberAccess,
+  MemberSuffix,
   Operation,
   Parameter,
+  PostfixChain,
+  PostfixSuffix,
   Property,
   Repository,
   TypeRef,
@@ -20,11 +22,11 @@ import type {
 } from "./generated/ast.js";
 import {
   isAggregate,
-  isBinaryExpr,
+  isBinaryChain,
   isBoolLit,
   isBoundedContext,
   isBuilderCall,
-  isCallExpr,
+  isCallSuffix,
   isContainment,
   isDecLit,
   isDerivedProp,
@@ -37,7 +39,7 @@ import {
   isIntLit,
   isLambda,
   isLetStmt,
-  isMemberAccess,
+  isMemberSuffix,
   isMoneyLit,
   isNamedType,
   isNameRef,
@@ -45,6 +47,7 @@ import {
   isNullLit,
   isOperation,
   isParenExpr,
+  isPostfixChain,
   isPrimitiveConversion,
   isPrimitiveType,
   isProperty,
@@ -369,17 +372,21 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
     if (expr.op === "!") return T.prim("bool");
     return t;
   }
-  if (isBinaryExpr(expr)) {
-    const op = expr.op;
-    // Logical / comparison ops produce a fresh bool — by convention low
-    // bandwidth implicit flows aren't tracked, so no propagation.
-    if (op === "&&" || op === "||") return T.prim("bool");
-    if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
-      return T.prim("bool");
+  if (isBinaryChain(expr)) {
+    // Left-fold: comparison / logical ops produce bool (short-circuit
+    // the chain — the chain is homogeneous-op per precedence level, so
+    // a single bool-result op makes the entire chain bool).
+    let acc = typeOf(expr.head, env);
+    for (let i = 0; i < expr.ops.length; i++) {
+      const op = expr.ops[i]!;
+      if (op === "&&" || op === "||") return T.prim("bool");
+      if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
+        return T.prim("bool");
+      }
+      const rt = typeOf(expr.rest[i]!, env);
+      acc = arithmeticResult(acc, rt, op);
     }
-    const lt = typeOf(expr.left, env);
-    const rt = typeOf(expr.right, env);
-    return arithmeticResult(lt, rt, op);
+    return acc;
   }
   if (isTernaryExpr(expr)) {
     // Union the branches' sensitivity — the chosen value could come from
@@ -395,11 +402,8 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
   if (isBuilderCall(expr)) {
     return typeOfBuilderCall(expr, env);
   }
-  if (isMemberAccess(expr)) {
-    return typeOfMemberAccess(expr, env);
-  }
-  if (isCallExpr(expr)) {
-    return typeOfCall(expr, env);
+  if (isPostfixChain(expr)) {
+    return typeOfPostfixChain(expr, env);
   }
   if (isNameRef(expr)) {
     const looked = env.resolve(expr.name);
@@ -523,19 +527,60 @@ function moneyArithmetic(
   return T.unknown;
 }
 
-function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env: Env): DddType {
-  const recvType = typeOf(expr.receiver, env);
-  const memberName = expr.member;
+/** Type of a PostfixChain — walk head + suffixes, threading the type
+ *  through each step.  Each MemberSuffix dispatches to the same
+ *  member-typing rules typeOfMemberAccess used; each CallSuffix
+ *  resolves the receiver via the head-name lookup (matches typeOfCall). */
+function typeOfPostfixChain(expr: PostfixChain, env: Env): DddType {
+  // Head + first suffix: a CallSuffix at the front collapses
+  // `<NameRef>(args)` to the function / VO ctor lookup (legacy
+  // CallExpr typing).  Anything else starts from the head's type.
+  let curType: DddType;
+  const first = expr.suffixes[0];
+  if (first && isCallSuffix(first) && isNameRef(expr.head)) {
+    curType = typeOfFreeCall(expr.head.name, env);
+    for (let i = 1; i < expr.suffixes.length; i++) {
+      curType = typeAfterSuffix(curType, expr.suffixes[i]!, env);
+    }
+    return curType;
+  }
+  curType = typeOf(expr.head, env);
+  for (const s of expr.suffixes) {
+    curType = typeAfterSuffix(curType, s, env);
+  }
+  return curType;
+}
+
+function typeOfFreeCall(name: string, env: Env): DddType {
+  const sym = env.resolve(name);
+  if (sym && isFunctionDecl(sym.origin)) {
+    return resolveTypeRef(sym.origin.returnType);
+  }
+  if (sym && isValueObject(sym.origin)) {
+    return { kind: "valueobject", ref: sym.origin };
+  }
+  const fn = lookupFunctionInScope(name, env);
+  if (fn) return resolveTypeRef(fn.returnType);
+  const vo = lookupValueObjectByName(name, env);
+  if (vo) return { kind: "valueobject", ref: vo };
+  return T.unknown;
+}
+
+export function typeAfterSuffix(recvType: DddType, suffix: PostfixSuffix, env: Env): DddType {
+  if (isCallSuffix(suffix)) {
+    // Invoking a non-NameRef receiver — without a signature the
+    // result is unknown (matches the legacy CallExpr typing for a
+    // non-NameRef callee).
+    return T.unknown;
+  }
+  const ms = suffix as MemberSuffix;
+  const memberName = ms.member;
   // Collection ops on arrays — type-check lambda args with the element
   // type bound to the lambda parameter, so `transactions.all(t => …)`
   // sees `t: AccountTransaction`.
   if (recvType.kind === "array") {
-    if (expr.call) {
-      for (const arg of expr.args) {
-        // Call args wrap an Expression in a `CallArg`
-        // node carrying an optional `name:` prefix.  Look at the
-        // wrapped value, not the wrapper itself, when checking for
-        // Lambda shape.
+    if (ms.call) {
+      for (const arg of ms.args) {
         const argExpr = arg.value;
         if (isLambda(argExpr) && argExpr.body) {
           const lambdaEnv: Env = makeEnv(
@@ -547,9 +592,8 @@ function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env
         }
       }
     }
-    return collectionOpType(recvType, memberName, expr, env);
+    return collectionOpType(recvType, memberName, ms, env);
   }
-  // Member access on entities/value objects/aggregates
   if (recvType.kind === "entity" || recvType.kind === "aggregate") {
     return lookupEntityMember(recvType.ref, memberName);
   }
@@ -558,11 +602,10 @@ function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env
   }
   if (recvType.kind === "primitive" && recvType.name === "string") {
     if (memberName === "length") return T.prim("int");
-    // `string.matches(regex)` operator.  Returns bool;
-    // argument is a string literal (the validator enforces that
-    // separately so a non-literal arg becomes a clear diagnostic
-    // rather than `unknown`).
-    if (memberName === "matches" && expr.call) return T.prim("bool");
+    if (memberName === "matches" && ms.call) return T.prim("bool");
+  }
+  if (recvType.kind === "id") {
+    return lookupEntityMember(recvType.target, memberName);
   }
   return T.unknown;
 }
@@ -616,7 +659,7 @@ const COLLECTION_OPS = new Set(COLLECTION_OP_SIGNATURES.map((o) => o.name));
 function collectionOpType(
   recv: { kind: "array"; element: DddType },
   name: string,
-  expr: import("./generated/ast.js").MemberAccess,
+  ms: MemberSuffix,
   env: Env,
 ): DddType {
   switch (name) {
@@ -626,7 +669,7 @@ function collectionOpType(
       // sum returns the lambda's body type when one is given;
       // otherwise the element type itself.  Args are CallArg
       // wrappers — peek through `.value`.
-      const callArg = expr.args[0];
+      const callArg = ms.args[0];
       const lambdaArg = callArg?.value;
       if (lambdaArg && isLambda(lambdaArg) && lambdaArg.body) {
         const lambdaEnv = makeEnv(
@@ -650,27 +693,6 @@ function collectionOpType(
     default:
       return T.unknown;
   }
-}
-
-function typeOfCall(expr: import("./generated/ast.js").CallExpr, env: Env): DddType {
-  const callee = expr.callee;
-  if (isNameRef(callee)) {
-    const sym = env.resolve(callee.name);
-    if (sym && isFunctionDecl(sym.origin)) {
-      return resolveTypeRef(sym.origin.returnType);
-    }
-    if (sym && isValueObject(sym.origin)) {
-      return { kind: "valueobject", ref: sym.origin };
-    }
-    // Look up functions / value-object constructors / operations declared
-    // in the enclosing aggregate or part.
-    const fn = lookupFunctionInScope(callee.name, env);
-    if (fn) return resolveTypeRef(fn.returnType);
-    const vo = lookupValueObjectByName(callee.name, env);
-    if (vo) return { kind: "valueobject", ref: vo };
-    return T.unknown;
-  }
-  return T.unknown;
 }
 
 function lookupFunctionInScope(
@@ -1000,11 +1022,24 @@ export function envForNode(node: AstNode): Env {
 /** Element type bound to a collection-op lambda's param (`xs.all(p => …)` ⇒ the
  *  element type of `xs`), or undefined when the lambda isn't a collection-op arg. */
 function lambdaParamElementType(lam: Lambda): DddType | undefined {
-  const ma = lam.$container?.$container; // Lambda → CallArg → MemberAccess
-  if (ma && isMemberAccess(ma) && isCollectionOp(ma.member) && ma.receiver) {
-    const recvType = typeOf(ma.receiver, envForNode(ma.receiver));
-    if (recvType.kind === "array") return recvType.element;
+  // Lambda → CallArg → MemberSuffix → PostfixChain.  The lambda is
+  // an argument to a method-call suffix on the postfix chain; the
+  // element type is the chain's effective receiver-type at the point
+  // before this suffix is applied.
+  const ms = lam.$container?.$container; // Lambda → CallArg → MemberSuffix (or CallSuffix)
+  if (!ms || !isMemberSuffix(ms)) return undefined;
+  if (!isCollectionOp(ms.member)) return undefined;
+  const chain = ms.$container; // MemberSuffix → PostfixChain
+  if (!chain || !isPostfixChain(chain)) return undefined;
+  // The receiver type at this suffix is the type after walking head +
+  // all suffixes before `ms`.
+  const idx = chain.suffixes.indexOf(ms);
+  if (idx < 0) return undefined;
+  let recvType: DddType = typeOf(chain.head, envForNode(chain.head));
+  for (let i = 0; i < idx; i++) {
+    recvType = typeAfterSuffix(recvType, chain.suffixes[i]!, envForNode(chain));
   }
+  if (recvType.kind === "array") return recvType.element;
   return undefined;
 }
 
@@ -1181,53 +1216,74 @@ export interface CalleeSignature {
 /** Resolve a call's callee to its parameter signature — a function / operation
  *  (its params) or a value-object constructor (its declared properties,
  *  positional). Shared by the LSP signature-help provider and the Model
- *  builder's structured editor. Undefined when the callee can't be resolved. */
+ *  builder's structured editor. Undefined when the callee can't be resolved.
+ *
+ *  Postfix-chain call: pass the chain plus the index of the call suffix
+ *  (in `chain.suffixes`) whose signature we want. */
 export function calleeSignature(
-  call: CallExpr | MemberAccess | import("./generated/ast.js").BuilderCall,
+  call:
+    | import("./generated/ast.js").BuilderCall
+    | { chain: PostfixChain; suffixIdx: number },
 ): CalleeSignature | undefined {
-  if (call.$type === "BuilderCall") {
-    const ctx = AstUtils.getContainerOfType(call, isBoundedContext);
-    const vo = ctx?.members.find((m): m is ValueObject => isValueObject(m) && m.name === call.type);
-    if (vo) {
-      return {
-        name: vo.name,
-        params: vo.members.filter(isProperty).map((p) => ({ name: p.name, type: p.type })),
-      };
+  if (!("chain" in call)) {
+    // BuilderCall branch.
+    if (call.$type === "BuilderCall") {
+      const ctx = AstUtils.getContainerOfType(call, isBoundedContext);
+      const vo = ctx?.members.find(
+        (m): m is ValueObject => isValueObject(m) && m.name === call.type,
+      );
+      if (vo) {
+        return {
+          name: vo.name,
+          params: vo.members.filter(isProperty).map((p) => ({ name: p.name, type: p.type })),
+        };
+      }
+      return undefined;
     }
     return undefined;
   }
-  if (isMemberAccess(call)) {
-    if (!call.call) return undefined;
-    const decl = stepIntoNode(typeOf(call.receiver, envForNode(call)), call.member);
+  const { chain, suffixIdx } = call;
+  const s = chain.suffixes[suffixIdx];
+  if (!s) return undefined;
+  // MemberSuffix(call=true): a method invocation — resolve via the
+  // receiver's type at the point before this suffix is applied.
+  if (isMemberSuffix(s)) {
+    if (!s.call) return undefined;
+    let recvType: DddType = typeOf(chain.head, envForNode(chain.head));
+    for (let i = 0; i < suffixIdx; i++) {
+      recvType = typeAfterSuffix(recvType, chain.suffixes[i]!, envForNode(chain));
+    }
+    const decl = stepIntoNode(recvType, s.member);
     if (decl && (isFunctionDecl(decl) || isOperation(decl))) {
       return {
-        name: call.member,
+        name: s.member,
         params: decl.params,
         ret: isFunctionDecl(decl) ? decl.returnType : undefined,
       };
     }
     return undefined;
   }
-  const callee = call.callee;
-  if (!isNameRef(callee)) return undefined;
-  // Function / operation on the enclosing entity.
-  const owner =
-    AstUtils.getContainerOfType(call, isAggregate) ??
-    AstUtils.getContainerOfType(call, isEntityPart) ??
-    AstUtils.getContainerOfType(call, isValueObject);
-  for (const m of owner?.members ?? []) {
-    if ((isFunctionDecl(m) || isOperation(m)) && m.name === callee.name) {
-      return { name: m.name, params: m.params, ret: isFunctionDecl(m) ? m.returnType : undefined };
+  // CallSuffix: a free call applied to the chain head — only meaningful
+  // when the head is a NameRef and this is the first suffix.
+  if (suffixIdx === 0 && isNameRef(chain.head)) {
+    const name = chain.head.name;
+    const owner =
+      AstUtils.getContainerOfType(chain, isAggregate) ??
+      AstUtils.getContainerOfType(chain, isEntityPart) ??
+      AstUtils.getContainerOfType(chain, isValueObject);
+    for (const m of owner?.members ?? []) {
+      if ((isFunctionDecl(m) || isOperation(m)) && m.name === name) {
+        return { name: m.name, params: m.params, ret: isFunctionDecl(m) ? m.returnType : undefined };
+      }
     }
-  }
-  // Value-object constructor: its properties, positional.
-  const ctx = AstUtils.getContainerOfType(call, isBoundedContext);
-  const vo = ctx?.members.find((m): m is ValueObject => isValueObject(m) && m.name === callee.name);
-  if (vo) {
-    return {
-      name: vo.name,
-      params: vo.members.filter(isProperty).map((p) => ({ name: p.name, type: p.type })),
-    };
+    const ctx = AstUtils.getContainerOfType(chain, isBoundedContext);
+    const vo = ctx?.members.find((m): m is ValueObject => isValueObject(m) && m.name === name);
+    if (vo) {
+      return {
+        name: vo.name,
+        params: vo.members.filter(isProperty).map((p) => ({ name: p.name, type: p.type })),
+      };
+    }
   }
   return undefined;
 }

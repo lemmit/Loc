@@ -15,14 +15,14 @@ import {
   type Operation,
   type Parameter,
   type Repository,
-  type BinaryExpr,
-  type CallExpr,
+  type BinaryChain,
   type Lambda,
   type MatchExpr,
-  type MemberAccess,
+  type MemberSuffix,
   type BuilderCall,
   type ObjectLit,
   type ParenExpr,
+  type PostfixChain,
   type Statement,
   type TernaryExpr,
   type UnaryExpr,
@@ -39,7 +39,7 @@ import {
   withLocal,
   type Env,
 } from "../../../../src/ir/lower-expr.js";
-import { calleeSignature, envForNode, membersOfType, typeOf } from "../../../../src/language/type-system.js";
+import { calleeSignature, envForNode, membersOfType, typeAfterSuffix, typeOf } from "../../../../src/language/type-system.js";
 import { applyEdits } from "../edit-engine";
 import { buildLinkedModel } from "./linked-doc";
 import { parseDdd } from "../parse";
@@ -426,29 +426,12 @@ export interface ExprHints {
 
 function collectHints(node: Expression, path: string, h: ExprHints): void {
   switch (node.$type) {
-    case "MemberAccess": {
-      const ma = node as MemberAccess;
-      if (ma.receiver) {
-        h.members.set(path, membersOfType(typeOf(ma.receiver, envForNode(ma.receiver))).map((m) => m.name));
-        collectHints(ma.receiver, `${path}r`, h);
-      }
-      if (ma.call) setArgLabels(ma, path, h);
-      ma.args.forEach((a, i) => collectHints(a.value, `${path}a${i}`, h));
+    case "PostfixChain":
+      collectPostfixHints(node as PostfixChain, path, h);
       break;
-    }
-    case "CallExpr": {
-      const c = node as CallExpr;
-      setArgLabels(c, path, h);
-      collectHints(c.callee, `${path}c`, h);
-      c.args.forEach((a, i) => collectHints(a.value, `${path}a${i}`, h));
+    case "BinaryChain":
+      collectBinaryChainHints(node as BinaryChain, path, h);
       break;
-    }
-    case "BinaryExpr": {
-      const b = node as BinaryExpr;
-      collectHints(b.left, `${path}L`, h);
-      collectHints(b.right, `${path}R`, h);
-      break;
-    }
     case "UnaryExpr":
       collectHints((node as UnaryExpr).operand, `${path}o`, h);
       break;
@@ -462,7 +445,7 @@ function collectHints(node: Expression, path: string, h: ExprHints): void {
     }
     case "TernaryExpr": {
       const t = node as TernaryExpr;
-      collectHints(t.condition, `${path}?c`, h);
+      collectHints(t.cond, `${path}?c`, h);
       collectHints(t.thenExpr, `${path}?t`, h);
       collectHints(t.elseExpr, `${path}?e`, h);
       break;
@@ -486,8 +469,80 @@ function collectHints(node: Expression, path: string, h: ExprHints): void {
   }
 }
 
-function setArgLabels(call: CallExpr | MemberAccess, path: string, h: ExprHints): void {
-  const sig = calleeSignature(call);
+/** Left-fold a BinaryChain into the path scheme the editor uses
+ *  (`L`/`R` per fold step). Mirrors `seedBinaryChain` so paths align. */
+function collectBinaryChainHints(node: BinaryChain, path: string, h: ExprHints): void {
+  // The structure is left-folded: outermost binary node owns the
+  // last operator and rest[len-1] as its R; its L is the next-deeper
+  // binary node owning ops[len-2] / rest[len-2]; …; the innermost
+  // binary node has the head as its L.
+  // Walk from outermost inward, mirroring `seedBinaryChain`.
+  const n = node.ops.length;
+  if (n === 0) {
+    collectHints(node.head, path, h);
+    return;
+  }
+  // Outermost: path with last rest as R.
+  collectHints(node.rest[n - 1]!, `${path}R`, h);
+  // Walk left-fold steps from len-2 down to 0; each consumes one `L`.
+  let lhsPath = `${path}L`;
+  for (let i = n - 2; i >= 0; i--) {
+    collectHints(node.rest[i]!, `${lhsPath}R`, h);
+    lhsPath = `${lhsPath}L`;
+  }
+  collectHints(node.head, lhsPath, h);
+}
+
+/** Walk a PostfixChain's suffixes producing the same path scheme the
+ *  editor's nested `member` / `call` view does (mirrors
+ *  `seedPostfixChain`). */
+function collectPostfixHints(node: PostfixChain, path: string, h: ExprHints): void {
+  // seedPostfixChain wraps each suffix outward — the LAST suffix is the
+  // outermost node and the head sits at the innermost `r`/`c`-receiver.
+  // Walk outermost-first: emit args/labels for the outermost wrapper,
+  // descend into the receiver path.
+  const suffixes = node.suffixes;
+  if (suffixes.length === 0) {
+    collectHints(node.head, path, h);
+    return;
+  }
+  // Build the receiver-type chain ahead so we can answer "members at
+  // this member node" for each step.  recvTypes[i] = type seen at
+  // suffix i's receiver (i.e. before applying suffix i).
+  const env = envForNode(node.head);
+  let curType = typeOf(node.head, env);
+  const recvTypes: Array<typeof curType> = [];
+  for (const s of suffixes) {
+    recvTypes.push(curType);
+    curType = typeAfterSuffix(curType, s, env);
+  }
+  // Emit hints from outermost suffix inward.  At each step the editor
+  // path appends `r` (member.receiver) or `c` (call.callee) to descend.
+  let curPath = path;
+  for (let i = suffixes.length - 1; i >= 0; i--) {
+    const s = suffixes[i]!;
+    const recvT = recvTypes[i]!;
+    if (s.$type === "MemberSuffix") {
+      const ms = s as MemberSuffix;
+      h.members.set(curPath, membersOfType(recvT).map((m) => m.name));
+      if (ms.call) setSuffixArgLabels(node, i, curPath, h);
+      ms.args.forEach((a, j) => collectHints(a.value, `${curPath}a${j}`, h));
+      curPath = `${curPath}r`;
+    } else {
+      // CallSuffix — only meaningful when this is the first suffix and
+      // the chain head is a NameRef.  We still walk its args.
+      setSuffixArgLabels(node, i, curPath, h);
+      (s as { args: { value: Expression }[] }).args.forEach((a, j) =>
+        collectHints(a.value, `${curPath}a${j}`, h),
+      );
+      curPath = `${curPath}c`;
+    }
+  }
+  collectHints(node.head, curPath, h);
+}
+
+function setSuffixArgLabels(chain: PostfixChain, suffixIdx: number, path: string, h: ExprHints): void {
+  const sig = calleeSignature({ chain, suffixIdx });
   if (sig) h.argLabels.set(path, sig.params.map((p) => p.name));
 }
 

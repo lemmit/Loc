@@ -18,8 +18,9 @@ import {
   isEnumValue,
   isEventDecl,
   isFunctionDecl,
-  isMemberAccess,
+  isMemberSuffix,
   isNameRef,
+  isPostfixChain,
   isOperation,
   isProperty,
   isValueObject,
@@ -31,6 +32,7 @@ import {
   type MemberCompletion,
   membersOfType,
   resolveTypeRef,
+  typeAfterSuffix,
   typeOf,
 } from "../type-system.js";
 
@@ -84,23 +86,37 @@ export class DddCompletionProvider extends DefaultCompletionProvider {
   // -------------------------------------------------------------------------
 
   private isMemberAccessMemberSlot(context: CompletionContext, next: NextFeature): boolean {
-    // The most reliable signal: `next.type === "MemberAccess"` AND
+    // Post grammar-flatten the member-name token lives on a
+    // `MemberSuffix` rule: `next.type === "MemberSuffix"` AND
     // `next.property === "member"`.  Fall back to inspecting the AST
     // node at the cursor in case Langium produces a more nested
     // feature description for nested member chains.
-    if (next.type === "MemberAccess" && next.property === "member") return true;
+    if (next.type === "MemberSuffix" && next.property === "member") return true;
     const node = context.node;
-    return !!node && isMemberAccess(node);
+    return !!node && isMemberSuffix(node);
   }
 
   private completeMemberAccess(context: CompletionContext, acceptor: CompletionAcceptor): void {
     const node = context.node;
-    if (!node || !isMemberAccess(node)) return;
-    const receiver = node.receiver;
-    if (!receiver) return;
-
+    if (!node || !isMemberSuffix(node)) return;
+    // Receiver of a member suffix is the chain head plus any prior
+    // suffixes' types — compute via the type system once.
+    const chain = node.$container;
+    if (!chain || !isPostfixChain(chain)) return;
+    const idx = chain.suffixes.indexOf(node);
+    if (idx < 0) return;
+    // Build a "receiver" type by typing the head, then walking
+    // every prior suffix in order.  `typeOf` is the entry point;
+    // the suffix-walk lives inside typeOfPostfixChain — but since we
+    // need the type AT this suffix (not after), we build a sub-chain
+    // up to but not including `node` and type that.
     const env = envForNode(node);
-    const receiverType = typeOf(receiver, env);
+    let receiverType = typeOf(chain.head, env);
+    if (idx > 0) {
+      for (let i = 0; i < idx; i++) {
+        receiverType = typeAfterSuffix(receiverType, chain.suffixes[i]!, env);
+      }
+    }
     if (receiverType.kind !== "unknown") {
       this.emitMembersForType(receiverType, context, acceptor);
       return;
@@ -109,8 +125,8 @@ export class DddCompletionProvider extends DefaultCompletionProvider {
     // enclosing context (`Status.Active`).  The type system doesn't
     // type enum-name-as-expression today; we resolve it here for the
     // completion popup.
-    if (isNameRef(receiver)) {
-      const enumDecl = findEnumByName(node, receiver.name);
+    if (idx === 0 && isNameRef(chain.head)) {
+      const enumDecl = findEnumByName(node, chain.head.name);
       if (enumDecl) {
         for (const v of enumDecl.values) {
           acceptor(context, {

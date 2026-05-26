@@ -74,16 +74,14 @@ function walkAst(root: AstNode | undefined, cb: (n: AstNode) => void): void {
 }
 
 /** Walk an expression for any `NameRef` whose `name` is one of `targets`,
- *  used inside a `MemberAccess` receiver chain. Catches `Repo.find(x)`,
- *  `where Repo.byId(x)`, `Repo.x.y`, …. */
+ *  used as the head of a `PostfixChain` (post grammar-flatten the receiver
+ *  chain is flat). Catches `Repo.find(x)`, `where Repo.byId(x)`, `Repo.x.y`, …. */
 function collectReceiverNames(expr: Expression | undefined, targets: Set<string>, into: Set<string>): void {
   walkAst(expr, (n) => {
-    if (n.$type !== "MemberAccess") return;
-    // Walk receivers leftward until we hit a NameRef or a non-MA leaf.
-    let r: AstNode | undefined = (n as { receiver?: AstNode }).receiver;
-    while (r && r.$type === "MemberAccess") r = (r as { receiver?: AstNode }).receiver;
-    if (r?.$type === "NameRef") {
-      const name = (r as { name?: string }).name;
+    if (n.$type !== "PostfixChain") return;
+    const head = (n as { head?: AstNode }).head;
+    if (head?.$type === "NameRef") {
+      const name = (head as { name?: string }).name;
       if (name && targets.has(name)) into.add(name);
     }
   });

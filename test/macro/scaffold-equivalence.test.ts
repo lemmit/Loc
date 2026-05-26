@@ -61,8 +61,13 @@ function pageBodyCallee(model: Model, name: string): string | undefined {
   for (const prop of p.props ?? []) {
     if (prop.$type === "BodyProp") {
       const expr = (prop as any).expr;
-      if (expr?.$type === "CallExpr" && expr.callee?.$type === "NameRef") {
-        return expr.callee.name;
+      // Post grammar-flatten: a `Name(args)` invocation is a
+      // PostfixChain with head=NameRef(Name) and a single CallSuffix.
+      if (expr?.$type === "PostfixChain" && expr.head?.$type === "NameRef") {
+        const first = (expr.suffixes ?? [])[0];
+        if (first?.$type === "CallSuffix") {
+          return expr.head.name;
+        }
       }
     }
   }

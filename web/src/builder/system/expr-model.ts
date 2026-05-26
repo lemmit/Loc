@@ -67,8 +67,8 @@ export const UNARY_OPS = ["!", "-"];
 
 export function seedExpr(node: Expression): EExpr {
   switch (node.$type) {
-    case "BinaryExpr":
-      return { kind: "binary", op: node.op, left: seedExpr(node.left), right: seedExpr(node.right) };
+    case "BinaryChain":
+      return seedBinaryChain(node);
     case "UnaryExpr":
       return { kind: "unary", op: node.op, operand: seedExpr(node.operand) };
     case "ParenExpr":
@@ -83,16 +83,8 @@ export function seedExpr(node: Expression): EExpr {
       return { kind: "lit", lit: "bool", value: node.value };
     case "NullLit":
       return { kind: "lit", lit: "null", value: "null" };
-    case "CallExpr":
-      return { kind: "call", callee: seedExpr(node.callee), args: node.args.map(seedArg) };
-    case "MemberAccess":
-      return {
-        kind: "member",
-        receiver: seedExpr(node.receiver),
-        member: node.member,
-        call: !!node.call,
-        args: node.args.map(seedArg),
-      };
+    case "PostfixChain":
+      return seedPostfixChain(node);
     case "Lambda":
       // Expression-body lambdas structure (`p => expr`); block-body lambdas
       // (`p => { … }`) seed editable statement rows.
@@ -100,7 +92,7 @@ export function seedExpr(node: Expression): EExpr {
         ? { kind: "lambda", param: node.param, body: seedExpr(node.body) }
         : { kind: "blockLambda", param: node.param, stmts: node.stmts.map(seedStmt) };
     case "TernaryExpr":
-      return { kind: "ternary", cond: seedExpr(node.condition), then: seedExpr(node.thenExpr), else: seedExpr(node.elseExpr) };
+      return { kind: "ternary", cond: seedExpr(node.cond), then: seedExpr(node.thenExpr), else: seedExpr(node.elseExpr) };
     case "MatchExpr":
       return {
         kind: "match",
@@ -114,6 +106,40 @@ export function seedExpr(node: Expression): EExpr {
     default:
       return { kind: "raw", text: printExpr(node) };
   }
+}
+
+/** Left-fold a `BinaryChain` into the EExpr binary tree the editor uses.
+ *  Each step of the chain becomes a binary node with the running fold as
+ *  its lhs and the next rhs as its right.  Mirrors the lowering layer's
+ *  left-associative semantics. */
+function seedBinaryChain(node: import("../../../../src/language/generated/ast.js").BinaryChain): EExpr {
+  let acc: EExpr = seedExpr(node.head);
+  for (let i = 0; i < node.ops.length; i++) {
+    acc = { kind: "binary", op: node.ops[i]!, left: acc, right: seedExpr(node.rest[i]!) };
+  }
+  return acc;
+}
+
+/** Walk a `PostfixChain` left-to-right, building the editor's nested
+ *  `member` / `call` tree (matching the legacy MemberAccess / CallExpr
+ *  shape the editor consumes). */
+function seedPostfixChain(node: import("../../../../src/language/generated/ast.js").PostfixChain): EExpr {
+  let acc: EExpr = seedExpr(node.head);
+  for (const s of node.suffixes) {
+    if (s.$type === "CallSuffix") {
+      acc = { kind: "call", callee: acc, args: s.args.map(seedArg) };
+    } else {
+      // MemberSuffix
+      acc = {
+        kind: "member",
+        receiver: acc,
+        member: s.member,
+        call: !!s.call,
+        args: s.args.map(seedArg),
+      };
+    }
+  }
+  return acc;
 }
 
 function seedStmt(s: Statement): EStmt {
