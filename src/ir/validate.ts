@@ -4,8 +4,8 @@ import type {
   AggregateIR,
   BoundedContextIR,
   DeployableIR,
+  EnrichedLoomModel,
   ExprIR,
-  LoomModel,
   ModuleIR,
   SystemIR,
   TestE2EIR,
@@ -40,7 +40,7 @@ export interface LoomDiagnostic {
   source: string;
 }
 
-export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
+export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   const diags: LoomDiagnostic[] = [];
   // Workspace-scope uniqueness checks — only meaningful once a
   // project may span multiple `.ddd` files (Stage A multi-file).
@@ -89,7 +89,7 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
 // class in .NET, etc.).
 // ---------------------------------------------------------------------------
 
-function validateWorkspaceUniqueness(loom: LoomModel, diags: LoomDiagnostic[]): void {
+function validateWorkspaceUniqueness(loom: EnrichedLoomModel, diags: LoomDiagnostic[]): void {
   // Duplicate root-level value object names.
   const rootVoSeen = new Set<string>();
   for (const vo of loom.rootValueObjects) {

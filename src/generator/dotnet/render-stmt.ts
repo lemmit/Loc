@@ -125,7 +125,7 @@ function renderPath(p: PathIR): string {
 function renderPrivatePath(p: PathIR, ctx?: CsRenderContext): string {
   if (p.segments.length === 0) return "this";
   const [head, ...tail] = p.segments;
-  const isRefColl = (ctx?.agg?.associations ?? []).some((a) => a.fieldName === head);
+  const isRefColl = !!ctx?.agg?.associations?.some((a) => a.fieldName === head);
   const headPath = isRefColl ? upperFirst(head!) : `_${head}`;
   return `${headPath}${tail.map((t) => `.${upperFirst(t)}`).join("")}`;
 }

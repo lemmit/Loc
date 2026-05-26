@@ -47,6 +47,17 @@ export interface PlatformSurface {
    * Consulted by the deployable validator instead of hardcoded
    * platform-string lists. */
   readonly mountsUi: boolean;
+  /** Whether the platform is a frontend-only deployable (renders a
+   * UI bundle but owns no server logic / DB).  True for `react` and
+   * `static`; false for backends (`hono`, `dotnet`) and the
+   * fullstack `phoenixLiveView`.  Replaces hardcoded
+   * `platform === "react" || platform === "static"` checks in
+   * lowering / enrichment.
+   *
+   * Frontend-only platforms get their `moduleNames` inherited from
+   * the deployable they `targets:`, since they have no domain code
+   * of their own — they just consume the backend's wire shapes. */
+  readonly isFrontend: boolean;
   /** Repository method names this platform auto-emits for every
    * aggregate.  A user-declared find with one of these names would
    * collide with the auto-emitted method (TS: duplicate function

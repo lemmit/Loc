@@ -390,7 +390,7 @@ function emitAggregate(
   // class + its EF Core configuration (composite PK, ordinal, FK
   // converters).  Skipped silently when the aggregate has no
   // `Id<T>[]` fields.
-  for (const assoc of agg.associations ?? []) {
+  for (const assoc of agg.associations!) {
     const cls = joinEntityName(assoc);
     out.set(`Infrastructure/Persistence/JoinTables/${cls}.cs`, renderJoinEntity(assoc, ns));
     out.set(

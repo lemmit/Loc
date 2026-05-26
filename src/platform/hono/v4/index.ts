@@ -29,6 +29,7 @@ const honoPlatform: PlatformSurface = {
   defaultPort: 3000,
   needsDb: true,
   mountsUi: false,
+  isFrontend: false,
   // Hono repository auto-emits these per aggregate — see
   // src/generator/typescript/repository-builder.ts (`async save`,
   // `async findById`, `async getById`).  A user-declared find with

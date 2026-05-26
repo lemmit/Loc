@@ -3,7 +3,10 @@ import { enrichLoomModel } from "../ir/enrichments.js";
 import type {
   BoundedContextIR,
   DeployableIR,
-  LoomModel,
+  EnrichedBoundedContextIR,
+  EnrichedLoomModel,
+  EnrichedModuleIR,
+  EnrichedSystemIR,
   ModuleIR,
   SystemIR,
 } from "../ir/loom-ir.js";
@@ -79,7 +82,7 @@ export function generateSystems(model: Model, options: GenerateSystemOptions = {
  *  above is the single-document shorthand that still does its own
  *  lower + enrich. */
 export function generateSystemsFromLoom(
-  loom: LoomModel,
+  loom: EnrichedLoomModel,
   options: GenerateSystemOptions = {},
 ): SystemEmission {
   const out = new Map<string, string>();
@@ -98,14 +101,14 @@ export function generateSystemsFromLoom(
 }
 
 function emitSystem(
-  sys: SystemIR,
-  _loom: LoomModel,
+  sys: EnrichedSystemIR,
+  _loom: EnrichedLoomModel,
   out: Map<string, string>,
   options: { emitTrace?: boolean; snapshots: SnapshotStore },
 ): void {
   // Pre-compute a module-name → contexts lookup so a deployable can
   // collect its slice quickly.
-  const modulesByName = new Map<string, ModuleIR>();
+  const modulesByName = new Map<string, EnrichedModuleIR>();
   for (const m of sys.modules) modulesByName.set(m.name, m);
 
   // Build platform-neutral migration deltas once per system, then write

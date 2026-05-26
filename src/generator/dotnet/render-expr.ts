@@ -244,7 +244,7 @@ function renderMethodCall(
   ) {
     const fieldName = refCollectionFieldName(e.receiver);
     if (fieldName) {
-      const assoc = (ctx.agg.associations ?? []).find((a) => a.fieldName === fieldName);
+      const assoc = ctx.agg.associations!.find((a) => a.fieldName === fieldName);
       if (assoc) {
         const dbSet = joinDbSetName(assoc);
         const owner = joinFkPropName(assoc.ownerFk);

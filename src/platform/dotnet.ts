@@ -5,6 +5,7 @@ const dotnetPlatform: PlatformSurface = {
   name: "dotnet",
   defaultPort: 8080,
   needsDb: true,
+  isFrontend: false,
   // .NET admits an embedded React SPA via static-files middleware +
   // SPA fallback route — see the fullstack branch in
   // `generator/dotnet/index.ts` that fires when `deployable.uiName`

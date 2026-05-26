@@ -23,6 +23,7 @@ const phoenixLiveViewPlatform: PlatformSurface = {
   defaultPort: 4000,
   needsDb: true,
   mountsUi: true,
+  isFrontend: false,
   // Ash code-interface conventions.  A user-declared find named one
   // of these would collide with the auto-generated CRUD action of
   // the same name on the resource module.

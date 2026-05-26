@@ -217,7 +217,7 @@ function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>, ctx: Rend
   ) {
     const fieldName = refCollectionFieldName(e.receiver);
     if (fieldName) {
-      const assoc = (ctx.agg.associations ?? []).find((a) => a.fieldName === fieldName);
+      const assoc = ctx.agg.associations!.find((a) => a.fieldName === fieldName);
       if (assoc) {
         const rel = relationshipNameFor(ctx.agg, fieldName);
         // The arg is typically a `ref` to the find's named parameter;

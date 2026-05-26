@@ -6,6 +6,13 @@ import type {
   CodeRefKind,
   DeployableIR,
   DerivedIR,
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+  EnrichedEntityPartIR,
+  EnrichedLoomModel,
+  EnrichedModuleIR,
+  EnrichedSystemIR,
+  EnrichedValueObjectIR,
   EntityPartIR,
   EnumIR,
   ExprIR,
@@ -14,6 +21,7 @@ import type {
   LoomModel,
   ModuleIR,
   Platform,
+  RawLoomModel,
   RepositoryIR,
   SystemIR,
   TraceabilityIR,
@@ -44,7 +52,7 @@ import type {
 // Idempotent: `enrich(enrich(m))` deep-equals `enrich(m)`.
 // ---------------------------------------------------------------------------
 
-export function enrichLoomModel(loom: LoomModel): LoomModel {
+export function enrichLoomModel(loom: RawLoomModel): EnrichedLoomModel {
   // Root-level VOs / enums are visible from every context as an
   // implicit shared kernel (see docs/multi-file-source.md).  We fold
   // them into each context's effective VO / enum list so every
@@ -64,7 +72,7 @@ export function enrichLoomModel(loom: LoomModel): LoomModel {
     solutions: loom.solutions,
     testCases: loom.testCases,
     traceability: computeTraceability(loom),
-  };
+  } as EnrichedLoomModel;
 }
 
 /** Read the populated wire shape for an aggregate / part / value-object.
@@ -74,27 +82,33 @@ export function enrichLoomModel(loom: LoomModel): LoomModel {
  * during the enrichment pass.  Callers used to write
  * `entity.wireShape!` with a non-null assertion at the consumer
  * site, scattering the same precondition across four files.  This
- * helper centralises the assumption + throws a structured error if
- * an unenriched IR ever reaches a downstream layer (which would
- * indicate a missed `enrichLoomModel(lowerModel(model))` call). */
-export function wireShapeFor(entity: AggregateIR | EntityPartIR | ValueObjectIR): WireField[] {
-  if (!entity.wireShape) {
-    throw new Error(
-      `internal: wireShape not populated on '${entity.name}' — ` +
-        "downstream layers must consume an IR that has been " +
-        "enriched via `enrichLoomModel(lowerModel(model))`.",
-    );
-  }
-  return entity.wireShape;
+ * helper centralises the assumption.
+ *
+ * Branded `EnrichedAggregateIR` / `EnrichedEntityPartIR` /
+ * `EnrichedValueObjectIR` now make `wireShape` non-optional at the
+ * type level — passing a raw entity is a compile error.  The runtime
+ * non-null assertion stays as a belt-and-suspenders cast for callers
+ * that still carry a structural `AggregateIR` reference (e.g.
+ * pre-enriched intermediate IR in tests or external constructors). */
+export function wireShapeFor(
+  entity:
+    | EnrichedAggregateIR
+    | EnrichedEntityPartIR
+    | EnrichedValueObjectIR
+    | AggregateIR
+    | EntityPartIR
+    | ValueObjectIR,
+): WireField[] {
+  return entity.wireShape!;
 }
 
 function enrichSystem(
   sys: SystemIR,
-  rootValueObjects: ValueObjectIR[],
+  rootValueObjects: EnrichedValueObjectIR[],
   rootEnums: EnumIR[],
-): SystemIR {
+): EnrichedSystemIR {
   // First enrich each module's contexts (auto-findAll, wire-shape).
-  const modules = sys.modules.map((m) => ({
+  const modules: EnrichedModuleIR[] = sys.modules.map((m) => ({
     ...m,
     contexts: m.contexts.map((c) => enrichContext(c, rootValueObjects, rootEnums)),
   }));
@@ -136,7 +150,7 @@ function enrichSystem(
 // `enrichments.ts` is platform-agnostic and can't import from registry.
 // ---------------------------------------------------------------------------
 
-function assignMigrationsOwner(m: ModuleIR, deployables: DeployableIR[]): ModuleIR {
+function assignMigrationsOwner(m: EnrichedModuleIR, deployables: DeployableIR[]): EnrichedModuleIR {
   const explicit = deployables.find((d) =>
     d.moduleBindings.some(
       (mb) => mb.moduleName === m.name && mb.storages.some((s) => s.role === "primary"),
@@ -156,9 +170,9 @@ function platformNeedsDb(p: Platform): boolean {
 
 function enrichContext(
   ctx: BoundedContextIR,
-  rootValueObjects: ValueObjectIR[],
+  rootValueObjects: EnrichedValueObjectIR[],
   rootEnums: EnumIR[],
-): BoundedContextIR {
+): EnrichedBoundedContextIR {
   // Fold the ambient root-level VOs / enums into the context's
   // effective set so every per-context emitter sees them as if they
   // were declared locally.  A root-level VO / enum with the same
@@ -166,7 +180,7 @@ function enrichContext(
   // reject collisions before we get here (Stage A check).
   const ownVoNames = new Set(ctx.valueObjects.map((v) => v.name));
   const ownEnumNames = new Set(ctx.enums.map((e) => e.name));
-  const valueObjects = [
+  const valueObjects: EnrichedValueObjectIR[] = [
     ...ctx.valueObjects.map(enrichValueObject),
     ...rootValueObjects.filter((v) => !ownVoNames.has(v.name)),
   ];
@@ -176,7 +190,10 @@ function enrichContext(
   return { ...ctx, valueObjects, enums, aggregates, repositories };
 }
 
-function enrichAggregate(agg: AggregateIR, contextVOs: ValueObjectIR[]): AggregateIR {
+function enrichAggregate(
+  agg: AggregateIR,
+  contextVOs: ValueObjectIR[],
+): EnrichedAggregateIR {
   const parts = agg.parts.map(enrichPart);
   const fields = agg.fields.map(resolveFieldAccess);
   // Synthesize a `derived inspect: string = <structural>` when the user
@@ -417,13 +434,13 @@ function associationsForAggregate(agg: AggregateIR): AssociationIR[] {
   return out;
 }
 
-function enrichPart(part: EntityPartIR): EntityPartIR {
+function enrichPart(part: EntityPartIR): EnrichedEntityPartIR {
   const fields = part.fields.map(resolveFieldAccess);
   const resolved: EntityPartIR = { ...part, fields };
   return { ...resolved, wireShape: wireFieldsForPart(resolved) };
 }
 
-function enrichValueObject(vo: ValueObjectIR): ValueObjectIR {
+function enrichValueObject(vo: ValueObjectIR): EnrichedValueObjectIR {
   const fields = vo.fields.map(resolveFieldAccess);
   const resolved: ValueObjectIR = { ...vo, fields };
   return { ...resolved, wireShape: wireFieldsForValueObject(resolved) };
@@ -452,7 +469,10 @@ function resolveFieldAccess(f: FieldIR): FieldIR {
 /** Every aggregate gets a repository with an implicit `find all():
  * T[]` query, mirroring how `findById` is implicit.  If the user
  * already declared a `find all(...)` of any shape, theirs wins. */
-function ensureFindAll(aggregates: AggregateIR[], existing: RepositoryIR[]): RepositoryIR[] {
+function ensureFindAll(
+  aggregates: EnrichedAggregateIR[],
+  existing: RepositoryIR[],
+): RepositoryIR[] {
   const out = existing.map((r) => ({ ...r, finds: [...r.finds] }));
   for (const agg of aggregates) {
     let repo = out.find((r) => r.aggregateName === agg.name);
@@ -483,6 +503,12 @@ function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
     // serve a built bundle and need to know about every context the
     // target backend exposes (so the page-IR emitter has every
     // aggregate's wire shape in scope).
+    //
+    // NOTE: this hardcoded check mirrors `PlatformSurface.isFrontend`
+    // in `src/platform/<name>.ts`.  Kept in sync manually because
+    // `enrichments.ts` is platform-agnostic and can't import from
+    // the registry — same reason `platformNeedsDb` above is
+    // hardcoded.
     const isFrontend = d.platform === "react" || d.platform === "static";
     if (!isFrontend || !d.targetName) return d;
     const target = deployables.find((t) => t.name === d.targetName);

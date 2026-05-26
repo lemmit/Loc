@@ -66,7 +66,7 @@ export function renderRepositoryImpl(
   const finds = repo?.finds ?? [];
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const setName = plural(upperFirst(agg.name));
-  const associations = agg.associations ?? [];
+  const associations = agg.associations!;
   // Reference-collection (`Id<T>[]`) load + save lines.  Each
   // association is a separate `_db.<JoinDbSet>` whose rows are
   // explicitly queried/inserted/deleted by the repository — we don't

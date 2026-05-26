@@ -19,7 +19,7 @@ import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./em
 /** Associations (`T id[]` reference collections) declared on an
  * aggregate, persisted as many-to-many join tables.  Empty when none. */
 function associationsOf(agg: AggregateIR): AssociationIR[] {
-  return agg.associations ?? [];
+  return agg.associations!;
 }
 
 /** True for a field type that is a collection of references
