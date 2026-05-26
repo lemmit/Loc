@@ -2334,11 +2334,18 @@ describe("OpenAPI spec — per-op + per-find paths", () => {
 });
 
 // ---------------------------------------------------------------------------
-// @derive Jason.Encoder — domain-emit unit test
+// Jason.Encoder defimpl — camelCase wire shape (parity follow-up C/4)
+//
+// Replaces the legacy `@derive {Jason.Encoder, only: [...]}` (which emitted
+// snake_case JSON keys) with a per-resource `defimpl Jason.Encoder` that
+// delegates to a shared `<App>.JasonCamelCase.encode_struct/3` helper.
+// The helper takes (struct, atom-key list, opts), camelizes each key, and
+// hands the result to `Jason.Encode.map/2`.  Result: aggregate/part/VO
+// wire shapes match Hono / .NET (camelCase keys).
 // ---------------------------------------------------------------------------
 
-describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
-  it("emits @derive {Jason.Encoder, only: [...]} on aggregate resource", () => {
+describe("Jason.Encoder defimpl emission (domain-emit unit)", () => {
+  it("emits a defimpl Jason.Encoder block on the aggregate resource", () => {
     const ctx: BoundedContextIR = {
       name: "Sales",
       enums: [],
@@ -2369,12 +2376,18 @@ describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
     const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
     const customerEx = files.get("lib/phoenix_app/sales/customer.ex")!;
     expect(customerEx).toBeDefined();
+    // Defimpl block exists, references the right struct + helper module.
+    expect(customerEx).toMatch(/defimpl Jason\.Encoder, for: PhoenixApp\.Sales\.Customer do/);
     expect(customerEx).toMatch(
-      /@derive \{Jason\.Encoder, only: \[:id, :name, :email, :inserted_at, :updated_at\]\}/,
+      /PhoenixApp\.JasonCamelCase\.encode_struct\(value, \[:id, :name, :email, :inserted_at, :updated_at\], opts\)/,
     );
+    // Legacy @derive must NOT be emitted alongside the defimpl —
+    // otherwise both implementations register and the second compile
+    // pass warns "redefining module Jason.Encoder.PhoenixApp.Sales.Customer".
+    expect(customerEx).not.toMatch(/@derive \{Jason\.Encoder/);
   });
 
-  it("@derive includes :id and timestamps in correct positions", () => {
+  it("defimpl atom list includes :id and timestamps in correct order", () => {
     const ctx: BoundedContextIR = {
       name: "Sales",
       enums: [],
@@ -2405,11 +2418,11 @@ describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
     const orderEx = files.get("lib/phoenix_app/sales/order.ex")!;
     expect(orderEx).toBeDefined();
     expect(orderEx).toMatch(
-      /@derive \{Jason\.Encoder, only: \[:id, :total, :inserted_at, :updated_at\]\}/,
+      /encode_struct\(value, \[:id, :total, :inserted_at, :updated_at\], opts\)/,
     );
   });
 
-  it("@derive is placed before use Ash.Resource in the module", () => {
+  it("defimpl is placed after defmodule close (outside the resource module)", () => {
     const ctx: BoundedContextIR = {
       name: "Sales",
       enums: [],
@@ -2436,10 +2449,54 @@ describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
 
     const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
     const customerEx = files.get("lib/phoenix_app/sales/customer.ex")!;
-    const derivePos = customerEx.indexOf("@derive");
-    const usePos = customerEx.indexOf("use Ash.Resource");
-    expect(derivePos).toBeGreaterThanOrEqual(0);
-    expect(usePos).toBeGreaterThan(derivePos);
+    // Defimpl follows the resource's defmodule close, never inside it.
+    const moduleClose = customerEx.indexOf("\nend\n");
+    const defimplPos = customerEx.indexOf("defimpl Jason.Encoder");
+    expect(moduleClose).toBeGreaterThan(0);
+    expect(defimplPos).toBeGreaterThan(moduleClose);
+  });
+
+  it("multi-word fields camelize via the helper (e.g. credit_limit → creditLimit)", () => {
+    // The helper itself is what does the camelization at runtime; here
+    // we only assert the atom-key list passed to encode_struct includes
+    // the snake_case atom — the helper is responsible for converting
+    // it to camelCase JSON.  Pinning the snake_case in the call keeps
+    // the test resilient to helper-internal refactors.
+    const ctx: BoundedContextIR = {
+      name: "Sales",
+      enums: [],
+      valueObjects: [],
+      events: [],
+      aggregates: [
+        {
+          name: "Customer",
+          idValueType: "guid",
+          fields: [
+            { name: "name", type: { kind: "primitive", name: "string" }, optional: false },
+            {
+              name: "createdAt",
+              type: { kind: "primitive", name: "datetime" },
+              optional: false,
+            },
+          ],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [],
+          parts: [],
+          tests: [],
+        },
+      ],
+      repositories: [],
+      workflows: [],
+      views: [],
+    };
+    const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
+    const customerEx = files.get("lib/phoenix_app/sales/customer.ex")!;
+    expect(customerEx).toMatch(
+      /encode_struct\(value, \[:id, :name, :created_at, :inserted_at, :updated_at\], opts\)/,
+    );
   });
 });
 
@@ -2750,11 +2807,10 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
     // No `attribute :party, {:array, :uuid}` line on the resource.
     expect(tr).not.toMatch(/attribute :party,/);
     expect(tr).not.toMatch(/attribute :caught,/);
-    // Jason `only:` list excludes party/caught (calculations aren't
-    // attribute-serialised by @derive).
-    expect(tr).toMatch(
-      /@derive \{Jason\.Encoder, only: \[:id, :name, :inserted_at, :updated_at\]\}/,
-    );
+    // Jason encoder atom list excludes party/caught (ref-collection
+    // attributes are persisted via the join table, not as a column;
+    // surfacing them on the wire would require an explicit Ash.load).
+    expect(tr).toMatch(/encode_struct\(value, \[:id, :name, :inserted_at, :updated_at\], opts\)/);
     // create action's accept[...] drops the ref-collections.
     expect(tr).toMatch(/accept \[:name\]/);
     expect(tr).not.toMatch(/accept \[[^\]]*:party/);
@@ -2812,5 +2868,109 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
     const dom = files.get("phoenix_app/lib/phoenix_app/roster.ex")!;
     expect(dom).toMatch(/resource PhoenixApp\.Roster\.TrainerParty/);
     expect(dom).toMatch(/resource PhoenixApp\.Roster\.TrainerCaught/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JasonCamelCase helper module + cross-cutting wire-shape parity (PR C/4)
+// ---------------------------------------------------------------------------
+
+describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
+  it("emits lib/<app>/jason_camel_case.ex with encode_struct/3", async () => {
+    const dsl = `
+      system Mini {
+        module Sales {
+          context Sales {
+            aggregate Project ids guid {
+              name: string
+              derived display: string = name
+            }
+          }
+        }
+        api SalesApi from Sales
+        ui SalesUi with scaffold(modules: [Sales]) { }
+        deployable phoenixApp {
+          platform: phoenixLiveView
+          modules: Sales
+          serves: SalesApi
+          ui: SalesUi
+          port: 4000
+        }
+      }
+    `;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pliv-c-"));
+    const file = path.join(dir, "mini.ddd");
+    fs.writeFileSync(file, dsl);
+    const services = createDddServices(NodeFileSystem);
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
+    await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+    if (errors.length > 0) {
+      throw new Error(`Validation errors:\n${errors.map((e) => `  ${e.message}`).join("\n")}`);
+    }
+    const model = doc.parseResult.value as Model;
+    const { files } = generateSystems(model);
+    const helper = files.get("phoenix_app/lib/phoenix_app/jason_camel_case.ex");
+    expect(helper, "JasonCamelCase helper module").toBeDefined();
+    expect(helper!).toMatch(/defmodule PhoenixApp\.JasonCamelCase do/);
+    expect(helper!).toMatch(/def encode_struct\(value, fields, opts\) do/);
+    // The camelization fn (kept private; pin the surface so refactors
+    // keep producing camelCase output for multi-word keys).
+    expect(helper!).toMatch(/Enum\.map_join\(rest, "", &String\.capitalize\/1\)/);
+  });
+
+  it("value objects emit defimpl Jason.Encoder targeting the shared helper", async () => {
+    // Drive through the top-level orchestrator so we exercise the VO
+    // emit path (renderValueObjectModule).  Money is a multi-field VO
+    // embedded under an aggregate — same shape Hono/.NET surface in
+    // their wire shape.
+    const dsl = `
+      system Mini {
+        module Sales {
+          context Sales {
+            valueobject Money {
+              amount: decimal
+              currency: string
+            }
+            aggregate Customer {
+              name: string
+              wallet: Money
+              derived display: string = name
+            }
+          }
+        }
+        api SalesApi from Sales
+        ui SalesUi with scaffold(modules: [Sales]) { }
+        deployable phoenixApp {
+          platform: phoenixLiveView
+          modules: Sales
+          serves: SalesApi
+          ui: SalesUi
+          port: 4000
+        }
+      }
+    `;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pliv-c-vo-"));
+    const file = path.join(dir, "vo.ddd");
+    fs.writeFileSync(file, dsl);
+    const services = createDddServices(NodeFileSystem);
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
+    await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+    if (errors.length > 0) {
+      throw new Error(`Validation errors:\n${errors.map((e) => `  ${e.message}`).join("\n")}`);
+    }
+    const model = doc.parseResult.value as Model;
+    const { files } = generateSystems(model);
+    const moneyEx = files.get("phoenix_app/lib/phoenix_app/sales/money.ex");
+    expect(moneyEx, "Money value-object module").toBeDefined();
+    expect(moneyEx!).toMatch(/defimpl Jason\.Encoder, for: PhoenixApp\.Sales\.Money do/);
+    expect(moneyEx!).toMatch(
+      /PhoenixApp\.JasonCamelCase\.encode_struct\(value, \[:amount, :currency\], opts\)/,
+    );
   });
 });

@@ -5,6 +5,7 @@ import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type ApiRoute, emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
+import { renderJasonCamelCaseModule, renderJasonEncoderImpl } from "./jason-camel-emit.js";
 import { joinEntityName, renderJoinResource } from "./join-resource-emit.js";
 import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
 import { emitMigrations } from "./migrations-emit.js";
@@ -204,7 +205,7 @@ function emitContext(
   // Value objects — Ash embedded resources
   for (const vo of ctx.valueObjects) {
     const path = `lib/${appName}/${ctxSnake}/${snake(vo.name)}.ex`;
-    out.set(path, renderValueObjectModule(vo, contextModule));
+    out.set(path, renderValueObjectModule(vo, contextModule, appModule));
   }
 
   // Events
@@ -288,6 +289,7 @@ end
 function renderValueObjectModule(
   vo: import("../../ir/loom-ir.js").ValueObjectIR,
   contextModule: string,
+  appModule: string,
 ): string {
   const moduleName = `${contextModule}.${upperFirst(vo.name)}`;
   const attrLines = vo.fields.map((f) => {
@@ -295,6 +297,11 @@ function renderValueObjectModule(
     const opts = f.optional ? "allow_nil?: true" : "allow_nil?: false";
     return `    attribute :${snake(f.name)}, ${ashType}, ${opts}`;
   });
+
+  // VOs are embedded inside aggregates' wire shape, so they need the
+  // camelCase Jason encoder too — same shared helper as aggregates.
+  const fieldAtoms = vo.fields.map((f) => `:${snake(f.name)}`);
+  const jasonImpl = renderJasonEncoderImpl(moduleName, fieldAtoms, appModule);
 
   return `# Auto-generated.
 defmodule ${moduleName} do
@@ -304,7 +311,8 @@ defmodule ${moduleName} do
 ${attrLines.join("\n")}
   end
 end
-`;
+
+${jasonImpl}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +442,12 @@ function emitShellFiles(
 
   // lib/<app>/repo.ex
   out.set(`lib/${appName}/repo.ex`, renderRepo(appName, appModule));
+
+  // lib/<app>/jason_camel_case.ex — shared helper that resource modules'
+  // `defimpl Jason.Encoder` delegates to.  Translates an Ash struct's
+  // snake_case atom keys into camelCase JSON keys, matching the Hono /
+  // .NET wire shape.  Emitted once per project.
+  out.set(`lib/${appName}/jason_camel_case.ex`, renderJasonCamelCaseModule(appModule));
 
   // lib/<app>/telemetry.ex — :telemetry handlers that translate Phoenix
   // endpoint events into the neutral log-event catalog identity.
