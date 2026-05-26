@@ -8,7 +8,8 @@ import { printExpr } from "../../../../src/language/print/index.js";
 // `seedExpr` decomposes a parsed Expression into an `EExpr` tree; `emitExpr`
 // renders it back to `.ddd` source (mirroring `print-expr.ts`).  Structured:
 // the operator tree (binary / unary / paren), literals, calls (`f(a, b)`),
-// member access (`a.b`, `a.b(c)`), `match`, ternary, `new`, object literals,
+// member access (`a.b`, `a.b(c)`), `match`, ternary, builder calls (`T { … }`,
+// the v2 canonical form for value-object / entity-part construction), object literals,
 // and lambdas — both expression-body (`p => expr`) and block-body
 // (`p => { … }`, modelled as editable statement rows).  Everything still
 // unmodelled is a `raw` leaf carrying its printed source verbatim —

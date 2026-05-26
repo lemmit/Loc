@@ -405,7 +405,8 @@ export function slotCandidates(ast: Model, slot: ExprSlot): string[] {
 //   member  → receiver "r",  args "a{i}"
 //   call    → callee "c",    args "a{i}"
 //   lambda  → body "b"
-//   new/obj → fields "f{i}"
+//   builder → entries "f{i}"
+//   object  → fields  "f{i}"
 // Leaves (names, literals, ternary, match, block-body lambdas) have no
 // children — they mirror the editor's `raw`/`lit` leaves.
 //

@@ -83,7 +83,7 @@ function ArgsEditor({ args, path, onArgs }: { args: ECallArg[]; path: string; on
   );
 }
 
-// Named-field list for `new Part { … }` and object literals `{ … }`. Edits a
+// Named-field list for object literals `{ … }`. Edits a
 // field's name or value, removes a field, or appends one (defaulting to
 // `field: null` so the result stays parseable until edited).
 function FieldsEditor({ fields, path, onFields }: { fields: EObjField[]; path: string; onFields: (fields: EObjField[], commit: boolean) => void }): JSX.Element {
