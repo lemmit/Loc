@@ -4,6 +4,7 @@ import { useMediaQuery } from "@mantine/hooks";
 import type { EditorHandle } from "./editor/LoomEditor";
 import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
+import { syncWorkspaceToLsp } from "./lsp/workspace-lsp-sync";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateOk, GenerateResult, VfsEntry, VirtualFile } from "./build/protocol";
@@ -337,6 +338,21 @@ export default function App(): JSX.Element {
 
   const workspaceForSeedRef = useRef(workspace);
   workspaceForSeedRef.current = workspace;
+
+  // Push every workspace `.ddd` source into the LSP worker as a Monaco
+  // model. Without this, only the currently-edited file reaches the LSP via
+  // Monaco's documentSelector, and any `import "./shared/x.ddd"` in main.ddd
+  // fails to resolve because the LSP never sees x.ddd. The sync runs once
+  // after the controller + LSP client are both available; the controller's
+  // own VFS subscription drives subsequent updates.
+  const activePathRef = useRef(sources.activePath);
+  activePathRef.current = sources.activePath;
+  useEffect(() => {
+    const dispose = syncWorkspaceToLsp(sources.controller, {
+      getActivePath: () => activePathRef.current,
+    });
+    return dispose;
+  }, [sources.controller]);
 
   useEffect(() => {
     const build = new LoomBuildClient({

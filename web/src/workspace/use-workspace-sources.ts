@@ -43,6 +43,11 @@ export interface WorkspaceSourcesApi extends WorkspaceSourcesState {
    *  folder still has `.ddd` content inside (VFS enforces non-empty
    *  protection); no-op when the folder doesn't exist. */
   deleteEmptyFolder(folder: string): void;
+  /** The underlying controller — exposed for non-React consumers that
+   *  need to subscribe outside the React render cycle (e.g. the LSP
+   *  workspace sync, which pushes every workspace `.ddd` into Monaco
+   *  models so the language server sees the full project). */
+  controller: WorkspaceSourcesController;
 }
 
 export function useWorkspaceSources(vfs: Vfs | null): WorkspaceSourcesApi {
@@ -89,7 +94,8 @@ export function useWorkspaceSources(vfs: Vfs | null): WorkspaceSourcesApi {
       delete: del,
       createEmptyFolder,
       deleteEmptyFolder,
+      controller,
     }),
-    [snapshot, setActivePath, write, del, createEmptyFolder, deleteEmptyFolder],
+    [snapshot, setActivePath, write, del, createEmptyFolder, deleteEmptyFolder, controller],
   );
 }

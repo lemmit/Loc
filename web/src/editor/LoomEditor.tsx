@@ -14,14 +14,19 @@ const DEFAULT_ACTIVE_PATH = "/workspace/main.ddd";
  *  that already opened a model under that URI (LSP document
  *  tracking, the live model created on first mount) keeps matching
  *  the same model identity across re-renders. */
+/** Map a workspace path to a deterministic Monaco URI. The LSP worker indexes
+ *  documents by URI, so two callers (LoomEditor + workspace-lsp-sync) must
+ *  agree on the same URI for the same file or they'd create duplicate
+ *  documents in Langium's global scope and produce phantom ambiguity errors.
+ *
+ *  The scheme is `inmemory:///<workspace-relative>` for every `.ddd` source,
+ *  so `/workspace/main.ddd` → `inmemory:///workspace/main.ddd` and
+ *  `/workspace/shared/money.ddd` → `inmemory:///workspace/shared/money.ddd`.
+ *  No special case for main — the previous `inmemory:///main.ddd` was a
+ *  back-compat shim from before multi-file workspaces existed; collapsing
+ *  it means cross-file imports (`import "./shared/money.ddd"`) resolve
+ *  through the same URI scheme as the build-worker's `project-loader`. */
 function modelUriFor(activePath: string): monaco.Uri {
-  if (activePath === DEFAULT_ACTIVE_PATH) {
-    return monaco.Uri.parse("inmemory:///main.ddd");
-  }
-  // Non-default path: derive a unique URI from the workspace path so
-  // two distinct files get two distinct Monaco models.  Strip leading
-  // slashes so the URI is `inmemory:///workspace/orders.ddd` not
-  // `inmemory:////workspace/orders.ddd`.
   return monaco.Uri.parse(`inmemory:///${activePath.replace(/^\/+/, "")}`);
 }
 
