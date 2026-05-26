@@ -58,32 +58,40 @@ Flags: `-o/--out`, `-w/--watch` (legacy generate only), `--dry-run` (print `writ
 
 ## Architecture — the one-directional pipeline
 
-The single most important fact: **layers are strictly one-directional and enforced by file structure.**
+The single most important fact: **layers are strictly one-directional and enforced by file structure.** The compiler runs in **ten phases**; the canonical detailed walk-through is in [`docs/technical.md`](docs/technical.md).
 
 ```
-.ddd source → Langium parser/linker → AST → Validator → Lowering → Loom IR → Enrichment → Per-platform generator → System orchestrator → Output writer
-              src/language/                 src/language/  src/ir/lower*    src/ir/enrichments  src/generator/<plat>/   src/system/        src/cli/main.ts
+.ddd → ① parse → ② macro expand → ③ scope/link → ④ AST validate → ⑤ lower → ⑥ enrich → ⑦ IR validate → ⑧ per-platform codegen → ⑨ system compose + migration derive → ⑩ write
+        src/language/generated/    src/macros/    src/language/    src/language/   src/ir/lower*  src/ir/      src/ir/         src/generator/<plat>/    src/system/                       src/cli/main.ts
+                                   (proposed;     ddd-scope.ts     ddd-validator   + walker-      enrichments  validate.ts                              + src/ir/migrations-builder.ts
+                                   currently in                    + type-system     primitive-                                                          (called from system, not ir)
+                                   src/language/)                                    expander.ts
 ```
 
 - `language/` knows nothing about `ir/`.
 - `ir/` knows nothing about `generator/`.
 - `generator/<platform>/` knows nothing about other platforms.
 - `system/` composes outputs from the platform generators; it never generates domain code itself.
+- **No target-backend IR.** Every backend consumes `LoomModel` directly. The only secondary IR is `MigrationsIR`, derived once in phase ⑨ and shared by every backend with a database.
 
-**Loom IR (`src/ir/loom-ir.ts`) is platform-neutral and fully resolved.** Every name carries a `refKind` (`param`/`let`/`this-prop`/`enum-value`/…), every member access carries `receiverType` and `memberType`, every call carries `callKind`, every find filter is a typed `ExprIR`. Backends never re-resolve. This is the architectural payoff for the lowering layer's complexity — adding a backend means writing emitters, not redoing name resolution.
+**Loom IR (`src/ir/loom-ir.ts`) is platform-neutral and fully resolved.** Every name carries a `refKind` (`param`/`let`/`this-prop`/`enum-value`/…), every member access carries `receiverType` and `memberType`, every call carries `callKind`, every find filter is a typed `ExprIR`. Backends never re-resolve. This is the architectural payoff for phase ⑤'s complexity — adding a backend means writing emitters, not redoing name resolution.
 
-The lowering layer is split intentionally:
+The lowering phase has three sub-passes, all driven by `lowerModel`:
 
-- `src/ir/lower.ts` — structural walk (`lowerSystem`, `lowerAggregate`, etc.). Never descends into expressions.
-- `src/ir/lower-expr.ts` — expressions, statements, types, name resolution, member typing. `lower.ts` imports from `lower-expr.ts`, never the other way.
+- **⑤a** `src/ir/lower.ts` — structural walk (`lowerSystem`, `lowerAggregate`, etc.). Never descends into expressions.
+- **⑤b** `src/ir/lower-expr.ts` — expressions, statements, types, name resolution, member typing. `lower.ts` imports from `lower-expr.ts`, never the other way.
+- **⑤c** `src/ir/walker-primitive-expander.ts` — inline scaffold expansion (`scaffoldDetails(of:)` / `scaffoldOperations(of:)` in page bodies → full walker-stdlib `ExprIR`). Called from `lower.ts:537` as the last statement of `lowerSystem`; downstream phases never see the un-expanded form.
 
-After lowering, `src/ir/enrichments.ts` runs **one pure pass** that derives:
+After lowering, `src/ir/enrichments.ts` runs **one pure pass** (phase ⑥) that derives:
 
 1. **`wireShape`** on every aggregate / part / value object — the canonical ordered field list every backend's DTO emitter consumes (`id`, then declared properties, then containments, then derived). Cross-backend wire compatibility is structural, not coincidental.
 2. **Auto-`findAll`** on every aggregate's repository.
-3. **React `targets:` module inheritance** — react deployables inherit their target backend's `moduleNames`.
+3. **Associations** for `X id[]` collection fields (join-table metadata).
+4. **React `targets:` module inheritance** — react deployables inherit their target backend's `moduleNames`.
 
-A JSON Schema artifact at `<outdir>/.loom/wire-spec.json` is built from `wireShape` by `src/system/wire-spec.ts` for diff-based contract change detection.
+Then `src/ir/validate.ts` runs phase ⑦ — cross-aggregate / multi-file IR-level checks that need the fully-resolved, enriched IR.
+
+A JSON Schema artifact at `<outdir>/.loom/wire-spec.json` is built from `wireShape` by `src/system/wire-spec.ts` (in phase ⑨) for diff-based contract change detection.
 
 ### Per-platform generators (`src/generator/<platform>/`)
 

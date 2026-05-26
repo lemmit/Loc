@@ -292,9 +292,9 @@ scaffold views:      ActiveOrders, … → page ActiveOrdersView  (+ shared View
 
 ### What each scaffolded page contains
 
-Scaffold is sugar: it lowers (via `src/ir/scaffold-expander.ts`) to a
-walker-stdlib body identical to one the user could hand-write. The
-contract per page:
+Scaffold is sugar: it lowers (via `src/ir/walker-primitive-expander.ts`,
+the final sub-pass of `lowerModel`) to a walker-stdlib body identical
+to one the user could hand-write. The contract per page:
 
 | Page | Body |
 |---|---|
@@ -464,13 +464,18 @@ The `examples/acme.ddd` `webApp` deployable is updated to this form.
 Validator rejects a `react` deployable without `ui:` (HTTP analogue: the
 deployable is missing its mount point).
 
-**Generator changes:**
+**Generator changes** (this refactor has shipped — described in
+present tense here is historical; current reality is below):
 
-- Current `pages-builder.ts`, `view-builder.ts`, `workflow-builder.ts`
-  become scaffold expanders that produce page-IR nodes.
-- A single new emitter (`pages-emitter.ts`) consumes the page IR.
-- `page-objects-builder.ts` stays — already driven by route + testid
-  metadata.
+- The legacy archetype renderer (`pages-builder.ts`) is **removed**.
+  Page bodies — both hand-written and scaffolded — now route through
+  `src/generator/react/body-walker.ts`, which dispatches every
+  walker-stdlib primitive into the active design pack.
+- `view-builder.ts` and `workflow-builder.ts` still exist for
+  per-aggregate plumbing the walker calls into.
+- `pages-emitter.ts` is the shell emitter that wraps the walker's
+  body output with `useForm` / mutation hook / `useParams` / imports.
+- `page-objects-builder.ts` stays — driven by route + testid metadata.
 - `theme-builder.ts` stays — theme is a system concern.
 
 ---

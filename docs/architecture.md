@@ -308,7 +308,9 @@ What the reader gets from any single declaration:
 The `scaffold modules: M` directive (page-metamodel §10) keeps
 working — but as **compile-time sugar**.  Synthesised pages now
 lower to explicit walker-stdlib bodies via
-`src/ir/scaffold-expander.ts`:
+`src/ir/walker-primitive-expander.ts`, called at the end of
+`lowerModel` as the final sub-pass of lowering (see
+[`docs/technical.md`](./technical.md) phase ⑤c):
 
 ```
 scaffold aggregates: Order
