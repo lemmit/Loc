@@ -1208,6 +1208,17 @@ export interface ProvSite {
 
 export type LiteralKind = "string" | "int" | "long" | "decimal" | "money" | "bool" | "null" | "now";
 
+/**
+ * Per-primitive style escape hatch — pack-neutral CSS entries.
+ * Lowered from `style: { background: "...", padding: "..." }` named args
+ * on walker-primitive calls.  Entries use an ordered list (not a
+ * Record<string, ExprIR>) so source order survives the IR pipeline and
+ * downstream emitters can produce deterministic output.  Keys are CSS
+ * property names (kebab- or camel-cased as in source); values are any
+ * `ExprIR` so refs/interpolation compose naturally.
+ */
+export type StyleIR = { entries: Array<{ key: string; value: ExprIR }> };
+
 export type RefKind =
   | "param"
   | "let"
@@ -1286,6 +1297,14 @@ export type ExprIR =
       args: ExprIR[];
       /** Same shape as `method-call.argNames` — see above. */
       argNames?: (string | undefined)[];
+      /** Per-primitive `style:` escape hatch.  Populated by lowering
+       *  when the source supplied a `style: { … }` named arg on a
+       *  walker-primitive call (`Container { style: { background: "red" }, ... }`).
+       *  The named arg is hoisted out of `args`/`argNames` into this
+       *  field.  React emits `style={{...}}`; Phoenix emits `style="..."`.
+       *  Use the ordered `entries` shape (not a `Record`) so entry order
+       *  survives the IR pipeline. */
+      style?: StyleIR;
     }
   | {
       kind: "lambda";

@@ -65,6 +65,7 @@ import type {
   PrimitiveName,
   ProvSite,
   StmtIR,
+  StyleIR,
   TypeIR,
   UserIR,
 } from "./loom-ir.js";
@@ -607,8 +608,13 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   }
   if (isCallExpr(expr)) {
     const callee = expr.callee;
-    const args = expr.args.map((a) => lowerExpr(a.value, env));
-    const argNames = expr.args.map((a) => a.name || undefined);
+    // Hoist `style:` named arg the same way builder-call form does, so
+    // both `Container { style: {...}, ... }` and `Container(style: {...}, ...)`
+    // surface the same IR shape downstream.
+    const styleHoist = hoistStyleArg(expr.args, env);
+    const callArgs = styleHoist.remainingEntries;
+    const args = callArgs.map((a) => lowerExpr(a.value, env));
+    const argNames = callArgs.map((a) => a.name || undefined);
     const named = argNames.some((n) => n !== undefined);
     if (isNameRef(callee)) {
       const callKind = resolveCallKind(callee.name, env);
@@ -618,6 +624,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
         name: callee.name,
         args,
         ...(named ? { argNames } : {}),
+        ...(styleHoist.style ? { style: styleHoist.style } : {}),
       };
     }
     return {
@@ -626,6 +633,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
       name: "<expr>",
       args,
       ...(named ? { argNames } : {}),
+      ...(styleHoist.style ? { style: styleHoist.style } : {}),
     };
   }
   if (isNameRef(expr)) {
@@ -675,8 +683,12 @@ function lowerBuilderCallAsCall(
   name: string,
   callKind: "value-object-ctor" | "free",
 ): ExprIR {
-  const args = expr.entries.map((e) => lowerExpr(e.value, env));
-  const argNames = expr.entries.map((e) => e.name || undefined);
+  // Hoist `style:` named arg into its own IR field — see lowerStyleArg.
+  // Filtering happens by index so `args` and `argNames` stay parallel.
+  const styleHoist = hoistStyleArg(expr.entries, env);
+  const entries = styleHoist.remainingEntries;
+  const args = entries.map((e) => lowerExpr(e.value, env));
+  const argNames = entries.map((e) => e.name || undefined);
   const named = argNames.some((n) => n !== undefined);
   return {
     kind: "call",
@@ -684,7 +696,35 @@ function lowerBuilderCallAsCall(
     name,
     args,
     ...(named ? { argNames } : {}),
+    ...(styleHoist.style ? { style: styleHoist.style } : {}),
   };
+}
+
+/** Hoist a `style: { … }` named entry out of a list of BuilderEntries
+ *  or CallArgs.  Returns the remaining entries (parallel to the
+ *  source order) plus a `StyleIR` when present.  When `style:` is
+ *  present but its value isn't an object literal, the entry is
+ *  dropped silently (validator surfaces a clearer diagnostic) so
+ *  downstream rendering doesn't see a half-broken shape. */
+function hoistStyleArg<E extends { name?: string; value: Expression }>(
+  entries: ReadonlyArray<E>,
+  env: Env,
+): { remainingEntries: E[]; style?: StyleIR } {
+  let style: StyleIR | undefined;
+  const remaining: E[] = [];
+  for (const e of entries) {
+    if (e.name === "style" && isObjectLit(e.value)) {
+      style = {
+        entries: e.value.fields.map((f) => ({
+          key: f.name,
+          value: lowerExpr(f.value, env),
+        })),
+      };
+      continue;
+    }
+    remaining.push(e);
+  }
+  return { remainingEntries: remaining, style };
 }
 
 function resolveNameRef(name: string, env: Env): ExprIR {

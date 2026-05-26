@@ -1,3 +1,3 @@
-{{#if hasChildren}}<Stack direction="row" gap={1}{{{testidAttr}}}>
+{{#if hasChildren}}<Stack direction="row" gap={1}{{{testidAttr}}}{{{styleAttr}}}>
 {{indent}}{{{childrenBlock}}}
-{{closeIndent}}</Stack>{{else}}<Stack direction="row"{{{testidAttr}}} />{{/if}}
+{{closeIndent}}</Stack>{{else}}<Stack direction="row"{{{testidAttr}}}{{{styleAttr}}} />{{/if}}
