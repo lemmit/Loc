@@ -631,7 +631,10 @@ Phasing:
   `test/system-v2/persisted-positions.test.ts` (pure-helper unit tests)
   and the v2 e2e (drag → reload → restored → reset → derived).
 - **Phase 5** — polish: search / coverage / grouped layout adapted per zoom
-  level, transitions on drill, mobile passes.
+  level, mobile passes. ~~Transitions on drill~~ done: drilling in/out animates
+  the React Flow viewport — `setCenter`-toward-clicked-node (~200ms) followed
+  by `fitView({ duration: 250 })` on the new view; breadcrumb jumps animate
+  the fit only. `prefers-reduced-motion` skips the animation.
 
 Planned — recommended order:
 
