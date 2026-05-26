@@ -10,6 +10,7 @@ import type {
   AggregateIR,
   BoundedContextIR,
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
   EntityPartIR,
   EnumIR,
@@ -50,9 +51,9 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // ---------------------------------------------------------------------------
 
 export function buildRoutesFile(
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   emitAudit = false,
   emitProvenance = false,
   emitTrace = false,
@@ -672,7 +673,7 @@ function emitFindRoute(
 // ---------------------------------------------------------------------------
 
 function emitResponseDtoSchema(
-  ent: AggregateIR | EntityPartIR,
+  ent: EnrichedAggregateIR | EnrichedEntityPartIR,
   ctx: BoundedContextIR,
   isAgg: boolean,
 ): string[] {
@@ -681,10 +682,10 @@ function emitResponseDtoSchema(
   lines.push(`export const ${name} = z.object({`);
   // Single canonical walk — populated by `enrichLoomModel` (see
   // src/ir/enrichments.ts).  Order and field-set match every other
-  // emitter (.NET DTO, React Zod, Hono toWire serializer).
-  // Local brand cast — surface still hands us raw IR; see
-  // `wireShapeFor`'s docstring on the brand-cascade gap.
-  const fields = wireShapeFor(ent as EnrichedAggregateIR | EnrichedEntityPartIR);
+  // emitter (.NET DTO, React Zod, Hono toWire serializer).  Enriched
+  // brand flows in via `PlatformSurface.emitProject(contexts:
+  // EnrichedBoundedContextIR[])` so no local cast is needed.
+  const fields = wireShapeFor(ent);
   void ctx;
   void isAgg;
   for (const wf of fields) {

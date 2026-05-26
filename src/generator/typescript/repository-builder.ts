@@ -4,6 +4,7 @@ import type {
   AssociationIR,
   BoundedContextIR,
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
   EntityPartIR,
   FieldIR,
@@ -72,9 +73,9 @@ function associationMapLines(agg: AggregateIR, dbExpr: string, indent: string): 
 // ---------------------------------------------------------------------------
 
 export function buildRepositoryFile(
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   emitTrace = false,
 ): string {
   // Walk every find's filter (and any matching view filters — both
@@ -214,7 +215,7 @@ export function buildRepositoryFile(
 // `<Agg>Response` zod schema; see routes-builder.ts).
 // ---------------------------------------------------------------------------
 
-function toWireMethod(agg: AggregateIR, ctx: BoundedContextIR): string {
+function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
   return lines(
     `  toWire(root: ${agg.name}): unknown {`,
     `    return ${wireProjectionEntity(agg, "root", ctx)};`,
@@ -223,19 +224,18 @@ function toWireMethod(agg: AggregateIR, ctx: BoundedContextIR): string {
 }
 
 function wireProjectionEntity(
-  ent: AggregateIR | EntityPartIR,
+  ent: EnrichedAggregateIR | EnrichedEntityPartIR,
   varExpr: string,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
 ): string {
   // Single canonical walk — see `agg.wireShape` (populated by
-  // src/ir/enrichments.ts).  This
-  // serializer feeds repo.toWire(); its output's keys must line up
-  // with the route's response Zod schema and the .NET DTO.  Single
-  // canonical walk populated by `enrichLoomModel`.  `forApiRead`
-  // strips `internal` and `secret` fields so the wire output matches
-  // the response schema's field set.  Local brand cast — see
-  // `wireShapeFor`'s docstring on the brand-cascade gap.
-  const fields = forApiRead(wireShapeFor(ent as EnrichedAggregateIR | EnrichedEntityPartIR));
+  // src/ir/enrichments.ts).  This serializer feeds repo.toWire();
+  // its output's keys must line up with the route's response Zod
+  // schema and the .NET DTO.  `forApiRead` strips `internal` and
+  // `secret` fields so the wire output matches the response schema's
+  // field set.  Enriched brand flows in via
+  // `PlatformSurface.emitProject(contexts: EnrichedBoundedContextIR[])`.
+  const fields = forApiRead(wireShapeFor(ent));
   const parts: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {

@@ -1,4 +1,11 @@
-import type { AggregateIR, BoundedContextIR, ExprIR, ViewIR } from "../../ir/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+  ExprIR,
+  ViewIR,
+} from "../../ir/loom-ir.js";
 import { viewUsesCurrentUser } from "../../ir/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
@@ -26,7 +33,7 @@ import { renderCsExpr } from "./render-expr.js";
 // ---------------------------------------------------------------------------
 
 export function emitViews(
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
   options?: { routePrefix?: string },
@@ -54,7 +61,7 @@ function responseRecordName(view: ViewIR, agg: AggregateIR): string {
   return view.output ? `${upperFirst(view.name)}Row` : `${agg.name}Response`;
 }
 
-function renderRowRecord(view: ViewIR, ctx: BoundedContextIR, ns: string): string {
+function renderRowRecord(view: ViewIR, ctx: EnrichedBoundedContextIR, ns: string): string {
   const fields = view
     .output!.fields.map((f) => `${wireType(f.type, ctx, "response")} ${upperFirst(f.name)}`)
     .join(", ");
@@ -84,7 +91,12 @@ public sealed record ${upperFirst(view.name)}Query() : IQuery<IReadOnlyList<${re
 `;
 }
 
-function renderHandler(view: ViewIR, agg: AggregateIR, ctx: BoundedContextIR, ns: string): string {
+function renderHandler(
+  view: ViewIR,
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): string {
   const queryName = `${upperFirst(view.name)}Query`;
   const handlerName = `${upperFirst(view.name)}Handler`;
   const responseRecord = responseRecordName(view, agg);
@@ -189,7 +201,7 @@ ${auxLines.join("\n")}${auxLines.length > 0 ? "\n" : ""}        return domain.Se
 
 function projectFullForm(
   view: ViewIR,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
   usings: Set<string>,
 ): string {

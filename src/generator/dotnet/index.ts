@@ -1,5 +1,12 @@
 import { enrichLoomModel } from "../../ir/enrichments.js";
-import type { BoundedContextIR, DeployableIR, RepositoryIR, SystemIR } from "../../ir/loom-ir.js";
+import type {
+  BoundedContextIR,
+  DeployableIR,
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+  RepositoryIR,
+  SystemIR,
+} from "../../ir/loom-ir.js";
 import { lowerModel } from "../../ir/lower.js";
 import type { MigrationsIR } from "../../ir/migrations-ir.js";
 import type { Model } from "../../language/generated/ast.js";
@@ -92,7 +99,7 @@ export function generateDotnet(
  * top-level contexts (no enclosing system) skip that path entirely.
  */
 export function generateDotnetForContexts(
-  contexts: BoundedContextIR[],
+  contexts: EnrichedBoundedContextIR[],
   namespace?: string,
   system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
   options: { emitTrace?: boolean } = {},
@@ -111,7 +118,7 @@ export function generateDotnetForContexts(
 }
 
 function emitProjectFromContexts(
-  contexts: BoundedContextIR[],
+  contexts: EnrichedBoundedContextIR[],
   ns: string,
   out: Map<string, string>,
   system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
@@ -237,7 +244,7 @@ function emitProjectFromContexts(
 }
 
 function emitContext(
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
   emitTrace = false,
@@ -345,8 +352,8 @@ function emitDispatcher(ns: string, out: Map<string, string>): void {
 // ---------------------------------------------------------------------------
 
 function emitAggregate(
-  agg: import("../../ir/loom-ir.js").AggregateIR,
-  ctx: BoundedContextIR,
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
   routePrefix?: string,

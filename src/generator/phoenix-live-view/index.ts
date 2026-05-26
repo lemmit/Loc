@@ -1,4 +1,9 @@
-import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
+import type {
+  BoundedContextIR,
+  DeployableIR,
+  EnrichedBoundedContextIR,
+  SystemIR,
+} from "../../ir/loom-ir.js";
 import type { MigrationsIR } from "../../ir/migrations-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
@@ -49,7 +54,7 @@ import { emitWorkflows } from "./workflow-emit.js";
 // ---------------------------------------------------------------------------
 
 export interface GeneratePhoenixLiveViewArgs {
-  contexts: BoundedContextIR[];
+  contexts: EnrichedBoundedContextIR[];
   deployable: DeployableIR;
   sys: SystemIR;
   /** Per-deployable slice of `buildMigrations(sys, snapshots)` — only the

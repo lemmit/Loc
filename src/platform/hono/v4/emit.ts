@@ -24,6 +24,7 @@ import {
   type BoundedContextIR,
   contextUsesMoney,
   type DeployableIR,
+  type EnrichedBoundedContextIR,
   type FieldIR,
   type RepositoryIR,
   type SystemIR,
@@ -128,7 +129,7 @@ export function generateTypeScript(
  * skip the auth path entirely.
  */
 export function generateTypeScriptForContexts(
-  contexts: BoundedContextIR[],
+  contexts: EnrichedBoundedContextIR[],
   pins: BackendPins,
   system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
   options: { emitTrace?: boolean } = {},
