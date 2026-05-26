@@ -335,11 +335,10 @@ export function checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
     const isPreset = v === "default" || v === "none";
     if (!isPreset && !declaredLayouts.has(v)) {
       const known = ["default", "none", ...declaredLayouts].join(", ");
-      accept(
-        "error",
-        `Unknown layout '${v}' on page '${p.name}'.  Recognised: ${known}.`,
-        { node: prop, property: "value" },
-      );
+      accept("error", `Unknown layout '${v}' on page '${p.name}'.  Recognised: ${known}.`, {
+        node: prop,
+        property: "value",
+      });
     }
   }
 }
@@ -480,7 +479,11 @@ export function checkLayout(layout: Layout, accept: ValidationAcceptor): void {
     if (count > 1) {
       accept(
         "error",
-        "Layout '" + layout.name + "' declares more than one '" + slotName + "' slot; keep just the first.",
+        "Layout '" +
+          layout.name +
+          "' declares more than one '" +
+          slotName +
+          "' slot; keep just the first.",
         { node: layout, property: "name" },
       );
     }
