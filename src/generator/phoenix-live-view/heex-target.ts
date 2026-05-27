@@ -82,6 +82,17 @@ export const heexTarget: WalkerTarget = {
     return [];
   },
 
+  /** Unreachable for HEEx — Phoenix LiveView doesn't lower api calls
+   *  to hoisted hooks (the heex-walker never invokes
+   *  `tryDetectApiHook`).  Stays on the interface for cross-target
+   *  uniformity; throwing documents the contract for future
+   *  contributors who might hook this up by mistake. */
+  buildHookUse(): never {
+    throw new Error(
+      "heexTarget.buildHookUse: Phoenix LiveView does not hoist api calls; this should never be called.",
+    );
+  },
+
   // --- Helper-import seam -------------------------------------------------
 
   /** `alias Path.To.Module, as: <Pascal>` per referenced user helper.

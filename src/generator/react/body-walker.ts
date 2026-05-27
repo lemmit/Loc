@@ -60,8 +60,9 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../language/walker-stdlib.js";
 import type { LoadedPack } from "../_packs/loader.js";
+import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
-import { registerApiHook, tryDetectApiHook } from "./walker/api-hooks.js";
+import { registerApiHook } from "./walker/api-hooks.js";
 import { emitUserComponent } from "./walker/primitives/controls.js";
 import { describeReceiver, escapeJsxText, positionalArgs } from "./walker/shared/args.js";
 import { tsxTarget } from "./walker/tsx-target.js";
@@ -192,7 +193,7 @@ export interface ApiHookUse {
    *  hook-decl time at page-top).  Rendered eagerly via the main
    *  WalkContext so any param/state refs in the args propagate
    *  to `usedParams` / `usesState` for the shell. */
-  argsRendered: string[];
+  argsRendered: readonly string[];
 }
 
 /** Component names the React walker accepts as the TOP-LEVEL `body:`
@@ -573,8 +574,9 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
   // is var-only — the surrounding member / method-call IR walk
   // emits any chained `.data` / `.mutate(args)` / `.isPending`.
   // JSX-child position wraps the result in braces.
-  const hookUse = tryDetectApiHook(expr, ctx);
-  if (hookUse) {
+  const detected = tryDetectApiHook(expr, ctx);
+  if (detected) {
+    const hookUse = tsxTarget.buildHookUse(detected, (e) => emitExpr(e, ctx));
     registerApiHook(hookUse, ctx);
     const rendered = tsxTarget.renderApiCall(
       {
@@ -825,8 +827,9 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
   // The shell emits the `const <var> = use<Op><Aggregate>(args)`
   // declaration at page-top via renderApiHoisting (delegated in #625).
   // Expression position — no JSX brace wrap.
-  const hookUse = tryDetectApiHook(expr, ctx);
-  if (hookUse) {
+  const detected = tryDetectApiHook(expr, ctx);
+  if (detected) {
+    const hookUse = tsxTarget.buildHookUse(detected, (e) => emitExpr(e, ctx));
     registerApiHook(hookUse, ctx);
     return tsxTarget.renderApiCall(
       {
@@ -938,8 +941,9 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // (detected by tryDetectApiHook on the receiver), emit
       // `<hookVar>.<method>(<args>)` (e.g.
       // `customerCreate.mutate({...})`).
-      const recvHookUse = tryDetectApiHook(expr.receiver, ctx);
-      if (recvHookUse) {
+      const recvDetected = tryDetectApiHook(expr.receiver, ctx);
+      if (recvDetected) {
+        const recvHookUse = tsxTarget.buildHookUse(recvDetected, (e) => emitExpr(e, ctx));
         registerApiHook(recvHookUse, ctx);
         const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
         return `${recvHookUse.varName}.${expr.member}(${args})`;

@@ -62,6 +62,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ExprIR, StateFieldIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { DetectedApiCall } from "./api-hook-detector.js";
 
 /** Discriminator: where in the emitted module the walker is currently
  *  rendering.  Drives state-reference syntax — HEEx differentiates
@@ -113,6 +114,30 @@ export interface ApiCallSite {
   argsRendered?: readonly string[];
 }
 
+/** A framework-specific hook-use record produced by
+ *  `WalkerTarget.buildHookUse`.  Carries the names + import path the
+ *  page-shell needs to hoist the hook (TSX: a `const x = useY(args)`
+ *  line; future Vue: a Pinia composable invocation; future Svelte: a
+ *  runes-flavoured `$state` derivation).  HEEx doesn't lower api
+ *  calls to hooks so its `buildHookUse` is unreachable in practice
+ *  (the heex-walker never calls `tryDetectApiHook`); the interface
+ *  shape stays uniform so a future LiveView-class consumer can
+ *  decide its own answer without adding a contract slot. */
+export interface TargetHookUse {
+  /** Local variable name in the generated file
+   *  (e.g. `customerCreate`, `activeOrdersView`). */
+  varName: string;
+  /** Hook function name to import + call
+   *  (e.g. `useCreateCustomer`, `useActiveOrdersView`). */
+  hookName: string;
+  /** Module-relative import path
+   *  (e.g. `../api/customer`, `../api/views`). */
+  importFrom: string;
+  /** Pre-rendered argument strings for parameterised hooks
+   *  (`useCustomerById(id)`).  Empty for paramless reads. */
+  argsRendered: readonly string[];
+}
+
 /** Per-target lowering interface.  An implementation is selected by
  *  the deployable's framework: `tsxTarget` for `react`/`static`,
  *  `heexTarget` for `phoenixLiveView`. */
@@ -141,6 +166,24 @@ export interface WalkerTarget {
   renderStateInit(field: StateFieldIR, init: ExprIR | undefined): string;
 
   // --- API binding seam ---------------------------------------------------
+
+  /** Turn a framework-agnostic `DetectedApiCall` (produced by the
+   *  shared `tryDetectApiHook` detector in
+   *  `src/generator/_walker/api-hook-detector.ts`) into the per-
+   *  framework hook-use record.  TSX produces React-Query naming
+   *  (`useCreateCustomer` + `../api/customer` import); a future Vue
+   *  target produces Pinia / composable naming; HEEx's
+   *  implementation is unreachable in practice (the heex-walker
+   *  never calls the detector) and throws.
+   *
+   *  `renderArg` is the caller's walker-context-aware expression
+   *  renderer — preserved as a callback so any param/state refs
+   *  inside parameterised-query args (`Customer.byId(id)`) propagate
+   *  to the walker's `usedParams` / `usesState` side-effects.
+   *  Identity-equal to `emitExpr(_, ctx)` at the caller's WalkContext.
+   *  The target invokes it on each entry of `detected.args` in
+   *  source order. */
+  buildHookUse(detected: DetectedApiCall, renderArg: (e: ExprIR) => string): TargetHookUse;
 
   /** Render an API call site as the framework's primary surface.
    *  The two shipped frameworks diverge structurally by design:

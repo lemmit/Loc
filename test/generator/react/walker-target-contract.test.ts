@@ -26,6 +26,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
+import type { DetectedApiCall } from "../../../src/generator/_walker/api-hook-detector.js";
 import type { ApiCallSite, StateRef, WalkerTarget } from "../../../src/generator/_walker/target.js";
 import { heexTarget } from "../../../src/generator/phoenix-live-view/heex-target.js";
 import { tsxTarget } from "../../../src/generator/react/walker/tsx-target.js";
@@ -70,6 +71,7 @@ describe("WalkerTarget — every shipped target conforms", () => {
       expect(typeof target.renderStateRead).toBe("function");
       expect(typeof target.renderStateWrite).toBe("function");
       expect(typeof target.renderStateInit).toBe("function");
+      expect(typeof target.buildHookUse).toBe("function");
       expect(typeof target.renderApiCall).toBe("function");
       expect(typeof target.renderApiHoisting).toBe("function");
       expect(typeof target.renderHelperImports).toBe("function");
@@ -251,6 +253,96 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
       "overrideState",
     );
     expect(tsx).toBe('navigate("/orders", { state: overrideState })');
+  });
+
+  // --- buildHookUse: detection-to-naming translation ---------------------
+
+  it("buildHookUse: TSX produces React-Query naming for the standard ops", () => {
+    const detected: DetectedApiCall = {
+      aggregateName: "Customer",
+      operation: "create",
+      args: [],
+      kind: "aggregate",
+    };
+    const renderArg = (_e: unknown): string => {
+      throw new Error("renderArg should not be called on a paramless `create`");
+    };
+    const use = tsxTarget.buildHookUse(detected, renderArg);
+    expect(use.varName).toBe("customerCreate");
+    expect(use.hookName).toBe("useCreateCustomer");
+    expect(use.importFrom).toBe("../api/customer");
+    expect(use.argsRendered).toEqual([]);
+  });
+
+  it("buildHookUse: TSX `all` op pluralises (`useAllCustomers`)", () => {
+    const detected: DetectedApiCall = {
+      aggregateName: "Customer",
+      operation: "all",
+      args: [],
+      kind: "aggregate",
+    };
+    const use = tsxTarget.buildHookUse(detected, () => "");
+    expect(use.varName).toBe("customerAll");
+    expect(use.hookName).toBe("useAllCustomers");
+  });
+
+  it("buildHookUse: TSX `byId` op is suffixed (`useCustomerById`)", () => {
+    const detected: DetectedApiCall = {
+      aggregateName: "Customer",
+      operation: "byId",
+      args: [],
+      kind: "aggregate",
+    };
+    const use = tsxTarget.buildHookUse(detected, () => "");
+    expect(use.hookName).toBe("useCustomerById");
+  });
+
+  it("buildHookUse: TSX renders args via the caller-supplied renderArg", () => {
+    const detected: DetectedApiCall = {
+      aggregateName: "Customer",
+      operation: "byId",
+      args: [
+        { kind: "ref", name: "id", refKind: "param" },
+        { kind: "literal", lit: "string", value: "v" },
+      ],
+      kind: "aggregate",
+    };
+    // The renderArg callback receives each arg in source order.  The
+    // walker's real renderer is `emitExpr(arg, ctx)`; here we substitute
+    // an identifying string so we can assert the args reach the target.
+    let calls = 0;
+    const renderArg = (e: { kind: string }): string => {
+      calls++;
+      return `<<${e.kind}>>`;
+    };
+    const use = tsxTarget.buildHookUse(detected, renderArg);
+    expect(calls).toBe(2);
+    expect(use.argsRendered).toEqual(["<<ref>>", "<<literal>>"]);
+  });
+
+  it("buildHookUse: TSX view-kind goes through the dedicated view-hook naming", () => {
+    const detected: DetectedApiCall = {
+      aggregateName: "activeOrders",
+      operation: "activeOrders",
+      args: [],
+      kind: "view",
+    };
+    const use = tsxTarget.buildHookUse(detected, () => "");
+    expect(use.varName).toBe("activeOrdersView");
+    expect(use.hookName).toBe("useActiveOrdersView");
+    expect(use.importFrom).toBe("../api/views");
+  });
+
+  it("buildHookUse: HEEx throws (Phoenix LiveView doesn't hoist hooks)", () => {
+    const detected: DetectedApiCall = {
+      aggregateName: "Customer",
+      operation: "create",
+      args: [],
+      kind: "aggregate",
+    };
+    expect(() => heexTarget.buildHookUse(detected, () => "")).toThrow(
+      /Phoenix LiveView does not hoist/,
+    );
   });
 
   it("defaultInitFor diverges on optional: TSX `undefined`, HEEx `nil`", () => {
