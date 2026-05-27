@@ -57,7 +57,7 @@ These cover a single language feature each.  Each one is self-contained.
 
 - [`plans/`](plans/) — implementation plans, roadmaps, and design notes for in-flight or future work.  Not authoritative for what ships today; treat as historical context.
 - [`audits/`](audits/) — empirical audits of shipped state (pack equivalence, stack version pins).  Snapshot-in-time documents.
-- [`proposals/`](proposals/) — formal proposals not yet adopted.  Aspirational; do not treat as describing the shipped system.
+- `proposals/` — formal proposals not yet adopted.  Aspirational; do not treat as describing the shipped system.  **Not deployed** to the published docs site; browse on [GitHub](https://github.com/lemmit/Loc/tree/main/docs/proposals).
 
 ## See also
 

@@ -2,7 +2,9 @@
 // Render docs/*.md → docs/_site/*.html using a template that matches
 // the landing page styling. Recurses into plans/ and audits/ subdirs
 // so cross-doc links into the historical material still resolve on the
-// deployed site.  Copies docs/index.html with .md→.html link rewrites,
+// deployed site, and emits an index.html for each rendered subdir so
+// the README's directory links resolve (GitHub Pages does not
+// auto-index).  Copies docs/index.html with .md→.html link rewrites,
 // and copies the shared stylesheet.
 
 import { readFile, writeFile, readdir, mkdir, copyFile, rm, stat } from 'node:fs/promises';
@@ -129,6 +131,43 @@ async function renderMdFile(srcPath, depth) {
   const styleHref = depth > 0 ? `${'../'.repeat(depth)}style.css` : 'style.css';
   await writeFile(outPath, page({ title, body, currentHref: outRel, depth, styleHref }));
   console.log(`rendered  ${rel} → ${outRel}`);
+  return { title, outRel };
+}
+
+// Build an index.html for a rendered subdir.  GitHub Pages serves
+// `dir/` as `dir/index.html`, so generating these makes README's
+// `[plans/](plans/)` etc. resolve to a real listing instead of a 404.
+// Entries are alphabetised by title; one bullet per file, linking to
+// the rendered .html with the page's `# H1` as link text.
+function buildIndexBody(subdir, entries) {
+  const sorted = [...entries].sort((a, b) => a.title.localeCompare(b.title));
+  const items = sorted.map(
+    ({ title, outRel }) =>
+      `  <li><a href="${basename(outRel)}">${escapeHtml(title)}</a></li>`,
+  );
+  return `<h1>${escapeHtml(subdir)}/</h1>
+<p>${escapeHtml(`${entries.length} document${entries.length === 1 ? '' : 's'}`)} in <code>docs/${subdir}/</code>.</p>
+<ul>
+${items.join('\n')}
+</ul>`;
+}
+
+async function writeSubdirIndex(subdir, entries) {
+  if (entries.length === 0) return;
+  const body = buildIndexBody(subdir, entries);
+  const outPath = join(OUT, subdir, 'index.html');
+  const styleHref = '../style.css';
+  await writeFile(
+    outPath,
+    page({
+      title: `${subdir}/`,
+      body,
+      currentHref: `${subdir}/index.html`,
+      depth: 1,
+      styleHref,
+    }),
+  );
+  console.log(`emitted   ${subdir}/index.html (${entries.length} entries)`);
 }
 
 async function main() {
@@ -151,13 +190,15 @@ async function main() {
     } catch {
       continue;
     }
+    const rendered = [];
     for (const f of subEntries) {
       if (!f.endsWith('.md')) continue;
       const full = join(subDir, f);
       const s = await stat(full);
       if (!s.isFile()) continue;
-      await renderMdFile(full, 1);
+      rendered.push(await renderMdFile(full, 1));
     }
+    await writeSubdirIndex(sub, rendered);
   }
 
   // Copy the landing page, rewriting .md links → .html links (incl. subdirs).
