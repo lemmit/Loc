@@ -39,6 +39,7 @@ export {
   checkPropertyCheck,
   checkSingleBinaryOperands,
   checkSinglePrimitiveConversion,
+  checkSlotMemberAccess,
 } from "./types.js";
 export {
   checkApiBodyRefs,

@@ -11,11 +11,13 @@ import type {
   Expression,
   FunctionDecl,
   Invariant,
+  MemberSuffix,
   Model,
+  PostfixChain,
   PrimitiveConversion,
   Property,
 } from "../generated/ast.js";
-import { isBinaryChain, isDerivedProp } from "../generated/ast.js";
+import { isBinaryChain, isDerivedProp, isMemberSuffix, isPostfixChain } from "../generated/ast.js";
 import {
   arithmeticResult,
   comparable,
@@ -25,6 +27,7 @@ import {
   isAssignable,
   resolveTypeRef,
   T,
+  typeAfterSuffix,
   typeOf,
   typeToString,
 } from "../type-system.js";
@@ -80,6 +83,38 @@ export function checkBinaryOperands(model: Model, accept: ValidationAcceptor): v
   for (const node of AstUtils.streamAllContents(model)) {
     if (!isBinaryChain(node)) continue;
     checkSingleBinaryOperands(node, accept);
+  }
+}
+
+/** Reject member access on a `slot`-typed receiver — slots are
+ *  opaque JSX values with no addressable fields.  Without this
+ *  check, `heading.foo` on a `(heading: slot)` param silently
+ *  cascades to `T.unknown` and produces either a generic
+ *  "unknown member" error or no error at all (depending on the
+ *  surrounding type-aware suppression).  Emits a precise
+ *  diagnostic at the member position pointing the author at the
+ *  type mistake. */
+export function checkSlotMemberAccess(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isPostfixChain(node)) continue;
+    const chain = node as PostfixChain;
+    const env = envForNode(chain);
+    let recvType = typeOf(chain.head, env);
+    let flagged = false;
+    for (const suffix of chain.suffixes) {
+      if (!flagged && recvType.kind === "slot" && isMemberSuffix(suffix)) {
+        const ms = suffix as MemberSuffix;
+        accept(
+          "error",
+          `'${ms.member}' is not accessible on a slot value — slots are opaque JSX and have no addressable members.  Use a primitive- or aggregate-typed param if the body needs to read fields off this value.`,
+          { node: ms, property: "member", code: "loom.slot-member-access" },
+        );
+        flagged = true;
+        // Cascade suppression for the rest of this chain — one
+        // diagnostic per offending access is enough.
+      }
+      recvType = typeAfterSuffix(recvType, suffix, env);
+    }
   }
 }
 
