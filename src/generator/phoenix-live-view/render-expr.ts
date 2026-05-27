@@ -175,6 +175,13 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: RenderCtx): string 
     case "current-user":
       return "current_user";
     default:
+      // `refKind === "unknown"` is intentional for some positions
+      // (e2e test bodies, member-chain receivers like `Order.byId(...)`
+      // where `Order` is rendered verbatim and the surrounding member
+      // node carries the resolved semantics — see
+      // `src/ir/lower/lower-expr.ts:606-608`).  Workflow-position
+      // unknowns ARE bugs and the IR validator catches those at
+      // `src/ir/validate/validate.ts:1098`.
       return snake(e.name);
   }
 }
