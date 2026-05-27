@@ -22,6 +22,7 @@ import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./emit.js";
+import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 
 /** Associations (`T id[]` reference collections) declared on an
  * aggregate, persisted as many-to-many join tables.  Empty when none. */
@@ -939,31 +940,6 @@ function tsTypeForReturn(t: TypeIR): string {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function collectValueObjects(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string[] {
-  const used = new Set<string>();
-  const visit = (t: TypeIR) => {
-    if (t.kind === "valueobject") used.add(t.name);
-    if (t.kind === "array") visit(t.element);
-    if (t.kind === "optional") visit(t.inner);
-  };
-  for (const f of agg.fields) visit(f.type);
-  for (const part of agg.parts) for (const f of part.fields) visit(f.type);
-  return ctx.valueObjects.filter((v) => used.has(v.name)).map((v) => v.name);
-}
-
-function collectEnums(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string[] {
-  const used = new Set<string>();
-  const visit = (t: TypeIR) => {
-    if (t.kind === "enum") used.add(t.name);
-    if (t.kind === "array") visit(t.element);
-    if (t.kind === "optional") visit(t.inner);
-  };
-  for (const f of agg.fields) visit(f.type);
-  for (const part of agg.parts) for (const f of part.fields) visit(f.type);
-  return ctx.enums.filter((e) => used.has(e.name)).map((e) => e.name);
-}
-
-// ---------------------------------------------------------------------------
 // IR expression → Drizzle expression
 //
 // Lowers the common subset of `where`-clause expressions to Drizzle
