@@ -76,6 +76,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateCurrentUserScope(c, diags);
     validatePermissionRefs(c, diags);
   }
+  validateExprIntegrity(loom, diags);
   return diags;
 }
 
@@ -861,6 +862,152 @@ function walkStmt(s: TestStmtIR, visit: (e: ExprIR) => void): void {
   }
   if (s.kind === "call") {
     for (const a of s.args) walkExpr(a, visit);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Expression-integrity pass.
+//
+// Catches un-expanded scaffold primitives that escape `walker-primitive-
+// expander.ts` (the file's documented contract is that downstream phases
+// — enrichment, validation, every backend — "never see the un-expanded
+// form"; the early-exit branches at lines 104, 117, 127 violate that
+// contract silently when the target aggregate/workflow/view can't be
+// resolved).  Backends have no handler for an un-expanded scaffold
+// primitive, so they either crash or emit something nonsensical; this
+// pass turns the failure into a clear validator error pointing at the
+// offending page.
+//
+// NOTE: `refKind === "unknown"` is NOT a bug — `src/ir/lower/lower-expr.ts:606-608`
+// documents it as the intentional shape for e2e test bodies and
+// member-chain receivers (e.g. `Order.byId(...)` where `Order` is
+// rendered verbatim and the surrounding member node carries the
+// resolved semantics).  The workflow-scope check at line 1098 below
+// catches the cases where it IS a bug (precondition / requires
+// expressions where bare unresolved references are nonsense); we keep
+// that check and don't extend it.
+// ---------------------------------------------------------------------------
+
+const SCAFFOLD_PRIMITIVE_NAMES: ReadonlySet<string> = new Set([
+  "scaffoldDetails",
+  "scaffoldOperations",
+  "scaffoldList",
+  "scaffoldNewForm",
+  "scaffoldWorkflowForm",
+  "scaffoldViewList",
+  "Home",
+  "WorkflowsIndex",
+  "ViewsIndex",
+]);
+
+function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagnostic[]): void {
+  const visitor = (source: string) => (e: ExprIR) => {
+    if (e.kind === "call" && SCAFFOLD_PRIMITIVE_NAMES.has(e.name)) {
+      diags.push({
+        severity: "error",
+        message: `un-expanded scaffold primitive '${e.name}' — walker-primitive-expander could not resolve its target aggregate/workflow/view; check that the referenced symbol exists in the surrounding context.`,
+        source,
+      });
+    }
+  };
+
+  for (const sys of loom.systems) {
+    for (const ui of sys.uis) {
+      for (const page of ui.pages) {
+        const source = `${sys.name}/${ui.name}/${page.name}`;
+        const visit = visitor(source);
+        walkExpr(page.body, visit);
+        walkExpr(page.title, visit);
+        walkExpr(page.requires, visit);
+        for (const s of page.state) walkExpr(s.init, visit);
+      }
+    }
+  }
+
+  for (const c of allContexts(loom)) {
+    // Workflows — walk every expression-bearing statement.
+    for (const wf of c.workflows) {
+      const source = `${c.name}/${wf.name}`;
+      const visit = visitor(source);
+      for (const st of wf.statements) walkExprsInWorkflowStmt(st, visit);
+    }
+    // Aggregate operations + invariants.
+    for (const agg of c.aggregates) {
+      for (const op of agg.operations) {
+        const source = `${c.name}/${agg.name}/${op.name}`;
+        const visit = visitor(source);
+        for (const st of op.statements) walkExprsInStmt(st, visit);
+      }
+      for (const inv of agg.invariants) {
+        const source = `${c.name}/${agg.name}/invariant`;
+        const visit = visitor(source);
+        walkExpr(inv.expr, visit);
+        walkExpr(inv.guard, visit);
+      }
+    }
+    // Views — filter + custom output binds.
+    for (const v of c.views) {
+      const source = `${c.name}/${v.name}`;
+      const visit = visitor(source);
+      walkExpr(v.filter, visit);
+      if (v.output) {
+        for (const b of v.output.binds) walkExpr(b.expr, visit);
+      }
+    }
+  }
+}
+
+function walkExprsInWorkflowStmt(
+  s: import("../types/loom-ir.js").WorkflowStmtIR,
+  visit: (e: ExprIR) => void,
+): void {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+      walkExpr(s.expr, visit);
+      break;
+    case "emit":
+      for (const f of s.fields) walkExpr(f.value, visit);
+      break;
+    case "factory-let":
+      for (const f of s.fields) walkExpr(f.value, visit);
+      break;
+    case "repo-let":
+      for (const a of s.args) walkExpr(a, visit);
+      break;
+    case "expr-let":
+      walkExpr(s.expr, visit);
+      break;
+    case "op-call":
+      for (const a of s.args) walkExpr(a, visit);
+      break;
+    // Other WorkflowStmtIR shapes that carry no expression payload
+    // (savepoints, mark-as-failed, etc.) need no traversal.
+  }
+}
+
+function walkExprsInStmt(
+  s: import("../types/loom-ir.js").StmtIR,
+  visit: (e: ExprIR) => void,
+): void {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+    case "let":
+    case "expression":
+      walkExpr(s.expr, visit);
+      break;
+    case "assign":
+    case "add":
+    case "remove":
+      walkExpr(s.value, visit);
+      break;
+    case "emit":
+      for (const f of s.fields) walkExpr(f.value, visit);
+      break;
+    case "call":
+      for (const a of s.args) walkExpr(a, visit);
+      break;
   }
 }
 
