@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Loom — a DSL that weaves Domain-Driven systems</title>
-  <meta name="description" content="Loom is a high-level domain-driven DSL. Describe aggregates, invariants, and operations once. Switch your runtime mid-project, swap design systems, regenerate the whole stack — a guardrail against architectural drift and LLM hallucination." />
+  <meta name="description" content="Loom is the high-level DSL that lets you describe systems at no-code altitude — and walk away with real, owned source code across Hono, .NET, Phoenix LiveView, and React. No-code speed; none of the lock-in. Visual builder included; full traceability from requirements to test runs." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -372,6 +372,96 @@
       color: var(--fg-dim);
       font-size: 12px;
     }
+
+    /* ---------- Comparison table ---------- */
+    .cmp-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    table.cmp {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    table.cmp th, table.cmp td {
+      padding: 14px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    table.cmp tbody tr:last-child td { border-bottom: 0; }
+    table.cmp thead th {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      background: rgba(255,255,255,0.025);
+      color: var(--fg);
+      border-bottom: 1px solid var(--line-strong);
+    }
+    table.cmp thead th .muted {
+      display: block;
+      margin-top: 4px;
+      font-weight: 400;
+      color: var(--fg-mute);
+      font-size: 11.5px;
+      letter-spacing: 0;
+    }
+    table.cmp th.loom-col, table.cmp td.loom-col {
+      background: linear-gradient(180deg, rgba(181,140,255,0.10), rgba(111,209,255,0.05));
+      border-left: 1px solid rgba(181,140,255,0.30);
+      border-right: 1px solid rgba(181,140,255,0.30);
+    }
+    table.cmp thead th.loom-col { color: var(--accent); }
+    table.cmp tbody tr:hover { background: rgba(255,255,255,0.02); }
+    table.cmp tbody td:first-child {
+      color: var(--fg);
+      font-weight: 500;
+      max-width: 280px;
+    }
+    table.cmp tbody td:first-child .small {
+      display: block;
+      margin-top: 3px;
+      color: var(--fg-mute);
+      font-size: 12.5px;
+      font-weight: 400;
+    }
+    table.cmp .mark { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+    table.cmp .ok { color: var(--good); }
+    table.cmp .nope { color: #ff7a7a; }
+    table.cmp .warn { color: var(--warn); }
+    table.cmp .ok::before  { content: "✓"; font-weight: 700; margin-right: 4px; }
+    table.cmp .nope::before { content: "✗"; font-weight: 700; margin-right: 4px; }
+    table.cmp .warn::before { content: "⚠"; font-weight: 700; margin-right: 4px; }
+
+    /* ---------- Visual tools grid ---------- */
+    .tools {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+    }
+    @media (max-width: 720px) { .tools { grid-template-columns: 1fr; } }
+    .tool {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+    }
+    .tool .badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 4px 10px; border-radius: 999px;
+      background: rgba(255,255,255,0.04);
+      color: var(--fg-dim); font-size: 12px;
+      border: 1px solid var(--line);
+      margin-bottom: 14px;
+    }
+    .tool h3 { margin: 0 0 8px; font-size: 18px; }
+    .tool p { margin: 0 0 12px; color: var(--fg-dim); font-size: 14px; }
+    .tool ul { margin: 0; padding-left: 18px; color: var(--fg-dim); font-size: 13.5px; }
+    .tool ul li { margin: 4px 0; }
   </style>
 </head>
 <body>
@@ -393,9 +483,10 @@
         <span class="brand-name">Loom</span>
       </a>
       <nav class="nav-links" aria-label="Primary">
-        <a href="#vision">Vision</a>
+        <a href="#compare">vs No-code</a>
+        <a href="#playground">Playground</a>
         <a href="#targets">Switch targets</a>
-        <a href="#designs">Design systems</a>
+        <a href="#trace">Traceability</a>
         <a href="#llm-safe">LLM-safe</a>
         <a href="#cli">CLI</a>
         <a class="btn" href="https://github.com/lemmit/loc" target="_blank" rel="noopener">
@@ -410,17 +501,16 @@
   <section class="hero">
     <div class="container hero-grid">
       <div>
-        <span class="eyebrow"><span class="dot"></span> Domain-first · Source-available</span>
+        <span class="eyebrow"><span class="dot"></span> Source-available · No-code altitude, real-code outcome</span>
         <h1 class="hero-title">
-          Weave a domain model.<br/>
-          <span class="grad">Generate the whole system.</span>
+          The speed of no-code.<br/>
+          <span class="grad">The keys to the codebase.</span>
         </h1>
         <p class="hero-sub">
-          Loom is a high-level DSL for Domain-Driven Design.
-          Describe aggregates, invariants, and operations once &mdash;
-          then pick your runtime, swap your design system, regenerate
-          the whole stack on demand.  Frontend, backend, database, and
-          tests stay in lockstep because they all come from the same source.
+          Loom lets you describe complete systems at the altitude of a no-code platform &mdash;
+          and walk away with real, owned source code across Hono, .NET, Phoenix LiveView,
+          and React.  No vendor lock-in.  No scaling cliff.  No drift between layers.
+          Just the model, a visual builder, and full ownership of every line that's generated.
         </p>
         <div class="hero-cta">
           <a class="btn primary" href="playground/">
@@ -432,9 +522,9 @@
           <a class="btn" href="language.md">Language reference</a>
         </div>
         <div class="hero-meta">
-          <span><span class="pip"></span> Switch runtimes mid-project</span>
-          <span><span class="pip"></span> Five design systems, one page DSL</span>
-          <span><span class="pip"></span> A guardrail for LLM-assisted dev</span>
+          <span><span class="pip"></span> All the speed of no-code</span>
+          <span><span class="pip"></span> All the source you'd write by hand</span>
+          <span><span class="pip"></span> Zero vendor lock-in</span>
         </div>
       </div>
 
@@ -519,6 +609,154 @@
             only the rendering changes.
           </p>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Comparison table ============ -->
+  <section id="compare">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">Versus the alternatives</div>
+        <h2>Pick the trade-off you actually want.</h2>
+        <p>
+          Every shortcut to building a system comes with a hidden tax &mdash; lock-in,
+          drift, framework jail, or a scaling cliff.  Loom is the row where everything
+          turns into a check mark.
+        </p>
+      </div>
+
+      <div class="cmp-wrap">
+        <table class="cmp">
+          <thead>
+            <tr>
+              <th></th>
+              <th class="loom-col">Loom</th>
+              <th>No-code / low-code<span class="muted">Bubble · Retool · OutSystems · Mendix · Appsmith</span></th>
+              <th>Starter kits / frameworks<span class="muted">Rails · Phoenix · Blitz · Wasp</span></th>
+              <th>AI codegen<span class="muted">Cursor projects · v0 · Bolt · Lovable</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Time to first prototype<span class="small">From blank slate to a deployable backend + UI.</span></td>
+              <td class="loom-col"><span class="ok">Minutes</span></td>
+              <td><span class="ok">Minutes</span></td>
+              <td><span class="warn">Hours&ndash;days</span></td>
+              <td><span class="ok">Minutes</span></td>
+            </tr>
+            <tr>
+              <td>You own every line of source<span class="small">Real files in your repo, not a managed model.</span></td>
+              <td class="loom-col"><span class="ok">Yes</span></td>
+              <td><span class="nope">No (platform-managed)</span></td>
+              <td><span class="ok">Yes</span></td>
+              <td><span class="ok">Yes</span></td>
+            </tr>
+            <tr>
+              <td>Zero vendor lock-in<span class="small">Walk away anytime; generated code stays useful.</span></td>
+              <td class="loom-col"><span class="ok">Yes</span></td>
+              <td><span class="nope">Existential dependency</span></td>
+              <td><span class="ok">Yes</span></td>
+              <td><span class="ok">Yes</span></td>
+            </tr>
+            <tr>
+              <td>Multiple runtimes from one source<span class="small">Same model on different stacks; pick per deployable.</span></td>
+              <td class="loom-col"><span class="ok">Hono · .NET · Phoenix · React</span></td>
+              <td><span class="nope">Single platform</span></td>
+              <td><span class="nope">Single framework</span></td>
+              <td><span class="nope">Single framework per prompt</span></td>
+            </tr>
+            <tr>
+              <td>Scaling ceiling<span class="small">Will you hit a wall in performance or cost?</span></td>
+              <td class="loom-col"><span class="ok">None &mdash; native code</span></td>
+              <td><span class="nope">Real (perf + cost cliffs)</span></td>
+              <td><span class="ok">None</span></td>
+              <td><span class="ok">None</span></td>
+            </tr>
+            <tr>
+              <td>Visual builder + textual editing on the same source<span class="small">Switch views; round-trip every change back to source.</span></td>
+              <td class="loom-col"><span class="ok">Both, one model</span></td>
+              <td><span class="warn">Visual only</span></td>
+              <td><span class="nope">Textual only</span></td>
+              <td><span class="warn">Textual + AI prompts</span></td>
+            </tr>
+            <tr>
+              <td>Built-in requirement &rarr; test &rarr; verdict trace<span class="small">Definition-of-Done verdicts straight from test runs.</span></td>
+              <td class="loom-col"><span class="ok">First-class</span></td>
+              <td><span class="nope">Separate tools</span></td>
+              <td><span class="nope">Separate tools</span></td>
+              <td><span class="nope">No native concept</span></td>
+            </tr>
+            <tr>
+              <td>Architectural drift across iterations<span class="small">Frontend, backend, DB, tests stay aligned?</span></td>
+              <td class="loom-col"><span class="ok">Prevented by construction</span></td>
+              <td><span class="warn">Hidden inside the platform</span></td>
+              <td><span class="warn">Manual discipline</span></td>
+              <td><span class="nope">High &mdash; drift after a few prompts</span></td>
+            </tr>
+            <tr>
+              <td>Production-grade tests generated end-to-end<span class="small">Unit + integration + e2e from the same source.</span></td>
+              <td class="loom-col"><span class="ok">Generated, runnable</span></td>
+              <td><span class="warn">Visual recorders, limited</span></td>
+              <td><span class="nope">You write them</span></td>
+              <td><span class="warn">AI-generated, quality varies</span></td>
+            </tr>
+            <tr>
+              <td>Code review-able, debuggable output<span class="small">Idiomatic per framework; team can read it.</span></td>
+              <td class="loom-col"><span class="ok">Idiomatic, owned</span></td>
+              <td><span class="nope">Debug inside the platform UI</span></td>
+              <td><span class="ok">Idiomatic, owned</span></td>
+              <td><span class="ok">Idiomatic, owned</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Visual tooling ============ -->
+  <section id="playground">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">Visual + textual, one source</div>
+        <h2>Three windows on the same model.</h2>
+        <p>
+          Loom ships a browser-based playground with a typed editor, a visual system builder,
+          and a live preview of the generated app.  Drag a deployable onto the canvas, type a
+          workflow in the editor, or click through the generated UI in a sandboxed iframe &mdash;
+          every view edits the same <code class="mono-chip">.ddd</code> source.  No round-trip
+          to a server; no separate "design mode" with a different source of truth.
+        </p>
+      </div>
+
+      <div class="tools">
+        <div class="tool">
+          <span class="badge"><span style="color:#6fd1ff">●</span> Typed editor</span>
+          <h3>Write the model with full LSP support</h3>
+          <p>The browser editor speaks the same Loom language as the CLI: completion, hover, jump-to-definition, rename-refactor, inline diagnostics.  Errors caught at type-time, not runtime.</p>
+        </div>
+        <div class="tool">
+          <span class="badge"><span style="color:#b58cff">●</span> System builder</span>
+          <h3>Drag deployables; wire UIs to APIs to storage</h3>
+          <p>A graph view of your <code class="mono-chip">system</code>: deployables, modules, UIs, APIs, storage.  Edit visually &mdash; every drag, every wire, round-trips to the textual source.  Designed for product folks; useful to anyone.</p>
+        </div>
+        <div class="tool">
+          <span class="badge"><span style="color:#ffb98a">●</span> Live preview</span>
+          <h3>The generated app, booting in your browser</h3>
+          <p>Every edit re-bundles your generated frontend (and a sandboxed backend) and serves it inside the playground.  Click through pages, fire operations, watch state change &mdash; in seconds, no Docker, no localhost.</p>
+        </div>
+        <div class="tool">
+          <span class="badge"><span style="color:#7ee787">●</span> In-browser test runner</span>
+          <h3>Run the generated suite without leaving the page</h3>
+          <p>The DSL's <code class="mono-chip">test</code> and <code class="mono-chip">test e2e</code> blocks compile to runnable tests.  The playground executes them against the in-browser stack and surfaces the results &mdash; same wire format <code class="mono-chip">ddd verify</code> consumes in CI.</p>
+        </div>
+      </div>
+
+      <div style="margin-top: 26px; text-align: center;">
+        <a class="btn primary" href="playground/">
+          Open the playground
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
       </div>
     </div>
   </section>
@@ -662,6 +900,63 @@
         <div class="feat">
           <h4>Bring your own</h4>
           <p>Design packs are just templates against a small page contract.  Write one for your in-house system; every deployable can use it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Traceability ============ -->
+  <section id="trace">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">Requirements &rarr; tests &rarr; verdict</div>
+        <h2>The straightest line from a user story to a green check mark.</h2>
+        <p>
+          Most projects keep requirements in Jira, tests in CI, and code in git &mdash;
+          and spend the whole quarter chasing the drift between them.  Loom puts
+          requirements alongside the domain, links them to test cases, and rolls
+          test runs into a per-requirement Definition-of-Done verdict.
+        </p>
+      </div>
+
+      <div class="cli-grid">
+        <div class="code-card" aria-label="Requirements alongside the domain">
+          <div class="titlebar">
+            <span class="traffic"><span></span><span></span><span></span></span>
+            <span class="file mono">acme.ddd</span>
+          </div>
+<pre class="code"><span class="tok-k">requirement</span> <span class="tok-i">US-001</span> {
+  <span class="tok-i">type</span>:     <span class="tok-t">UserStory</span>
+  <span class="tok-i">title</span>:    <span class="tok-s">"User can log in"</span>
+  <span class="tok-i">status</span>:   <span class="tok-t">Approved</span>
+}
+
+<span class="tok-k">solution</span> <span class="tok-i">SOL-001</span> <span class="tok-k">satisfies</span> <span class="tok-i">US-001</span> {
+  <span class="tok-i">entitles</span>: <span class="tok-t">Identity</span>.<span class="tok-t">Session</span>.<span class="tok-i">start</span>
+}
+
+<span class="tok-k">testCase</span> <span class="tok-i">TC-001</span> <span class="tok-k">verifies</span> <span class="tok-i">US-001</span> {
+  <span class="tok-i">covers</span>:   <span class="tok-t">Identity</span>.<span class="tok-t">Session</span>.<span class="tok-i">start</span>
+}
+
+<span class="tok-c">// Inside the aggregate:</span>
+<span class="tok-k">aggregate</span> <span class="tok-t">Session</span> {
+  <span class="tok-k">operation</span> <span class="tok-i">start</span>(<span class="tok-i">email</span>: <span class="tok-t">string</span>, <span class="tok-i">password</span>: <span class="tok-t">string</span>) { <span class="tok-c">/* ... */</span> }
+
+  <span class="tok-k">test</span> <span class="tok-s">"successful login"</span> <span class="tok-k">verifies</span> <span class="tok-i">TC-001</span> {
+    <span class="tok-k">let</span> <span class="tok-i">s</span> := <span class="tok-t">Session</span>.<span class="tok-i">start</span>(<span class="tok-s">"u@x.com"</span>, <span class="tok-s">"correct"</span>)
+    <span class="tok-k">expect</span> <span class="tok-i">s</span>.<span class="tok-i">active</span>.<span class="tok-i">toBe</span>(<span class="tok-k">true</span>)
+  }
+}
+</pre>
+        </div>
+
+        <div class="cmds">
+          <div class="row"><code>ddd verify</code><span>Runs the generated test suites against the running system; joins results back to the requirements that asked for them.</span></div>
+          <div class="row"><code>.loom/verification.md</code><span>Per-requirement Definition-of-Done verdict in human-readable form: which requirements are <em>actually</em> done against running code.</span></div>
+          <div class="row"><code>.loom/verification.json</code><span>Machine-readable for CI gates, status dashboards, release checklists, traceability matrices.</span></div>
+          <div class="row"><code>.loom/coverage.md</code><span>Which requirements have no verifying test case; which test cases have no executable backing.  The gap report.</span></div>
+          <div class="row"><code>.loom/gaps.md</code><span>Requirements without solutions; solutions citing missing code symbols.  Surface fiction before it ships.</span></div>
         </div>
       </div>
     </div>
