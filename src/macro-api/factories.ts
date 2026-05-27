@@ -36,7 +36,6 @@ import type {
   UnaryExpr,
 } from "../language/generated/ast.js";
 import { isModule, isProperty } from "../language/generated/ast.js";
-import type { OriginToken } from "./define.js";
 import {
   mkAssignOrCallStmt,
   mkCallArg,
@@ -58,6 +57,7 @@ import {
   mkTypeRef,
   mkUnaryExpr,
 } from "./_mk.js";
+import type { OriginToken } from "./define.js";
 import {
   _currentOrigin,
   _setContainer,

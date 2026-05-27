@@ -134,6 +134,14 @@ export interface AppShellVM {
    *  in App.tsx plus a matching `<Route element={<Name>Layout />}>`
    *  wrapping the routes that opted into it. */
   namedLayouts: NamedLayoutVM[];
+  /** True when `namedLayouts.length > 0`.  Drives conditional pack
+   *  imports in the AppShell template — Box/Card/Container/Grid/Image/
+   *  Badge are pre-imported for layout-slot JSX and are unused (Biome
+   *  flags) when no named layouts exist. */
+  hasNamedLayouts: boolean;
+  /** True when at least one named layout's slot uses programmatic
+   *  navigation.  Gates the `useNavigate` import — unused otherwise. */
+  anyLayoutUsesNavigate: boolean;
   /** One section per construct kind that has at least one entry. */
   navSections: NavSectionVM[];
 }
