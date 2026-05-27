@@ -11,7 +11,7 @@ import type {
   ViewIR,
   WorkflowIR,
 } from "../ir/types/loom-ir.js";
-import { intrinsicMatcherSig } from "../language/type-system.js";
+import { intrinsicMatcherSig } from "../util/intrinsic-matchers.js";
 import { lowerFirst, plural, snake, upperFirst } from "../util/naming.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 

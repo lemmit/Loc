@@ -2,6 +2,7 @@
 // `string.matches(regex)` literal-pattern gate.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { intrinsicMatcherSig } from "../../util/intrinsic-matchers.js";
 import {
   isMemberSuffix,
   type MatchExpr,
@@ -9,7 +10,6 @@ import {
   type Model,
   type StringLit,
 } from "../generated/ast.js";
-import { intrinsicMatcherSig } from "../type-system.js";
 
 export function checkMatchExpressions(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {

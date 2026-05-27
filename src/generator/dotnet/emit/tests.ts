@@ -5,7 +5,7 @@ import type {
   TestIR,
   TestStmtIR,
 } from "../../../ir/types/loom-ir.js";
-import { intrinsicMatcherSig } from "../../../language/type-system.js";
+import { intrinsicMatcherSig } from "../../../util/intrinsic-matchers.js";
 import { upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
 

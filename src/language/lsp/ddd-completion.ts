@@ -7,6 +7,7 @@ import {
   type NextFeature,
 } from "langium/lsp";
 import { CompletionItemKind } from "vscode-languageserver";
+import { isCollectionOp } from "../../util/collection-ops.js";
 import {
   type EnumDecl,
   isAggregate,
@@ -28,7 +29,6 @@ import {
 import {
   type DddType,
   envForNode,
-  isCollectionOp,
   type MemberCompletion,
   membersOfType,
   resolveTypeRef,

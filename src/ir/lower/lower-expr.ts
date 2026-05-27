@@ -63,7 +63,8 @@ import {
   isUnaryExpr,
   isValueObject,
 } from "../../language/generated/ast.js";
-import { isCollectionOp, isIntrinsicMatcher } from "../../language/type-system.js";
+import { isCollectionOp } from "../../util/collection-ops.js";
+import { isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
 import type {
   ExprIR,
   IdValueType,
