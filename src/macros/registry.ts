@@ -3,7 +3,7 @@
 // Holds the set of registered macros, keyed by name, and exposes
 // lookup for the expander and validator.  Loaded from two sources:
 //
-//   1. The stdlib (`src/stdlib/index.ts`) — bundled with the
+//   1. The stdlib (`src/macros/stdlib/index.ts`) — bundled with the
 //      toolchain, always available.
 //   2. Project-local `.loom/macros/*.js` modules — discovered
 //      under the workspace root when the CLI/LSP boots.  Authors

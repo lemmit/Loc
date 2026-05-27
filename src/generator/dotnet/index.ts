@@ -80,8 +80,9 @@ export function generateDotnet(
   model: Model,
   options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
-  // See generator/typescript/index.ts:generateTypeScript for the
-  // lowering + enrichment two-step.
+  // See platform/hono/v4/emit.ts:generateTypeScript for the
+  // lowering + enrichment two-step (Hono backend's shell since the
+  // versioned-package split).
   const loom = enrichLoomModel(lowerModel(model));
   return generateDotnetForContexts(loom.contexts, undefined, undefined, options);
 }

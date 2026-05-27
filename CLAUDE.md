@@ -52,6 +52,8 @@ node bin/cli.js parse <file.ddd>                       # parse + validate, exit 
 node bin/cli.js generate ts     <file.ddd> -o <out>    # single Hono project (legacy single-context mode)
 node bin/cli.js generate dotnet <file.ddd> -o <out>    # single .NET project (legacy)
 node bin/cli.js generate system <file.ddd> -o <out>    # full multi-deployable tree + docker-compose.yml
+node bin/cli.js snapshot        <file.ddd> -o <out>    # capture immutable .loom/snapshots/<ts>-<guid>.loomsnap.json (provenance rule snapshot — like `ef migrations add`, run deliberately)
+node bin/cli.js verify          <file.ddd> -o <out>    # run the generated test suites + join results onto the traceability graph → .loom/verification.{json,md}
 ```
 
 Flags: `-o/--out`, `-w/--watch` (legacy generate only), `--dry-run` (print `write`/`skip` plan, touch nothing).
@@ -62,10 +64,12 @@ The single most important fact: **layers are strictly one-directional and enforc
 
 ```
 .ddd → ① parse → ② macro expand → ③ scope/link → ④ AST validate → ⑤ lower → ⑥ enrich → ⑦ IR validate → ⑧ per-platform codegen → ⑨ system compose + migration derive → ⑩ write
-        src/language/generated/    src/macros/    src/language/    src/language/   src/ir/lower*  src/ir/      src/ir/         src/generator/<plat>/    src/system/                       src/cli/main.ts
-                                   (proposed;     ddd-scope.ts     validators/     + walker-      enrichments  validate.ts                              + src/ir/migrations-builder.ts
-                                   currently in                    + type-system   primitive-                                                            (called from system, not ir)
-                                   src/language/)                                  expander.ts
+        src/language/generated/    src/macros/    src/language/    src/language/   src/ir/lower/  src/ir/enrich/   src/ir/validate/                     src/generator/<plat>/    src/system/                       src/cli/main.ts
+                                   expander.ts    ddd-scope.ts     validators/     lower.ts +     enrichments.ts   validate.ts                          + src/platform/<plat>/   + src/system/migrations-builder.ts
+                                   registry.ts                     + type-system   lower-expr.ts                                                                                  (called from system, not ir)
+                                                                                   + walker-
+                                                                                   primitive-
+                                                                                   expander.ts
 ```
 
 - `language/` knows nothing about `ir/`.
@@ -74,24 +78,27 @@ The single most important fact: **layers are strictly one-directional and enforc
 - `system/` composes outputs from the platform generators; it never generates domain code itself.
 - **No target-backend IR.** Every backend consumes `LoomModel` directly. The only secondary IR is `MigrationsIR`, derived once in phase ⑨ and shared by every backend with a database.
 
-**Loom IR (`src/ir/loom-ir.ts`) is platform-neutral and fully resolved.** Every name carries a `refKind` (`param`/`let`/`this-prop`/`enum-value`/…), every member access carries `receiverType` and `memberType`, every call carries `callKind`, every find filter is a typed `ExprIR`. Backends never re-resolve. This is the architectural payoff for phase ⑤'s complexity — adding a backend means writing emitters, not redoing name resolution.
+**Loom IR (`src/ir/types/loom-ir.ts`) is platform-neutral and fully resolved.** Every name carries a `refKind` (`param`/`let`/`this-prop`/`enum-value`/…), every member access carries `receiverType` and `memberType`, every call carries `callKind`, every find filter is a typed `ExprIR`. Backends never re-resolve. This is the architectural payoff for phase ⑤'s complexity — adding a backend means writing emitters, not redoing name resolution.
 
 The lowering phase has three sub-passes, all driven by `lowerModel`:
 
-- **⑤a** `src/ir/lower.ts` — structural walk (`lowerSystem`, `lowerAggregate`, etc.). Never descends into expressions.
-- **⑤b** `src/ir/lower-expr.ts` — expressions, statements, types, name resolution, member typing. `lower.ts` imports from `lower-expr.ts`, never the other way.
-- **⑤c** `src/ir/walker-primitive-expander.ts` — inline scaffold expansion (`scaffoldDetails(of:)` / `scaffoldOperations(of:)` in page bodies → full walker-stdlib `ExprIR`). Called from `lower.ts:537` as the last statement of `lowerSystem`; downstream phases never see the un-expanded form.
+- **⑤a** `src/ir/lower/lower.ts` — structural walk (`lowerSystem`, `lowerAggregate`, etc.). Never descends into expressions.
+- **⑤b** `src/ir/lower/lower-expr.ts` + `lower-stmt.ts` + `lower-types.ts` — expressions, statements, types, name resolution, member typing. `lower.ts` imports from these; they never import from `lower.ts`.
+- **⑤c** `src/ir/lower/walker-primitive-expander.ts` — inline scaffold expansion (`scaffoldDetails(of:)` / `scaffoldOperations(of:)` in page bodies → full walker-stdlib `ExprIR`). Called from `lower.ts:552` as the last statement of `lowerSystem`; downstream phases never see the un-expanded form.
 
-After lowering, `src/ir/enrichments.ts` runs **one pure pass** (phase ⑥) that derives:
+After lowering, `src/ir/enrich/enrichments.ts` runs **one pure pass** (phase ⑥) that derives:
 
 1. **`wireShape`** on every aggregate / part / value object — the canonical ordered field list every backend's DTO emitter consumes (`id`, then declared properties, then containments, then derived). Cross-backend wire compatibility is structural, not coincidental.
 2. **Auto-`findAll`** on every aggregate's repository.
 3. **Associations** for `X id[]` collection fields (join-table metadata).
 4. **React `targets:` module inheritance** — react deployables inherit their target backend's `moduleNames`.
+5. **Per-module `migrationsOwner`** — picks one backend deployable per module to own schema-migration emission; consumed by `buildMigrations` in phase ⑨.
 
-Then `src/ir/validate.ts` runs phase ⑦ — cross-aggregate / multi-file IR-level checks that need the fully-resolved, enriched IR.
+The output is a branded `EnrichedLoomModel` — the validator, system orchestrator, and generators all take `EnrichedLoomModel` / `EnrichedBoundedContextIR` / `EnrichedAggregateIR` at their entry points, so an un-enriched IR fails to type-check rather than getting silently passed through with a `wireShape!` cast.
 
-A JSON Schema artifact at `<outdir>/.loom/wire-spec.json` is built from `wireShape` by `src/system/wire-spec.ts` (in phase ⑨) for diff-based contract change detection.
+Then `src/ir/validate/validate.ts` runs phase ⑦ — cross-aggregate / multi-file IR-level checks that need the fully-resolved, enriched IR.
+
+A JSON Schema artifact at `<outdir>/.loom/wire-spec.json` is built from `wireShape` by `src/system/wire-spec.ts` (in phase ⑨) for diff-based contract change detection. See [`docs/loom-artifacts.md`](docs/loom-artifacts.md) for the full `.loom/` bundle (mermaid views, LikeC4 model, traceability, verification, provenance snapshots) — every sibling of `index.ts` under `src/system/` emits one of these.
 
 ### Per-platform generators (`src/generator/<platform>/`)
 
@@ -122,10 +129,16 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 |---|---|
 | `src/` | The Loom toolchain (compiler, generators, CLI). |
 | `src/language/generated/` | **Gitignored.** `langium generate` output — parser, AST types, reflection. Must exist before `tsc` runs. |
+| `src/language/print/` | AST → `.ddd` source printer (`printExpr` / `printStmt` / `printStructural`).  Drives the LSP "unfold macro" code action (`src/language/lsp/unfold-macro.ts`), which rewrites a `with X(...)` clause into its expanded source in place. |
+| `src/verify/` | `ddd verify` rollup — joins test-execution results onto the traceability graph to produce per-requirement Definition-of-Done verdicts.  Pure, dependency-free; consumed by both the CLI and the browser playground. |
+| `src/system/` | More than just the orchestrator — siblings of `index.ts` emit the `.loom/` artefact bundle: `mermaid.ts`, `likec4.ts`, `traceability.ts`, `wire-spec.ts`, `loomsnap.ts` (provenance snapshot capture for `ddd snapshot`), `sql-pg.ts`, `migrations-builder.ts`.  See [`docs/loom-artifacts.md`](docs/loom-artifacts.md). |
+| `packages/` | **Publish-shaped workspaces** discovered by the plugin resolver: `@loom/core` (the toolchain library + `PlatformSurface` contract), `@loom/backend-hono-v4` (versioned Hono backend), `@loom/ui-test-driver` (the cross-window page-object/locator runtime).  Each `package.json` carries a `loom` key (`kind: "core"\|"backend"`, `family`, `loomVersion`, `core` semver range) read by `src/platform/fs-discovery.ts` — this is the out-of-tree backend story. |
 | `web/` | Separate package — the browser-side playground. Imports the Loom toolchain straight from `../src` (pure TS, no Node-only APIs except `src/cli/` and `src/language/main.ts`). Has its own `package.json`, `playwright.config.ts`, and Vite shim that swaps `_packs/loader-fs.js` for a VFS-backed loader. |
 | `vscode/` | Separate package — VS Code extension (LSP client). Has its own `package.json`; builds against the compiled toolchain. |
 | `designs/` | Design packs (Mantine / shadcn / MUI / Chakra / ashPhoenix). Each pack is a tree of templates that the body-walker dispatches into. |
 | `api/`, `vite/`, `docker/` | Top-level `.hbs` snippets — boilerplate for generated projects (API client, vite config, dockerfile). |
+| `stacks/v1/`, `v2/`, `v3/` | Versioned Handlebars templates for generated-project `package.json` dependency / devDependency blocks (`stack-package-deps.hbs`, `stack-package-devdeps.hbs`, `stack.json` manifest).  The active stack version is chosen per generated deployable based on its platform pins. |
+| `phoenix/` | Top-level companion docs for the Phoenix backend (README). |
 | `examples/`, `web/src/examples/` | Sample `.ddd` files. CI's `generated-react-build.yml` matrix iterates `examples/acme.ddd` + everything under `web/src/examples/` × every design pack. |
 | `test/fixtures/` | **Excluded from vitest discovery** in `vitest.config.ts`. These are byte-for-byte snapshots of generated output used as regression fixtures (capture script: `scripts/capture-baseline-fixture.mjs`); the `.test.ts` files inside are not part of this project's test surface. |
 | `docs/` | Reference docs (top-level), plus `plans/` (in-flight design notes), `audits/` (snapshot-in-time empirical audits), and `proposals/` (unadopted designs). `docs/README.md` is the canonical index. Build the landing+docs site via `node docs/build.mjs` (recurses into `plans/` + `audits/`). Deployed by `.github/workflows/pages.yml` to GitHub Pages. |
@@ -152,7 +165,9 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 7. Verify with `npm test` and at least one `LOOM_TS_BUILD=1` / `LOOM_REACT_BUILD=1` run.
 
 **Adding a backend:**
-1. Implement `PlatformSurface` in `src/platform/<backend>.ts`; register in `src/platform/registry.ts`.
+1. Two homes are possible:
+   - **In-tree (default for new backends):** implement `PlatformSurface` in `src/platform/<backend>.ts`; register in `src/platform/registry.ts`.
+   - **Out-of-tree (versioned package, like `hono@v4`):** add a workspace under `packages/backend-<family>-v<N>/` with a `package.json` carrying a `loom: { kind: "backend", family, loomVersion, core }` block.  `src/platform/fs-discovery.ts` picks it up via `setBackendSource`; `parseBuiltinPlatformRef` lets a deployable target it by `family@version`.
 2. If the backend serves a wire shape, read `agg.wireShape` etc. directly from the IR — do not recompute.
 3. If it runs domain logic, implement `render-expr.ts` / `render-stmt.ts` honouring `refKind` / `callKind` / `isCollectionOp`.
 4. If a new `platform:` keyword is added, also extend the `Platform` rule in `ddd.langium`, the `Platform` type in `loom-ir.ts`, and `checkDeployable` in `src/language/validators/deployable.ts` (see the `'react'` and `'phoenixLiveView'` additions for the pattern).

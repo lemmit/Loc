@@ -57,7 +57,7 @@ export class DddValidator {
    *  walk per top-level member that delegates to the themed checks. */
   check(model: Model, accept: ValidationAcceptor): void {
     // Macro-expansion diagnostics — drained from the side channel
-    // populated by `ddd-macro-expander.ts` during the pre-link
+    // populated by `src/macros/expander.ts` during the pre-link
     // pass.  Surfaced here so unknown macros, bad args, and
     // composition collisions show up alongside other validator
     // diagnostics rather than in a separate diagnostic pipeline.
