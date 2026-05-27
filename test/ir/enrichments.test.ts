@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { allAggregates, allContexts } from "../../src/ir/types/loom-ir.js";
+import type { RawLoomModel } from "../../src/ir/types/loom-ir.js";
 import { buildLoomModel } from "../_helpers/index.js";
 
 // enrichLoomModel runs one pure pass after lowering.  These tests pin the
@@ -103,5 +105,70 @@ describe("enrichment — associations (T id[] join tables)", () => {
     const loom = await buildLoomModel(ASSOC_SRC);
     const pokemon = allAggregates(loom).find((a) => a.name === "Pokemon")!;
     expect(pokemon.associations).toEqual([]);
+  });
+});
+
+describe("enrichment — idempotency", () => {
+  // Re-enriching an already-enriched LoomModel must be a no-op.  Every
+  // derivation that synthesises (`ensureFindAll`, `synthesizeInspect`,
+  // `resolveFieldAccess`, `assignMigrationsOwner`) has an early-out for
+  // pre-existing output; this test pins that contract end-to-end so a
+  // future derivation can't slip past it.
+
+  const SYSTEM_SRC = `
+    system Shop {
+      module Sales {
+        context Orders {
+          aggregate Order ids guid {
+            customerId: string
+            total: int
+            contains lines: OrderLine[]
+            derived lineCount: int = lines.count
+            entity OrderLine { quantity: int }
+          }
+          aggregate Catalog ids guid {
+            name: string
+            tags: Order id[]
+          }
+          repository Orders for Order { }
+          repository Catalogs for Catalog { }
+          valueobject Money { amount: int  currency: string }
+        }
+      }
+      deployable api { platform: hono, modules: Sales, port: 3000 }
+    }
+  `;
+
+  it("re-enriching deep-equals the first enrichment pass", async () => {
+    const once = await buildLoomModel(SYSTEM_SRC);
+    // Brand cast: enrichLoomModel's input is the `RawLoomModel` brand;
+    // an already-`EnrichedLoomModel` value is structurally compatible
+    // but carries the wrong phantom phase tag.  The cast is for the
+    // type-checker only — no runtime data is changed.
+    const twice = enrichLoomModel(once as unknown as RawLoomModel);
+    expect(twice).toEqual(once);
+  });
+
+  it("re-enriching does not duplicate the auto-injected `findAll`", async () => {
+    const once = await buildLoomModel(SYSTEM_SRC);
+    const twice = enrichLoomModel(once as unknown as RawLoomModel);
+    for (const ctx of allContexts(twice)) {
+      for (const repo of ctx.repositories) {
+        const allCount = repo.finds.filter((f) => f.name === "all").length;
+        expect(allCount, `${repo.aggregateName}.repository.finds["all"]`).toBe(1);
+      }
+    }
+  });
+
+  it("re-enriching keeps the per-module migrationsOwner stable", async () => {
+    const once = await buildLoomModel(SYSTEM_SRC);
+    const twice = enrichLoomModel(once as unknown as RawLoomModel);
+    const onceOwners = once.systems.flatMap((s) =>
+      s.modules.map((m) => [m.name, m.migrationsOwner] as const),
+    );
+    const twiceOwners = twice.systems.flatMap((s) =>
+      s.modules.map((m) => [m.name, m.migrationsOwner] as const),
+    );
+    expect(twiceOwners).toEqual(onceOwners);
   });
 });

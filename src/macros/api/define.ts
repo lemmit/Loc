@@ -3,9 +3,9 @@
 //
 // A macro is a TypeScript function from typed args to a list of
 // AST fragments that get spliced into the host declaration's body.
-// The expander (`src/language/ddd-macro-expander.ts`) invokes
-// `expand()` once per `with X(...)` call site, validates the args
-// against `params`, and splices the result into the host.
+// The expander (`src/macros/expander.ts`) invokes `expand()` once
+// per `with X(...)` call site, validates the args against `params`,
+// and splices the result into the host.
 //
 // All AST nodes returned from `expand()` MUST be constructed via
 // the factories in `./factories.ts` so they carry origin metadata

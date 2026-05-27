@@ -104,7 +104,7 @@ them was costing readers an accurate mental model.
 
 **There is no target-backend IR.** Every backend consumes `LoomModel`
 directly. The only secondary IR is `MigrationsIR`, derived once in
-phase ⑧ and shared by every backend that has a database. This is the
+phase ⑨ and shared by every backend that has a database. This is the
 architectural payoff: name resolution, member typing, call-kind
 classification, and inline scaffold expansion all happen exactly once
 (in phase ⑤). Backends never re-resolve.
@@ -114,11 +114,7 @@ above and produces output the next phase consumes — no back-edges, no
 shared mutable state. This is enforced by file structure: `language/`
 knows nothing about `ir/`, `ir/` knows nothing about `generator/`,
 `generator/<platform>/` knows nothing about other platforms, and
-`system/` composes everything from above. The one nuance: `system/`
-calls `src/ir/migrations-builder.ts` to derive `MigrationsIR`, so that
-file is currently in `src/ir/` but logically runs at system time. (See
-[`docs/proposals/src-ir-phase-reveal.md`](./proposals/src-ir-phase-reveal.md)
-for a proposal to move it.)
+`system/` composes everything from above.
 
 ---
 
@@ -156,15 +152,13 @@ for a proposal to move it.)
   `DocumentState.IndexedContent` (before scope computation).
 - `src/macros/registry.ts` — process-global macro registry.
 - `src/macros/api/` — the `defineMacro(...)` authoring API.
-- `src/macros/stdlib/` — stdlib macros: `scaffold`, `auditable`,
-  `softDeletable`, `crudish`, etc.
-
-(NB: as of this writing the macro infrastructure still lives at
-`src/language/ddd-macro-expander.ts`, `src/language/macro-registry.ts`,
-`src/macro-api/`, and `src/stdlib/`. See
-[`docs/proposals/test-layout-and-macro-consolidation.md`](./proposals/test-layout-and-macro-consolidation.md)
-for the proposed consolidation under `src/macros/`. The paths above
-reflect that proposed target.)
+- `src/macros/stdlib/` — stdlib macros: `scaffold` (+ `scaffoldModule`
+  / `scaffoldContext` / `scaffoldAggregate` / `scaffoldView` /
+  `scaffoldWorkflow`), `audit` (+ `auditable` / `auditedByDefault`),
+  `softDelete` (+ `softDeletable` / `softDeleteByDefault`), `crudish`.
+- Wired by `bootMacros(shared)` in `src/language/ddd-module.ts`, which
+  loads the stdlib once and registers the `DocumentState.IndexedContent`
+  listener for the expander.
 
 **Inputs**
 - Raw AST from phase ① with `with X(...)` clauses present on
@@ -362,7 +356,7 @@ expression / statement construction:
 | `resolveNameRef` | Bare identifier → `RefIR` with the right `refKind` (param / let / lambda / this-prop / this-vo-prop / this-derived / helper-fn / enum-value / unknown). |
 | `resolveCallKind` | Free call name → `CallKind` (function / value-object-ctor / private-operation / free). |
 | `inferExprType` | Best-effort type inference for an AST expression — used to inform IR nodes (`receiverType`, let-binding type, etc.). |
-| `widenNumeric` | `int → long → decimal` widening for arithmetic. |
+| `binaryResultType` | Result type for a binary expression, including `int → long → decimal` numeric widening for arithmetic. |
 | `memberType` / `memberOnEntity` / `memberOnValueObject` | `T.member` typing — handles primitives, entities, value objects, collection ops, and the `string.length` shortcut. |
 | `findEntityByName` / `findValueObjectByName` / `findFunctionInEnv` / `findOperationInEnv` | Look-ups that run against the env (parts → aggregate → ctx). |
 | `pathType` / `stepInto` | Type a multi-segment LValue path (for assign / add / remove). |
@@ -388,7 +382,7 @@ the same import direction.
 
 **Why it's a sub-pass of lowering, not its own phase**: `lower.ts`
 calls `expandInlineScaffoldPrimitiveCalls(built)` as the final
-statement of `lowerSystem(...)` (lower.ts:537). The LoomModel
+statement of `lowerSystem(...)` (lower.ts:552). The LoomModel
 returned by `lowerModel(...)` already has its page bodies expanded.
 No downstream phase ever sees the un-expanded form.
 
@@ -471,13 +465,13 @@ mutator without re-walking the env.
 
 ---
 
-## Phase ⑥ — IR enrichment (wire-shape, auto-finds, associations, react inheritance)
+## Phase ⑥ — IR enrichment (wire-shape, auto-finds, associations, react inheritance, migrations ownership)
 
-**File**: `src/ir/enrichments.ts`.
+**File**: `src/ir/enrich/enrichments.ts`.
 
 After lowering returns a faithful AST projection, `enrichLoomModel(loom)`
 runs a single pure pass that populates everything cross-cutting
-the IR consumers need.  Four derivations, in order:
+the IR consumers need.  Five derivations, in order:
 
 1. **Wire-shape on every aggregate / part / value object.**  The
    canonical, ordered list of fields that appear on the wire for
@@ -539,7 +533,23 @@ the IR consumers need.  Four derivations, in order:
    inherits its target backend's module set, propagated here so
    downstream layers see the resolved set.
 
+5. **Per-module `migrationsOwner`.**  For every module, picks the
+   single backend deployable responsible for emitting schema
+   migrations against it (`assignMigrationsOwner` —
+   `enrichments.ts:124`).  Consumed in phase ⑨ by
+   `buildMigrations(...)` to decide which deployable's output map
+   receives the per-module migration file.
+
 **Idempotent** — `enrich(enrich(m))` deep-equals `enrich(m)`.
+Asserted by `test/ir/enrichments.test.ts` ("enrichLoomModel is
+idempotent").
+
+**Output is a branded `EnrichedLoomModel`.** Downstream
+(validator, system orchestrator, generators) takes
+`EnrichedLoomModel` / `EnrichedBoundedContextIR` /
+`EnrichedAggregateIR` at the call site, so passing an un-enriched
+IR is a compile error rather than a `wireShape!` non-null cast at
+the consumer.
 
 **Non-responsibilities**
 - No mutation of the input — returns a new model.  The pre-
@@ -558,9 +568,12 @@ backend.
 
 ## Phase ⑦ — IR validation
 
-**File**: `src/ir/validate.ts` (~1700 lines), plus
-`src/ir/invariant-classify.ts` (~415 lines) for invariant
-categorisation.
+**File**: `src/ir/validate/validate.ts` (~1700 lines), plus
+`src/ir/validate/invariant-classify.ts` (~420 lines) — invariant
+*wire-boundary* classification + single-field shape detection
+consumed by backend emitters (Zod refines, FluentValidation
+rules).  Not run by the validator itself; the file co-locates with
+validate.ts because both are pure IR analyses.
 
 **Inputs**
 - Enriched `LoomModel` from phase ⑥.
@@ -581,9 +594,10 @@ catches things that need that context:
   declared in a different file).
 - Checks that depend on enrichment output (e.g., wire-shape
   derived field ordering, association metadata).
-- Invariant categorisation (`invariant-classify.ts` buckets
-  invariants into structural / data / interlock categories that
-  some backends consume).
+- Workspace-wide uniqueness (root VOs, enums, systems, contexts),
+  find-name collisions across aggregates in a context, react ID
+  references, queryable `where` filters, workflow / view / auth
+  / current-user / permission consistency.
 
 **Non-responsibilities**
 - No mutation of the IR — pure read.
@@ -613,7 +627,7 @@ multiple platforms:
 | Subdir | Consumed by | What it owns |
 |---|---|---|
 | `_packs/` | every UI-mounting backend (react, fullstack dotnet, phoenixLiveView) | Design-pack discovery + loader.  `builtin-formats.ts` holds `BUILTIN_PACK_FORMATS` + `BUILTIN_PACK_LATEST` and the `parseBuiltinDesignRef` parser.  `loader-fs.ts` / `loader-vfs.ts` are the FS / browser-VFS backends.  See [`design-packs.md`](design-packs.md). |
-| `_walker/` | react today; phoenixLiveView in progress | `target.ts` defines the `WalkerTarget` interface that captures the framework-shaped seams (state read/write, navigation, API call lowering, `match` rendering).  The TSX walker (`react/body-walker.ts`) currently inlines its own implementations; extracting them behind this interface is the gate for plugging in a HEEx walker without touching the TSX path. |
+| `_walker/` | react + phoenixLiveView | `target.ts` defines the `WalkerTarget` interface that captures the framework-shaped seams (state read/write, navigation, API call lowering, `match` rendering).  Both targets are implemented and consumed: `react/walker/tsx-target.ts` is imported by `body-walker.ts` and delegated to at ~15 call sites (state-read/write, API call shape); `phoenix-live-view/heex-target.ts` is imported by `heex-walker.ts` and delegated to at 20+ call sites. |
 | `_obs/` | hono, dotnet, phoenixLiveView | Observability catalog + per-backend renderers.  `log-events.ts` defines the envelope schema; `render-<platform>.ts` emits the per-backend instrumentation.  See [`observability.md`](observability.md). |
 
 ### All-procedural emission
@@ -632,21 +646,40 @@ module exporting `render<Thing>(args)` functions.  No runtime
 parsing, no SafeString escaping, no helper registration — the type
 checker validates every data flow from the IR to the rendered string.
 
-### Hono backend (`src/generator/typescript/`)
+### Hono backend (`src/platform/hono/v4/` + `src/generator/typescript/`)
+
+The Hono backend is split between a *versioned* package
+(`src/platform/hono/v4/` — owns the package shell, the per-version
+dep pin set, and any per-version routing glue) and a *shared*
+TypeScript emitter library (`src/generator/typescript/` — the
+per-aggregate procedural builders that every Hono version reuses).
+A future `hono@v5` would ship its own `pins.ts` + shell next to
+`v4/` and continue to import the shared emitter library.
 
 | File | Owns |
 | --- | --- |
-| `index.ts` | Project shell (package.json, tsconfig, vite-style index.ts, Dockerfile, certs/ dir). |
-| `emit/ids.ts` | Branded id types + smart constructors. |
-| `emit/value-objects.ts` | Enums + value-object classes. |
-| `emit/events.ts` | Domain-event union + dispatcher. |
-| `emit/aggregate.ts` | Aggregate / part class shape. |
-| `emit/schema.ts` | Drizzle `pgTable` / `pgEnum` declarations. |
-| `emit/routes.ts` | `http/index.ts` composer (CORS + sub-router mount + `/openapi.json`). |
-| `emit/tests.ts` | Per-aggregate vitest spec when `test` blocks present. |
-| `routes-builder.ts` | OpenAPIHono router per aggregate — full Zod schemas via wire-shape, routes for create / get-by-id / find-all / per-op / per-find, domain-error handler. |
-| `repository-builder.ts` | Per-aggregate repository — find-by-id (load + hydrate), get-by-id (throws), save (upsert + diff-sync + dispatch), find-all + user finds (with Drizzle `where`-clause lowering), `toWire` serializer. |
-| `render-expr.ts` / `render-stmt.ts` | IR → idiomatic TS for invariants / preconditions / op bodies. |
+| `platform/hono/v4/index.ts` | `PlatformSurface` adapter — `emitProject`, `composeService`, `needsDb`, `defaultPort`. |
+| `platform/hono/v4/emit.ts` | Project shell + per-context orchestration: package.json, tsconfig, Dockerfile, certs/ dir, route mount, calls into the shared emitters below. |
+| `platform/hono/v4/pins.ts` | Dependency version pins owned by this Hono major (hono / zod / drizzle / pg / pino + dev deps). |
+| `platform/hono/v4/routes-builder.ts` | OpenAPIHono router per aggregate — full Zod schemas via wire-shape, routes for create / get-by-id / find-all / per-op / per-find, domain-error handler. |
+| `platform/hono/v4/view-routes-builder.ts` | OpenAPIHono router per declared view. |
+| `platform/hono/v4/workflow-builder.ts` | OpenAPIHono router + handler per declared workflow. |
+| `platform/hono/v4/auth-emit.ts` | JWT verifier hook + middleware when any deployable declares `auth: required`. |
+| `platform/hono/v4/observability-builder.ts` | Wires the `_obs/render-hono` instrumentation into the per-aggregate routes. |
+| `generator/typescript/emit.ts` | Top-level barrel called from `platform/hono/v4/emit.ts`. |
+| `generator/typescript/emit/ids.ts` | Branded id types + smart constructors. |
+| `generator/typescript/emit/value-objects.ts` | Enums + value-object classes. |
+| `generator/typescript/emit/events.ts` | Domain-event union + dispatcher. |
+| `generator/typescript/emit/aggregate.ts` | Aggregate / part class shape. |
+| `generator/typescript/emit/schema.ts` | Drizzle `pgTable` / `pgEnum` declarations. |
+| `generator/typescript/emit/routes.ts` | `http/index.ts` composer (CORS + sub-router mount + `/openapi.json`). |
+| `generator/typescript/emit/tests.ts` | Per-aggregate vitest spec when `test` blocks present. |
+| `generator/typescript/emit/migrations.ts` | Per-module Drizzle SQL migration file from the `MigrationsIR` slice. |
+| `generator/typescript/repository-builder.ts` | Per-aggregate repository — find-by-id (load + hydrate), get-by-id (throws), save (upsert + diff-sync + dispatch), find-all + user finds (with Drizzle `where`-clause lowering), `toWire` serializer. |
+| `generator/typescript/repository-imports-builder.ts` | Imports the per-aggregate repository needs (drizzle ops, id types, etc.). |
+| `generator/typescript/extern-builder.ts` | Generated handler stubs for `extern` operations. |
+| `generator/typescript/zod-refine.ts` | Shared helpers for emitting Zod `refine` chains from wire-translatable invariants. |
+| `generator/typescript/render-expr.ts` / `render-stmt.ts` | IR → idiomatic TS for invariants / preconditions / op bodies. |
 
 ### .NET backend (`src/generator/dotnet/`)
 
@@ -668,6 +701,11 @@ checker validates every data flow from the IR to the rendered string.
 | `dto-mapping.ts` | Wire ↔ domain conversion: `wireType`, `wireToCommandArgument`, `projectToResponse`, `projectEntityExpr`, `aggregateResponseParams`, `entityResponseParams`.  Walks `wireFieldsForAggregate` so the DTOs line up with every other backend. |
 | `cqrs-emit.ts` | Per-aggregate orchestration: emits Request / Response DTO files, Command + Handler per public op, Query + Handler per find, controller. |
 | `find-emit.ts` | Repository find-method bodies (LINQ predicate from convention or from a `where` filter). |
+| `auth-emit.ts` | JWT bearer auth + `[Authorize]` filter wiring when any deployable declares `auth: required`. |
+| `validator-emit.ts` | `AbstractValidator<TRequest>` FluentValidation rules from wire-translatable invariants. |
+| `view-emit.ts` | Controller + handler per declared view. |
+| `workflow-emit.ts` | Controller + handler per declared workflow. |
+| `emit.ts` | Top-level barrel that `index.ts` invokes per context. |
 | `render-expr.ts` / `render-stmt.ts` | IR → idiomatic C#, with a `thisName` context (e.g., `x` for find filters' `.Where(x => …)`). |
 
 ### React frontend (`src/generator/react/`)
@@ -680,6 +718,14 @@ checker validates every data flow from the IR to the rendered string.
 | `form-helpers.ts` | Per-type form-input dispatch (`prepareFormFieldVM`/`renderFormField`): text/number/switch/select/fieldset/datetime, RHF `register` vs `Controller`, initial-value generation, `X id` → `useAll<Target>()` picker injection.  Shared by `Form { of: }`, `Form { runs: }`, and operation-modal forms. |
 | `pages-emitter.ts` | Page shell: wraps the walker's body TSX with `useForm`/mutation-hook/`useParams`/import declarations the body recorded on the walk context. |
 | `page-objects-builder.ts` / `walker-page-objects.ts` | Per-aggregate Playwright page-object class — keyed off the `data-testid` strings every primitive threads through (`testid:` named arg). |
+| `layouts-emitter.ts` | Per-layout shell (`<Outlet/>` wrappers, header/footer, sidebar slots). |
+| `menu-emitter.ts` | Sidebar / nav menu from `menu:` declarations + scaffold defaults. |
+| `view-builder.ts` | Per-view page module. |
+| `workflow-builder.ts` | Per-workflow page module. |
+| `walker/tsx-target.ts` | `WalkerTarget` implementation for TSX — state read/write, navigation, API call lowering, `match` rendering.  Imported by `body-walker.ts`. |
+| `walker/api-hooks.ts` / `context.ts` / `icons.ts` / `import-lines.ts` / `page-shell.ts` | Walker helpers — TanStack Query hook import collection, walk-context plumbing, design-pack icon resolution, deduped import lines, page-shell wrapping. |
+| `walker/primitives/` | Per-primitive TSX dispatch entries (`Stack`, `Table`, `Form`, `QueryView`, `Modal`, `KeyValueRow`, etc.) called from `body-walker.ts`. |
+| `templating/` | Procedural TSX assembly helpers shared across the walker. |
 
 The React side has no `render-expr.ts` / `render-stmt.ts`: the
 frontend doesn't run domain logic, only consumes the wire shape.
@@ -741,14 +787,12 @@ is reachable from an explicit `page <Name> { body: … }` —
 **Files**: `src/system/index.ts` (orchestrator entry),
 `src/system/e2e-render.ts`, `src/system/ui-e2e-render.ts`,
 `src/system/wire-spec.ts` (writes `.loom/wire-spec.json` from
-`IR.wireShape`), and `src/ir/migrations-builder.ts` (derives
-`MigrationsIR[]` from an IR snapshot diff).
-
-(NB: `migrations-builder.ts` currently lives in `src/ir/` for
-historical reasons but is only called from
-`src/system/index.ts:116`. See
-[`docs/proposals/src-ir-phase-reveal.md`](./proposals/src-ir-phase-reveal.md)
-for the proposed move to `src/system/`.)
+`IR.wireShape`), and `src/system/migrations-builder.ts` (derives
+`MigrationsIR[]` from an IR snapshot diff).  The `system/` layer
+also emits the rest of the `.loom/` artefact bundle through
+sibling modules — see [`loom-artifacts.md`](loom-artifacts.md) for
+the full inventory (mermaid views, LikeC4 model, traceability,
+verification, provenance snapshots).
 
 **Inputs**: `LoomModel.systems[]` (each carries modules,
 deployables, and e2e tests) plus an optional `SnapshotStore` of

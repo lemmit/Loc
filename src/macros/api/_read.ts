@@ -15,7 +15,7 @@
 // type-checks the `$type` once and returns the payload as a real
 // TypeScript value — the one structural cast lives in this file.
 //
-// Importers: `src/language/ddd-macro-expander.ts` and
+// Importers: `src/macros/expander.ts` and
 // `src/language/print/print-structural.ts`.
 
 import type {

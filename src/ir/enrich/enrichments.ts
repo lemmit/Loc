@@ -43,13 +43,20 @@ import type {
 // read-only after lowering and gives downstream layers a single
 // "fully computed" entry point: `enrichLoomModel(lowerModel(ast))`.
 //
-// Derivations applied (in order — each is independent):
+// Derivations applied (in order):
 //
 //   1. Wire-shape on every aggregate / part / value object.
 //   2. Auto-included `findAll` on every aggregate's repository.
-//   3. React deployable `moduleNames` ← target deployable's modules.
+//   3. Associations per aggregate from `X id[]` reference-collection
+//      fields (computed during `enrichAggregate`).
+//   4. React deployable `moduleNames` ← target deployable's modules
+//      (in `enrichDeployables`).
+//   5. Per-module `migrationsOwner` — picks one backend deployable
+//      per module to own schema migrations (`assignMigrationsOwner`,
+//      after deployables are enriched).
 //
-// Idempotent: `enrich(enrich(m))` deep-equals `enrich(m)`.
+// Idempotent: `enrich(enrich(m))` deep-equals `enrich(m)`.  Pinned
+// by `test/ir/enrichments.test.ts`.
 // ---------------------------------------------------------------------------
 
 export function enrichLoomModel(loom: RawLoomModel): EnrichedLoomModel {
