@@ -97,15 +97,28 @@ describe("walker primitives — Icon", () => {
 });
 
 describe("walker primitives — CodeBlock", () => {
-  // The React emitter reads source / language / title as named args
-  // (see `src/generator/react/walker/primitives/code-block.ts`); the
-  // Phoenix emitter accepts a positional first arg.  These tests pin
-  // the React shape — the Phoenix side is already covered in
-  // `heex-section-sticky-codeblock-icon.test.ts`.
-  it("CodeBlock { source:, language: } emits a <pre><code class=language-…>", async () => {
+  // The React emitter accepts both shapes: `source:` named arg (the
+  // historical surface, used by `web/src/examples/loom-landing.ddd`) and
+  // a positional first arg (the Phoenix surface, used by
+  // `test/generator/phoenix/heex-section-sticky-codeblock-icon.test.ts`).
+  // These tests pin both — see `src/generator/react/walker/primitives/code-block.ts`.
+  it("CodeBlock { source:, language: } (named) emits a <pre><code class=language-…>", async () => {
     const tsx = await emit(`CodeBlock { source: "const x = 1", language: "ts" }`);
     expect(tsx).toMatch(/<pre className="loom-code-block"/);
     expect(tsx).toMatch(/<code className="language-ts">const x = 1<\/code>/);
+  });
+
+  it("CodeBlock { positional, language: } also threads the source", async () => {
+    const tsx = await emit(`CodeBlock { "const y = 2", language: "ts" }`);
+    expect(tsx).toMatch(/<code className="language-ts">const y = 2<\/code>/);
+  });
+
+  it("named `source:` wins over a positional arg when both are supplied", async () => {
+    const tsx = await emit(
+      `CodeBlock { "ignored", source: "const z = 3", language: "ts" }`,
+    );
+    expect(tsx).toMatch(/<code className="language-ts">const z = 3<\/code>/);
+    expect(tsx).not.toMatch(/ignored/);
   });
 
   it("CodeBlock title: emits a wrapping <div> with the title header", async () => {

@@ -326,10 +326,10 @@ export function isMacroArgValue(item: unknown): item is MacroArgValue {
     return reflection.isInstance(item, MacroArgValue);
 }
 
-export type MemberName = 'aggregates' | 'api' | 'contains' | 'contexts' | 'filter' | 'id' | 'implements' | 'modules' | 'permissions' | 'stamp' | 'ui' | 'views' | 'workflows' | string;
+export type MemberName = 'aggregates' | 'api' | 'contains' | 'contexts' | 'filter' | 'id' | 'implements' | 'modules' | 'permissions' | 'stamp' | 'ui' | 'views' | 'where' | 'workflows' | string;
 
 export function isMemberName(item: unknown): item is MemberName {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'where' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type ModelMember = BoundedContext | Component | EnumDecl | Requirement | Solution | System | TestCase | ValueObject;

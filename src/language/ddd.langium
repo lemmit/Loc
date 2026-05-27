@@ -1037,7 +1037,13 @@ CallArg:
 MemberName returns string:
     ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
-       | 'filter' | 'stamp' | 'implements';
+       | 'filter' | 'stamp' | 'implements'
+       // `where` is a hard keyword in `FindDecl` (`find foo(): T where ...`)
+       // and `View` (`view X = Y where ...` and the full form's `from Y where`),
+       // but it's also the collection-op name in `arr.where(λ)` — see
+       // `src/util/collection-ops.ts` and the `case "where":` arms in the TS /
+       // Phoenix renderers.  Admit it here so expression-position uses parse.
+       | 'where';
 
 // Lambdas accept either a single expression body (the only form
 // in v22) or a brace-wrapped block of statements.  Block bodies

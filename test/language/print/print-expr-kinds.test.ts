@@ -177,6 +177,14 @@ describe("printExpr — postfix chain (member + call)", () => {
     const printed = printExpr(e);
     expect(printed).toBe("items.all(x => x > 0)");
   });
+
+  it("admits the `where` collection op as a method name (soft keyword in MemberName)", async () => {
+    const e = await derivedExpr(
+      `items: int[]  derived positive: int[] = items.where(x => x > 0)`,
+      "positive",
+    );
+    expect(printExpr(e)).toBe("items.where(x => x > 0)");
+  });
 });
 
 describe("printExpr — match", () => {
