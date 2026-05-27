@@ -1,6 +1,7 @@
 import type { AstNode } from "langium";
 import { AstUtils } from "langium";
 import type { PrimitiveName } from "../ir/types/loom-ir.js";
+import { COLLECTION_OP_SIGNATURES, isCollectionOp } from "../util/collection-ops.js";
 import type {
   Aggregate,
   BaseType,
@@ -657,19 +658,9 @@ function lookupValueObjectMember(target: ValueObject, name: string): DddType {
   return T.unknown;
 }
 
-// Canonical collection-op catalogue — the single source for both the
-// membership check (`isCollectionOp`) and member enumeration (`membersOfType`).
-const COLLECTION_OP_SIGNATURES: ReadonlyArray<{ name: string; signature: string }> = [
-  { name: "count", signature: "int" },
-  { name: "sum", signature: "(λ): decimal" },
-  { name: "all", signature: "(λ): bool" },
-  { name: "any", signature: "(λ): bool" },
-  { name: "where", signature: "(λ): T[]" },
-  { name: "first", signature: "T" },
-  { name: "firstOrNull", signature: "T?" },
-  { name: "contains", signature: "bool" },
-];
-const COLLECTION_OPS = new Set(COLLECTION_OP_SIGNATURES.map((o) => o.name));
+// Collection-op catalogue moved to src/util/collection-ops.ts (pure data
+// catalogue, consumed by ir/, generator/, system/ as well — keeps the
+// language layer free of back-edges).
 
 function collectionOpType(
   recv: { kind: "array"; element: DddType },
@@ -775,43 +766,9 @@ function lookupValueObjectByName(name: string, env: Env): ValueObject | undefine
   return undefined;
 }
 
-export function isCollectionOp(name: string): boolean {
-  return COLLECTION_OPS.has(name);
-}
-
-// Canonical test-assertion matcher catalogue — a built-in "intrinsic"
-// library the compiler knows by name (resolved into the IR, then lowered
-// per-backend to Playwright / vitest / xUnit / ExUnit).  `on` records
-// whether the matcher reads a DOM locator (web-first, auto-retrying) or a
-// plain value; `arity` is the fixed positional-argument count for
-// validation. This is the surface declared as DATA — adding a matcher is
-// a table entry plus a per-backend lowering, not a renderer special-case.
-export interface MatcherSig {
-  name: string;
-  arity: number;
-  on: "locator" | "value";
-  /** When this matcher reads a locator, the negated form is `not.<name>`. */
-  negatable: boolean;
-}
-const INTRINSIC_MATCHER_SIGNATURES: ReadonlyArray<MatcherSig> = [
-  { name: "toBe", arity: 1, on: "value", negatable: true },
-  { name: "toBeGreaterThan", arity: 1, on: "value", negatable: true },
-  { name: "toBeGreaterThanOrEqual", arity: 1, on: "value", negatable: true },
-  { name: "toBeLessThan", arity: 1, on: "value", negatable: true },
-  { name: "toBeLessThanOrEqual", arity: 1, on: "value", negatable: true },
-  { name: "toHaveText", arity: 1, on: "locator", negatable: true },
-  { name: "toHaveCount", arity: 1, on: "locator", negatable: true },
-  { name: "toBeVisible", arity: 0, on: "locator", negatable: true },
-];
-const INTRINSIC_MATCHERS = new Map(INTRINSIC_MATCHER_SIGNATURES.map((m) => [m.name, m]));
-
-export function isIntrinsicMatcher(name: string): boolean {
-  return INTRINSIC_MATCHERS.has(name);
-}
-
-export function intrinsicMatcherSig(name: string): MatcherSig | undefined {
-  return INTRINSIC_MATCHERS.get(name);
-}
+// Matcher catalogue + isCollectionOp moved to src/util/intrinsic-matchers.ts
+// and src/util/collection-ops.ts — pure data catalogues that all layers
+// can import without back-edges into language/.
 
 export function lambdaTakesElementOf(t: DddType): DddType {
   if (t.kind === "array") return t.element;
