@@ -254,6 +254,7 @@ function renderLiveView(a: RenderArgs): string {
     walked.formBindings,
     walked.idOptionsBindings,
     contextModuleByAggName,
+    aggregatesByName,
   );
   const handleParams = renderHandleParams(
     page,
@@ -318,6 +319,13 @@ function renderMount(
    *  resolves at mount time. */
   idOptionsBindings: readonly string[],
   contextModuleByAggName: ReadonlyMap<string, string>,
+  /** Used by the option-list emission to detect targets that
+   *  declared `derived display: string = ...`.  When set, the
+   *  emitted assign loads the `:display` calculation via
+   *  `list_<x>!(load: [:display])` and uses it as the option label;
+   *  when absent, the assign falls back to the v0 shape with the
+   *  record's id as both label and value. */
+  aggregatesByName: ReadonlyMap<string, AggregateIR>,
 ): string {
   const assigns: string[] = [];
   for (const f of page.state) {
@@ -325,18 +333,26 @@ function renderMount(
     // `state.field` defaults match across scaffold and custom pages.
     assigns.push(`      |> assign(:${snake(f.name)}, ${defaultInitFor(f.type)})`);
   }
-  // Option-list loads for `X id` form fields.  v0 uses the record's
-  // id as both label and value — the proper `display`-based label
-  // requires loading the aggregate's `:display` calculation
-  // (Ash.load).  Deferred follow-up; until then the select is
-  // structurally correct (right value flows through on submit) but
-  // shows uuids as labels.
+  // Option-list loads for `X id` form fields.  When the target
+  // aggregate declares `derived display: string = ...` (always
+  // injected when the user opts in; absent otherwise), load the
+  // calculation alongside the read and use it as the human-readable
+  // option label.  Falls back to the id-as-label v0 shape when no
+  // display derives — the select stays structurally correct.
   for (const aggName of idOptionsBindings) {
     const ctxModule = contextModuleByAggName.get(aggName);
     if (!ctxModule) continue;
     const aggSnake = snake(aggName);
+    const targetAgg = aggregatesByName.get(aggName);
+    const hasDisplay = targetAgg?.displayDerived !== undefined;
+    const listCall = hasDisplay
+      ? `${ctxModule}.list_${aggSnake}s!(load: [:display])`
+      : `${ctxModule}.list_${aggSnake}s!()`;
+    const tupleFn = hasDisplay
+      ? `fn r -> {r.display, r.id} end`
+      : `fn r -> {to_string(r.id), r.id} end`;
     assigns.push(
-      `      |> assign(:${aggSnake}_options, ${ctxModule}.list_${aggSnake}s!() |> Enum.map(fn r -> {to_string(r.id), r.id} end))`,
+      `      |> assign(:${aggSnake}_options, ${listCall} |> Enum.map(${tupleFn}))`,
     );
   }
   // @form assignment — one per Form(of:/runs:) call in the page body.

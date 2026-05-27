@@ -16,10 +16,12 @@
 //      iterates these and emits one
 //      `socket |> assign(:<x_snake>_options, <Ctx>.list_<x_snake>s!() |> Enum.map(...))`
 //      per binding.
-//   3. v0 maps each record to `{to_string(r.id), r.id}` — the id
-//      is shown as the label (not pretty but functional).
-//      Display-based labels need Ash.load(:display) — tracked as
-//      a follow-up; out of scope for Slice C.
+//   3. When the target aggregate declares `derived display: string`,
+//      the option-list load uses `list_<x>!(load: [:display])` and
+//      maps each record to `{r.display, r.id}` — proper
+//      human-readable label.
+//      When NO display is declared (test below), falls back to the
+//      v0 id-as-label shape `{to_string(r.id), r.id}`.
 //   4. Non-id fields stay on their previous dispatch
 //      (anti-regression).
 //   5. Optional `X id?` still routes to select (the optional
@@ -90,7 +92,46 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
     const files = await generateSystemFiles(phoenixSystem("customerId: Customer id"));
     const heex = findNewOrderHeex(files);
     // The mount stub assigns :<target>_options from the Ash code
-    // interface list-call.  v0 maps each record to {id, id}.
+    // interface list-call.  Customer in this fixture has
+    // `derived display: string = name`, so the load includes
+    // `load: [:display]` and the option label is `r.display`.
+    expect(heex).toMatch(
+      /\|> assign\(:customer_options, [\w.]+\.list_customers!\(load: \[:display\]\) \|> Enum\.map\(fn r -> \{r\.display, r\.id\} end\)\)/,
+    );
+  });
+
+  it("falls back to id-as-label when target aggregate has no `derived display`", async () => {
+    // No `derived display: string = ...` on Customer.  The walker
+    // would still need a display for `string(<agg>)` semantics, but
+    // for id-selects without one we fall back to showing the uuid as
+    // the option label so the select stays functional (right value
+    // flows through on submit).
+    const files = await generateSystemFiles(`
+      system Demo {
+        module M {
+          context C {
+            aggregate Customer { name: string }
+            repository Customers for Customer { }
+            aggregate Order {
+              customerId: Customer id
+              derived display: string = "ord"
+            }
+            repository Orders for Order { }
+          }
+        }
+        api DemoApi from M
+        ui DemoUi {
+          page NewOrder { route: "/orders/new" body: CreateForm { of: Order } }
+        }
+        deployable phoenixApp {
+          platform: phoenixLiveView, modules: M, serves: DemoApi,
+          ui: DemoUi, port: 4000
+        }
+      }
+    `);
+    const heex = findNewOrderHeex(files);
+    // No load: [:display] in the list call, fallback {to_string, id}
+    // shape in the Enum.map.
     expect(heex).toMatch(
       /\|> assign\(:customer_options, [\w.]+\.list_customers!\(\) \|> Enum\.map\(fn r -> \{to_string\(r\.id\), r\.id\} end\)\)/,
     );
