@@ -128,6 +128,24 @@ describe("DddHoverProvider", () => {
       hover: /function doubled\(\): int/,
     });
   });
+
+  it("hovers a slot-typed component param and shows the slot type", async () => {
+    // Without `DddType.slot` the hover would fall back to "unknown".
+    // The variant makes it carry through `resolveTypeRef` → `typeToString`
+    // and render correctly in the bubble.
+    await expectHoverFor({
+      text: `
+        system S {
+          ui WebApp {
+            component DetailView(<|>heading: slot) {
+              body: Stack { heading }
+            }
+          }
+        }`,
+      index: 0,
+      hover: /heading: slot/,
+    });
+  });
 });
 
 // Sanity-check: services factory completes without throwing.
