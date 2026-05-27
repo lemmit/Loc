@@ -122,9 +122,9 @@ function cloneBase(
   // NamedType
   return mkNamedType({
     $type: "NamedType",
-    target: { $refText: (b as { target: { $refText: string } }).target.$refText } as import(
-      "langium"
-    ).Reference<import("../language/generated/ast.js").NamedDecl>,
+    target: {
+      $refText: (b as { target: { $refText: string } }).target.$refText,
+    } as import("langium").Reference<import("../language/generated/ast.js").NamedDecl>,
   });
 }
 

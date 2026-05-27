@@ -158,10 +158,7 @@ function diffTable(prev: TableShape, next: TableShape, steps: MigrationStep[]): 
   }
 }
 
-export function buildMigrations(
-  sys: EnrichedSystemIR,
-  snapshots: SnapshotStore,
-): MigrationsIR[] {
+export function buildMigrations(sys: EnrichedSystemIR, snapshots: SnapshotStore): MigrationsIR[] {
   const out: MigrationsIR[] = [];
   for (const m of sys.modules) {
     if (!m.migrationsOwner) continue;

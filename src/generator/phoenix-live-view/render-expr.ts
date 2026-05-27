@@ -1,10 +1,4 @@
-import type {
-  AggregateIR,
-  BinOp,
-  EnrichedAggregateIR,
-  ExprIR,
-  TypeIR,
-} from "../../ir/loom-ir.js";
+import type { AggregateIR, BinOp, EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------

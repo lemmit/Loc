@@ -362,7 +362,11 @@ function findManyByIdsMethod(agg: EnrichedAggregateIR, ctx: BoundedContextIR): s
   );
 }
 
-function findByIdMethod(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace = false): string {
+function findByIdMethod(
+  agg: EnrichedAggregateIR,
+  ctx: BoundedContextIR,
+  emitTrace = false,
+): string {
   // Inner body of the `db.transaction(async (tx) => { … })` callback.
   // Built at 6-space indent so we can wrap it differently for --trace
   // (which needs an outer try/catch + tx_begin/commit/rollback logs)

@@ -55,7 +55,11 @@ const CS_WIRE_PRIMITIVE: Record<WirePrimitive, string> = {
 /** C# DTO property type for a `TypeIR`.  `dir` selects the suffix for
  *  nested value-object DTOs (`Request` for inputs, `Response` for
  *  outputs); entities always nest as `<Name>Response`. */
-export function wireType(t: TypeIR, ctx: EnrichedBoundedContextIR, dir: "request" | "response"): string {
+export function wireType(
+  t: TypeIR,
+  ctx: EnrichedBoundedContextIR,
+  dir: "request" | "response",
+): string {
   void ctx;
   const info = wireTypeInfo(t, dir);
   let s: string;
@@ -133,7 +137,11 @@ export function wireToCommandArgument(
 }
 
 /** Project a domain expression to its wire-shape Response. */
-export function projectToResponse(domainExpr: string, t: TypeIR, ctx: EnrichedBoundedContextIR): string {
+export function projectToResponse(
+  domainExpr: string,
+  t: TypeIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   const info = wireTypeInfo(t, "response");
   if (info.isNullable) {
     // C# doesn't narrow `T?` to `T` after `is null` test; unwrap
@@ -190,7 +198,11 @@ export function projectToResponse(domainExpr: string, t: TypeIR, ctx: EnrichedBo
 
 /** Convert a domain-typed expression to its wire-shape Request form.
  *  Symmetric with `projectToResponse` but wraps VOs as `<VO>Request`. */
-export function domainToRequestExpr(domainExpr: string, t: TypeIR, ctx: EnrichedBoundedContextIR): string {
+export function domainToRequestExpr(
+  domainExpr: string,
+  t: TypeIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   const info = wireTypeInfo(t, "request");
   if (info.isNullable) {
     const innerT = peelNullable(t);
@@ -275,11 +287,17 @@ export function projectEntityExpr(
   return `new ${entity.name}Response(${args.join(", ")})`;
 }
 
-export function aggregateResponseParams(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
+export function aggregateResponseParams(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   return responseRecordParams(agg, ctx);
 }
 
-export function entityResponseParams(part: EnrichedEntityPartIR, ctx: EnrichedBoundedContextIR): string {
+export function entityResponseParams(
+  part: EnrichedEntityPartIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   return responseRecordParams(part, ctx);
 }
 
@@ -302,9 +320,7 @@ function responseRecordParams(
   return parts.join(", ");
 }
 
-function isPart(
-  ent: EnrichedAggregateIR | EnrichedEntityPartIR,
-): ent is EnrichedEntityPartIR {
+function isPart(ent: EnrichedAggregateIR | EnrichedEntityPartIR): ent is EnrichedEntityPartIR {
   return "parentName" in ent;
 }
 
@@ -314,7 +330,10 @@ function containmentPartName(t: TypeIR): string | undefined {
 }
 
 /** Set of value objects reachable from an aggregate's surface. */
-export function valueObjectsUsedBy(agg: AggregateIR, ctx: EnrichedBoundedContextIR): ValueObjectIR[] {
+export function valueObjectsUsedBy(
+  agg: AggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): ValueObjectIR[] {
   const used = new Set<string>();
   const visit = (t: TypeIR) => {
     if (t.kind === "valueobject") used.add(t.name);
