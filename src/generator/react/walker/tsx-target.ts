@@ -24,7 +24,14 @@
 // ---------------------------------------------------------------------------
 
 import type { ExprIR, StateFieldIR, TypeIR } from "../../../ir/types/loom-ir.js";
-import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../../_walker/target.js";
+import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
+import type {
+  ApiCallSite,
+  RenderPosition,
+  StateRef,
+  TargetHookUse,
+  WalkerTarget,
+} from "../../_walker/target.js";
 
 /** TSX-flavoured `WalkerTarget`.  Stateless and pure — no walker
  *  context is captured; every method takes the data it needs.  Consumed
@@ -76,6 +83,34 @@ export const tsxTarget: WalkerTarget = {
   },
 
   // --- API binding seam ---------------------------------------------------
+
+  /** Turn a detected api call into React-Query naming + import.
+   *  `Customer.create` → `{ varName: "customerCreate", hookName:
+   *  "useCreateCustomer", importFrom: "../api/customer", argsRendered: [] }`.
+   *  View hooks (`Views.activeOrders`) take a different naming
+   *  shape (`activeOrdersView` / `useActiveOrdersView` /
+   *  `"../api/views"`).  Mirrors the formula at
+   *  `walker/api-hooks.ts:60-103` pre-extraction. */
+  buildHookUse(detected: DetectedApiCall, renderArg: (e: ExprIR) => string): TargetHookUse {
+    if (detected.kind === "view") {
+      const viewName = detected.aggregateName;
+      const viewPascal = upperFirstLocal(viewName);
+      return {
+        varName: `${lowerFirstLocal(viewName)}View`,
+        hookName: `use${viewPascal}View`,
+        importFrom: "../api/views",
+        argsRendered: [],
+      };
+    }
+    const aggregate = detected.aggregateName;
+    const op = detected.operation;
+    return {
+      varName: hookVarName(aggregate, op),
+      hookName: hookFnName(aggregate, op),
+      importFrom: `../api/${lowerFirstLocal(upperFirstLocal(aggregate))}`,
+      argsRendered: detected.args.map(renderArg),
+    };
+  },
 
   /** TSX rewrites the IR call site to the local hook variable
    *  produced by `renderApiHoisting`.  See the contract docs at
