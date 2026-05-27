@@ -1,4 +1,11 @@
 import type { AstNode } from "langium";
+import {
+  readArgBoolLiteral,
+  readArgInt,
+  readArgRef,
+  readArgRefs,
+  readArgString,
+} from "../../macro-api/_read.js";
 import type {
   Aggregate,
   Api,
@@ -50,13 +57,6 @@ import type {
   View,
   Workflow,
 } from "../generated/ast.js";
-import {
-  readArgBoolLiteral,
-  readArgInt,
-  readArgRef,
-  readArgRefs,
-  readArgString,
-} from "../../macro-api/_read.js";
 import { printExpr } from "./print-expr.js";
 import { printStmt } from "./print-stmt.js";
 
