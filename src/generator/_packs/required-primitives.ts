@@ -95,12 +95,19 @@ const SHARED_PRIMITIVES: readonly string[] = [
 ];
 
 // Primitives required only in TSX packs.  Three slots `ashPhoenix/v3`
-// doesn't ship:
-//   - `primitive-code-block`  — not in the HEEx pack.
-//   - `primitive-icon`        — not in the HEEx pack.
-//   - `primitive-modal`       — `heex-walker.ts` renders a placeholder;
-//                                promoting this to the HEEx required
-//                                set requires backfilling ashPhoenix v3.
+// doesn't ship as templates:
+//   - `primitive-code-block`  — not in the HEEx pack; emitted inline by
+//                                `heex-walker.ts:renderCodeBlock`.
+//   - `primitive-icon`        — not in the HEEx pack; emitted inline by
+//                                `heex-walker.ts:renderIcon`.
+//   - `primitive-modal`       — emitted inline by `heex-walker.ts:renderModal`
+//                                as a `<.button phx-click={show_modal(id)}>`
+//                                trigger + `<.modal id=…>` body hosting a
+//                                `<.simple_form>`.  HEEx body primitives are
+//                                walker-inline by design (one CoreComponents
+//                                convention vs TSX's competing libraries) — no
+//                                pack template is needed and the gate is
+//                                deliberately not extended to HEEx for these.
 const TSX_ONLY_PRIMITIVES: readonly string[] = [
   "primitive-code-block",
   "primitive-icon",

@@ -1201,6 +1201,11 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
     // (these are Mantine-specific props; CoreComponents.table doesn't use them)
   }
   const tableId = testid || "data-table";
+  // When `testid:` is supplied, also emit it as `data-testid` so
+  // Playwright/lvtest selectors work the same way they do on TSX
+  // tables.  The `id=` attribute stays for the `<.table>` LiveView
+  // hook contract (required by Phoenix.Component).
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
   const colSlots = cols
     .map((c) =>
       c.kind === "call"
@@ -1209,7 +1214,7 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
     )
     .join("\n");
   return [
-    `<.table id="${tableId}" rows={${rowsExpr}}>`,
+    `<.table id="${tableId}"${testidAttr} rows={${rowsExpr}}>`,
     colSlots.length > 0 ? indent(colSlots, 2) : `  <:col :let={_row} label="Data"></:col>`,
     `</.table>`,
   ].join("\n");
@@ -1398,6 +1403,13 @@ export function renderKeyValueRow(
   expr: Extract<ExprIR, { kind: "call" }>,
   ctx: WalkContext,
 ): string {
+  let testid = "";
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (name === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const label =
     positionals[0]?.kind === "literal"
@@ -1406,43 +1418,51 @@ export function renderKeyValueRow(
         ? renderInTemplate(positionals[0], ctx)
         : "Field";
   const value = positionals[1] ? renderInTemplate(positionals[1], ctx) : "";
-  return `<div class="key-value-row">\n  <dt class="key-value-label">${label}</dt>\n  <dd class="key-value-value">${value}</dd>\n</div>`;
+  return `<div class="key-value-row"${testidAttr}>\n  <dt class="key-value-label">${label}</dt>\n  <dd class="key-value-value">${value}</dd>\n</div>`;
 }
 
 /** `Skeleton(count: N)` → `<div class="animate-pulse">` repeated loading lines. */
 export function renderSkeleton(expr: Extract<ExprIR, { kind: "call" }>, _ctx: WalkContext): string {
   let count = 3;
+  let testid = "";
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "count" && arg.kind === "literal") {
       count = parseInt(arg.value, 10) || 3;
+    } else if (name === "testid" && arg.kind === "literal") {
+      testid = arg.value;
     }
   }
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
   const lines = Array.from(
     { length: count },
     () => `  <div class="h-4 bg-gray-200 rounded animate-pulse mb-2"></div>`,
   ).join("\n");
-  return `<div class="skeleton">\n${lines}\n</div>`;
+  return `<div class="skeleton"${testidAttr}>\n${lines}\n</div>`;
 }
 
 /** `Alert("message")` → `<div class="alert">` */
 export function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let color = "red";
   let message = "";
+  let testid = "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   if (positionals[0]) message = renderInTemplate(positionals[0], ctx);
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "color" && arg.kind === "literal") color = arg.value;
+    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
-  return `<div class="alert alert-${color}" role="alert">${message}</div>`;
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  return `<div class="alert alert-${color}" role="alert"${testidAttr}>${message}</div>`;
 }
 
 /** `IdLink(value, of: Aggregate)` → `<.link navigate={...}>value</.link>` */
 export function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let aggName = "";
+  let testid = "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const valueExpr = positionals[0];
   const valueHeex = valueExpr ? renderInTemplate(valueExpr, ctx) : "";
@@ -1450,12 +1470,14 @@ export function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "of" && arg.kind === "ref") aggName = snake(plural(arg.name));
+    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
   if (aggName && valueExpr) {
     const idVal = renderExpr(valueExpr, { ...ctx, position: "template" });
-    return `<.link navigate={~p"/${aggName}/#{${idVal}}"}>${valueHeex}</.link>`;
+    return `<.link navigate={~p"/${aggName}/#{${idVal}}"}${testidAttr}>${valueHeex}</.link>`;
   }
-  return `<span>${valueHeex}</span>`;
+  return `<span${testidAttr}>${valueHeex}</span>`;
 }
 
 /** `DateDisplay(date_expr)` → `<time>` with formatted date. */
@@ -1463,18 +1485,32 @@ export function renderDateDisplay(
   expr: Extract<ExprIR, { kind: "call" }>,
   ctx: WalkContext,
 ): string {
+  let testid = "";
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (name === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const dateExpr = positionals[0];
-  if (!dateExpr) return `<time></time>`;
+  if (!dateExpr) return `<time${testidAttr}></time>`;
   const val = renderExpr(dateExpr, { ...ctx, position: "template" });
-  return `<time datetime={to_string(${val})}><%= Calendar.strftime(${val}, "%Y-%m-%d") %></time>`;
+  return `<time datetime={to_string(${val})}${testidAttr}><%= Calendar.strftime(${val}, "%Y-%m-%d") %></time>`;
 }
 
 /** `EnumBadge(enum_value)` → `<.badge>` with the enum value. */
 export function renderEnumBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  let testid = "";
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (name === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const val = positionals[0] ? renderInTemplate(positionals[0], ctx) : "";
-  return `<span class="badge badge-enum">${val}</span>`;
+  return `<span class="badge badge-enum"${testidAttr}>${val}</span>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1721,6 +1757,13 @@ function renderPrimitive(
         const eventName = hoistLambdaToHandler(arg, ctx);
         const phxAttr = name === "onSubmit" ? "phx-submit" : "phx-click";
         namedAttrs.push(`${phxAttr}="${eventName}"`);
+      } else if (name === "testid") {
+        // The DSL `testid:` arg maps to the HTML `data-testid` attribute
+        // (what Playwright / lvtest assertions look for).  Without this
+        // special-case the generic else-branch below would emit a bare
+        // `testid=` attribute which no test harness recognises.
+        const value = renderAttrValue(arg, ctx, false);
+        namedAttrs.push(`data-testid=${value}`);
       } else {
         const value = renderAttrValue(arg, ctx, spec.staticAttrs?.includes(name) ?? false);
         namedAttrs.push(`${snake(name)}=${value}`);
@@ -1743,7 +1786,8 @@ function renderPrimitive(
     return `<.header${attrs}>${text}</.header>`;
   }
   if (spec.tag === ".empty") {
-    return `<.empty />`;
+    const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";
+    return `<.empty${attrs} />`;
   }
 
   // Other primitives — render children (if any).
