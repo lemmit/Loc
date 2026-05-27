@@ -27,6 +27,7 @@ import type {
   SystemIR,
   TypeIR,
   UiIR,
+  ValueObjectIR,
 } from "../../ir/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import {
@@ -76,6 +77,10 @@ export function emitLiveViewPages(args: {
   // type="select" options={...}>` instead of the legacy text input.
   // Built once across every loaded context.
   const enumsByName = new Map<string, EnumIR>();
+  // Workspace-wide VO registry — drives nested-form dispatch
+  // (`<.inputs_for :let={…}>`) for value-object-typed aggregate
+  // fields.  See `renderFieldInputForField` in heex-walker.ts.
+  const valueObjectsByName = new Map<string, ValueObjectIR>();
   for (const ctx of contexts) {
     const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
     for (const agg of ctx.aggregates) {
@@ -84,6 +89,7 @@ export function emitLiveViewPages(args: {
       contextModuleByAggName.set(agg.name, ctxModule);
     }
     for (const en of ctx.enums) enumsByName.set(en.name, en);
+    for (const vo of ctx.valueObjects) valueObjectsByName.set(vo.name, vo);
   }
 
   // Walk each user component once to capture its `Action` bindings +
@@ -98,7 +104,15 @@ export function emitLiveViewPages(args: {
       body: c.body,
       source: "explicit",
     } as PageIR;
-    const w = walkBodyToHeex(c.body, synthPage, ui, appModule, aggregatesByName, enumsByName);
+    const w = walkBodyToHeex(
+      c.body,
+      synthPage,
+      ui,
+      appModule,
+      aggregatesByName,
+      enumsByName,
+      valueObjectsByName,
+    );
     componentInfo.set(c.name, {
       actionBindings: w.actionBindings,
       usedComponents: w.usedComponents,
@@ -117,6 +131,7 @@ export function emitLiveViewPages(args: {
       ui,
       aggregatesByName,
       enumsByName,
+      valueObjectsByName,
       contextModuleByAggName,
       componentInfo,
     });
@@ -144,7 +159,7 @@ export function emitLiveViewPages(args: {
   if (ui.components.length > 0) {
     out.set(
       `lib/${appName}_web/components/ui_components.ex`,
-      renderUiComponents({ ui, appModule, aggregatesByName, enumsByName }),
+      renderUiComponents({ ui, appModule, aggregatesByName, enumsByName, valueObjectsByName }),
     );
   }
 
@@ -160,6 +175,9 @@ interface RenderArgs {
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
   /** Workspace-wide enum registry — drives form select-input dispatch. */
   enumsByName: ReadonlyMap<string, EnumIR>;
+  /** Workspace-wide VO registry — drives nested-form dispatch
+   *  (`<.inputs_for :let={…}>`) for VO-typed aggregate fields. */
+  valueObjectsByName: ReadonlyMap<string, ValueObjectIR>;
   /** Module-qualified name of the bounded context an aggregate lives in,
    *  keyed by aggregate PascalCase name.  Used to build the Ash
    *  `for_create(<Ctx>.<Agg>, :create)` call in mount/3. */
@@ -232,6 +250,7 @@ function renderLiveView(a: RenderArgs): string {
     ui,
     aggregatesByName,
     enumsByName,
+    valueObjectsByName,
     contextModuleByAggName,
     componentInfo,
   } = a;
@@ -244,7 +263,15 @@ function renderLiveView(a: RenderArgs): string {
   // populated with a walker-stdlib ExprIR tree.  The walker produces
   // handle_event clauses and alias lines from helper imports the body
   // actually references.
-  const walked = walkBodyToHeex(page.body, page, ui, appModule, aggregatesByName, enumsByName);
+  const walked = walkBodyToHeex(
+    page.body,
+    page,
+    ui,
+    appModule,
+    aggregatesByName,
+    enumsByName,
+    valueObjectsByName,
+  );
   const heex = walked.heex;
   const handlers: HandleEventClause[] = walked.handlers;
   const aliasLines: string[] = walked.aliasLines;
@@ -351,9 +378,7 @@ function renderMount(
     const tupleFn = hasDisplay
       ? `fn r -> {r.display, r.id} end`
       : `fn r -> {to_string(r.id), r.id} end`;
-    assigns.push(
-      `      |> assign(:${aggSnake}_options, ${listCall} |> Enum.map(${tupleFn}))`,
-    );
+    assigns.push(`      |> assign(:${aggSnake}_options, ${listCall} |> Enum.map(${tupleFn}))`);
   }
   // @form assignment — one per Form(of:/runs:) call in the page body.
   // For aggregate-of: AshPhoenix.Form.for_create(<Ctx>.<Agg>, :create);
@@ -591,8 +616,9 @@ function renderUiComponents(args: {
   appModule: string;
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
   enumsByName: ReadonlyMap<string, EnumIR>;
+  valueObjectsByName: ReadonlyMap<string, ValueObjectIR>;
 }): string {
-  const { ui, appModule, aggregatesByName, enumsByName } = args;
+  const { ui, appModule, aggregatesByName, enumsByName, valueObjectsByName } = args;
   const webModule = `${appModule}Web`;
   const defs = ui.components.map((c) => {
     const synthPage = {
@@ -602,7 +628,15 @@ function renderUiComponents(args: {
       body: c.body,
       source: "explicit",
     } as PageIR;
-    const walked = walkBodyToHeex(c.body, synthPage, ui, appModule, aggregatesByName, enumsByName);
+    const walked = walkBodyToHeex(
+      c.body,
+      synthPage,
+      ui,
+      appModule,
+      aggregatesByName,
+      enumsByName,
+      valueObjectsByName,
+    );
     const attrLines = c.params
       .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)
       .join("\n");
