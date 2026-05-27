@@ -38,6 +38,13 @@ import type {
   ParamType,
 } from "../macro-api/define.js";
 import { _withOrigin } from "../macro-api/factories.js";
+import {
+  readArgBool,
+  readArgInt,
+  readArgRef,
+  readArgRefs,
+  readArgString,
+} from "../macro-api/_read.js";
 import { loadStdlibMacros } from "../stdlib/index.js";
 import {
   type Aggregate,
@@ -246,8 +253,14 @@ function expandOneCall(
     try {
       childProduced = _withOrigin(origin, () =>
         child.expand({
-          target: opts.target as any,
-          args: (opts.args ?? {}) as any,
+          // `child` is a `MacroDefinition` whose T is erased to the
+          // upper bound here; `expand` therefore expects the union
+          // `TargetNodeOf[MacroTarget]` (Aggregate | Ui | BoundedContext).
+          // The caller has already chosen the right concrete `target`
+          // for `child.target`, but the type system can't see that —
+          // this cast bridges the variance.
+          target: opts.target as Aggregate,
+          args: opts.args ?? {},
           origin,
           invokeMacro,
         }),
@@ -278,7 +291,14 @@ function expandOneCall(
   try {
     produced = _withOrigin(origin, () =>
       macro.expand({
-        target: host as any,
+        // `macro` is a `MacroDefinition` whose T is erased to the
+        // upper bound here; `expand` therefore expects the union
+        // `TargetNodeOf[MacroTarget]` (Aggregate | Ui | BoundedContext).
+        // `host` is the same union; the runtime check at the top of
+        // this function (`macro.target !== hostKind`) guarantees the
+        // pairing, but the type system can't see that — this cast
+        // bridges the variance.
+        target: host as Aggregate,
         args: argResult.values,
         origin,
         invokeMacro,
@@ -506,20 +526,20 @@ function coerceArg(
   const v = arg.value;
   switch (spec.kind) {
     case "string":
-      if (v.$type === "MacroArgString") return { ok: true, value: (v as any).string };
+      if (v.$type === "MacroArgString") return { ok: true, value: readArgString(v)! };
       break;
     case "bool":
-      if (v.$type === "MacroArgBool") return { ok: true, value: (v as any).bool === "true" };
+      if (v.$type === "MacroArgBool") return { ok: true, value: readArgBool(v)! };
       break;
     case "int":
-      if (v.$type === "MacroArgInt") return { ok: true, value: Number((v as any).int) };
+      if (v.$type === "MacroArgInt") return { ok: true, value: readArgInt(v)! };
       break;
     case "ref":
       if (v.$type === "MacroArgRef") {
         // After the grammar change, MacroArgRef.ref is a plain
         // string (not a Langium Reference) — the expander does
         // its own lookup against the per-document inventory.
-        const refText = (v as any).ref as string | undefined;
+        const refText = readArgRef(v);
         if (!refText) return { ok: false };
         const resolved = resolveRef(inv, spec.of, refText);
         if (!resolved) {
@@ -536,7 +556,7 @@ function coerceArg(
       break;
     case "refList":
       if (v.$type === "MacroArgRefList") {
-        const refs = ((v as any).refs ?? []) as string[];
+        const refs = readArgRefs(v);
         const resolved: AstNode[] = [];
         let anyBad = false;
         for (const refText of refs) {

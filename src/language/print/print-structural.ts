@@ -50,6 +50,13 @@ import type {
   View,
   Workflow,
 } from "../generated/ast.js";
+import {
+  readArgBoolLiteral,
+  readArgInt,
+  readArgRef,
+  readArgRefs,
+  readArgString,
+} from "../../macro-api/_read.js";
 import { printExpr } from "./print-expr.js";
 import { printStmt } from "./print-stmt.js";
 
@@ -451,7 +458,7 @@ function printWithClause(wc: import("../generated/ast.js").WithClause | undefine
 
 function printMacroCall(c: import("../generated/ast.js").MacroCall): string {
   const args = (c.args ?? []).map(printMacroArg);
-  if (args.length === 0 && (c as any).$cstNode?.text?.endsWith("()")) {
+  if (args.length === 0 && c.$cstNode?.text?.endsWith("()")) {
     return `${c.name}()`;
   }
   return args.length === 0 ? c.name : `${c.name}(${args.join(", ")})`;
@@ -464,15 +471,15 @@ function printMacroArg(a: import("../generated/ast.js").MacroArg): string {
 function printMacroArgValue(v: import("../generated/ast.js").MacroArgValue): string {
   switch (v.$type) {
     case "MacroArgString":
-      return quote((v as any).string);
+      return quote(readArgString(v) ?? "");
     case "MacroArgBool":
-      return String((v as any).bool);
+      return readArgBoolLiteral(v) ?? "false";
     case "MacroArgInt":
-      return String((v as any).int);
+      return String(readArgInt(v) ?? 0);
     case "MacroArgRef":
-      return (v as any).ref;
+      return readArgRef(v) ?? "";
     case "MacroArgRefList":
-      return `[${((v as any).refs ?? []).join(", ")}]`;
+      return `[${readArgRefs(v).join(", ")}]`;
   }
 }
 
