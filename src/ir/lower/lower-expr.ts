@@ -78,309 +78,23 @@ import type {
 } from "../types/loom-ir.js";
 import { lit } from "../types/loom-ir.js";
 import { snapshotIdFor } from "../util/prov-id.js";
+import { lowerStatement } from "./lower-stmt.js";
+import {
+  ancestorAggregate,
+  cstText,
+  type Env,
+  findEntityByName,
+  findFunctionInEnv,
+  findValueObjectByName,
+  lowerType,
+  USER_SHAPE_NAME,
+  withLocal,
+} from "./lower-types.js";
 
 /** Synthetic entity name used to type the `currentUser` magic
  *  identifier.  Member access on the user shape resolves through
  *  `env.user.fields` rather than the bounded-context namespace, so
  *  the name doesn't collide with any user-declared aggregate / part. */
-export const USER_SHAPE_NAME = "__User__";
-
-// ---------------------------------------------------------------------------
-// Lowering env + the IR-producing layer for expressions, statements, and
-// types.  Owns name resolution, member typing, and the pure
-// AST-walk helpers.
-//
-// `lower.ts` (the structure layer) imports from this file; this file
-// imports nothing from `lower.ts` — the dependency is one-directional
-// so we can always reason about the expression layer in isolation.
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Env
-// ---------------------------------------------------------------------------
-
-export interface Env {
-  /** The enclosing bounded context.  Undefined for `test e2e` blocks
-   * that live at the system level, outside any context. */
-  ctx?: BoundedContext;
-  aggregate?: Aggregate;
-  part?: EntityPart;
-  valueObject?: ValueObject;
-  locals: Map<string, { kind: "param" | "let" | "lambda"; type: TypeIR }>;
-  /** System-wide user-claim shape — the lowered `user { ... }` block.
-   *  Threaded down by the lowering structure layer so every
-   *  expression context (operation / workflow / view / test) can
-   *  resolve the magic `currentUser` identifier.  Undefined for
-   *  systems / loose contexts that don't declare a user block. */
-  user?: UserIR;
-  /** Module-scoped permission catalogue — populated when the
-   *  enclosing context lives inside a module that declares one or
-   *  more `permissions { ... }` blocks.  Drives resolution of the
-   *  magic `permissions.<name>` identifier in expression bodies.
-   *  Loose contexts (no enclosing module) leave it undefined; the
-   *  validator surfaces a friendly diagnostic for any
-   *  `permissions.X` reference there. */
-  modulePermissions?: PermissionDeclIR[];
-}
-
-export function newEnv(
-  ctx: BoundedContext,
-  user?: UserIR,
-  modulePermissions?: PermissionDeclIR[],
-): Env {
-  return { ctx, locals: new Map(), user, modulePermissions };
-}
-
-export function withLocal(
-  env: Env,
-  name: string,
-  kind: "param" | "let" | "lambda",
-  type: TypeIR,
-): Env {
-  const next = new Map(env.locals);
-  next.set(name, { kind, type });
-  return { ...env, locals: next };
-}
-
-export function inAggregate(env: Env, agg: Aggregate): Env {
-  return { ...env, aggregate: agg, part: undefined, valueObject: undefined };
-}
-
-export function inPart(env: Env, agg: Aggregate, part: EntityPart): Env {
-  return { ...env, aggregate: agg, part, valueObject: undefined };
-}
-
-export function inValueObject(env: Env, vo: ValueObject): Env {
-  return { ...env, valueObject: vo, aggregate: undefined, part: undefined };
-}
-
-export interface ScopeCandidate {
-  name: string;
-  kind:
-    | "current-user"
-    | "param"
-    | "let"
-    | "lambda"
-    | "property"
-    | "derived"
-    | "helper-fn"
-    | "enum-value";
-}
-
-/** Enumerate the names resolvable as a bare `NameRef` in `env` — the
- *  enumeration counterpart to `resolveNameRef` below.  Drives scope-aware name
- *  suggestions in tooling (the web model builder's expression editor) so the
- *  in-scope rules live in one place.  Order follows resolution precedence
- *  (currentUser → locals → properties/containments/derived/helpers → enum
- *  values); the first occurrence of a name wins, mirroring shadowing. */
-export function inScopeNames(env: Env): ScopeCandidate[] {
-  const out: ScopeCandidate[] = [];
-  const seen = new Set<string>();
-  const add = (name: string, kind: ScopeCandidate["kind"]): void => {
-    if (seen.has(name)) return;
-    seen.add(name);
-    out.push({ name, kind });
-  };
-  if (env.user) add("currentUser", "current-user");
-  for (const [name, info] of env.locals) add(name, info.kind);
-  const owner = env.part ?? env.aggregate ?? env.valueObject;
-  if (owner) {
-    for (const m of owner.members) {
-      if (isProperty(m) || isContainment(m)) add(m.name, "property");
-      else if (isDerivedProp(m)) add(m.name, "derived");
-      else if (isFunctionDecl(m)) add(m.name, "helper-fn");
-    }
-  }
-  if (env.ctx) {
-    for (const m of env.ctx.members) {
-      if (isEnumDecl(m)) for (const v of m.values) add(v.name, "enum-value");
-    }
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export function lowerType(t: TypeRef | undefined): TypeIR {
-  if (!t) return { kind: "primitive", name: "string" };
-  let inner = lowerBase(t);
-  if (t.array) inner = { kind: "array", element: inner };
-  if (t.optional) inner = { kind: "optional", inner };
-  return inner;
-}
-
-function lowerBase(t: TypeRef): TypeIR {
-  const base = t.base;
-  if (isPrimitiveType(base)) return { kind: "primitive", name: base.name };
-  if (isSlotType(base)) return { kind: "slot" };
-  if (isIdType(base)) {
-    const target = base.target?.ref;
-    let valueType: IdValueType = "guid";
-    if (target && isAggregate(target)) {
-      valueType = (target.idKind ?? "guid") as IdValueType;
-    } else if (target && isEntityPart(target)) {
-      const owner = ancestorAggregate(target);
-      valueType = (owner?.idKind ?? "guid") as IdValueType;
-    }
-    // Macro-emitted references can lack a `$refNode`, which causes
-    // Langium's default Linker to skip resolution silently — `ref`
-    // stays undefined even when the target exists in scope.  Fall
-    // back to the reference text so the IR still names the target;
-    // downstream generators pick up the right `<Name>Id` symbol.
-    // Tracked separately from the "genuinely unresolved" case
-    // because the text is authoritative for synthesised refs.
-    const targetName = target?.name ?? base.target?.$refText ?? "Unknown";
-    return {
-      kind: "id",
-      targetName,
-      valueType,
-    };
-  }
-  if (isNamedType(base)) {
-    const target = base.target?.ref;
-    if (!target) return { kind: "primitive", name: "string" };
-    if (isEnumDecl(target)) return { kind: "enum", name: target.name };
-    if (isValueObject(target)) return { kind: "valueobject", name: target.name };
-    if (isAggregate(target)) return { kind: "entity", name: target.name };
-    if (isEntityPart(target)) return { kind: "entity", name: target.name };
-  }
-  return { kind: "primitive", name: "string" };
-}
-
-// ---------------------------------------------------------------------------
-// Statements
-// ---------------------------------------------------------------------------
-
-export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAfter: Env } {
-  if (isPreconditionStmt(stmt)) {
-    return {
-      stmt: {
-        kind: "precondition",
-        expr: lowerExpr(stmt.expr, env),
-        source: cstText(stmt.expr),
-      },
-      envAfter: env,
-    };
-  }
-  if (isRequiresStmt(stmt)) {
-    // `requires` lowers like `precondition` but with a different
-    // statement kind so the renderer can throw a 403-mapping
-    // exception instead of the 400-mapping DomainException.
-    return {
-      stmt: {
-        kind: "requires",
-        expr: lowerExpr(stmt.expr, env),
-        source: cstText(stmt.expr),
-      },
-      envAfter: env,
-    };
-  }
-  if (isLetStmt(stmt)) {
-    const expr = lowerExpr(stmt.expr, env);
-    const t = inferExprType(stmt.expr, env);
-    const next = withLocal(env, stmt.name, "let", t);
-    return {
-      stmt: { kind: "let", name: stmt.name, expr, type: t },
-      envAfter: next,
-    };
-  }
-  if (isEmitStmt(stmt)) {
-    return {
-      stmt: {
-        kind: "emit",
-        eventName: stmt.event?.ref?.name ?? "Unknown",
-        fields: stmt.fields.map((f) => ({
-          name: f.name,
-          value: lowerExpr(f.value, env),
-        })),
-      },
-      envAfter: env,
-    };
-  }
-  if (isAssignOrCallStmt(stmt)) {
-    const lv: LValue = stmt.target;
-    if (!stmt.op) {
-      // `name(args)` — local function or private operation.
-      if (lv.call && lv.tail.length === 0) {
-        const fn = findFunctionInEnv(env, lv.head);
-        const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
-        const target: "function" | "private-operation" = fn ? "function" : "private-operation";
-        return {
-          stmt: { kind: "call", target, name: lv.head, args },
-          envAfter: env,
-        };
-      }
-      // `a.b.c(args)` — chained call (e.g. `api.orders.addLine(...)`
-      // in an e2e body).  Synthesise a method-call expression and
-      // wrap as an expression-statement.
-      if (lv.call && lv.tail.length > 0) {
-        let recv: ExprIR = { kind: "ref", name: lv.head, refKind: "unknown" };
-        for (let i = 0; i < lv.tail.length - 1; i++) {
-          recv = {
-            kind: "member",
-            receiver: recv,
-            member: lv.tail[i]!,
-            receiverType: { kind: "primitive", name: "string" },
-            memberType: { kind: "primitive", name: "string" },
-          };
-        }
-        const lastMember = lv.tail[lv.tail.length - 1]!;
-        const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
-        const expr: ExprIR = {
-          kind: "method-call",
-          receiver: recv,
-          member: lastMember,
-          args,
-          receiverType: { kind: "primitive", name: "string" },
-          isCollectionOp: false,
-        };
-        return { stmt: { kind: "expression", expr }, envAfter: env };
-      }
-      return {
-        stmt: { kind: "call", target: "function", name: lv.head, args: [] },
-        envAfter: env,
-      };
-    }
-    const path: PathIR = { segments: [lv.head, ...lv.tail] };
-    const prov = provSiteFor(path, stmt.value, stmt, env);
-    if (stmt.op === ":=") {
-      // Contextual lowering: a numeric literal flowing into a
-      // money-typed target lowers as money — `subtotal := 0.50`
-      // becomes `lit("money", "0.50")` so the backend emits the
-      // precise constructor.
-      const targetType = pathType(path, env);
-      const value = lowerExprInContext(stmt.value, targetType, env);
-      return {
-        stmt: { kind: "assign", target: path, value, targetType, prov },
-        envAfter: env,
-      };
-    }
-    if (stmt.op === "+=" || stmt.op === "-=") {
-      const targetType = pathType(path, env);
-      const elementType = targetType.kind === "array" ? targetType.element : targetType;
-      // Element-type context applies for both array push (`+=`) and
-      // remove (`-=`) — same numeric-literal-into-money elaboration.
-      const value = lowerExprInContext(stmt.value, elementType, env);
-      return {
-        stmt: {
-          kind: stmt.op === "+=" ? "add" : "remove",
-          target: path,
-          value,
-          elementType,
-          prov,
-        },
-        envAfter: env,
-      };
-    }
-  }
-  // Fallback no-op
-  return {
-    stmt: { kind: "call", target: "function", name: "<unknown>", args: [] },
-    envAfter: env,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Expressions
@@ -1450,50 +1164,6 @@ function memberOnValueObject(vo: ValueObject, name: string): TypeIR {
   return { kind: "primitive", name: "string" };
 }
 
-function findEntityByName(env: Env, name: string): Aggregate | EntityPart | undefined {
-  if (!env.ctx) return undefined;
-  for (const m of env.ctx.members) {
-    if (isAggregate(m)) {
-      if (m.name === name) return m;
-      for (const inner of m.members) {
-        if (isEntityPart(inner) && inner.name === name) return inner;
-      }
-    }
-  }
-  return undefined;
-}
-
-function findValueObjectByName(env: Env, name: string): ValueObject | undefined {
-  if (!env.ctx) return undefined;
-  for (const m of env.ctx.members) {
-    if (isValueObject(m) && m.name === name) return m;
-  }
-  return undefined;
-}
-
-export function findFunctionInEnv(env: Env, name: string): FunctionDecl | undefined {
-  const owners: Array<Aggregate | EntityPart | ValueObject | undefined> = [
-    env.part,
-    env.aggregate,
-    env.valueObject,
-  ];
-  for (const o of owners) {
-    if (!o) continue;
-    for (const m of o.members) {
-      if (isFunctionDecl(m) && m.name === name) return m;
-    }
-  }
-  return undefined;
-}
-
-export function findOperationInEnv(env: Env, name: string): Operation | undefined {
-  if (!env.aggregate) return undefined;
-  for (const m of env.aggregate.members) {
-    if (isOperation(m) && m.name === name) return m;
-  }
-  return undefined;
-}
-
 // ---------------------------------------------------------------------------
 // Path typing — for assign/add/remove statements
 // ---------------------------------------------------------------------------
@@ -1518,7 +1188,7 @@ function resolveProvenancedProperty(
 
 /** Build the per-site snapshot metadata for an instrumented write, or
  *  undefined when the target is not a provenanced field. */
-function provSiteFor(
+export function provSiteFor(
   path: PathIR,
   valueNode: Expression | undefined,
   stmt: AstNode,
@@ -1539,7 +1209,7 @@ function provSiteFor(
   };
 }
 
-function pathType(path: PathIR, env: Env): TypeIR {
+export function pathType(path: PathIR, env: Env): TypeIR {
   if (path.segments.length === 0) return { kind: "primitive", name: "string" };
   const head = path.segments[0]!;
   let cur: TypeIR;
@@ -1584,23 +1254,4 @@ function stepInto(t: TypeIR, name: string, env: Env): TypeIR {
     if (target) return memberOnEntity(target, name);
   }
   return { kind: "primitive", name: "string" };
-}
-
-// ---------------------------------------------------------------------------
-// Misc AST helpers
-// ---------------------------------------------------------------------------
-
-export function ancestorAggregate(node: AstNode): Aggregate | undefined {
-  let cur: AstNode | undefined = node;
-  while (cur) {
-    if (isAggregate(cur)) return cur;
-    cur = cur.$container;
-  }
-  return undefined;
-}
-
-export function cstText(node: AstNode | undefined): string {
-  if (!node) return "";
-  const cst = (node as { $cstNode?: { text?: string } }).$cstNode;
-  return cst?.text ?? "<expr>";
 }
