@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Loom — a DSL that weaves Domain-Driven systems</title>
-  <meta name="description" content="Loom is a Langium-based DSL for Domain-Driven Design. Write aggregates, value objects, invariants, and operations in .ddd; generate a runnable Hono + .NET + React + Phoenix LiveView system, wired together as one docker compose stack." />
+  <meta name="description" content="Loom is a high-level domain-driven DSL. Describe aggregates, invariants, and operations once. Switch your runtime mid-project, swap design systems, regenerate the whole stack — a guardrail against architectural drift and LLM hallucination." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -394,8 +394,9 @@
       </a>
       <nav class="nav-links" aria-label="Primary">
         <a href="#vision">Vision</a>
-        <a href="#pipeline">Pipeline</a>
-        <a href="#platforms">Platforms</a>
+        <a href="#targets">Switch targets</a>
+        <a href="#designs">Design systems</a>
+        <a href="#llm-safe">LLM-safe</a>
         <a href="#cli">CLI</a>
         <a class="btn" href="https://github.com/lemmit/loc" target="_blank" rel="noopener">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2.05c-3.2.7-3.87-1.37-3.87-1.37-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.69 1.24 3.35.95.1-.74.4-1.24.72-1.52-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.09-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.15 1.18a10.96 10.96 0 0 1 5.74 0c2.18-1.49 3.14-1.18 3.14-1.18.63 1.58.24 2.75.12 3.04.74.8 1.18 1.83 1.18 3.09 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.13v3.16c0 .31.21.67.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/></svg>
@@ -409,18 +410,17 @@
   <section class="hero">
     <div class="container hero-grid">
       <div>
-        <span class="eyebrow"><span class="dot"></span> Langium-based DSL · Source-available</span>
+        <span class="eyebrow"><span class="dot"></span> Domain-first · Source-available</span>
         <h1 class="hero-title">
           Weave a domain model.<br/>
           <span class="grad">Generate the whole system.</span>
         </h1>
         <p class="hero-sub">
-          Loom is a high-descriptive DSL for Domain-Driven Design.
-          Write aggregates, value objects, invariants, and operations in
-          <code class="mono-chip">.ddd</code> &mdash; and mechanically generate
-          a runnable Hono&nbsp;+&nbsp;.NET&nbsp;+&nbsp;React&nbsp;+&nbsp;Phoenix
-          LiveView system, wired together as one
-          <code class="mono-chip">docker compose</code> stack.
+          Loom is a high-level DSL for Domain-Driven Design.
+          Describe aggregates, invariants, and operations once &mdash;
+          then pick your runtime, swap your design system, regenerate
+          the whole stack on demand.  Frontend, backend, database, and
+          tests stay in lockstep because they all come from the same source.
         </p>
         <div class="hero-cta">
           <a class="btn primary" href="playground/">
@@ -432,9 +432,9 @@
           <a class="btn" href="language.md">Language reference</a>
         </div>
         <div class="hero-meta">
-          <span><span class="pip"></span> Type-safe end-to-end</span>
-          <span><span class="pip"></span> DDD-faithful by construction</span>
-          <span><span class="pip"></span> 2,300+ unit tests · opt-in e2e</span>
+          <span><span class="pip"></span> Switch runtimes mid-project</span>
+          <span><span class="pip"></span> Five design systems, one page DSL</span>
+          <span><span class="pip"></span> A guardrail for LLM-assisted dev</span>
         </div>
       </div>
 
@@ -462,9 +462,9 @@
   }
 }
 
-<span class="tok-c">// Three deployables, one stack:</span>
-<span class="tok-k">deployable</span> <span class="tok-i">api</span>     { <span class="tok-i">platform</span>: <span class="tok-t">dotnet</span>, <span class="tok-i">modules</span>: <span class="tok-t">Sales</span>, <span class="tok-i">port</span>: <span class="tok-n">8080</span> }
-<span class="tok-k">deployable</span> <span class="tok-i">webApp</span>  { <span class="tok-i">platform</span>: <span class="tok-t">react</span>,  <span class="tok-i">targets</span>: <span class="tok-i">api</span>,    <span class="tok-i">port</span>: <span class="tok-n">3001</span> }
+<span class="tok-c">// One model. Pick your runtime per deployable.</span>
+<span class="tok-k">deployable</span> <span class="tok-i">api</span>    { <span class="tok-i">platform</span>: <span class="tok-t">dotnet</span>, <span class="tok-i">modules</span>: <span class="tok-t">Sales</span>, <span class="tok-i">port</span>: <span class="tok-n">8080</span> }
+<span class="tok-k">deployable</span> <span class="tok-i">webApp</span> { <span class="tok-i">platform</span>: <span class="tok-t">react</span>,  <span class="tok-i">targets</span>: <span class="tok-i">api</span>,    <span class="tok-i">design</span>: <span class="tok-t">shadcn</span>, <span class="tok-i">port</span>: <span class="tok-n">3001</span> }
 </pre>
       </div>
     </div>
@@ -485,78 +485,83 @@
 
       <div class="two-col">
         <div class="vision-card">
-          <h4>Domain-first, not framework-first</h4>
+          <h4>Write what you mean</h4>
           <p>
-            You write <strong>aggregates, invariants, operations, events, repositories</strong> &mdash; concepts from
-            <em>Domain-Driven Design</em>, not from a web framework. The framework choice is a deployable
-            attribute, not a design constraint.
+            You write <strong>aggregates, invariants, operations, events, workflows</strong> &mdash;
+            primitives from <em>Domain-Driven Design</em>, not from a web framework.  The pages,
+            the routes, the database, the page objects, the docker stack: generated.  None of them
+            yours to maintain.
           </p>
         </div>
         <div class="vision-card">
-          <h4>Mechanical, not magical</h4>
+          <h4>Switch runtimes like you switch branches</h4>
           <p>
-            Lowering goes through a fully-resolved IR, then per-platform procedural emitters.
-            Generated output is idiomatic enough to read, debug, and grep &mdash; not framework lock-in.
+            Prototype on Hono.  Ship on .NET.  Evaluate Phoenix LiveView side-by-side.
+            Each deployable picks its runtime in one line; the model doesn't change, the
+            contracts don't drift, and the frontend doesn't notice which backend it's pointed at.
           </p>
         </div>
         <div class="vision-card">
-          <h4>One model, multiple platforms</h4>
+          <h4>A guardrail for LLM-assisted development</h4>
           <p>
-            The same aggregate compiles to ASP.NET&nbsp;+&nbsp;EF&nbsp;+&nbsp;Mediator, Hono&nbsp;+&nbsp;Drizzle&nbsp;+&nbsp;Zod,
-            and Phoenix LiveView&nbsp;+&nbsp;Ash. A built-in cross-platform OpenAPI parity check guarantees backends present an identical wire shape.
+            The DSL is small, declarative, and validated before any code is emitted.  The same
+            source drives every layer, so an LLM <em>can't</em> hallucinate fields the model doesn't
+            have, drift naming between files, or write a frontend that disagrees with its backend.
+            Refactor the model; the model regenerates the rest.
           </p>
         </div>
         <div class="vision-card">
-          <h4>The whole stack, including the UI</h4>
+          <h4>Pick a design system, not just a framework</h4>
           <p>
-            Per aggregate the generator emits list, detail, and create pages with React Query hooks, Zod parsing,
-            Mantine forms, and Playwright page-objects keyed off stable <code class="mono-chip">data-testid</code>s.
-            UI tests are written top-down, not selector-by-selector.
+            Five first-class design packs ship in-tree: <strong>Mantine</strong>, <strong>shadcn/ui</strong>,
+            <strong>MUI</strong>, <strong>Chakra</strong>, and <strong>Phoenix HEEx</strong>.
+            Swap packs to compare &mdash; no template edits, no UI rewrite.  The page DSL is identical;
+            only the rendering changes.
           </p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ============ Pipeline ============ -->
-  <section id="pipeline">
+  <!-- ============ Target switching ============ -->
+  <section id="targets">
     <div class="container">
       <div class="section-head">
-        <div class="kicker">How it works</div>
-        <h2>From <code class="mono">.ddd</code> source to a running stack.</h2>
+        <div class="kicker">Switch targets mid-project</div>
+        <h2>Same model. Whatever stack you need today.</h2>
         <p>
-          The pipeline is fully type-safe end-to-end. Validation runs before any generator emits;
-          a <code class="mono-chip">--dry-run</code> mode prints the full write plan without touching disk.
-          The five stages below are a summary &mdash; the canonical pipeline is
-          <a href="technical.md">ten phases</a> (parse, macro expand, scope/link, AST validate, lower, enrich, IR validate, codegen, system compose, write).
+          A <code class="mono-chip">deployable</code> picks its runtime in one line.
+          Prototype on Hono, ship on .NET, evaluate Phoenix LiveView side-by-side &mdash;
+          identical contracts, idiomatic output, zero rewrites between platforms.
         </p>
       </div>
 
-      <div class="pipeline">
-        <div class="stage">
-          <div class="num">01</div>
-          <h4>Source</h4>
-          <p><code class="mono">.ddd</code> file authored against the Loom grammar.</p>
+      <div class="cli-grid">
+        <div class="code-card" aria-label="Pick a runtime per deployable">
+          <div class="titlebar">
+            <span class="traffic"><span></span><span></span><span></span></span>
+            <span class="file mono">acme.ddd</span>
+          </div>
+<pre class="code"><span class="tok-c">// Same `Sales` module, three different runtimes.</span>
+<span class="tok-k">deployable</span> <span class="tok-i">api</span>    { <span class="tok-i">platform</span>: <span class="tok-t">hono</span>,            <span class="tok-i">modules</span>: <span class="tok-t">Sales</span>, <span class="tok-i">port</span>: <span class="tok-n">3000</span> }
+<span class="tok-k">deployable</span> <span class="tok-i">apiNet</span> { <span class="tok-i">platform</span>: <span class="tok-t">dotnet</span>,          <span class="tok-i">modules</span>: <span class="tok-t">Sales</span>, <span class="tok-i">port</span>: <span class="tok-n">8080</span> }
+<span class="tok-k">deployable</span> <span class="tok-i">apiPhx</span> { <span class="tok-i">platform</span>: <span class="tok-t">phoenixLiveView</span>, <span class="tok-i">modules</span>: <span class="tok-t">Sales</span>, <span class="tok-i">port</span>: <span class="tok-n">4000</span> }
+
+<span class="tok-c">// Frontend targets any of them.  Pick a design pack the same way.</span>
+<span class="tok-k">deployable</span> <span class="tok-i">web</span> {
+  <span class="tok-i">platform</span>: <span class="tok-t">react</span>
+  <span class="tok-i">targets</span>:  <span class="tok-i">api</span>          <span class="tok-c">// switch to apiNet or apiPhx anytime</span>
+  <span class="tok-i">design</span>:   <span class="tok-t">mantine</span>      <span class="tok-c">// or shadcn, mui, chakra, ashPhoenix</span>
+  <span class="tok-i">port</span>:     <span class="tok-n">3001</span>
+}
+</pre>
         </div>
-        <div class="stage">
-          <div class="num">02</div>
-          <h4>AST</h4>
-          <p>Langium parser, macro expansion, scope/link, validator. Errors abort generation.</p>
-        </div>
-        <div class="stage">
-          <div class="num">03</div>
-          <h4>IR</h4>
-          <p>Lower, enrich, validate &mdash; fully resolved <code class="mono">refKind</code> / <code class="mono">callKind</code> / wire shapes. Platform-neutral.</p>
-        </div>
-        <div class="stage">
-          <div class="num">04</div>
-          <h4>Codegen</h4>
-          <p>Per-platform procedural emitters for Hono, .NET, React, Phoenix LiveView.</p>
-        </div>
-        <div class="stage">
-          <div class="num">05</div>
-          <h4>System</h4>
-          <p>Multi-project tree with <code class="mono">docker-compose.yml</code> + healthchecks + migration files + e2e.</p>
+        <div class="cmds">
+          <div class="row"><code>Same request shapes</code><span>Every runtime serves identical JSON. Your frontend doesn't care which backend it's pointed at.</span></div>
+          <div class="row"><code>Same response shapes</code><span>Aggregates, parts, and value objects serialise identically across platforms.</span></div>
+          <div class="row"><code>Same invariants</code><span>Validated server-side; mirrored at the wire boundary as form-level errors when they fit.</span></div>
+          <div class="row"><code>Same migrations</code><span>Schema for the same module is generated for whichever backend owns it &mdash; never hand-maintained.</span></div>
+          <div class="row"><code>Same e2e suite</code><span>One DSL test runs against whichever runtime you point it at &mdash; no test rewrite when you switch.</span></div>
         </div>
       </div>
     </div>
@@ -566,54 +571,164 @@
   <section id="platforms">
     <div class="container">
       <div class="section-head">
-        <div class="kicker">Four platforms, one model</div>
-        <h2>Idiomatic output. Identical wire shapes.</h2>
+        <div class="kicker">Four runtimes</div>
+        <h2>Idiomatic output. Identical contracts.</h2>
         <p>
-          Every backend produces the same aggregate root, repository, routes, and DTOs &mdash;
-          but in the language and framework conventions you'd write by hand.
+          Every backend produces the same aggregates, repositories, routes, and contracts &mdash;
+          in the language and framework conventions your team would write by hand.
+          Reviewable, debuggable, owned code &mdash; not framework lock-in.
         </p>
       </div>
 
       <div class="platforms">
         <div class="plat">
           <span class="badge"><span class="accent-ts">●</span> TypeScript backend</span>
-          <h3>Hono · Drizzle · Zod</h3>
-          <p>HTTP via Hono with full type-validated routes, Drizzle ORM with master-detail load/save, and OpenAPI through <code class="mono-chip">@hono/zod-openapi</code>.</p>
+          <h3>Hono</h3>
+          <p>Modern, type-safe HTTP backend.  Aggregates as classes with private state; repositories with master-detail persistence; domain events dispatched on save.</p>
           <ul>
-            <li>Aggregate roots with private state &amp; factories</li>
-            <li>Repositories with user-declared finds</li>
-            <li>Domain events dispatched on save</li>
+            <li>Type-validated routes for every operation and find</li>
+            <li>Drizzle-backed Postgres with generated migrations</li>
+            <li>OpenAPI spec served from <code class="mono-chip">/openapi.json</code></li>
           </ul>
         </div>
         <div class="plat">
           <span class="badge"><span class="accent-net">●</span> .NET backend</span>
-          <h3>ASP.NET Core · EF Core · Mediator</h3>
-          <p>Controllers wired through <code class="mono-chip">martinothamar/Mediator</code>, EF Core for persistence, Swashbuckle for OpenAPI &mdash; all scaffolded from your aggregates.</p>
+          <h3>ASP.NET Core</h3>
+          <p>Mediator-style controllers per aggregate; EF Core entity configurations; FluentValidation rules derived from your invariants; structured exception filter for clean 4xx errors.</p>
           <ul>
-            <li>Entity-part classes with invariant checks</li>
-            <li>Derived properties &amp; domain events</li>
-            <li>Cross-platform OpenAPI parity-checked</li>
+            <li>Commands and queries per public operation</li>
+            <li>EF migrations generated alongside the model</li>
+            <li>Swashbuckle OpenAPI, byte-compatible with Hono's</li>
           </ul>
         </div>
         <div class="plat">
           <span class="badge"><span class="accent-phx">●</span> Elixir backend</span>
-          <h3>Phoenix LiveView · Ash</h3>
-          <p>Server-rendered HEEx with LiveView, Ash 3.x resources and actions, Ecto migrations &mdash; same aggregates, idiomatic Elixir.</p>
+          <h3>Phoenix LiveView &amp; Ash</h3>
+          <p>Server-rendered HEEx pages over LiveView; Ash 3.x resources and actions per aggregate; Ecto migrations alongside.  Same aggregates, idiomatic Elixir.</p>
           <ul>
-            <li>One Ash resource per aggregate; actions for ops &amp; finds</li>
-            <li>HEEx pages share the walker stdlib with React</li>
-            <li>Compiled with <code class="mono-chip">--warnings-as-errors</code> in CI</li>
+            <li>One Ash resource per aggregate</li>
+            <li>Telemetry + structured logs out of the box</li>
+            <li>Compiled with warnings-as-errors in CI</li>
           </ul>
         </div>
         <div class="plat">
           <span class="badge"><span class="accent-react">●</span> React frontend</span>
-          <h3>Vite · React Query · Mantine · Playwright</h3>
-          <p>Per-aggregate list / detail / create pages, typed RQ hooks parsing responses with Zod, and Playwright page-objects keyed off stable test ids.</p>
+          <h3>React + your design pack</h3>
+          <p>List / detail / create pages per aggregate, with master-detail when aggregates contain parts, and a modal-form button per public operation.  Targets any of the backends above.</p>
           <ul>
-            <li>Master-detail when aggregates contain parts</li>
-            <li>Modal-form button per public operation</li>
-            <li>Generated UI e2e tests pass against the live stack</li>
+            <li>Typed API hooks that parse responses before returning</li>
+            <li>Generated forms with field-level validation</li>
+            <li>End-to-end tests against the live stack</li>
           </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Design systems ============ -->
+  <section id="designs">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">Five design systems</div>
+        <h2>Pick the look. Keep the model.</h2>
+        <p>
+          Pages, forms, tables, and modals are written once in the Loom page DSL &mdash;
+          rendered through whichever design system you pick at generation time.
+          Swap packs to compare, mix per deployable, or add your own.  No template edits.
+        </p>
+      </div>
+
+      <div class="features">
+        <div class="feat">
+          <h4>Mantine</h4>
+          <p>The polished React default &mdash; accessible primitives, batteries included, sensible defaults out of the box.</p>
+        </div>
+        <div class="feat">
+          <h4>shadcn/ui</h4>
+          <p>Tailwind-based components copied into your tree.  Owned, not imported &mdash; styled the way your design team wants.</p>
+        </div>
+        <div class="feat">
+          <h4>MUI</h4>
+          <p>Material Design 3.  The long-standing React UI standard, with deep theming and a vast component surface.</p>
+        </div>
+        <div class="feat">
+          <h4>Chakra UI</h4>
+          <p>Composable React primitives with a focused theming system &mdash; ideal when you want consistency without ceremony.</p>
+        </div>
+        <div class="feat">
+          <h4>Phoenix HEEx</h4>
+          <p>Native HEEx components for the Phoenix LiveView backend.  Server-rendered, real-time updated, no JS shipped.</p>
+        </div>
+        <div class="feat">
+          <h4>Bring your own</h4>
+          <p>Design packs are just templates against a small page contract.  Write one for your in-house system; every deployable can use it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LLM-safe ============ -->
+  <section id="llm-safe">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">LLM-safe by construction</div>
+        <h2>An anchor against hallucination and architectural drift.</h2>
+        <p>
+          LLM-assisted development is fast &mdash; and dangerous.  Hand-written code drifts
+          between layers; LLMs hallucinate fields, invent operations, and forget the
+          conventions three files away.  Loom is a small declarative DSL that keeps every
+          layer agreeing with the same source &mdash; on purpose.
+        </p>
+      </div>
+
+      <div class="features">
+        <div class="feat">
+          <h4>One source of truth</h4>
+          <p>
+            The <code class="mono-chip">.ddd</code> describes domain, contracts, and pages once.
+            Frontend, backend, database, and tests regenerate together.  No hand-maintained
+            mirrors to drift apart between commits, between teams, or between LLM sessions.
+          </p>
+        </div>
+        <div class="feat">
+          <h4>Validated before emission</h4>
+          <p>
+            Types, references, invariants, and scope are checked end-to-end before a line
+            of code is generated.  An LLM can't sneak in a field the model doesn't have,
+            a state the workflow doesn't allow, or a reference that crosses an aggregate boundary.
+          </p>
+        </div>
+        <div class="feat">
+          <h4>Small surface, large reach</h4>
+          <p>
+            The DSL fits in a prompt.  An LLM holds the whole language in context &mdash;
+            no rambling through hundreds of generated files to find the conventions; no
+            divergent code coming out at the other end.
+          </p>
+        </div>
+        <div class="feat">
+          <h4>Refactor the model, regenerate the system</h4>
+          <p>
+            Rename an aggregate, add a containment, remove a derived field &mdash; one source
+            change, one <code class="mono-chip">ddd generate system</code>, your whole stack
+            updates in lockstep.  No half-updated codebases waiting for the next LLM round.
+          </p>
+        </div>
+        <div class="feat">
+          <h4>Diff the contract, not the implementation</h4>
+          <p>
+            Every regen writes a language-agnostic contract spec.  Wire contract changed?
+            Clean JSON diff.  Migration needed?  Snapshot diff.  The generator surfaces
+            drift you'd otherwise discover at runtime &mdash; or in production.
+          </p>
+        </div>
+        <div class="feat">
+          <h4>Owned, idiomatic output</h4>
+          <p>
+            Generated code looks like code your team would write by hand &mdash; not a
+            framework's opaque internals.  Review it, debug it, edit it.  If you ever leave
+            Loom, the generated tree is yours to keep.
+          </p>
         </div>
       </div>
     </div>
@@ -650,22 +765,22 @@
           <div class="icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
           </div>
-          <h4>HTTP routes &amp; DTOs</h4>
-          <p>Wire-shape DTOs identical across backends so the OpenAPI cross-check passes byte-for-byte.</p>
+          <h4>Identical API contracts</h4>
+          <p>Every runtime serves the same request and response shapes. Your frontend targets any backend without changes &mdash; cross-runtime parity is structural, not coincidental.</p>
         </div>
         <div class="feat">
           <div class="icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
           </div>
-          <h4>List / detail / create UI</h4>
-          <p>Mantine tables and modal forms, React Query hooks, Zod-validated request bodies &mdash; per aggregate, automatically.</p>
+          <h4>Generated pages, ready to use</h4>
+          <p>List, detail, and create pages per aggregate; modal-form button per public operation; master-detail when aggregates contain parts &mdash; rendered through your design pack.</p>
         </div>
         <div class="feat">
           <div class="icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
           </div>
-          <h4>Playwright page-objects</h4>
-          <p>One class per page, keyed off stable <code class="mono-chip">data-testid</code> attributes. Write top-down UI tests without crafting selectors.</p>
+          <h4>End-to-end tests, top-down</h4>
+          <p>One page object per generated page; write <code class="mono">expect(order.total).toBe(...)</code>, not selectors.  The same DSL test runs against whichever runtime you point it at.</p>
         </div>
         <div class="feat">
           <div class="icon">
@@ -703,15 +818,17 @@
             <div class="out">  validate ................................... <span class="ok">ok</span> <span style="color:#6b7388">(0 errors, 0 warnings)</span></div>
             <div class="out">  emit api/         (.NET · Sales, Catalog) .. <span class="ok">write 84</span></div>
             <div class="out">  emit catalog_web/ (Hono · Catalog) ......... <span class="ok">write 41</span></div>
-            <div class="out">  emit web_app/     (React · targets api) .... <span class="ok">write 67</span></div>
+            <div class="out">  emit ops_phx/     (Phoenix · Ops) .......... <span class="ok">write 38</span></div>
+            <div class="out">  emit web_app/     (React · shadcn → api) ... <span class="ok">write 67</span></div>
             <div class="out">  emit e2e/         (DSL e2e) ................ <span class="ok">write  9</span></div>
             <div class="out">  emit docker-compose.yml + db-init/ ......... <span class="ok">write  2</span></div>
-            <div class="out">  cross-platform OpenAPI parity .............. <span class="ok">match</span></div>
+            <div class="out">  contracts identical across runtimes ........ <span class="ok">match</span></div>
             <br/>
             <div><span class="prompt">$</span> docker compose -f out/docker-compose.yml up -d</div>
             <div class="out"> ✔ postgres        healthy</div>
             <div class="out"> ✔ api             healthy <span style="color:#6b7388">(:8080)</span></div>
             <div class="out"> ✔ catalog_web     healthy <span style="color:#6b7388">(:3000)</span></div>
+            <div class="out"> ✔ ops_phx         healthy <span style="color:#6b7388">(:4000)</span></div>
             <div class="out"> ✔ web_app         healthy <span style="color:#6b7388">(:3001)</span></div>
           </div>
         </div>
@@ -745,7 +862,6 @@
         </a>
         <a class="btn" href="https://github.com/lemmit/loc" target="_blank" rel="noopener">Clone on GitHub</a>
         <a class="btn" href="language.md">Read the language reference</a>
-        <a class="btn" href="generators.md">Per-platform feature matrix</a>
       </div>
     </div>
   </section>
