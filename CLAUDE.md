@@ -121,7 +121,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 
 ### Scaffolding
 
-`scaffold modules: M` / `scaffold aggregates: …` is compile-time sugar. The AST-walker expansion lives in `src/ir/walker-primitive-expander.ts` (~1.1k LOC); the per-shape macro bodies live under `src/stdlib/scaffold/` (`scaffold.macro.ts` plus its siblings `scaffoldAggregate.macro.ts`, `scaffoldContext.macro.ts`, `scaffoldModule.macro.ts`, `scaffoldView.macro.ts`, `scaffoldWorkflow.macro.ts`). Synthesised pages carry a `scaffoldOrigin` tag, then lower to explicit walker-stdlib bodies.
+`scaffold modules: M` / `scaffold aggregates: …` is compile-time sugar. The AST-walker expansion lives in `src/ir/lower/walker-primitive-expander.ts` (~1.0k LOC); the per-shape macro bodies live under `src/macros/stdlib/scaffold/` (`scaffold.macro.ts` plus its siblings `scaffoldAggregate.macro.ts`, `scaffoldContext.macro.ts`, `scaffoldModule.macro.ts`, `scaffoldView.macro.ts`, `scaffoldWorkflow.macro.ts`). Sibling stdlib capabilities (`audit/`, `softDelete/`, `crudish.macro.ts`) sit alongside under `src/macros/stdlib/`. Synthesised pages carry a `scaffoldOrigin` tag, then lower to explicit walker-stdlib bodies.
 
 ## Repository layout (non-obvious bits)
 
@@ -130,6 +130,8 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 | `src/` | The Loom toolchain (compiler, generators, CLI). |
 | `src/language/generated/` | **Gitignored.** `langium generate` output — parser, AST types, reflection. Must exist before `tsc` runs. |
 | `src/language/print/` | AST → `.ddd` source printer (`printExpr` / `printStmt` / `printStructural`).  Drives the LSP "unfold macro" code action (`src/language/lsp/unfold-macro.ts`), which rewrites a `with X(...)` clause into its expanded source in place. |
+| `src/ir/{types,lower,enrich,validate,util}/` | The phase-revealing IR layout. One subdir per pipeline phase; `lower/` further splits into `lower.ts` (structural) + `lower-expr.ts` / `lower-stmt.ts` / `lower-types.ts` (expression / statement / type-resolution) + `walker-primitive-expander.ts`. |
+| `src/macros/` | Macro pipeline. `expander.ts` is the Langium `DocumentBuilder` listener; `registry.ts` is the global lookup; `api/` is the macro-authoring surface (`defineMacro`, factories); `stdlib/` ships the built-in macros (`audit/`, `softDelete/`, `scaffold/`, `crudish.macro.ts`). `bootMacros()` from `src/language/ddd-module.ts` registers them once at language-module init. |
 | `src/verify/` | `ddd verify` rollup — joins test-execution results onto the traceability graph to produce per-requirement Definition-of-Done verdicts.  Pure, dependency-free; consumed by both the CLI and the browser playground. |
 | `src/system/` | More than just the orchestrator — siblings of `index.ts` emit the `.loom/` artefact bundle: `mermaid.ts`, `likec4.ts`, `traceability.ts`, `wire-spec.ts`, `loomsnap.ts` (provenance snapshot capture for `ddd snapshot`), `sql-pg.ts`, `migrations-builder.ts`.  See [`docs/loom-artifacts.md`](docs/loom-artifacts.md). |
 | `packages/` | **Publish-shaped workspaces** discovered by the plugin resolver: `@loom/core` (the toolchain library + `PlatformSurface` contract), `@loom/backend-hono-v4` (versioned Hono backend), `@loom/ui-test-driver` (the cross-window page-object/locator runtime).  Each `package.json` carries a `loom` key (`kind: "core"\|"backend"`, `family`, `loomVersion`, `core` semver range) read by `src/platform/fs-discovery.ts` — this is the out-of-tree backend story. |
@@ -140,6 +142,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 | `stacks/v1/`, `v2/`, `v3/` | Versioned Handlebars templates for generated-project `package.json` dependency / devDependency blocks (`stack-package-deps.hbs`, `stack-package-devdeps.hbs`, `stack.json` manifest).  The active stack version is chosen per generated deployable based on its platform pins. |
 | `phoenix/` | Top-level companion docs for the Phoenix backend (README). |
 | `examples/`, `web/src/examples/` | Sample `.ddd` files. CI's `generated-react-build.yml` matrix iterates `examples/acme.ddd` + everything under `web/src/examples/` × every design pack. |
+| `test/` | Test tree mirrors `src/` phases — `test/language/`, `test/macro/`, `test/ir/`, `test/generator/`, `test/platform/`, `test/system/`, `test/cli/`, `test/conformance/`, `test/playground/`, `test/util/`, with slow opt-in suites under `test/e2e/`. |
 | `test/fixtures/` | **Excluded from vitest discovery** in `vitest.config.ts`. These are byte-for-byte snapshots of generated output used as regression fixtures (capture script: `scripts/capture-baseline-fixture.mjs`); the `.test.ts` files inside are not part of this project's test surface. |
 | `docs/` | Reference docs (top-level), plus `plans/` (in-flight design notes), `audits/` (snapshot-in-time empirical audits), and `proposals/` (unadopted designs). `docs/README.md` is the canonical index. Build the landing+docs site via `node docs/build.mjs` (recurses into `plans/` + `audits/`). Deployed by `.github/workflows/pages.yml` to GitHub Pages. |
 | `experience_gathered.md` | Running retrospective of design decisions and gotchas. **Worth reading before non-trivial changes** — covers Langium grammar gotchas, the Handlebars-removal rationale, Mantine + Playwright findings, IR design trade-offs. |
@@ -174,10 +177,17 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 
 ## CI surface (what each workflow gates)
 
+- `test.yml` — the fast vitest suite (the same one `npm test` runs); also runs `test:biome-gen` against emitted TS/TSX.
+- `langium-generated.yml` — guards that `npm run langium:generate` produces deterministic output (drift between `ddd.langium` and the committed types).
 - `pages.yml` — typecheck + smoke + build playground + deploy docs/playground to GitHub Pages (main only).
 - `generated-react-build.yml` — matrix `{example × pack}`, generates the React project, `npm install`, `tsc --noEmit`. Catches generator drift invisible to IR-level tests.
-- `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview).
+- `hono-build.yml` — fast `tsc --noEmit` + `tsup` gate against the Hono backend output.
+- `dotnet-build.yml` — `dotnet build /warnaserror` against the .NET output.
 - `phoenix-build.yml` — `mix deps.get && mix compile --warnings-as-errors` against the real Ash 3.x dep set in an Elixir docker image.
+- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `phoenix-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout).
+- `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview).
+- `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader run).
+- `cleanup-artifacts.yml` — scheduled tidy of test artefacts.
 
 ## Further reading
 
