@@ -249,7 +249,12 @@ function renderLiveView(a: RenderArgs): string {
   const handlers: HandleEventClause[] = walked.handlers;
   const aliasLines: string[] = walked.aliasLines;
 
-  const mount = renderMount(page, walked.formBindings, contextModuleByAggName);
+  const mount = renderMount(
+    page,
+    walked.formBindings,
+    walked.idOptionsBindings,
+    contextModuleByAggName,
+  );
   const handleParams = renderHandleParams(
     page,
     ui,
@@ -307,6 +312,11 @@ ${h.body.join("\n")}
 function renderMount(
   page: PageIR,
   formBindings: import("./heex-walker.js").FormBinding[],
+  /** Aggregate names referenced by `X id` form fields; each gets
+   *  a `socket |> assign(:<x_snake>_options, …list_…!())` line so
+   *  the rendered `<.input type="select" options={@<x>_options}>`
+   *  resolves at mount time. */
+  idOptionsBindings: readonly string[],
   contextModuleByAggName: ReadonlyMap<string, string>,
 ): string {
   const assigns: string[] = [];
@@ -314,6 +324,20 @@ function renderMount(
     // Type-aware default from the walker — single source of truth so
     // `state.field` defaults match across scaffold and custom pages.
     assigns.push(`      |> assign(:${snake(f.name)}, ${defaultInitFor(f.type)})`);
+  }
+  // Option-list loads for `X id` form fields.  v0 uses the record's
+  // id as both label and value — the proper `display`-based label
+  // requires loading the aggregate's `:display` calculation
+  // (Ash.load).  Deferred follow-up; until then the select is
+  // structurally correct (right value flows through on submit) but
+  // shows uuids as labels.
+  for (const aggName of idOptionsBindings) {
+    const ctxModule = contextModuleByAggName.get(aggName);
+    if (!ctxModule) continue;
+    const aggSnake = snake(aggName);
+    assigns.push(
+      `      |> assign(:${aggSnake}_options, ${ctxModule}.list_${aggSnake}s!() |> Enum.map(fn r -> {to_string(r.id), r.id} end))`,
+    );
   }
   // @form assignment — one per Form(of:/runs:) call in the page body.
   // For aggregate-of: AshPhoenix.Form.for_create(<Ctx>.<Agg>, :create);
