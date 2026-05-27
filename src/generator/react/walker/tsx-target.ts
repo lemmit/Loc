@@ -18,7 +18,7 @@
 //   renderApiHoisting — walker/page-shell.ts:220-226 (apiHookDecls)
 //   renderHelperImports — walker/import-lines.ts:76-92
 //   renderMatch       — body-walker.ts:635-645 (ternary chain — match
-//                       lowers to ternary in `src/ir/lower.ts:1542`)
+//                       lowers to ternary in `src/ir/lower/lower-expr.ts`)
 //   renderNavigate    — walker/primitives/controls.ts:199-213 (emitActionThen)
 //   defaultInitFor    — walker/page-shell.ts:705-725 (zeroValueForType)
 // ---------------------------------------------------------------------------
@@ -187,7 +187,7 @@ export const tsxTarget: WalkerTarget = {
   // --- Match expression seam ----------------------------------------------
 
   /** Chain ternaries — `(p1) ? v1 : (p2) ? v2 : fallback`.  Match
-   *  lowers via `src/ir/lower.ts:1542` to a `match` IR node; the
+   *  lowers via `src/ir/lower/lower-expr.ts` to a `match` IR node; the
    *  React walker emits the chained form (no native switch
    *  expression in JS).  When `elseArm` is undefined we emit
    *  `null` as the terminal — JSX renders nothing. */

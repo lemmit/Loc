@@ -349,7 +349,7 @@ function buildFindWhereClause(
     // The IR validator (Layer ②) rejects any `where` clause that can't
     // lower to Drizzle's queryable subset, so by the time we get here
     // lowering always succeeds.  See validateLoomModel +
-    // firstNonQueryableNode in src/ir/validate.ts.
+    // firstNonQueryableNode in src/ir/validate/validate.ts.
     const lowered = lowerToDrizzle(find.filter, tableName, ctx);
     if (!lowered) {
       throw new Error(

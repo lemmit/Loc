@@ -9,7 +9,7 @@
 //
 // All pages (scaffold and custom) route through the HEEx walker.
 // Scaffold pages emit canonical body primitives that
-// `expandInlineScaffoldPrimitiveCalls` (src/ir/lower.ts) rewrites
+// `expandInlineScaffoldPrimitives` (src/ir/lower/walker-primitive-expander.ts) rewrites
 // during lowering, so `page.body` is always
 // a walker-stdlib `ExprIR` tree.  The walker (heex-walker.ts::walkBodyToHeex)
 // emits HEEx directly — no pack templates for full pages.
@@ -258,7 +258,7 @@ function renderLiveView(a: RenderArgs): string {
 
   // All pages — scaffold and custom — route through the HEEx walker.
   // Scaffold pages emit canonical body primitives that
-  // expandInlineScaffoldPrimitiveCalls (src/ir/lower.ts) rewrites
+  // expandInlineScaffoldPrimitives (src/ir/lower/walker-primitive-expander.ts) rewrites
   // during lowering, so page.body is always
   // populated with a walker-stdlib ExprIR tree.  The walker produces
   // handle_event clauses and alias lines from helper imports the body

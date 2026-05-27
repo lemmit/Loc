@@ -457,7 +457,7 @@ function lowerSystem(sys: System): SystemIR {
   }
   // React deployable's `moduleNames` inheritance from `targets:` is
   // an enrichment, not a structural lowering — see
-  // `src/ir/enrichments.ts`.
+  // `src/ir/enrich/enrichments.ts`.
   // E2E test bodies reference the magic `api.<aggregate>.<method>(…)`
   // chain; resolution happens at render time against the target
   // deployable's IR.  The lowering env is minimal — bare-name lookups
@@ -1160,7 +1160,7 @@ function lowerContext(
 ): BoundedContextIR {
   // Lowering produces a faithful AST projection only.  Auto-included
   // `findAll`, react `moduleNames` inheritance, and wire-shape
-  // derivation all live in `enrichLoomModel` (src/ir/enrichments.ts)
+  // derivation all live in `enrichLoomModel` (src/ir/enrich/enrichments.ts)
   // which runs after lowering.  `user` (when set) threads the
   // system's user-claim shape into every expression context so the
   // `currentUser` magic identifier resolves to a typed shape.

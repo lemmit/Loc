@@ -84,7 +84,7 @@ The lowering phase has three sub-passes, all driven by `lowerModel`:
 
 - **⑤a** `src/ir/lower/lower.ts` — structural walk (`lowerSystem`, `lowerAggregate`, etc.). Never descends into expressions.
 - **⑤b** `src/ir/lower/lower-expr.ts` + `lower-stmt.ts` + `lower-types.ts` — expressions, statements, types, name resolution, member typing. `lower.ts` imports from these; they never import from `lower.ts`.
-- **⑤c** `src/ir/lower/walker-primitive-expander.ts` — inline scaffold expansion (`scaffoldDetails(of:)` / `scaffoldOperations(of:)` in page bodies → full walker-stdlib `ExprIR`). Called from `lower.ts:552` as the last statement of `lowerSystem`; downstream phases never see the un-expanded form.
+- **⑤c** `src/ir/lower/walker-primitive-expander.ts` — inline scaffold expansion (`scaffoldDetails(of:)` / `scaffoldOperations(of:)` in page bodies → full walker-stdlib `ExprIR`). Called from `lower.ts:568` as the last statement of `lowerSystem`; downstream phases never see the un-expanded form.
 
 After lowering, `src/ir/enrich/enrichments.ts` runs **one pure pass** (phase ⑥) that derives:
 

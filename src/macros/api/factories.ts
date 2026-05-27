@@ -168,7 +168,7 @@ export function namedType(
  *
  * `opts.access` sets the field's role for input-shaping and view/API
  * exposure (see `FieldAccess` in `src/language/ddd.langium` and the
- * resolution rules in `src/ir/enrichments.ts`).  Trait macros that
+ * resolution rules in `src/ir/enrich/enrichments.ts`).  Trait macros that
  * contribute server-owned fields should set this — e.g. `auditable`
  * passes `access: "managed"` for `createdAt`/`updatedAt`; `softDeletable`
  * passes `access: "internal"` for `isDeleted`. */
@@ -367,7 +367,7 @@ export function targetFields(target: Aggregate): readonly Property[] {
  * Operation-specific name on purpose: a future `writableCreateFields`
  * will keep `immutable` (assignable on create) and exclude the
  * server-owned ones differently.  See the access-modifier matrix in
- * `src/ir/loom-ir.ts` (`FieldAccess`) for the canonical semantics. */
+ * `src/ir/types/loom-ir.ts` (`FieldAccess`) for the canonical semantics. */
 export function writableUpdateFields(target: Aggregate): readonly Property[] {
   return targetFields(target).filter((f) => {
     if ((f as { [ORIGIN_PROP]?: OriginToken })[ORIGIN_PROP] !== undefined) return false;

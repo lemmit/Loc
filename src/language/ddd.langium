@@ -761,8 +761,8 @@ BindEntry:
 
 // Field access modifier — single optional keyword controlling the
 // field's role in input DTOs, update wire shape, and view/API read
-// exposure.  See `src/ir/enrichments.ts` for resolution rules and
-// `FieldIR.access` in `src/ir/loom-ir.ts` for downstream semantics.
+// exposure.  See `src/ir/enrich/enrichments.ts` for resolution rules and
+// `FieldIR.access` in `src/ir/types/loom-ir.ts` for downstream semantics.
 //
 //   editable (default) — client read+write
 //   immutable          — client write on create only

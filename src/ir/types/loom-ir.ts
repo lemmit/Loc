@@ -98,7 +98,7 @@ export interface ParamIR {
 
 /** Resolved access role for a stored field.  Controls the field's
  * presence in create/update inputs, the update wire envelope, and
- * view/API read exposure.  See `src/ir/enrichments.ts` for resolution
+ * view/API read exposure.  See `src/ir/enrich/enrichments.ts` for resolution
  * rules.
  *
  *   editable  — default; client may read and write freely
@@ -151,7 +151,7 @@ export interface ContainmentIR {
  * type is a collection of references to another aggregate
  * (`field: Target id[]`).  Populated by `enrichLoomModel`; backends
  * that persist relationally emit a join table from this rather than
- * re-deriving it.  See `src/ir/enrichments.ts`. */
+ * re-deriving it.  See `src/ir/enrich/enrichments.ts`. */
 export interface AssociationIR {
   /** The owning aggregate's field name (`party`). */
   fieldName: string;
@@ -228,12 +228,12 @@ export interface EntityPartIR {
   /** Canonical JSON-on-the-wire field list.  Populated by
    * `enrichLoomModel` after lowering; lowering itself leaves it
    * undefined so an unenriched IR is a type error to consume.
-   * See `src/ir/enrichments.ts`. */
+   * See `src/ir/enrich/enrichments.ts`. */
   wireShape?: WireField[];
 }
 
 /** One field in an aggregate / part / value object's canonical
- * wire shape.  See `src/ir/enrichments.ts`. */
+ * wire shape.  See `src/ir/enrich/enrichments.ts`. */
 export type WireFieldSource = "id" | "property" | "containment" | "derived";
 
 export interface WireField {

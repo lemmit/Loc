@@ -313,7 +313,7 @@ function emitResponseSchema(
   const name = `${ent.name}Response`;
   lines.push(`export const ${name} = z.object({`);
   // Single canonical walk — populated by `enrichLoomModel` (see
-  // src/ir/enrichments.ts).  Backends + frontend all read the same
+  // src/ir/enrich/enrichments.ts).  Backends + frontend all read the same
   // field list, so Zod schemas line up field-for-field with what
   // the wire actually carries.  `forApiRead` strips `internal` and
   // `secret` fields so the React response schema matches what the

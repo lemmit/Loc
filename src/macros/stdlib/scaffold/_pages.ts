@@ -38,7 +38,7 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
       route: `/${pluralSnake}/:id`,
       // Explicit Stack of two body primitives — see
       // `expandInlineScaffoldPrimitives` in
-      // src/ir/walker-primitive-expander.ts.
+      // src/ir/lower/walker-primitive-expander.ts.
       //
       //   * scaffoldDetails(of: <Agg>)    — full read view
       //     (Breadcrumbs, Heading, QueryView wrapping the field

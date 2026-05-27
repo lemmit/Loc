@@ -1074,7 +1074,7 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
  *  rather than emit a `/* unsupported *\/` comment: the old comment compiled
  *  fine but silently dropped the statement at runtime (e.g. a button whose
  *  handler does nothing).  Failing generation surfaces the gap loudly — see
- *  the same rationale in src/ir/validate.ts (test-body fallbacks). */
+ *  the same rationale in src/ir/validate/validate.ts (test-body fallbacks). */
 function unsupportedPageStmt(what: string, why: string): never {
   throw new Error(`react: unsupported ${what} in a page event handler — ${why}.`);
 }

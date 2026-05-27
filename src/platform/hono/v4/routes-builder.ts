@@ -684,7 +684,7 @@ function emitResponseDtoSchema(
   const name = `${ent.name}Response`;
   lines.push(`export const ${name} = z.object({`);
   // Single canonical walk — populated by `enrichLoomModel` (see
-  // src/ir/enrichments.ts).  Order and field-set match every other
+  // src/ir/enrich/enrichments.ts).  Order and field-set match every other
   // emitter (.NET DTO, React Zod, Hono toWire serializer).  Enriched
   // brand flows in via `PlatformSurface.emitProject(contexts:
   // EnrichedBoundedContextIR[])` so no local cast is needed.

@@ -189,7 +189,7 @@ function collectReferencedAggregateSlugs(statements: readonly TestStmtIR[]): Set
 }
 
 /** A backend platform serves a queryable HTTP API.  Mirrors the
- *  `isFrontend` check in `src/ir/enrichments.ts:509`. */
+ *  `isFrontend` check in `src/ir/enrich/enrichments.ts:509`. */
 function isBackendPlatform(platform: string): boolean {
   return platform !== "react" && platform !== "static";
 }
