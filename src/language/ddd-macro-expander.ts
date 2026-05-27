@@ -30,6 +30,13 @@
 import type { AstNode, LangiumDocument } from "langium";
 import { AstUtils, DocumentState } from "langium";
 import type { LangiumSharedServices } from "langium/lsp";
+import {
+  readArgBool,
+  readArgInt,
+  readArgRef,
+  readArgRefs,
+  readArgString,
+} from "../macro-api/_read.js";
 import type {
   MacroDefinition,
   NamedDeclKind,
@@ -38,13 +45,6 @@ import type {
   ParamType,
 } from "../macro-api/define.js";
 import { _withOrigin } from "../macro-api/factories.js";
-import {
-  readArgBool,
-  readArgInt,
-  readArgRef,
-  readArgRefs,
-  readArgString,
-} from "../macro-api/_read.js";
 import { loadStdlibMacros } from "../stdlib/index.js";
 import {
   type Aggregate,
