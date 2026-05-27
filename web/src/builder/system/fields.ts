@@ -86,15 +86,17 @@ function findConstruct(ast: Model, kind: NodeKind, name: string): AstNode | null
 
 /** The property nodes of a construct, paired with where they live so we can
  *  mutate the backing array.  Events keep them in `fields`; aggregates and
- *  value objects keep them in `members` interleaved with other member kinds. */
-function propertyList(node: AstNode): { list: Property[]; container: Property[] } {
+ *  value objects keep them in `members` interleaved with other member kinds —
+ *  so `container` is the heterogeneous backing array (typed as `AstNode[]`
+ *  to span both member-array shapes), and `list` is the `Property`-only view. */
+function propertyList(node: AstNode): { list: Property[]; container: AstNode[] } {
   if (node.$type === "EventDecl") {
     const fields = (node as EventDecl).fields;
     return { list: fields, container: fields };
   }
   const members = (node as Aggregate | ValueObject).members as AstNode[];
   const list = members.filter((m): m is Property => m.$type === "Property");
-  return { list, container: members as unknown as Property[] };
+  return { list, container: members };
 }
 
 export function baseLabel(base: BaseSpec): string {

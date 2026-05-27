@@ -596,8 +596,8 @@ export function enumStateFields(page: Page, enums: ReadonlyMap<string, readonly 
     // A `NamedType` base carries a cross-reference (`target.$refText` is the
     // declared identifier); consult its name without needing the linker, then
     // intersect with the supplied enums map. PrimitiveType/IdType are ignored.
-    const base = (f.type as unknown as { base?: { $type?: string; target?: { $refText?: string } } }).base;
-    if (base?.$type !== "NamedType") continue;
+    const base = f.type.base;
+    if (base.$type !== "NamedType") continue;
     const name = base.target?.$refText;
     if (typeof name === "string" && enums.has(name)) out.set(f.name, name);
   }

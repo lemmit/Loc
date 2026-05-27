@@ -143,8 +143,7 @@ function collectFromStatements(
       if (ev) addEdge(rel.emits, src, ev);
       for (const f of e.fields) {
         // EmitField has `value` per the grammar — walk it for reads.
-        const expr = (f as unknown as { value?: Expression }).value;
-        collectReads(expr, stateNames, reads);
+        collectReads(f.value, stateNames, reads);
       }
     } else if (s.$type === "LetStmt") {
       collectReads((s as { expr: Expression }).expr, stateNames, reads);
