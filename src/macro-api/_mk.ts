@@ -50,6 +50,8 @@ import type {
   Property,
   RouteProp,
   StampDecl,
+  StateBlock,
+  StateField,
   StringLit,
   ThisRef,
   TypeRef,
@@ -186,4 +188,12 @@ export function mkPageMenuMeta(shape: AstLiteral<PageMenuMeta>): PageMenuMeta {
 
 export function mkPage(shape: AstLiteral<Page>): Page {
   return mkAst<Page>(shape);
+}
+
+export function mkStateField(shape: AstLiteral<StateField>): StateField {
+  return mkAst<StateField>(shape);
+}
+
+export function mkStateBlock(shape: AstLiteral<StateBlock>): StateBlock {
+  return mkAst<StateBlock>(shape);
 }

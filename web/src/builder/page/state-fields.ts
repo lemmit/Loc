@@ -1,6 +1,7 @@
 import { AstUtils } from "langium";
 import type { BodyProp, Expression, Model, Page, StateBlock, StateField } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
+import { mkStateBlock, mkStateField } from "../../../../src/macro-api/index.js";
 import { parseDdd } from "../parse";
 import { applyEdits, nodeEditRange, spliceNode } from "../edit-engine";
 import { baseLabel, baseSpecOf, buildTypeRef, type BaseSpec, type TypeSpec } from "../system/fields";
@@ -46,7 +47,7 @@ function bodyPropOf(page: Page): BodyProp | undefined {
 }
 
 function buildStateField(name: string, spec: TypeSpec, init?: Expression): StateField {
-  return { $type: "StateField", name, type: buildTypeRef(spec), init } as unknown as StateField;
+  return mkStateField({ $type: "StateField", name, type: buildTypeRef(spec), init });
 }
 
 function freshName(sb: StateBlock | undefined): string {
@@ -105,7 +106,7 @@ export function addStateField(source: string, pageName: string, spec: TypeSpec =
     const body = bodyPropOf(page);
     const range = body && nodeEditRange(body);
     if (!range) return null;
-    const block = { $type: "StateBlock", fields: [buildStateField(freshName(undefined), spec)] } as unknown as StateBlock;
+    const block = mkStateBlock({ $type: "StateBlock", fields: [buildStateField(freshName(undefined), spec)] });
     return applyEdits(source, [{ offset: range.offset, end: range.offset, newText: `${printStructural(block)}\n      ` }]);
   });
 }

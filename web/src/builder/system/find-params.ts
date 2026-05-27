@@ -8,6 +8,7 @@ import type {
   TypeRef,
 } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
+import { mkParameter } from "../../../../src/macro-api/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode } from "../edit-engine";
 import { IDENTIFIER } from "./rename";
@@ -77,7 +78,7 @@ function commit(source: string, repoName: string, findName: string, mutate: (fin
 }
 
 function buildParam(name: string, spec: TypeSpec): Parameter {
-  return { $type: "Parameter", name, type: buildTypeRef(spec) } as unknown as Parameter;
+  return mkParameter({ $type: "Parameter", name, type: buildTypeRef(spec) });
 }
 
 export function addFindParam(source: string, repoName: string, findName: string, paramName: string, type: TypeSpec): string | null {

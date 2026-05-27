@@ -29,7 +29,11 @@ export type {
 export {
   mkIdType,
   mkNamedType,
+  mkParameter,
   mkPrimitiveType,
+  mkProperty,
+  mkStateBlock,
+  mkStateField,
   mkTypeRef,
 } from "./_mk.js";
 export type {
