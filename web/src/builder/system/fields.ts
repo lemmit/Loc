@@ -14,7 +14,13 @@ import { printStructural } from "../../../../src/language/print/index.js";
 // the IR so a new primitive (e.g. `money` in #498) shows up here
 // automatically.
 import { PRIMITIVES, type PrimitiveName } from "../../../../src/ir/loom-ir.js";
-import { mkProperty, mkTypeRef } from "../../../../src/macro-api/index.js";
+import {
+  mkIdType,
+  mkNamedType,
+  mkPrimitiveType,
+  mkProperty,
+  mkTypeRef,
+} from "../../../../src/macro-api/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode } from "../edit-engine";
 import type { NodeKind } from "./model";
@@ -120,13 +126,13 @@ export function buildTypeRef(spec: TypeSpec): TypeRef {
   let base: TypeRef["base"];
   switch (spec.base.kind) {
     case "primitive":
-      base = { $type: "PrimitiveType", name: spec.base.name } as TypeRef["base"];
+      base = mkPrimitiveType({ $type: "PrimitiveType", name: spec.base.name });
       break;
     case "id":
-      base = { $type: "IdType", target: { $refText: spec.base.target } } as TypeRef["base"];
+      base = mkIdType({ $type: "IdType", target: { $refText: spec.base.target } });
       break;
     case "named":
-      base = { $type: "NamedType", target: { $refText: spec.base.target } } as TypeRef["base"];
+      base = mkNamedType({ $type: "NamedType", target: { $refText: spec.base.target } });
       break;
   }
   return mkTypeRef({ $type: "TypeRef", base, array: spec.array, optional: spec.optional });

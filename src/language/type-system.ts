@@ -730,20 +730,15 @@ function typeOfBuilderCall(expr: import("./generated/ast.js").BuilderCall, env: 
 }
 
 function lookupEntityByName(name: string, env: Env): Aggregate | EntityPart | undefined {
-  let cur: AstNode | undefined = (env.aggregate ?? env.part ?? env.valueObject) as
-    | AstNode
-    | undefined;
-  while (cur && cur.$type !== "BoundedContext") cur = cur.$container;
-  if (!cur) return undefined;
-  const ctxMembers = (cur as unknown as { members: AstNode[] }).members;
-  for (const m of ctxMembers) {
-    if (m.$type === "Aggregate") {
-      const agg = m as Aggregate;
-      if (agg.name === name) return agg;
-      for (const inner of agg.members) {
-        if (inner.$type === "EntityPart" && (inner as EntityPart).name === name) {
-          return inner as EntityPart;
-        }
+  const start = env.aggregate ?? env.part ?? env.valueObject;
+  if (!start) return undefined;
+  const ctx = AstUtils.getContainerOfType(start, isBoundedContext);
+  if (!ctx) return undefined;
+  for (const m of ctx.members) {
+    if (isAggregate(m)) {
+      if (m.name === name) return m;
+      for (const inner of m.members) {
+        if (isEntityPart(inner) && inner.name === name) return inner;
       }
     }
   }
@@ -751,20 +746,16 @@ function lookupEntityByName(name: string, env: Env): Aggregate | EntityPart | un
 }
 
 function lookupValueObjectByName(name: string, env: Env): ValueObject | undefined {
-  // Walk up to bounded context and search value objects.  The
-  // generated AST types make `members` an opaque list with mixed
-  // member shapes, so we go through `unknown` to apply the structural
-  // narrowing the cast below cements.
-  let cur: AstNode | undefined = (env.aggregate ?? env.part ?? env.valueObject) as
-    | AstNode
-    | undefined;
-  while (cur && cur.$type !== "BoundedContext") cur = cur.$container;
-  if (!cur) return undefined;
-  const ctxMembers = (cur as unknown as { members: AstNode[] }).members;
-  for (const m of ctxMembers) {
-    if (m.$type === "ValueObject" && (m as ValueObject).name === name) {
-      return m as ValueObject;
-    }
+  // Walk up to bounded context and search value objects.  `members` on
+  // BoundedContext is `ContextMember[]` in the generated AST — we use
+  // the typed `isValueObject` guard to narrow rather than escape-hatch
+  // casting through `unknown`.
+  const start = env.aggregate ?? env.part ?? env.valueObject;
+  if (!start) return undefined;
+  const ctx = AstUtils.getContainerOfType(start, isBoundedContext);
+  if (!ctx) return undefined;
+  for (const m of ctx.members) {
+    if (isValueObject(m) && m.name === name) return m;
   }
   return undefined;
 }
