@@ -2,7 +2,6 @@ import { wireShapeFor } from "../../ir/enrich/enrichments.js";
 import { forApiRead } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
-  AssociationIR,
   BoundedContextIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -22,43 +21,12 @@ import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./emit.js";
+import {
+  associationMapLines,
+  associationsOf,
+  isRefCollection,
+} from "./repository-associations-builder.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
-
-/** Associations (`T id[]` reference collections) declared on an
- * aggregate, persisted as many-to-many join tables.  Empty when none. */
-function associationsOf(agg: EnrichedAggregateIR): AssociationIR[] {
-  return agg.associations;
-}
-
-/** True for a field type that is a collection of references
- * (`T id[]`) — persisted via a join table, not a column. */
-function isRefCollection(t: TypeIR): boolean {
-  return t.kind === "array" && t.element.kind === "id";
-}
-
-/** Bulk-load lines for every association into `<field>ByOwner`
- * maps keyed by the owner id.  Assumes a `rootIds: string[]` of owner
- * ids is in scope.  Used by the array-returning load paths
- * (`findManyByIds`, array `find`s); `findById` loads singular lists
- * inline instead. */
-function associationMapLines(agg: EnrichedAggregateIR, dbExpr: string, indent: string): string[] {
-  return associationsOf(agg).flatMap((assoc) => {
-    const joinConst = joinTableConstName(assoc);
-    const ownerCol = joinColumnName(assoc.ownerFk);
-    const targetCol = joinColumnName(assoc.targetFk);
-    const rows = `${assoc.fieldName}JoinRows`;
-    const map = `${assoc.fieldName}ByOwner`;
-    return [
-      `${indent}const ${rows} = await ${dbExpr}.select({ o: schema.${joinConst}.${ownerCol}, t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(inArray(schema.${joinConst}.${ownerCol}, rootIds)).orderBy(schema.${joinConst}.${ownerCol}, schema.${joinConst}.ordinal);`,
-      `${indent}const ${map} = new Map<string, Ids.${assoc.targetAgg}Id[]>();`,
-      `${indent}for (const r of ${rows}) {`,
-      `${indent}  const list = ${map}.get(r.o) ?? [];`,
-      `${indent}  list.push(Ids.${assoc.targetAgg}Id(r.t));`,
-      `${indent}  ${map}.set(r.o, list);`,
-      `${indent}}`,
-    ];
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Generates the TypeScript repository file for an aggregate.
