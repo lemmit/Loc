@@ -99,6 +99,13 @@ export interface WalkResult {
   /** Names of user `component`s invoked in the body, so the LiveView
    *  emitter can hoist their action handlers transitively. */
   usedComponents: string[];
+  /** Aggregate names (PascalCase) referenced by `X id` form fields in
+   *  this page's body — the LiveView emitter loads each target's
+   *  record list in `mount/3` and assigns to
+   *  `socket.assigns.<x_snake>_options` so the rendered select can
+   *  read `options={@<x_snake>_options}`.  Empty when no `X id` form
+   *  field appears. */
+  idOptionsBindings: string[];
 }
 
 /** `Action(<instance>.<operation>)` → a `<.button phx-click=…>` plus a
@@ -159,6 +166,13 @@ export interface WalkContext {
    *  dispatch for enum-typed fields to `<.input type="select" options={...}>`.
    *  Built once at walker entry from every loaded context's enums. */
   enumsByName: ReadonlyMap<string, EnumIR>;
+  /** Set of aggregate names (PascalCase) referenced by `X id` form
+   *  fields in this page's body — drives mount-time option-list
+   *  loading.  For each binding, `renderMount` emits
+   *  `socket |> assign(:<x_snake>_options, <ctx>.list_<x_snake>s!() |> Enum.map(...))`
+   *  so the rendered select's `options={@<x_snake>_options}` resolves.
+   *  Populated lazily as the walker visits Form / OperationForm bodies. */
+  idOptionsBindings: Set<string>;
   /** Form bindings discovered as the walker visits `Form(...)` calls. */
   formBindings: FormBinding[];
   /** Query bindings discovered as the walker visits `QueryView(...)`. */
@@ -230,6 +244,7 @@ export function walkBodyToHeex(
     appModule,
     aggregatesByName,
     enumsByName,
+    idOptionsBindings: new Set(),
     formBindings: [],
     queryBindings: [],
     page,
@@ -265,6 +280,7 @@ export function walkBodyToHeex(
     queryBindings: ctx.queryBindings,
     actionBindings: ctx.actionBindings,
     usedComponents: [...ctx.usedComponents],
+    idOptionsBindings: [...ctx.idOptionsBindings],
   };
 }
 
@@ -904,7 +920,10 @@ export function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
 
   const inputs =
     params.length > 0
-      ? params.map((p) => `    ${renderFieldInputForField(p, formAssign, ctx.enumsByName)}`)
+      ? params.map(
+          (p) =>
+            `    ${renderFieldInputForField(p, formAssign, ctx.enumsByName, ctx.idOptionsBindings)}`,
+        )
       : [`    <%!-- ${opSnake} has no parameters --%>`];
 
   return [
@@ -976,7 +995,9 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
     if (agg) {
       for (const f of agg.fields) {
         if (f.name === "id") continue;
-        inputs.push(`  ${renderFieldInputForField(f, "form", ctx.enumsByName)}`);
+        inputs.push(
+          `  ${renderFieldInputForField(f, "form", ctx.enumsByName, ctx.idOptionsBindings)}`,
+        );
       }
     }
   }
@@ -1013,13 +1034,18 @@ function findPascalArg(
 
 /** Emit a `<.input>` for a single aggregate field.  Picks the HTML
  *  input type from the IR type and labels it from a humanized name.
- *  `T id` references fall through to a text input — a proper
- *  select-with-options requires loading T's list at mount time, which
- *  is out of scope here. */
+ *  Enum + `X id` types lower to `<.input type="select" …>`; the rest
+ *  dispatch to `htmlInputTypeForIRType`. */
 function renderFieldInputForField(
   f: { name: string; type: TypeIR },
   formAssign = "form",
   enumsByName?: ReadonlyMap<string, EnumIR>,
+  /** Side-effect sink for `X id` field types.  When the walker
+   *  encounters `customerId: Customer id`, it pushes "Customer"
+   *  here; renderMount in liveview-emit.ts iterates these and
+   *  loads the target list at mount so the select's
+   *  `options={@<x_snake>_options}` resolves. */
+  idOptionsBindings?: Set<string>,
 ): string {
   const fieldName = snake(f.name);
   const label = humanize(f.name);
@@ -1036,6 +1062,18 @@ function renderFieldInputForField(
       const options = en.values.map((v) => JSON.stringify(v)).join(", ");
       return `<.input field={@${formAssign}[:${fieldName}]} type="select" label="${label}" options={[${options}]} />`;
     }
+  }
+  // `X id` fields render as `<.input type="select" options={@x_options}>`.
+  // The options assign is populated by `renderMount` (liveview-emit.ts)
+  // from the walker's `idOptionsBindings` set.  v0 uses the record's
+  // id as both label and value — proper `display`-based labels need
+  // an Ash calculation load that lives in the mount stub; tracked as
+  // follow-up.  Falls back to text input when the binding sink isn't
+  // threaded (e.g. tests calling the helper directly).
+  if (inner.kind === "id" && idOptionsBindings) {
+    idOptionsBindings.add(inner.targetName);
+    const optionsVar = `${snake(inner.targetName)}_options`;
+    return `<.input field={@${formAssign}[:${fieldName}]} type="select" label="${label}" options={@${optionsVar}} />`;
   }
   const inputType = htmlInputTypeForIRType(f.type);
   const isDecimal = f.type.kind === "primitive" && f.type.name === "decimal";
@@ -1805,6 +1843,7 @@ export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): 
     appModule,
     aggregatesByName: new Map(),
     enumsByName: new Map(),
+    idOptionsBindings: new Set(),
     formBindings: [],
     queryBindings: [],
     page,
