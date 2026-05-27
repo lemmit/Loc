@@ -208,7 +208,13 @@ export function generateReactForContexts(
   // route bucket + the imports the slot JSX needs).  The shell
   // template renders one `<XLayout>` component + matching
   // `<Route element={<XLayout />}>` block per entry.
-  const layoutPrep = prepareNamedLayouts(ui, sys, pack, extraRouteSplit.namedLayouts ?? new Map());
+  const layoutPrep = prepareNamedLayouts(
+    ui,
+    sys,
+    pack,
+    extraRouteSplit.namedLayouts ?? new Map(),
+    options.topLevelComponents ?? [],
+  );
   const namedLayouts = layoutPrep.namedLayouts;
   const layoutImports = layoutPrep.extraImports;
 

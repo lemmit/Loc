@@ -934,6 +934,62 @@ describe("validation", () => {
       expect(errors, errors.join("\n")).toEqual([]);
     });
   });
+
+  describe("slot type position", () => {
+    it("admits `slot` on a component parameter", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            component DetailView(heading: slot, primaryAction: slot) {
+              body: Stack { heading, primaryAction }
+            }
+          }
+        }
+      `);
+      expect(errors, errors.join("\n")).toEqual([]);
+    });
+
+    it("rejects `slot` on an aggregate field", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate Order { thing: slot }
+        }
+      `);
+      expect(
+        errors.some((e) => /'slot' is only valid on a component's parameter list/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("rejects `slot` on a value-object field", async () => {
+      const { errors } = await parse(`
+        context T {
+          valueobject V { x: slot }
+        }
+      `);
+      expect(
+        errors.some((e) => /'slot' is only valid on a component's parameter list/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("rejects `slot` on an operation parameter", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate Order {
+            status: string
+            operation tag(label: slot) {
+              status := "Tagged"
+            }
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /'slot' is only valid on a component's parameter list/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+  });
 });
 
 describe("Loom IR validation (post-lowering)", async () => {

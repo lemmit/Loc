@@ -62,6 +62,20 @@ export const PRIMITIVES: readonly PrimitiveName[] = [
  * `.loom/wire-spec.json`. */
 export type SensitivityTags = readonly string[];
 
+/** Canonical type-discriminated union for every type that appears in
+ *  the IR — primitives, ids, enums, value objects, entities, arrays,
+ *  optionals, and the UI-only `slot` marker.
+ *
+ *  Switch-dispatch convention for the `"slot"` arm: sites that consume
+ *  a type as wire / schema / source-code (backend renderers, migrations
+ *  builder, wire-spec, OpenAPI schema, Zod schema) MUST `throw` — the
+ *  validator (`checkSlotTypePosition`) guarantees `slot` never reaches
+ *  a storage / wire position, so encountering it there is a bug.
+ *  Sites that produce display strings (mermaid, loomsnap,
+ *  structural-print, playground inspector) return the literal
+ *  `"slot"` so editors and diagnostics still read sensibly when a
+ *  slot-typed component param surfaces in a label.  React's
+ *  `propType` recognises the variant and emits `ReactNode`. */
 export type TypeIR =
   | { kind: "primitive"; name: PrimitiveName; sensitivity?: SensitivityTags }
   | { kind: "id"; targetName: string; valueType: IdValueType; sensitivity?: SensitivityTags }
