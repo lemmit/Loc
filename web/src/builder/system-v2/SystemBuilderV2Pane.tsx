@@ -47,6 +47,7 @@ import {
 } from "../system/expr-slots";
 import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
 import { AstUtils, type AstNode } from "langium";
+import { isEventDecl } from "../../../../src/language/generated/ast.js";
 import { spliceNode } from "../edit-engine";
 import { IDENTIFIER, renameMember } from "../system/rename";
 import AddPalette from "./AddPalette";
@@ -451,7 +452,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     // All declared events in the model — candidates for the emit-row Select.
     const events: string[] = [];
     for (const n of AstUtils.streamAst(parsed.ast)) {
-      if (n.$type === "EventDecl") events.push((n as unknown as { name: string }).name);
+      if (isEventDecl(n)) events.push(n.name);
     }
 
     views.forEach((view, i) => {
