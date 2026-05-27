@@ -8,7 +8,7 @@ import type {
   TypeRef,
 } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
-import { mkParameter } from "../../../../src/macro-api/index.js";
+import { mkParameter } from "../../../../src/macros/api/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode } from "../edit-engine";
 import { IDENTIFIER } from "./rename";

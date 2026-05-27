@@ -5,8 +5,8 @@
 // shapes.  Keeping them in one place means the per-archetype leaf
 // macros and the top-level composer share one source of truth.
 
-import type { Aggregate, Page, View, Workflow } from "../../macro-api/index.js";
-import { boolLit, callExpr, nameRefExpr, page, stringLit } from "../../macro-api/index.js";
+import type { Aggregate, Page, View, Workflow } from "../../api/index.js";
+import { boolLit, callExpr, nameRefExpr, page, stringLit } from "../../api/index.js";
 
 export function pagesForAggregate(agg: Aggregate): Page[] {
   const pluralSnake = snake(plural(agg.name));

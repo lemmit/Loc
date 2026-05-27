@@ -1,7 +1,7 @@
 import { AstUtils } from "langium";
 import type { BodyProp, Expression, Model, Page, StateBlock, StateField } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
-import { mkStateBlock, mkStateField } from "../../../../src/macro-api/index.js";
+import { mkStateBlock, mkStateField } from "../../../../src/macros/api/index.js";
 import { parseDdd } from "../parse";
 import { applyEdits, nodeEditRange, spliceNode } from "../edit-engine";
 import { baseLabel, baseSpecOf, buildTypeRef, type BaseSpec, type TypeSpec } from "../system/fields";

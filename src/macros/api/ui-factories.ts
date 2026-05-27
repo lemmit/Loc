@@ -21,7 +21,7 @@ import type {
   RouteProp,
   StringLit,
   UiMember,
-} from "../language/generated/ast.js";
+} from "../../language/generated/ast.js";
 import {
   mkBodyProp,
   mkBoolLit,

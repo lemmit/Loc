@@ -20,7 +20,7 @@ import {
   mkPrimitiveType,
   mkProperty,
   mkTypeRef,
-} from "../../../../src/macro-api/index.js";
+} from "../../../../src/macros/api/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode } from "../edit-engine";
 import type { NodeKind } from "./model";

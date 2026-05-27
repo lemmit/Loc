@@ -19,7 +19,7 @@ export type {
   UiMember,
   View,
   Workflow,
-} from "../language/generated/ast.js";
+} from "../../language/generated/ast.js";
 // Typed AST-node builders.  Most macro authors don't need these —
 // the named factories above produce already-tagged-and-wired
 // nodes.  Re-exported here for the few macros (e.g. `crudish`'s

@@ -25,7 +25,7 @@ import type {
   MacroArgRefList,
   MacroArgString,
   MacroArgValue,
-} from "../language/generated/ast.js";
+} from "../../language/generated/ast.js";
 
 /** Read the string payload of a `MacroArgString`, or `undefined` if
  *  `v` is some other variant. */

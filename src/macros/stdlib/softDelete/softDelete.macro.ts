@@ -1,4 +1,4 @@
-import { contextFilter, defineMacro, memberAccess, not, thisRef } from "../../macro-api/index.js";
+import { contextFilter, defineMacro, memberAccess, not, thisRef } from "../../api/index.js";
 
 /** Context-level companion to `softDeletable`.
  *

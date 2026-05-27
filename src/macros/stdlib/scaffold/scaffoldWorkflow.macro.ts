@@ -1,5 +1,5 @@
-import type { Workflow } from "../../macro-api/index.js";
-import { defineMacro } from "../../macro-api/index.js";
+import type { Workflow } from "../../api/index.js";
+import { defineMacro } from "../../api/index.js";
 import { pageForWorkflow } from "./_pages.js";
 
 /** Synthesise the default form page for one workflow.  Leaf of

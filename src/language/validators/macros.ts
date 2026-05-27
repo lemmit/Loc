@@ -5,7 +5,7 @@
 // diagnostics rather than in a separate diagnostic pipeline.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
-import { drainMacroDiagnostics } from "../ddd-macro-expander.js";
+import { drainMacroDiagnostics } from "../../macros/expander.js";
 import type { Model } from "../generated/ast.js";
 
 export function checkMacroExpansion(model: Model, accept: ValidationAcceptor): void {
