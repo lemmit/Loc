@@ -168,6 +168,60 @@ fields to `wireShape(Order.create)`.
 User-defined components are pure functions over their parameters and local
 state — they cannot synthesise pages, routes, or menu entries.
 
+### 5.1 Where components may live
+
+Components declare in two scopes; both forms parse identically and share the
+same emission path (one `src/components/<Name>.tsx` per ui that references
+them).
+
+- **`ui`-scope** (`ui WebApp { component X(…) { … } }`) — visible only to
+  pages and other components inside the same ui block. Use when the
+  component is specific to one frontend.
+- **Top-level** (`component X(…) { … }` at the file root, outside any
+  `system { … }`) — visible workspace-wide through Loom's import-graph
+  walk. A `.ddd` file can be a pure component library: declare components
+  bare at the root and `import "./marketing-lib.ddd"` from any other
+  `.ddd` to use them. Lives in the same global scope as root-level value
+  objects and enums.
+
+On a name collision the **ui-scope wins** — a `component Hero` inside a ui
+shadows a top-level `component Hero` reachable through imports.
+
+### 5.2 Parameter types
+
+| Type | Example | Meaning |
+|---|---|---|
+| Primitive | `(title: string, level: int)` | Plain value, rendered into JSX positions or used in expressions. |
+| Aggregate | `(order: Order)` | Strongly-typed aggregate instance — `order.confirm` resolves to the operation and the walker hoists the mutation hook into the calling page. See `web/src/examples/action-showcase.ddd`. |
+| `slot` | `(heading: slot, primaryAction: slot)` | Element-shaped marker — the caller passes any walker expression (`Heading { … }`, `Action { order.confirm }`, even a nested component invocation) and the component body renders it via a bare ref (`Stack { heading }`). Slots are walked in the **caller's** scope, so refs / aggregate ops / route params resolve against the calling page. `slot?` marks an optional slot. |
+
+Slot params unlock generic structural components: a `DetailView` declares
+where the heading, summary, and action positions sit; each call site fills
+them with site-specific JSX. Every component invocation is implicitly a slot
+value, so components nest into each other's slots without further ceremony.
+
+```ddd
+component DetailView(heading: slot, primaryAction: slot, secondaryAction: slot?) {
+  body: Stack {
+    heading,
+    Toolbar { primaryAction, secondaryAction }
+  }
+}
+
+page OrderDetail(order: Order) {
+  route: "/orders/:id"
+  body: DetailView {
+    heading:        Heading { "Order #" + order.id, level: 2 },
+    primaryAction:  Action { order.confirm, then: navigate(Home) },
+    // secondaryAction is `slot?` — omitting it is admitted.
+  }
+}
+```
+
+The validator rejects `slot` anywhere except a component parameter list
+(`loom.slot-out-of-position`) and member access on a slot ref
+(`loom.slot-member-access`).
+
 ---
 
 ## 6. `state { … }` block

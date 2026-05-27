@@ -103,9 +103,12 @@ Rules:
   `import`).
 - The import graph defines the project.  Files nobody imports are not
   part of the project (no autodiscovery).
-- **Only `valueobject` and `enum` may appear at the model root.**
-  They form an implicit shared kernel — visible from every context as
-  a type, regardless of which file defines them.
+- **`valueobject`, `enum`, and `component` may appear at the model root.**
+  They form an implicit shared kernel — visible workspace-wide from every
+  importing file.  Value objects and enums resolve into every context's
+  type space; top-level `component` declarations resolve from every page
+  body in every ui in every system (ui-scope components shadow on name
+  collision).  See [`page-metamodel.md`](page-metamodel.md) §5.1.
 - Aggregates, events, repositories, workflows, and views stay inside
   a context, as before.
 - Cross-context aggregate references are **not** changed by this
@@ -390,11 +393,12 @@ opts out of redaction by writing their own debug form.
 ### Type references
 
 ```
-TypeRef    = BaseType ('[]')? ('?')?
-BaseType   = PrimitiveType | IdType | NamedType
-IdType     = Identifier 'id'                  // cross-aggregate FK
-NamedType  = Identifier                       // bare name
+TypeRef       = BaseType ('[]')? ('?')?
+BaseType      = PrimitiveType | SlotType | IdType | NamedType
+IdType        = Identifier 'id'                // cross-aggregate FK
+NamedType     = Identifier                     // bare name
 PrimitiveType = 'int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid'
+SlotType      = 'slot'                         // element-shaped param marker — UI-only
 MoneyLit      = 'money' '(' STRING ')'         // precise-decimal literal
 ```
 
@@ -420,6 +424,14 @@ and the type system tells you what it means.
 `T[]` denotes a collection; `T?` denotes an optional value.  Both
 suffixes apply to the same `TypeRef`, in either order
 (`Customer id?`, `Pokemon id[]`, `Address?`).
+
+`slot` is a UI-only marker — valid **only** on a `component`'s parameter
+list, where the caller injects a JSX expression that the component body
+renders via a bare ref.  The validator rejects `slot` in any other
+position (aggregate field, value-object field, operation param, etc.)
+with `loom.slot-out-of-position`.  Member access on a slot ref is also
+rejected (`loom.slot-member-access`) — slots are opaque values, not
+records.  See [`page-metamodel.md`](page-metamodel.md) §5.2.
 
 > Query results and projections are exempt — `find byEmail(e: string): Customer?`
 > and `derived owner: Customer = ...` may legitimately reference an

@@ -253,6 +253,43 @@ describe("validator — slot operand rejection", () => {
   });
 });
 
+describe("validator — slot member access rejection", () => {
+  it("`heading.length` on a slot param emits `loom.slot-member-access`", async () => {
+    // Slots are opaque JSX values — they have no addressable
+    // members, so `.length` / `.foo` / etc. on a slot-typed ref is
+    // a clear type mistake.  The validator emits a precise
+    // diagnostic at the member position instead of letting the
+    // access silently cascade to `T.unknown`.
+    const { errors } = await parseString(`
+      system S {
+        ui WebApp {
+          component Bad(heading: slot) {
+            state { len: int = heading.length }
+            body: Text { len }
+          }
+        }
+      }
+    `);
+    expect(errors.join("\n"), errors.join("\n")).toMatch(
+      /'length' is not accessible on a slot value/,
+    );
+  });
+
+  it("legitimate slot use (bare ref, no member access) stays clean", async () => {
+    const { errors } = await parseString(`
+      system S {
+        ui WebApp {
+          component Ok(heading: slot) {
+            body: Stack { heading }
+          }
+        }
+      }
+    `);
+    const slotErrs = errors.filter((e) => /slot-member-access/.test(e));
+    expect(slotErrs).toEqual([]);
+  });
+});
+
 describe("validator — cascade prevention", () => {
   it("does NOT duplicate-error when an operand has an upstream resolution failure", async () => {
     // `nonExistent` doesn't resolve — typeOf returns unknown — the

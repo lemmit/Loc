@@ -30,6 +30,7 @@ import {
   checkMatcherArity,
   checkMatchesCalls,
   checkPrimitiveConversions,
+  checkSlotMemberAccess,
   checkSlotTypePosition,
   checkTheme,
   checkTraceability,
@@ -111,6 +112,11 @@ export class DddValidator {
     // pattern in `checkDerived` etc. — see the function's header
     // for the full rationale.
     checkBinaryOperands(model, accept);
+    // Slot member access: `heading.foo` on a `(heading: slot)` param
+    // is meaningless — slots are opaque JSX, no addressable fields.
+    // Emits a precise diagnostic at the member position instead of
+    // letting the access cascade silently to `T.unknown`.
+    checkSlotMemberAccess(model, accept);
     // Primitive conversion expressions (`string(x)`, `money(d)`):
     // restrict to the infallible (source, target) pairs.  Fallible
     // parses (`int("42")`) and narrowing (`int(longValue)`) are

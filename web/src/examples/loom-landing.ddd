@@ -24,6 +24,58 @@
 //   /     — `layout: none`, the marketing landing (no AppShell chrome).
 //   /app  — default chrome — header + sidebar reappear.
 
+// ────────────────────────────────────────────────────────────────────
+// Marketing component library — top-level (`ModelMember`) components.
+// Originally inline inside `ui Landing { … }` (Phase 7 of the gap-
+// closing roadmap); promoted to the file root so any other `.ddd` in
+// the workspace can `import "./loom-landing.ddd"` and reuse Hero,
+// FeatureCard, and Footer.  See `multifile-marketing-lib.ddd` for the
+// canonical "library file with NO system wrapper" pattern.
+// ────────────────────────────────────────────────────────────────────
+
+component Hero(
+  eyebrow:        string,
+  titleLine1:     string,
+  titleLine2:     string,
+  titleGradient:  string,
+  subtitle:       string
+) {
+  body: Container {
+    style: { background: "linear-gradient(180deg, rgba(139,92,246,0.1) 0%, transparent 100%)", padding: "60px 0" },
+    Stack {
+      Badge { eyebrow },
+      Heading { titleLine1, level: 1 },
+      Heading { titleLine2, level: 1, gradient: titleGradient },
+      Text { subtitle }
+    },
+    size: "xl"
+  }
+}
+
+component FeatureCard(iconName: string, title: string, body: string) {
+  body: Card {
+    Group { Icon { name: iconName, size: "md" }, Heading { title, level: 4 } },
+    Text { body }
+  }
+}
+
+component Footer(copyright: string) {
+  body: Container {
+    Group {
+      Text { copyright },
+      Group {
+        Anchor { "Language",      to: "https://github.com/lemmit/loc/blob/main/docs/language.md" },
+        Anchor { "Generators",    to: "https://github.com/lemmit/loc/blob/main/docs/generators.md" },
+        Anchor { "Architecture",  to: "https://github.com/lemmit/loc/blob/main/docs/technical.md" },
+        Anchor { "Observability", to: "https://github.com/lemmit/loc/blob/main/docs/observability.md" },
+        Anchor { "Tools",         to: "https://github.com/lemmit/loc/blob/main/docs/tools.md" },
+        Anchor { "GitHub",        to: "https://github.com/lemmit/loc" }
+      }
+    },
+    size: "xl"
+  }
+}
+
 system LoomLanding {
 
   // Visual identity — projected by every React pack to its idiom.
@@ -92,66 +144,6 @@ system LoomLanding {
   }
 
   ui Landing {
-
-    // ──────────────────────────────────────────────────────────────
-    // Compound components — Phase 7 demonstrates the "stdlib pattern":
-    // landing-page idioms (Hero, FeatureGrid, Footer) authored as
-    // user-component declarations on top of the primitive set.  A
-    // future Phase 7b ships these as auto-injected stdlib components
-    // (override-by-redeclaration) so every ui gets them for free.
-    // For now they live inline so the gap closes visually right
-    // away.
-    // ──────────────────────────────────────────────────────────────
-
-    component Hero(
-      eyebrow:        string,
-      titleLine1:     string,
-      titleLine2:     string,
-      titleGradient:  string,
-      subtitle:       string
-    ) {
-      body: Container {
-        style: { background: "linear-gradient(180deg, rgba(139,92,246,0.1) 0%, transparent 100%)", padding: "60px 0" },
-        Stack {
-          Badge { eyebrow },
-          Heading { titleLine1, level: 1 },
-          Heading { titleLine2, level: 1, gradient: titleGradient },
-          Text { subtitle }
-        },
-        size: "xl"
-      }
-    }
-
-    component FeatureCard(iconName: string, title: string, body: string) {
-      body: Card {
-        Group { Icon { name: iconName, size: "md" }, Heading { title, level: 4 } },
-        Text { body }
-      }
-    }
-
-    // ──────────────────────────────────────────────────────────────
-    // Named layout — Phase 8 lifts the sticky header + footer out of
-    // the page body into a `layout LandingFrame { … }` SystemMember.
-    // Every page that opts in with `layout: LandingFrame` gets the
-    // same nav + footer chrome wrapping the page body.
-    // ──────────────────────────────────────────────────────────────
-
-    component Footer(copyright: string) {
-      body: Container {
-        Group {
-          Text { copyright },
-          Group {
-            Anchor { "Language",      to: "https://github.com/lemmit/loc/blob/main/docs/language.md" },
-            Anchor { "Generators",    to: "https://github.com/lemmit/loc/blob/main/docs/generators.md" },
-            Anchor { "Architecture",  to: "https://github.com/lemmit/loc/blob/main/docs/technical.md" },
-            Anchor { "Observability", to: "https://github.com/lemmit/loc/blob/main/docs/observability.md" },
-            Anchor { "Tools",         to: "https://github.com/lemmit/loc/blob/main/docs/tools.md" },
-            Anchor { "GitHub",        to: "https://github.com/lemmit/loc" }
-          }
-        },
-        size: "xl"
-      }
-    }
 
     // ──────────────────────────────────────────────────────────────
     // The landing page — wrapped by the `LandingFrame` named layout
