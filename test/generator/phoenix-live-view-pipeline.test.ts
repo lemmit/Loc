@@ -609,6 +609,32 @@ describe("emitApiControllers (api-emit unit)", () => {
     expect(wfRoute?.action).toBe(":place_order");
   });
 
+  it("workflows_controller.ex documents the Plug.RequestId trace_id flow and uses it in error_response", () => {
+    // The moduledoc used to carry a stale `TODO: Wire Plug.RequestId
+    // for trace_id propagation` line — but `Plug.RequestId` has been
+    // wired in `endpoint.ex` for a while (see `index.ts:981`), and
+    // `error_response/2` was already reading the `x-request-id`
+    // response header it sets.  This pin guards three things:
+    //   1. No leftover TODO/FIXME crumbs in the rendered controller.
+    //   2. The moduledoc accurately describes the trace_id flow
+    //      so the next contributor doesn't re-add the stale TODO.
+    //   3. `error_response/2` still reads `x-request-id` (the actual
+    //      mechanism behind the documented contract).
+    const { files } = emitApiControllers({
+      contexts: [workflowCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const ctrl = files.get("lib/phoenix_app_web/controllers/workflows_controller.ex")!;
+    expect(ctrl).not.toMatch(/TODO|FIXME|HACK/);
+    expect(ctrl).toMatch(/Plug\.RequestId/);
+    expect(ctrl).toMatch(/x-request-id/);
+    expect(ctrl).toMatch(/get_resp_header\(conn, "x-request-id"\)/);
+    expect(ctrl).toMatch(/trace_id: trace_id/);
+  });
+
   it("does NOT emit workflows_controller.ex when deployable serves nothing", () => {
     const noServe: DeployableIR = { ...stubDeployable, serves: [] };
     const { files } = emitApiControllers({
