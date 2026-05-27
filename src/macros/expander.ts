@@ -59,7 +59,7 @@ import { allMacros, lookupMacro } from "./registry.js";
 // AST members (FilterDecl / StampDecl / ImplementsDecl) spliced into
 // the host's `members[]` array, indistinguishable from user-written
 // ones.  Lowering reads structurally — see `lowerAggregate` and
-// `lowerContext` in `src/ir/lower.ts`.
+// `lowerContext` in `src/ir/lower/lower.ts`.
 
 // ---------------------------------------------------------------------------
 // Diagnostic accumulation — surfaced through document parseResult.

@@ -8930,6 +8930,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "implements"
+          },
+          {
+            "$type": "Keyword",
+            "value": "where"
           }
         ]
       },

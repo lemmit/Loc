@@ -318,7 +318,7 @@ export function pagePropDisplayName(typeName: string): string {
 // validator to refuse `layout:` on scaffold-synthesised pages in
 // v1 — the AST shape is the source of truth here because the
 // validator runs before IR lowering, and `inferPageOrigin`
-// (`src/ir/lower.ts:934`) is the lowering's same-shape mirror.
+// (`src/ir/lower/lower.ts:1028`) is the lowering's same-shape mirror.
 const SCAFFOLD_BODY_CALL_NAMES = new Set([
   "Home",
   "WorkflowsIndex",

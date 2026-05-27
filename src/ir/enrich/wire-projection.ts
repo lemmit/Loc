@@ -3,7 +3,7 @@
 // the modifier matrix.  Generic over anything carrying `access`:
 // works on `WireField[]` (where the synthetic id row participates) and
 // on `FieldIR[]` (where only declared properties participate) without
-// duplicating the rules.  See `FieldAccess` in `src/ir/loom-ir.ts`
+// duplicating the rules.  See `FieldAccess` in `src/ir/types/loom-ir.ts`
 // for the canonical role semantics this layer implements.
 
 import type { FieldAccess } from "../types/loom-ir.js";

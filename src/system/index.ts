@@ -68,7 +68,7 @@ export interface GenerateSystemOptions {
 export function generateSystems(model: Model, options: GenerateSystemOptions = {}): SystemEmission {
   // Lowering produces a faithful AST projection; enrichment populates
   // wireShape, the implicit `findAll` find, and react `moduleNames`
-  // inheritance.  See src/ir/enrichments.ts.
+  // inheritance.  See src/ir/enrich/enrichments.ts.
   const loom = enrichLoomModel(lowerModel(model));
   return generateSystemsFromLoom(loom, options);
 }

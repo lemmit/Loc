@@ -1,10 +1,21 @@
 // CodeBlock primitive — syntax-highlighted code via highlight.js CDN.
 //
 //   CodeBlock {
+//     "aggregate Order {\n  customerId: string\n}",   // positional source
 //     language: "typescript",
-//     source:   "aggregate Order {\n  customerId: string\n}",
-//     title:    "orders.ddd"   // optional macOS-titlebar style header
+//     title:    "orders.ddd"                          // optional title
 //   }
+//
+//   // Equivalent — named-arg shape:
+//   CodeBlock { source: "...", language: "typescript" }
+//
+// Both shapes are admissible.  The Phoenix backend accepts the
+// positional form (see `renderCodeBlock` in
+// `src/generator/phoenix-live-view/heex-walker.ts:1660+`), and the
+// React emitter mirrors that surface — a positional first arg wins
+// over a missing `source:` named arg.  Without this, a write like
+// `CodeBlock { "x", language: "ts" }` silently emitted an empty
+// `<code></code>` (the same source compiled on Phoenix).
 //
 // Renders to a `<pre><code class="language-...">...</code></pre>`
 // block.  The shell template (`vite/index-html.hbs`) injects the
@@ -22,7 +33,7 @@ import type { ExprIR } from "../../../../ir/types/loom-ir.js";
 import type { WalkContext } from "../../body-walker.js";
 import { testidAttr } from "../../body-walker.js";
 import { renderPrimitive } from "../context.js";
-import { escapeJsxText, stringNamed } from "../shared/args.js";
+import { escapeJsxText, firstPositionalText, stringNamed } from "../shared/args.js";
 
 export function emitCodeBlock(
   call: ExprIR & { kind: "call" },
@@ -31,7 +42,10 @@ export function emitCodeBlock(
 ): string {
   void depth;
   const language = stringNamed(call, "language") ?? "plaintext";
-  const sourceRaw = stringNamed(call, "source") ?? "";
+  // `source:` named arg wins when present; otherwise fall back to the
+  // first positional string literal so the Phoenix-style call shape
+  // (`CodeBlock { "...code...", language: "ts" }`) emits the same code.
+  const sourceRaw = stringNamed(call, "source") ?? firstPositionalText(call) ?? "";
   const title = stringNamed(call, "title");
   // Flag the shell so it injects highlight.js once across the
   // deployable.  Pages without CodeBlock skip the CDN payload.

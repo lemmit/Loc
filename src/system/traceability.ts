@@ -4,7 +4,7 @@ import { type LinesPart, lines } from "../util/code-builder.js";
 // ---------------------------------------------------------------------------
 // Traceability documentation — derived views over the
 // requirement / solution / testCase artifacts and the precomputed
-// `TraceabilityIR` index (`src/ir/enrichments.ts`).  Same status as
+// `TraceabilityIR` index (`src/ir/enrich/enrichments.ts`).  Same status as
 // the Mermaid diagrams and wire-spec: pure derivations, not contracts.
 //
 // Emitted under `<outdir>/.loom/` once per build (the artifacts are

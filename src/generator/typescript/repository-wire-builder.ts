@@ -29,7 +29,7 @@ function wireProjectionEntity(
   ctx: EnrichedBoundedContextIR,
 ): string {
   // Single canonical walk — see `agg.wireShape` (populated by
-  // src/ir/enrichments.ts).  This serializer feeds repo.toWire();
+  // src/ir/enrich/enrichments.ts).  This serializer feeds repo.toWire();
   // its output's keys must line up with the route's response Zod
   // schema and the .NET DTO.  `forApiRead` strips `internal` and
   // `secret` fields so the wire output matches the response schema's

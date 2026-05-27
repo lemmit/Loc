@@ -107,7 +107,7 @@ function renderExplicitMatcherToAwesome(expr: ExprIR): string | null {
 }
 
 function renderTestStmt(s: TestStmtIR): string {
-  // See `validateAggregateTestBodies` in src/ir/validate.ts — by the
+  // See `validateAggregateTestBodies` in src/ir/validate/validate.ts — by the
   // time we reach the generator, only `expect` / `expect-throws` /
   // `let` / `expression` / pure-function `call` survive.
   if (s.kind === "expect") {

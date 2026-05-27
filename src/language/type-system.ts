@@ -98,7 +98,7 @@ export type DddType =
   | { kind: "unknown"; sensitivity?: SensitivityTags };
 
 // `PrimitiveName` is the canonical primitive-type set sourced from
-// `src/ir/loom-ir.ts` (the IR layer downstream consumes the same
+// `src/ir/types/loom-ir.ts` (the IR layer downstream consumes the same
 // union the type-system layer assigns names against — kept in one
 // place so a new primitive shows up in both without N parallel
 // updates).  See `experience_gathered.md` → "Adding a new primitive".

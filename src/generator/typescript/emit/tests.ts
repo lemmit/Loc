@@ -93,7 +93,7 @@ function renderExplicitMatcher(expr: ExprIR): string | null {
 
 function renderTestStmt(s: TestStmtIR): string {
   // The IR validator (`validateAggregateTestBodies` in
-  // src/ir/validate.ts) rejects mutating statements (`assign` /
+  // src/ir/validate/validate.ts) rejects mutating statements (`assign` /
   // `add` / `remove` / `emit` / `precondition`) and `call` to a
   // private operation — those need an aggregate instance which a
   // bare test block doesn't have.  By the time we reach the

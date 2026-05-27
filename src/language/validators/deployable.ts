@@ -219,11 +219,12 @@ export function checkDeployableDesignPack(
   accept: ValidationAcceptor,
 ): void {
   if (d.design == null) return;
-  // Case 3 — design set on a non-UI deployable.  Lowering at
-  // ir/lower.ts:481 silently drops `design` for non-react/static/
-  // phoenixLiveView platforms, so a hono+design or dotnet+design
-  // (no `ui:`) combination silently does nothing today.  Warn
-  // before the silent drop costs the user a debugging session.
+  // Case 3 — design set on a non-UI deployable.  Lowering in
+  // `src/ir/lower/lower.ts` (the `qualifyDesign` call ~line 762)
+  // silently drops `design` for non-react/static/phoenixLiveView
+  // platforms, so a hono+design or dotnet+design (no `ui:`)
+  // combination silently does nothing today.  Warn before the
+  // silent drop costs the user a debugging session.
   if (!hasUiBinding && !platformMountsUi(d.platform)) {
     accept(
       "warning",

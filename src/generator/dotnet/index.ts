@@ -131,7 +131,7 @@ function emitProjectFromContexts(
   // namespace stays free for client-side routing; `Program.cs` adds
   // `UseStaticFiles` + `MapFallbackToFile`; the Dockerfile becomes
   // multi-stage and copies the SPA bundle into `wwwroot/`.  See
-  // `src/platform/dotnet.ts:mountsUi` + `src/ir/lower.ts` for the
+  // `src/platform/dotnet.ts:mountsUi` + `src/ir/lower/lower.ts` for the
   // upstream wiring.
   const hasEmbeddedSpa = !!system?.deployable.uiName;
   const routePrefix = hasEmbeddedSpa ? "api/" : undefined;
