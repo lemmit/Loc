@@ -262,6 +262,8 @@ export function prepareAppShellVM(
     routes,
     outOfShellRoutes: outOfShellRoutesVM,
     namedLayouts: namedLayoutsVM,
+    hasNamedLayouts: namedLayoutsVM.length > 0,
+    anyLayoutUsesNavigate: namedLayoutsVM.some((nl) => nl.usesNavigate),
     navSections: sidebarOverride ?? navSections,
   };
 }

@@ -572,8 +572,13 @@ export function renderUserComponentFile(
   const reactImport = usesState ? `import { useState } from "react";\n` : "";
   // Components that reference Slot() or declare a `slot`-typed
   // param get `ReactNode` in scope — Slot() emits `{children}` and
-  // slot params are typed as `ReactNode`.
-  const hasSlotParam = params.some((p) => p.type.kind === "slot");
+  // slot params are typed as `ReactNode`.  `slot?` (optional) lowers
+  // to `{kind: "optional", inner: {kind: "slot"}}` and gets the same
+  // treatment, but emits as `name?: ReactNode` so the caller can
+  // omit it.
+  const isSlotShape = (t: ParamIR["type"]): boolean =>
+    t.kind === "slot" || (t.kind === "optional" && t.inner.kind === "slot");
+  const hasSlotParam = params.some((p) => isSlotShape(p.type));
   const needsReactNode = usesChildren || hasSlotParam;
   const reactTypesImport = needsReactNode ? `import type { ReactNode } from "react";\n` : "";
   const userComponentImports = [...usedUserComponents]
@@ -585,21 +590,27 @@ export function renderUserComponentFile(
   // aggregate-typed param (`order: Order`) gets the aggregate's wire
   // DTO type (`OrderResponse`, imported from its api module) so member
   // accesses like `order.id` / `order.customerId` typecheck;
-  // slot-typed params (`heading: slot`) render as `ReactNode` so the
-  // caller can drop any walker expression into the prop; other
-  // params fall back to the route-param `string` shape.
+  // slot-typed params (`heading: slot` / `heading: slot?`) render as
+  // `ReactNode` so the caller can drop any walker expression into the
+  // prop; other params fall back to the route-param `string` shape.
   const dtoImports = new Map<string, string>(); // DTO type → api module
   const propType = (p: ParamIR): string => {
     if (p.type.kind === "entity" && aggregatesByName.has(p.type.name)) {
       dtoImports.set(`${p.type.name}Response`, `../api/${lowerFirst(p.type.name)}`);
       return `${p.type.name}Response`;
     }
-    if (p.type.kind === "slot") {
+    if (isSlotShape(p.type)) {
       return "ReactNode";
     }
     return typeRefAsTsString(p);
   };
-  const propLines = params.map((p) => `  ${p.name}: ${propType(p)};`);
+  const propLines = params.map((p) => {
+    // `slot?` → optional prop (`name?: ReactNode`) so the caller can
+    // omit it.  Required slot (`name: slot`) stays mandatory.
+    const optional = p.type.kind === "optional" && p.type.inner.kind === "slot";
+    const sep = optional ? "?:" : ":";
+    return `  ${p.name}${sep} ${propType(p)};`;
+  });
   if (usesChildren) propLines.push(`  children?: ReactNode;`);
   const dtoImportLines = [...dtoImports.entries()]
     .map(([type, mod]) => `import type { ${type} } from "${mod}";\n`)

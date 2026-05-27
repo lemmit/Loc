@@ -35,7 +35,7 @@ import type {
   TypeRef,
   UnaryExpr,
 } from "../language/generated/ast.js";
-import { isProperty } from "../language/generated/ast.js";
+import { isModule, isProperty } from "../language/generated/ast.js";
 import {
   mkAssignOrCallStmt,
   mkCallArg,
@@ -57,6 +57,7 @@ import {
   mkTypeRef,
   mkUnaryExpr,
 } from "./_mk.js";
+import type { OriginToken } from "./define.js";
 import {
   _currentOrigin,
   _setContainer,
@@ -369,7 +370,7 @@ export function targetFields(target: Aggregate): readonly Property[] {
  * `src/ir/loom-ir.ts` (`FieldAccess`) for the canonical semantics. */
 export function writableUpdateFields(target: Aggregate): readonly Property[] {
   return targetFields(target).filter((f) => {
-    if ((f as any)[ORIGIN_PROP] !== undefined) return false;
+    if ((f as { [ORIGIN_PROP]?: OriginToken })[ORIGIN_PROP] !== undefined) return false;
     const access = (f as { access?: FieldAccess }).access;
     if (
       access === "immutable" ||
@@ -400,7 +401,7 @@ export function writableUpdateFields(target: Aggregate): readonly Property[] {
  * iterates to derive the request-body shape. */
 export function writableCreateFields(target: Aggregate): readonly Property[] {
   return targetFields(target).filter((f) => {
-    if ((f as any)[ORIGIN_PROP] !== undefined) return false;
+    if ((f as { [ORIGIN_PROP]?: OriginToken })[ORIGIN_PROP] !== undefined) return false;
     const access = (f as { access?: FieldAccess }).access;
     if (access === "managed" || access === "token" || access === "internal") {
       return false;
@@ -425,14 +426,12 @@ export function aggregatesIn(
     | import("../language/generated/ast.js").Module
     | import("../language/generated/ast.js").BoundedContext,
 ): readonly Aggregate[] {
-  if ((parent as any).$type === "Module") {
-    const m = parent as import("../language/generated/ast.js").Module;
-    return (m.contexts ?? []).flatMap(
+  if (isModule(parent)) {
+    return (parent.contexts ?? []).flatMap(
       (c) => (c.members ?? []).filter((cm) => cm.$type === "Aggregate") as Aggregate[],
     );
   }
-  const ctx = parent as import("../language/generated/ast.js").BoundedContext;
-  return (ctx.members ?? []).filter((m) => m.$type === "Aggregate") as Aggregate[];
+  return (parent.members ?? []).filter((m) => m.$type === "Aggregate") as Aggregate[];
 }
 
 /** Workflows declared inside a Module / BoundedContext. */
@@ -442,14 +441,12 @@ export function workflowsIn(
     | import("../language/generated/ast.js").BoundedContext,
 ): readonly import("../language/generated/ast.js").Workflow[] {
   type W = import("../language/generated/ast.js").Workflow;
-  if ((parent as any).$type === "Module") {
-    const m = parent as import("../language/generated/ast.js").Module;
-    return (m.contexts ?? []).flatMap(
+  if (isModule(parent)) {
+    return (parent.contexts ?? []).flatMap(
       (c) => (c.members ?? []).filter((cm) => cm.$type === "Workflow") as W[],
     );
   }
-  const ctx = parent as import("../language/generated/ast.js").BoundedContext;
-  return (ctx.members ?? []).filter((m) => m.$type === "Workflow") as W[];
+  return (parent.members ?? []).filter((m) => m.$type === "Workflow") as W[];
 }
 
 /** Views declared inside a Module / BoundedContext. */
@@ -459,14 +456,12 @@ export function viewsIn(
     | import("../language/generated/ast.js").BoundedContext,
 ): readonly import("../language/generated/ast.js").View[] {
   type V = import("../language/generated/ast.js").View;
-  if ((parent as any).$type === "Module") {
-    const m = parent as import("../language/generated/ast.js").Module;
-    return (m.contexts ?? []).flatMap(
+  if (isModule(parent)) {
+    return (parent.contexts ?? []).flatMap(
       (c) => (c.members ?? []).filter((cm) => cm.$type === "View") as V[],
     );
   }
-  const ctx = parent as import("../language/generated/ast.js").BoundedContext;
-  return (ctx.members ?? []).filter((m) => m.$type === "View") as V[];
+  return (parent.members ?? []).filter((m) => m.$type === "View") as V[];
 }
 
 // ---------------------------------------------------------------------------

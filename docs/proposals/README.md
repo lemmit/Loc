@@ -38,6 +38,8 @@ requirements-tracing one.
 | [`pagination-design-note.md`](./pagination-design-note.md) | Pagination | `Paged<T>` response envelope; offset/limit defaults; `unpaged` opt-out for small reference lists |
 | [`mutation-testing.md`](./mutation-testing.md) | Mutation testing | IR-level `ExprIR → ExprIR[]` operators; gated instrumented emit mode preserving byte-identical fixtures; staged runner plan |
 | [`authorization.md`](./authorization.md) | Authorization | `DataKey` hierarchical scoping, `policy { data { … } }` reachability, operation/view/workflow gates, field masking |
+| [`lifecycle-operations.md`](./lifecycle-operations.md) | Aggregate lifecycle operations | Three keywords on aggregates (`create [name]`, `operation name`, `destroy [name]`) with kind-tagged typed actions, framework-owned persistence, body operating on pre-bound `this`. Drops PATCH; POST for body-carrying actions, DELETE only for canonical destroy. API-layer `urlStyle: literal \| resource` setting controls noun pluralisation. Reframes `crudish` to emit the canonical lifecycle trio. Rejects: lifecycle-on-service (Naked Objects), per-operation route alias, generic action kind, `delete` keyword. |
+| [`loom-forms.md`](./loom-forms.md) | Declarative forms | `CreateForm` / `OperationForm` / `DestroyForm` walker primitives binding to typed actions defined by [`lifecycle-operations.md`](./lifecycle-operations.md). Strict binding (no field-walking fallback); param list IS the field list; submission dispatches via the generated API client. Fixes the layering bug where form walker + API generators independently synthesise the create contract. |
 
 ## Type-system family — state, transport, exception-less
 
@@ -191,6 +193,19 @@ that still belong with the design corpus:
 The storage proposal's §12 records one recommendation to the [`aggregate-inheritance.md`](./aggregate-inheritance.md) author: rename the inheritance-table-layout key `storage: shared | own` to `inheritanceStrategy: shareTable | ownTable` (moved inside the `aggregate { ... }` block). The two aspects (persistence model vs. inheritance table layout) are genuinely orthogonal; only the word `storage` is overloaded between the storage proposal's top-level keyword and the inheritance proposal's aggregate-property key. The corner case of an event-sourced concrete subtype of a TPH-inheritance hierarchy is documented with a recommended resolution (force `inheritanceStrategy: ownTable` for ES subtypes).
 
 The storage proposal's foundation phases are positioned to land **before** the type-system family's exception-less A4 phase, in parallel with the aggregate-inheritance I-track. The storage proposal's `PersistenceAdapter.emitRepository(...)` contract is stable under A4 — landing the seam first reduces A4's per-backend monolithic edits to per-adapter file edits.
+
+## Aggregate lifecycle + forms family
+
+A two-doc, tightly coupled pair covering the aggregate's action surface and the form-generation layer that consumes it:
+
+| Doc | Aspect | Core addition |
+|---|---|---|
+| [`lifecycle-operations.md`](./lifecycle-operations.md) | Aggregate lifecycle operations | Three keywords on aggregates (`create [name]`, `operation name`, `destroy [name]`) with kind-tagged typed actions; framework-owned persistence; body operating on pre-bound `this`. Drops PATCH (POST for body-carrying actions, DELETE only for canonical destroy). API-layer `urlStyle: literal \| resource` controls noun pluralisation. Reframes `crudish` to emit the canonical lifecycle trio. Surveys prior art (Naked Objects / Causeway, Ash, DDD orthodoxy) and rejects: lifecycle-on-service, per-operation route alias, generic action kind, `delete` keyword. |
+| [`loom-forms.md`](./loom-forms.md) | Declarative forms | `CreateForm` / `OperationForm` / `DestroyForm` walker primitives binding strictly to typed actions defined by [`lifecycle-operations.md`](./lifecycle-operations.md). The action's param list IS the form's field list — no field-walking fallback. Submission dispatches via the generated API client. Fixes the layering bug where form walker + per-backend API generators independently synthesise the create contract by walking `aggregate.fields`. |
+
+**Read order:** `lifecycle-operations.md` first (foundation); `loom-forms.md` second (depends on lifecycle-operations Phase 1 + Phase 3 for typed-action IR and API-client method shapes respectively).
+
+**Delivery sequencing:** lifecycle-operations is a 5-phase build (~13 days serialised, ~7 with parallelism — backends can split); forms is a 3-phase build (~5 days serialised, ~3 with parallelism) that overlaps once lifecycle-operations Phase 1 lands. The Phase 0 stash on the branch that produced these proposals (`phase-0-crudish-create — pending design decision`) is superseded and should be dropped before crudish is reimplemented under the new model.
 
 ## Relationship to the policies work
 
