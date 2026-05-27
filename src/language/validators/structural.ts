@@ -28,6 +28,33 @@ import { envForAggregate, envForPart, envForValueObject } from "./_shared.js";
 import { checkOperation } from "./statements.js";
 import { checkDerived, checkFunction, checkInvariant, checkPropertyCheck } from "./types.js";
 
+/** `slot` is a UI-only element-shaped param marker — meaningful only
+ *  on a `component`'s parameter list (where the caller supplies JSX
+ *  for the slot and the body renders it via a bare ref).  Anywhere
+ *  else (aggregate field, value-object field, page param, operation
+ *  param, …) the type has no runtime meaning and the backend
+ *  emitters throw on it.  Flag the misuse at parse time with the
+ *  same precision as `checkTypeReferences`. */
+export function checkSlotTypePosition(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (node.$type !== "SlotType") continue;
+    // SlotType lives inside a TypeRef which lives inside the
+    // declaring node (Parameter / Property / etc.).  Walk one level
+    // up to find the holder; `slot` is valid only when the holder is
+    // a Parameter directly owned by a Component.
+    const typeRef = node.$container;
+    const holder = typeRef?.$container;
+    const enclosing = holder?.$container;
+    const ok = holder?.$type === "Parameter" && enclosing?.$type === "Component";
+    if (ok) continue;
+    const where = enclosing?.$type ?? holder?.$type ?? "<unknown>";
+    accept("error", `'slot' is only valid on a component's parameter list; found on ${where}.`, {
+      node,
+      code: "loom.slot-out-of-position",
+    });
+  }
+}
+
 export function checkTypeReferences(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
     if (node.$type !== "NamedType") continue;

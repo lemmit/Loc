@@ -312,6 +312,46 @@ describe("user-defined components", () => {
     expect(home).toMatch(/primaryAction=\{[\s\S]*?<Button[\s\S]*?Click[\s\S]*?\}/);
   });
 
+  it("`slot?` (optional) emits an optional Props field and admits omission at the call site", async () => {
+    // `slot?` lowers to `{kind: "optional", inner: {kind: "slot"}}`.
+    // The Props interface should mark the field optional (`heading?:`)
+    // so a caller can leave it off; the type is still `ReactNode`.
+    // Named `Panel` rather than `Card` because `Card` collides with
+    // the stdlib walker primitive.
+    const files = await buildAndGenerate(`
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          component Panel(heading: slot?, body: slot) {
+            body: Stack { heading, body }
+          }
+          page Home {
+            route: "/"
+            body: Panel { body: Text { "no heading provided" } }
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const panel = files.get("web/src/components/Panel.tsx")!;
+    expect(panel).toBeDefined();
+    // Optional slot → `heading?: ReactNode`; required slot stays `body: ReactNode`.
+    expect(panel).toMatch(
+      /export interface PanelProps \{\n\s+heading\?: ReactNode;\n\s+body: ReactNode;\n\}/,
+    );
+    // Caller can omit the optional slot.
+    const home = files.get("web/src/pages/home.tsx")!;
+    expect(home).toMatch(/<Panel body=\{[\s\S]*?<Text>no heading provided<\/Text>[\s\S]*?\} \/>/);
+    // The optional slot was NOT passed — should not appear as a prop attr.
+    expect(home).not.toMatch(/<Panel[^>]*heading=/);
+  });
+
   it("ui-scope component overrides a same-named top-level component", async () => {
     // Resolution precedence: a `component X(...)` inside the ui wins
     // over a top-level `component X(...)` declared at the model root.
@@ -344,5 +384,50 @@ describe("user-defined components", () => {
     const hero = files.get("web/src/components/Hero.tsx")!;
     expect(hero).toMatch(/"ui-scope: "/);
     expect(hero).not.toMatch(/"top-level: "/);
+  });
+
+  it("a named layout's slot can invoke a top-level component", async () => {
+    // Layout slots are walked at App.tsx-emit time (via `walkSlot` in
+    // layouts-emitter), which previously didn't see workspace-wide
+    // components.  After the fix, a `layout LandingFrame { header:
+    // Logo {} }` resolves `Logo` to the top-level component, emits the
+    // matching `<Logo />` inside `LandingFrameLayout`, and threads the
+    // `import Logo from "./components/Logo"` into App.tsx.
+    const files = await buildAndGenerate(`
+      component Logo() {
+        body: Heading { "Loom", level: 3 }
+      }
+
+      system S {
+        module M { context C { } }
+        layout LandingFrame {
+          header { Logo() }
+          main
+        }
+        ui WebApp {
+          page Home {
+            route: "/"
+            layout: LandingFrame
+            body: Heading { "Hi", level: 1 }
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const app = files.get("web/src/App.tsx")!;
+    expect(app).toBeDefined();
+    // Logo imported from ./components in App.tsx.
+    expect(app).toMatch(/import Logo from "\.\/components\/Logo";/);
+    // LandingFrameLayout wrapper renders <Logo /> in its header slot.
+    expect(app).toMatch(/function LandingFrameLayout\(\)/);
+    expect(app).toMatch(/<Logo \/>/);
+    // The component file itself is emitted exactly once.
+    expect(files.get("web/src/components/Logo.tsx")).toBeDefined();
   });
 });

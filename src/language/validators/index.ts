@@ -25,6 +25,7 @@ export {
   checkContainment,
   checkContext,
   checkEntityPart,
+  checkSlotTypePosition,
   checkTypeReferences,
   checkValueObject,
 } from "./structural.js";

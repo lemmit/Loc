@@ -8,7 +8,7 @@
 // pack imports the JSX needs.  The preparer wires those imports
 // into the App.tsx shell's import list (deduped).
 
-import type { LayoutIR, SystemIR, UiIR } from "../../ir/loom-ir.js";
+import type { ComponentIR, LayoutIR, ParamIR, SystemIR, UiIR } from "../../ir/loom-ir.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { walkBodyToTsx } from "./body-walker.js";
 import type { ExtraPageRoute } from "./templating/preparers/app-shell.js";
@@ -19,11 +19,22 @@ interface WalkedSlot {
   imports: Map<string, Set<string>>;
   usesNavigate: boolean;
   usesRouterLink: boolean;
+  usedUserComponents: Set<string>;
 }
 
-function walkSlot(body: NonNullable<LayoutIR["header"]>, pack: LoadedPack): WalkedSlot {
-  const { tsx, imports, usesNavigate, usesRouterLink } = walkBodyToTsx(body, pack);
-  return { jsx: tsx, imports, usesNavigate, usesRouterLink };
+function walkSlot(
+  body: NonNullable<LayoutIR["header"]>,
+  pack: LoadedPack,
+  userComponents: ReadonlyMap<string, readonly ParamIR[]>,
+): WalkedSlot {
+  const { tsx, imports, usesNavigate, usesRouterLink, usedUserComponents } = walkBodyToTsx(
+    body,
+    pack,
+    new Set(),
+    new Set(),
+    userComponents,
+  );
+  return { jsx: tsx, imports, usesNavigate, usesRouterLink, usedUserComponents };
 }
 
 /** Pre-walked named layout — slots rendered to JSX, routes bucket
@@ -52,25 +63,39 @@ export interface PreparedNamedLayout {
 
 /** For every named layout actually referenced by a page in this ui,
  *  pre-walk its slot expressions and bucket the routes that opted
- *  into it.  Returns `[]` when the ui has no layouts in scope. */
+ *  into it.  Returns `[]` when the ui has no layouts in scope.
+ *
+ *  `topLevelComponents` carries the workspace-wide bare-`ModelMember`
+ *  components from `LoomModel.components` so a layout slot like
+ *  `header: Logo { }` resolves the same shared name a page body can —
+ *  ui-scope entries override on collision (matching the precedence
+ *  in `pages-emitter.ts`). */
 export function prepareNamedLayouts(
   ui: UiIR,
   sys: SystemIR,
   pack: LoadedPack,
   routesByLayout: ReadonlyMap<string, ExtraPageRoute[]>,
+  topLevelComponents: readonly ComponentIR[] = [],
 ): { namedLayouts: PreparedNamedLayout[]; extraImports: ImportVM[] } {
   if (sys.layouts.length === 0) return { namedLayouts: [], extraImports: [] };
   const referenced = new Set<string>();
   for (const page of ui.pages) {
     if (page.layout?.kind === "named") referenced.add(page.layout.ref);
   }
+  // Build the per-emit `userComponents` map the same way the page
+  // emitter does: top-level seeds first, ui-scope overrides on
+  // collision.  Layout-slot walks consult it identically.
+  const userComponents = new Map<string, readonly ParamIR[]>();
+  for (const c of topLevelComponents) userComponents.set(c.name, c.params);
+  for (const c of ui.components) userComponents.set(c.name, c.params);
   const namedLayouts: PreparedNamedLayout[] = [];
   const aggregatedImports = new Map<string, Set<string>>();
+  const aggregatedUserComponents = new Set<string>();
   for (const layout of sys.layouts) {
     if (!referenced.has(layout.name)) continue;
-    const header = layout.header ? walkSlot(layout.header, pack) : undefined;
-    const sidebar = layout.sidebar ? walkSlot(layout.sidebar, pack) : undefined;
-    const footer = layout.footer ? walkSlot(layout.footer, pack) : undefined;
+    const header = layout.header ? walkSlot(layout.header, pack, userComponents) : undefined;
+    const sidebar = layout.sidebar ? walkSlot(layout.sidebar, pack, userComponents) : undefined;
+    const footer = layout.footer ? walkSlot(layout.footer, pack, userComponents) : undefined;
     let usesNavigate = false;
     let usesRouterLink = false;
     for (const slot of [header, sidebar, footer]) {
@@ -80,6 +105,7 @@ export function prepareNamedLayouts(
         for (const sym of symbols) existing.add(sym);
         aggregatedImports.set(from, existing);
       }
+      for (const name of slot.usedUserComponents) aggregatedUserComponents.add(name);
       usesNavigate ||= slot.usesNavigate;
       usesRouterLink ||= slot.usesRouterLink;
     }
@@ -120,6 +146,14 @@ export function prepareNamedLayouts(
     for (const symbol of symbols) {
       extraImports.push({ specifier: symbol, from });
     }
+  }
+  // User-defined components invoked from a layout slot — emit one
+  // default-import line per component name.  App.tsx (the layout
+  // wrapper's home) sits at `src/App.tsx` and components emit to
+  // `src/components/<Name>.tsx`, so `./components/<Name>` is the
+  // sibling path.  Sort for deterministic output.
+  for (const name of [...aggregatedUserComponents].sort()) {
+    extraImports.push({ specifier: name, from: `./components/${name}` });
   }
   return { namedLayouts, extraImports };
 }

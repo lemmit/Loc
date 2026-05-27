@@ -30,6 +30,7 @@ import {
   checkMatcherArity,
   checkMatchesCalls,
   checkPrimitiveConversions,
+  checkSlotTypePosition,
   checkTheme,
   checkTraceability,
   checkTypeReferences,
@@ -97,6 +98,10 @@ export class DddValidator {
     // Type-position references: bare aggregate name (must be `X id`),
     // and cross-aggregate entity-part name (must go through the root).
     checkTypeReferences(model, accept);
+    // `slot` is a UI-only param marker (PR #632) — reject anywhere
+    // outside a component's parameter list with a clear error rather
+    // than letting the backend emitter throw at generate time.
+    checkSlotTypePosition(model, accept);
     // Binary operand compatibility: every binary expression's
     // operands must agree with the operator's semantics.
     // Arithmetic uses `arithmeticResult` (numeric widening, closed

@@ -16,6 +16,7 @@
   "main": "./out/language/main.js",
   "scripts": {
     "build": "tsc -b tsconfig.json",
+    "build:web": "test -d web/node_modules && tsc -p web/tsconfig.json --noEmit || echo 'web/node_modules not present — run (cd web && npm install) once to enable the web tsc gate'",
     "watch": "tsc -b tsconfig.json --watch",
     "langium:generate": "langium generate",
     "langium:watch": "langium generate --watch",
@@ -31,7 +32,7 @@
     "test:obs-dotnet": "LOOM_OBS_E2E_DOTNET=1 vitest run test/e2e/observability-events-dotnet.test.ts",
     "test:obs-phoenix": "LOOM_OBS_E2E_PHOENIX=1 vitest run test/e2e/observability-events-phoenix.test.ts",
     "test:biome-gen": "LOOM_BIOME=1 vitest run test/e2e/generated-biome.test.ts",
-    "prepare": "npm run langium:generate && npm run build",
+    "prepare": "npm run langium:generate && npm run build && npm run build:web",
     "lint": "biome ci .",
     "format": "biome format --write .",
     "cli": "node bin/cli.js"
