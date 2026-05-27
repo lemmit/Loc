@@ -942,3 +942,115 @@ of footgun worth documenting.
   pattern works for any "log it now, gate it later" rollout —
   the report-only phase doubles as a regression baseline.
 
+## Substrate cleanup retro (W0 → W4, PRs #557 → #638)
+
+The "substrate-cleanup" series ran roughly Apr→May 2026: thirteen PRs
+(W0-A through W4 plus follow-ups #628 and #638) tightening IR brands,
+splitting the validator, promoting a walker SSOT, killing legacy
+fallback paths, and centralising AST construction. Lessons:
+
+- **Brand the architectural boundary, not every internal call site.**
+  W1B-A introduced `EnrichedLoomModel` / `EnrichedAggregateIR` / ... to
+  make `wireShape` / `associations` non-optional post-enrichment. The
+  initial cascade stopped at `PlatformSurface.emitProject(contexts:
+  BoundedContextIR[])` with local `as Enriched...` casts at the eight
+  consumer sites. A first cross-cutting audit flagged the local casts;
+  fixing them surfaced a deeper pattern (the W3-followups agent counted
+  ~224 typed sites that flow raw IR if you push the brand all the way
+  down through every helper). The pragmatic resolution (PRs #615, #628)
+  was: brand the public surface (`emitProject`), tighten the
+  per-platform entry points + per-aggregate helpers that get called
+  directly from it, then accept the brand stops at internal utilities.
+  Lesson: a brand is most useful at contracts between layers (`system/`
+  ↔ `platform/`, `ir/` ↔ `generator/`); pushing it further is
+  high-effort and low-marginal-value.
+
+- **Type casts mask latent bugs as often as they silence type errors.**
+  Twice during this work, replacing an `as unknown as X` cast with a
+  typed builder surfaced a real bug. (a) `BoolLit.value` in
+  `ui-factories.ts` is `'true' | 'false'` literal-union, not arbitrary
+  string; the cast accepted `String(value)` which would have produced
+  invalid AST literals on edge inputs. (b) `web/src/builder/system/
+  fields.ts` was setting `display: false` on a `Property` AST node;
+  `Property` has no `display` field — the cast accepted it, the runtime
+  wrote a property no consumer read. Both bugs were latent for as long
+  as the casts existed. Lesson: every `as unknown as X` in
+  AST-construction code is a place where the compiler stopped
+  type-checking the literal; assume there's drift and verify when you
+  migrate.
+
+- **Carve validators by INVARIANT, not by AST type.** W1B-B split the
+  monolithic `ddd-validator.ts` into `src/language/validators/<theme>.ts`
+  (`deployable.ts`, `aggregate.ts`, `page.ts`, etc.) rather than by the
+  node the check fires on. Themes track domain concerns
+  (cross-aggregate references, deployable rules, page metamodel);
+  organising by AST type would fragment those concerns across files —
+  the "cross-aggregate ref" rule and the "containment ref" rule both
+  fire on different nodes but enforce the same invariant. The themed
+  layout also matches how the docs reference these (`docs/auth.md` ↔
+  `validators/auth.ts`). Lesson: a file boundary that matches the
+  user-visible concern is more durable than one that matches a parser
+  artifact.
+
+- **Two-layer registries: typed SSOT + name-only mirror pinned by a
+  completeness test.** The walker-primitive registry pattern (W1B-C):
+  `src/generator/_walker/registry.ts` is the typed dispatch table
+  (each primitive carries its renderer function); `src/language/
+  walker-stdlib.ts` exports name-only `Set<string>`s for the validator
+  to consult. The layering rule forbids `language/` from importing
+  `generator/`, so the names are hand-listed in the mirror — but a
+  completeness test (`walker-stdlib-completeness.test.ts`) pins them
+  mechanically against the registry. Drift surfaces as a test failure
+  with an actionable diff. Same pattern then applied to derive
+  `STDLIB_LAYOUT_COMPONENTS` (body-walker.ts) and `STDLIB_PRIMITIVES`
+  (validators/ui.ts) from the same SSOT (PR #638). Lesson: when a name
+  list lives in two places because of a layering constraint, don't try
+  to remove one — pin the other to the first with a test.
+
+- **`mk<X>` builder pattern for closed-set AST construction.** PR #619
+  introduced `src/macro-api/_mk.ts`: a single `mkAst<T>(node)` generic
+  carrying the one structural-typing escape hatch, with thin per-type
+  wrappers (`mkProperty`, `mkTypeRef`, `mkStateField`, etc.) the macros
+  call. Net: 29 `as unknown as <AstType>` casts in
+  `factories.ts`/`ui-factories.ts` → 1 internal cast in `_mk.ts`. The
+  pattern then extended to `crudish.macro.ts` (PR #628) and the web
+  builder's AST construction sites (PR #638). Lesson: when a structural
+  cast is genuinely needed (Langium AST types model the post-link
+  state; pre-link literals legitimately lack `$container`), centralise
+  it in ONE generic wrapper rather than scattering it across every
+  author site.
+
+- **Parallel maintainer activity is the dominant rebase cost on small
+  PRs.** Across the substrate series, several PRs hit `dirty` /
+  `unstable` GitHub mergeable states because the maintainer was running
+  the Phase A Item 1 walker-target delegation (PRs #607, #610, #612,
+  #616, #622-#627) in the same files (body-walker.ts, surface.ts,
+  enrichments.ts). Mitigations that worked: (a) keep each PR scoped to
+  ≤ ~10 files, so rebase conflicts are mechanical comment-text merges
+  rather than logic merges; (b) merge fast — the PR that sat dirtiest
+  the longest (W2-C, PR #606) had to be rebased three times before it
+  landed. Lesson: when working alongside parallel activity in the same
+  files, optimize for cheap rebases over comprehensive scope.
+
+- **Commit-per-logical-group is the cheapest crash insurance for
+  long-running agents.** Two agents during this work hit rate limits
+  (529 overloaded) mid-task — once during F1 (after touching 11 files),
+  once during the web-builder migration. The agent that committed each
+  item before moving to the next preserved its work; the agent that
+  batched commits at the end lost progress and required a second
+  dispatch to pick up. Other mitigations: prefer `grep -n` over
+  `Read`, skip full `npm test` runs between commits (only at the end
+  and after high-risk groups). Lesson: a multi-item agent task should
+  treat the remote branch as a checkpoint store, not a final
+  destination.
+
+- **The "deferred" item often becomes the next PR's surprise scope.**
+  Items deferred from PR #628 (the STDLIB_LAYOUT_COMPONENTS derive,
+  blocked by a safety gate on body-walker.ts activity) ended up
+  defining PR #638's scope when the gate cleared. The pattern: a small
+  deferral list in the PR body is enough if it's actionable; what
+  doesn't work is "we should fix this someday" buried in a code
+  comment. Lesson: every deferral that survives a PR needs either a
+  tracking item or an inline TODO with a grep-able tag — otherwise it
+  drifts.
+
