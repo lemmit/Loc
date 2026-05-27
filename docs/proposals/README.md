@@ -194,6 +194,19 @@ The storage proposal's §12 records one recommendation to the [`aggregate-inheri
 
 The storage proposal's foundation phases are positioned to land **before** the type-system family's exception-less A4 phase, in parallel with the aggregate-inheritance I-track. The storage proposal's `PersistenceAdapter.emitRepository(...)` contract is stable under A4 — landing the seam first reduces A4's per-backend monolithic edits to per-adapter file edits.
 
+## Aggregate lifecycle + forms family
+
+A two-doc, tightly coupled pair covering the aggregate's action surface and the form-generation layer that consumes it:
+
+| Doc | Aspect | Core addition |
+|---|---|---|
+| [`lifecycle-operations.md`](./lifecycle-operations.md) | Aggregate lifecycle operations | Three keywords on aggregates (`create [name]`, `operation name`, `destroy [name]`) with kind-tagged typed actions; framework-owned persistence; body operating on pre-bound `this`. Drops PATCH (POST for body-carrying actions, DELETE only for canonical destroy). API-layer `urlStyle: literal \| resource` controls noun pluralisation. Reframes `crudish` to emit the canonical lifecycle trio. Surveys prior art (Naked Objects / Causeway, Ash, DDD orthodoxy) and rejects: lifecycle-on-service, per-operation route alias, generic action kind, `delete` keyword. |
+| [`loom-forms.md`](./loom-forms.md) | Declarative forms | `CreateForm` / `OperationForm` / `DestroyForm` walker primitives binding strictly to typed actions defined by [`lifecycle-operations.md`](./lifecycle-operations.md). The action's param list IS the form's field list — no field-walking fallback. Submission dispatches via the generated API client. Fixes the layering bug where form walker + per-backend API generators independently synthesise the create contract by walking `aggregate.fields`. |
+
+**Read order:** `lifecycle-operations.md` first (foundation); `loom-forms.md` second (depends on lifecycle-operations Phase 1 + Phase 3 for typed-action IR and API-client method shapes respectively).
+
+**Delivery sequencing:** lifecycle-operations is a 5-phase build (~13 days serialised, ~7 with parallelism — backends can split); forms is a 3-phase build (~5 days serialised, ~3 with parallelism) that overlaps once lifecycle-operations Phase 1 lands. The Phase 0 stash on the branch that produced these proposals (`phase-0-crudish-create — pending design decision`) is superseded and should be dropped before crudish is reimplemented under the new model.
+
 ## Relationship to the policies work
 
 Loom's authorization model is owned by
