@@ -38,6 +38,8 @@ requirements-tracing one.
 | [`pagination-design-note.md`](./pagination-design-note.md) | Pagination | `Paged<T>` response envelope; offset/limit defaults; `unpaged` opt-out for small reference lists |
 | [`mutation-testing.md`](./mutation-testing.md) | Mutation testing | IR-level `ExprIR → ExprIR[]` operators; gated instrumented emit mode preserving byte-identical fixtures; staged runner plan |
 | [`authorization.md`](./authorization.md) | Authorization | `DataKey` hierarchical scoping, `policy { data { … } }` reachability, operation/view/workflow gates, field masking |
+| [`lifecycle-operations.md`](./lifecycle-operations.md) | Aggregate lifecycle operations | Three keywords on aggregates (`create [name]`, `operation name`, `destroy [name]`) with kind-tagged typed actions, framework-owned persistence, body operating on pre-bound `this`. Drops PATCH; POST for body-carrying actions, DELETE only for canonical destroy. API-layer `urlStyle: literal \| resource` setting controls noun pluralisation. Reframes `crudish` to emit the canonical lifecycle trio. Rejects: lifecycle-on-service (Naked Objects), per-operation route alias, generic action kind, `delete` keyword. |
+| [`loom-forms.md`](./loom-forms.md) | Declarative forms | `CreateForm` / `OperationForm` / `DestroyForm` walker primitives binding to typed actions defined by [`lifecycle-operations.md`](./lifecycle-operations.md). Strict binding (no field-walking fallback); param list IS the field list; submission dispatches via the generated API client. Fixes the layering bug where form walker + API generators independently synthesise the create contract. |
 
 ## Type-system family — state, transport, exception-less
 
