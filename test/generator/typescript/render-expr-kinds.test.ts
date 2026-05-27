@@ -1,0 +1,414 @@
+// Direct unit tests for the TypeScript backend's `renderTsExpr` — one
+// pin per ExprIR kind plus per-kind variants worth locking against
+// regressions.  Mirrors the dispatch table in
+// `src/generator/typescript/render-expr.ts:28-88`.
+//
+// Pattern follows `test/generator/phoenix/phoenix-render-expr.test.ts`.
+// These tests run in <50ms total; the TS emitter is pure string emission
+// with no IO or class instantiation.
+
+import { describe, expect, it } from "vitest";
+import { renderTsExpr } from "../../../src/generator/typescript/render-expr.js";
+import type { ExprIR, TypeIR } from "../../../src/ir/types/loom-ir.js";
+
+const STRING: TypeIR = { kind: "primitive", name: "string" };
+const INT: TypeIR = { kind: "primitive", name: "int" };
+const MONEY: TypeIR = { kind: "primitive", name: "money" };
+const BOOL: TypeIR = { kind: "primitive", name: "bool" };
+
+const litInt = (v: string): ExprIR => ({ kind: "literal", lit: "int", value: v });
+const litStr = (v: string): ExprIR => ({ kind: "literal", lit: "string", value: v });
+const litMoney = (v: string): ExprIR => ({ kind: "literal", lit: "money", value: v });
+const litBool = (v: "true" | "false"): ExprIR => ({ kind: "literal", lit: "bool", value: v });
+const refParam = (name: string): ExprIR => ({ kind: "ref", name, refKind: "param" });
+const thisProp = (name: string): ExprIR => ({ kind: "ref", name, refKind: "this-prop" });
+
+describe("ts renderTsExpr — literals", () => {
+  it("renders string literals JSON-quoted", () => {
+    expect(renderTsExpr(litStr("hello"))).toBe('"hello"');
+  });
+
+  it("renders int literals verbatim", () => {
+    expect(renderTsExpr(litInt("42"))).toBe("42");
+  });
+
+  it("renders `now` as `new Date()`", () => {
+    expect(renderTsExpr({ kind: "literal", lit: "now", value: "" })).toBe("new Date()");
+  });
+
+  it("renders `null` as the bare null keyword", () => {
+    expect(renderTsExpr({ kind: "literal", lit: "null", value: "" })).toBe("null");
+  });
+
+  it("renders money literals as `new Decimal(\"…\")`", () => {
+    expect(renderTsExpr(litMoney("9.99"))).toBe('new Decimal("9.99")');
+  });
+
+  it("renders bool literals verbatim", () => {
+    expect(renderTsExpr(litBool("true"))).toBe("true");
+    expect(renderTsExpr(litBool("false"))).toBe("false");
+  });
+});
+
+describe("ts renderTsExpr — `this` / `id` receiver shapes", () => {
+  it("renders `this` as ctx.thisName", () => {
+    expect(renderTsExpr({ kind: "this" })).toBe("this");
+    expect(renderTsExpr({ kind: "this" }, { thisName: "r" })).toBe("r");
+  });
+
+  it("renders `id` as `this._id` inside the class", () => {
+    expect(renderTsExpr({ kind: "id" })).toBe("this._id");
+  });
+
+  it("renders `id` as `<row>.id` from outside the class (view bind / row scope)", () => {
+    expect(renderTsExpr({ kind: "id" }, { thisName: "r" })).toBe("r.id");
+  });
+});
+
+describe("ts renderTsExpr — refs", () => {
+  it("renders param / let / lambda refs by bare name", () => {
+    expect(renderTsExpr(refParam("orderNumber"))).toBe("orderNumber");
+    expect(renderTsExpr({ kind: "ref", name: "x", refKind: "let" })).toBe("x");
+    expect(renderTsExpr({ kind: "ref", name: "i", refKind: "lambda" })).toBe("i");
+  });
+
+  it("renders this-prop refs as `this._<name>` inside the class", () => {
+    expect(renderTsExpr(thisProp("customerName"))).toBe("this._customerName");
+  });
+
+  it("renders this-prop refs as `<row>.<name>` from outside (public getter)", () => {
+    expect(renderTsExpr(thisProp("customerName"), { thisName: "r" })).toBe("r.customerName");
+  });
+
+  it("renders enum-value refs as <enumName>.<name>", () => {
+    expect(
+      renderTsExpr({
+        kind: "ref",
+        name: "Active",
+        refKind: "enum-value",
+        enumName: "Status",
+      }),
+    ).toBe("Status.Active");
+  });
+
+  it("renders `currentUser` ref verbatim", () => {
+    expect(
+      renderTsExpr({ kind: "ref", name: "currentUser", refKind: "current-user" }),
+    ).toBe("currentUser");
+  });
+
+  it("renders helper-fn refs with lowerFirst on the name", () => {
+    expect(
+      renderTsExpr({ kind: "ref", name: "FormatName", refKind: "helper-fn" }),
+    ).toBe("this.formatName");
+  });
+});
+
+describe("ts renderTsExpr — member + method-call", () => {
+  it("renders member access as `<recv>.<member>`", () => {
+    expect(
+      renderTsExpr({
+        kind: "member",
+        receiver: thisProp("address"),
+        member: "city",
+        receiverType: { kind: "valueobject", name: "Address" },
+        memberType: STRING,
+      }),
+    ).toBe("this._address.city");
+  });
+
+  it("collapses array.count → `.length`", () => {
+    expect(
+      renderTsExpr({
+        kind: "member",
+        receiver: thisProp("items"),
+        member: "count",
+        receiverType: { kind: "array", element: STRING },
+        memberType: INT,
+      }),
+    ).toBe("this._items.length");
+  });
+
+  it("renders `string.matches(literal)` as `/pattern/.test(recv)`", () => {
+    expect(
+      renderTsExpr({
+        kind: "method-call",
+        receiver: thisProp("email"),
+        member: "matches",
+        args: [litStr("^[^@]+@.+$")],
+        receiverType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe("/^[^@]+@.+$/.test(this._email)");
+  });
+
+  it("renders collection-op `count` as .length", () => {
+    expect(
+      renderTsExpr({
+        kind: "method-call",
+        receiver: thisProp("items"),
+        member: "count",
+        args: [],
+        receiverType: { kind: "array", element: STRING },
+        isCollectionOp: true,
+      }),
+    ).toBe("(this._items).length");
+  });
+
+  it("renders collection-op `where(λ)` as `.filter(λ)`", () => {
+    expect(
+      renderTsExpr({
+        kind: "method-call",
+        receiver: thisProp("items"),
+        member: "where",
+        args: [{ kind: "lambda", param: "x", body: litBool("true") }],
+        receiverType: { kind: "array", element: STRING },
+        isCollectionOp: true,
+      }),
+    ).toBe("(this._items).filter((x) => true)");
+  });
+
+  it("renders collection-op `firstOrNull` as `(recv[0] ?? null)`", () => {
+    expect(
+      renderTsExpr({
+        kind: "method-call",
+        receiver: thisProp("items"),
+        member: "firstOrNull",
+        args: [],
+        receiverType: { kind: "array", element: STRING },
+        isCollectionOp: true,
+      }),
+    ).toBe("((this._items)[0] ?? null)");
+  });
+});
+
+describe("ts renderTsExpr — call kinds", () => {
+  it("renders value-object-ctor as `new <Name>(...)`", () => {
+    expect(
+      renderTsExpr({
+        kind: "call",
+        callKind: "value-object-ctor",
+        name: "Money",
+        args: [litInt("3"), litStr("USD")],
+      }),
+    ).toBe('new Money(3, "USD")');
+  });
+
+  it("renders function call as this.<lowerFirst(name)>(args)", () => {
+    expect(
+      renderTsExpr({
+        kind: "call",
+        callKind: "function",
+        name: "ComputeTotal",
+        args: [litInt("3")],
+      }),
+    ).toBe("this.computeTotal(3)");
+  });
+
+  it("renders free function call without receiver", () => {
+    expect(
+      renderTsExpr({ kind: "call", callKind: "free", name: "now", args: [] }),
+    ).toBe("now()");
+  });
+});
+
+describe("ts renderTsExpr — binary, unary, paren, ternary", () => {
+  it("renders int `==` as `===`", () => {
+    expect(
+      renderTsExpr({
+        kind: "binary",
+        op: "==",
+        left: litInt("1"),
+        right: litInt("2"),
+        leftType: INT,
+      }),
+    ).toBe("1 === 2");
+  });
+
+  it("renders int `!=` as `!==`", () => {
+    expect(
+      renderTsExpr({
+        kind: "binary",
+        op: "!=",
+        left: litInt("1"),
+        right: litInt("2"),
+        leftType: INT,
+      }),
+    ).toBe("1 !== 2");
+  });
+
+  it("renders money `+` as `.plus(...)` method call", () => {
+    expect(
+      renderTsExpr({
+        kind: "binary",
+        op: "+",
+        left: litMoney("1"),
+        right: litMoney("2"),
+        leftType: MONEY,
+      }),
+    ).toBe('new Decimal("1").plus(new Decimal("2"))');
+  });
+
+  it("renders money `==` as `.eq(...)` and money `!=` as `!(...)` of eq", () => {
+    expect(
+      renderTsExpr({
+        kind: "binary",
+        op: "==",
+        left: litMoney("1"),
+        right: litMoney("2"),
+        leftType: MONEY,
+      }),
+    ).toBe('new Decimal("1").eq(new Decimal("2"))');
+    expect(
+      renderTsExpr({
+        kind: "binary",
+        op: "!=",
+        left: litMoney("1"),
+        right: litMoney("2"),
+        leftType: MONEY,
+      }),
+    ).toBe('!(new Decimal("1").eq(new Decimal("2")))');
+  });
+
+  it("renders unary minus as a prefix operator", () => {
+    expect(renderTsExpr({ kind: "unary", op: "-", operand: litInt("3") })).toBe("-3");
+  });
+
+  it("renders unary `!` as a prefix operator (not `!!`)", () => {
+    expect(renderTsExpr({ kind: "unary", op: "!", operand: thisProp("active") })).toBe(
+      "!this._active",
+    );
+  });
+
+  it("renders paren as `(inner)`", () => {
+    expect(renderTsExpr({ kind: "paren", inner: litBool("true") })).toBe("(true)");
+  });
+
+  it("renders ternary as JS `cond ? then : else`", () => {
+    expect(
+      renderTsExpr({
+        kind: "ternary",
+        cond: litBool("true"),
+        then: litInt("1"),
+        otherwise: litInt("2"),
+      }),
+    ).toBe("true ? 1 : 2");
+  });
+});
+
+describe("ts renderTsExpr — convert", () => {
+  it("string(money) → `<expr>.toString()`", () => {
+    expect(
+      renderTsExpr({ kind: "convert", target: "string", from: "money", value: thisProp("price") }),
+    ).toBe("this._price.toString()");
+  });
+
+  it("string(int) → `String(<expr>)`", () => {
+    expect(
+      renderTsExpr({ kind: "convert", target: "string", from: "int", value: litInt("3") }),
+    ).toBe("String(3)");
+  });
+
+  it("money(int) → `new Decimal(<expr>)`", () => {
+    expect(
+      renderTsExpr({ kind: "convert", target: "money", from: "int", value: litInt("5") }),
+    ).toBe("new Decimal(5)");
+  });
+
+  it("money(money) → no-op (pass-through)", () => {
+    expect(
+      renderTsExpr({ kind: "convert", target: "money", from: "money", value: thisProp("amount") }),
+    ).toBe("this._amount");
+  });
+
+  it("decimal(money) → `<expr>.toNumber()` (lossy)", () => {
+    expect(
+      renderTsExpr({
+        kind: "convert",
+        target: "decimal",
+        from: "money",
+        value: thisProp("amount"),
+      }),
+    ).toBe("this._amount.toNumber()");
+  });
+});
+
+describe("ts renderTsExpr — match → right-folded ternary", () => {
+  it("lowers a single-arm match to `(cond ? value : tail)` with `undefined` tail", () => {
+    expect(
+      renderTsExpr({
+        kind: "match",
+        arms: [{ cond: thisProp("active"), value: litStr("yes") }],
+      }),
+    ).toBe('(this._active ? "yes" : undefined)');
+  });
+
+  it("includes the `otherwise` branch as the tail", () => {
+    expect(
+      renderTsExpr({
+        kind: "match",
+        arms: [{ cond: thisProp("active"), value: litStr("yes") }],
+        otherwise: litStr("no"),
+      }),
+    ).toBe('(this._active ? "yes" : "no")');
+  });
+
+  it("right-folds multiple arms with the later arms nested deeper", () => {
+    expect(
+      renderTsExpr({
+        kind: "match",
+        arms: [
+          { cond: litBool("true"), value: litStr("first") },
+          { cond: litBool("false"), value: litStr("second") },
+        ],
+        otherwise: litStr("else"),
+      }),
+    ).toBe('(true ? "first" : (false ? "second" : "else"))');
+  });
+});
+
+describe("ts renderTsExpr — lambda, new, list, object", () => {
+  it("renders single-expression lambda as `(x) => expr`", () => {
+    expect(
+      renderTsExpr({ kind: "lambda", param: "item", body: thisProp("active") }),
+    ).toBe("(item) => this._active");
+  });
+
+  it("renders block-body lambda as a TODO arrow (not TS-renderable)", () => {
+    expect(renderTsExpr({ kind: "lambda", param: "x", block: [] })).toMatch(
+      /\(x\) => \{ \/\* block-body lambda/,
+    );
+  });
+
+  it("renders entity-part constructor with id + parentId boilerplate", () => {
+    expect(
+      renderTsExpr({
+        kind: "new",
+        partName: "LineItem",
+        fields: [{ name: "sku", value: litStr("ABC") }],
+      }),
+    ).toBe(
+      'LineItem._create({ id: Ids.newLineItemId(), parentId: this._id, sku: "ABC" })',
+    );
+  });
+
+  it("renders list literal as TS array", () => {
+    expect(
+      renderTsExpr({ kind: "list", elements: [litInt("1"), litInt("2"), litInt("3")] }),
+    ).toBe("[1, 2, 3]");
+  });
+
+  it("renders object literal as parenthesised TS object", () => {
+    expect(
+      renderTsExpr({
+        kind: "object",
+        fields: [
+          { name: "name", value: litStr("Ada") },
+          { name: "age", value: litInt("36") },
+        ],
+      }),
+    ).toBe('({ name: "Ada", age: 36 })');
+  });
+});
+
+void BOOL;
