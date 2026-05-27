@@ -38,7 +38,7 @@ import {
   newEnv,
   withLocal,
   type Env,
-} from "../../../../src/ir/lower/lower-expr.js";
+} from "../../../../src/ir/lower/lower-types.js";
 import { calleeSignature, envForNode, membersOfType, typeAfterSuffix, typeOf } from "../../../../src/language/type-system.js";
 import { applyEdits } from "../edit-engine";
 import { buildLinkedModel } from "./linked-doc";

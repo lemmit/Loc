@@ -144,20 +144,18 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
+import { inferExprType, lowerExpr, lowerExprInContext } from "./lower-expr.js";
+import { lowerStatement } from "./lower-stmt.js";
 import {
   cstText,
   type Env,
   inAggregate,
-  inferExprType,
   inPart,
   inValueObject,
-  lowerExpr,
-  lowerExprInContext,
-  lowerStatement,
   lowerType,
   newEnv,
   withLocal,
-} from "./lower-expr.js";
+} from "./lower-types.js";
 import {
   buildExpandContext,
   expandInlineScaffoldPrimitives,
