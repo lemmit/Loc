@@ -91,7 +91,7 @@ import {
   type BodyLocator,
 } from "./body";
 import { BodyEditor } from "./BodyEditor";
-import { editExprSlot, exprHints, exprSlotOptions, repoSlotOptions, slotCandidates, slotExpr, viewSlotOptions, workflowSlotOptions, type ExprSlot } from "./expr-slots";
+import { editExprSlot, enumPickerCandidates, exprHints, exprSlotOptions, repoSlotOptions, slotCandidates, slotExpr, viewSlotOptions, workflowSlotOptions, type ExprSlot } from "./expr-slots";
 import { seedExpr } from "./expr-model";
 import { ExprSlotEditor, type ExprMode } from "./ExpressionEditor";
 
@@ -700,6 +700,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             seedText={expr.$cstNode?.text ?? ""}
             candidates={slotCandidates(parsed.ast, slot)}
             loadHints={() => exprHints(ctx.getSource(), slot)}
+            loadEnumPicker={() => enumPickerCandidates(ctx.getSource(), slot)}
             mode={exprMode}
             onMode={setExprMode}
             onCommit={(text) => {
@@ -1217,6 +1218,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                         seedText={expr.$cstNode?.text ?? ""}
                         candidates={slotCandidates(parsed.ast, slot as ExprSlot)}
                         loadHints={() => exprHints(ctx.getSource(), slot as ExprSlot)}
+                        loadEnumPicker={() => enumPickerCandidates(ctx.getSource(), slot as ExprSlot)}
                         mode={exprMode}
                         onMode={setExprMode}
                         onCommit={(text) => {

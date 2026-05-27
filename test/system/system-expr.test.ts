@@ -14,6 +14,7 @@ import { emitExpr, seedExpr } from "../../web/src/builder/system/expr-model.js";
 import {
   type ExprSlot,
   editExprSlot,
+  enumPickerCandidates,
   exprHints,
   exprSlotOptions,
   listDerived,
@@ -529,4 +530,92 @@ describe("structured expression editor — type-directed member candidates", () 
   // ["amount", "currency"]) no longer applies once every VO construction
   // is a BuilderCall with named slots written into the source.  Slot-name
   // suggestion for empty BuilderCall entries is a separate feature.
+});
+
+describe("structured expression editor — match-arm enum-case picker", () => {
+  // OrderStatus + a `match { status == EnumCase => … }` derived prop. Both
+  // operands type as `enum(OrderStatus)`, so each side gets the picker keyed
+  // on its leaf path.
+  const matchSrc = `system S { context C {
+    enum OrderStatus { Draft, Confirmed, Cancelled }
+    aggregate Order { status: OrderStatus
+      derived label: string = match {
+        status == Confirmed => "ready",
+        status == Cancelled => "no",
+        else => "pending"
+      } } } }`;
+
+  it("offers enum cases at the rhs leaf of a `status == Case` arm cond", async () => {
+    const m = await enumPickerCandidates(matchSrc, {
+      kind: "derived",
+      owner: "Order",
+      name: "label",
+    });
+    // Cond path is `m{i}c`; the BinaryChain's rest[0] (RHS) appends `R`.
+    expect(m.get("m0cR")).toEqual(["Draft", "Confirmed", "Cancelled"]);
+    expect(m.get("m1cR")).toEqual(["Draft", "Confirmed", "Cancelled"]);
+  });
+
+  it("offers the cases on the lhs when the RHS is the typed-enum operand", async () => {
+    // `Confirmed == status` — lhs is the literal case, rhs is the typed
+    // `status` operand. Bare NameRefs to enum cases don't resolve via
+    // `envForNode` (env doesn't bind enum values), so we recognise them
+    // separately as a bare-ident matching some enum's case.
+    const src = `system S { context C {
+      enum OrderStatus { Draft, Confirmed }
+      aggregate Order { status: OrderStatus
+        derived label: string = match {
+          status == Confirmed => "yes"
+          else => "no"
+        } } } }`;
+    const m = await enumPickerCandidates(src, { kind: "derived", owner: "Order", name: "label" });
+    // `status` types as enum(OrderStatus) → rhs leaf at `m0cR` gets the
+    // picker; lhs picker would need a reverse-direction inference we
+    // currently don't do (documented caveat).
+    expect(m.get("m0cR")).toEqual(["Draft", "Confirmed"]);
+  });
+
+  it("unwraps ParenExpr wrappers and threads `i` segments into the path", async () => {
+    const src = `system S { context C {
+      enum OrderStatus { Draft, Confirmed }
+      aggregate Order { status: OrderStatus
+        derived label: string = match {
+          (status == Confirmed) => "ready"
+          else => "pending"
+        } } } }`;
+    const m = await enumPickerCandidates(src, { kind: "derived", owner: "Order", name: "label" });
+    // Arm 0 cond is ParenExpr → inner BinaryChain → rhs leaf at `m0ciR`.
+    expect(m.get("m0ciR")).toEqual(["Draft", "Confirmed"]);
+  });
+
+  it("covers `!=` arm conds the same way", async () => {
+    const src = `system S { context C {
+      enum OrderStatus { Draft, Confirmed }
+      aggregate Order { status: OrderStatus
+        derived label: string = match {
+          status != Confirmed => "no"
+          else => "yes"
+        } } } }`;
+    const m = await enumPickerCandidates(src, { kind: "derived", owner: "Order", name: "label" });
+    expect(m.get("m0cR")).toEqual(["Draft", "Confirmed"]);
+  });
+
+  it("falls through on nested conjunctions (compound conds stay free text)", async () => {
+    const src = `system S { context C {
+      enum OrderStatus { Draft, Confirmed }
+      aggregate Order { qty: int  status: OrderStatus
+        derived label: string = match {
+          qty > 0 && status == Confirmed => "yes"
+          else => "no"
+        } } } }`;
+    const m = await enumPickerCandidates(src, { kind: "derived", owner: "Order", name: "label" });
+    // The arm cond's top-level is `&&`, not `==` — picker doesn't apply
+    // anywhere on this arm.
+    expect(m.size).toBe(0);
+  });
+
+  it("returns an empty map for slots without a match expression", async () => {
+    const m = await enumPickerCandidates(sales, { kind: "invariant", owner: "Money", index: 0 });
+    expect(m.size).toBe(0);
+  });
 });

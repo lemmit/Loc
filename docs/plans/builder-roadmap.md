@@ -135,6 +135,21 @@ text stays the source of truth.
   `expectedAssignEnum` in `web/src/builder/page/model.ts`; wired through
   `BuilderPane` → `PageBuilder` → the assign-row settings. Gated by
   `test/generator/builder-page-model.test.ts` and `web/e2e/builder-page.spec.ts`.
+- **`match` arm cond enum picker (Model tab)**: in the structured expression
+  editor, a `match` arm cond shaped `<expr> == <expr>` / `<expr> != <expr>`
+  whose one operand types as an enum renders the other operand's raw leaf as a
+  Mantine `Select` of the enum's cases (current value always selectable;
+  fall-through to the existing Autocomplete otherwise). Reuses `typeOf` +
+  `envForNode` from `src/language/type-system.ts` and `membersOfType`'s enum
+  case enumeration — no parallel resolver. Path scheme mirrors `memberCandidates`
+  exactly so the editor's leaf lookup hits the right slot. Caveat: covers the
+  top-level `lhs == EnumCase` / `lhs != EnumCase` shape; nested conjunctions
+  (`a && b`), set-membership, and reverse-direction `EnumCase == lhs` (where
+  only the LHS is a bare case name, which `envForNode` doesn't resolve) fall
+  through to free text. Helpers: `enumPickerCandidates` in
+  `web/src/builder/system/expr-slots.ts`; threaded through `SystemBuilderPane`
+  → `ExprSlotEditor` via the new `EnumPickerCandidatesContext`. Gated by
+  `test/system/system-expr.test.ts` and `web/e2e/system-builder.spec.ts`.
 - **Mobile Builder + Model tabs**: both builders have a narrow-viewport layout —
   full-width canvas, palette/settings (page) and inspector (model) move into
   bottom drawers, reached via the consolidated Code tab's SegmentedControl
@@ -160,11 +175,6 @@ text stays the source of truth.
   structured (see Done above); other bare calls keep a validated single-row
   editor (a call is one expression, so structuring buys little beyond the
   validation now in place).
-- **`match` arm cond enum picker** — predicate-arms `match` has no scrutinee in
-  the grammar (conds are general boolean expressions like `status == Confirmed`),
-  so a single-position picker doesn't fit. Lifting this would mean structuring
-  the cond into `lhs op rhs` rows and inferring the lhs's type; out of scope
-  here.
 - **`match` arm cond caveat** — the grammar misparses a *bare-identifier* arm
   cond (`ready => …`) as a lambda, so such conds must be comparisons/calls. Emit
   reproduces the original (valid) cond, so round-trip is safe; the "+ arm"

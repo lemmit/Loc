@@ -20,6 +20,12 @@ const MemberCandidatesContext = createContext<Map<string, string[]>>(new Map());
 // linked build resolves.
 const ArgLabelsContext = createContext<Map<string, string[]>>(new Map());
 
+// Per-leaf enum-case candidates, same path scheme. When a match-arm cond is
+// `<expr> == <expr>` / `!=` and one side types as an enum, the OTHER side's
+// raw leaf renders as a case picker (locked to the list). Empty until the
+// async linked build resolves; a stale lookup just keeps the free-text leaf.
+const EnumPickerCandidatesContext = createContext<Map<string, readonly string[]>>(new Map());
+
 // Recursive structured expression editor. Operator nodes (binary/unary/paren)
 // render dropdowns + nested operands; literals render typed inputs; everything
 // else is a `raw` text leaf. `onChange(next, commit)` bubbles the full updated
@@ -199,6 +205,7 @@ function StmtRow({ stmt, path, scope, onChange, onDelete, onMoveUp, onMoveDown }
 export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Element {
   const candidates = useContext(ExprScopeContext);
   const memberMap = useContext(MemberCandidatesContext);
+  const enumPicker = useContext(EnumPickerCandidatesContext);
   switch (node.kind) {
     case "binary":
       return (
@@ -409,7 +416,28 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
       );
     case "object":
       return <FieldsEditor fields={node.fields} path={path} onFields={(fields, c) => onChange({ ...node, fields }, c)} />;
-    case "raw":
+    case "raw": {
+      // When this leaf sits opposite an enum-typed operand in a match-arm
+      // `==`/`!=` cond, render a Select of the enum's cases. Current value
+      // stays selectable (data merges the live `text`) so a hand-written
+      // identifier isn't clobbered if it isn't an exact case.
+      const cases = enumPicker.get(path);
+      if (cases) {
+        const data = [...new Set([...cases, node.text].filter((v) => v !== ""))];
+        return (
+          <Select
+            size="xs"
+            w={150}
+            value={node.text || null}
+            data={data}
+            allowDeselect={false}
+            searchable
+            data-testid="c4expr-raw"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(v) => v && onChange({ ...node, text: v }, true)}
+          />
+        );
+      }
       return (
         <Autocomplete
           size="xs"
@@ -422,6 +450,7 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
           onBlur={() => onChange(node, true)}
         />
       );
+    }
   }
 }
 
@@ -458,6 +487,7 @@ export function ExprSlotEditor({
   seedText,
   candidates,
   loadHints,
+  loadEnumPicker,
   mode,
   onMode,
   onCommit,
@@ -470,6 +500,9 @@ export function ExprSlotEditor({
    *  re-keys this component per slot/revision, so a fresh slot or a commit
    *  remounts and recomputes. */
   loadHints: () => Promise<{ members: Map<string, string[]>; argLabels: Map<string, string[]> }>;
+  /** Resolves per-leaf enum-case candidates for match-arm `==`/`!=` conds
+   *  (see `enumPickerCandidates`). Same async/remount lifecycle as hints. */
+  loadEnumPicker?: () => Promise<Map<string, readonly string[]>>;
   mode: ExprMode;
   onMode: (mode: ExprMode) => void;
   onCommit: (text: string) => boolean;
@@ -478,6 +511,7 @@ export function ExprSlotEditor({
   const [error, setError] = useState(false);
   const [memberMap, setMemberMap] = useState<Map<string, string[]>>(new Map());
   const [argLabels, setArgLabels] = useState<Map<string, string[]>>(new Map());
+  const [enumPicker, setEnumPicker] = useState<Map<string, readonly string[]>>(new Map());
   const handle = (next: EExpr, commit: boolean): void => {
     setLocal(next);
     if (commit && !onCommit(emitExpr(next))) setError(true);
@@ -489,6 +523,12 @@ export function ExprSlotEditor({
       setMemberMap(h.members);
       setArgLabels(h.argLabels);
     });
+    if (loadEnumPicker) {
+      void loadEnumPicker().then((m) => {
+        if (!alive) return;
+        setEnumPicker(m);
+      });
+    }
     return () => { alive = false; };
     // Run once per mount; the rev/slot-keyed remount drives recomputation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -512,8 +552,10 @@ export function ExprSlotEditor({
         <ExprScopeContext.Provider value={candidates}>
           <MemberCandidatesContext.Provider value={memberMap}>
             <ArgLabelsContext.Provider value={argLabels}>
-              <ExpressionEditor node={local} path="" onChange={handle} />
-              {error && <Text size="xs" c="red">invalid expression</Text>}
+              <EnumPickerCandidatesContext.Provider value={enumPicker}>
+                <ExpressionEditor node={local} path="" onChange={handle} />
+                {error && <Text size="xs" c="red">invalid expression</Text>}
+              </EnumPickerCandidatesContext.Provider>
             </ArgLabelsContext.Provider>
           </MemberCandidatesContext.Provider>
         </ExprScopeContext.Provider>

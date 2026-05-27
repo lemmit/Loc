@@ -1002,3 +1002,60 @@ test("persists hand-dragged node positions across a reload, and Reset clears the
   await page.getByTestId("c4system-reset-layout").click();
   await expect.poll(transform).toBe(derived);
 });
+
+test("offers an enum-case picker on a match-arm cond's other operand", async ({ page }) => {
+  // No bundled example has `match { lhs == EnumCase => … }` in a domain-logic
+  // slot, so inject one through the editor exactly the way a user would (same
+  // find-then-type pattern preview-shadcn uses). Anchor on Order's `isMutable`
+  // function, append a derived prop whose body is a match with two
+  // `status == <case>` arms — `status` types as the OrderStatus enum, so the
+  // RHS leaf of each arm cond renders as a Select of the enum's cases.
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  const editor = page.locator(".monaco-editor").first();
+  await editor.click();
+  await page.keyboard.press("Control+f");
+  const findInput = page
+    .locator(".monaco-editor .find-widget .find-part textarea, .monaco-editor .find-widget .find-part input")
+    .first();
+  await findInput.fill("function isMutable");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type('derived label: string = match { status == Confirmed => "ready", status == Cancelled => "no", else => "pending" }');
+  await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 10_000 });
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  await page.locator('[data-testid="rf__node-aggregate:Order"]').click();
+  await page.getByTestId("c4system-expr-pick").click();
+  await page.getByRole("option", { name: /derived label/ }).click();
+  await expect(page.getByTestId("c4expr")).toBeVisible();
+
+  // The async linked-model build seeds the enum-picker map; poll until the
+  // first arm's RHS leaf turns into a locked picker (Mantine renders Select
+  // as a combobox role). Two raw-leaves per arm cond — the RHS is the second.
+  const raws = page.getByTestId("c4expr").getByTestId("c4expr-raw");
+  await expect(raws.first()).toBeVisible();
+  await expect
+    .poll(
+      async () => (await raws.nth(1).getAttribute("role")) ?? "",
+      { timeout: 10_000 },
+    )
+    .toBe("combobox");
+
+  // Open the dropdown and confirm the OrderStatus cases are listed.
+  await raws.nth(1).click();
+  for (const c of ["Draft", "Confirmed", "Shipped", "Cancelled"]) {
+    await expect(page.getByRole("option", { name: c, exact: true }).first()).toBeVisible();
+  }
+
+  // Pick a different case → the cond re-parses cleanly, source stays valid.
+  await page.getByRole("option", { name: "Shipped", exact: true }).first().click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
