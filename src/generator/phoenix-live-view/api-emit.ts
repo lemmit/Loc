@@ -262,7 +262,12 @@ defmodule ${webModule}.WorkflowsController do
   HTTP entry points for all workflow code-interface functions.
   Each action delegates to the matching workflow module's run/1.
 
-  TODO: Wire Plug.RequestId for trace_id propagation.
+  Trace ID propagation: \`Plug.RequestId\` runs in the endpoint pipeline
+  (see \`endpoint.ex\`) before this controller, so it has already set
+  the \`x-request-id\` response header (and \`Logger.metadata(:request_id)\`).
+  The \`error_response/2\` helper reads that header back to include the
+  trace id in the JSON error envelope — matching the
+  \`{error, trace_id}\` shape Hono and .NET emit on errors.
   """
 
 ${actions}
