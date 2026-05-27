@@ -1,5 +1,5 @@
-import { contextStamp, defineMacro, nameRef } from "../../macro-api/index.js";
-import { callExpr } from "../../macro-api/ui-factories.js";
+import { contextStamp, defineMacro, nameRef } from "../../api/index.js";
+import { callExpr } from "../../api/ui-factories.js";
 
 /** Context-level companion to `auditable`.
  *

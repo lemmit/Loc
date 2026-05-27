@@ -15,7 +15,7 @@
 // open projects with different macro libraries) would require a
 // per-services-container map.
 
-import type { MacroDefinition } from "../macro-api/define.js";
+import type { MacroDefinition } from "./api/define.js";
 
 const registry = new Map<string, MacroDefinition>();
 

@@ -31,22 +31,6 @@ import type { AstNode, LangiumDocument } from "langium";
 import { AstUtils, DocumentState } from "langium";
 import type { LangiumSharedServices } from "langium/lsp";
 import {
-  readArgBool,
-  readArgInt,
-  readArgRef,
-  readArgRefs,
-  readArgString,
-} from "../macro-api/_read.js";
-import type {
-  MacroDefinition,
-  NamedDeclKind,
-  OriginToken,
-  ParamSpec,
-  ParamType,
-} from "../macro-api/define.js";
-import { _withOrigin } from "../macro-api/factories.js";
-import { loadStdlibMacros } from "../stdlib/index.js";
-import {
   type Aggregate,
   isAggregate,
   isBoundedContext,
@@ -59,8 +43,17 @@ import {
   type MacroCall,
   type Model,
   type Ui,
-} from "./generated/ast.js";
-import { allMacros, lookupMacro } from "./macro-registry.js";
+} from "../language/generated/ast.js";
+import { readArgBool, readArgInt, readArgRef, readArgRefs, readArgString } from "./api/_read.js";
+import type {
+  MacroDefinition,
+  NamedDeclKind,
+  OriginToken,
+  ParamSpec,
+  ParamType,
+} from "./api/define.js";
+import { _withOrigin } from "./api/factories.js";
+import { allMacros, lookupMacro } from "./registry.js";
 
 // Side-table mechanism removed: capabilities are now first-class
 // AST members (FilterDecl / StampDecl / ImplementsDecl) spliced into
@@ -105,7 +98,6 @@ function recordDiagnostic(doc: LangiumDocument, d: ExpansionDiagnostic): void {
 
 export function registerMacroExpander(shared: LangiumSharedServices): void {
   // Ensure stdlib is registered before the first document is built.
-  loadStdlibMacros();
   shared.workspace.DocumentBuilder.onDocumentPhase(DocumentState.IndexedContent, async (doc) => {
     const root = doc.parseResult.value as Model | undefined;
     if (!root) return;
@@ -180,7 +172,7 @@ function expandModel(model: Model, doc: LangiumDocument): void {
 }
 
 function expandHost(
-  host: Aggregate | Ui | import("./generated/ast.js").BoundedContext,
+  host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext,
   kind: "aggregate" | "ui" | "context",
   doc: LangiumDocument,
   inv: Inventory,
@@ -194,7 +186,7 @@ function expandHost(
 
 function expandOneCall(
   call: MacroCall,
-  host: Aggregate | Ui | import("./generated/ast.js").BoundedContext,
+  host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext,
   hostKind: "aggregate" | "ui" | "context",
   doc: LangiumDocument,
   inv: Inventory,
@@ -360,7 +352,7 @@ function isHostOrDescendant(host: object, candidate: object): boolean {
 }
 
 function spliceMembers(
-  host: Aggregate | Ui | import("./generated/ast.js").BoundedContext,
+  host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext,
   hostKind: "aggregate" | "ui" | "context",
   members: unknown[],
   call: MacroCall,

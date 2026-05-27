@@ -34,8 +34,8 @@ import type {
   Statement,
   TypeRef,
   UnaryExpr,
-} from "../language/generated/ast.js";
-import { isModule, isProperty } from "../language/generated/ast.js";
+} from "../../language/generated/ast.js";
+import { isModule, isProperty } from "../../language/generated/ast.js";
 import {
   mkAssignOrCallStmt,
   mkCallArg,
@@ -423,8 +423,8 @@ export function writableCreateFields(target: Aggregate): readonly Property[] {
  * BoundedContexts) or directly inside a BoundedContext. */
 export function aggregatesIn(
   parent:
-    | import("../language/generated/ast.js").Module
-    | import("../language/generated/ast.js").BoundedContext,
+    | import("../../language/generated/ast.js").Module
+    | import("../../language/generated/ast.js").BoundedContext,
 ): readonly Aggregate[] {
   if (isModule(parent)) {
     return (parent.contexts ?? []).flatMap(
@@ -437,10 +437,10 @@ export function aggregatesIn(
 /** Workflows declared inside a Module / BoundedContext. */
 export function workflowsIn(
   parent:
-    | import("../language/generated/ast.js").Module
-    | import("../language/generated/ast.js").BoundedContext,
-): readonly import("../language/generated/ast.js").Workflow[] {
-  type W = import("../language/generated/ast.js").Workflow;
+    | import("../../language/generated/ast.js").Module
+    | import("../../language/generated/ast.js").BoundedContext,
+): readonly import("../../language/generated/ast.js").Workflow[] {
+  type W = import("../../language/generated/ast.js").Workflow;
   if (isModule(parent)) {
     return (parent.contexts ?? []).flatMap(
       (c) => (c.members ?? []).filter((cm) => cm.$type === "Workflow") as W[],
@@ -452,10 +452,10 @@ export function workflowsIn(
 /** Views declared inside a Module / BoundedContext. */
 export function viewsIn(
   parent:
-    | import("../language/generated/ast.js").Module
-    | import("../language/generated/ast.js").BoundedContext,
-): readonly import("../language/generated/ast.js").View[] {
-  type V = import("../language/generated/ast.js").View;
+    | import("../../language/generated/ast.js").Module
+    | import("../../language/generated/ast.js").BoundedContext,
+): readonly import("../../language/generated/ast.js").View[] {
+  type V = import("../../language/generated/ast.js").View;
   if (isModule(parent)) {
     return (parent.contexts ?? []).flatMap(
       (c) => (c.members ?? []).filter((cm) => cm.$type === "View") as V[],
@@ -487,7 +487,7 @@ export function not(operand: Expression): UnaryExpr {
 /** Bare `this` reference.  Returns a real `ThisRef` AST node (not a
  * `NameRef("this")`) so it lowers to `{ kind: "this" }` via the
  * `isThisRef(expr)` branch in `lower-expr.ts:377`. */
-export function thisRef(): import("../language/generated/ast.js").ThisRef {
+export function thisRef(): import("../../language/generated/ast.js").ThisRef {
   const origin = currentOrigin();
   return tag(mkThisRef({ $type: "ThisRef" }), origin);
 }
@@ -495,7 +495,7 @@ export function thisRef(): import("../language/generated/ast.js").ThisRef {
 /** `null` literal.  Loom's grammar models this as a `NullLit` with
  * `value: 'null'` (`src/language/ddd.langium:897`); the lowerer
  * recognises it and emits `{ kind: "literal", lit: "null", value: "null" }`. */
-export function nullLit(): import("../language/generated/ast.js").NullLit {
+export function nullLit(): import("../../language/generated/ast.js").NullLit {
   const origin = currentOrigin();
   return tag(
     mkNullLit({
@@ -520,9 +520,9 @@ export function nullLit(): import("../language/generated/ast.js").NullLit {
 // AST a user could hand-write inside an aggregate or context block.
 // ---------------------------------------------------------------------------
 
-type FilterDeclAst = import("../language/generated/ast.js").FilterDecl;
-type StampDeclAst = import("../language/generated/ast.js").StampDecl;
-type ImplementsDeclAst = import("../language/generated/ast.js").ImplementsDecl;
+type FilterDeclAst = import("../../language/generated/ast.js").FilterDecl;
+type StampDeclAst = import("../../language/generated/ast.js").StampDecl;
+type ImplementsDeclAst = import("../../language/generated/ast.js").ImplementsDecl;
 
 /** Construct a `filter <expr>` aggregate / context member.
  * Equivalent to writing `filter <expr>` directly in source.  Pass

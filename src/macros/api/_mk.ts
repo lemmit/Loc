@@ -56,7 +56,7 @@ import type {
   ThisRef,
   TypeRef,
   UnaryExpr,
-} from "../language/generated/ast.js";
+} from "../../language/generated/ast.js";
 
 /** Shape of a literal that callers may supply to a `mk<X>` builder.
  * Langium's generated AST types treat container metadata as required;

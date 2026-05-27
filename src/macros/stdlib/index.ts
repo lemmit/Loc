@@ -1,7 +1,7 @@
 // Stdlib macro bundle.  Imported once at toolchain start to
 // register every shipped macro into the global registry.
 
-import { registerMacro } from "../language/macro-registry.js";
+import { registerMacro } from "../registry.js";
 import audit from "./audit/audit.macro.js";
 import auditable from "./audit/auditable.macro.js";
 import auditedByDefault from "./audit/auditedByDefault.macro.js";

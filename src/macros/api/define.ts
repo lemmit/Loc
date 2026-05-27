@@ -20,7 +20,7 @@ import type {
   ContextMember,
   Ui,
   UiMember,
-} from "../language/generated/ast.js";
+} from "../../language/generated/ast.js";
 
 /** Macros attach to one of a fixed set of host kinds.  Each kind
  * determines (a) the AST type of `target` in `ExpandContext`,
@@ -124,7 +124,7 @@ export interface OriginToken {
   /** The MacroCall AST node whose expansion produced any nodes
    * tagged with this token.  May lack CST info if it was itself
    * macro-emitted (future: nested macro calls). */
-  readonly callNode: import("../language/generated/ast.js").MacroCall;
+  readonly callNode: import("../../language/generated/ast.js").MacroCall;
 }
 
 /** A macro registered with the compiler.  Stdlib ships these

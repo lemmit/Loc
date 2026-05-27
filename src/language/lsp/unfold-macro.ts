@@ -30,9 +30,10 @@
 
 import type { LangiumDocument } from "langium";
 import type { TextEdit } from "vscode-languageserver";
-import type { MacroDefinition, OriginToken } from "../../macro-api/define.js";
-import { _withOrigin } from "../../macro-api/factories.js";
-import { resolveMacroArgs } from "../ddd-macro-expander.js";
+import type { MacroDefinition, OriginToken } from "../../macros/api/define.js";
+import { _withOrigin } from "../../macros/api/factories.js";
+import { resolveMacroArgs } from "../../macros/expander.js";
+import { lookupMacro } from "../../macros/registry.js";
 import type {
   Aggregate,
   BoundedContext,
@@ -41,7 +42,6 @@ import type {
   Ui,
   WithClause,
 } from "../generated/ast.js";
-import { lookupMacro } from "../macro-registry.js";
 import { printStructural } from "../print/index.js";
 
 const DEST_PROP = "$destination" as const;

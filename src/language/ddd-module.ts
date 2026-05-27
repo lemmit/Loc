@@ -8,7 +8,7 @@ import {
   type PartialLangiumServices,
   type PartialLangiumSharedServices,
 } from "langium/lsp";
-import { registerMacroExpander } from "./ddd-macro-expander.js";
+import { bootMacros } from "../macros/index.js";
 import { DddScopeComputation, DddScopeProvider } from "./ddd-scope.js";
 import { DddValidator, registerValidationChecks } from "./ddd-validator.js";
 import { DddGeneratedModule, DddGeneratedSharedModule } from "./generated/module.js";
@@ -78,6 +78,6 @@ export function createDddServices(context: DefaultSharedModuleContext): {
   // participate in scope resolution and validation as if user-
   // written.  Replaces the legacy scaffold AST expander, which
   // was deleted when `scaffold` migrated to a stdlib macro.
-  registerMacroExpander(shared);
+  bootMacros(shared);
   return { shared, Ddd };
 }

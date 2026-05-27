@@ -1,5 +1,5 @@
-import type { BoundedContext } from "../../macro-api/index.js";
-import { aggregatesIn, defineMacro, viewsIn, workflowsIn } from "../../macro-api/index.js";
+import type { BoundedContext } from "../../api/index.js";
+import { aggregatesIn, defineMacro, viewsIn, workflowsIn } from "../../api/index.js";
 
 /** Composer: invokes `scaffoldAggregate` / `scaffoldWorkflow` /
  * `scaffoldView` for each member of one bounded context.

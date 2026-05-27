@@ -1,5 +1,5 @@
-import type { Aggregate } from "../../macro-api/index.js";
-import { defineMacro } from "../../macro-api/index.js";
+import type { Aggregate } from "../../api/index.js";
+import { defineMacro } from "../../api/index.js";
 import { pagesForAggregate } from "./_pages.js";
 
 /** Synthesise the three default pages for one aggregate: List, New,

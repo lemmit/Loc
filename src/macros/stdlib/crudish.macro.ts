@@ -11,7 +11,7 @@ import {
   param,
   primType,
   writableUpdateFields,
-} from "../macro-api/index.js";
+} from "../api/index.js";
 
 /** Adds standardised CRUD-style operations to an aggregate, built
  * from the host's user-declared fields.  This is the macro the
@@ -88,8 +88,8 @@ export default defineMacro({
  * This is intentionally limited to the shapes the stdlib emits;
  * extend when a new shape is needed. */
 function cloneType(
-  t: import("../language/generated/ast.js").TypeRef,
-): import("../language/generated/ast.js").TypeRef {
+  t: import("../../language/generated/ast.js").TypeRef,
+): import("../../language/generated/ast.js").TypeRef {
   const cloned = mkTypeRef({
     $type: "TypeRef",
     array: t.array,
@@ -106,8 +106,8 @@ function cloneType(
 }
 
 function cloneBase(
-  b: import("../language/generated/ast.js").BaseType,
-): import("../language/generated/ast.js").BaseType {
+  b: import("../../language/generated/ast.js").BaseType,
+): import("../../language/generated/ast.js").BaseType {
   if (b.$type === "PrimitiveType") {
     return mkPrimitiveType({ $type: "PrimitiveType", name: b.name });
   }
@@ -115,7 +115,7 @@ function cloneBase(
     return mkIdType({
       $type: "IdType",
       target: { $refText: b.target.$refText } as import("langium").Reference<
-        import("../language/generated/ast.js").Aggregate
+        import("../../language/generated/ast.js").Aggregate
       >,
     });
   }
@@ -124,7 +124,7 @@ function cloneBase(
     $type: "NamedType",
     target: {
       $refText: (b as { target: { $refText: string } }).target.$refText,
-    } as import("langium").Reference<import("../language/generated/ast.js").NamedDecl>,
+    } as import("langium").Reference<import("../../language/generated/ast.js").NamedDecl>,
   });
 }
 

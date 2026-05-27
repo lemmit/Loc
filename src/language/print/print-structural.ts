@@ -5,7 +5,7 @@ import {
   readArgRef,
   readArgRefs,
   readArgString,
-} from "../../macro-api/_read.js";
+} from "../../macros/api/_read.js";
 import type {
   Aggregate,
   Api,

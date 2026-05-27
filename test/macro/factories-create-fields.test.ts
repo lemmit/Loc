@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { Aggregate } from "../../src/language/generated/ast.js";
 import { isAggregate } from "../../src/language/generated/ast.js";
-import { writableCreateFields, writableUpdateFields } from "../../src/macro-api/factories.js";
+import { writableCreateFields, writableUpdateFields } from "../../src/macros/api/factories.js";
 import { parseString } from "../_helpers/index.js";
 
 async function aggregate(src: string, name: string): Promise<Aggregate> {

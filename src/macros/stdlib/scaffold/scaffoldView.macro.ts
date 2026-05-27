@@ -1,5 +1,5 @@
-import type { View } from "../../macro-api/index.js";
-import { defineMacro } from "../../macro-api/index.js";
+import type { View } from "../../api/index.js";
+import { defineMacro } from "../../api/index.js";
 import { pageForView } from "./_pages.js";
 
 /** Synthesise the default list page for one view.  Leaf of the
