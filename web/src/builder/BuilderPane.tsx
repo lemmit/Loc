@@ -4,6 +4,7 @@ import { AstUtils } from "langium";
 import type { SerializedNodes } from "@craftjs/core";
 import type { LayoutCtx } from "../layout/ctx";
 import type { BodyProp, Component, EnumDecl, Expression, Page } from "../../../src/language/generated/ast.js";
+import { isAggregate, isOperation, isPage, isView, isWorkflow } from "../../../src/language/generated/ast.js";
 import { parseDdd } from "./parse";
 import { spliceNode } from "./edit-engine";
 import { seedFromBody, emitBody, enumStateFields, type BuilderNode } from "./page/model";
@@ -50,10 +51,10 @@ function collectOptions(ast: unknown): Record<string, string[]> {
   const view = new Set<string>();
   const page = new Set<string>();
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
-    if (node.$type === "Aggregate") aggregate.add((node as unknown as { name: string }).name);
-    else if (node.$type === "Workflow") workflow.add((node as unknown as { name: string }).name);
-    else if (node.$type === "View") view.add((node as unknown as { name: string }).name);
-    else if (node.$type === "Page") page.add((node as unknown as { name: string }).name);
+    if (isAggregate(node)) aggregate.add(node.name);
+    else if (isWorkflow(node)) workflow.add(node.name);
+    else if (isView(node)) view.add(node.name);
+    else if (isPage(node)) page.add(node.name);
   }
   return { aggregate: [...aggregate].sort(), workflow: [...workflow].sort(), view: [...view].sort(), page: [...page].sort() };
 }
@@ -63,9 +64,9 @@ function collectOptions(ast: unknown): Record<string, string[]> {
 function collectOperations(ast: unknown): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
-    if (node.$type !== "Operation") continue;
-    const agg = (node as unknown as { $container?: { $type?: string; name?: string } }).$container;
-    if (agg?.$type === "Aggregate" && agg.name) (out[agg.name] ??= []).push((node as unknown as { name: string }).name);
+    if (!isOperation(node)) continue;
+    const agg = AstUtils.getContainerOfType(node, isAggregate);
+    if (agg) (out[agg.name] ??= []).push(node.name);
   }
   return out;
 }
