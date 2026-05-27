@@ -151,6 +151,10 @@ export function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
       return { type: "array", items: jsonPropertyForType(t.element) };
     case "optional":
       return jsonPropertyForType(t.inner);
+    case "slot":
+      throw new Error(
+        "jsonPropertyForType: 'slot' type is UI-only and has no wire-spec representation.",
+      );
   }
 }
 

@@ -2,6 +2,7 @@ import type {
   AggregateIR,
   AssociationIR,
   BoundedContextIR,
+  EnrichedBoundedContextIR,
   ExprIR,
   FieldIR,
   TypeIR,
@@ -21,7 +22,7 @@ import { lowerFirst, plural, snake } from "../../../util/naming.js";
 // match.  Without these, common reads degrade to sequential scans
 // once the table has more than a few hundred rows.
 export function renderSchema(
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   opts: { audit?: boolean; provenance?: boolean } = {},
 ): string {
   const tables: string[] = [];
@@ -32,7 +33,7 @@ export function renderSchema(
       tables.push(emitTable(part.name, part.fields, agg.name, ctx, new Set()));
     }
     // Many-to-many join tables for `T id[]` reference collections.
-    for (const assoc of agg.associations!) {
+    for (const assoc of agg.associations) {
       tables.push(emitJoinTable(assoc));
     }
   }
@@ -347,6 +348,10 @@ function drizzleColumnLinesForName(
       return [`${fieldName}: text("${colName}")${not}, // arrays not supported as inline columns`];
     case "optional":
       return drizzleColumnLinesForName(fieldName, inner.inner, true, ctx);
+    case "slot":
+      throw new Error(
+        "drizzleColumnLinesForName: 'slot' type is UI-only and should not reach the schema emitter.",
+      );
   }
 }
 

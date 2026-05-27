@@ -26,6 +26,7 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  ComponentIR,
   DeployableIR,
   ParamIR,
   SystemIR,
@@ -56,6 +57,13 @@ export interface PageEmitContext {
   /** Loaded design pack.  Used by the list-page renderer; other
    *  archetypes use the procedural per-archetype builders. */
   pack: LoadedPack;
+  /** Top-level (workspace-wide) components from `LoomModel.components`.
+   *  Merged into the per-ui name→params map at emission so a page
+   *  body can invoke them by bare name; their emitted file lands at
+   *  `src/components/<Name>.tsx` alongside ui-scope components.  A
+   *  ui-scope component with the same name overrides the top-level
+   *  one (the ui-scope iteration runs second and wins). */
+  topLevelComponents: readonly ComponentIR[];
 }
 
 /** Compute the relative-path prefix from a page's emit
@@ -127,7 +135,10 @@ function buildBcByWorkflow(ctx: PageEmitContext): Map<string, BoundedContextIR> 
  *      `Name → ExtraPageRoute[]`.  The generator emits one
  *      `<Name>Layout` wrapper component and routes the bucket
  *      through it. */
-export function deriveExtraRoutesFromUi(ui: UiIR): {
+export function deriveExtraRoutesFromUi(
+  ui: UiIR,
+  topLevelComponents: readonly ComponentIR[] = [],
+): {
   inShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[];
   outOfShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[];
   namedLayouts: Map<string, import("./templating/preparers/app-shell.js").ExtraPageRoute[]>;
@@ -140,8 +151,10 @@ export function deriveExtraRoutesFromUi(ui: UiIR): {
   >();
   // Same name→params map the page emitter builds, so
   // route derivation recognises pages whose body is a user-component
-  // invocation.
+  // invocation.  Top-level components seed the map first; ui-scope
+  // entries override on collision.
   const userComponents = new Map<string, readonly ParamIR[]>();
+  for (const c of topLevelComponents) userComponents.set(c.name, c.params);
   for (const c of ui.components) userComponents.set(c.name, c.params);
   // Helper names are also a walker-eligibility signal.
   const helperNames = new Set(ui.helperImports.map((h) => h.name));
@@ -171,10 +184,12 @@ export function deriveExtraRoutesFromUi(ui: UiIR): {
 export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, string> {
   const out = new Map<string, string>();
 
-  // Emit one `src/components/<Name>.tsx` per
-  // user-defined component, and build a name→params map the
-  // walker uses to resolve cross-component invocations.
+  // Build the per-ui name→params map the walker uses to resolve
+  // cross-component invocations.  Top-level components seed the map
+  // first; ui-scope entries override on collision so a ui can shadow
+  // a workspace-wide name when needed.
   const userComponents = new Map<string, readonly ParamIR[]>();
+  for (const c of ctx.topLevelComponents) userComponents.set(c.name, c.params);
   for (const c of ui.components) userComponents.set(c.name, c.params);
   // Page name → declared route, so an `Action`'s `then: navigate(<Page>)`
   // targets the page's real path (only routable pages are included).
@@ -182,7 +197,13 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
   for (const page of ui.pages) {
     if (page.route) pageRoutes.set(page.name, page.route);
   }
-  for (const c of ui.components) {
+  // Merge top-level + ui-scope components, ui-scope last so it wins
+  // by overwriting the earlier entry under the same name.  Both
+  // flavours emit identical `src/components/<Name>.tsx` files.
+  const emittedComponents = new Map<string, ComponentIR>();
+  for (const c of ctx.topLevelComponents) emittedComponents.set(c.name, c);
+  for (const c of ui.components) emittedComponents.set(c.name, c);
+  for (const c of emittedComponents.values()) {
     out.set(
       `src/components/${c.name}.tsx`,
       renderUserComponentFile(
@@ -257,14 +278,21 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
 
 /** True when the UI contains at least one `CodeBlock { ... }`
  *  primitive call anywhere — in a page body OR a user-component
- *  body.  Drives conditional injection of the highlight.js CDN
- *  payload into the shell's `index.html` (parallels the `usesMoney`
- *  contract for `decimal.js` in `package.json`). */
-export function uiUsesCodeBlock(ui: UiIR): boolean {
+ *  body (ui-scope or workspace-wide top-level).  Drives conditional
+ *  injection of the highlight.js CDN payload into the shell's
+ *  `index.html` (parallels the `usesMoney` contract for
+ *  `decimal.js` in `package.json`). */
+export function uiUsesCodeBlock(
+  ui: UiIR,
+  topLevelComponents: readonly ComponentIR[] = [],
+): boolean {
   for (const page of ui.pages) {
     if (page.body && exprUsesCodeBlock(page.body)) return true;
   }
   for (const component of ui.components) {
+    if (component.body && exprUsesCodeBlock(component.body)) return true;
+  }
+  for (const component of topLevelComponents) {
     if (component.body && exprUsesCodeBlock(component.body)) return true;
   }
   return false;
@@ -459,7 +487,7 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
   // we still guard against an explicit page named identically to
   // a scaffold-aggregate fragment by skipping any walker output
   // whose path is already in `out`.
-  const userComponents = buildUserComponentsMap(ui);
+  const userComponents = buildUserComponentsMap(ui, ctx.topLevelComponents);
   const bcByAggregate = buildBcByAggregate(ctx);
   const helperNames = new Set(ui.helperImports.map((h) => h.name));
   for (const page of ui.pages) {
@@ -497,11 +525,17 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
 }
 
 /** UI's component-name → ParamIR map, mirroring how
- *  `emitPagesForUi` builds it.  `isWalkableLayoutBody` calls this
- *  to decide whether a body composed of user components is
+ *  `emitPagesForUi` builds it.  Top-level components seed the map;
+ *  ui-scope entries override on collision so a ui can shadow a
+ *  workspace-wide name.  `isWalkableLayoutBody` calls this to
+ *  decide whether a body composed of user components is
  *  walker-eligible. */
-function buildUserComponentsMap(ui: UiIR): Map<string, readonly ParamIR[]> {
+function buildUserComponentsMap(
+  ui: UiIR,
+  topLevelComponents: readonly ComponentIR[] = [],
+): Map<string, readonly ParamIR[]> {
   const map = new Map<string, readonly ParamIR[]>();
+  for (const c of topLevelComponents) map.set(c.name, c.params);
   for (const c of ui.components) map.set(c.name, c.params);
   return map;
 }

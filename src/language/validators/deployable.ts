@@ -13,6 +13,7 @@ import {
   backendVersionsForFamily,
   isRegisteredBackendRef,
   parseBuiltinPlatformRef,
+  platformFor,
 } from "../../platform/registry.js";
 import type { Deployable } from "../generated/ast.js";
 import {
@@ -25,6 +26,19 @@ import {
 } from "./data/platform-rules.js";
 
 void BUILTIN_PACK_LATEST;
+
+/** True iff this platform is a frontend-only deployable.  Consults the
+ *  `PlatformSurface.isFrontend` flag via the runtime registry.  Returns
+ *  `false` for unknown / typo'd platforms — `checkDeployablePlatform`
+ *  surfaces those as a separate unknown-platform diagnostic. */
+function isFrontendPlatform(platform: string | undefined): boolean {
+  if (platform == null) return false;
+  try {
+    return platformFor(platform as Parameters<typeof platformFor>[0]).isFrontend;
+  } catch {
+    return false;
+  }
+}
 
 export function checkDeployable(
   d: Deployable,
@@ -103,7 +117,7 @@ export function checkDeployable(
   checkDeployableDesignPack(d, hasUiBinding, framework, accept);
 
   // Existing rules — react/static both behave like frontends.
-  if (d.platform === "react" || d.platform === "static") {
+  if (isFrontendPlatform(d.platform)) {
     const target = d.targets?.ref;
     if (!target) {
       accept(
@@ -113,7 +127,7 @@ export function checkDeployable(
       );
       return;
     }
-    if (target.platform === "react" || target.platform === "static") {
+    if (isFrontendPlatform(target.platform)) {
       accept(
         "error",
         `Frontend deployable '${d.name}' cannot target another frontend ('${target.name}'). Pick a 'dotnet' or 'hono' deployable.`,

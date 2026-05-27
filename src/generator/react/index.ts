@@ -3,6 +3,8 @@ import {
   type BoundedContextIR,
   contextUsesMoney,
   type DeployableIR,
+  type EnrichedAggregateIR,
+  type EnrichedBoundedContextIR,
   type PageIR,
   type SystemIR,
   type UiIR,
@@ -56,10 +58,17 @@ import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflo
 export interface GenerateReactOptions {
   apiBaseUrl?: string;
   pathPrefix?: string;
+  /** Top-level (workspace-wide) components — pure render functions
+   *  declared as bare `ModelMember`s in any reachable `.ddd`
+   *  document.  The emitter merges them into the per-ui name→params
+   *  map and emits `src/components/<Name>.tsx` for every top-level
+   *  component referenced from this ui (ui-scope wins on
+   *  collisions). */
+  topLevelComponents?: import("../../ir/loom-ir.js").ComponentIR[];
 }
 
 export function generateReactForContexts(
-  contexts: BoundedContextIR[],
+  contexts: EnrichedBoundedContextIR[],
   sys: SystemIR,
   deployable: DeployableIR,
   options: GenerateReactOptions = {},
@@ -72,7 +81,7 @@ export function generateReactForContexts(
   const apiBaseUrl = options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
 
   // Per-aggregate api modules + pages.
-  const aggregates: Array<{ agg: AggregateIR; ctx: BoundedContextIR }> = [];
+  const aggregates: Array<{ agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }> = [];
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) aggregates.push({ agg, ctx });
   }
@@ -131,6 +140,7 @@ export function generateReactForContexts(
     aggregatesByName,
     contextsByName,
     pack,
+    topLevelComponents: options.topLevelComponents ?? [],
   };
   const pages = emitPagesForUi(ui, emitCtx);
   pages.forEach((content, path) => out.set(path, content));
@@ -190,7 +200,7 @@ export function generateReactForContexts(
   // `prepareAppShellVM`.  Pages with `layout: none` go to a
   // separate `outOfShell` channel that mounts as sibling routes
   // outside the AppShell chrome.
-  const extraRouteSplit = deriveExtraRoutesFromUi(ui);
+  const extraRouteSplit = deriveExtraRoutesFromUi(ui, options.topLevelComponents ?? []);
   const extraRoutes = extraRouteSplit.inShell;
   const outOfShellRoutes = extraRouteSplit.outOfShell;
   // Phase 8 step 2: walk each declared `layout <Name>` referenced by
@@ -269,7 +279,7 @@ export function generateReactForContexts(
   // detect-once / inject-once gate keeps the HTML lean when no page
   // uses code rendering.  Mirrors the `usesMoney` flag for
   // `decimal.js` in `package.json` below.
-  const usesCodeBlock = uiUsesCodeBlock(ui);
+  const usesCodeBlock = uiUsesCodeBlock(ui, options.topLevelComponents ?? []);
   out.set(
     "index.html",
     renderShellFile(

@@ -1,4 +1,9 @@
-import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
+import type {
+  BoundedContextIR,
+  DeployableIR,
+  EnrichedBoundedContextIR,
+  SystemIR,
+} from "../../ir/loom-ir.js";
 import type { MigrationsIR } from "../../ir/migrations-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
@@ -49,7 +54,7 @@ import { emitWorkflows } from "./workflow-emit.js";
 // ---------------------------------------------------------------------------
 
 export interface GeneratePhoenixLiveViewArgs {
-  contexts: BoundedContextIR[];
+  contexts: EnrichedBoundedContextIR[];
   deployable: DeployableIR;
   sys: SystemIR;
   /** Per-deployable slice of `buildMigrations(sys, snapshots)` — only the
@@ -189,7 +194,7 @@ export function generatePhoenixLiveViewProject(
 
 function emitContext(
   appName: string,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   appModule: string,
   out: Map<string, string>,
 ): void {
@@ -230,7 +235,7 @@ function emitContext(
     // context's Ash.Domain like any other resource so the auto-discovery
     // sees it.  Naming flows through `joinEntityName(assoc)` so all four
     // emitters (resource, configuration, domain, migration) stay in sync.
-    for (const assoc of agg.associations!) {
+    for (const assoc of agg.associations) {
       const joinPath = `lib/${appName}/${ctxSnake}/${assoc.joinTable}.ex`;
       out.set(joinPath, renderJoinResource(assoc, contextModule, appModule));
       allResources.push(`${contextModule}.${joinEntityName(assoc)}`);

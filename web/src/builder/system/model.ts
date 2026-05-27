@@ -224,6 +224,8 @@ export function typeLabel(t: TypeIR): string {
       return `${typeLabel(t.element)}[]`;
     case "optional":
       return `${typeLabel(t.inner)}?`;
+    case "slot":
+      return "slot";
   }
 }
 

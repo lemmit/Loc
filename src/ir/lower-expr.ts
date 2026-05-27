@@ -56,6 +56,7 @@ import {
   isPrimitiveType,
   isProperty,
   isRequiresStmt,
+  isSlotType,
   isStringLit,
   isTernaryExpr,
   isThisRef,
@@ -213,6 +214,7 @@ export function lowerType(t: TypeRef | undefined): TypeIR {
 function lowerBase(t: TypeRef): TypeIR {
   const base = t.base;
   if (isPrimitiveType(base)) return { kind: "primitive", name: base.name };
+  if (isSlotType(base)) return { kind: "slot" };
   if (isIdType(base)) {
     const target = base.target?.ref;
     let valueType: IdValueType = "guid";

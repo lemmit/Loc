@@ -14,6 +14,7 @@ import {
   type Aggregate,
   type EntityPart,
   isAggregate,
+  isComponent,
   isContainment,
   isEntityPart,
   isEnumDecl,
@@ -106,6 +107,17 @@ export class DddScopeComputation extends DefaultScopeComputation {
     for (const node of AstUtils.streamAllContents(document.parseResult.value)) {
       if (cancelToken?.isCancellationRequested) break;
       if (isAggregate(node) || isEntityPart(node) || isValueObject(node) || isEnumDecl(node)) {
+        const name = this.nameProvider.getName(node);
+        if (name) {
+          exports.push(this.descriptions.createDescription(node, name, document));
+        }
+      }
+      // Top-level components — declared as a `ModelMember` rather than
+      // inside a `ui { … }` — are visible globally so any page in any ui
+      // in any system in the workspace can invoke them by bare name.
+      // Ui-scoped components stay local and intentionally shadow on
+      // collision (resolved at the call site, not here).
+      if (isComponent(node) && isModel(node.$container)) {
         const name = this.nameProvider.getName(node);
         if (name) {
           exports.push(this.descriptions.createDescription(node, name, document));

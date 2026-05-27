@@ -1,4 +1,10 @@
-import type { BoundedContextIR, DeployableIR, Platform, SystemIR } from "../ir/loom-ir.js";
+import type {
+  ComponentIR,
+  DeployableIR,
+  EnrichedBoundedContextIR,
+  Platform,
+  SystemIR,
+} from "../ir/loom-ir.js";
 import type { MigrationsIR } from "../ir/migrations-ir.js";
 
 // ---------------------------------------------------------------------------
@@ -68,9 +74,16 @@ export interface PlatformSurface {
    * against `find.name` directly. */
   readonly reservedRepositoryFindNames: ReadonlySet<string>;
   /** All files for one deployable's project, paths relative to the
-   * deployable's folder under `<outdir>/`. */
+   * deployable's folder under `<outdir>/`.
+   *
+   * Contexts are typed as `EnrichedBoundedContextIR[]` because the
+   * system orchestrator (`src/system/index.ts`) only ever invokes
+   * `emitProject` after `enrichLoomModel` has run.  Threading the brand
+   * through the surface lets each platform's `wireShapeFor` callers see
+   * enriched aggregates / parts at compile time, without local
+   * `as Enriched...` casts. */
   emitProject(args: {
-    contexts: BoundedContextIR[];
+    contexts: EnrichedBoundedContextIR[];
     deployable: DeployableIR;
     sys: SystemIR;
     /** Per-deployable slice of `buildMigrations(sys, snapshots)` — only
@@ -83,6 +96,13 @@ export interface PlatformSurface {
      * `value_computed`, `precondition_evaluated`, etc.).  Off keeps the
      * artefact lean and the domain layer pure. */
     emitTrace?: boolean;
+    /** Top-level (workspace-wide) components declared as bare
+     *  `ModelMember`s in any reachable `.ddd` document — pure render
+     *  functions visible to every page in every ui.  Today only the
+     *  React generator consumes them (emits one
+     *  `src/components/<Name>.tsx` per ui that references the
+     *  component); other platforms ignore the arg. */
+    topLevelComponents?: ComponentIR[];
   }): Map<string, string>;
   /** Inputs for the deployable's docker-compose service stanza. */
   composeService(args: {

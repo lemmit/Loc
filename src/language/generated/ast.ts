@@ -164,6 +164,7 @@ export type DddKeywordNames =
     | "serves"
     | "shadcn"
     | "sidebar"
+    | "slot"
     | "solution"
     | "sqlite"
     | "stamp"
@@ -213,7 +214,7 @@ export function isAuthMode(item: unknown): item is AuthMode {
     return item === 'required';
 }
 
-export type BaseType = IdType | NamedType | PrimitiveType;
+export type BaseType = IdType | NamedType | PrimitiveType | SlotType;
 
 export const BaseType = 'BaseType';
 
@@ -331,7 +332,7 @@ export function isMemberName(item: unknown): item is MemberName {
     return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type ModelMember = BoundedContext | EnumDecl | Requirement | Solution | System | TestCase | ValueObject;
+export type ModelMember = BoundedContext | Component | EnumDecl | Requirement | Solution | System | TestCase | ValueObject;
 
 export const ModelMember = 'ModelMember';
 
@@ -642,7 +643,7 @@ export function isCanonicalProp(item: unknown): item is CanonicalProp {
 }
 
 export interface Component extends AstNode {
-    readonly $container: Ui;
+    readonly $container: Model | Ui;
     readonly $type: 'Component';
     body: Expression;
     decls: Array<ComponentDecl>;
@@ -1640,6 +1641,18 @@ export function isSensitivityClause(item: unknown): item is SensitivityClause {
     return reflection.isInstance(item, SensitivityClause);
 }
 
+export interface SlotType extends AstNode {
+    readonly $container: TypeRef;
+    readonly $type: 'SlotType';
+    name: 'slot';
+}
+
+export const SlotType = 'SlotType';
+
+export function isSlotType(item: unknown): item is SlotType {
+    return reflection.isInstance(item, SlotType);
+}
+
 export interface Solution extends AstNode {
     readonly $container: Model;
     readonly $type: 'Solution';
@@ -2143,6 +2156,7 @@ export type DddAstType = {
     RequiresStmt: RequiresStmt
     RouteProp: RouteProp
     SensitivityClause: SensitivityClause
+    SlotType: SlotType
     Solution: Solution
     StampDecl: StampDecl
     StateBlock: StateBlock
@@ -2184,7 +2198,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, Containment, ContextMember, DecLit, Deployable, DerivedProp, DescriptionProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, Module, ModuleBinding, ModuleStorageBinding, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SensitivityClause, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
+        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, Containment, ContextMember, DecLit, Deployable, DerivedProp, DescriptionProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, Module, ModuleBinding, ModuleStorageBinding, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SensitivityClause, SlotType, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2247,12 +2261,8 @@ export class DddAstReflection extends AbstractAstReflection {
             case MemberSuffix: {
                 return this.isSubtype(PostfixSuffix, supertype);
             }
-            case Component:
-            case MenuBlock:
-            case Page:
-            case UiApiParam:
-            case UiHelperImport: {
-                return this.isSubtype(UiMember, supertype);
+            case Component: {
+                return this.isSubtype(ModelMember, supertype) || this.isSubtype(UiMember, supertype);
             }
             case Containment: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype);
@@ -2286,7 +2296,8 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case IdType:
             case NamedType:
-            case PrimitiveType: {
+            case PrimitiveType:
+            case SlotType: {
                 return this.isSubtype(BaseType, supertype);
             }
             case Layout:
@@ -2307,6 +2318,12 @@ export class DddAstReflection extends AbstractAstReflection {
             case MacroArgRefList:
             case MacroArgString: {
                 return this.isSubtype(MacroArgValue, supertype);
+            }
+            case MenuBlock:
+            case Page:
+            case UiApiParam:
+            case UiHelperImport: {
+                return this.isSubtype(UiMember, supertype);
             }
             case Operation: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(Targetable, supertype);
@@ -3183,6 +3200,14 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: SensitivityClause,
                     properties: [
                         { name: 'tags', defaultValue: [] }
+                    ]
+                };
+            }
+            case SlotType: {
+                return {
+                    name: SlotType,
+                    properties: [
+                        { name: 'name' }
                     ]
                 };
             }

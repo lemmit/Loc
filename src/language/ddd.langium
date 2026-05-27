@@ -15,7 +15,7 @@ ImportStmt:
     'import' path=STRING ';'?;
 
 ModelMember:
-    System | BoundedContext | ValueObject | EnumDecl | Requirement | Solution | TestCase;
+    System | BoundedContext | ValueObject | EnumDecl | Requirement | Solution | TestCase | Component;
 
 // ---------------------------------------------------------------------------
 // System / Module / Deployable — the deployment shape.
@@ -875,10 +875,19 @@ TypeRef:
     base=BaseType (array?='[]')? (optional?='?')?;
 
 BaseType:
-    PrimitiveType | IdType | NamedType;
+    PrimitiveType | SlotType | IdType | NamedType;
 
 PrimitiveType:
     name=('int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid');
+
+// Element-shaped param type for component slot injection — see
+// `docs/page-metamodel.md`.  Valid only on a `component`'s parameter
+// list; values flow as JSX (`React.ReactNode`-ish in TS land) from
+// the caller's expression scope into the component's body, where
+// a bare ref `paramName` renders the caller's expr at that
+// position.  The validator pins the position restriction.
+SlotType:
+    name='slot';
 
 IdType:
     target=[NamedDecl:ID] 'id';

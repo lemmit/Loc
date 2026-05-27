@@ -1,13 +1,11 @@
 import { E2E_FIXTURES_TS } from "../generator/react/index.js";
 import { enrichLoomModel } from "../ir/enrichments.js";
 import type {
-  BoundedContextIR,
   DeployableIR,
   EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedModuleIR,
   EnrichedSystemIR,
-  ModuleIR,
   SystemIR,
 } from "../ir/loom-ir.js";
 import { lowerModel } from "../ir/lower.js";
@@ -102,7 +100,7 @@ export function generateSystemsFromLoom(
 
 function emitSystem(
   sys: EnrichedSystemIR,
-  _loom: EnrichedLoomModel,
+  loom: EnrichedLoomModel,
   out: Map<string, string>,
   options: { emitTrace?: boolean; snapshots: SnapshotStore },
 ): void {
@@ -127,6 +125,7 @@ function emitSystem(
     emitDeployable(sys, d, contexts, out, {
       emitTrace: options.emitTrace,
       migrations: ownedMigrations,
+      topLevelComponents: loom.components,
     });
   }
 
@@ -225,9 +224,9 @@ const E2E_TSCONFIG_JSON =
 
 function collectContextsFor(
   d: DeployableIR,
-  modulesByName: Map<string, ModuleIR>,
-): BoundedContextIR[] {
-  const out: BoundedContextIR[] = [];
+  modulesByName: Map<string, EnrichedModuleIR>,
+): EnrichedBoundedContextIR[] {
+  const out: EnrichedBoundedContextIR[] = [];
   for (const name of d.moduleNames) {
     const mod = modulesByName.get(name);
     if (!mod) continue;
@@ -239,9 +238,13 @@ function collectContextsFor(
 function emitDeployable(
   sys: SystemIR,
   d: DeployableIR,
-  contexts: BoundedContextIR[],
+  contexts: EnrichedBoundedContextIR[],
   out: Map<string, string>,
-  options: { emitTrace?: boolean; migrations?: MigrationsIR[] } = {},
+  options: {
+    emitTrace?: boolean;
+    migrations?: MigrationsIR[];
+    topLevelComponents?: import("../ir/loom-ir.js").ComponentIR[];
+  } = {},
 ): void {
   const emitTrace = !!options.emitTrace;
   // Per-deployable folder uses a lowercase slug (Docker requires
@@ -258,6 +261,7 @@ function emitDeployable(
     sys,
     migrations: options.migrations,
     emitTrace,
+    topLevelComponents: options.topLevelComponents,
   });
   for (const [relPath, content] of files) {
     out.set(`${sub}/${relPath}`, content);

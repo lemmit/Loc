@@ -1,8 +1,8 @@
 import { wireShapeFor } from "../../ir/enrichments.js";
 import type {
   AggregateIR,
-  BoundedContextIR,
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
   EntityPartIR,
   IdValueType,
@@ -55,7 +55,11 @@ const CS_WIRE_PRIMITIVE: Record<WirePrimitive, string> = {
 /** C# DTO property type for a `TypeIR`.  `dir` selects the suffix for
  *  nested value-object DTOs (`Request` for inputs, `Response` for
  *  outputs); entities always nest as `<Name>Response`. */
-export function wireType(t: TypeIR, ctx: BoundedContextIR, dir: "request" | "response"): string {
+export function wireType(
+  t: TypeIR,
+  ctx: EnrichedBoundedContextIR,
+  dir: "request" | "response",
+): string {
   void ctx;
   const info = wireTypeInfo(t, dir);
   let s: string;
@@ -88,7 +92,7 @@ export function wireType(t: TypeIR, ctx: BoundedContextIR, dir: "request" | "res
 export function wireToCommandArgument(
   expr: string,
   t: TypeIR,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   usings?: Set<string>,
 ): string {
   const info = wireTypeInfo(t, "request");
@@ -133,7 +137,11 @@ export function wireToCommandArgument(
 }
 
 /** Project a domain expression to its wire-shape Response. */
-export function projectToResponse(domainExpr: string, t: TypeIR, ctx: BoundedContextIR): string {
+export function projectToResponse(
+  domainExpr: string,
+  t: TypeIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   const info = wireTypeInfo(t, "response");
   if (info.isNullable) {
     // C# doesn't narrow `T?` to `T` after `is null` test; unwrap
@@ -169,11 +177,19 @@ export function projectToResponse(domainExpr: string, t: TypeIR, ctx: BoundedCon
       return `new ${info.base}Response(${args})`;
     }
     case "entity": {
-      const part =
+      type Resolved = {
+        part: EnrichedAggregateIR | EnrichedEntityPartIR;
+        agg: EnrichedAggregateIR;
+      };
+      const part: Resolved | undefined =
         ctx.aggregates
-          .flatMap((a) => a.parts.map((p) => ({ part: p, agg: a })))
+          .flatMap((a): Resolved[] =>
+            a.parts.map((p: EnrichedEntityPartIR) => ({ part: p, agg: a })),
+          )
           .find((x) => x.part.name === info.base) ??
-        ctx.aggregates.map((a) => ({ part: a, agg: a })).find((x) => x.part.name === info.base);
+        ctx.aggregates
+          .map((a): Resolved => ({ part: a, agg: a }))
+          .find((x) => x.part.name === info.base);
       if (!part) return domainExpr;
       return projectEntityExpr(domainExpr, part.part, ctx);
     }
@@ -182,7 +198,11 @@ export function projectToResponse(domainExpr: string, t: TypeIR, ctx: BoundedCon
 
 /** Convert a domain-typed expression to its wire-shape Request form.
  *  Symmetric with `projectToResponse` but wraps VOs as `<VO>Request`. */
-export function domainToRequestExpr(domainExpr: string, t: TypeIR, ctx: BoundedContextIR): string {
+export function domainToRequestExpr(
+  domainExpr: string,
+  t: TypeIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   const info = wireTypeInfo(t, "request");
   if (info.isNullable) {
     const innerT = peelNullable(t);
@@ -236,16 +256,15 @@ function csIsValueType(t: TypeIR): boolean {
 
 export function projectEntityExpr(
   domainExpr: string,
-  entity: AggregateIR | EntityPartIR,
-  ctx: BoundedContextIR,
+  entity: EnrichedAggregateIR | EnrichedEntityPartIR,
+  ctx: EnrichedBoundedContextIR,
 ): string {
-  // `entity.wireShape` is populated by `enrichLoomModel`.  Each wire
-  // field maps to one positional argument on `new <Ent>Response(...)`,
+  // `entity.wireShape` is populated by `enrichLoomModel` and exposed via
+  // the `Enriched...` brands threaded through `PlatformSurface.emitProject`.
+  // Each wire field maps to one positional argument on `new <Ent>Response(...)`,
   // in the same order the Hono / React Zod schemas emit.  `forApiRead`
-  // strips `internal` and `secret` fields.  Local cast asserts the
-  // brand — see `wireShapeFor`'s docstring for why the surface contract
-  // still hands us raw IR even though the runtime value is enriched.
-  const fields = forApiRead(wireShapeFor(entity as EnrichedAggregateIR | EnrichedEntityPartIR));
+  // strips `internal` and `secret` fields.
+  const fields = forApiRead(wireShapeFor(entity));
   const args: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
@@ -268,19 +287,27 @@ export function projectEntityExpr(
   return `new ${entity.name}Response(${args.join(", ")})`;
 }
 
-export function aggregateResponseParams(agg: AggregateIR, ctx: BoundedContextIR): string {
+export function aggregateResponseParams(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   return responseRecordParams(agg, ctx);
 }
 
-export function entityResponseParams(part: EntityPartIR, ctx: BoundedContextIR): string {
+export function entityResponseParams(
+  part: EnrichedEntityPartIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   return responseRecordParams(part, ctx);
 }
 
-function responseRecordParams(ent: AggregateIR | EntityPartIR, ctx: BoundedContextIR): string {
+function responseRecordParams(
+  ent: EnrichedAggregateIR | EnrichedEntityPartIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   // Drop `internal` / `secret` fields so the C# record's param list
-  // matches what `projectEntityExpr` projects.  Local brand cast —
-  // see `projectEntityExpr` above.
-  const fields = forApiRead(wireShapeFor(ent as EnrichedAggregateIR | EnrichedEntityPartIR));
+  // matches what `projectEntityExpr` projects.
+  const fields = forApiRead(wireShapeFor(ent));
   const idValueType = isPart(ent) ? ent.parentIdValueType : ent.idValueType;
   const parts: string[] = [];
   for (const wf of fields) {
@@ -293,7 +320,7 @@ function responseRecordParams(ent: AggregateIR | EntityPartIR, ctx: BoundedConte
   return parts.join(", ");
 }
 
-function isPart(ent: AggregateIR | EntityPartIR): ent is EntityPartIR {
+function isPart(ent: EnrichedAggregateIR | EnrichedEntityPartIR): ent is EnrichedEntityPartIR {
   return "parentName" in ent;
 }
 
@@ -303,7 +330,10 @@ function containmentPartName(t: TypeIR): string | undefined {
 }
 
 /** Set of value objects reachable from an aggregate's surface. */
-export function valueObjectsUsedBy(agg: AggregateIR, ctx: BoundedContextIR): ValueObjectIR[] {
+export function valueObjectsUsedBy(
+  agg: AggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): ValueObjectIR[] {
   const used = new Set<string>();
   const visit = (t: TypeIR) => {
     if (t.kind === "valueobject") used.add(t.name);

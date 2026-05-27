@@ -38,7 +38,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export function buildApiModule(
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
   ctx: BoundedContextIR,
 ): string {
@@ -305,7 +305,7 @@ function preconditionsAsInvariants(op: OperationIR): InvariantIR[] {
 }
 
 function emitResponseSchema(
-  ent: AggregateIR | EntityPartIR,
+  ent: EnrichedAggregateIR | EnrichedEntityPartIR,
   ctx: BoundedContextIR,
   isAgg: boolean,
 ): string[] {
@@ -317,9 +317,8 @@ function emitResponseSchema(
   // field list, so Zod schemas line up field-for-field with what
   // the wire actually carries.  `forApiRead` strips `internal` and
   // `secret` fields so the React response schema matches what the
-  // .NET and Hono backends actually serve.  Local brand cast — see
-  // `wireShapeFor`'s docstring on the brand-cascade gap.
-  const fields = forApiRead(wireShapeFor(ent as EnrichedAggregateIR | EnrichedEntityPartIR));
+  // .NET and Hono backends actually serve.
+  const fields = forApiRead(wireShapeFor(ent));
   void ctx;
   void isAgg;
   for (const wf of fields) {

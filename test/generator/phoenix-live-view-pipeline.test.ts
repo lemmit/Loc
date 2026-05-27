@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { emitApiControllers } from "../../src/generator/phoenix-live-view/api-emit.js";
 import { emitAggregateResources } from "../../src/generator/phoenix-live-view/domain-emit.js";
 import { emitOpenApiSpec } from "../../src/generator/phoenix-live-view/openapi-emit.js";
+import { enrichContext } from "../../src/ir/enrichments.js";
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../src/ir/loom-ir.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
@@ -729,7 +730,7 @@ describe("Ash validate clause emission (domain-emit unit)", () => {
   };
 
   it("emits at least one validate line for an aggregate with an invariant", () => {
-    const files = emitAggregateResources(salesCtx, "PhoenixApp", "phoenix_app");
+    const files = emitAggregateResources(enrichContext(salesCtx), "PhoenixApp", "phoenix_app");
     const customerEx = files.get("lib/phoenix_app/sales/customer.ex");
     expect(customerEx).toBeDefined();
     // The aggregate's `email.length > 0` invariant must produce a validate line.
@@ -737,7 +738,7 @@ describe("Ash validate clause emission (domain-emit unit)", () => {
   });
 
   it("emits a string_length validate for an email.length > 0 invariant", () => {
-    const files = emitAggregateResources(salesCtx, "PhoenixApp", "phoenix_app");
+    const files = emitAggregateResources(enrichContext(salesCtx), "PhoenixApp", "phoenix_app");
     const customerEx = files.get("lib/phoenix_app/sales/customer.ex");
     expect(customerEx).toBeDefined();
     // Single-field len-min shape → idiomatic Ash string_length validator.
@@ -745,7 +746,7 @@ describe("Ash validate clause emission (domain-emit unit)", () => {
   });
 
   it("emits an operation action with a validate clause for a precondition", () => {
-    const files = emitAggregateResources(salesCtx, "PhoenixApp", "phoenix_app");
+    const files = emitAggregateResources(enrichContext(salesCtx), "PhoenixApp", "phoenix_app");
     const customerEx = files.get("lib/phoenix_app/sales/customer.ex");
     expect(customerEx).toBeDefined();
     // The :activate action must be emitted with a validate clause.
@@ -2373,7 +2374,7 @@ describe("Jason.Encoder defimpl emission (domain-emit unit)", () => {
       views: [],
     };
 
-    const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
+    const files = emitAggregateResources(enrichContext(ctx), "PhoenixApp", "phoenix_app");
     const customerEx = files.get("lib/phoenix_app/sales/customer.ex")!;
     expect(customerEx).toBeDefined();
     // Defimpl block exists, references the right struct + helper module.
@@ -2414,7 +2415,7 @@ describe("Jason.Encoder defimpl emission (domain-emit unit)", () => {
       views: [],
     };
 
-    const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
+    const files = emitAggregateResources(enrichContext(ctx), "PhoenixApp", "phoenix_app");
     const orderEx = files.get("lib/phoenix_app/sales/order.ex")!;
     expect(orderEx).toBeDefined();
     expect(orderEx).toMatch(
@@ -2447,7 +2448,7 @@ describe("Jason.Encoder defimpl emission (domain-emit unit)", () => {
       views: [],
     };
 
-    const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
+    const files = emitAggregateResources(enrichContext(ctx), "PhoenixApp", "phoenix_app");
     const customerEx = files.get("lib/phoenix_app/sales/customer.ex")!;
     // Defimpl follows the resource's defmodule close, never inside it.
     const moduleClose = customerEx.indexOf("\nend\n");
@@ -2492,7 +2493,7 @@ describe("Jason.Encoder defimpl emission (domain-emit unit)", () => {
       workflows: [],
       views: [],
     };
-    const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
+    const files = emitAggregateResources(enrichContext(ctx), "PhoenixApp", "phoenix_app");
     const customerEx = files.get("lib/phoenix_app/sales/customer.ex")!;
     expect(customerEx).toMatch(
       /encode_struct\(value, \[:id, :name, :created_at, :inserted_at, :updated_at\], opts\)/,

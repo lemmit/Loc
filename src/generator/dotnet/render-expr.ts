@@ -1,4 +1,4 @@
-import type { AggregateIR, BinOp, ExprIR, TypeIR } from "../../ir/loom-ir.js";
+import type { BinOp, EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { joinDbSetName, joinFkPropName } from "./emit/join-entities.js";
 
@@ -37,7 +37,7 @@ export interface CsRenderContext {
    * the validator only admits the membership form inside repository
    * `where` clauses, so other emission contexts (derived, invariant)
    * shouldn't reach it. */
-  agg?: AggregateIR;
+  agg?: EnrichedAggregateIR;
 }
 
 const DEFAULT: CsRenderContext = { thisName: "this" };
@@ -244,7 +244,7 @@ function renderMethodCall(
   ) {
     const fieldName = refCollectionFieldName(e.receiver);
     if (fieldName) {
-      const assoc = ctx.agg.associations!.find((a) => a.fieldName === fieldName);
+      const assoc = ctx.agg.associations.find((a) => a.fieldName === fieldName);
       if (assoc) {
         const dbSet = joinDbSetName(assoc);
         const owner = joinFkPropName(assoc.ownerFk);
@@ -365,6 +365,8 @@ export function renderCsType(t: TypeIR): string {
       return `List<${renderCsType(t.element)}>`;
     case "optional":
       return `${renderCsType(t.inner)}?`;
+    case "slot":
+      throw new Error("renderCsType: 'slot' type is UI-only and should not reach the backend.");
   }
 }
 

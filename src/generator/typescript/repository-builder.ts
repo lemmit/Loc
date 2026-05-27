@@ -4,6 +4,7 @@ import type {
   AssociationIR,
   BoundedContextIR,
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
   EntityPartIR,
   FieldIR,
@@ -20,8 +21,8 @@ import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./em
 
 /** Associations (`T id[]` reference collections) declared on an
  * aggregate, persisted as many-to-many join tables.  Empty when none. */
-function associationsOf(agg: AggregateIR): AssociationIR[] {
-  return agg.associations!;
+function associationsOf(agg: EnrichedAggregateIR): AssociationIR[] {
+  return agg.associations;
 }
 
 /** True for a field type that is a collection of references
@@ -35,7 +36,7 @@ function isRefCollection(t: TypeIR): boolean {
  * ids is in scope.  Used by the array-returning load paths
  * (`findManyByIds`, array `find`s); `findById` loads singular lists
  * inline instead. */
-function associationMapLines(agg: AggregateIR, dbExpr: string, indent: string): string[] {
+function associationMapLines(agg: EnrichedAggregateIR, dbExpr: string, indent: string): string[] {
   return associationsOf(agg).flatMap((assoc) => {
     const joinConst = joinTableConstName(assoc);
     const ownerCol = joinColumnName(assoc.ownerFk);
@@ -72,9 +73,9 @@ function associationMapLines(agg: AggregateIR, dbExpr: string, indent: string): 
 // ---------------------------------------------------------------------------
 
 export function buildRepositoryFile(
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   emitTrace = false,
 ): string {
   // Walk every find's filter (and any matching view filters — both
@@ -214,7 +215,7 @@ export function buildRepositoryFile(
 // `<Agg>Response` zod schema; see routes-builder.ts).
 // ---------------------------------------------------------------------------
 
-function toWireMethod(agg: AggregateIR, ctx: BoundedContextIR): string {
+function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
   return lines(
     `  toWire(root: ${agg.name}): unknown {`,
     `    return ${wireProjectionEntity(agg, "root", ctx)};`,
@@ -223,19 +224,18 @@ function toWireMethod(agg: AggregateIR, ctx: BoundedContextIR): string {
 }
 
 function wireProjectionEntity(
-  ent: AggregateIR | EntityPartIR,
+  ent: EnrichedAggregateIR | EnrichedEntityPartIR,
   varExpr: string,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
 ): string {
   // Single canonical walk — see `agg.wireShape` (populated by
-  // src/ir/enrichments.ts).  This
-  // serializer feeds repo.toWire(); its output's keys must line up
-  // with the route's response Zod schema and the .NET DTO.  Single
-  // canonical walk populated by `enrichLoomModel`.  `forApiRead`
-  // strips `internal` and `secret` fields so the wire output matches
-  // the response schema's field set.  Local brand cast — see
-  // `wireShapeFor`'s docstring on the brand-cascade gap.
-  const fields = forApiRead(wireShapeFor(ent as EnrichedAggregateIR | EnrichedEntityPartIR));
+  // src/ir/enrichments.ts).  This serializer feeds repo.toWire();
+  // its output's keys must line up with the route's response Zod
+  // schema and the .NET DTO.  `forApiRead` strips `internal` and
+  // `secret` fields so the wire output matches the response schema's
+  // field set.  Enriched brand flows in via
+  // `PlatformSurface.emitProject(contexts: EnrichedBoundedContextIR[])`.
+  const fields = forApiRead(wireShapeFor(ent));
   const parts: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
@@ -319,7 +319,7 @@ function wireProjectionValue(
 // findById — load root, load each part collection, hydrate
 // ---------------------------------------------------------------------------
 
-function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string {
+function findManyByIdsMethod(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string {
   const tableName = lowerFirst(plural(agg.name));
   // Bulk-load every containment (collections + singulars) into per-
   // parent maps; mirrors the array-return path of findQueryMethod.
@@ -362,7 +362,11 @@ function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string {
   );
 }
 
-function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR, emitTrace = false): string {
+function findByIdMethod(
+  agg: EnrichedAggregateIR,
+  ctx: BoundedContextIR,
+  emitTrace = false,
+): string {
   // Inner body of the `db.transaction(async (tx) => { … })` callback.
   // Built at 6-space indent so we can wrap it differently for --trace
   // (which needs an outer try/catch + tx_begin/commit/rollback logs)
@@ -396,7 +400,7 @@ function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR, emitTrace = fal
  *  Extracted so the trace-on variant can re-indent and wrap it with the
  *  outer try/catch + tx_* logs.  Also the seam where `child_synced`
  *  trace lines (--trace) are injected per child upsert. */
-function saveTxBody(agg: AggregateIR, ctx: BoundedContextIR, emitTrace: boolean): string[] {
+function saveTxBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace: boolean): string[] {
   const tableName = lowerFirst(plural(agg.name));
   const containBlocks = agg.contains.flatMap((c): string[] => {
     if (!c.collection) return [];
@@ -466,7 +470,7 @@ function saveTxBody(agg: AggregateIR, ctx: BoundedContextIR, emitTrace: boolean)
 /** Inner body of the findById db.transaction callback at 6-space indent.
  *  Extracted so the trace-on variant can re-indent and wrap it with the
  *  outer try/catch + tx_* logs. */
-function txCallbackBody(agg: AggregateIR, ctx: BoundedContextIR): string[] {
+function txCallbackBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string[] {
   const tableName = lowerFirst(plural(agg.name));
   // Eager-load each `contains` child (collection or singular).
   const childLoads = agg.contains.flatMap((c): string[] => {
@@ -512,7 +516,7 @@ function txCallbackBody(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   ];
 }
 
-function hydrateRootExpr(agg: AggregateIR, rowVar: string, ctx: BoundedContextIR): string {
+function hydrateRootExpr(agg: EnrichedAggregateIR, rowVar: string, ctx: BoundedContextIR): string {
   const fields: string[] = [];
   fields.push(`id: Ids.${agg.name}Id(${rowVar}.id)`);
   for (const f of agg.fields) {
@@ -542,7 +546,7 @@ function provHydrateEntries(fields: FieldIR[], rowVar: string): string[] {
 function hydrateEntityExpr(
   part: EntityPartIR,
   rowVar: string,
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   ctx: BoundedContextIR,
 ): string {
   const fields: string[] = [];
@@ -609,7 +613,7 @@ function primitiveColumnRead(expr: string, t: TypeIR): string {
 // save — upsert root + diff-sync children + dispatch events
 // ---------------------------------------------------------------------------
 
-function saveMethod(agg: AggregateIR, ctx: BoundedContextIR, emitTrace = false): string {
+function saveMethod(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace = false): string {
   // Inner body of the save transaction at 6-space indent.  Built into a
   // local array so the trace-on variant can wrap it with try/catch +
   // tx_* logs without duplicating the body.
@@ -647,7 +651,7 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR, emitTrace = false):
   );
 }
 
-function rootProjection(agg: AggregateIR, varExpr: string, ctx: BoundedContextIR): string {
+function rootProjection(agg: EnrichedAggregateIR, varExpr: string, ctx: BoundedContextIR): string {
   return projectionObject(varExpr, [
     { fieldName: "id", expr: `${varExpr}.id as string` },
     // Reference collections live in join tables, not on the root row.
@@ -736,7 +740,11 @@ function projectionObject(
 // Find queries — convention-based equality predicates
 // ---------------------------------------------------------------------------
 
-function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): string {
+function findQueryMethod(
+  agg: EnrichedAggregateIR,
+  find: FindIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   const tableName = lowerFirst(plural(agg.name));
   // When the find's `where` references currentUser, the method gains a
   // trailing `currentUser: User` parameter that the closure-captured
@@ -828,10 +836,10 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
 }
 
 function buildFindWhereClause(
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   find: FindIR,
   tableName: string,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
 ): string {
   if (find.filter) {
     // The IR validator (Layer ②) rejects any `where` clause that can't
@@ -874,7 +882,7 @@ function buildFindWhereClause(
  * in one batched read.  Singular containments default to `null` if
  * the parent had no row in the bulk join. */
 function hydrateRootForFindAllExpr(
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   rowVar: string,
   ctx: BoundedContextIR,
 ): string {
@@ -927,7 +935,7 @@ function tsTypeForReturn(t: TypeIR): string {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function collectValueObjects(agg: AggregateIR, ctx: BoundedContextIR): string[] {
+function collectValueObjects(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string[] {
   const used = new Set<string>();
   const visit = (t: TypeIR) => {
     if (t.kind === "valueobject") used.add(t.name);
@@ -939,7 +947,7 @@ function collectValueObjects(agg: AggregateIR, ctx: BoundedContextIR): string[] 
   return ctx.valueObjects.filter((v) => used.has(v.name)).map((v) => v.name);
 }
 
-function collectEnums(agg: AggregateIR, ctx: BoundedContextIR): string[] {
+function collectEnums(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string[] {
   const used = new Set<string>();
   const visit = (t: TypeIR) => {
     if (t.kind === "enum") used.add(t.name);
@@ -981,7 +989,7 @@ interface DrizzleLowering {
 function lowerToDrizzle(
   expr: import("../../ir/loom-ir.js").ExprIR,
   tableName: string,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
 ): DrizzleLowering | null {
   const ops = new Set<string>();
   const text = lowerExpr(expr);

@@ -1,4 +1,10 @@
-import type { AggregateIR, BoundedContextIR, FindIR, RepositoryIR } from "../../ir/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  EnrichedAggregateIR,
+  FindIR,
+  RepositoryIR,
+} from "../../ir/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
@@ -26,7 +32,7 @@ import { type RenderCtx, renderExpr } from "./render-expr.js";
  *  `actions do … end` section by domain-emit.ts. */
 export function buildFindActions(
   repo: RepositoryIR,
-  agg: AggregateIR,
+  agg: EnrichedAggregateIR,
   contextModule: string,
 ): string[] {
   // `agg` threaded so renderMethodCall's contains branch (see

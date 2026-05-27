@@ -222,4 +222,127 @@ describe("user-defined components", () => {
     // for a user component).  Check there's no `WelcomeBox`-shaped file.
     expect(componentFiles.find((k) => /WelcomeBox|Foo|Bar/.test(k))).toBeUndefined();
   });
+
+  it("top-level component (declared as a ModelMember) is reachable from every ui", async () => {
+    // A bare `component Hero(...)` at the file root — outside any
+    // `system { … }` — flows into `LoomModel.components` and the
+    // React emitter merges it into the per-ui name→params map.
+    // Pages can invoke it by bare name; one `src/components/<Name>.tsx`
+    // is emitted per ui that references the component.
+    const files = await buildAndGenerate(`
+      component Hero(title: string) {
+        body: Card { title, Text { "shared library" } }
+      }
+
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          page Home {
+            route: "/"
+            body: Hero("Welcome")
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const hero = files.get("web/src/components/Hero.tsx");
+    expect(hero).toBeDefined();
+    expect(hero).toMatch(/export interface HeroProps \{\n\s+title: string;\n\}/);
+    expect(hero).toMatch(/<Title order=\{3\}>\{title\}<\/Title>/);
+    const home = files.get("web/src/pages/home.tsx")!;
+    expect(home).toMatch(/import Hero from "\.\.\/components\/Hero";/);
+    expect(home).toMatch(/<Hero title="Welcome" \/>/);
+  });
+
+  it("slot-typed params accept any walker expression from the caller", async () => {
+    // PR B: a `slot`-typed param renders as `ReactNode` in the
+    // generated component's Props interface; in the body, a bare ref
+    // emits as a JSX expression `{paramName}`.  At call sites, the
+    // walker walks the arg expression in the CALLER'S env (so refs
+    // like `name` resolve against the page's params, not the
+    // component's) and brace-wraps the resulting JSX into the prop
+    // slot.
+    const files = await buildAndGenerate(`
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          component DetailView(heading: slot, primaryAction: slot) {
+            body: Stack { heading, primaryAction }
+          }
+          page Home(name: string) {
+            route: "/:name"
+            body: DetailView {
+              heading: Heading { "Hello " + name, level: 2 },
+              primaryAction: Button { "Click " + name }
+            }
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const dv = files.get("web/src/components/DetailView.tsx")!;
+    expect(dv).toBeDefined();
+    // ReactNode in scope + slot params typed.
+    expect(dv).toMatch(/import type \{ ReactNode \} from "react";/);
+    expect(dv).toMatch(
+      /export interface DetailViewProps \{\n\s+heading: ReactNode;\n\s+primaryAction: ReactNode;\n\}/,
+    );
+    // Body: bare slot refs render as JSX expressions.
+    expect(dv).toMatch(/\{heading\}/);
+    expect(dv).toMatch(/\{primaryAction\}/);
+
+    // Caller side: slot args walked as JSX, brace-wrapped into the prop.
+    const home = files.get("web/src/pages/home.tsx")!;
+    expect(home).toBeDefined();
+    expect(home).toMatch(
+      /<DetailView heading=\{[\s\S]*?<Title order=\{2\}>\{\("Hello " \+ name\)\}<\/Title>[\s\S]*?\}/,
+    );
+    expect(home).toMatch(/primaryAction=\{[\s\S]*?<Button[\s\S]*?Click[\s\S]*?\}/);
+  });
+
+  it("ui-scope component overrides a same-named top-level component", async () => {
+    // Resolution precedence: a `component X(...)` inside the ui wins
+    // over a top-level `component X(...)` declared at the model root.
+    // Only the ui-scope body emits.
+    const files = await buildAndGenerate(`
+      component Hero(title: string) {
+        body: Text { "top-level: " + title }
+      }
+
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          component Hero(title: string) {
+            body: Text { "ui-scope: " + title }
+          }
+          page Home {
+            route: "/"
+            body: Hero("World")
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const hero = files.get("web/src/components/Hero.tsx")!;
+    expect(hero).toMatch(/"ui-scope: "/);
+    expect(hero).not.toMatch(/"top-level: "/);
+  });
 });

@@ -1,31 +1,19 @@
-// Scaffold expander (dark-launched behind env flag).
+// Inline scaffold expander — phase ⑤c of the lowering pipeline.
 //
-// Pure function from `(PageArchetypeIR, system context) → ExprIR`
-// that synthesises a walker-stdlib body equivalent to what the
-// scaffold archetype renderer would emit.  When
-// `LOOM_SCAFFOLD_EXPAND=1` is set, `lowerSystem` post-processes
-// every page whose `archetype` is recognised, replacing the
-// page's `body: List(of: …)` (or similar) with the expanded form.
-// The React emitter then routes through the walker instead of through
-// the legacy archetype path.
+// Pure function from `(PageIR with scaffoldDetails/scaffoldOperations
+// in its body, system context) → ExprIR` that rewrites every
+// `scaffoldDetails(of: <Agg>)` / `scaffoldOperations(of: <Agg>)` /
+// `scaffoldFormFields(of: <Agg>)` / etc. inline primitive into the
+// full walker-stdlib `ExprIR` it expands to.  Called from
+// `lowerSystem` as the last statement of phase ⑤ (see `lower.ts`
+// near the end of `lowerSystem`); downstream phases (enrichment,
+// validate, every backend) never see the un-expanded form.
 //
-// This pass is purely additive — with the flag off, baseline fixtures
-// are unchanged.
-//
-// What's covered today:
-//   - `aggregate-list`     → Stack + Breadcrumbs + Toolbar + QueryView
-//                            + Paper + Table (matching acme-order-
-//                            explicit.ddd's OrderList shape)
-//   - `aggregate-new`      → Stack + Breadcrumbs + Heading + Card +
-//                            Form(of:) (matching OrderNew shape)
-//   - all other origin kinds return `null` so the legacy path
-//     stays in use.
-//
-// Spillover:
-//   - `aggregate-detail`   — needs operations / modals / KeyValueRow
-//   - `workflow-form`      — needs workflow IR introspection
-//   - `view-list`          — needs view IR introspection
-//   - `home` / index pages — needs domain navigation primitives
+// Page bodies post-#606 always route through the walker; the
+// previous archetype-based renderers were removed.  The expander
+// keeps page authoring concise (one `scaffoldDetails(of: Order)`
+// in the source) while every downstream consumer reads the
+// full expanded body uniformly.
 
 import { humanize, plural, snake } from "../util/naming.js";
 import type { AggregateIR, BoundedContextIR, ExprIR, SystemIR, UiIR } from "./loom-ir.js";
