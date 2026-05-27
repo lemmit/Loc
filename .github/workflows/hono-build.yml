@@ -1,0 +1,85 @@
+name: TypeScript (Hono) build verification
+
+# Compiles a TypeScript / Hono project generated from each test-fixture
+# `.ddd` by `ddd generate ts`, then runs `tsc --noEmit` (type-check) +
+# `npm run build` (tsup bundle).  Catches Hono-generator drift that
+# string-match unit tests can't see (missing imports, type-incompatible
+# repository signatures, Zod schema shape drift, tsup-incompatible
+# barrel exports, etc.).
+#
+# Mirrors `dotnet-build.yml` (.NET → dotnet build /warnaserror) and
+# `phoenix-build.yml` (Phoenix → Ash 3.x mix compile).  Until this
+# lands, the Hono emitter had no fast PR gate — TS-compile regressions
+# only surfaced via the heavy `conformance-parity.yml` docker e2e (on
+# main only, runtime >10min).
+#
+# Triggers:
+#   - PRs that touch the Hono generator, the hono platform module,
+#     the shared `examples/` fixtures, or the test fixture itself.
+#   - Pushes to main (full regression check).
+#   - Manual dispatch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/typescript/**'
+      - 'src/platform/hono.ts'
+      - 'src/platform/hono/**'
+      - 'examples/**'
+      - 'package.json'
+      - '.github/workflows/hono-build.yml'
+      - 'test/e2e/generated-build.test.ts'
+  pull_request:
+    paths:
+      - 'src/generator/typescript/**'
+      - 'src/platform/hono.ts'
+      - 'src/platform/hono/**'
+      - 'examples/**'
+      - 'package.json'
+      - '.github/workflows/hono-build.yml'
+      - 'test/e2e/generated-build.test.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-generated-ts:
+    runs-on: ubuntu-latest
+    # Per-example runtime is ~60s with a warm node_modules cache; cold
+    # `npm install` of the generated project dominates the first run.
+    # 4 examples × ~60s + overhead → ~6min steady-state; 15min cap
+    # leaves headroom for cold cache + tsup variance.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Build the Loom toolchain.  `prepare` lifecycle runs
+      # `langium:generate` which populates src/language/generated/.
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Type-check
+        run: npm run build
+
+      - name: tsc --noEmit + tsup bundle against each fixture
+        run: npm run test:tsc
+
+      # Surface generator output + tsc compile diagnostics in the
+      # run summary on failure so the cause is visible without
+      # clicking through to the raw step log.
+      - name: Surface tsc output on failure
+        if: failure()
+        run: |
+          echo '## Tail of test:tsc output' >> $GITHUB_STEP_SUMMARY
+          echo 'See the previous step log for full `tsc` diagnostics — the test inherits stdio so per-file errors appear there as `error TSxxxx:` lines.' >> $GITHUB_STEP_SUMMARY
