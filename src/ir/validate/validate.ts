@@ -1,5 +1,5 @@
-import { allPlatforms, platformFor } from "../platform/registry.js";
-import { lowerFirst, plural, snake } from "../util/naming.js";
+import { allPlatforms, platformFor } from "../../platform/registry.js";
+import { lowerFirst, plural, snake } from "../../util/naming.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -11,8 +11,8 @@ import type {
   TestE2EIR,
   TestStmtIR,
   TypeIR,
-} from "./loom-ir.js";
-import { allContexts, findUsesCurrentUser } from "./loom-ir.js";
+} from "../types/loom-ir.js";
+import { allContexts, findUsesCurrentUser } from "../types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Loom IR validator — semantic checks that need the full IR (not just
@@ -1074,10 +1074,10 @@ function validateWorkflowBody(
   ctx: BoundedContextIR,
   wf: {
     name: string;
-    statements: import("./loom-ir.js").WorkflowStmtIR[];
+    statements: import("../types/loom-ir.js").WorkflowStmtIR[];
     transactional: boolean;
-    isolation?: import("./loom-ir.js").IsolationLevel;
-    params: import("./loom-ir.js").ParamIR[];
+    isolation?: import("../types/loom-ir.js").IsolationLevel;
+    params: import("../types/loom-ir.js").ParamIR[];
   },
   diags: LoomDiagnostic[],
 ): void {
@@ -1671,7 +1671,7 @@ function validatePermissionRefs(ctx: BoundedContextIR, diags: LoomDiagnostic[]):
  *  branch here (TS exhaustiveness check guards against drift). */
 function flagStmt(
   prefix: string,
-  s: import("./loom-ir.js").TestStmtIR,
+  s: import("../types/loom-ir.js").TestStmtIR,
   flag: (location: string, expr: ExprIR | undefined) => void,
 ): void {
   switch (s.kind) {

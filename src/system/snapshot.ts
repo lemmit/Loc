@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import type { SchemaSnapshot } from "../ir/migrations-ir.js";
+import type { SchemaSnapshot } from "../ir/types/migrations-ir.js";
 
 // ---------------------------------------------------------------------------
 // Snapshot store — reads `.loom/snapshots/<module>.snapshot.json` from disk.

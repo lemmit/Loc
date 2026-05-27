@@ -47,7 +47,7 @@
 // generator/" from CLAUDE.md.
 // ---------------------------------------------------------------------------
 
-import type { ExprIR } from "../../ir/loom-ir.js";
+import type { ExprIR } from "../../ir/types/loom-ir.js";
 import type { WalkContext as HeexWalkContext } from "../phoenix-live-view/heex-walker.js";
 // Re-exported renderers from the Phoenix/HEEx walker.  Each function
 // takes `(call, ctx)` and returns the HEEx fragment.

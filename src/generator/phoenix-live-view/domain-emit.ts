@@ -1,4 +1,3 @@
-import { classifyForWire, singleFieldShape } from "../../ir/invariant-classify.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -15,8 +14,9 @@ import type {
   OperationIR,
   StmtIR,
   TypeIR,
-} from "../../ir/loom-ir.js";
-import { exprUsesCurrentUser } from "../../ir/loom-ir.js";
+} from "../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { classifyForWire, singleFieldShape } from "../../ir/validate/invariant-classify.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderJasonEncoderImpl } from "./jason-camel-emit.js";
 import { joinEntityName } from "./join-resource-emit.js";
@@ -661,7 +661,7 @@ function renderOperationValidates(
  *  built-in covers the shape. */
 function ashBuiltinValidate(
   field: string,
-  pattern: import("../../ir/invariant-classify.js").SingleFieldPattern,
+  pattern: import("../../ir/validate/invariant-classify.js").SingleFieldPattern,
 ): string | null {
   const attr = `:${snake(field)}`;
   switch (pattern.kind) {

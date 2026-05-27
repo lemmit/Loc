@@ -19,7 +19,7 @@ import type {
   Statement,
   TypeRef,
   ValueObject,
-} from "../language/generated/ast.js";
+} from "../../language/generated/ast.js";
 import {
   isAggregate,
   isAssignOrCallStmt,
@@ -62,8 +62,8 @@ import {
   isThisRef,
   isUnaryExpr,
   isValueObject,
-} from "../language/generated/ast.js";
-import { isCollectionOp, isIntrinsicMatcher } from "../language/type-system.js";
+} from "../../language/generated/ast.js";
+import { isCollectionOp, isIntrinsicMatcher } from "../../language/type-system.js";
 import type {
   ExprIR,
   IdValueType,
@@ -75,9 +75,9 @@ import type {
   StyleIR,
   TypeIR,
   UserIR,
-} from "./loom-ir.js";
-import { lit } from "./loom-ir.js";
-import { snapshotIdFor } from "./prov-id.js";
+} from "../types/loom-ir.js";
+import { lit } from "../types/loom-ir.js";
+import { snapshotIdFor } from "../util/prov-id.js";
 
 /** Synthetic entity name used to type the `currentUser` magic
  *  identifier.  Member access on the user shape resolves through

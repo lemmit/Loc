@@ -1,4 +1,4 @@
-import type { BoundedContextIR } from "../../../ir/loom-ir.js";
+import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 

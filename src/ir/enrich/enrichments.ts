@@ -1,5 +1,5 @@
-import { platformFor } from "../platform/registry.js";
-import { snake } from "../util/naming.js";
+import { platformFor } from "../../platform/registry.js";
+import { snake } from "../../util/naming.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -28,7 +28,7 @@ import type {
   TypeIR,
   ValueObjectIR,
   WireField,
-} from "./loom-ir.js";
+} from "../types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Loom IR enrichments — pure derivations layered on top of the IR

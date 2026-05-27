@@ -4,7 +4,7 @@ import type {
   ExprIR,
   TestIR,
   TestStmtIR,
-} from "../../../ir/loom-ir.js";
+} from "../../../ir/types/loom-ir.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr } from "../render-expr.js";
 

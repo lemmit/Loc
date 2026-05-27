@@ -3,7 +3,7 @@
 // renders through the active design pack; KeyValueRow recurses into a
 // value child via the shared `walk`.
 
-import type { ExprIR } from "../../../../ir/loom-ir.js";
+import type { ExprIR } from "../../../../ir/types/loom-ir.js";
 import type { WalkContext } from "../../body-walker.js";
 import {
   emitExpr,

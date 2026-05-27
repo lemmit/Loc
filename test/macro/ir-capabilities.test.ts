@@ -4,7 +4,7 @@
 // `flags.isAuditable` / `flags.softDelete` shape.
 
 import { describe, expect, it } from "vitest";
-import type { AggregateIR } from "../../src/ir/loom-ir.js";
+import type { AggregateIR } from "../../src/ir/types/loom-ir.js";
 import { buildLoomModel } from "../_helpers/ir.js";
 
 function findAgg(

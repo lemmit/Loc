@@ -1,4 +1,5 @@
-import { wireShapeFor } from "../../ir/enrichments.js";
+import { wireShapeFor } from "../../ir/enrich/enrichments.js";
+import { forApiRead, forCreateInput } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -12,14 +13,13 @@ import type {
   TypeIR,
   ValueObjectIR,
   WireField,
-} from "../../ir/loom-ir.js";
-import { forApiRead, forCreateInput } from "../../ir/wire-projection.js";
+} from "../../ir/types/loom-ir.js";
 import {
   peelCollection,
   peelNullable,
   type WirePrimitive,
   wireTypeInfo,
-} from "../../ir/wire-types.js";
+} from "../../ir/types/wire-types.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { ApiRoute } from "./api-emit.js";
 
@@ -77,11 +77,11 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
   const allAggregates: Array<{ ctx: EnrichedBoundedContextIR; agg: EnrichedAggregateIR }> = [];
   const allWorkflows: Array<{
     ctx: EnrichedBoundedContextIR;
-    wf: import("../../ir/loom-ir.js").WorkflowIR;
+    wf: import("../../ir/types/loom-ir.js").WorkflowIR;
   }> = [];
   const allViews: Array<{
     ctx: EnrichedBoundedContextIR;
-    view: import("../../ir/loom-ir.js").ViewIR;
+    view: import("../../ir/types/loom-ir.js").ViewIR;
   }> = [];
 
   for (const ctx of contexts) {
@@ -201,9 +201,12 @@ function renderApiSpec(
   allAggregates: Array<{ ctx: EnrichedBoundedContextIR; agg: EnrichedAggregateIR }>,
   allWorkflows: Array<{
     ctx: EnrichedBoundedContextIR;
-    wf: import("../../ir/loom-ir.js").WorkflowIR;
+    wf: import("../../ir/types/loom-ir.js").WorkflowIR;
   }>,
-  allViews: Array<{ ctx: EnrichedBoundedContextIR; view: import("../../ir/loom-ir.js").ViewIR }>,
+  allViews: Array<{
+    ctx: EnrichedBoundedContextIR;
+    view: import("../../ir/types/loom-ir.js").ViewIR;
+  }>,
 ): string {
   const specModule = `${webModule}.Api.${apiPascal}Spec`;
   const schemasModule = `${webModule}.Api.Schemas`;
@@ -600,7 +603,7 @@ function renderCreateRequestSchema(agg: AggregateIR, webModule: string): string 
 
 function renderOperationRequestSchema(
   agg: AggregateIR,
-  op: import("../../ir/loom-ir.js").OperationIR,
+  op: import("../../ir/types/loom-ir.js").OperationIR,
   webModule: string,
 ): string {
   const schemaName = `${upperFirst(op.name)}Request`;
@@ -617,7 +620,7 @@ function renderOperationRequestSchema(
 }
 
 function renderWorkflowRequestSchema(
-  wf: import("../../ir/loom-ir.js").WorkflowIR,
+  wf: import("../../ir/types/loom-ir.js").WorkflowIR,
   webModule: string,
 ): string {
   const schemaName = `${upperFirst(wf.name)}Request`;
@@ -633,7 +636,7 @@ function renderWorkflowRequestSchema(
 }
 
 function renderViewResponseSchema(
-  view: import("../../ir/loom-ir.js").ViewIR,
+  view: import("../../ir/types/loom-ir.js").ViewIR,
   ctx: EnrichedBoundedContextIR,
   webModule: string,
 ): string {

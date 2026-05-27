@@ -4,8 +4,8 @@ import type {
   EnrichedEntityPartIR,
   EntityPartIR,
   TypeIR,
-} from "../../../ir/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
+} from "../../../ir/types/loom-ir.js";
+import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";

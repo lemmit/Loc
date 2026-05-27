@@ -5,7 +5,12 @@
 // trigger surface onto the operation state its Form child just pushed,
 // so it must share the same sink and live alongside the form emitters.
 
-import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR } from "../../../../ir/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ExprIR,
+  TypeIR,
+} from "../../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../../util/naming.js";
 import type { WalkContext } from "../../body-walker.js";
 import {

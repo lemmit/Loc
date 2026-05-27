@@ -1,4 +1,4 @@
-import type { ExprIR } from "../ir/loom-ir.js";
+import type { ExprIR } from "../ir/types/loom-ir.js";
 import { intrinsicMatcherSig } from "../language/type-system.js";
 
 // Shared lowering for `expect <expr>` statements in the generated e2e (api)

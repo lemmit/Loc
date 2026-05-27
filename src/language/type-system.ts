@@ -1,6 +1,6 @@
 import type { AstNode } from "langium";
 import { AstUtils } from "langium";
-import type { PrimitiveName } from "../ir/loom-ir.js";
+import type { PrimitiveName } from "../ir/types/loom-ir.js";
 import type {
   Aggregate,
   BaseType,

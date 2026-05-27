@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateLoomModel } from "../../src/ir/validate.js";
+import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { generateHono, parseString, parseValid, toLoomModel } from "../_helpers/index.js";
 
 // Reference collections (`field: Target id[]`) persist as many-to-many

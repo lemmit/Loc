@@ -1,4 +1,5 @@
-import { wireShapeFor } from "../../ir/enrichments.js";
+import { wireShapeFor } from "../../ir/enrich/enrichments.js";
+import { forApiRead } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -11,9 +12,12 @@ import type {
   FindIR,
   RepositoryIR,
   TypeIR,
-} from "../../ir/loom-ir.js";
-import { aggregateUsesMoney, findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
-import { forApiRead } from "../../ir/wire-projection.js";
+} from "../../ir/types/loom-ir.js";
+import {
+  aggregateUsesMoney,
+  findUsesCurrentUser,
+  viewUsesCurrentUser,
+} from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
@@ -90,7 +94,7 @@ export function buildRepositoryFile(
   const allFilters = [
     ...(repo?.finds ?? [])
       .map((f) => f.filter)
-      .filter((x): x is import("../../ir/loom-ir.js").ExprIR => !!x),
+      .filter((x): x is import("../../ir/types/loom-ir.js").ExprIR => !!x),
     ...viewFilters,
   ];
   for (const f of allFilters) {
@@ -987,7 +991,7 @@ interface DrizzleLowering {
 }
 
 function lowerToDrizzle(
-  expr: import("../../ir/loom-ir.js").ExprIR,
+  expr: import("../../ir/types/loom-ir.js").ExprIR,
   tableName: string,
   ctx: EnrichedBoundedContextIR,
 ): DrizzleLowering | null {
@@ -996,7 +1000,7 @@ function lowerToDrizzle(
   if (text === null) return null;
   return { expr: text, ops };
 
-  function lowerExpr(e: import("../../ir/loom-ir.js").ExprIR): string | null {
+  function lowerExpr(e: import("../../ir/types/loom-ir.js").ExprIR): string | null {
     if (e.kind === "paren") return lowerExpr(e.inner);
     if (e.kind === "binary") {
       if (e.op === "&&" || e.op === "||") {
@@ -1050,14 +1054,14 @@ function lowerToDrizzle(
   }
 
   /** Field name behind a `this.<field>` receiver, or null. */
-  function refCollectionFieldName(e: import("../../ir/loom-ir.js").ExprIR): string | null {
+  function refCollectionFieldName(e: import("../../ir/types/loom-ir.js").ExprIR): string | null {
     if (e.kind === "paren") return refCollectionFieldName(e.inner);
     if (e.kind === "member" && e.receiver.kind === "this") return e.member;
     if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
     return null;
   }
 
-  function renderColumnRef(e: import("../../ir/loom-ir.js").ExprIR): string | null {
+  function renderColumnRef(e: import("../../ir/types/loom-ir.js").ExprIR): string | null {
     if (e.kind === "paren") return renderColumnRef(e.inner);
     // `this.field` — direct column access.  In the IR this is a
     // `member` over the `this` literal.
@@ -1081,7 +1085,7 @@ function lowerToDrizzle(
     return null;
   }
 
-  function renderValue(e: import("../../ir/loom-ir.js").ExprIR): string | null {
+  function renderValue(e: import("../../ir/types/loom-ir.js").ExprIR): string | null {
     if (e.kind === "paren") return renderValue(e.inner);
     if (e.kind === "literal") {
       switch (e.lit) {

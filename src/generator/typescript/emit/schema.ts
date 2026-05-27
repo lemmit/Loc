@@ -6,7 +6,7 @@ import type {
   ExprIR,
   FieldIR,
   TypeIR,
-} from "../../../ir/loom-ir.js";
+} from "../../../ir/types/loom-ir.js";
 import { lines as joinLines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 

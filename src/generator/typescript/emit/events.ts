@@ -1,4 +1,4 @@
-import type { BoundedContextIR, EventIR, TypeIR } from "../../../ir/loom-ir.js";
+import type { BoundedContextIR, EventIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { renderTsType } from "../render-expr.js";
 

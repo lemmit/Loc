@@ -1,11 +1,11 @@
+import type { AggregateIR, ExprIR, InvariantIR, OperationIR } from "../../ir/types/loom-ir.js";
 import {
   type ClassifyContext,
   classifyForWire,
   pickErrorPath,
   type SingleFieldPattern,
   singleFieldShape,
-} from "../../ir/invariant-classify.js";
-import type { AggregateIR, ExprIR, InvariantIR, OperationIR } from "../../ir/loom-ir.js";
+} from "../../ir/validate/invariant-classify.js";
 import { plural, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------

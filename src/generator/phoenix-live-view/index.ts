@@ -3,8 +3,8 @@ import type {
   DeployableIR,
   EnrichedBoundedContextIR,
   SystemIR,
-} from "../../ir/loom-ir.js";
-import type { MigrationsIR } from "../../ir/migrations-ir.js";
+} from "../../ir/types/loom-ir.js";
+import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type ApiRoute, emitApiControllers } from "./api-emit.js";
@@ -275,7 +275,10 @@ function emitContext(
 // Enum module
 // ---------------------------------------------------------------------------
 
-function renderEnumModule(en: import("../../ir/loom-ir.js").EnumIR, contextModule: string): string {
+function renderEnumModule(
+  en: import("../../ir/types/loom-ir.js").EnumIR,
+  contextModule: string,
+): string {
   const moduleName = `${contextModule}.${upperFirst(en.name)}`;
   const values = en.values.map((v) => `  :${snake(v)}`).join(",\n");
   return `# Auto-generated.
@@ -292,7 +295,7 @@ end
 // ---------------------------------------------------------------------------
 
 function renderValueObjectModule(
-  vo: import("../../ir/loom-ir.js").ValueObjectIR,
+  vo: import("../../ir/types/loom-ir.js").ValueObjectIR,
   contextModule: string,
   appModule: string,
 ): string {
@@ -325,7 +328,7 @@ ${jasonImpl}`;
 // ---------------------------------------------------------------------------
 
 function renderEventModule(
-  ev: import("../../ir/loom-ir.js").EventIR,
+  ev: import("../../ir/types/loom-ir.js").EventIR,
   contextModule: string,
 ): string {
   const moduleName = `${contextModule}.Events.${upperFirst(ev.name)}`;

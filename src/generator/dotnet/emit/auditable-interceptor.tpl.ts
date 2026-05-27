@@ -1,4 +1,4 @@
-import type { AggregateIR, ContextStampIR } from "../../../ir/loom-ir.js";
+import type { AggregateIR, ContextStampIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";

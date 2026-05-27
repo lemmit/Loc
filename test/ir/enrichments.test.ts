@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allAggregates, allContexts } from "../../src/ir/loom-ir.js";
+import { allAggregates, allContexts } from "../../src/ir/types/loom-ir.js";
 import { buildLoomModel } from "../_helpers/index.js";
 
 // enrichLoomModel runs one pure pass after lowering.  These tests pin the

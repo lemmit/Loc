@@ -183,7 +183,7 @@ describe('money — literal form `money("...")`', () => {
         repository Invoices for Invoice { }
       }
     `);
-    const { allAggregates } = await import("../../src/ir/loom-ir.js");
+    const { allAggregates } = await import("../../src/ir/types/loom-ir.js");
     const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
     const starting = inv.derived.find((d) => d.name === "starting")!;
     expect(starting.expr).toEqual({
@@ -204,7 +204,7 @@ describe('money — literal form `money("...")`', () => {
         repository Invoices for Invoice { }
       }
     `);
-    const { allAggregates } = await import("../../src/ir/loom-ir.js");
+    const { allAggregates } = await import("../../src/ir/types/loom-ir.js");
     const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
     const withFee = inv.derived.find((d) => d.name === "withFee")!;
     const bin = withFee.expr as Extract<typeof withFee.expr, { kind: "binary" }>;
@@ -296,7 +296,7 @@ describe("money — IR binary node carries leftType & resultType", () => {
         repository Invoices for Invoice { }
       }
     `);
-    const { allAggregates } = await import("../../src/ir/loom-ir.js");
+    const { allAggregates } = await import("../../src/ir/types/loom-ir.js");
     const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
     const plus = inv.derived.find((d) => d.name === "plus")!;
     expect(plus.expr.kind).toBe("binary");
@@ -317,7 +317,7 @@ describe("money — IR binary node carries leftType & resultType", () => {
         repository Invoices for Invoice { }
       }
     `);
-    const { allAggregates } = await import("../../src/ir/loom-ir.js");
+    const { allAggregates } = await import("../../src/ir/types/loom-ir.js");
     const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
     const tax = inv.derived.find((d) => d.name === "tax")!;
     const bin = tax.expr as Extract<typeof tax.expr, { kind: "binary" }>;
@@ -337,7 +337,7 @@ describe("money — IR binary node carries leftType & resultType", () => {
         repository Invoices for Invoice { }
       }
     `);
-    const { allAggregates } = await import("../../src/ir/loom-ir.js");
+    const { allAggregates } = await import("../../src/ir/types/loom-ir.js");
     const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
     const settled = inv.derived.find((d) => d.name === "isSettled")!;
     const bin = settled.expr as Extract<typeof settled.expr, { kind: "binary" }>;
@@ -365,7 +365,7 @@ describe("money — array.sum is money-aware", () => {
         repository Invoices for Invoice { }
       }
     `);
-    const { allAggregates } = await import("../../src/ir/loom-ir.js");
+    const { allAggregates } = await import("../../src/ir/types/loom-ir.js");
     const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
     const total = inv.derived.find((d) => d.name === "total")!;
     // The IR-side wireShape for the derived 'total' field carries the

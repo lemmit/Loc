@@ -1,4 +1,4 @@
-import type { MigrationsIR } from "../../../ir/migrations-ir.js";
+import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
 import { renderPgStep } from "../../../system/sql-pg.js";
 import { upperFirst } from "../../../util/naming.js";
 

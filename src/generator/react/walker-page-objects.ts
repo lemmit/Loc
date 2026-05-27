@@ -32,7 +32,7 @@
 //     literal testids surface; dynamic strings get caller-supplied
 //     `byTestId(id)` accessors in a future slice).
 
-import type { ParamIR } from "../../ir/loom-ir.js";
+import type { ParamIR } from "../../ir/types/loom-ir.js";
 
 /** Inputs for the walker page-object emitter.  Kept narrow so
  *  callers in `pages-emitter.ts` don't have to thread additional

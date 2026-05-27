@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
 import { emitApiControllers } from "../../src/generator/phoenix-live-view/api-emit.js";
 import { emitAggregateResources } from "../../src/generator/phoenix-live-view/domain-emit.js";
 import { emitOpenApiSpec } from "../../src/generator/phoenix-live-view/openapi-emit.js";
-import { enrichContext } from "../../src/ir/enrichments.js";
-import type { BoundedContextIR, DeployableIR, SystemIR } from "../../src/ir/loom-ir.js";
+import { enrichContext } from "../../src/ir/enrich/enrichments.js";
+import type { BoundedContextIR, DeployableIR, SystemIR } from "../../src/ir/types/loom-ir.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import { generateSystems } from "../../src/system/index.js";
@@ -1119,8 +1119,8 @@ describe.skip("integration (parent wires emitters)", () => {
 // `platform: phoenixLiveView`.
 // ---------------------------------------------------------------------------
 
-import { enrichLoomModel } from "../../src/ir/enrichments.js";
-import { lowerModel } from "../../src/ir/lower.js";
+import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
+import { lowerModel } from "../../src/ir/lower/lower.js";
 import { buildWireSpec } from "../../src/system/wire-spec.js";
 
 const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
@@ -1299,7 +1299,7 @@ describe("cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
 // ---------------------------------------------------------------------------
 
 import { emitViews } from "../../src/generator/phoenix-live-view/view-emit.js";
-import type { ExprIR } from "../../src/ir/loom-ir.js";
+import type { ExprIR } from "../../src/ir/types/loom-ir.js";
 
 describe("full-form view bind projection (view-emit unit)", () => {
   // Synthetic ViewIR for `view OrderSummary { orderId status lineCount from Order … bind … }`

@@ -2,10 +2,10 @@
 import { EmptyFileSystem, URI } from "langium";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
-import { lowerModel, mergeLoomModels } from "../../../src/ir/lower.js";
-import { enrichLoomModel } from "../../../src/ir/enrichments.js";
-import type { EnrichedLoomModel, LoomModel } from "../../../src/ir/loom-ir.js";
-import { validateLoomModel } from "../../../src/ir/validate.js";
+import { lowerModel, mergeLoomModels } from "../../../src/ir/lower/lower.js";
+import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
+import type { EnrichedLoomModel, LoomModel } from "../../../src/ir/types/loom-ir.js";
+import { validateLoomModel } from "../../../src/ir/validate/validate.js";
 import { generateSystems, generateSystemsFromLoom } from "../../../src/system/index.js";
 import { captureSnapshots } from "../../../src/system/loomsnap.js";
 // P2a moved the TS orchestrator into the hono@v4 package; the

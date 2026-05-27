@@ -1,4 +1,4 @@
-import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
+import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 
@@ -94,9 +94,12 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
   // Collect all workflows and views across all contexts
   const allWorkflows: Array<{
     ctx: BoundedContextIR;
-    wf: import("../../ir/loom-ir.js").WorkflowIR;
+    wf: import("../../ir/types/loom-ir.js").WorkflowIR;
   }> = [];
-  const allViews: Array<{ ctx: BoundedContextIR; view: import("../../ir/loom-ir.js").ViewIR }> = [];
+  const allViews: Array<{
+    ctx: BoundedContextIR;
+    view: import("../../ir/types/loom-ir.js").ViewIR;
+  }> = [];
 
   for (const ctx of contexts) {
     for (const wf of ctx.workflows) {
@@ -245,7 +248,7 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
 // ---------------------------------------------------------------------------
 
 function renderWorkflowsController(
-  workflows: Array<{ ctx: BoundedContextIR; wf: import("../../ir/loom-ir.js").WorkflowIR }>,
+  workflows: Array<{ ctx: BoundedContextIR; wf: import("../../ir/types/loom-ir.js").WorkflowIR }>,
   appModule: string,
 ): string {
   const webModule = `${appModule}Web`;
@@ -288,7 +291,7 @@ end
 
 function renderWorkflowAction(
   ctx: BoundedContextIR,
-  wf: import("../../ir/loom-ir.js").WorkflowIR,
+  wf: import("../../ir/types/loom-ir.js").WorkflowIR,
   appModule: string,
 ): string {
   const wfSnake = snake(wf.name);
@@ -326,7 +329,7 @@ function renderWorkflowAction(
 // ---------------------------------------------------------------------------
 
 function renderViewsController(
-  views: Array<{ ctx: BoundedContextIR; view: import("../../ir/loom-ir.js").ViewIR }>,
+  views: Array<{ ctx: BoundedContextIR; view: import("../../ir/types/loom-ir.js").ViewIR }>,
   appModule: string,
 ): string {
   const webModule = `${appModule}Web`;
@@ -350,7 +353,7 @@ end
 
 function renderViewAction(
   ctx: BoundedContextIR,
-  view: import("../../ir/loom-ir.js").ViewIR,
+  view: import("../../ir/types/loom-ir.js").ViewIR,
   appModule: string,
 ): string {
   const viewSnake = snake(view.name);
@@ -394,7 +397,7 @@ function renderViewAction(
 
 function renderAggregateController(
   ctx: BoundedContextIR,
-  agg: import("../../ir/loom-ir.js").AggregateIR,
+  agg: import("../../ir/types/loom-ir.js").AggregateIR,
   appModule: string,
   emitTrace: boolean,
 ): string {

@@ -5,7 +5,7 @@ import type {
   IndexShape,
   MigrationStep,
   TableShape,
-} from "../ir/migrations-ir.js";
+} from "../ir/types/migrations-ir.js";
 
 // ---------------------------------------------------------------------------
 // Postgres SQL renderer shared by the TS/Hono and .NET/EF migration emitters.

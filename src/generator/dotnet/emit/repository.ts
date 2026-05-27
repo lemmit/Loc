@@ -4,8 +4,8 @@ import type {
   EnrichedAggregateIR,
   ParamIR,
   RepositoryIR,
-} from "../../../ir/loom-ir.js";
-import { findUsesCurrentUser } from "../../../ir/loom-ir.js";
+} from "../../../ir/types/loom-ir.js";
+import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";

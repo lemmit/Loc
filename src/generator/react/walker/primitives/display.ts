@@ -3,7 +3,7 @@
 // and carries no child-scope creation of its own (Breadcrumbs/Paper
 // recurse via the shared `positionalChildren`).
 
-import type { ExprIR } from "../../../../ir/loom-ir.js";
+import type { ExprIR } from "../../../../ir/types/loom-ir.js";
 import type { WalkContext } from "../../body-walker.js";
 import {
   firstPositionalContent,

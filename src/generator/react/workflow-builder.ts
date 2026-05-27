@@ -3,7 +3,7 @@ import {
   contextUsesMoney,
   type TypeIR,
   type WorkflowIR,
-} from "../../ir/loom-ir.js";
+} from "../../ir/types/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 import { fillBlock } from "./page-objects-builder.js";
 

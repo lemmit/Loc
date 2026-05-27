@@ -52,15 +52,15 @@ import {
   type Solution,
   type TestCase,
 } from "../../../../src/language/generated/ast.js";
-import { lowerModel } from "../../../../src/ir/lower.js";
-import { enrichLoomModel } from "../../../../src/ir/enrichments.js";
+import { lowerModel } from "../../../../src/ir/lower/lower.js";
+import { enrichLoomModel } from "../../../../src/ir/enrich/enrichments.js";
 import { computeVerification } from "../../../../src/verify/verification.js";
 import type {
   RequirementVerdict,
   TestCaseStatus,
   TestOutcome,
   VerificationIR,
-} from "../../../../src/ir/loom-ir.js";
+} from "../../../../src/ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Parse + collect

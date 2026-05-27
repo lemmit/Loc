@@ -26,7 +26,7 @@ import type {
   TestOutcome,
   TraceabilityIR,
   VerificationIR,
-} from "../ir/loom-ir.js";
+} from "../ir/types/loom-ir.js";
 
 /** The slice of the traceability index the rollup needs. */
 export type VerificationIndex = Pick<TraceabilityIR, "execTests" | "testsByRequirement">;

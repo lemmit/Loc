@@ -17,7 +17,7 @@
 // target (`priv/static/assets/theme.css`).
 // ---------------------------------------------------------------------------
 
-import type { ThemeIR } from "../../ir/loom-ir.js";
+import type { ThemeIR } from "../../ir/types/loom-ir.js";
 import { prepareThemeVM } from "../react/templating/preparers/theme.js";
 
 /** Emit a standalone CSS file (`:root { ... }`) with design tokens from the

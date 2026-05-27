@@ -3,7 +3,7 @@
 // detection (via emitExpr), navigation, lambda handlers, and aggregate
 // lookups, so they pull the core walk/expr/stmt helpers.
 
-import type { ExprIR } from "../../../../ir/loom-ir.js";
+import type { ExprIR } from "../../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../../util/naming.js";
 import type { WalkContext } from "../../body-walker.js";
 import {

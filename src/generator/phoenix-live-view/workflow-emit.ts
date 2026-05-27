@@ -1,4 +1,4 @@
-import type { BoundedContextIR, WorkflowIR, WorkflowStmtIR } from "../../ir/loom-ir.js";
+import type { BoundedContextIR, WorkflowIR, WorkflowStmtIR } from "../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
@@ -371,7 +371,7 @@ function renderSequentialBody(lines: WorkflowBodyLine[], wf: WorkflowIR): string
   return `${precondSection ? precondSection + "\n" : ""}${bodySection}${emitSection}`;
 }
 
-function elixirIsolationLevel(level: import("../../ir/loom-ir.js").IsolationLevel): string {
+function elixirIsolationLevel(level: import("../../ir/types/loom-ir.js").IsolationLevel): string {
   switch (level) {
     case "readUncommitted":
       return "read_uncommitted";

@@ -8,7 +8,7 @@
 // artefact-build time, never per node.
 // ---------------------------------------------------------------------------
 
-import type { ProvSite, StmtIR, SystemIR } from "./loom-ir.js";
+import type { ProvSite, StmtIR, SystemIR } from "../types/loom-ir.js";
 
 /** FNV-1a 32-bit, rendered as 8 lowercase hex chars.  Deterministic and
  *  pure — adequate for content-addressing source spans, not for crypto. */

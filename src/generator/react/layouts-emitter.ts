@@ -8,7 +8,7 @@
 // pack imports the JSX needs.  The preparer wires those imports
 // into the App.tsx shell's import list (deduped).
 
-import type { ComponentIR, LayoutIR, ParamIR, SystemIR, UiIR } from "../../ir/loom-ir.js";
+import type { ComponentIR, LayoutIR, ParamIR, SystemIR, UiIR } from "../../ir/types/loom-ir.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { walkBodyToTsx } from "./body-walker.js";
 import type { ExtraPageRoute } from "./templating/preparers/app-shell.js";

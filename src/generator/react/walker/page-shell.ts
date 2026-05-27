@@ -15,7 +15,7 @@ import type {
   UiApiParamIR,
   UiHelperImportIR,
   WorkflowIR,
-} from "../../../ir/loom-ir.js";
+} from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";

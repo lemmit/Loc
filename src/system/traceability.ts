@@ -1,4 +1,4 @@
-import type { CodeRefKind, LoomModel, RequirementIR, TraceabilityIR } from "../ir/loom-ir.js";
+import type { CodeRefKind, LoomModel, RequirementIR, TraceabilityIR } from "../ir/types/loom-ir.js";
 import { type LinesPart, lines } from "../util/code-builder.js";
 
 // ---------------------------------------------------------------------------

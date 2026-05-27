@@ -13,7 +13,7 @@ import { printStructural } from "../../../../src/language/print/index.js";
 // declares — keeps the field-builder's type picker in lockstep with
 // the IR so a new primitive (e.g. `money` in #498) shows up here
 // automatically.
-import { PRIMITIVES, type PrimitiveName } from "../../../../src/ir/loom-ir.js";
+import { PRIMITIVES, type PrimitiveName } from "../../../../src/ir/types/loom-ir.js";
 import {
   mkIdType,
   mkNamedType,

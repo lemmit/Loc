@@ -1,4 +1,4 @@
-import type { BinOp, EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/loom-ir.js";
+import type { BinOp, EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { joinDbSetName, joinFkPropName } from "./emit/join-entities.js";
 

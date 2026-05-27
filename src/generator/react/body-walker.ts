@@ -57,7 +57,7 @@ import type {
   UiApiParamIR,
   UiHelperImportIR,
   WorkflowIR,
-} from "../../ir/loom-ir.js";
+} from "../../ir/types/loom-ir.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../language/walker-stdlib.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";

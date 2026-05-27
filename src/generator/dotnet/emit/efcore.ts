@@ -7,7 +7,7 @@ import type {
   EnrichedBoundedContextIR,
   ExprIR,
   FieldIR,
-} from "../../../ir/loom-ir.js";
+} from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";

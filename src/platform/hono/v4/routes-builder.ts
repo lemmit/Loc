@@ -4,8 +4,8 @@ import {
   refineClauseFor,
   takeSingleFieldChain,
 } from "../../../generator/typescript/zod-refine.js";
-import { wireShapeFor } from "../../../ir/enrichments.js";
-import type { ClassifyContext, SingleFieldPattern } from "../../../ir/invariant-classify.js";
+import { wireShapeFor } from "../../../ir/enrich/enrichments.js";
+import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -20,20 +20,23 @@ import type {
   RepositoryIR,
   TypeIR,
   ValueObjectIR,
-} from "../../../ir/loom-ir.js";
+} from "../../../ir/types/loom-ir.js";
 import {
   aggregateUsesMoney,
   findUsesCurrentUser,
   operationUsesCurrentUser,
-} from "../../../ir/loom-ir.js";
-import { opHasProvSite } from "../../../ir/prov-id.js";
-import { forCreateInput } from "../../../ir/wire-projection.js";
+} from "../../../ir/types/loom-ir.js";
 import {
   peelCollection,
   peelNullable,
   type WirePrimitive,
   wireTypeInfo,
-} from "../../../ir/wire-types.js";
+} from "../../../ir/types/wire-types.js";
+import { opHasProvSite } from "../../../ir/util/prov-id.js";
+import type {
+  ClassifyContext,
+  SingleFieldPattern,
+} from "../../../ir/validate/invariant-classify.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------

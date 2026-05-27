@@ -1,3 +1,4 @@
+import { forCreateInput } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -5,9 +6,8 @@ import type {
   FindIR,
   RepositoryIR,
   TypeIR,
-} from "../../ir/loom-ir.js";
-import { findUsesCurrentUser, operationUsesCurrentUser } from "../../ir/loom-ir.js";
-import { forCreateInput } from "../../ir/wire-projection.js";
+} from "../../ir/types/loom-ir.js";
+import { findUsesCurrentUser, operationUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import {
   aggregateResponseParams,

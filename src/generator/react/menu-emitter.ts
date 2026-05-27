@@ -26,7 +26,7 @@
 // the default sidebar still flows through the hardcoded grouping in
 // `prepareAppShellVM`.
 
-import type { PageIR, UiIR } from "../../ir/loom-ir.js";
+import type { PageIR, UiIR } from "../../ir/types/loom-ir.js";
 import { plural, snake } from "../../util/naming.js";
 import type { NavEntryVM, NavSectionVM } from "./templating/view-models.js";
 
@@ -96,7 +96,7 @@ export function deriveSidebarFromUi(ui: UiIR): NavSectionVM[] | undefined {
 }
 
 function navEntryForLink(
-  link: import("../../ir/loom-ir.js").MenuLinkIR,
+  link: import("../../ir/types/loom-ir.js").MenuLinkIR,
   ui: UiIR,
 ): NavEntryVM | undefined {
   if (link.kind === "external") {
@@ -219,7 +219,7 @@ function readMenuMetaBool(page: PageIR, key: string): boolean | undefined {
 }
 
 function stringPropOf(
-  props: { name: string; value: import("../../ir/loom-ir.js").ExprIR }[] | undefined,
+  props: { name: string; value: import("../../ir/types/loom-ir.js").ExprIR }[] | undefined,
   key: string,
 ): string | undefined {
   const entry = props?.find((p) => p.name === key);

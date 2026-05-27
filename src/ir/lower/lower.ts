@@ -2,7 +2,7 @@ import type { Reference } from "langium";
 import {
   type BuiltinPackFamily,
   parseBuiltinDesignRef,
-} from "../generator/_packs/builtin-formats.js";
+} from "../../generator/_packs/builtin-formats.js";
 import type {
   Aggregate,
   Api,
@@ -41,7 +41,7 @@ import type {
   ValueObject,
   View,
   Workflow,
-} from "../language/generated/ast.js";
+} from "../../language/generated/ast.js";
 import {
   isAggregate,
   isAssignOrCallStmt,
@@ -81,8 +81,8 @@ import {
   isValueObject,
   isView,
   isWorkflow,
-} from "../language/generated/ast.js";
-import { parseBuiltinPlatformRef, platformFor } from "../platform/registry.js";
+} from "../../language/generated/ast.js";
+import { parseBuiltinPlatformRef, platformFor } from "../../platform/registry.js";
 import type {
   AggregateIR,
   ApiIR,
@@ -143,7 +143,7 @@ import type {
   ViewIR,
   WorkflowIR,
   WorkflowStmtIR,
-} from "./loom-ir.js";
+} from "../types/loom-ir.js";
 import {
   cstText,
   type Env,

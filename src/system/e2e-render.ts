@@ -9,7 +9,7 @@ import type {
   SystemIR,
   TestE2EIR,
   TestStmtIR,
-} from "../ir/loom-ir.js";
+} from "../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake } from "../util/naming.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 

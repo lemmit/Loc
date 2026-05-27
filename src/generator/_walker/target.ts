@@ -61,7 +61,7 @@
 // code.
 // ---------------------------------------------------------------------------
 
-import type { ExprIR, StateFieldIR, TypeIR } from "../../ir/loom-ir.js";
+import type { ExprIR, StateFieldIR, TypeIR } from "../../ir/types/loom-ir.js";
 
 /** Discriminator: where in the emitted module the walker is currently
  *  rendering.  Drives state-reference syntax — HEEx differentiates

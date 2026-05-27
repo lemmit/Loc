@@ -5,7 +5,7 @@ import type {
   MigrationHistoryEntry,
   MigrationsIR,
   SchemaSnapshot,
-} from "../../src/ir/migrations-ir.js";
+} from "../../src/ir/types/migrations-ir.js";
 
 // ---------------------------------------------------------------------------
 // TS/Hono migrations emitter — emits Drizzle-format `<tag>.sql` files

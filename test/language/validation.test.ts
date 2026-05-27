@@ -993,7 +993,7 @@ describe("validation", () => {
 });
 
 describe("Loom IR validation (post-lowering)", async () => {
-  const { validateLoomModel } = await import("../../src/ir/validate.js");
+  const { validateLoomModel } = await import("../../src/ir/validate/validate.js");
   const { toLoomModel, parseString } = await import("../_helpers/index.js");
 
   // Note: does NOT assert parse validity — these tests feed deliberately

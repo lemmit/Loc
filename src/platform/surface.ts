@@ -4,8 +4,8 @@ import type {
   EnrichedBoundedContextIR,
   Platform,
   SystemIR,
-} from "../ir/loom-ir.js";
-import type { MigrationsIR } from "../ir/migrations-ir.js";
+} from "../ir/types/loom-ir.js";
+import type { MigrationsIR } from "../ir/types/migrations-ir.js";
 
 // ---------------------------------------------------------------------------
 // Platform surface contract.

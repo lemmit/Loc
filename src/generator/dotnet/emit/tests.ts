@@ -4,7 +4,7 @@ import type {
   ExprIR,
   TestIR,
   TestStmtIR,
-} from "../../../ir/loom-ir.js";
+} from "../../../ir/types/loom-ir.js";
 import { intrinsicMatcherSig } from "../../../language/type-system.js";
 import { upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";

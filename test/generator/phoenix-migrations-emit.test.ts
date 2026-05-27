@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { emitMigrations } from "../../src/generator/phoenix-live-view/migrations-emit.js";
-import type { MigrationsIR, SchemaSnapshot } from "../../src/ir/migrations-ir.js";
+import type { MigrationsIR, SchemaSnapshot } from "../../src/ir/types/migrations-ir.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix migrations-emit — unit tests for the delta path (subsequent

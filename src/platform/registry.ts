@@ -1,4 +1,4 @@
-import type { Platform } from "../ir/loom-ir.js";
+import type { Platform } from "../ir/types/loom-ir.js";
 import dotnetPlatform from "./dotnet.js";
 import honoPlatform, { loomManifest as honoV4Manifest } from "./hono/v4/index.js";
 import type { LoomBackendManifest } from "./manifest.js";

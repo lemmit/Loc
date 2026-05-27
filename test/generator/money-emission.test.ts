@@ -19,7 +19,7 @@ import {
   buildExternHandlersFile as _externStub,
   type AggregateIR,
   type BoundedContextIR,
-} from "../../src/ir/loom-ir.js";
+} from "../../src/ir/types/loom-ir.js";
 import { buildLoomModel } from "../_helpers/index.js";
 
 void _externStub; // re-export anchor; not invoked here

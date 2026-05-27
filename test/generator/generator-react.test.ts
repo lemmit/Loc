@@ -704,9 +704,9 @@ describe("react generator", () => {
 
     it("validator rejects ui.workflows.<unknown>", async () => {
       const { parseHelper } = await import("langium/test");
-      const { lowerModel } = await import("../../src/ir/lower.js");
-      const { enrichLoomModel } = await import("../../src/ir/enrichments.js");
-      const { validateLoomModel } = await import("../../src/ir/validate.js");
+      const { lowerModel } = await import("../../src/ir/lower/lower.js");
+      const { enrichLoomModel } = await import("../../src/ir/enrich/enrichments.js");
+      const { validateLoomModel } = await import("../../src/ir/validate/validate.js");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
       const doc = await helper(
@@ -741,9 +741,9 @@ describe("react generator", () => {
 
     it("validator rejects ui.views.<unknown>", async () => {
       const { parseHelper } = await import("langium/test");
-      const { lowerModel } = await import("../../src/ir/lower.js");
-      const { enrichLoomModel } = await import("../../src/ir/enrichments.js");
-      const { validateLoomModel } = await import("../../src/ir/validate.js");
+      const { lowerModel } = await import("../../src/ir/lower/lower.js");
+      const { enrichLoomModel } = await import("../../src/ir/enrich/enrichments.js");
+      const { validateLoomModel } = await import("../../src/ir/validate/validate.js");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
       const doc = await helper(

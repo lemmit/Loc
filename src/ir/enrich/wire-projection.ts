@@ -6,7 +6,7 @@
 // duplicating the rules.  See `FieldAccess` in `src/ir/loom-ir.ts`
 // for the canonical role semantics this layer implements.
 
-import type { FieldAccess } from "./loom-ir.js";
+import type { FieldAccess } from "../types/loom-ir.js";
 
 /** Any structure carrying a resolved access role.  Both `WireField`
  * and `FieldIR` satisfy this — backends choose the shape that suits

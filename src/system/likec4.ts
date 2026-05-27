@@ -1,4 +1,4 @@
-import type { DeployableIR, SystemIR } from "../ir/loom-ir.js";
+import type { DeployableIR, SystemIR } from "../ir/types/loom-ir.js";
 import { lines } from "../util/code-builder.js";
 
 // ---------------------------------------------------------------------------
