@@ -1151,9 +1151,7 @@ carries everything needed for code generation.
 ## Tests
 
 The vitest suite under `test/` covers each phase. The directory
-layout mirrors the pipeline (see
-[`docs/proposals/test-layout-and-macro-consolidation.md`](./proposals/test-layout-and-macro-consolidation.md)
-for the in-progress reorg target):
+layout mirrors the pipeline:
 
 | Suite (current path) | Phase(s) covered |
 | --- | --- |

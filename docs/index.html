@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Loom — a DSL that weaves Domain-Driven systems</title>
-  <meta name="description" content="Loom is a Langium-based DSL for Domain-Driven Design. Write aggregates, value objects, invariants, and operations in .ddd; generate a runnable TypeScript + .NET + React system, wired together as one docker compose stack." />
+  <meta name="description" content="Loom is a Langium-based DSL for Domain-Driven Design. Write aggregates, value objects, invariants, and operations in .ddd; generate a runnable Hono + .NET + React + Phoenix LiveView system, wired together as one docker compose stack." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -231,13 +231,13 @@
     .stage h4 { margin: 0 0 6px; font-size: 16px; }
     .stage p { margin: 0; color: var(--fg-dim); font-size: 13.5px; }
 
-    /* ---------- Three platforms ---------- */
+    /* ---------- Platforms ---------- */
     .platforms {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 18px;
     }
-    @media (max-width: 860px) { .platforms { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) { .platforms { grid-template-columns: 1fr; } }
     .plat {
       background: var(--bg-card);
       border: 1px solid var(--line);
@@ -261,6 +261,7 @@
     .plat .accent-ts { color: #6fd1ff; }
     .plat .accent-net { color: #b58cff; }
     .plat .accent-react { color: #ffb98a; }
+    .plat .accent-phx { color: #7ee787; }
 
     /* ---------- Features grid ---------- */
     .features {
@@ -417,8 +418,9 @@
           Loom is a high-descriptive DSL for Domain-Driven Design.
           Write aggregates, value objects, invariants, and operations in
           <code class="mono-chip">.ddd</code> &mdash; and mechanically generate
-          a runnable TypeScript&nbsp;+&nbsp;.NET&nbsp;+&nbsp;React system,
-          wired together as one <code class="mono-chip">docker compose</code> stack.
+          a runnable Hono&nbsp;+&nbsp;.NET&nbsp;+&nbsp;React&nbsp;+&nbsp;Phoenix
+          LiveView system, wired together as one
+          <code class="mono-chip">docker compose</code> stack.
         </p>
         <div class="hero-cta">
           <a class="btn primary" href="playground/">
@@ -432,7 +434,7 @@
         <div class="hero-meta">
           <span><span class="pip"></span> Type-safe end-to-end</span>
           <span><span class="pip"></span> DDD-faithful by construction</span>
-          <span><span class="pip"></span> 49 unit tests · opt-in e2e</span>
+          <span><span class="pip"></span> 2,300+ unit tests · opt-in e2e</span>
         </div>
       </div>
 
@@ -493,15 +495,15 @@
         <div class="vision-card">
           <h4>Mechanical, not magical</h4>
           <p>
-            Lowering goes through a fully-resolved IR, then per-platform Handlebars templates plus procedural builders.
+            Lowering goes through a fully-resolved IR, then per-platform procedural emitters.
             Generated output is idiomatic enough to read, debug, and grep &mdash; not framework lock-in.
           </p>
         </div>
         <div class="vision-card">
           <h4>One model, multiple platforms</h4>
           <p>
-            The same aggregate compiles to ASP.NET&nbsp;+&nbsp;EF&nbsp;+&nbsp;Mediator and Hono&nbsp;+&nbsp;Drizzle&nbsp;+&nbsp;Zod.
-            A built-in cross-platform OpenAPI parity check guarantees both backends present an identical wire shape.
+            The same aggregate compiles to ASP.NET&nbsp;+&nbsp;EF&nbsp;+&nbsp;Mediator, Hono&nbsp;+&nbsp;Drizzle&nbsp;+&nbsp;Zod,
+            and Phoenix LiveView&nbsp;+&nbsp;Ash. A built-in cross-platform OpenAPI parity check guarantees backends present an identical wire shape.
           </p>
         </div>
         <div class="vision-card">
@@ -525,6 +527,8 @@
         <p>
           The pipeline is fully type-safe end-to-end. Validation runs before any generator emits;
           a <code class="mono-chip">--dry-run</code> mode prints the full write plan without touching disk.
+          The five stages below are a summary &mdash; the canonical pipeline is
+          <a href="technical.md">ten phases</a> (parse, macro expand, scope/link, AST validate, lower, enrich, IR validate, codegen, system compose, write).
         </p>
       </div>
 
@@ -537,22 +541,22 @@
         <div class="stage">
           <div class="num">02</div>
           <h4>AST</h4>
-          <p>Langium parser &amp; validator. Errors abort generation.</p>
+          <p>Langium parser, macro expansion, scope/link, validator. Errors abort generation.</p>
         </div>
         <div class="stage">
           <div class="num">03</div>
           <h4>IR</h4>
-          <p>Name resolution, type inference, semantic shaping &mdash; platform-neutral.</p>
+          <p>Lower, enrich, validate &mdash; fully resolved <code class="mono">refKind</code> / <code class="mono">callKind</code> / wire shapes. Platform-neutral.</p>
         </div>
         <div class="stage">
           <div class="num">04</div>
-          <h4>Templates</h4>
-          <p>Per-platform Handlebars + procedural builders for TypeScript, .NET, React.</p>
+          <h4>Codegen</h4>
+          <p>Per-platform procedural emitters for Hono, .NET, React, Phoenix LiveView.</p>
         </div>
         <div class="stage">
           <div class="num">05</div>
           <h4>System</h4>
-          <p>Multi-project tree with <code class="mono">docker-compose.yml</code> + healthchecks + e2e.</p>
+          <p>Multi-project tree with <code class="mono">docker-compose.yml</code> + healthchecks + migration files + e2e.</p>
         </div>
       </div>
     </div>
@@ -562,7 +566,7 @@
   <section id="platforms">
     <div class="container">
       <div class="section-head">
-        <div class="kicker">Three platforms, one model</div>
+        <div class="kicker">Four platforms, one model</div>
         <h2>Idiomatic output. Identical wire shapes.</h2>
         <p>
           Every backend produces the same aggregate root, repository, routes, and DTOs &mdash;
@@ -589,6 +593,16 @@
             <li>Entity-part classes with invariant checks</li>
             <li>Derived properties &amp; domain events</li>
             <li>Cross-platform OpenAPI parity-checked</li>
+          </ul>
+        </div>
+        <div class="plat">
+          <span class="badge"><span class="accent-phx">●</span> Elixir backend</span>
+          <h3>Phoenix LiveView · Ash</h3>
+          <p>Server-rendered HEEx with LiveView, Ash 3.x resources and actions, Ecto migrations &mdash; same aggregates, idiomatic Elixir.</p>
+          <ul>
+            <li>One Ash resource per aggregate; actions for ops &amp; finds</li>
+            <li>HEEx pages share the walker stdlib with React</li>
+            <li>Compiled with <code class="mono-chip">--warnings-as-errors</code> in CI</li>
           </ul>
         </div>
         <div class="plat">
@@ -669,9 +683,10 @@
     <div class="container">
       <div class="section-head">
         <div class="kicker">CLI</div>
-        <h2>Three commands. One model. Whatever shape you need.</h2>
+        <h2>One model. Whatever shape you need.</h2>
         <p>
           Generate a single deployable for a focused service, or the full system for an integrated stack.
+          Capture a provenance snapshot when shipping a release; run <code class="mono-chip">verify</code> to roll test results up against the traceability graph.
           Watch mode re-runs on save; <code class="mono-chip">--dry-run</code> prints the plan with <code class="mono">write</code> / <code class="mono">skip</code> annotations.
         </p>
       </div>
@@ -706,6 +721,8 @@
           <div class="row"><code>ddd generate ts</code><span>Emit a single Hono + Drizzle project.</span></div>
           <div class="row"><code>ddd generate dotnet</code><span>Emit a single ASP.NET + EF + Mediator project.</span></div>
           <div class="row"><code>ddd generate system</code><span>Emit every deployable + <code>docker-compose.yml</code>.</span></div>
+          <div class="row"><code>ddd snapshot</code><span>Capture an immutable <code>.loom/snapshots/&lt;ts&gt;-&lt;guid&gt;.loomsnap.json</code> for provenance.</span></div>
+          <div class="row"><code>ddd verify</code><span>Join test-execution results onto the traceability graph; write <code>.loom/verification.{json,md}</code>.</span></div>
           <div class="row"><code>-w, --watch</code><span>Re-run on every save of the <code>.ddd</code> source.</span></div>
           <div class="row"><code>--dry-run</code><span>Print the plan; touch nothing.</span></div>
         </div>
