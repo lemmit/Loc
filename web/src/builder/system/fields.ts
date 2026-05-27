@@ -14,6 +14,7 @@ import { printStructural } from "../../../../src/language/print/index.js";
 // the IR so a new primitive (e.g. `money` in #498) shows up here
 // automatically.
 import { PRIMITIVES, type PrimitiveName } from "../../../../src/ir/loom-ir.js";
+import { mkProperty, mkTypeRef } from "../../../../src/macro-api/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode } from "../edit-engine";
 import type { NodeKind } from "./model";
@@ -116,28 +117,28 @@ export function baseSpecOf(type: TypeRef): BaseSpec {
 }
 
 export function buildTypeRef(spec: TypeSpec): TypeRef {
-  let base: unknown;
+  let base: TypeRef["base"];
   switch (spec.base.kind) {
     case "primitive":
-      base = { $type: "PrimitiveType", name: spec.base.name };
+      base = { $type: "PrimitiveType", name: spec.base.name } as TypeRef["base"];
       break;
     case "id":
-      base = { $type: "IdType", target: { $refText: spec.base.target } };
+      base = { $type: "IdType", target: { $refText: spec.base.target } } as TypeRef["base"];
       break;
     case "named":
-      base = { $type: "NamedType", target: { $refText: spec.base.target } };
+      base = { $type: "NamedType", target: { $refText: spec.base.target } } as TypeRef["base"];
       break;
   }
-  return { $type: "TypeRef", base, array: spec.array, optional: spec.optional } as unknown as TypeRef;
+  return mkTypeRef({ $type: "TypeRef", base, array: spec.array, optional: spec.optional });
 }
 
 function buildProperty(name: string, spec: TypeSpec): Property {
-  return {
+  return mkProperty({
     $type: "Property",
     name,
     type: buildTypeRef(spec),
-    display: false,
-  } as unknown as Property;
+    provenanced: false,
+  });
 }
 
 // --- read helpers (for the inspector UI) -----------------------------------
