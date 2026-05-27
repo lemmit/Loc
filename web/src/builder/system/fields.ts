@@ -14,6 +14,13 @@ import { printStructural } from "../../../../src/language/print/index.js";
 // the IR so a new primitive (e.g. `money` in #498) shows up here
 // automatically.
 import { PRIMITIVES, type PrimitiveName } from "../../../../src/ir/loom-ir.js";
+import {
+  mkIdType,
+  mkNamedType,
+  mkPrimitiveType,
+  mkProperty,
+  mkTypeRef,
+} from "../../../../src/macro-api/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode } from "../edit-engine";
 import type { NodeKind } from "./model";
@@ -79,15 +86,17 @@ function findConstruct(ast: Model, kind: NodeKind, name: string): AstNode | null
 
 /** The property nodes of a construct, paired with where they live so we can
  *  mutate the backing array.  Events keep them in `fields`; aggregates and
- *  value objects keep them in `members` interleaved with other member kinds. */
-function propertyList(node: AstNode): { list: Property[]; container: Property[] } {
+ *  value objects keep them in `members` interleaved with other member kinds —
+ *  so `container` is the heterogeneous backing array (typed as `AstNode[]`
+ *  to span both member-array shapes), and `list` is the `Property`-only view. */
+function propertyList(node: AstNode): { list: Property[]; container: AstNode[] } {
   if (node.$type === "EventDecl") {
     const fields = (node as EventDecl).fields;
     return { list: fields, container: fields };
   }
   const members = (node as Aggregate | ValueObject).members as AstNode[];
   const list = members.filter((m): m is Property => m.$type === "Property");
-  return { list, container: members as unknown as Property[] };
+  return { list, container: members };
 }
 
 export function baseLabel(base: BaseSpec): string {
@@ -116,28 +125,28 @@ export function baseSpecOf(type: TypeRef): BaseSpec {
 }
 
 export function buildTypeRef(spec: TypeSpec): TypeRef {
-  let base: unknown;
+  let base: TypeRef["base"];
   switch (spec.base.kind) {
     case "primitive":
-      base = { $type: "PrimitiveType", name: spec.base.name };
+      base = mkPrimitiveType({ $type: "PrimitiveType", name: spec.base.name });
       break;
     case "id":
-      base = { $type: "IdType", target: { $refText: spec.base.target } };
+      base = mkIdType({ $type: "IdType", target: { $refText: spec.base.target } });
       break;
     case "named":
-      base = { $type: "NamedType", target: { $refText: spec.base.target } };
+      base = mkNamedType({ $type: "NamedType", target: { $refText: spec.base.target } });
       break;
   }
-  return { $type: "TypeRef", base, array: spec.array, optional: spec.optional } as unknown as TypeRef;
+  return mkTypeRef({ $type: "TypeRef", base, array: spec.array, optional: spec.optional });
 }
 
 function buildProperty(name: string, spec: TypeSpec): Property {
-  return {
+  return mkProperty({
     $type: "Property",
     name,
     type: buildTypeRef(spec),
-    display: false,
-  } as unknown as Property;
+    provenanced: false,
+  });
 }
 
 // --- read helpers (for the inspector UI) -----------------------------------

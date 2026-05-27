@@ -54,6 +54,7 @@ import type {
   TypeIR,
   UiHelperImportIR,
   UiIR,
+  ValueObjectIR,
 } from "../../ir/loom-ir.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
@@ -99,6 +100,13 @@ export interface WalkResult {
   /** Names of user `component`s invoked in the body, so the LiveView
    *  emitter can hoist their action handlers transitively. */
   usedComponents: string[];
+  /** Aggregate names (PascalCase) referenced by `X id` form fields in
+   *  this page's body — the LiveView emitter loads each target's
+   *  record list in `mount/3` and assigns to
+   *  `socket.assigns.<x_snake>_options` so the rendered select can
+   *  read `options={@<x_snake>_options}`.  Empty when no `X id` form
+   *  field appears. */
+  idOptionsBindings: string[];
 }
 
 /** `Action(<instance>.<operation>)` → a `<.button phx-click=…>` plus a
@@ -159,6 +167,18 @@ export interface WalkContext {
    *  dispatch for enum-typed fields to `<.input type="select" options={...}>`.
    *  Built once at walker entry from every loaded context's enums. */
   enumsByName: ReadonlyMap<string, EnumIR>;
+  /** Workspace-wide value-object registry — drives
+   *  `renderFieldInputForField` dispatch for VO-typed fields to
+   *  `<.inputs_for :let={…}>` nested forms.  Built once at walker
+   *  entry from every loaded context's value objects. */
+  valueObjectsByName: ReadonlyMap<string, ValueObjectIR>;
+  /** Set of aggregate names (PascalCase) referenced by `X id` form
+   *  fields in this page's body — drives mount-time option-list
+   *  loading.  For each binding, `renderMount` emits
+   *  `socket |> assign(:<x_snake>_options, <ctx>.list_<x_snake>s!() |> Enum.map(...))`
+   *  so the rendered select's `options={@<x_snake>_options}` resolves.
+   *  Populated lazily as the walker visits Form / OperationForm bodies. */
+  idOptionsBindings: Set<string>;
   /** Form bindings discovered as the walker visits `Form(...)` calls. */
   formBindings: FormBinding[];
   /** Query bindings discovered as the walker visits `QueryView(...)`. */
@@ -213,6 +233,11 @@ export function walkBodyToHeex(
    *  walker falls back to `text` input as before.  See the matching
    *  `aggregatesByName` plumbing for how to populate. */
   enumsByName: ReadonlyMap<string, EnumIR> = new Map(),
+  /** Workspace-wide VO registry — drives `renderFieldInputForField`
+   *  dispatch for value-object-typed fields to `<.inputs_for :let={…}>`
+   *  nested-form blocks.  Defaults to empty when callers haven't
+   *  threaded VOs yet; the walker falls back to text input. */
+  valueObjectsByName: ReadonlyMap<string, ValueObjectIR> = new Map(),
 ): WalkResult {
   const stateNames = new Set<string>(page.state.map((f) => snake(f.name)));
   const stateFields = new Map<string, StateFieldIR>(page.state.map((f) => [snake(f.name), f]));
@@ -230,6 +255,8 @@ export function walkBodyToHeex(
     appModule,
     aggregatesByName,
     enumsByName,
+    valueObjectsByName,
+    idOptionsBindings: new Set(),
     formBindings: [],
     queryBindings: [],
     page,
@@ -265,6 +292,7 @@ export function walkBodyToHeex(
     queryBindings: ctx.queryBindings,
     actionBindings: ctx.actionBindings,
     usedComponents: [...ctx.usedComponents],
+    idOptionsBindings: [...ctx.idOptionsBindings],
   };
 }
 
@@ -904,7 +932,16 @@ export function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
 
   const inputs =
     params.length > 0
-      ? params.map((p) => `    ${renderFieldInputForField(p, formAssign, ctx.enumsByName)}`)
+      ? params.map(
+          (p) =>
+            `    ${renderFieldInputForField(
+              p,
+              formAssign,
+              ctx.enumsByName,
+              ctx.idOptionsBindings,
+              ctx.valueObjectsByName,
+            )}`,
+        )
       : [`    <%!-- ${opSnake} has no parameters --%>`];
 
   return [
@@ -976,7 +1013,15 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
     if (agg) {
       for (const f of agg.fields) {
         if (f.name === "id") continue;
-        inputs.push(`  ${renderFieldInputForField(f, "form", ctx.enumsByName)}`);
+        inputs.push(
+          `  ${renderFieldInputForField(
+            f,
+            "form",
+            ctx.enumsByName,
+            ctx.idOptionsBindings,
+            ctx.valueObjectsByName,
+          )}`,
+        );
       }
     }
   }
@@ -1013,13 +1058,31 @@ function findPascalArg(
 
 /** Emit a `<.input>` for a single aggregate field.  Picks the HTML
  *  input type from the IR type and labels it from a humanized name.
- *  `T id` references fall through to a text input — a proper
- *  select-with-options requires loading T's list at mount time, which
- *  is out of scope here. */
+ *  Enum + `X id` + value-object types lower to higher-shape elements
+ *  (`<.input type="select" …>`, `<.inputs_for :let={…}>`); the rest
+ *  dispatch to `htmlInputTypeForIRType`. */
 function renderFieldInputForField(
   f: { name: string; type: TypeIR },
   formAssign = "form",
   enumsByName?: ReadonlyMap<string, EnumIR>,
+  /** Side-effect sink for `X id` field types.  When the walker
+   *  encounters `customerId: Customer id`, it pushes "Customer"
+   *  here; renderMount in liveview-emit.ts iterates these and
+   *  loads the target list at mount so the select's
+   *  `options={@<x_snake>_options}` resolves. */
+  idOptionsBindings?: Set<string>,
+  /** Workspace-wide VO registry.  When supplied, VO-typed fields
+   *  render as `<.inputs_for :let={X_form}>` nested-form blocks
+   *  with one `<.input>` per VO field (recursing through this
+   *  function).  Without it (tests / fallbacks), VOs default to
+   *  text input. */
+  valueObjectsByName?: ReadonlyMap<string, ValueObjectIR>,
+  /** Sigil prefix for the form field reference.  Top-level callers
+   *  use the default `@` (form is a LiveView assign — `@form[:f]`).
+   *  Recursive nested-form callers pass `""` because the nested
+   *  form is a local variable bound by `:let={…}` (`f_form[:sub]`,
+   *  no `@`). */
+  assignPrefix = "@",
 ): string {
   const fieldName = snake(f.name);
   const label = humanize(f.name);
@@ -1034,7 +1097,48 @@ function renderFieldInputForField(
     const en = enumsByName.get(inner.name);
     if (en) {
       const options = en.values.map((v) => JSON.stringify(v)).join(", ");
-      return `<.input field={@${formAssign}[:${fieldName}]} type="select" label="${label}" options={[${options}]} />`;
+      return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="select" label="${label}" options={[${options}]} />`;
+    }
+  }
+  // `X id` fields render as `<.input type="select" options={@x_options}>`.
+  // The options assign is populated by `renderMount` (liveview-emit.ts)
+  // from the walker's `idOptionsBindings` set.  Falls back to text
+  // input when the binding sink isn't threaded (e.g. tests calling
+  // the helper directly).
+  if (inner.kind === "id" && idOptionsBindings) {
+    idOptionsBindings.add(inner.targetName);
+    const optionsVar = `${snake(inner.targetName)}_options`;
+    return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="select" label="${label}" options={@${optionsVar}} />`;
+  }
+  // Value-object fields render as `<.inputs_for :let={<f>_form}>`
+  // with one nested `<.input>` per VO field.  The `:let` local
+  // variable shadows the outer form scope, so the recursive call
+  // passes assignPrefix="" — `f_form[:sub]` instead of `@f_form[:sub]`.
+  // AshPhoenix.Form takes care of the nested-changeset wiring at
+  // mount + validate time.  Falls back to text input when the VO
+  // registry isn't threaded or the type's name isn't found.
+  if (inner.kind === "valueobject" && valueObjectsByName) {
+    const vo = valueObjectsByName.get(inner.name);
+    if (vo) {
+      const nestedFormVar = `${fieldName}_form`;
+      // Single-line emission keeps the multi-line indent from the
+      // outer template unbroken — the caller prefixes a fixed number
+      // of spaces and that prefix applies to the whole `<fieldset>`
+      // block.  HEEx is whitespace-tolerant; the rendered DOM nests
+      // identically.
+      const subInputs = vo.fields
+        .map((sub) =>
+          renderFieldInputForField(
+            sub,
+            nestedFormVar,
+            enumsByName,
+            idOptionsBindings,
+            valueObjectsByName,
+            "",
+          ),
+        )
+        .join(" ");
+      return `<fieldset><legend>${label}</legend><.inputs_for :let={${nestedFormVar}} field={${assignPrefix}${formAssign}[:${fieldName}]}>${subInputs}</.inputs_for></fieldset>`;
     }
   }
   const inputType = htmlInputTypeForIRType(f.type);
@@ -1048,7 +1152,7 @@ function renderFieldInputForField(
     : isMoney
       ? ` pattern="^-?\\d+(\\.\\d+)?$" inputmode="decimal"`
       : "";
-  return `<.input field={@${formAssign}[:${fieldName}]} type="${inputType}" label="${label}"${extraAttrs} />`;
+  return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="${inputType}" label="${label}"${extraAttrs} />`;
 }
 
 /** Map a TypeIR to the HTML `<input type="…">` attribute Ash forms
@@ -1805,6 +1909,8 @@ export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): 
     appModule,
     aggregatesByName: new Map(),
     enumsByName: new Map(),
+    valueObjectsByName: new Map(),
+    idOptionsBindings: new Set(),
     formBindings: [],
     queryBindings: [],
     page,

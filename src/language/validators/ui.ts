@@ -16,6 +16,11 @@ import type {
 } from "../generated/ast.js";
 import { isMemberSuffix, isPostfixChain } from "../generated/ast.js";
 import {
+  WALKER_LAYOUT_PRIMITIVES,
+  WALKER_SCAFFOLD_PRIMITIVES,
+  WALKER_SUB_PRIMITIVES,
+} from "../walker-stdlib.js";
+import {
   findAggregateInModule,
   isScaffoldOriginPageBody,
   isValidApiOperation,
@@ -23,58 +28,24 @@ import {
   pagePropDisplayName,
 } from "./_shared.js";
 
+/** Union of all walker-stdlib primitive names — derived once from the
+ *  `walker-stdlib.ts` SSOT and reused across `checkUiHelperImports`
+ *  invocations.  Drift between this set and the registry surfaces as
+ *  a `walker-stdlib-completeness.test.ts` failure, not as a silent
+ *  validation gap. */
+const STDLIB_PRIMITIVES: ReadonlySet<string> = new Set<string>([
+  ...WALKER_LAYOUT_PRIMITIVES,
+  ...WALKER_SUB_PRIMITIVES,
+  ...WALKER_SCAFFOLD_PRIMITIVES,
+]);
+
 /** `import helper <name> from "<path>"` at the UI
  *  level.  Validate two invariants:
  *   1. Helper names don't shadow any walker stdlib primitive
  *      (else a typo would silently divert a body call like
  *      `Stack(...)` from the primitive to the helper).
- *   2. No duplicate helper names within the same UI.
- *
- *  The stdlib set is duplicated here from `body-walker.ts`
- *  intentionally — the validator runs before generation and
- *  the cross-module import would inflate the language-server
- *  bundle. */
+ *   2. No duplicate helper names within the same UI. */
 export function checkUiHelperImports(model: Model, accept: ValidationAcceptor): void {
-  const STDLIB_PRIMITIVES = new Set<string>([
-    "Stack",
-    "Group",
-    "Grid",
-    "Container",
-    "Tabs",
-    "Tab",
-    "Toolbar",
-    "Empty",
-    "Field",
-    "NumberField",
-    "PasswordField",
-    "Toggle",
-    "Loader",
-    "Anchor",
-    "Image",
-    "Avatar",
-    "Slot",
-    "Heading",
-    "Text",
-    "Button",
-    "Card",
-    "Stat",
-    "Badge",
-    "Divider",
-    "Table",
-    "Column",
-    "Money",
-    "DateDisplay",
-    "EnumBadge",
-    "IdLink",
-    "Form",
-    // Scaffold-archetype call names also reserved (List / Detail
-    // dispatch via inferBodyDispatch).
-    "List",
-    "Detail",
-    "Home",
-    "WorkflowsIndex",
-    "ViewsIndex",
-  ]);
   for (const member of model.members) {
     if (member.$type !== "System") continue;
     const sys = member as System;

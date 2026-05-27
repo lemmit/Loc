@@ -58,6 +58,7 @@ import type {
   UiHelperImportIR,
   WorkflowIR,
 } from "../../ir/loom-ir.js";
+import { WALKER_LAYOUT_PRIMITIVES } from "../../language/walker-stdlib.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { registerApiHook, tryDetectApiHook } from "./walker/api-hooks.js";
@@ -212,54 +213,28 @@ export interface ApiHookUse {
  *  page-body-eligible.  The completeness test
  *  (`test/language/walker-stdlib-completeness.test.ts`) pins the
  *  language-side admissibility sets against the registry; this set
- *  is a different concern (page-body eligibility) and stays here. */
-export const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
-  "Stack",
-  "Group",
-  "Grid",
-  "Container",
-  "Tabs",
-  "Toolbar",
-  "Empty",
-  "Field",
-  "NumberField",
-  "PasswordField",
-  "Toggle",
-  "Loader",
-  "Anchor",
-  "Image",
-  "Avatar",
-  "Slot",
-  "Heading",
-  "Text",
-  "Bold",
-  "Italic",
-  "InlineCode",
-  "Button",
-  "Card",
-  "Stat",
-  "Badge",
-  "Divider",
-  "Table",
-  "Money",
-  "DateDisplay",
-  "EnumBadge",
-  "IdLink",
-  "CreateForm",
-  "OperationForm",
-  "WorkflowForm",
-  "Breadcrumbs",
-  "Paper",
-  "Skeleton",
-  "Alert",
-  "QueryView",
-  "KeyValueRow",
-  "Modal",
-  "CodeBlock",
-  "Icon",
-  "Section",
-  "Sticky",
+ *  is a different concern (page-body eligibility) and stays here as
+ *  a filtered view of `WALKER_LAYOUT_PRIMITIVES` — the exclusion list
+ *  below is the load-bearing piece, not the included names. */
+const NON_PAGE_BODY_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
+  // Action — single-button operation invocation; child of Toolbar, not
+  // a page body root.
+  "Action",
+  // For — list-comprehension; renders as JSX children, not a page body.
+  "For",
+  // Archetype names that lower to `custom` page origins post-#515.
+  "List",
+  "Detail",
+  "MasterDetail",
+  // Form-field inputs that are not meaningful as top-level page bodies.
+  "MultilineField",
+  "SelectField",
+  "Switch",
 ]);
+
+export const STDLIB_LAYOUT_COMPONENTS: ReadonlySet<string> = new Set(
+  [...WALKER_LAYOUT_PRIMITIVES].filter((n) => !NON_PAGE_BODY_LAYOUT_PRIMITIVES.has(n)),
+);
 
 export function isWalkableLayoutBody(
   body: ExprIR | undefined,

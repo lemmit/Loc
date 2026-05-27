@@ -57,7 +57,10 @@ function findNewOrderHeex(files: Map<string, string>): string {
     if (path.endsWith("/new_order_live.ex")) return content;
   }
   throw new Error(
-    `NewOrder LiveView not found.  Files: ${[...files.keys()].filter((p) => p.includes("live")).slice(0, 5).join(", ")}`,
+    `NewOrder LiveView not found.  Files: ${[...files.keys()]
+      .filter((p) => p.includes("live"))
+      .slice(0, 5)
+      .join(", ")}`,
   );
 }
 
@@ -86,16 +89,13 @@ describe("HEEx form — enum field renders as <.input type='select'>", () => {
   it("non-enum fields stay on their previous input types", async () => {
     // Anti-regression: the dispatch added for enums shouldn't
     // accidentally divert string/int/bool/datetime to select.
-    const files = await generateSystemFiles(
-      phoenixSystemWithEnum(`{ A, B }`),
-    );
+    const files = await generateSystemFiles(phoenixSystemWithEnum(`{ A, B }`));
     const heex = findNewOrderHeex(files);
     // `notes: string` still text-input.
     expect(heex).toMatch(/<\.input field=\{@form\[:notes\]\} type="text"/);
     // `status: OrderStatus` is the select (sanity).
     expect(heex).toMatch(/<\.input field=\{@form\[:status\]\} type="select"/);
   });
-
 });
 
 // Operation-modal forms (renderModal path) ALSO route through
