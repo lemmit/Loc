@@ -5,7 +5,7 @@
 // per-primitive emitter modules can share them without dragging the
 // walker context.
 
-import type { ExprIR } from "../../../../ir/loom-ir.js";
+import type { ExprIR } from "../../../../ir/types/loom-ir.js";
 
 export function slugify(s: string): string {
   return s

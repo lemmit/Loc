@@ -13,7 +13,7 @@
 // + colour icons via CSS rather than each pack having to know the
 // icon's intrinsic dimensions.
 
-import type { ExprIR } from "../../../../ir/loom-ir.js";
+import type { ExprIR } from "../../../../ir/types/loom-ir.js";
 import type { WalkContext } from "../../body-walker.js";
 import { testidAttr } from "../../body-walker.js";
 import { renderPrimitive } from "../context.js";

@@ -3,8 +3,8 @@ import {
   classifyForWire,
   pickErrorPath,
   singleFieldShape,
-} from "../../src/ir/invariant-classify.js";
-import type { ExprIR, InvariantIR } from "../../src/ir/loom-ir.js";
+} from "../../src/ir/validate/invariant-classify.js";
+import type { ExprIR, InvariantIR } from "../../src/ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Pure-function tests for the wire-invariant classifier.  No file system, no

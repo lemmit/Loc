@@ -1,4 +1,4 @@
-import type { ExprIR, InvariantIR } from "./loom-ir.js";
+import type { ExprIR, InvariantIR } from "../types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Invariant classification + single-field pattern detection.

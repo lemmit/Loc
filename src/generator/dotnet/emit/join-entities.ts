@@ -1,4 +1,4 @@
-import type { AssociationIR } from "../../../ir/loom-ir.js";
+import type { AssociationIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural } from "../../../util/naming.js";
 

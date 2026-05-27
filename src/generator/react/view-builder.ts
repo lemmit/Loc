@@ -3,7 +3,7 @@ import {
   contextUsesMoney,
   type TypeIR,
   type ViewIR,
-} from "../../ir/loom-ir.js";
+} from "../../ir/types/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------

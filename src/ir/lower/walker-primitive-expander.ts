@@ -15,8 +15,8 @@
 // in the source) while every downstream consumer reads the
 // full expanded body uniformly.
 
-import { humanize, plural, snake } from "../util/naming.js";
-import type { AggregateIR, BoundedContextIR, ExprIR, SystemIR, UiIR } from "./loom-ir.js";
+import { humanize, plural, snake } from "../../util/naming.js";
+import type { AggregateIR, BoundedContextIR, ExprIR, SystemIR, UiIR } from "../types/loom-ir.js";
 
 /** Inputs for the expander.  Carried as a struct so callers don't
  *  have to thread through the same handful of derived maps every
@@ -34,9 +34,9 @@ export interface WalkerExpandContext {
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
   /** Workflow by name.  Powers `workflow-form`
    *  expander coverage (`Form(runs: <wf>)` field dispatch). */
-  workflowsByName: ReadonlyMap<string, import("./loom-ir.js").WorkflowIR>;
+  workflowsByName: ReadonlyMap<string, import("../types/loom-ir.js").WorkflowIR>;
   /** View by name + per-view shape lookup. */
-  viewsByName: ReadonlyMap<string, import("./loom-ir.js").ViewIR>;
+  viewsByName: ReadonlyMap<string, import("../types/loom-ir.js").ViewIR>;
 }
 
 /** Build the expander context from the system + a specific UI.
@@ -44,8 +44,8 @@ export interface WalkerExpandContext {
 export function buildExpandContext(sys: SystemIR, ui: UiIR): WalkerExpandContext {
   const aggregatesByName = new Map<string, AggregateIR>();
   const bcByAggregate = new Map<string, BoundedContextIR>();
-  const workflowsByName = new Map<string, import("./loom-ir.js").WorkflowIR>();
-  const viewsByName = new Map<string, import("./loom-ir.js").ViewIR>();
+  const workflowsByName = new Map<string, import("../types/loom-ir.js").WorkflowIR>();
+  const viewsByName = new Map<string, import("../types/loom-ir.js").ViewIR>();
   for (const m of sys.modules) {
     for (const ctx of m.contexts) {
       for (const agg of ctx.aggregates) {
@@ -420,7 +420,7 @@ function expandScaffoldNewForm(agg: AggregateIR): ExprIR {
 /** Expand `scaffoldWorkflowForm(runs: <Wf>)`: Stack(Breadcrumbs,
  *  Heading, Card(WorkflowForm(runs: <Wf>))).  Emits `WorkflowForm`
  *  (new named primitive) rather than `Form(runs:)` (legacy). */
-function expandScaffoldWorkflowForm(wf: import("./loom-ir.js").WorkflowIR): ExprIR {
+function expandScaffoldWorkflowForm(wf: import("../types/loom-ir.js").WorkflowIR): ExprIR {
   const wfSlug = snake(wf.name);
   const humanWf = humanize(wf.name);
   return call(
@@ -452,12 +452,12 @@ function expandScaffoldWorkflowForm(wf: import("./loom-ir.js").WorkflowIR): Expr
  *  archetype-driven `expandViewList`; the archetype wrapper delegates
  *  here so the two stay byte-equivalent. */
 function expandScaffoldViewList(
-  view: import("./loom-ir.js").ViewIR,
+  view: import("../types/loom-ir.js").ViewIR,
   ctx: WalkerExpandContext,
 ): ExprIR {
   const humanView = humanize(view.name);
 
-  let fields: Array<{ name: string; type: import("./loom-ir.js").TypeIR }> = [];
+  let fields: Array<{ name: string; type: import("../types/loom-ir.js").TypeIR }> = [];
   if (view.output) {
     fields = view.output.fields;
   } else {
@@ -818,7 +818,7 @@ export function buildOperationsSection(agg: AggregateIR, cellVar: string): ExprI
  *  aggregate to link to). */
 function cellAccessorFor(
   fieldName: string,
-  type: import("./loom-ir.js").TypeIR,
+  type: import("../types/loom-ir.js").TypeIR,
   rowVar: string,
 ): ExprIR {
   return typedCellFor(member(ref(rowVar), fieldName), type);
@@ -831,7 +831,7 @@ function cellAccessorFor(
  *  member IR nodes — so React emits `data.shipTo.city` and Phoenix
  *  emits `@data.ship_to.city` correctly (a dotted member string
  *  would mis-snake on the Phoenix HEEx walker). */
-function typedCellFor(receiver: ExprIR, type: import("./loom-ir.js").TypeIR): ExprIR {
+function typedCellFor(receiver: ExprIR, type: import("../types/loom-ir.js").TypeIR): ExprIR {
   const inner = type.kind === "optional" ? type.inner : type;
   if (inner.kind === "id") {
     return call("IdLink", [receiver], [["of", ref(inner.targetName)]]);
@@ -921,7 +921,7 @@ function methodCall(receiver: ExprIR, member: string, args: ExprIR[]): ExprIR {
 // have to recompute.  Placeholder values (always `"free"` /
 // `"unknown"` / a primitive string TypeIR) keep the shapes valid
 // without inventing fake type info that downstream might trust.
-const PLACEHOLDER_TYPE: import("./loom-ir.js").TypeIR = {
+const PLACEHOLDER_TYPE: import("../types/loom-ir.js").TypeIR = {
   kind: "primitive",
   name: "string",
 };
@@ -966,7 +966,7 @@ function lambda(param: string, body: ExprIR): ExprIR {
   return { kind: "lambda", param, body };
 }
 
-function binary(left: ExprIR, op: import("./loom-ir.js").BinOp, right: ExprIR): ExprIR {
+function binary(left: ExprIR, op: import("../types/loom-ir.js").BinOp, right: ExprIR): ExprIR {
   return { kind: "binary", op, left, right };
 }
 
@@ -979,7 +979,7 @@ function binary(left: ExprIR, op: import("./loom-ir.js").BinOp, right: ExprIR): 
  *  type-driven dispatch. */
 function columnAccessorFor(
   fieldName: string,
-  type: import("./loom-ir.js").TypeIR,
+  type: import("../types/loom-ir.js").TypeIR,
   rowVar: string,
 ): ExprIR {
   // Strip the optional wrapper — display dispatch ignores

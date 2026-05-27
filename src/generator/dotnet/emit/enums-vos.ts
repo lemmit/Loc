@@ -1,4 +1,4 @@
-import type { EnumIR, ValueObjectIR } from "../../../ir/loom-ir.js";
+import type { EnumIR, ValueObjectIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
 import { renderCsExpr, renderCsType } from "../render-expr.js";

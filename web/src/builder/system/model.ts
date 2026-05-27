@@ -1,5 +1,5 @@
 import { AstUtils, type AstNode } from "langium";
-import type { LoomModel, TraceabilityIR, TypeIR, WireField } from "../../../../src/ir/loom-ir.js";
+import type { LoomModel, TraceabilityIR, TypeIR, WireField } from "../../../../src/ir/types/loom-ir.js";
 import type {
   Aggregate,
   Api,

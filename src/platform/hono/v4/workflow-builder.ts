@@ -6,7 +6,7 @@ import type {
   TypeIR,
   WorkflowIR,
   WorkflowStmtIR,
-} from "../../../ir/loom-ir.js";
+} from "../../../ir/types/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 
@@ -358,7 +358,7 @@ function lookupOp(
   ctx: BoundedContextIR,
   aggName: string,
   opName: string,
-): import("../../../ir/loom-ir.js").OperationIR | undefined {
+): import("../../../ir/types/loom-ir.js").OperationIR | undefined {
   return ctx.aggregates.find((a) => a.name === aggName)?.operations.find((o) => o.name === opName);
 }
 
@@ -388,7 +388,7 @@ function collectReposForWorkflow(wf: WorkflowIR): {
 
 /** Drizzle-postgres `isolationLevel` enum values are space-cased
  *  lowercase strings.  Map DSL camelCase tokens onto them. */
-function pgIsolationLevel(level: import("../../../ir/loom-ir.js").IsolationLevel): string {
+function pgIsolationLevel(level: import("../../../ir/types/loom-ir.js").IsolationLevel): string {
   switch (level) {
     case "readUncommitted":
       return "read uncommitted";

@@ -5,8 +5,8 @@ import type {
   EnrichedBoundedContextIR,
   ExprIR,
   ViewIR,
-} from "../../ir/loom-ir.js";
-import { viewUsesCurrentUser } from "../../ir/loom-ir.js";
+} from "../../ir/types/loom-ir.js";
+import { viewUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
 import { renderCsExpr } from "./render-expr.js";

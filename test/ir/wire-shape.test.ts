@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { enrichLoomModel } from "../../src/ir/enrichments.js";
+import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import type {
   AggregateIR,
   EntityPartIR,
   LoomModel,
   ValueObjectIR,
   WireField,
-} from "../../src/ir/loom-ir.js";
+} from "../../src/ir/types/loom-ir.js";
 import { loadExampleModel, toLoomModel } from "../_helpers/index.js";
 
 async function buildEnrichedModel(file: string): Promise<LoomModel> {

@@ -6,7 +6,7 @@ import {
   operationUsesCurrentUser,
   type WorkflowIR,
   type WorkflowStmtIR,
-} from "../../ir/loom-ir.js";
+} from "../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   csIdValueClrType,
@@ -232,7 +232,7 @@ function renderHandler(
   // renderExprWithCmdParams rewrites those refs at render time, keyed by the
   // workflow's param-name set.
   const paramNames = new Set(wf.params.map((p) => p.name));
-  const renderArg = (e: import("../../ir/loom-ir.js").ExprIR): string => {
+  const renderArg = (e: import("../../ir/types/loom-ir.js").ExprIR): string => {
     return renderExprWithCmdParams(e, paramNames, usings);
   };
 
@@ -323,7 +323,7 @@ ${body}    }
 }
 
 /** Maps DSL isolation levels to System.Data.IsolationLevel members. */
-function csIsolationLevel(level: import("../../ir/loom-ir.js").IsolationLevel): string {
+function csIsolationLevel(level: import("../../ir/types/loom-ir.js").IsolationLevel): string {
   switch (level) {
     case "readUncommitted":
       return "ReadUncommitted";
@@ -338,7 +338,7 @@ function csIsolationLevel(level: import("../../ir/loom-ir.js").IsolationLevel): 
 
 function renderStatement(
   st: WorkflowStmtIR,
-  renderArg: (e: import("../../ir/loom-ir.js").ExprIR) => string,
+  renderArg: (e: import("../../ir/types/loom-ir.js").ExprIR) => string,
   ctx: EnrichedBoundedContextIR,
   usage: WorkflowUsage,
 ): string[] {
@@ -421,14 +421,14 @@ function renderStatement(
 
 // Render an ExprIR, but rewrite param refs to `cmd.PascalName`.
 function renderExprWithCmdParams(
-  e: import("../../ir/loom-ir.js").ExprIR,
+  e: import("../../ir/types/loom-ir.js").ExprIR,
   paramNames: Set<string>,
   usings?: Set<string>,
 ): string {
   // Substitute by rewriting the IR before renderCsExpr.
   const rewrite = (
-    e: import("../../ir/loom-ir.js").ExprIR,
-  ): import("../../ir/loom-ir.js").ExprIR => {
+    e: import("../../ir/types/loom-ir.js").ExprIR,
+  ): import("../../ir/types/loom-ir.js").ExprIR => {
     if (e.kind === "ref" && e.refKind === "param" && paramNames.has(e.name)) {
       return { ...e, name: `cmd.${upperFirst(e.name)}`, refKind: "let" };
     }

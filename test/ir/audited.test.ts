@@ -2,7 +2,7 @@ import { AstUtils } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
-import { lowerModel } from "../../src/ir/lower.js";
+import { lowerModel } from "../../src/ir/lower/lower.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import {
   type Aggregate,

@@ -28,7 +28,7 @@ import type {
   TypeIR,
   UiIR,
   ValueObjectIR,
-} from "../../ir/loom-ir.js";
+} from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import {
   type ActionBinding,

@@ -1,4 +1,4 @@
-import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------

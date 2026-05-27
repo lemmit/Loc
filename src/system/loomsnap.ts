@@ -6,8 +6,8 @@ import type {
   StmtIR,
   SystemIR,
   TypeIR,
-} from "../ir/loom-ir.js";
-import { hasAnyProvSite, stmtHasProv } from "../ir/prov-id.js";
+} from "../ir/types/loom-ir.js";
+import { hasAnyProvSite, stmtHasProv } from "../ir/util/prov-id.js";
 
 // ---------------------------------------------------------------------------
 // Provenance rule-snapshot capture — the `ddd snapshot` prebuild step.

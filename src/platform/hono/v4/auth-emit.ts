@@ -1,5 +1,5 @@
 import { renderTsType } from "../../../generator/typescript/render-expr.js";
-import type { SystemIR, UserIR } from "../../../ir/loom-ir.js";
+import type { SystemIR, UserIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 
 // ---------------------------------------------------------------------------

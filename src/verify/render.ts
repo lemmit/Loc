@@ -9,7 +9,7 @@ import type {
   RequirementIR,
   RequirementVerdict,
   VerificationIR,
-} from "../ir/loom-ir.js";
+} from "../ir/types/loom-ir.js";
 import { lines } from "../util/code-builder.js";
 
 const GLYPH: Record<RequirementVerdict, string> = {

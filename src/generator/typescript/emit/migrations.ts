@@ -1,4 +1,4 @@
-import type { MigrationsIR, SchemaSnapshot } from "../../../ir/migrations-ir.js";
+import type { MigrationsIR, SchemaSnapshot } from "../../../ir/types/migrations-ir.js";
 import { renderPgStep } from "../../../system/sql-pg.js";
 import { snake } from "../../../util/naming.js";
 

@@ -4,14 +4,14 @@
 // drift.  See `src/ir/wire-projection.ts` for the rules under test.
 
 import { describe, expect, it } from "vitest";
-import type { FieldAccess, WireField } from "../../src/ir/loom-ir.js";
+import type { FieldAccess, WireField } from "../../src/ir/types/loom-ir.js";
 import {
   forApiRead,
   forCreateInput,
   forUiRead,
   forUpdateInput,
   updatePreconditions,
-} from "../../src/ir/wire-projection.js";
+} from "../../src/ir/enrich/wire-projection.js";
 
 // Synthetic wire field with one of each access role.  Names are
 // deliberately the modifier itself for readability of failure

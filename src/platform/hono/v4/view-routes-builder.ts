@@ -1,6 +1,6 @@
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
-import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR, ViewIR } from "../../../ir/loom-ir.js";
-import { viewUsesCurrentUser } from "../../../ir/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR, ViewIR } from "../../../ir/types/loom-ir.js";
+import { viewUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------

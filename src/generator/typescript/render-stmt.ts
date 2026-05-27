@@ -1,4 +1,4 @@
-import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/loom-ir.js";
+import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { renderTsExpr } from "./render-expr.js";
 
 const INDENT = "    ";

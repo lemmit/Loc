@@ -23,7 +23,7 @@
 //   defaultInitFor    — walker/page-shell.ts:705-725 (zeroValueForType)
 // ---------------------------------------------------------------------------
 
-import type { ExprIR, StateFieldIR, TypeIR } from "../../../ir/loom-ir.js";
+import type { ExprIR, StateFieldIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../../_walker/target.js";
 
 /** TSX-flavoured `WalkerTarget`.  Stateless and pure — no walker

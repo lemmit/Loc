@@ -55,7 +55,7 @@ import type {
   UiHelperImportIR,
   UiIR,
   ValueObjectIR,
-} from "../../ir/loom-ir.js";
+} from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { heexTarget } from "./heex-target.js";
@@ -480,7 +480,7 @@ function renderMethodCall(
  *  Values render in template position (refs become `@assign`). */
 function renderUserComponent(
   expr: Extract<ExprIR, { kind: "call" }>,
-  comp: import("../../ir/loom-ir.js").ComponentIR,
+  comp: import("../../ir/types/loom-ir.js").ComponentIR,
   ctx: WalkContext,
 ): string {
   ctx.usedComponents.add(comp.name);

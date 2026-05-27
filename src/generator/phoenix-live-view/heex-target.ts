@@ -24,7 +24,7 @@
 // `framework: "phoenixLiveView"` matches the IR enum.
 // ---------------------------------------------------------------------------
 
-import type { ExprIR, StateFieldIR, TypeIR } from "../../ir/loom-ir.js";
+import type { ExprIR, StateFieldIR, TypeIR } from "../../ir/types/loom-ir.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 
 export const heexTarget: WalkerTarget = {

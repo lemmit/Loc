@@ -8,7 +8,7 @@
 // calls back into emitExpr to render hook args — a call-time cycle ESM
 // resolves fine; the type imports below are erased.
 
-import type { ExprIR } from "../../../ir/loom-ir.js";
+import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
 import type { ApiHookUse, WalkContext } from "../body-walker.js";
 import { emitExpr } from "../body-walker.js";

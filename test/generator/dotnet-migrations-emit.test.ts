@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { emitDotnetMigrations } from "../../src/generator/dotnet/emit/migrations.js";
-import type { MigrationsIR, SchemaSnapshot } from "../../src/ir/migrations-ir.js";
+import type { MigrationsIR, SchemaSnapshot } from "../../src/ir/types/migrations-ir.js";
 
 // ---------------------------------------------------------------------------
 // .NET migrations emitter — one Migration class per MigrationsIR, plus

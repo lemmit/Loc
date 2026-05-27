@@ -4,7 +4,7 @@ import type {
   EnrichedAggregateIR,
   FindIR,
   RepositoryIR,
-} from "../../ir/loom-ir.js";
+} from "../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
@@ -171,7 +171,7 @@ export function mergeViewFindsForAgg(
   const matchingViews = ctx.views.filter((v) => v.aggregateName === agg.name);
   if (matchingViews.length === 0) return repo;
 
-  const arrayReturn: import("../../ir/loom-ir.js").TypeIR = {
+  const arrayReturn: import("../../ir/types/loom-ir.js").TypeIR = {
     kind: "array",
     element: { kind: "entity", name: agg.name },
   };

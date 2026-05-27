@@ -11,7 +11,7 @@
 // branding, breakpoint behaviour) lives in the template.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, ViewIR, WorkflowIR } from "../../../../ir/loom-ir.js";
+import type { AggregateIR, ViewIR, WorkflowIR } from "../../../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../../../util/naming.js";
 import type { AppShellVM, ImportVM, NavEntryVM, NavSectionVM, RouteVM } from "../view-models.js";
 

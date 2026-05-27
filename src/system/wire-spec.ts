@@ -7,7 +7,7 @@ import type {
   ModuleIR,
   TypeIR,
   WireField,
-} from "../ir/loom-ir.js";
+} from "../ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // `<system>/.loom/wire-spec.json` artifact.

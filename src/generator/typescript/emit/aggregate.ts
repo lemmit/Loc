@@ -8,9 +8,9 @@ import type {
   FunctionIR,
   InvariantIR,
   OperationIR,
-} from "../../../ir/loom-ir.js";
-import { aggregateUsesMoney, operationUsesCurrentUser } from "../../../ir/loom-ir.js";
-import { stmtHasProv } from "../../../ir/prov-id.js";
+} from "../../../ir/types/loom-ir.js";
+import { aggregateUsesMoney, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { stmtHasProv } from "../../../ir/util/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr, renderTsType } from "../render-expr.js";

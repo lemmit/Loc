@@ -8,7 +8,7 @@ import {
   type PageIR,
   type SystemIR,
   type UiIR,
-} from "../../ir/loom-ir.js";
+} from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
@@ -64,7 +64,7 @@ export interface GenerateReactOptions {
    *  map and emits `src/components/<Name>.tsx` for every top-level
    *  component referenced from this ui (ui-scope wins on
    *  collisions). */
-  topLevelComponents?: import("../../ir/loom-ir.js").ComponentIR[];
+  topLevelComponents?: import("../../ir/types/loom-ir.js").ComponentIR[];
 }
 
 export function generateReactForContexts(

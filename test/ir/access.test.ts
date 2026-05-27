@@ -1,9 +1,9 @@
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
-import { enrichLoomModel } from "../../src/ir/enrichments.js";
-import type { AggregateIR } from "../../src/ir/loom-ir.js";
-import { lowerModel } from "../../src/ir/lower.js";
+import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
+import type { AggregateIR } from "../../src/ir/types/loom-ir.js";
+import { lowerModel } from "../../src/ir/lower/lower.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 

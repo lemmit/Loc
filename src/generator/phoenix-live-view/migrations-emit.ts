@@ -4,14 +4,14 @@ import type {
   MigrationStep,
   MigrationsIR,
   TableShape,
-} from "../../ir/migrations-ir.js";
+} from "../../ir/types/migrations-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix Ecto migration emitter.
 //
 // Consumes the platform-neutral `MigrationsIR[]` from
-// `src/ir/migrations-builder.ts` and translates each `MigrationStep` into
+// `src/system/migrations-builder.ts` and translates each `MigrationStep` into
 // Ecto migration DSL.
 //
 // File layout:

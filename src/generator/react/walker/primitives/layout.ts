@@ -3,7 +3,7 @@
 // positional children (Tabs into each Tab's body, Card into its body)
 // via the shared walk helpers.
 
-import type { ExprIR } from "../../../../ir/loom-ir.js";
+import type { ExprIR } from "../../../../ir/types/loom-ir.js";
 import type { WalkContext } from "../../body-walker.js";
 import {
   positionalChildren,

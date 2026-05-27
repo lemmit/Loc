@@ -16,7 +16,7 @@
 //   sections are separated by an <h3> heading.
 // ---------------------------------------------------------------------------
 
-import type { UiIR } from "../../ir/loom-ir.js";
+import type { UiIR } from "../../ir/types/loom-ir.js";
 import { deriveSidebarFromUi } from "../react/menu-emitter.js";
 import type { NavSectionVM } from "../react/templating/view-models.js";
 

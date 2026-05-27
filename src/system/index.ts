@@ -1,5 +1,5 @@
 import { E2E_FIXTURES_TS } from "../generator/react/index.js";
-import { enrichLoomModel } from "../ir/enrichments.js";
+import { enrichLoomModel } from "../ir/enrich/enrichments.js";
 import type {
   DeployableIR,
   EnrichedBoundedContextIR,
@@ -7,10 +7,10 @@ import type {
   EnrichedModuleIR,
   EnrichedSystemIR,
   SystemIR,
-} from "../ir/loom-ir.js";
-import { lowerModel } from "../ir/lower.js";
-import { buildMigrations } from "../ir/migrations-builder.js";
-import type { MigrationsIR } from "../ir/migrations-ir.js";
+} from "../ir/types/loom-ir.js";
+import { lowerModel } from "../ir/lower/lower.js";
+import { buildMigrations } from "./migrations-builder.js";
+import type { MigrationsIR } from "../ir/types/migrations-ir.js";
 import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
 import { renderE2EFile } from "./e2e-render.js";
@@ -243,7 +243,7 @@ function emitDeployable(
   options: {
     emitTrace?: boolean;
     migrations?: MigrationsIR[];
-    topLevelComponents?: import("../ir/loom-ir.js").ComponentIR[];
+    topLevelComponents?: import("../ir/types/loom-ir.js").ComponentIR[];
   } = {},
 ): void {
   const emitTrace = !!options.emitTrace;

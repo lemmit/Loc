@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allAggregates } from "../../src/ir/loom-ir.js";
+import { allAggregates } from "../../src/ir/types/loom-ir.js";
 import { buildWireSpec, jsonPropertyForType, renderWireSpec } from "../../src/system/wire-spec.js";
 import { buildLoomModel, loadExampleModel, toLoomModel } from "../_helpers/index.js";
 

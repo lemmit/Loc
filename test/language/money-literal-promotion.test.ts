@@ -15,7 +15,7 @@
 
 import { AstUtils, EmptyFileSystem, URI } from "langium";
 import { describe, expect, it } from "vitest";
-import { allAggregates } from "../../src/ir/loom-ir.js";
+import { allAggregates } from "../../src/ir/types/loom-ir.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Aggregate, DerivedProp, Model } from "../../src/language/generated/ast.js";
 import { buildLoomModel } from "../_helpers/index.js";

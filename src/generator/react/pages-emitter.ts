@@ -31,7 +31,7 @@ import type {
   ParamIR,
   SystemIR,
   UiIR,
-} from "../../ir/loom-ir.js";
+} from "../../ir/types/loom-ir.js";
 import { lowerFirst, snake } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { isWalkableLayoutBody, walkBodyToTsx } from "./body-walker.js";
@@ -104,8 +104,8 @@ function buildBcByAggregate(ctx: PageEmitContext): Map<string, BoundedContextIR>
  *  `Form(runs: <wf>)` field dispatch in the walker. */
 function buildWorkflowsByName(
   ctx: PageEmitContext,
-): Map<string, import("../../ir/loom-ir.js").WorkflowIR> {
-  const out = new Map<string, import("../../ir/loom-ir.js").WorkflowIR>();
+): Map<string, import("../../ir/types/loom-ir.js").WorkflowIR> {
+  const out = new Map<string, import("../../ir/types/loom-ir.js").WorkflowIR>();
   for (const bc of ctx.contextsByName.values()) {
     for (const wf of bc.workflows) out.set(wf.name, wf);
   }
@@ -302,7 +302,7 @@ export function uiUsesCodeBlock(
  *  Stops at the first hit — no flag accumulation needed.  Covers
  *  every compound `ExprIR` shape from `loom-ir.ts`; leaf nodes
  *  (`literal` / `ref` / `this` / `id`) fall through to `false`. */
-function exprUsesCodeBlock(expr: import("../../ir/loom-ir.js").ExprIR): boolean {
+function exprUsesCodeBlock(expr: import("../../ir/types/loom-ir.js").ExprIR): boolean {
   switch (expr.kind) {
     case "call":
       if (expr.name === "CodeBlock") return true;
@@ -351,7 +351,7 @@ function exprUsesCodeBlock(expr: import("../../ir/loom-ir.js").ExprIR): boolean 
   }
 }
 
-function stmtUsesCodeBlock(stmt: import("../../ir/loom-ir.js").StmtIR): boolean {
+function stmtUsesCodeBlock(stmt: import("../../ir/types/loom-ir.js").StmtIR): boolean {
   switch (stmt.kind) {
     case "let":
     case "expression":

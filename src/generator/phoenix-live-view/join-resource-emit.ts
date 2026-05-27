@@ -1,4 +1,4 @@
-import type { AssociationIR } from "../../ir/loom-ir.js";
+import type { AssociationIR } from "../../ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Ash join-resource emitter for `Id<T>[]` reference collections.

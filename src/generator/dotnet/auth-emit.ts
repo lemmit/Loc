@@ -1,4 +1,4 @@
-import type { SystemIR, TypeIR, UserIR } from "../../ir/loom-ir.js";
+import type { SystemIR, TypeIR, UserIR } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { renderCsType } from "./render-expr.js";
 

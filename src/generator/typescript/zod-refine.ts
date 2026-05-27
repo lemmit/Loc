@@ -4,8 +4,8 @@ import {
   pickErrorPath,
   type SingleFieldPattern,
   singleFieldShape,
-} from "../../ir/invariant-classify.js";
-import type { BinOp, ExprIR, InvariantIR } from "../../ir/loom-ir.js";
+} from "../../ir/validate/invariant-classify.js";
+import type { BinOp, ExprIR, InvariantIR } from "../../ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Zod-refine renderer for wire-boundary validators (frontend forms +

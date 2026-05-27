@@ -9,7 +9,7 @@
 // aren't forced to compute them.
 // ---------------------------------------------------------------------------
 
-import type { ThemeIR } from "../../../../ir/loom-ir.js";
+import type { ThemeIR } from "../../../../ir/types/loom-ir.js";
 import type { ThemeVM } from "../view-models.js";
 
 /** Default brand colour when the system declares no `theme.primary`.

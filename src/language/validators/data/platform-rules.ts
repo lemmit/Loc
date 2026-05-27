@@ -17,7 +17,7 @@ import {
   BUILTIN_PACK_LATEST,
   packFormatForBuiltin,
 } from "../../../generator/_packs/builtin-formats.js";
-import type { Platform } from "../../../ir/loom-ir.js";
+import type { Platform } from "../../../ir/types/loom-ir.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../../platform/registry.js";
 
 /** Frontend keyword platforms — those that are valid as bareword

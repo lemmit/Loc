@@ -1,5 +1,5 @@
-import { wireShapeFor } from "../../ir/enrichments.js";
-import type { ClassifyContext, SingleFieldPattern } from "../../ir/invariant-classify.js";
+import { wireShapeFor } from "../../ir/enrich/enrichments.js";
+import type { ClassifyContext, SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
 import {
   type AggregateIR,
   aggregateUsesMoney,
@@ -13,14 +13,14 @@ import {
   type RepositoryIR,
   type TypeIR,
   type ValueObjectIR,
-} from "../../ir/loom-ir.js";
-import { forApiRead, forCreateInput } from "../../ir/wire-projection.js";
+} from "../../ir/types/loom-ir.js";
+import { forApiRead, forCreateInput } from "../../ir/enrich/wire-projection.js";
 import {
   peelCollection,
   peelNullable,
   type WirePrimitive,
   wireTypeInfo,
-} from "../../ir/wire-types.js";
+} from "../../ir/types/wire-types.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   chainSingleFieldNative,

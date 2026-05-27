@@ -1,4 +1,4 @@
-import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/loom-ir.js";
+import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------

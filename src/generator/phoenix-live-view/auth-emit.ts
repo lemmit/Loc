@@ -1,4 +1,4 @@
-import type { DeployableIR, FieldIR, SystemIR, UserIR } from "../../ir/loom-ir.js";
+import type { DeployableIR, FieldIR, SystemIR, UserIR } from "../../ir/types/loom-ir.js";
 import { snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------

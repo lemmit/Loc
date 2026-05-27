@@ -5,8 +5,8 @@ import {
   buildMigrations,
   diffSchema,
   schemaFromModule,
-} from "../../src/ir/migrations-builder.js";
-import type { SchemaSnapshot } from "../../src/ir/migrations-ir.js";
+} from "../../src/system/migrations-builder.js";
+import type { SchemaSnapshot } from "../../src/ir/types/migrations-ir.js";
 import { memorySnapshotStore } from "../../src/system/snapshot.js";
 import { buildLoomModel } from "../_helpers/index.js";
 

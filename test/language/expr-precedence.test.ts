@@ -14,7 +14,7 @@
 
 import { AstUtils } from "langium";
 import { describe, expect, it } from "vitest";
-import { allAggregates, type ExprIR } from "../../src/ir/loom-ir.js";
+import { allAggregates, type ExprIR } from "../../src/ir/types/loom-ir.js";
 import type {
   BinaryChain,
   DerivedProp,

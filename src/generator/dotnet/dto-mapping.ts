@@ -1,4 +1,4 @@
-import { wireShapeFor } from "../../ir/enrichments.js";
+import { wireShapeFor } from "../../ir/enrich/enrichments.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -8,14 +8,14 @@ import type {
   IdValueType,
   TypeIR,
   ValueObjectIR,
-} from "../../ir/loom-ir.js";
-import { forApiRead } from "../../ir/wire-projection.js";
+} from "../../ir/types/loom-ir.js";
+import { forApiRead } from "../../ir/enrich/wire-projection.js";
 import {
   peelCollection,
   peelNullable,
   type WirePrimitive,
   wireTypeInfo,
-} from "../../ir/wire-types.js";
+} from "../../ir/types/wire-types.js";
 import { upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------

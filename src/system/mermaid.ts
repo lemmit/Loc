@@ -14,7 +14,7 @@ import type {
   ValueObjectIR,
   WorkflowIR,
   WorkflowStmtIR,
-} from "../ir/loom-ir.js";
+} from "../ir/types/loom-ir.js";
 import { lines } from "../util/code-builder.js";
 
 // ---------------------------------------------------------------------------

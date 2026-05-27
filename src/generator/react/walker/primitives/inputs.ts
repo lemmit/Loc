@@ -3,7 +3,7 @@
 // the per-pack input. The label/bind helpers are private to this
 // module.
 
-import type { ExprIR } from "../../../../ir/loom-ir.js";
+import type { ExprIR } from "../../../../ir/types/loom-ir.js";
 import type { WalkContext } from "../../body-walker.js";
 import { firstPositionalContent, testidAttr } from "../../body-walker.js";
 import { renderPrimitive } from "../context.js";

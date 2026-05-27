@@ -6,7 +6,7 @@
 // collide because they're reached via different call paths.
 
 import { describe, expect, it } from "vitest";
-import { allAggregates } from "../../src/ir/loom-ir.js";
+import { allAggregates } from "../../src/ir/types/loom-ir.js";
 import { buildLoomModel } from "../_helpers/index.js";
 import { parseString } from "../_helpers/parse.js";
 

@@ -1,4 +1,4 @@
-import type { ExprIR, PathIR, StmtIR } from "../../ir/loom-ir.js";
+import type { ExprIR, PathIR, StmtIR } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import type { CsRenderContext } from "./render-expr.js";
 import { renderCsExpr } from "./render-expr.js";

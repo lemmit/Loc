@@ -10,7 +10,7 @@
 // lacks a display) with `formInput` in form-helpers.ts.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, BoundedContextIR, TypeIR } from "../../../../ir/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, TypeIR } from "../../../../ir/types/loom-ir.js";
 import { humanize } from "../../../../util/naming.js";
 import { idTargetHookVar, unwrapOpt } from "../../form-helpers.js";
 import type { FormFieldVM } from "../view-models.js";

@@ -1,4 +1,4 @@
-import { enrichLoomModel } from "../../ir/enrichments.js";
+import { enrichLoomModel } from "../../ir/enrich/enrichments.js";
 import type {
   BoundedContextIR,
   DeployableIR,
@@ -6,9 +6,9 @@ import type {
   EnrichedBoundedContextIR,
   RepositoryIR,
   SystemIR,
-} from "../../ir/loom-ir.js";
-import { lowerModel } from "../../ir/lower.js";
-import type { MigrationsIR } from "../../ir/migrations-ir.js";
+} from "../../ir/types/loom-ir.js";
+import { lowerModel } from "../../ir/lower/lower.js";
+import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural } from "../../util/naming.js";
 import { generateReactForContexts } from "../react/index.js";
@@ -490,13 +490,13 @@ function findRepoFor(ctx: BoundedContextIR, name: string): RepositoryIR | undefi
  *  every downstream emitter (interface, implementation, find-emit,
  *  CQRS) treat views uniformly with declared finds. */
 function mergeViewsAsFinds(
-  agg: import("../../ir/loom-ir.js").AggregateIR,
+  agg: import("../../ir/types/loom-ir.js").AggregateIR,
   repo: RepositoryIR | undefined,
   ctx: BoundedContextIR,
 ): RepositoryIR | undefined {
   const matching = ctx.views.filter((v) => v.aggregateName === agg.name);
   if (matching.length === 0) return repo;
-  const arrayReturn: import("../../ir/loom-ir.js").TypeIR = {
+  const arrayReturn: import("../../ir/types/loom-ir.js").TypeIR = {
     kind: "array",
     element: { kind: "entity", name: agg.name },
   };

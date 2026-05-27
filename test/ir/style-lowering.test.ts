@@ -8,8 +8,8 @@
 
 import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import type { ExprIR, LoomModel } from "../../src/ir/loom-ir.js";
-import { lowerModel } from "../../src/ir/lower.js";
+import type { ExprIR, LoomModel } from "../../src/ir/types/loom-ir.js";
+import { lowerModel } from "../../src/ir/lower/lower.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 

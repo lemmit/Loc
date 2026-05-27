@@ -19,7 +19,7 @@ import {
 } from "../../../generator/typescript/emit.js";
 import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
-import { enrichLoomModel } from "../../../ir/enrichments.js";
+import { enrichLoomModel } from "../../../ir/enrich/enrichments.js";
 import {
   type BoundedContextIR,
   contextUsesMoney,
@@ -30,10 +30,10 @@ import {
   type SystemIR,
   type TypeIR,
   type UserIR,
-} from "../../../ir/loom-ir.js";
-import { lowerModel } from "../../../ir/lower.js";
-import type { MigrationsIR } from "../../../ir/migrations-ir.js";
-import { contextsHaveProvenancedField } from "../../../ir/prov-id.js";
+} from "../../../ir/types/loom-ir.js";
+import { lowerModel } from "../../../ir/lower/lower.js";
+import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
+import { contextsHaveProvenancedField } from "../../../ir/util/prov-id.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { lowerFirst } from "../../../util/naming.js";
 // Hono-framework builders now live in this package (P2b) — siblings.

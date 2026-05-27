@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { AggregateIR, ExprIR } from "../../src/ir/loom-ir.js";
-import { allAggregates } from "../../src/ir/loom-ir.js";
+import type { AggregateIR, ExprIR } from "../../src/ir/types/loom-ir.js";
+import { allAggregates } from "../../src/ir/types/loom-ir.js";
 import { buildLoomModel } from "../_helpers/index.js";
 
 // The lowering layer's job is to fully resolve names so backends never

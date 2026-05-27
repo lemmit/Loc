@@ -10,7 +10,7 @@ import type {
   TestStmtIR,
   ViewIR,
   WorkflowIR,
-} from "../ir/loom-ir.js";
+} from "../ir/types/loom-ir.js";
 import { intrinsicMatcherSig } from "../language/type-system.js";
 import { lowerFirst, plural, snake, upperFirst } from "../util/naming.js";
 import { renderExpectStmt } from "./expect-stmt.js";

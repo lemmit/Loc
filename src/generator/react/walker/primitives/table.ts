@@ -3,7 +3,7 @@
 // lambdas rebind their source param to the emitted `row` identifier via
 // the shared lambda-scope helpers. emitColumn is private to this module.
 
-import type { ExprIR } from "../../../../ir/loom-ir.js";
+import type { ExprIR } from "../../../../ir/types/loom-ir.js";
 import type { WalkContext } from "../../body-walker.js";
 import {
   emitExpr,

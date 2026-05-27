@@ -113,8 +113,8 @@ describe("byte-equivalence — page emitter vs legacy direct walk", () => {
     // React project's pages flow through `ui.pages`, so an empty
     // `uiName` would surface as a `loom.react-deployable-missing-ui`
     // validator error rather than silently falling through.
-    const { lowerModel } = await import("../../src/ir/lower.js");
-    const { enrichLoomModel } = await import("../../src/ir/enrichments.js");
+    const { lowerModel } = await import("../../src/ir/lower/lower.js");
+    const { enrichLoomModel } = await import("../../src/ir/enrich/enrichments.js");
     const model = await buildAcme();
     const loom = enrichLoomModel(lowerModel(model));
     const sys = loom.systems[0]!;

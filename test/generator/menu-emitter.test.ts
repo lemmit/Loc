@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 import { deriveSidebarFromUi } from "../../src/generator/react/menu-emitter.js";
-import type { LoomModel, UiIR } from "../../src/ir/loom-ir.js";
+import type { LoomModel, UiIR } from "../../src/ir/types/loom-ir.js";
 import { parseString, toLoomModel } from "../_helpers/index.js";
 
 async function buildLoom(src: string): Promise<LoomModel> {
