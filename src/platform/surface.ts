@@ -35,6 +35,36 @@ export interface ComposeServiceShape {
   healthPath: string;
   /** The internal port the service's HTTP listener binds to. */
   internalPort: number;
+  // -------------------------------------------------------------------------
+  // Reserved slots for future cross-cutting concerns (Phase 3 / 4 of the
+  // proposal corpus).  Currently undefined on every backend; the
+  // orchestrator emits nothing when absent.  Wiring lands per concern.
+  // -------------------------------------------------------------------------
+  /** Audit sidecar — a separate container for the audit subsystem
+   *  (e.g. a log aggregator that drains audit-record events).
+   *  Filled by backends that implement `emitAuditInit`. */
+  auditSidecar?: ComposeSidecar;
+  /** Policy initialisation command — an entrypoint wrapper that runs
+   *  before the main service to load / verify compliance policies
+   *  (sensitivity-and-compliance / authorization phases). */
+  policyInitCmd?: string[];
+  /** Mount path inside the container for the i18n catalog directory.
+   *  Filled by backends that implement `emitI18nAdapter`. */
+  i18nCatalogDir?: string;
+}
+
+/** Sidecar container shape — minimal subset of the compose service
+ *  attributes a sidecar needs.  Used by `ComposeServiceShape.auditSidecar`
+ *  (and any future sidecar reservations).  Intentionally smaller than the
+ *  full service shape because sidecars don't expose a public health path. */
+export interface ComposeSidecar {
+  /** Docker image reference (e.g. `vector:0.39`). */
+  image: string;
+  /** Environment variables — ordered tuples for stable yaml output. */
+  env: Array<[string, string]>;
+  /** Optional internal port if the sidecar exposes one (typically
+   *  scraped by an observability backend). */
+  internalPort?: number;
 }
 
 export interface PlatformSurface {
@@ -110,4 +140,60 @@ export interface PlatformSurface {
     sys: SystemIR;
     slug: string;
   }): ComposeServiceShape;
+
+  // ---------------------------------------------------------------------------
+  // Reserved no-op lifecycle hooks for future cross-cutting concerns.
+  //
+  // Each is OPTIONAL today and undefined on every backend; the orchestrator
+  // reads with `?.` and emits nothing when absent.  Filling a hook on a
+  // backend lands that backend's adapter for the named concern — the
+  // signature pins the data shape so adopters don't redesign the boundary.
+  //
+  // Concerns and the proposals they back:
+  //   - emitAuthGate           docs/proposals/authorization.md
+  //   - emitAuditInit          docs/proposals/audit-and-logging.md
+  //   - emitCompliancePolicy   docs/proposals/sensitivity-and-compliance.md
+  //   - emitTenancyFilter      docs/proposals/multi-tenancy-design-note.md
+  //   - emitI18nAdapter        docs/proposals/i18n.md
+  // ---------------------------------------------------------------------------
+
+  /** Lines spliced into the deployable's bootstrap to install the
+   *  authorization gate (policy evaluator + per-route guard wiring). */
+  emitAuthGate?(args: {
+    contexts: EnrichedBoundedContextIR[];
+    deployable: DeployableIR;
+    sys: SystemIR;
+  }): string[];
+
+  /** Lines spliced into the deployable's bootstrap to initialise the
+   *  audit subsystem (record persister + behaviour-pipeline attachment). */
+  emitAuditInit?(args: {
+    contexts: EnrichedBoundedContextIR[];
+    deployable: DeployableIR;
+    sys: SystemIR;
+  }): string[];
+
+  /** Lines spliced into the deployable's bootstrap to load / verify
+   *  compliance policies (sensitivity mask DTOs + sink-call classification). */
+  emitCompliancePolicy?(args: {
+    contexts: EnrichedBoundedContextIR[];
+    deployable: DeployableIR;
+    sys: SystemIR;
+  }): string[];
+
+  /** Lines spliced into the repository / query layer to enforce tenant
+   *  isolation (DataKey leftmost = TenantId per multi-tenancy proposal). */
+  emitTenancyFilter?(args: {
+    contexts: EnrichedBoundedContextIR[];
+    deployable: DeployableIR;
+    sys: SystemIR;
+  }): string[];
+
+  /** Lines spliced into the deployable's bootstrap to wire the i18n
+   *  adapter (catalog loader + locale switch). */
+  emitI18nAdapter?(args: {
+    contexts: EnrichedBoundedContextIR[];
+    deployable: DeployableIR;
+    sys: SystemIR;
+  }): string[];
 }
