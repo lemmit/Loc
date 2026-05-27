@@ -1,5 +1,5 @@
 // Auto-generated.
-import { Routes, Route, Link as RouterLink, useLocation, useNavigate, Outlet } from "{{routerPackage}}";
+import { Routes, Route, Link as RouterLink, useLocation, {{#if anyLayoutUsesNavigate}}useNavigate, {{/if}}Outlet } from "{{routerPackage}}";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
