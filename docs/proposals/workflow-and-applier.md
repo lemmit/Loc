@@ -1,157 +1,249 @@
 # Workflow-centric DDD — appliers, workflows, and the workflow-as-aggregate model
 
-> Status: design agreed in conversation, not yet implemented. Reframes today's `workflow Name(params) [transactional]` (see [`docs/workflow.md`](../workflow.md)) and introduces appliers (`apply(...)`) for event-sourced aggregates and workflows. Companion to the events surface declared today (`event Name { ... }`) and complementary to the schemas-as-boundary commitment that the wire-spec artifact already approximates but currently sources from the wrong layer.
+> Status: design agreed in conversation, not yet implemented. Reframes today's `workflow Name(params) [transactional]` (see [`docs/workflow.md`](../workflow.md)) and introduces appliers (`apply(...)`) for event-sourced aggregates and workflows. Companion to the events surface declared today (`event Name { ... }`) and complementary to the schemas-as-boundary commitment that the wire-spec artifact already approximates but currently sources from the wrong layer. Sagas (compensation contract) deferred to a v2 amendment.
 
 ## Problem statement
 
-Today's `workflow` declaration in Loom is a context-level orchestrator with a flat body of statements (`precondition` / `let` / `emit` / `op.call`), optional `transactional` modifier, and an optional SQL isolation level. It is, in the paper's vocabulary, **the conflation of three different things** under one name:
+Today's `workflow Name(params) [transactional]` is the conflation of three different things:
 
-1. A **single-transaction command handler** — when written with `transactional`, the workflow is a classical one-shot handler that fits in one DB transaction. This is structurally the "lucky case" the paper identifies.
-2. A **multi-transaction command-triggered process** — without `transactional`, today's workflow saves multiple aggregates in declaration order, each commit independent. The doc admits: *"Mid-workflow failure leaves earlier saves committed."* There is no state aggregate to remember position, no compensation contract, no replay. This is the paper's *unnamed-position-blob* antipattern, encoded into the language.
-3. A **placeholder for event-triggered processes** — `docs/workflow.md:178` explicitly defers: *"For event-driven choreography wait for the event-triggered workflow slice — it'll add `starts on event ...` plus the typed event-handler registry."*
+1. A **single-transaction command handler** — `workflow X(params) transactional` is the "lucky case" the paper identifies.
+2. A **multi-transaction command-triggered process** — without `transactional`, today's workflow saves multiple aggregates in declaration order with no state aggregate to remember position. The current doc admits *"Mid-workflow failure leaves earlier saves committed."* The paper's unnamed-position-blob antipattern, encoded in the language.
+3. A **placeholder for event-triggered processes** — `docs/workflow.md:178` explicitly defers: *"wait for the event-triggered workflow slice."*
 
-Beyond the workflow conflation, there is a second gap: **event-sourced aggregates** have no surface in the language at all. The current model is *operations mutate then emit*; there is no `(state, event) → state` applier form, no replay, no event log. The paper makes this category explicit; Loom should follow.
+Beyond the workflow conflation, two further gaps:
 
-A third gap, smaller but consequential: **commands are not first-class.** A workflow's `(params)` list synthesises the command's payload implicitly; there is no `command` declaration, no published command schema, no symbol the validator can route external callers through. Loom already publishes `wire-spec.json` from aggregate `wireShape` — the wrong layer for a bounded-context boundary (couples external consumers to internal aggregate shape; see the paper's §"Schemas as the Boundary").
+- **Event-sourced aggregates have no surface.** The current model is operations-mutate-then-emit; there is no `(state, event) → state` applier form.
+- **Commands are not first-class.** A workflow's `(params)` list synthesises the command's payload implicitly; there is no `command` declaration, no published command schema. `wire-spec.json` is published from aggregate `wireShape` — the wrong layer for a bounded-context boundary.
 
 This proposal addresses all three gaps in one coordinated revision.
 
 ## What the source argument says
 
-The proposal follows the workflow-centric DDD framework (in-tree at `2948ae13-workflowcentricddd.md` for the originating argument; reproduced in this proposal's appendix). The load-bearing claims:
+Follows the workflow-centric DDD framework (in-tree `2948ae13-workflowcentricddd.md`). Load-bearing claims:
 
-1. **The aggregate is the transaction boundary.** Anything that coordinates across aggregates is structurally a workflow.
-2. **The applier/workflow split runs along the aggregate boundary.** Inside the aggregate, pure `(state, event) → state` *appliers*. Outside the aggregate, *workflows* that may coordinate across aggregates.
-3. **Workflow state is an aggregate** — identity, invariants, lifecycle, its own table. Not a "saga store" blob.
-4. **Five message-handler forms** cover the space — collapsing the old "command handler / process manager / saga" trichotomy into three orthogonal axes (trigger, transaction scope, failure contract).
-5. **Schemas of commands + events are the boundary.** Not aggregate shapes.
+1. The aggregate is the transaction boundary.
+2. The applier/workflow split runs along the aggregate boundary.
+3. Workflow state is an aggregate — identity, invariants, lifecycle, its own table.
+4. Five message-handler forms collapse the old taxonomy along three orthogonal axes.
+5. Schemas of commands + events are the boundary.
 
-This proposal lands all five claims as Loom language features.
+This proposal lands all five as Loom language features, with form 5 (saga) deferred.
 
 ## Prior art surveyed
 
-Before settling on the syntax, we surveyed how established workflow systems handle the two hard problems: correlation (which workflow instance does this message belong to?) and lifecycle (which messages can create vs. continue an instance?).
+Two hard problems: correlation (which instance does this message belong to?) and lifecycle (which messages create vs. continue?).
 
 | System | Correlation | Lifecycle | What Loom takes |
 |---|---|---|---|
-| **NServiceBus** sagas | Per-message `ConfigureHowToFindSaga` mapping from message property → saga data property | Implicit "first message creates" with `IAmStartedByMessages<T>` marker interface | Explicit per-event correlation expression |
-| **MassTransit** sagas | Per-event `CorrelateById(x => x.Message.OrderId)` lambdas inside state machine | `Initially.When(...).Then(...).TransitionTo(...)` distinguishes initial from in-state events | Per-handler correlation expression + starter-as-header |
-| **Axon** sagas | `@SagaEventHandler(associationProperty = "orderId")` (name-match by default; explicit attribute) | `@StartSaga` annotation marks creating handlers | Name-match by default; explicit alias when names diverge |
-| **Camunda BPMN** | "Business key" — one identifier per process instance; receive tasks correlate by it | Engine instantiates process from message-start event | Single correlation key per workflow (Loom: the workflow's id field) |
-| **Temporal** | Caller resolves workflow ID and targets it directly (no content-based correlation) | Workflow function is the lifecycle; `signal` continues it | Not applicable — Temporal is execution infrastructure, not authoring |
-| **Akka Cluster Sharding** | `extractEntityId(message)` function at routing layer | Lazy: first message to an id creates the entity | Routing-by-id model (matches "the workflow is an aggregate") |
-| **EventFlow** | Per-event `ISubscribeAsynchronousTo<...>` with saga locator | Configurable starter event | Per-event subscription declaration |
-| **Ash Framework (Elixir)** | Resource changesets bound to id | Action types: `:create` / `:update` / `:destroy` distinguish lifecycle phase | The kind-tag approach for distinguishing lifecycle phases (already adopted in [`lifecycle-operations.md`](./lifecycle-operations.md)) |
+| NServiceBus | Per-message `ConfigureHowToFindSaga` | `IAmStartedByMessages<T>` marker | Per-event correlation expression |
+| MassTransit | Per-event `CorrelateById(...)` lambdas | `Initially.When(...)` | Per-handler correlation + starter-as-header |
+| Axon | `@SagaEventHandler(associationProperty=…)` | `@StartSaga` annotation | Name-match default + explicit alias |
+| Camunda BPMN | Business key + per-receive correlation | Message-start event | Single correlation key per workflow |
+| Temporal | Caller resolves workflow ID | Workflow function = lifecycle | Not applicable (execution infrastructure) |
+| Akka Cluster Sharding | `extractEntityId(message)` | First-message lazy create | Routing-by-id model |
+| EventFlow | `ISubscribeAsynchronousTo<...>` + saga locator | Configurable starter | Per-event subscription declaration |
+| Ash Framework | Resource changesets bound to id | `:create` / `:update` / `:destroy` kinds | The kind-tag pattern (already in [`lifecycle-operations.md`](./lifecycle-operations.md)) |
 
-Three patterns emerge across all of them:
+Three industry patterns crystallise:
 
-1. **Per-message correlation expression** (NServiceBus, MassTransit, Axon, EventFlow) is the dominant pattern. It scales from "all events share the same id field" (Camunda's business key) to "every event has its own mapping" (NServiceBus's `ConfigureHowToFindSaga`).
-2. **Starter-vs-continuation distinction is structural** in every framework. Whether marked by interface (`IAmStartedByMessages`), annotation (`@StartSaga`), state-machine position (MassTransit's `Initially`), or DSL keyword — the lifecycle phase is always made explicit.
-3. **State is the aggregate** is the common shape — even when called "saga data" or "process variables" or "actor state", every framework's persistence model is "one row per running instance, keyed by correlation."
+1. **Per-handler correlation expression** is the dominant pattern.
+2. **Starter-vs-continuation distinction is structural** in every framework.
+3. **State is an aggregate** under every name (saga data, process variables, actor state).
 
-**What Loom takes:**
-- Per-handler correlation expression (`by <expr>`) with implicit name-match (Axon's defaulting).
-- Starter-in-header (the starter is the workflow's *signature*, not a handler annotation — sharpened from MassTransit's state-machine `Initially`).
-- State-as-aggregate (already Loom-native — workflows just become aggregates).
+What Loom takes: per-handler `by <expr>` with implicit name-match; starter-as-typed-action-on-the-entity; state-as-aggregate.
+What Loom rejects: marker interfaces, generic saga stores, caller-supplied IDs.
 
-**What Loom rejects:**
-- Marker interfaces / annotations (the language declares; the runtime follows).
-- Generic "saga store" persistence (each workflow gets its own table, like any aggregate).
-- Caller-supplied IDs (Temporal-style) — publishers can't know which workflows subscribe.
+### Prior art — the workflow-creation moment specifically
+
+Beyond the broad correlation/lifecycle survey above, the more specific question — **how is the creation moment shaped, and how does state get populated?** — has more variation. Eight frameworks surveyed:
+
+| Framework | Creation marker | Init mechanism | Multiple starters? |
+|---|---|---|---|
+| NServiceBus | `IAmStartedByMessages<T>` marker on handler class | Handler body mutates saga data (POCO with default-init properties) | Yes — multiple markers per saga |
+| MassTransit | `Initially.When(E).Then(...)` in fluent state machine | Lambda after `.Then(...)` mutates instance | Yes — multiple `Initially.When(...)` clauses |
+| Axon | `@StartSaga` annotation on `@SagaEventHandler` method | Method body mutates `@SagaEventHandler(associationProperty=…)`-correlated saga instance | Yes — multiple annotated methods |
+| Camunda BPMN | Message Start Event in process XML | Declarative variable assignments + optional Execution Listeners (Java/Groovy) | Yes — multiple start events |
+| Temporal | Workflow function arguments — caller invokes | First statements of the function body | No — one workflow function per type |
+| EventFlow | `ISagaIsStartedBy<TEvent>` marker interface | Handler body mutates saga state | Yes |
+| **Ash Framework** | **`create :name do ... end` action with `accept [list]` + `change` chain** | **Imperative `change` modules OR declarative `change set_attribute(...)`** | **Yes — multiple named creates** |
+| Akka Persistence | First event in the stream materialises the persistent actor | `applyEvent(event)` reconstructs state from log | Implicit — any inbound message can be first |
+
+Three patterns recur, with one constant across all of them:
+
+1. **Marker + body** (NServiceBus, MassTransit, Axon, EventFlow). Some declaration tags a handler as a starter; the body mutates default-initialised state.
+2. **Typed action with declared shape** (Ash, BPMN). The action's shape is declared (`accept` list, BPMN variables); a declarative or imperative chain populates fields.
+3. **Function arguments** (Temporal). Initialization is just the first statements of the workflow function; framework supplies the args.
+
+Common across all: **multiple starters are first-class.** Every state-based saga framework allows multiple entry points to one workflow type. Ash's `create :name` is the most explicit — each named create is a distinct entry point with its own accept list and change chain.
+
+**Ash is the closest match.** Loom's aggregate-lifecycle proposal ([`lifecycle-operations.md`](./lifecycle-operations.md)) is already Ash-shaped — `create [name](params) { this.field := ... }` is a near-1:1 translation of Ash's `create :name do accept [...]; change ... end`. Lifting the same shape to workflows produces a unified mental model: an aggregate and a workflow are both stateful entities with typed lifecycle actions, differing only in which member forms are allowed.
+
+What Loom v2 takes from Ash:
+- **Typed-action `create` keyword.** Same as aggregate.
+- **Multiple named creates as entry points.** Same as aggregate.
+- **`by <expr>` per declaration** for correlation (Loom's spelling of association mapping; NServiceBus/Axon do the same with config objects/annotations).
+- **Name-match auto-seeding** for the common case (Camunda BPMN parity; NServiceBus has this implicitly via reflection).
+
+What Loom v2 rejects:
+- **Fluent state-machine builders** (MassTransit). Doesn't fit Loom's declarative style.
+- **Marker interfaces / annotations** (NServiceBus, Axon, EventFlow). Loom uses a keyword over a marker.
+- **Default-initialised POCO state** (NServiceBus). Loom requires explicit assignment in the `create` body.
+
+What composes later:
+- **Explicit `accept` list** (Ash). `create(event: OrderPlaced) accept [orderId, ...] by event.order { ... }`. Composes with name-match auto-seeding (whitelist overrides match); deferred to v2 of this proposal.
+- **Declarative field defaults** (Camunda, Ash's `change set_attribute`). Already proposed for aggregates in `lifecycle-operations.md` (`status: T = default`); workflows inherit when that lands.
 
 ## Design — the workflow is an aggregate
 
-The unifying insight: **a workflow is an aggregate whose declared scope of authority includes operations on other aggregates, subscriptions to external events, and (optionally) a compensation contract. Its lifecycle is anchored by a triggering message named in the declaration's header.**
+**Load-bearing claim:** a workflow is an aggregate whose declared scope of authority includes operations on other aggregates, subscriptions to external events, and a header-declared lifecycle trigger. Every other rule follows.
 
-This is the load-bearing claim of the proposal. Every other rule follows from it.
-
-The three concrete differences between an `aggregate` and a `workflow` in the language:
+The three concrete differences between an `aggregate` and a `workflow`:
 
 | Difference | Why |
 |---|---|
-| Operations may call other aggregates/repositories | The whole point of coordination |
-| `on(e: E)` event subscription is allowed | Reacting to facts from outside your own scope |
-| `compensated` modifier is available | Cross-aggregate work can't be atomic; the failure contract has to be explicit |
+| Command handlers may call other aggregates / repositories | The whole point of coordination |
+| `on(e: E)` event subscription is allowed | Reacting to facts from outside own scope |
+| `create` carries a `by <expr>` clause for event-triggered creation | Aggregates are invoked into existence directly (factory call); workflows can be triggered by either a command call or an inbound event correlated by `by` |
 
-Plus one syntactic difference:
+These differences are surfaced by *vocabulary*, not by body restrictions:
 
-| Header-declared starter trigger | Aggregates are *invoked into existence* (`Agg.create({...})`); workflows are *triggered into existence* (the header's command or event arriving) |
+- Aggregates have `operation` (domain-pure command handler).
+- Workflows have `handle` (orchestration-capable command handler) plus `on(...)` (event subscription).
+- Both have `apply(...)` when `eventSourced` (own-event replay).
 
-Everything else is shared: fields, invariants, operations, `apply(...)` blocks when `eventSourced`, ids, repositories, migrations, tables. **The IR treats them as variants of one kind**; the surface grammar uses two keywords for modeller-facing clarity.
+Same syntactic shape (`keyword[name](typed-binding) { body }`); different keyword carries the contract.
 
 ### Modifiers
 
-Three modifiers, each asserting a contract the compiler enforces. Orthogonal — any combination is legal.
-
 | Modifier | Applies to | Contract |
 |---|---|---|
-| `eventSourced` | `aggregate`, `workflow` | Operations may only `emit`; `on(...)` handlers may only `emit`; all mutation lives in `apply(...)` blocks. State is reconstructed by replay. |
-| `compensated` | `workflow` | Every domain-aggregate operation invoked across the workflow's bodies must have a declared `compensatedBy` partner. The saga contract from the paper, made compile-time. |
-| `transactional` | workflow header (single-handler workflows only) | The starter handler's body fits in one DB transaction. Maps to existing Loom transactional semantics (`db.transaction` / `BeginTransactionAsync`). |
+| `eventSourced` | `aggregate`, `workflow` | Command handlers (`operation` / `handle` / `create`) may only `emit`; `on(...)` handlers may only `emit`; all mutation lives in `apply(...)` blocks |
+| `transactional` | workflow declaration (single-`create`, no-continuations workflows only) | The starter body fits in one DB transaction. Optional isolation level via `transactional(serializable)` etc. |
 
-`transactional` is **per-header**, not per-workflow, because multi-handler workflows (process managers, sagas) are structurally multi-transaction. The compiler rejects `transactional` on workflows whose bodies declare any `on(...)` or any additional `operation` (i.e., anything besides the starter).
+`transactional` is per-workflow and only legal when the workflow has exactly one `create` declaration and no continuation handlers (no `handle`, no `on(...)`, no additional `create`) — multi-handler workflows are structurally multi-transaction.
 
 ### Member forms
 
-Three member forms cover all command/event handling:
-
 | Form | Allowed in | Role | Body restrictions |
 |---|---|---|---|
-| `operation name(params) { ... }` | any aggregate, any workflow | Command handler — mutates own state; may `emit` | In `eventSourced`: may not contain `:=` (only `emit`). In domain `aggregate`: may not call other aggregates / repos. In `workflow`: may call other aggregates / repos. |
-| `apply(e: Event) { ... }` | `eventSourced` aggregate or workflow only | Pure intrinsic state transition from the declaring thing's own emitted event | May contain only `:=` and field-derivation expressions. No `emit`, no calls, no I/O. Replay-safe by construction. |
-| `on(e: Event) [by <expr>] { ... }` | workflow only | Extrinsic subscription — react to an event published elsewhere | In non-`eventSourced` workflow: may `:=`, `emit`, call. In `eventSourced` workflow: may only `emit` (the translation rule below). |
+| `create [name](params) [by <expr>] { ... }` | workflow only | Lifecycle starter — fresh blank instance, body populates state and (optionally) orchestrates other aggregates. May call other aggregates / repos. | May not read `this.id` (assigned by persistence). In `eventSourced`: may only `emit`. |
+| `create [name](params) { ... }` | aggregate only | Lifecycle factory (per [`lifecycle-operations.md`](./lifecycle-operations.md)) — fresh blank instance, body populates own fields | May not call other aggregates / repos. May not read `this.id`. In `eventSourced`: may only `emit`. |
+| `operation name(params) { ... }` | aggregate only | Domain command handler — `this`-bound mutation, may `emit` | May not call other aggregates / repos. In `eventSourced`: may only `emit`. |
+| `handle name(params) { ... }` | workflow only | Continuation command handler — own-state mutation, may call other aggregates / repos | In `eventSourced`: may only `emit`. |
+| `on(e: Event) [by <expr>] { ... }` | workflow only | Extrinsic event subscription (continuation) | In `eventSourced`: may only `emit`. |
+| `apply(e: Event) { ... }` | `eventSourced` aggregate or workflow | Pure intrinsic state transition from own event | Only `:=` and field-derivation expressions. No `emit`, no calls, no I/O. |
+| `destroy [name](params) { ... }` | aggregate only (per `lifecycle-operations.md`) | Lifecycle terminator | (see lifecycle proposal) |
 
-The parallel between `operation`, `apply(...)`, and `on(...)` is intentional: all three are typed-parameter-in-parens member declarations, like a function. The keyword carries the contract:
+All declarations are typed-parameter-in-parens. Both `create` (workflow) and `handle` accept implicit-command sugar (positional typed params synthesise a `command` declaration named after the workflow + optional create-name, see §"Commands as first-class declarations") or explicit reference (`create(c: Cancel)`, `handle(c: Cancel)`). `create(event: E) by <expr>` is the event-triggered shape; `by` is omitted when the event has a field whose name matches the workflow's correlation field. `operation` keeps today's positional-params shape.
+
+**Symmetry with aggregate lifecycle.** Both `aggregate` and `workflow` are stateful entities with a `create` factory shape. They differ in member surface:
+
+| Member kind | Aggregate | Workflow |
+|---|---|---|
+| `create [name](...) [by ...] { ... }` | ✓ (no `by`) | ✓ (with `by` for events) |
+| `operation name(...) { ... }` | ✓ | — |
+| `handle name(...) { ... }` | — | ✓ |
+| `on(e: E) by ... { ... }` | — | ✓ |
+| `apply(e: E) { ... }` | ✓ (`eventSourced`) | ✓ (`eventSourced`) |
+| `destroy [name](...) { ... }` | ✓ | — (workflow termination is an open question — see §"Open questions") |
+
+The workflow header carries no trigger params — trigger shape lives in the `create` declaration that owns the starter body. Multiple `create` declarations per workflow are first-class (Ash parity); the canonical (unnamed) form is at most one per workflow.
+
+### Identity and correlation
+
+Workflows have an implicit `id` field, typed `<WorkflowName> id`, configurable via `ids` clause exactly like aggregates. The workflow's primary key is `id` (its own synthetic identity). Beyond `id`, a workflow declares one regular field whose value is used by the runtime to **route inbound events** to this workflow instance — the *correlation field*.
 
 ```ddd
-operation cancel(reason: string)     // typed params, command-driven
-apply(e: ShipmentDispatched)         // typed event binding, own event, replay-safe
-on(paid: PaymentReceived)            // typed event binding, external event
-```
-
-### Trigger shapes (workflow header)
-
-Three trigger kinds, all using the same paren-shaped signature:
-
-```ddd
-workflow Name(p: T, q: U)                       // implicit command sugar — synthesises `command Name { p: T, q: U }`
-workflow Name(command: C)                       // explicit command — references a declared `command C`
-workflow Name(event: E [by <expr>])             // event-triggered starter
-```
-
-The implicit-command sugar lowers to an explicit command declaration so the boundary schema includes it. Authors who want to share commands across workflows or publish them on the API surface use the explicit form.
-
-### Correlation
-
-Every event handler (header starter and `on(...)` continuations alike) declares how to extract the workflow's correlation key from the event payload:
-
-```ddd
-workflow OrderFulfillment(event: OrderPlaced by event.order) compensated {
-  id: Order id
+workflow OrderFulfillment {
+  // implicit id: OrderFulfillment id  (guid by default; configurable via 'ids' clause)
+  orderId: Order id         // correlation field
   status: FulfillmentStatus
 
-  on(paid: PaymentReceived) by paid.orderId { ... }
-  on(arr:  ShipmentArrived) by arr.shipRef  { ... }
-  on(failed: PaymentFailed) by failed.orderId { ... }
+  create(event: OrderPlaced) by event.order {
+    this.status := AwaitingPayment
+  }
 }
 ```
 
-The `by <expr>` clause yields a value typed to match the workflow's id field. The compiler checks the type statically.
+**Routing semantics.** The `by <expr>` clause on a `create` or `on(...)` declaration *is* the routing expression. When an event arrives, the runtime evaluates the `by` expression against the event payload (e.g., `event.order` yields the placed order's id) and uses the resulting value to identify which workflow instance the event belongs to. For `create`, the runtime looks up the workflow whose correlation field holds that value; if none exists, it allocates a new row and seeds the correlation field from the `by` value. For `on(...)`, the runtime looks up the existing workflow whose correlation field equals the `by` value.
 
-**Implicit name-match.** When the event has a field whose name matches the workflow's id field (e.g., the event has `orderId` and the workflow's id is also `orderId`), the `by` clause may be omitted. The compiler infers `by <event-binding>.<id-field-name>`. This handles the common case (intra-org event naming converges) without forcing boilerplate.
+How the backend implements this lookup (database index, in-memory map, sharded distribution) is per-backend and outside the DSL's scope.
+
+**Correlation field identification.** Across a single workflow's declarations, the correlation field is the workflow's regular field of the same type as the values produced by every `by` clause. Concretely:
+
+- For `create(event: E) by event.X` and `on(e: E) by e.X` etc., the `by` expressions yield a value of some id-shaped type (e.g., `Order id`). The workflow must have exactly one regular field of that type — that field is the correlation field.
+- For `create(p: T) by p` (command-triggered via name-match), the matching workflow field is identified by name + type.
+
+All `by` clauses across all of a workflow's `create` / `on(...)` declarations must yield a value compatible with the same single correlation field; mismatch is a validator error. If the workflow has multiple regular fields of the same id-shaped type (so the target can't be inferred), v1 rejects the workflow — the modeller must rename or restructure. (A future amendment may introduce an explicit `into <fieldName>` clause on `by` to disambiguate; deferred until observed in practice.)
 
 ```ddd
-on(paid: PaymentReceived) { ... }                  // inferred: by paid.orderId  (event has matching field)
-on(arr: ShipmentArrived) by arr.shipRef { ... }    // explicit alias            (names differ)
+workflow PaymentReconciliation {
+  paymentId: Payment id        // the correlation field — only Payment id field in this workflow
+  invoiceId: Invoice id        // a regular id field, used by handlers for cross-aggregate lookup
+  status: ReconStatus
+
+  create(event: PaymentReceived) by event.paymentId {
+    this.invoiceId := event.invoice    // explicit assignment for the non-correlation id field
+    this.status := Pending
+  }
+
+  on(matched: PaymentMatched) by matched.paymentId {
+    this.status := Matched
+  }
+}
 ```
 
-**Single identity field per workflow.** A workflow has exactly one id-bearing field that serves as the correlation key. Composite correlation is expressed by making the id a value object. The paper: *"workflows aren't 'find any matching instance,' they're 'the one instance for this thing.'"*
+### State is optional for `transactional` workflows
 
-**Header correlation seeds; continuation correlation looks up.** For the starter, `by event.order` seeds the new workflow row's id (lookup must miss); the row is created with that id. For continuation handlers, `by paid.orderId` looks up the existing row (lookup must hit). The compiler distinguishes these positions; the runtime enforces miss-vs-hit semantics.
+| Case | State fields? | Table? |
+|---|---|---|
+| `transactional` workflow with no state fields | none | **no** — pure handler |
+| `transactional` workflow with state fields | declared | yes — one row per invocation (opt-in audit/idempotency) |
+| Non-`transactional` workflow (multi-handler, has `on(...)`, has continuation `handle`s) | **required** | yes — validator enforces |
 
-## The five forms
+The "stateless single-tx" case is the paper's "lucky case" — the work is in the side effects on other aggregates; no row to track.
 
-The paper's five forms, expressed in this proposal's grammar:
+### `by` clauses and implicit name-match
+
+Every event-triggered handler declares a correlation expression. The compiler type-checks the expression against the workflow's correlation field type.
+
+```ddd
+create(event: OrderPlaced) by event.order { ... }       // starter
+on(paid: PaymentReceived) by paid.orderId { ... }       // continuation
+on(arr:  ShipmentArrived) by arr.shipRef  { ... }       // continuation
+```
+
+When the event has a field whose name matches the workflow's correlation field, `by` may be omitted:
+
+```ddd
+on(paid: PaymentReceived) { ... }                    // inferred: by paid.orderId (correlation field is orderId)
+on(arr:  ShipmentArrived) by arr.shipRef { ... }     // explicit alias when names differ
+```
+
+For starter `create` declarations the `by` clause seeds the correlation field of the new row (lookup must miss). For continuation `on(...)` declarations it locates the existing row (lookup must hit). Command-triggered `create` declarations (no `by` clause; trigger is an implicit or explicit command) seed correlation by name-match from a create-param of matching name.
+
+## Workflow lifecycle — what happens when a workflow is created
+
+When a `create` declaration's trigger arrives, the runtime executes a defined sequence:
+
+1. **Allocate** a fresh row for the workflow with a new `id` (its own synthetic identity).
+2. **Seed the correlation field**:
+   - Event-triggered `create(event: E) by <expr>`: from the `by` expression (or the implicit name-match against `event`).
+   - Command-triggered `create(params)`: from the create-param whose name matches the correlation field.
+3. **Auto-seed any other fields** whose name matches a create-param of the same type (commands only; events don't auto-seed beyond the correlation, since the create body has explicit access to the bound event variable).
+4. **Run the `create` body** — `this.field := X` mutations and (for non-`eventSourced`) any cross-aggregate calls. `this.id` is not readable in the body (assigned by persistence on commit).
+5. **Commit** the row.
+
+For continuations (`handle` invocation, `on` event), the runtime:
+1. **Look up** the workflow row by the correlation field (using the `by` clause's value).
+2. **Run the handler body** with the existing row's state in scope (`this.field` reads the loaded state).
+3. **Commit** the changes (one transaction per handler invocation).
+
+The `create` body runs exactly once per workflow instance — it IS the starter, not a separate block. In `eventSourced` workflows, `create` may only `emit` (no direct `:=`); the appliers consume the emitted events to populate state.
+
+**Multiple `create` declarations** (Ash-style multiple entry points): a workflow may declare more than one `create`. Each is a distinct entry point — the runtime picks the matching one based on the inbound trigger's type (event class for `create(event: E)`, command class for command-triggered). At most one canonical (unnamed) `create` per workflow; named variants are distinguished by their `name`.
+
+## The four forms
 
 ### 1. Applier
 
@@ -164,7 +256,6 @@ aggregate Shipment eventSourced {
     precondition status == Pending
     emit ShipmentDispatched { at: now() }
   }
-
   apply(e: ShipmentDispatched) {
     status := Dispatched
     dispatchedAt := e.at
@@ -172,104 +263,150 @@ aggregate Shipment eventSourced {
 }
 ```
 
-Aggregate-level state transition. Pure. Replay-safe.
-
 ### 2. Single-transaction command-triggered workflow
 
-```ddd
-workflow PlaceOrder(customerId: Customer id, placedAt: datetime) transactional {
-  id: PlaceOrderId
-  status: PlaceOrderStatus
+Stateless (the lucky case — no fields, no table):
 
-  let order = Order.create({ customerId: customerId, placedAt: placedAt })
-  status := Completed
+```ddd
+workflow PlaceOrder transactional {
+  create(customerId: Customer id, placedAt: datetime) {
+    let order = Order.create({ customerId: customerId, placedAt: placedAt })
+  }
 }
 ```
 
-The starter body (statements at the top level of the block) runs in one transaction. The workflow's state aggregate is a terminal record of the handling (audit trail + idempotency). One handler, no `on(...)`, no continuations.
+Or stateful (opt-in audit row). The create-param `customerId` seeds the workflow's correlation field by name-match:
+
+```ddd
+workflow PlaceOrder transactional {
+  customerId: Customer id     // correlation field; seeded from create-param of same name
+  placedAt: datetime                       // seeded from create-param of same name
+  outcome: PlaceOrderOutcome
+
+  create(customerId: Customer id, placedAt: datetime) {
+    let order = Order.create({ customerId: customerId, placedAt: placedAt })
+    this.outcome := Completed
+  }
+}
+```
+
+The synthesised command is named after the workflow (`command PlaceOrder { customerId: Customer id, placedAt: datetime }`).
 
 ### 3. Multi-transaction command-triggered workflow
 
 ```ddd
-workflow OrderFulfillment(orderId: Order id) compensated {
-  id: Order id
+workflow OrderFulfillment {
+  orderId: Order id           // correlation field (sole Order id field)
   status: FulfillmentStatus
 
-  id := orderId
-  status := Pending
-
-  operation markPaid() {
-    precondition status == Pending
-    status := Paid
+  create(orderId: Order id) {
+    this.status := Pending
   }
-  operation ship() {
-    precondition status == Paid
-    let order = Orders.getById(id)
+
+  handle markPaid() {
+    precondition this.status == Pending
+    this.status := Paid
+  }
+  handle ship() {
+    precondition this.status == Paid
+    let order = Orders.getById(this.orderId)
     order.ship()
-    status := Shipped
+    this.status := Shipped
   }
-  operation cancel(reason: string) {
-    precondition status != Shipped
-    let order = Orders.getById(id)
+  handle cancel(reason: string) {
+    precondition this.status != Shipped
+    let order = Orders.getById(this.orderId)
     order.cancel()
-    status := Cancelled
+    this.status := Cancelled
   }
 }
 ```
 
-Starter command, multiple continuation `operation`s. Each invocation is its own transaction; the workflow row spans them.
-
-### 4. Event-triggered process manager
+The create-param `orderId` and the field `orderId` match by name (and by `Order id` type); the field is auto-seeded when the `create` runs. The body then handles any other initialization (here, setting the initial status). When create-param and field names differ, an explicit `by <param>` clause on the create makes the mapping visible (parallel to the event-triggered case):
 
 ```ddd
-workflow OrderFulfillment(event: OrderPlaced by event.order) {
-  id: Order id
-  status: FulfillmentStatus
+workflow OrderFulfillment {
+  orderId: Order id           // correlation field (sole Order id field)
 
-  id := event.order
-  status := AwaitingPayment
-
-  on(paid: PaymentReceived) by paid.orderId { status := Paid }
-  on(arr:  ShipmentArrived) by arr.shipRef  { status := Shipped }
+  create(targetOrder: Order id) by targetOrder {
+    this.status := Pending
+  }
+  // ...
 }
 ```
 
-Starter event, continuation events. State machine encoded in `status` field + `invariant` clauses.
-
-### 5. Saga (process manager + compensation contract)
+### 4. Event-triggered process manager (with explicit failure handler)
 
 ```ddd
-workflow OrderFulfillment(event: OrderPlaced by event.order) compensated {
-  id: Order id
+workflow OrderFulfillment {
+  orderId: Order id           // correlation field (sole Order id field)
   status: FulfillmentStatus
 
-  id := event.order
-  status := AwaitingPayment
+  create(event: OrderPlaced) by event.order {
+    this.status := AwaitingPayment
+  }
 
-  on(paid: PaymentReceived) by paid.orderId { status := Paid }
+  on(paid: PaymentReceived) by paid.orderId {
+    let order = Orders.getById(this.orderId)
+    order.reserveStock()
+    order.charge(paid.amount)
+    this.status := Paid
+  }
+
+  on(arr: ShipmentArrived) by arr.shipRef {
+    this.status := Shipped
+  }
+
+  // The saga case: author writes the inverse explicitly
   on(failed: PaymentFailed) by failed.orderId {
-    let order = Orders.getById(id)
-    order.cancel()                // requires `confirm() compensatedBy cancel()` on Order
-    status := Cancelled
+    let order = Orders.getById(this.orderId)
+    if order.isReserved then order.unreserveStock()
+    this.status := Cancelled
+  }
+
+  handle adminCancel(reason: string) {
+    precondition this.status != Shipped
+    let order = Orders.getById(this.orderId)
+    order.cancel()
+    this.status := Cancelled
   }
 }
 ```
 
-The `compensated` modifier obliges every domain operation invoked (`order.cancel()` here) to have a declared `compensatedBy` partner on its source aggregate. The validator gates this at compile time.
+#### Multiple-starter variant
 
-### Combinations
-
-`eventSourced` and `compensated` compose freely:
+A workflow can declare multiple `create` declarations — one per entry point. Useful when the same workflow type can be kicked off by customer action, admin import, or system event:
 
 ```ddd
-workflow OrderFulfillment eventSourced (event: OrderPlaced by event.order) compensated {
-  id: Order id
+workflow OrderFulfillment {
+  orderId: Order id           // correlation field (sole Order id field)
+  status: FulfillmentStatus
+
+  create(event: OrderPlaced) by event.order {
+    this.status := AwaitingPayment
+  }
+  create import(event: OrderImported) by event.target {     // named alternate starter
+    this.status := PaymentDeferred                          // imports bypass payment
+  }
+
+  // continuations as before
+  on(paid: PaymentReceived) by paid.orderId { ... }
+}
+```
+
+### Combined: event-sourced workflow
+
+```ddd
+workflow OrderFulfillment eventSourced {
+  orderId: Order id           // correlation field (sole Order id field)
   status: FulfillmentStatus
   paidAt: datetime?
 
-  emit FulfillmentStarted { id: event.order }
+  create(event: OrderPlaced) by event.order {
+    emit FulfillmentStarted { orderId: event.order }
+  }
   apply(e: FulfillmentStarted) {
-    id := e.id
+    orderId := e.orderId
     status := AwaitingPayment
   }
 
@@ -281,7 +418,7 @@ workflow OrderFulfillment eventSourced (event: OrderPlaced by event.order) compe
     paidAt := e.at
   }
 
-  operation cancel(reason: string) {
+  handle cancel(reason: string) {
     emit FulfillmentCancelled { reason: reason }
   }
   apply(e: FulfillmentCancelled) {
@@ -290,59 +427,54 @@ workflow OrderFulfillment eventSourced (event: OrderPlaced by event.order) compe
 }
 ```
 
-The workflow's event log contains only its own emitted events. External events (`OrderPlaced`, `PaymentReceived`) are triggers; they cause `on(...)` handlers to fire, which translate them into own-events. Replaying the workflow doesn't depend on external streams being available; the history is self-contained.
+The workflow's event log contains only its own emitted events. External events (`OrderPlaced`, `PaymentReceived`) are triggers; the `create` and `on(...)` handlers translate each into a workflow-internal event that gets applied. Replay doesn't depend on external streams.
 
-## What `compensatedBy` looks like
+## Why sagas are deferred
 
-A property of the source operation, declared once, reusable across any saga that invokes it:
+Form 5 (saga = form 4 + compensation contract) is deferred to a v2 amendment. Three open problems prevent a clean v1 design:
 
-```ddd
-aggregate Order {
-  status: OrderStatus
+1. **Failure trigger.** What kicks off compensation? An unhandled exception in a handler body? An explicit failure event like `on(failed: …)`? A terminal state transition? Each implies different runtime infrastructure.
+2. **Compensation scope.** Does "compensate" mean undoing the last completed step, all steps in this handler, or all completed steps across the workflow's lifetime? The Garcia-Molina & Salem 1987 paper says "all completed, in reverse order" — but real systems need finer control (don't refund if the customer hasn't seen the charge yet; don't unreserve if the shipment is in flight).
+3. **Mechanism.** Validator-only (`compensated` enforces inverses exist; author writes the dispatch) vs. fully automatic (Loom emits a forward-step log and reverse-dispatch infrastructure). The automatic path is meaningful work: forward-step logging table per workflow, atomic append on every operation call, compensator-failure policy, argument capture for compensators that need data.
 
-  operation confirm() {
-    precondition status == Draft
-    status := Confirmed
-  } compensatedBy cancel()
+In v1, sagas are still expressible — authors write form 4 with explicit failure handlers, calling inverse operations manually. The capability is present; the compile-time guard rails (validator-enforced compensator existence) and runtime automation (reverse dispatch) are not.
 
-  operation cancel() {
-    precondition status != Shipped
-    status := Cancelled
-  }
-}
-```
+When saga design is settled, the addition is purely additive:
+- New `compensated` modifier on workflows (opt-in).
+- New `compensatedBy <op>` clause on operations (opt-in).
+- New validator rules (only fire on `compensated` workflows).
+- Optional runtime log + reverse-dispatch infrastructure.
 
-A `compensated` workflow that invokes `order.confirm()` is now valid (the compensator is declared); one that invokes `order.ship()` without a compensator is rejected. The validator's check is local: walk every operation invocation in the workflow's bodies; for each, verify the target operation has a `compensatedBy` clause.
-
-`compensatedBy` is also useful outside saga contexts as documentation of inverse pairs, but only `compensated` workflows make it load-bearing.
+No breaking change against v1.
 
 ## Schemas as the boundary
 
 Today's `<outdir>/.loom/wire-spec.json` is generated from aggregate `wireShape`. This couples external consumers to internal aggregate structure — the paper's antipattern.
 
-This proposal **moves the boundary** to `commands` and `events`. The published schema becomes a catalog of:
+This proposal moves the boundary to **commands** and **events**. The published artifact (`.loom/contracts.json` — exact name TBD with the [`payload-transport-layer.md`](./payload-transport-layer.md) coordination) catalogs every declared `command` (including ones synthesised by implicit-command sugar) and every declared `event`.
 
-- Every declared `command` (including ones synthesised by the implicit-command-sugar header form).
-- Every declared `event` that any workflow `emit`s or any external system subscribes to.
+Aggregate wire shapes continue to be emitted for intra-context use (API client, React forms). The published boundary catalog is commands + events only.
 
-Aggregate wire shapes are still emitted for *intra-context* use (the API client and the React forms still consume them), but the published boundary catalog at `.loom/contracts.json` (or however named) is **commands + events only**.
+Versioning policy follows API versioning generally: never break old versions; publish new versions alongside; deprecate slowly.
 
-This is a contract-shape change for any downstream tooling that today consumes `wire-spec.json` to talk to a Loom-generated system. The migration is straightforward — re-point at the new artifact, key by command/event name instead of aggregate name.
+## Commands as first-class declarations
 
-(This change has implications for the [`payload-transport-layer.md`](./payload-transport-layer.md) proposal: commands and events both become `payload` declarations under that proposal's model. The boundary artifact should likely be derived from the payload layer's IR rather than a parallel mechanism. Cross-reference detail in §"Coordination" below.)
+```ddd
+command PlaceOrder { customerId: Customer id, placedAt: datetime }
+```
+
+Used either by reference (`workflow X(command: PlaceOrder)`, `handle(c: PlaceOrder)`) or synthesised by sugar (`workflow PlaceOrder(customerId: Customer id, ...)` auto-creates the command). Synthesised commands carry a back-reference (`declaringWorkflow`) for the catalog.
 
 ## Grammar additions
 
-The grammar diff against today's `ddd.langium`:
-
 ```langium
-// === Commands — first-class declared things, alongside events ===
+// === Commands ===
 CommandDecl:
     'command' name=ID '{'
         (fields+=Property (','? fields+=Property)* ','?)?
     '}';
 
-// === Aggregate modifiers — add eventSourced ===
+// === Aggregate modifier — eventSourced ===
 Aggregate:
     'aggregate' name=ID
         eventSourced?='eventSourced'?
@@ -354,53 +486,49 @@ Aggregate:
 AggregateMember:
     Containment | DerivedProp | Invariant | FunctionDecl
     | Operation | EntityPart | TestBlock | Property
-    | ApplyDecl;  // NEW
+    | ApplyDecl;  // NEW — only legal when eventSourced
 
 ApplyDecl:
     'apply' '(' binding=ID ':' eventType=[EventDecl:ID] ')' '{'
         body+=Statement*
     '}';
 
-// === Operation modifier — compensatedBy ===
-Operation:
-    /* existing rule */ ...
-    ('compensatedBy' compensatedBy=[Operation:ID])?;
-
-// === Workflow — full reshape ===
+// === Workflow ===
 Workflow:
     'workflow' name=ID
         eventSourced?='eventSourced'?
-        triggerHeader=WorkflowTrigger
-        compensated?='compensated'?
+        ('ids' idKind=IdKind)?
+        (transactional?='transactional' ('(' isolation=IsolationLevel ')')?)?
     '{'
         members+=WorkflowMember*
     '}';
 
-WorkflowTrigger:
-    '(' triggerKind=TriggerKind ')' (transactional?='transactional' ('(' isolation=IsolationLevel ')')?)?;
-
-TriggerKind:
-    ImplicitCommandTrigger
-  | ExplicitCommandTrigger
-  | EventTrigger;
-
-ImplicitCommandTrigger:
-    params+=Parameter (',' params+=Parameter)*;
-
-ExplicitCommandTrigger:
-    'command' ':' commandRef=[CommandDecl:ID];
-
-EventTrigger:
-    'event' ':' eventRef=[EventDecl:ID] ('by' correlationExpr=Expression)?;
-
 WorkflowMember:
-    Property               // state field
+    Property                  // state field; correlation field identified by type-match in enrichment
   | Invariant
   | DerivedProp
-  | Operation
-  | ApplyDecl              // when eventSourced
-  | OnDecl                 // workflow-only event subscription
-  | Statement;             // starter body statements (top-level)
+  | WorkflowCreateDecl        // starter — at least one required for stateful workflows
+  | HandleDecl                // continuation command handler
+  | OnDecl                    // continuation event subscription
+  | ApplyDecl;                // when eventSourced
+
+WorkflowCreateDecl:
+    'create' (name=ID)?
+        '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+        ('by' correlationExpr=Expression)?       // omitted = name-match (events) or N/A (commands)
+    '{'
+        body+=Statement*
+    '}';
+
+// Workflow create-param shapes (resolved during lowering, not at parse time):
+//   create(event: E) by ...      → event-triggered (one positional `binding: EventRef` param)
+//   create(command: C)           → explicit-command-triggered
+//   create(p1: T1, p2: T2, ...)  → implicit-command-sugar; synthesises a command
+
+HandleDecl:
+    'handle' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
+        body+=Statement*
+    '}';
 
 OnDecl:
     'on' '(' binding=ID ':' eventType=[EventDecl:ID] ')'
@@ -408,198 +536,248 @@ OnDecl:
     '{'
         body+=Statement*
     '}';
-```
 
-The parser distinguishes starter-body `Statement`s from `WorkflowMember` declarations the same way `Aggregate` already distinguishes `Property`/`Invariant`/`Operation` — by keyword presence. Statements (`let`, `precondition`, bare expressions, `:=`, `emit`) are leaf shapes; declarations start with a kind keyword (`operation`, `apply`, `on`, `invariant`, etc.) or a typed field shape (`name: Type`).
+// === Property — unchanged ===
+// The correlation field is identified by type-match (the workflow's regular field whose type
+// matches the value yielded by all `by` clauses). No new Property modifier required.
+```
 
 ## Validation rules
 
-The validator must enforce, beyond what today's pipeline does:
+1. `eventSourced` `operation` bodies may not contain `:=`. (`loom.event-sourced-operation-mutates`)
+2. `eventSourced` `handle` bodies may not contain `:=`. (`loom.event-sourced-handle-mutates`)
+3. `eventSourced` `on(...)` bodies may not contain `:=`. (`loom.event-sourced-on-mutates`)
+4. In `eventSourced` workflows, `create` bodies may only `emit` (no `:=`). The applier consumes the emitted event. (`loom.event-sourced-create-mutates`)
+5. `apply(...)` bodies may not contain `emit`, repository calls, or operation calls. (`loom.apply-impure`)
+6. `apply(...)` is only legal in `eventSourced` declarations. (`loom.apply-without-event-sourced`)
+7. `on(...)` is only legal in workflows. (`loom.on-outside-workflow`)
+8. `operation` bodies may not call other aggregates or repositories. (`loom.aggregate-operation-crosses-boundary`)
+9. `handle` is only legal in workflows. (`loom.handle-outside-workflow`)
+10. Stateful workflows (any field declared, any `handle`, any `on(...)`) must have a correlation field — identified by type-match against the value type yielded by every `by` clause across the workflow's declarations. (`loom.workflow-correlation-required`)
+11. Every workflow must declare at least one `create` declaration (stateless `transactional` workflows still need one to define the trigger). (`loom.workflow-no-create`)
+12. `by <expr>` (anywhere it appears — `create`, `on(...)`) must yield a value type-compatible with the correlation field's type. (`loom.correlation-type-mismatch`)
+13. **Correlation seeding rule.** When a `create` runs:
+    - **Event-triggered `create(event: E)`:** the correlation field is seeded by the `by <expr>` clause, or by name-match (event field of the same name as the correlation field) when `by` is omitted.
+    - **Command-triggered `create(p1: T1, ...)`** (implicit or explicit command): the correlation field is seeded by name-match from a create-param of the same name. If no matching param exists, the `create` must carry an explicit `by <paramName>` clause.
+    Validator error if no seeding source can be identified. (`loom.correlation-not-seeded`)
+14. **Create-param-to-field seeding.** When a create-param's name matches a declared state field of the same type, the field is auto-seeded from the param. Mismatched type is an error. (`loom.create-param-type-mismatch`)
+15. **`this.id` inside a `create` body is invalid** — id is not assigned until persistence. (`loom.this-id-in-create`, shared with the aggregate `create` lifecycle rule.)
+16. `transactional` is only legal on workflows with exactly one `create`, no `handle`, no `on(...)`, and no `apply` blocks. (`loom.transactional-multi-handler`)
+17. Stateless `transactional` workflows have no state fields declared. (Permitted; no error.)
+18. Non-`transactional` workflows with no continuation members but with state fields are legal — stateful single-starter with audit row. (Permitted; no error.)
+19. All `by` clauses across a workflow's `create` / `on(...)` declarations must yield values of the same type, matching exactly one of the workflow's regular fields. Ambiguity (multiple matching fields) is a v1 error; the modeller must restructure. (`loom.correlation-field-ambiguous`)
+20. (reserved — was `correlation-key-duplicate`; merged into rule 19.)
+21. **At most one canonical (unnamed) `create` per workflow.** Named variants distinguish multiple entry points. (`loom.canonical-create-duplicate-workflow`)
+22. **No two `create` declarations on one workflow may share a name.** (`loom.create-name-conflict-workflow`)
+23. **No two `create` declarations on one workflow may subscribe to the same event type** with overlapping `by` clauses (validator detects identical or unrestricted overlap; complex predicates produce a warning). (`loom.create-event-overlap`)
+24. **A `create(event: E)` and an `on(e: E)` for the same event type** are legal — the runtime prefers continuation on correlation hit, creation on miss. The validator only ensures the `by` clauses agree on which field of E carries the correlation key. (`loom.create-on-correlation-mismatch`)
+25. Implicit-command sugar (`create(p1: T1, ...)`) and explicit `command: C` (`create(c: C)`) in the same create declaration are mutually exclusive. (Grammar enforces.)
+26. `emit` of an event not declared in the same context — unchanged from today.
 
-1. **`eventSourced` operation bodies may not contain `:=`.** Direct mutation in operations is the non-event-sourced model; `eventSourced` requires all state changes go through `apply(...)`. (Error code: `loom.event-sourced-operation-mutates`.)
-2. **`eventSourced` `on(...)` bodies may not contain `:=` either.** Translation rule: external events must be mapped to own-events via `emit`, then applied. (Error code: `loom.event-sourced-on-mutates`.)
-3. **`apply(...)` bodies may not contain `emit`, `let x = Repo.…`, or operation calls.** Purity gate. (Error code: `loom.apply-impure`.)
-4. **`apply(...)` is only legal in `eventSourced` declarations.** A non-event-sourced aggregate or workflow may not declare appliers. (Error code: `loom.apply-without-event-sourced`.)
-5. **`on(...)` is only legal in workflows.** Domain aggregates don't subscribe to external events. (Error code: `loom.on-outside-workflow`.)
-6. **Domain `aggregate` `operation` bodies may not contain cross-aggregate calls** (`Repo.method(...)`, `OtherAgg.create(...)`, `someRef.someOp(...)` where `someRef` is loaded from elsewhere). The current Loom rule that `Repo.getById` is workflow-only stays; this proposal extends the rule to all cross-aggregate operations. (Error code: `loom.aggregate-operation-crosses-boundary`.)
-7. **Every workflow has exactly one id-bearing field.** Either spelled `id: T` or declared via the existing `ids` clause syntax (which this proposal extends to workflows). (Error code: `loom.workflow-id-required`.)
-8. **`by <expr>` (header and `on`) must yield a value typed-compatible with the workflow's id field.** (Error code: `loom.correlation-type-mismatch`.)
-9. **`compensated` workflows: every domain operation invoked from any body (starter, `on`, `operation`) must have a declared `compensatedBy` on its source aggregate.** Walked at IR validation phase. (Error code: `loom.uncompensated-operation`.)
-10. **`transactional` is only legal on single-handler workflows.** A workflow with any `on(...)` declaration or any additional `operation` (beyond the starter) cannot be `transactional`. (Error code: `loom.transactional-multi-handler`.)
-11. **`compensated` is only legal on workflows.** Aggregates can't be compensated — there is nothing to compensate inside one aggregate's invariant boundary. (Error code: `loom.compensated-on-aggregate`.)
-12. **Starter `by` lookup expects miss; `on` `by` lookup expects hit.** Both produce typed `correlationKind: 'starter' | 'continuation'` in IR; runtime enforcement is per-backend. (No validation error; informational tagging.)
-13. **`emit` of an event not declared in the same context** remains an error (today's rule, unchanged).
-14. **Multi-starter workflows: header may list multiple triggers** (deferred — see §"Open questions"). v1 admits exactly one starter per workflow.
-
-## IR — one node, two facades
-
-The IR collapses `aggregate` and `workflow` into a single node kind with capability flags. This is the *"don't invent everything twice"* commitment.
+## IR — one shape, two facades
 
 ```typescript
-// Conceptual shape — placement details defer to the IR-architecture PR
-
-export interface ProcessAggregateIR {     // working name
+export interface LoomEntityIR {                  // working name; replaces today's AggregateIR
   name: string;
-  kind: 'aggregate' | 'workflow';         // surface keyword
+  kind: 'aggregate' | 'workflow';
   eventSourced: boolean;
-  compensated: boolean;                   // only true when kind === 'workflow'
-  idField: FieldIR;                        // single id-bearing field
+  idField: FieldIR;                              // always present, typed <Name> id
+  correlationField: FieldIR | null;              // workflow only; null for stateless workflows
   fields: FieldIR[];
   invariants: InvariantIR[];
 
-  trigger?: TriggerIR;                     // only present when kind === 'workflow'
+  creates: CreateIR[];                           // both aggregate and workflow (Ash-style typed action)
+  operations: OperationIR[];                     // aggregate only
+  destroys: DestroyIR[];                         // aggregate only (per lifecycle-operations.md)
+  handles: HandleIR[];                           // workflow only
+  subscriptions: OnIR[];                         // workflow only
+  applies: ApplyIR[];                            // when eventSourced
 
-  operations: OperationIR[];               // command handlers
-  applies: ApplyIR[];                      // only when eventSourced
-  subscriptions: OnIR[];                   // only when kind === 'workflow'
-
-  starterBodyStatements: StmtIR[];         // top-level statements; only when kind === 'workflow'
-
-  wireShape: WireShapeIR;                  // existing — derived in enrichments
+  wireShape: WireShapeIR;                        // derived in enrichments
+  hasTable: boolean;                             // derived: stateful workflows + all aggregates
+  transactional: boolean;                        // workflow only; derived from declaration modifier
+  isolation: IsolationLevel | null;              // workflow only
 }
 
-export interface TriggerIR {
-  kind: 'implicit-command' | 'explicit-command' | 'event';
-  commandRef?: CommandIR;                  // for implicit-command, this points to the auto-synthesised command
-  eventRef?: EventIR;
-  correlation?: ExprIR;                    // typed against idField
-  transactional?: boolean;
-  isolation?: IsolationLevel;
+export interface CreateIR {                      // typed-action starter (workflow) or factory (aggregate)
+  name: string | null;                           // null for canonical (unnamed) create
+  triggerKind: 'event' | 'command-implicit' | 'command-explicit' | 'aggregate-factory';
+  // event trigger (workflow):
+  eventRef?: EventIR;                            // for triggerKind = 'event'
+  eventBinding?: string;                         // parameter name bound to the event
+  correlation?: ExprIR;                          // by-clause; typed against correlationField (workflow)
+  // command trigger (workflow):
+  commandRef?: CommandIR;                        // for triggerKind = 'command-explicit'
+  synthesisedCommand?: CommandIR;                // for triggerKind = 'command-implicit'
+  // aggregate factory:
+  params: ParamIR[];                             // explicit param list for command-style triggers and aggregate factories
+  // common:
+  body: StmtIR[];                                // restricted in eventSourced (emit-only)
+  paramSeedings: ParamSeedingIR[];               // resolved auto-assignments from create-params to state fields
+  canonicalCreate: boolean;                      // derived: true when name == null
+  routeSlug: string | null;                      // workflow: per `urlStyle` from lifecycle-operations.md; null for event-triggered
 }
 
-export interface OnIR {
+export interface ParamSeedingIR {                // resolved auto-assignment from create-param to field
+  paramName: string;
+  fieldName: string;
+  isCorrelationKey: boolean;
+}
+
+export interface HandleIR {                      // workflow continuation command handler
+  name: string;
+  params: ParamIR[];
+  synthesisedCommand?: CommandIR;                // when implicit-command sugar used
+  body: StmtIR[];
+}
+
+export interface OnIR {                          // workflow event subscription (continuation)
   binding: string;
   eventRef: EventIR;
-  correlation: ExprIR;                     // explicit, or inferred via name-match resolution
+  correlation: ExprIR;                           // explicit, or inferred via name-match
   body: StmtIR[];
 }
 
 export interface ApplyIR {
   binding: string;
   eventRef: EventIR;
-  body: StmtIR[];                          // restricted: only mutations + derivations
+  body: StmtIR[];                                // restricted to mutations + derivations
+}
+
+export interface DestroyIR {                     // aggregate terminator (per lifecycle-operations.md)
+  name: string | null;
+  params: ParamIR[];
+  body: StmtIR[];
+  canonicalDestroy: boolean;
 }
 
 export interface CommandIR {
   name: string;
   fields: FieldIR[];
-  synthesised: boolean;                    // true when generated from implicit-command header
-  declaringWorkflow?: string;              // back-reference when synthesised
+  synthesised: boolean;
+  declaringWorkflow?: string;                    // back-reference when synthesised
+  declaringCreateName?: string | null;           // back-reference when synthesised from a named create
 }
 ```
 
-The `wireShape` enrichment already exists; it now applies uniformly to both kinds. The migrations-builder runs unchanged — workflows get tables because the IR shape doesn't distinguish them from aggregates.
+The same `CreateIR` shape serves both aggregates and workflows; `triggerKind` discriminates. Aggregate creates are always `triggerKind: 'aggregate-factory'` (no event, no command synthesis — they're invoked directly via the lifecycle-operations.md routing). Workflow creates carry one of the three trigger-shape tags.
 
-The **only** new IR nodes are `ApplyIR`, `OnIR`, `CommandIR`, and `TriggerIR`. Everything else reuses what's already there.
+The IR commits to "don't invent twice" — one shape for both kinds. Behaviour-bearing members (`operations` vs `handles` + `subscriptions`) diverge; structure-bearing members (`fields`, `invariants`, `idField`, `wireShape`) are shared. Backend emitters that touch only the structural side need no per-kind branching.
 
 ### Lowering
 
-Three phases get extended; nothing gets duplicated.
-
-- **⑤a `src/ir/lower.ts`** — `lowerAggregate` now handles `apply(...)` members; new `lowerWorkflow` produces a `ProcessAggregateIR` with `kind: 'workflow'`. The two share the same field/operation/invariant lowering helpers.
-- **⑤b `src/ir/lower-expr.ts`** — adds expression-level support for `<binding>.field` access where `binding` resolves to an event payload binding (refKind `event-binding`). Otherwise unchanged.
-- **⑥ `src/ir/enrichments.ts`** — for workflows whose header uses implicit-command sugar, *synthesise* a `CommandIR` with the header's params, link it back via `declaringWorkflow`. Wire-shape derivation already runs over the unified shape; no change there.
-- **⑦ `src/ir/validate.ts`** — new validators implementing rules 1–14 above.
-- **⑨ `src/system/wire-spec.ts`** — *replace* the artifact, or add a sibling `contracts.json`, that catalogs all `CommandIR` + all `EventIR`. Aggregate `wireShape` continues to be emitted as today for intra-context consumers.
+| Phase | Change |
+|---|---|
+| ⑤a `lower.ts` | `lowerAggregate` handles `create`/`destroy`/`apply(...)` members (per lifecycle-operations.md); new `lowerWorkflow` produces a `LoomEntityIR` with `kind: 'workflow'` and lowers `create`/`handle`/`on`/`apply` members. Share field/invariant/create lowering helpers across both. |
+| ⑤b `lower-expr.ts` | Add expression support for event-binding access (`event.field` where `event` is the parameter name of a `create(event:)` / `apply` / `on` declaration). New `refKind: 'event-binding'`. |
+| ⑥ `enrichments.ts` | For workflow command-triggered creates with implicit-command sugar, synthesise a `CommandIR` linked back via `declaringWorkflow` + `declaringCreateName`. Wire-shape enrichment runs over the unified shape. Infer `correlationField` from type-match: the workflow's unique regular field whose type matches the value type produced by every `by` clause across `create` / `on(...)` declarations. Resolve `paramSeedings` per create. Compute `hasTable` (false for stateless `transactional` workflows). Compute `transactional` and `isolation` from declaration modifiers. |
+| ⑦ `validate.ts` | New validators for rules 1–26 above. |
+| ⑨ `system/wire-spec.ts` | Add new sibling artifact `contracts.json` cataloging `CommandIR` + `EventIR`. Aggregate-shape `wire-spec.json` continues for intra-context consumers (deprecation timing TBD with payload-transport-layer coordination). |
 
 ## Per-backend emit
 
-The backends consume the unified IR. Each backend's existing aggregate-emit machinery handles workflows; the workflow-specific additions are:
-
-| Backend | Aggregate today | Workflow additions in this proposal |
+| Backend | Aggregate today | Workflow additions |
 |---|---|---|
-| **TS / Hono** | Drizzle table, repository, route handlers per operation | One additional event-subscription router per `on(...)`. `apply(...)` blocks lower to event-applier functions called from `repo.append(event)` (event-sourced) or unused (state-based). Command-synth lowers to wire DTO. |
-| **.NET / EF + Mediator** | EF entity, repository, mediator handler per operation | Mediator notification handlers per `on(...)`. `apply(...)` lowers to `Apply(Event e)` methods on the aggregate/process class. |
-| **Phoenix / Ash** | Resource with actions | Reactions / lifecycle hooks for `on(...)`; Commanded-style event handlers for `apply(...)` when adopting an event-store. |
-| **React** | Forms / pages bound to operations | Continuation-operation forms generated as `OperationForm` (already in [`loom-forms.md`](./loom-forms.md)); starter-command forms generated when the trigger is `command:` or implicit-command. Event-triggered workflows have no user-facing form. |
+| TS / Hono | Drizzle table, repository, route handlers per `operation` (+ `create`/`destroy` per lifecycle-operations.md) | Route per command-triggered `create` (POST /workflows/<name> or named variant). Event-subscription router per event-triggered `create` and per `on(...)` (in-process dispatch via existing `IDomainEventDispatcher`). Route per `handle`. `apply(...)` blocks lower to event-applier functions called from `repo.append(event)`. Command-synth lowers to wire DTO. |
+| .NET / EF + Mediator | EF entity, repository, mediator handler per `operation` (+ `create`/`destroy`) | Mediator command handler per command-triggered `create`. Mediator notification handler per event-triggered `create` and per `on(...)`. Mediator handler per `handle`. `apply(...)` lowers to `Apply(Event e)` method. |
+| Phoenix / Ash | Resource with actions (Ash `create`/`update`/`destroy` map to Loom `create`/`operation`/`destroy` per lifecycle-operations.md) | Each workflow command-triggered `create` becomes an Ash `create` action; each event-triggered `create` and each `on(...)` becomes a Reactor / lifecycle hook. Commanded-style handlers for `apply(...)` when adopting an event-store. |
+| React | Forms / pages bound to `operation`s (+ create forms per loom-forms.md) | `CreateForm { of: WorkflowName }` for command-triggered `create`s (one form per `create` declaration). `OperationForm` for workflow `handle`s (per [`loom-forms.md`](./loom-forms.md)). Event-triggered `create`s have no user-facing form (system fires them). |
 
-The per-backend implementation surface is deliberately small because the IR is unified. Each backend's `emitProject(...)` in `PlatformSurface` walks the same node list it does today; the new node types (`ApplyIR`, `OnIR`) are additional emission points, not architectural new layers.
-
-The execution model — how `on(...)` handlers get triggered when an event arrives — is deferred to per-backend implementation. v1 can use simple in-process dispatch (the `IDomainEventDispatcher` already in place); later phases may introduce durable execution (Temporal, durable-functions, in-process saga libraries) without changing the language.
+The execution model — how `on(...)` handlers are triggered when an event arrives — is deferred to per-backend implementation. v1 uses in-process dispatch through today's `IDomainEventDispatcher`. Future phases may introduce durable execution (Temporal, durable-functions, in-process saga libraries) without language changes.
 
 ## Backward compatibility
 
-This proposal **breaks the current `workflow Name(params) [transactional]` shape** as it stands. The breakage is intentional — the current form is the antipattern.
+Breaking against today:
 
-The migration path for existing `.ddd` files:
+1. `workflow Name(params) transactional { body }` (today) → `workflow Name transactional { create(params) { body } }` (v2). Mechanical rewrite: header params + body become the workflow's single `create` declaration. The body uses `this.field := X` for any state mutation (in the stateless case, no `this` reads happen). Where the original body referenced `params` directly, v2 references them inside the `create` body identically.
+2. `workflow Name(params) { body }` without `transactional` — **rejected** (multi-tx workflow with no state is the antipattern the paper identifies). Either add `transactional` (declare atomicity) or restructure into stateful workflow with declared correlation field, state, `create`, and `handle`s. No `bestEffort` opt-out.
+3. Aggregate `operation` bodies that today call `Repo.getById(...)` or other aggregates — **rejected.** Refactor into a workflow `handle` that performs the orchestration.
+4. `docs/workflow.md` rewritten to match the new model with migration recipe.
 
-1. **`workflow Name(params) transactional { body }`** (today's "single-tx command handler") becomes:
-   ```ddd
-   workflow Name(params) transactional {
-     id: NameId
-     status: NameStatus
-     // body
-   }
-   ```
-   The body is unchanged. The author adds the state aggregate's id and status fields. Even single-step workflows get a state aggregate (the audit/idempotency record).
+Mechanical migration recipe for v1 → v2 (the trigger-as-header → trigger-as-create change):
 
-2. **`workflow Name(params) { body }` without `transactional`** (today's silently-multi-transaction form) is REJECTED unless the author either:
-   - Adds `transactional` (declares atomicity), or
-   - Restructures into a stateful workflow with `id`, state field, and per-step `operation`s.
+```ddd
+// Before (v1)
+workflow PlaceOrder(customerId: Customer id, placedAt: datetime) transactional {
+  outcome: PlaceOrderOutcome
+  start {
+    let order = Order.create({ customerId, placedAt })
+    outcome := Completed
+  }
+}
 
-   There is no `bestEffort` opt-out. The antipattern stops being expressible.
+// After (v2)
+workflow PlaceOrder transactional {
+  customerId: Customer id      // correlation field (sole Customer id field)
+  placedAt: datetime
+  outcome: PlaceOrderOutcome
 
-3. **`docs/workflow.md`** is rewritten to reflect the new model, with the breaking changes flagged and the migration recipe spelled out.
+  create(customerId: Customer id, placedAt: datetime) {
+    let order = Order.create({ customerId, placedAt })
+    this.outcome := Completed
+  }
+}
+```
 
-The current `examples/acme.ddd` (`placeOrder` workflow) and `examples/sales.ddd` migrate cleanly to form 2 (single-tx) with the addition of a state field. The fixtures need re-baselining.
+Examples needing updates: `examples/acme.ddd`, `examples/sales.ddd`, every fixture under `test/fixtures/`. Re-baselining is required.
 
 ## Coordination with other proposals
 
-This proposal interacts with several others; placement here is to flag, not resolve, the seams.
-
-- **[`payload-transport-layer.md`](./payload-transport-layer.md)** — proposes a `payload` umbrella with `command` and `event` as sugar keywords over it. **Recommendation:** this proposal's `CommandDecl` becomes a sugar form of `payload Name (command shape)` under that proposal's grammar; events similarly. The IR shape `CommandIR` collapses into `PayloadIR` with a `kind: 'command' | 'event'` tag. Sequencing: this proposal should land *after* the payload transport layer's P1–P4, so the boundary artifact (commands + events) is built on the unified payload IR rather than a parallel mechanism.
-- **[`exception-less.md`](./exception-less.md)** — workflow operations return `or`-unions on failure under that model. This proposal's `compensated` rule composes: the validator can verify that a compensator exists, and the workflow's failure-handling propagates through `?` as that proposal specifies. No conflict.
-- **[`criterion.md`](./criterion.md)** — introduces `private workflow` modifier and workflow-calls-workflow. This proposal's workflow definition trivially extends to `private workflow Name(...)` and to `operation` bodies invoking other workflows. The `compensated` contract applies transitively.
-- **[`lifecycle-operations.md`](./lifecycle-operations.md)** — uses `create`/`operation`/`destroy` kind tags for aggregate lifecycle. **This proposal does not introduce equivalent kinds for workflows.** A workflow's "create" is its starter (in the header); its "destroy" is a terminal state in its state machine (`status := Completed` is the equivalent of `destroy` semantically, but the row stays as an audit record). Hard-deleting a completed workflow row is intentionally not surfaced — the audit value of the row is the whole point. If a need for terminal deletion emerges, it joins this proposal as a v2 amendment.
-- **[`storage-and-platform-config.md`](./storage-and-platform-config.md)** — per-aggregate `persistenceStrategy: stateBased | eventSourced` already proposes the strategy split this proposal's `eventSourced` modifier expresses inline. **Reconcile**: this proposal's `eventSourced` modifier on the declaration is equivalent to that proposal's `persistenceStrategy: eventSourced` on the storage binding. Choose one surface (likely this one — declaration-site over binding-site, matching Loom's spirit). The storage proposal's adapter contract is unchanged either way.
-- **[`authorization.md`](./authorization.md)** — `policy` gates apply to operations and workflows. Workflow `on(...)` handlers triggered by external events bypass the user-facing authorization model (they react to system facts, not user requests). `operation`s on workflows go through the same policy gates as aggregate operations. Already coherent.
+- [`payload-transport-layer.md`](./payload-transport-layer.md) — recommendation: `CommandDecl` becomes sugar over `payload Name`, and the boundary artifact derives from the unified payload IR. This proposal should land *after* payload P1-P4.
+- [`exception-less.md`](./exception-less.md) — workflow `handle` bodies return `or`-unions on failure. `?` propagation composes; no conflict.
+- [`criterion.md`](./criterion.md) — `private workflow` modifier and workflow-calls-workflow extend trivially to this proposal's workflow shape.
+- [`lifecycle-operations.md`](./lifecycle-operations.md) — aggregate's `create` typed-action shape is the model this proposal lifts to workflows. Both kinds of entity share the `create [name](params) { ... }` declaration form (workflows extend it with `by <expr>` and event-typed first params). Aggregate-only `destroy` and aggregate-only `operation` remain unchanged. Workflows do not gain `destroy` in v1 (terminal state transitions handle workflow termination); future amendments may add it.
+- [`storage-and-platform-config.md`](./storage-and-platform-config.md) — its `persistenceStrategy: stateBased | eventSourced` overlaps with this proposal's `eventSourced` modifier. **Reconcile by choosing one surface** — recommend this one (declaration-site over binding-site). Storage adapter contract unchanged.
+- [`authorization.md`](./authorization.md) — `policy` gates apply to `handle`s like to `operation`s. `on(...)` handlers bypass user-facing authorization (they react to system facts, not user requests).
 
 ## Open questions
 
-1. **Multi-starter workflows.** Real systems sometimes need a workflow that can be started by either of two messages (`OrderPlaced` *or* `OrderImported`). v1 of this proposal admits exactly one starter per workflow. A v2 amendment may extend the header to a union (`event: OrderPlaced | OrderImported by event.order`), but the type-system support depends on the payload-transport-layer's anonymous-union work landing.
+1. **Multi-starter workflows.** v1 admits exactly one starter. v2 may extend the header to a union when the payload-transport-layer's anonymous-union work lands.
+2. **Cross-system event subscription.** v1 expects all subscribed events to be declared in the same `system`. Cross-system routing follows after the contracts catalog stabilises.
+3. **Event-store choice for `eventSourced`** — per-backend. The `PersistenceAdapter` contract gains a `kind: 'state' | 'event-log'` capability.
+4. **Sagas** — the v2 amendment. See §"Why sagas are deferred."
+5. **`contracts.json` artifact name and format.** Coordinate with payload-transport-layer's published schema work.
+6. **Workflow termination.** When does a workflow's row get removed (or archived)? Three plausible models, none chosen for v1:
+   - **Terminal state declaration** — the modeller marks specific values of a status enum as terminal (`status: FulfillmentStatus { Pending, Paid, Shipped terminal, Cancelled terminal }`); reaching one signals end-of-life. Composes with field-defaults from `lifecycle-operations.md`.
+   - **Explicit workflow `destroy`** — lift the aggregate's `destroy` keyword to workflows. Author calls it from a `handle`/`on` body.
+   - **Always-keep** — workflow rows are immortal; cleanup is operator-level (TTL, manual purge). Matches NServiceBus/Camunda defaults.
 
-2. **External event subscription registry.** When `on(e: E) by ...` references an event declared in a different context (or a different deployable), the runtime needs cross-context routing. v1 expects all subscribed events to be declared in the same `system` definition; cross-system subscription is a follow-up after the schemas-as-boundary artifact stabilises.
+   v1 ships with always-keep semantics by default (no language feature). The terminal-state-declaration path is the most likely v2 addition since it composes with declarative defaults and reads naturally; we defer the decision until usage informs it.
+7. **Disambiguating multiple same-type correlation candidates.** v1 rejects workflows where multiple regular fields share the type yielded by `by` clauses. A future `into <fieldName>` clause on `by` may relax this; deferred.
 
-3. **Replay storage for `eventSourced` workflows.** This proposal commits to the language form but does not pin a per-backend event-store choice. Phoenix/Ash has Commanded. TS may use a Postgres event log table or external store. .NET has Marten or similar. The `PersistenceAdapter` contract (already in `storage-and-platform-config.md`) gains a `kind: 'state' | 'event-log'` capability flag.
+## Implementation phases
 
-4. **Compensation ordering and partial compensation.** The `compensated` modifier currently asserts a static contract (every forward op has a compensator). It does not specify *when* during workflow failure the compensators run, or whether all-compensated-so-far is the right protocol vs. only-the-failed-step. v1 commits to "all completed forward steps compensate in reverse order" (the strict Garcia-Molina & Salem 1987 semantics). A finer-grained per-step failure policy may follow.
-
-5. **User-configurable workflows.** Out of scope, as per the paper's §"Scope". If a Camunda-style integration is ever pursued, the published commands+events catalog from this proposal is the integration point.
-
-## Concrete checklist (for the implementation plan)
-
-Once this proposal is accepted, the implementation work breaks into:
-
-| Phase | Scope | Approx. weeks |
+| Phase | Scope | Approx. |
 |---|---|---|
-| **W1** — Grammar additions | `command`, modified `aggregate`/`workflow`, `apply`, `on`, `compensatedBy` | ~1 |
-| **W2** — IR unification | Single `ProcessAggregateIR`, new IR nodes, lowering helpers | ~2 |
-| **W3** — Validators | Rules 1–14 above, with negative tests | ~1.5 |
-| **W4** — Backend emit (TS/Hono) | `apply` lowering, `on` subscription router, command DTO generation | ~2 |
-| **W5** — Backend emit (.NET) | Same for EF + Mediator | ~2 |
-| **W6** — Backend emit (Phoenix) | Same for Ash/Commanded (event-sourced path) | ~2 |
-| **W7** — Backend emit (React) | `OperationForm` for workflow operations; starter forms | ~1 |
-| **W8** — Schemas-as-boundary artifact | New `contracts.json` from commands+events; deprecate aggregate-shape in wire-spec | ~1 |
-| **W9** — Migration of examples + fixtures + docs | Rewrite `docs/workflow.md`, migrate `examples/*.ddd`, re-baseline fixtures | ~1 |
+| W1 | Grammar additions (commands, aggregate modifier, workflow reshape, `apply`, `on`, `handle`) | ~1 wk |
+| W2 | IR unification (`LoomEntityIR`, new IR nodes, lowering helpers, correlation-field inference) | ~2 wk |
+| W3 | Validators (rules 1–26 + negative tests) | ~1.5 wk |
+| W4 | Backend emit — TS/Hono | ~2 wk |
+| W5 | Backend emit — .NET | ~2 wk |
+| W6 | Backend emit — Phoenix (state-based; event-sourced deferred until event-store adapter lands) | ~1.5 wk |
+| W7 | Backend emit — React (workflow `handle` forms; starter-command forms) | ~1 wk |
+| W8 | Schemas-as-boundary artifact (`contracts.json`) | ~1 wk |
+| W9 | Migrate examples + fixtures + docs (`docs/workflow.md` rewrite) | ~1 wk |
 
-Total ~13.5 weeks focused work. Phases W4-W7 are parallelisable across implementers; W2 blocks everything downstream.
+Total ~13 weeks focused. W4-W7 parallelisable; W2 blocks downstream.
 
-Sequencing relative to the type-system family: this proposal should land **after** the payload-transport-layer (P1–P4) so commands and events live in one unified IR shape. It may land **before** or **after** criterion + exception-less, with mild integration work either way.
+Sequencing: this proposal lands *after* payload-transport-layer P1–P4. Independent of criterion / exception-less, with mild integration work either way.
 
-## Appendix — relationship to the source argument
+## Appendix — source-claim mapping
 
-The originating document `2948ae13-workflowcentricddd.md` argues five things; this proposal lands each as follows:
-
-| Source claim | Loom landing |
+| Source claim | Loom landing in v1 |
 |---|---|
-| The aggregate is the transaction boundary | Validation rule 6 — aggregate operations may not cross boundaries; the cross-aggregate work is the workflow's job |
-| Appliers and workflows split along the aggregate boundary | `apply(...)` member (intrinsic, replay-safe) vs. `on(...)` member (extrinsic, workflow-only); enforced by validators 3, 4, 5 |
-| Five forms (applier, single-tx workflow, multi-tx command workflow, process manager, saga) | The five examples in §"The five forms" |
-| Workflow state is an aggregate | The `workflow IS an aggregate` model — unified IR, single declaration with `id`, state, invariants, table |
-| Schemas of commands+events are the boundary | §"Schemas as the boundary" — new `contracts.json` artifact |
+| The aggregate is the transaction boundary | Validation rule 7 — aggregate `operation`s may not cross boundaries |
+| Appliers and workflows split along the aggregate boundary | `apply(...)` (intrinsic, replay-safe) vs. `on(...)` (extrinsic) — validators 3–6 |
+| Forms 1–4 (applier, single-tx workflow, multi-tx command workflow, process manager) | §"The four forms" |
+| Form 5 (saga) | Deferred — §"Why sagas are deferred" |
+| Workflow state is an aggregate | Unified IR; workflows have implicit `id`, optional state fields, table when stateful |
+| Schemas of commands + events are the boundary | §"Schemas as the boundary" — new `contracts.json` |
 
-Three claims from the source are explicitly out of scope:
+Explicitly out of scope:
+- User-configurable workflows (deferred per source).
+- Temporal / Cadence / Restate as execution platforms (per-backend deferred).
+- Camunda / Flowable / Zeebe as user-configurable layers (deferred).
 
-- **User-configurable workflows** — open question 5.
-- **Temporal/Cadence/Restate as execution platforms** — deferred to per-backend implementation; the language allows them, does not require them.
-- **Camunda/Flowable/Zeebe as user-configurable layers** — deferred; the boundary catalog from this proposal is the integration point if pursued.
+---
+
