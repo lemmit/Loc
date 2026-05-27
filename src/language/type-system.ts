@@ -27,6 +27,7 @@ import {
   isBoundedContext,
   isBuilderCall,
   isCallSuffix,
+  isComponent,
   isContainment,
   isDecLit,
   isDerivedProp,
@@ -46,11 +47,13 @@ import {
   isNowExpr,
   isNullLit,
   isOperation,
+  isPage,
   isParenExpr,
   isPostfixChain,
   isPrimitiveConversion,
   isPrimitiveType,
   isProperty,
+  isSlotType,
   isStringLit,
   isTernaryExpr,
   isThisRef,
@@ -81,6 +84,14 @@ export type DddType =
   | { kind: "entity"; ref: EntityPart; sensitivity?: SensitivityTags }
   | { kind: "array"; element: DddType; sensitivity?: SensitivityTags }
   | { kind: "optional"; inner: DddType; sensitivity?: SensitivityTags }
+  /** Element-shaped param marker — mirrors the `TypeIR.slot` variant
+   *  produced by lowering a `SlotType` AST node.  Only valid on a
+   *  `component`'s parameter list (the validator
+   *  `checkSlotTypePosition` rejects misuse).  Conceptually equivalent
+   *  to `React.ReactNode`; arithmetic / comparison / member access on
+   *  a slot ref is an error and the consumer-side validators flag it.
+   *  Compatibility against `any` succeeds (opaque pass-through). */
+  | { kind: "slot"; sensitivity?: SensitivityTags }
   | { kind: "any"; sensitivity?: SensitivityTags }
   | { kind: "never"; sensitivity?: SensitivityTags }
   | { kind: "unknown"; sensitivity?: SensitivityTags };
@@ -96,6 +107,7 @@ export const T = {
   prim: (name: PrimitiveName): DddType => ({ kind: "primitive", name }),
   array: (e: DddType): DddType => ({ kind: "array", element: e }),
   opt: (i: DddType): DddType => ({ kind: "optional", inner: i }),
+  slot: { kind: "slot" } as DddType,
   any: { kind: "any" } as DddType,
   never: { kind: "never" } as DddType,
   unknown: { kind: "unknown" } as DddType,
@@ -171,6 +183,8 @@ export function typeToString(t: DddType): string {
         return `${typeToString(t.element)}[]`;
       case "optional":
         return `${typeToString(t.inner)}?`;
+      case "slot":
+        return "slot";
       case "any":
         return "any";
       case "never":
@@ -303,6 +317,7 @@ export function resolveTypeRef(ref: TypeRef | undefined): DddType {
 
 function resolveBase(base: BaseType): DddType {
   if (isPrimitiveType(base)) return T.prim(base.name as PrimitiveName);
+  if (isSlotType(base)) return T.slot;
   if (isIdType(base)) {
     const target = base.target?.ref;
     if (!target) return T.unknown;
@@ -954,6 +969,12 @@ export function envForNode(node: AstNode): Env {
   const find = AstUtils.getContainerOfType(node, isFindDecl);
   const view = AstUtils.getContainerOfType(node, isView);
   const wf = AstUtils.getContainerOfType(node, isWorkflow);
+  // UI-side containers — pages and components carry typed params
+  // (route-params for pages, slot/aggregate-typed for components) that
+  // need to flow through `typeOf` so the binary-operand validator and
+  // LSP can reason about expressions inside their bodies.
+  const page = AstUtils.getContainerOfType(node, isPage);
+  const component = AstUtils.getContainerOfType(node, isComponent);
 
   // The `this`/root aggregate: an enclosing aggregate container, else the
   // repository's `for` aggregate (find filters) or the view's `from` aggregate
@@ -980,8 +1001,19 @@ export function envForNode(node: AstNode): Env {
     }
   }
 
-  // 2. Function / operation / find / workflow parameter bindings.
-  const params = fn?.params ?? op?.params ?? find?.params ?? wf?.params ?? [];
+  // 2. Function / operation / find / workflow / page / component
+  //    parameter bindings.  Page + component params come last so a
+  //    nested component's param can shadow an outer ui-scope name —
+  //    today no such nesting exists, but the order matches the lexical
+  //    expectation if it ever does.
+  const params =
+    fn?.params ??
+    op?.params ??
+    find?.params ??
+    wf?.params ??
+    component?.params ??
+    page?.params ??
+    [];
   for (const p of params) bindings.set(p.name, { type: paramType(p), origin: p });
 
   // 3. let-bindings from preceding statements in the enclosing operation / workflow.

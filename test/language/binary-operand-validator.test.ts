@@ -199,6 +199,60 @@ describe("validator — invalid logical operands", () => {
   });
 });
 
+describe("validator — slot operand rejection", () => {
+  // A `slot`-typed component param is opaque JSX; any binary expression
+  // mixing it with another type is meaningless and the validator should
+  // flag it the same way `string == int` is flagged.  These tests gate
+  // the AST-level type system's slot variant against silent misuse.
+  it("`string + slot` errors (slot can't be concat'd into a string)", async () => {
+    const { errors } = await parseString(`
+      system S {
+        ui WebApp {
+          component Bad(heading: slot) {
+            state { label: string = "hi " + heading }
+            body: Text { label }
+          }
+        }
+      }
+    `);
+    expect(errors.join("\n"), errors.join("\n")).toMatch(/incompatible operand types/);
+  });
+
+  it("`slot == slot` is admitted (same-type comparison is legal even if odd)", async () => {
+    // Both operands are slot → `typesEqual` short-circuits comparable
+    // to true.  We don't actively prohibit slot-vs-slot identity
+    // because the rule is "operands must be the same type", not
+    // "operands must be a domain value type" — and locking that down
+    // would constrain a future "rerender-key" pattern.
+    const { errors } = await parseString(`
+      system S {
+        ui WebApp {
+          component Same(a: slot, b: slot) {
+            state { eq: bool = a == b }
+            body: Text { eq }
+          }
+        }
+      }
+    `);
+    const cmpErrs = errors.filter((e) => /cannot compare/.test(e));
+    expect(cmpErrs).toEqual([]);
+  });
+
+  it("`slot == string` errors (cross-type comparison)", async () => {
+    const { errors } = await parseString(`
+      system S {
+        ui WebApp {
+          component Bad(heading: slot) {
+            state { eq: bool = heading == "x" }
+            body: Text { eq }
+          }
+        }
+      }
+    `);
+    expect(errors.join("\n"), errors.join("\n")).toMatch(/cannot compare/);
+  });
+});
+
 describe("validator — cascade prevention", () => {
   it("does NOT duplicate-error when an operand has an upstream resolution failure", async () => {
     // `nonExistent` doesn't resolve — typeOf returns unknown — the

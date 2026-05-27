@@ -114,4 +114,11 @@ describe("type-system — membersOfType (single source for member completion)", 
       expect.arrayContaining(["id", "productId", "quantity", "unitPrice", "subtotal"]),
     );
   });
+
+  it("slot → no members (opaque JSX, no addressable fields)", () => {
+    // `slot` is element-shaped: the caller injects a ReactNode-ish
+    // expression; the component body renders it verbatim.  No `.foo`
+    // access makes sense, so completion correctly returns nothing.
+    expect(names({ kind: "slot" })).toEqual([]);
+  });
 });
