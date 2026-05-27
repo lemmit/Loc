@@ -1,4 +1,3 @@
-import { classifyForWire, singleFieldShape } from "../../ir/validate/invariant-classify.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -17,6 +16,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { classifyForWire, singleFieldShape } from "../../ir/validate/invariant-classify.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderJasonEncoderImpl } from "./jason-camel-emit.js";
 import { joinEntityName } from "./join-resource-emit.js";

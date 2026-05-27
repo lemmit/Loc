@@ -1,4 +1,5 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
+import { forApiRead } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -9,7 +10,6 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
-import { forApiRead } from "../../ir/enrich/wire-projection.js";
 import {
   peelCollection,
   peelNullable,

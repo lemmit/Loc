@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { ExprIR, InvariantIR } from "../../src/ir/types/loom-ir.js";
 import {
   classifyForWire,
   pickErrorPath,
   singleFieldShape,
 } from "../../src/ir/validate/invariant-classify.js";
-import type { ExprIR, InvariantIR } from "../../src/ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Pure-function tests for the wire-invariant classifier.  No file system, no

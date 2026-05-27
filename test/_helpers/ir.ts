@@ -1,6 +1,6 @@
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
-import type { LoomModel } from "../../src/ir/types/loom-ir.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
+import type { LoomModel } from "../../src/ir/types/loom-ir.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import { parseValid } from "./parse.js";
 

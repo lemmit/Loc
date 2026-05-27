@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 import { EmptyFileSystem, URI } from "langium";
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
-import type { TraceabilityIR } from "../../src/ir/types/loom-ir.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
+import type { TraceabilityIR } from "../../src/ir/types/loom-ir.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import {

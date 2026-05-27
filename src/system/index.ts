@@ -1,5 +1,6 @@
 import { E2E_FIXTURES_TS } from "../generator/react/index.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
+import { lowerModel } from "../ir/lower/lower.js";
 import type {
   DeployableIR,
   EnrichedBoundedContextIR,
@@ -8,8 +9,6 @@ import type {
   EnrichedSystemIR,
   SystemIR,
 } from "../ir/types/loom-ir.js";
-import { lowerModel } from "../ir/lower/lower.js";
-import { buildMigrations } from "./migrations-builder.js";
 import type { MigrationsIR } from "../ir/types/migrations-ir.js";
 import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
@@ -22,6 +21,7 @@ import {
   renderSequenceDiagram,
   renderWorkflowDiagram,
 } from "./mermaid.js";
+import { buildMigrations } from "./migrations-builder.js";
 import {
   memorySnapshotStore,
   type SnapshotStore,

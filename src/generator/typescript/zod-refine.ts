@@ -1,3 +1,4 @@
+import type { BinOp, ExprIR, InvariantIR } from "../../ir/types/loom-ir.js";
 import {
   type ClassifyContext,
   classifyForWire,
@@ -5,7 +6,6 @@ import {
   type SingleFieldPattern,
   singleFieldShape,
 } from "../../ir/validate/invariant-classify.js";
-import type { BinOp, ExprIR, InvariantIR } from "../../ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Zod-refine renderer for wire-boundary validators (frontend forms +

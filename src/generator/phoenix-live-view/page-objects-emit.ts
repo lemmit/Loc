@@ -418,7 +418,10 @@ function buildWorkflowFormPageObject(
 // View-list page object
 // ---------------------------------------------------------------------------
 
-function buildViewListPageObject(page: PageIR, view: import("../../ir/types/loom-ir.js").ViewIR): string {
+function buildViewListPageObject(
+  page: PageIR,
+  view: import("../../ir/types/loom-ir.js").ViewIR,
+): string {
   const slug = snake(view.name);
   const className = `${upperFirst(page.name)}Page`;
   const route = page.route ?? `/views/${slug}`;

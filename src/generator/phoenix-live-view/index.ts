@@ -275,7 +275,10 @@ function emitContext(
 // Enum module
 // ---------------------------------------------------------------------------
 
-function renderEnumModule(en: import("../../ir/types/loom-ir.js").EnumIR, contextModule: string): string {
+function renderEnumModule(
+  en: import("../../ir/types/loom-ir.js").EnumIR,
+  contextModule: string,
+): string {
   const moduleName = `${contextModule}.${upperFirst(en.name)}`;
   const values = en.values.map((v) => `  :${snake(v)}`).join(",\n");
   return `# Auto-generated.

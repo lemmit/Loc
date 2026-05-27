@@ -1,4 +1,5 @@
 import { enrichLoomModel } from "../../ir/enrich/enrichments.js";
+import { lowerModel } from "../../ir/lower/lower.js";
 import type {
   BoundedContextIR,
   DeployableIR,
@@ -7,7 +8,6 @@ import type {
   RepositoryIR,
   SystemIR,
 } from "../../ir/types/loom-ir.js";
-import { lowerModel } from "../../ir/lower/lower.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural } from "../../util/naming.js";

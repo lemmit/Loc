@@ -34,7 +34,7 @@ import type {
   RequirementVerdict,
   TestOutcome,
   VerificationIR,
-} from "../../../src/ir/loom-ir.js";
+} from "../../../src/ir/types/loom-ir.js";
 
 // Shape of the `.loom/traceability.json` slice the verification overlay
 // reads — emitted by `src/system/traceability.ts`.

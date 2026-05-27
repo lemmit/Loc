@@ -20,6 +20,7 @@ import {
 import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import { enrichLoomModel } from "../../../ir/enrich/enrichments.js";
+import { lowerModel } from "../../../ir/lower/lower.js";
 import {
   type BoundedContextIR,
   contextUsesMoney,
@@ -31,7 +32,6 @@ import {
   type TypeIR,
   type UserIR,
 } from "../../../ir/types/loom-ir.js";
-import { lowerModel } from "../../../ir/lower/lower.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
 import { contextsHaveProvenancedField } from "../../../ir/util/prov-id.js";
 import type { Model } from "../../../language/generated/ast.js";

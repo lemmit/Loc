@@ -96,7 +96,10 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
     ctx: BoundedContextIR;
     wf: import("../../ir/types/loom-ir.js").WorkflowIR;
   }> = [];
-  const allViews: Array<{ ctx: BoundedContextIR; view: import("../../ir/types/loom-ir.js").ViewIR }> = [];
+  const allViews: Array<{
+    ctx: BoundedContextIR;
+    view: import("../../ir/types/loom-ir.js").ViewIR;
+  }> = [];
 
   for (const ctx of contexts) {
     for (const wf of ctx.workflows) {

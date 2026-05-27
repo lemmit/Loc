@@ -1,6 +1,3 @@
-import type { SnapshotStore } from "./snapshot.js";
-import { plural, snake, upperFirst } from "../util/naming.js";
-
 import type {
   AggregateIR,
   AssociationIR,
@@ -24,6 +21,8 @@ import type {
   SchemaSnapshot,
   TableShape,
 } from "../ir/types/migrations-ir.js";
+import { plural, snake, upperFirst } from "../util/naming.js";
+import type { SnapshotStore } from "./snapshot.js";
 
 // ---------------------------------------------------------------------------
 // MigrationsIR builder + diff.

@@ -1,4 +1,5 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
+import { forApiRead, forCreateInput } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -13,7 +14,6 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../ir/types/loom-ir.js";
-import { forApiRead, forCreateInput } from "../../ir/enrich/wire-projection.js";
 import {
   peelCollection,
   peelNullable,
@@ -203,7 +203,10 @@ function renderApiSpec(
     ctx: EnrichedBoundedContextIR;
     wf: import("../../ir/types/loom-ir.js").WorkflowIR;
   }>,
-  allViews: Array<{ ctx: EnrichedBoundedContextIR; view: import("../../ir/types/loom-ir.js").ViewIR }>,
+  allViews: Array<{
+    ctx: EnrichedBoundedContextIR;
+    view: import("../../ir/types/loom-ir.js").ViewIR;
+  }>,
 ): string {
   const specModule = `${webModule}.Api.${apiPascal}Spec`;
   const schemasModule = `${webModule}.Api.Schemas`;

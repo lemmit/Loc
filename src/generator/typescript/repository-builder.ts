@@ -1,4 +1,5 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
+import { forApiRead } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -12,8 +13,11 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
-import { aggregateUsesMoney, findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/types/loom-ir.js";
-import { forApiRead } from "../../ir/enrich/wire-projection.js";
+import {
+  aggregateUsesMoney,
+  findUsesCurrentUser,
+  viewUsesCurrentUser,
+} from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";

@@ -21,14 +21,14 @@ import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode, lineDiff } from "../edit-engine";
 import { buildSystemGraph, coverageByNode, matchNodes, nodeDiagnostics, typeLabel, wireShapeOf, type CoverageStatus, type GraphNode, type NodeKind } from "./model";
-import type { WireField } from "../../../../src/ir/loom-ir.js";
+import type { WireField } from "../../../../src/ir/types/loom-ir.js";
 import { loadPositions, savePositions, type Pos } from "./positions";
 import { addConstructSource, addModuleSource, firstAggregateName, listContextNames } from "./add";
 import { groupedLayout } from "./grouped-layout";
 import { isRebindableEdge, rebindEdgeTarget } from "./edge-rebind";
 import { buildLinkedModel } from "./linked-doc";
-import { lowerModel } from "../../../../src/ir/lower.js";
-import { enrichLoomModel } from "../../../../src/ir/enrichments.js";
+import { lowerModel } from "../../../../src/ir/lower/lower.js";
+import { enrichLoomModel } from "../../../../src/ir/enrich/enrichments.js";
 import type { Diagnostic } from "../../lsp/protocol";
 import { IDENTIFIER, renameConstruct, renameMember } from "./rename";
 import {
