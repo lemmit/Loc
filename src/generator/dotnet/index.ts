@@ -11,7 +11,10 @@ import type {
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural } from "../../util/naming.js";
+import type { EmitCtx } from "../_adapters/index.js";
 import { generateReactForContexts } from "../react/index.js";
+import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
+import { cqrsStyleAdapter } from "./adapters/cqrs-style.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
@@ -140,6 +143,28 @@ function emitProjectFromContexts(
   emitCommon(ns, out);
   emitDispatcher(ns, out);
   out.set("Domain/Events/IDomainEvent.cs", renderIDomainEvent(ns));
+  // Adapter dispatch context — built once per system-mode emit so
+  // every per-aggregate call dispatches through the same EmitCtx
+  // (deployable, contexts, sys, migrations).  Threaded into
+  // `emitAggregate` only; helpers that don't yet route through
+  // adapters keep the existing direct emit-fn calls.
+  //
+  // The dotnet generator dispatches through its OWN sibling adapters
+  // (`./adapters/cqrs-style.js`, `./adapters/by-layer-layout.js`) —
+  // sibling imports stay within `src/generator/`, so the backend-
+  // packages layering invariant (no `src/generator/* → src/platform/*`
+  // edges) holds.  Future per-deployable overrides (`style: layered`,
+  // `persistence: dapper`, …) will resolve through the registry at
+  // the platform-surface seam (`src/platform/dotnet.ts`).
+  const emitCtx: EmitCtx | undefined = system
+    ? {
+        deployable: system.deployable,
+        contexts,
+        sys: system.sys,
+        migrations: system.migrations,
+        emitTrace,
+      }
+    : undefined;
   // Each context contributes its enums / VOs / events / aggregates.
   for (const ctx of contexts) {
     emitIds(ctx, ns, out);
@@ -149,7 +174,7 @@ function emitProjectFromContexts(
       out.set(`Domain/Events/${ev.name}.cs`, renderEvent(ev, ns));
     }
     for (const agg of ctx.aggregates) {
-      emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace);
+      emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace, emitCtx);
     }
     emitWorkflows(ctx, ns, out, { routePrefix });
     emitViews(ctx, ns, out, { routePrefix });
@@ -359,6 +384,14 @@ function emitAggregate(
   out: Map<string, string>,
   routePrefix?: string,
   emitTrace = false,
+  /** Adapter-dispatch context — present only in system-mode emit
+   *  (legacy single-context entry doesn't have a deployable + sys to
+   *  build it from).  When provided, the CQRS step routes through
+   *  the local `cqrsStyleAdapter.emitForAggregate` +
+   *  `byLayerLayoutAdapter.pathFor` instead of the direct `emitCqrs`
+   *  call.  Byte-identical because the adapter wraps the same
+   *  `emitCqrs` underneath. */
+  emitCtx?: EmitCtx,
 ): void {
   const aggFolder = plural(agg.name);
   const repo = findRepoFor(ctx, agg.name);
@@ -407,7 +440,20 @@ function emitAggregate(
       renderJoinEntityConfiguration(assoc, ns),
     );
   }
-  emitCqrs(agg, repo, ctx, ns, out, { routePrefix, emitTrace });
+  // CQRS emission — adapter-dispatched when an EmitCtx is available
+  // (system mode), direct call in the legacy single-context path.
+  // The two paths produce identical Map entries: the adapter wraps
+  // the same `emitCqrs` underneath, and the byLayer layout adapter
+  // recomputes the same `Application/<Plural>/...` + `Api/...` paths
+  // the emitter writes inline.
+  if (emitCtx) {
+    const artifacts = cqrsStyleAdapter.emitForAggregate?.(agg, emitCtx) ?? [];
+    for (const artifact of artifacts) {
+      out.set(byLayerLayoutAdapter.pathFor(artifact, emitCtx), artifact.content);
+    }
+  } else {
+    emitCqrs(agg, repo, ctx, ns, out, { routePrefix, emitTrace });
+  }
   const testsFile = renderTestsFile(agg, ctx, ns);
   if (testsFile) {
     out.set(`Tests/${ns}.Tests/${aggFolder}/${agg.name}Tests.cs`, testsFile);

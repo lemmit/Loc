@@ -76,7 +76,7 @@ describe("cqrs StyleAdapter — dotnet (real)", () => {
     expect(joined).toContain("AddValidatorsFromAssembly");
     expect(joined).toContain("ValidationBehavior");
     // The deployable's namespace flows through into the behavior type.
-    expect(joined).toContain("api.Application.Common.ValidationBehavior");
+    expect(joined).toContain("Api.Application.Common.ValidationBehavior");
   });
 
   it("emitForAggregate wraps emitCqrs end-to-end", async () => {

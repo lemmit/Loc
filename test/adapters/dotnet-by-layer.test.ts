@@ -128,21 +128,21 @@ describe("byLayer LayoutAdapter (real)", () => {
     );
   });
 
-  it("places extern handler artifacts under Application/<Plural>/Extern/", () => {
+  it("places extern handler artifacts under Application/<Plural>/Handlers/", () => {
     expect(
       p({
         name: "IExternFooHandler.cs",
         category: "extern-handler-interface",
         aggregateName: "Order",
       }),
-    ).toBe("Application/Orders/Extern/IExternFooHandler.cs");
+    ).toBe("Application/Orders/Handlers/IExternFooHandler.cs");
     expect(
       p({
         name: "ExternFooHandlerStub.cs",
         category: "extern-handler-stub",
         aggregateName: "Order",
       }),
-    ).toBe("Application/Orders/Extern/ExternFooHandlerStub.cs");
+    ).toBe("Application/Orders/Handlers/ExternFooHandlerStub.cs");
   });
 
   it("routes Infrastructure/ artifacts to their conventional folders", () => {

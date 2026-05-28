@@ -32,8 +32,14 @@ import {
 import { emitCqrs } from "../cqrs-emit.js";
 import type { DotnetArtifactCategory } from "./by-layer-layout.js";
 
+/** Namespace string the dotnet emitter threads everywhere as `ns`.
+ *  The orchestrator computes it as `deployable.name` with the first
+ *  letter capitalised (see `src/platform/dotnet.ts:emitProject`); the
+ *  adapter mirrors that so adapter-dispatched emit produces the same
+ *  `using <Ns>.…;` + `namespace <Ns>.…;` lines as the direct path. */
 function nsOf(ctx: EmitCtx): string {
-  return ctx.deployable.name;
+  const name = ctx.deployable.name;
+  return name[0]!.toUpperCase() + name.slice(1);
 }
 
 function contextOf(ctx: EmitCtx, aggName: string): EnrichedBoundedContextIR | undefined {
@@ -64,8 +70,13 @@ function categoriseCqrsPath(path: string): DotnetArtifactCategory {
   }
   if (path.startsWith("Application/") && path.includes("/Requests/")) return "request-dto";
   if (path.startsWith("Application/") && path.includes("/Responses/")) return "response-dto";
-  if (path.startsWith("Application/") && path.includes("/Extern/")) {
-    if (path.includes("/I") && path.endsWith("Handler.cs")) return "extern-handler-interface";
+  if (path.startsWith("Application/") && path.includes("/Handlers/")) {
+    // Extern operations emit a per-op interface plus a dev-stub
+    // implementation: `IXAggHandler.cs` (interface, named `I…`) and
+    // `DevStub…Handler.cs` (concrete stub).  Both live under the
+    // per-aggregate `Handlers/` folder.
+    const bare = path.split("/").pop()!;
+    if (bare.startsWith("I") && bare.endsWith("Handler.cs")) return "extern-handler-interface";
     return "extern-handler-stub";
   }
   if (path.startsWith("Api/")) return "controller";

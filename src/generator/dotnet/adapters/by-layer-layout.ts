@@ -174,7 +174,7 @@ function pathForCategory(artifact: DotnetArtifact): string {
     case "extern-handler-interface":
     case "extern-handler-stub":
       if (!agg) throw new Error(`byLayer.pathFor: '${cat}' missing aggregateName (${name})`);
-      return `Application/${aggFolder(agg)}/Extern/${name}`;
+      return `Application/${aggFolder(agg)}/Handlers/${name}`;
     case "dbcontext":
       return `Infrastructure/Persistence/${name}`;
     case "ef-configuration":
