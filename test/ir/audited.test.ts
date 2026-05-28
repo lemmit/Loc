@@ -38,7 +38,7 @@ async function parseModel(
 // deployable.  `extra` is appended into the aggregate body verbatim.
 const SYSTEM = (extra = "", platform = "hono", targets = "") => `
 system S {
-  module M {
+  subdomain M {
     context C {
       aggregate Cart ids guid {
         label: string
@@ -57,7 +57,7 @@ ${extra}
       }
     }
   }
-  deployable api { platform: ${platform}, ${targets || "modules: M,"} port: 3000 }
+  deployable api { platform: ${platform}, ${targets || "contexts: [C],"} port: 3000 }
 }
 `;
 

@@ -6,7 +6,7 @@ import type {
   Deployable,
   EmitStmt,
   EventDecl,
-  Module,
+  Subdomain,
   Repository,
   Storage,
   Ui,
@@ -114,7 +114,7 @@ export function buildSystemGraph(ast: AstNode): SystemGraph {
   // First pass — every construct becomes a node.
   for (const node of AstUtils.streamAst(ast)) {
     switch (node.$type) {
-      case "Module": addNode("module", (node as Module).name, node); break;
+      case "Subdomain": addNode("subdomain", (node as Subdomain).name, node); break;
       case "Aggregate": addNode("aggregate", (node as Aggregate).name, node); break;
       case "ValueObject": addNode("valueobject", (node as ValueObject).name, node); break;
       case "EventDecl": addNode("event", (node as EventDecl).name, node); break;
@@ -152,13 +152,13 @@ export function buildSystemGraph(ast: AstNode): SystemGraph {
       }
       case "Api": {
         const a = node as Api;
-        addEdge(nodeId("api", a.name), nodeId("module", a.source.$refText), "from");
+        addEdge(nodeId("api", a.name), nodeId("subdomain", a.source.$refText), "from");
         break;
       }
       case "Deployable": {
         const d = node as Deployable;
         const from = nodeId("deployable", d.name);
-        for (const b of d.moduleBindings) addEdge(from, nodeId("module", b.name.$refText), "module");
+        for (const r of d.contextRefs) addEdge(from, nodeId("context", r.$refText), "context");
         for (const s of d.serves) addEdge(from, nodeId("api", s.$refText), "serves");
         if (d.targets) addEdge(from, nodeId("deployable", d.targets.$refText), "targets");
         const uiRef = d.uiSugar?.ref ?? d.uiCompose?.ref ?? d.uiBlock?.ref;

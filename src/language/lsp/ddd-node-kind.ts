@@ -38,7 +38,7 @@ export class DddNodeKindProvider extends DefaultNodeKindProvider {
         return SymbolKind.Interface;
       case "FindDecl":
         return SymbolKind.Method;
-      case "Module":
+      case "Subdomain":
       case "BoundedContext":
         return SymbolKind.Module;
       case "System":
@@ -72,7 +72,7 @@ export class DddNodeKindProvider extends DefaultNodeKindProvider {
         return CompletionItemKind.Method;
       case "FindDecl":
         return CompletionItemKind.Method;
-      case "Module":
+      case "Subdomain":
       case "BoundedContext":
         return CompletionItemKind.Module;
       default:

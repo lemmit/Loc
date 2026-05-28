@@ -60,7 +60,7 @@ export function currentTarget(node: AstNode, kind: RebindKind): string | null {
 
 /** Candidate target names for the rebind Select. */
 export function rebindTargets(ast: Model, kind: RebindKind): string[] {
-  const wantType = targetKindOf(kind) === "module" ? "Module" : "Aggregate";
+  const wantType = targetKindOf(kind) === "module" ? "Subdomain" : "Aggregate";
   const out = new Set<string>();
   for (const n of AstUtils.streamAst(ast)) {
     const name = (n as { name?: unknown }).name;

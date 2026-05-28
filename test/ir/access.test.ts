@@ -32,7 +32,7 @@ async function parseModel(
 function aggregateFrom(model: Model, name: string): AggregateIR {
   const enriched = enrichLoomModel(lowerModel(model));
   for (const sys of enriched.systems) {
-    for (const mod of sys.modules) {
+    for (const mod of sys.subdomains) {
       for (const ctx of mod.contexts) {
         const agg = ctx.aggregates.find((a) => a.name === name);
         if (agg) return agg;
@@ -48,14 +48,14 @@ function aggregateFrom(model: Model, name: string): AggregateIR {
 
 const SYSTEM = (fields: string) => `
 system S {
-  module M {
+  subdomain M {
     context C {
       aggregate Post ids guid {
 ${fields}
       }
     }
   }
-  deployable api { platform: hono, modules: M, port: 3000 }
+  deployable api { platform: hono, contexts: [C], port: 3000 }
 }
 `;
 

@@ -16,14 +16,14 @@ describe("Image + Avatar in walker stdlib", () => {
   it("Image { src, alt } emits Mantine <Image> with both attrs", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
             body:  Image { src: "/logo.png", alt: "Acme" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -41,14 +41,14 @@ describe("Image + Avatar in walker stdlib", () => {
   it("Avatar { src, alt } emits Mantine <Avatar> with both attrs", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
             body:  Avatar { src: "/u.png", alt: "User" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -65,14 +65,14 @@ describe("Image + Avatar in walker stdlib", () => {
   it("Image with no attrs emits a self-closing Image (Mantine fallback)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
             body:  Image {}
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -88,14 +88,14 @@ describe("Image + Avatar in walker stdlib", () => {
   it("Avatar accepts a route-param ref in src (template-literal interpolation)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Profile(slug: string) {
             route: "/profile/:slug"
             body:  Avatar { src: slug, alt: "User" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -115,7 +115,7 @@ describe("Image + Avatar in walker stdlib", () => {
   it("Image + Avatar in a Toolbar — composition stays clean", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Header {
             route: "/header"
@@ -125,7 +125,7 @@ describe("Image + Avatar in walker stdlib", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

@@ -21,7 +21,7 @@ function findAggregate(model: Model, name: string): Aggregate {
   for (const sm of model.members ?? []) {
     if ((sm as any).$type !== "System") continue;
     for (const m of (sm as any).members ?? []) {
-      if (m.$type !== "Module") continue;
+      if (m.$type !== "Subdomain") continue;
       for (const ctx of m.contexts ?? []) {
         for (const cm of ctx.members ?? []) {
           if (isAggregate(cm) && cm.name === name) return cm;
@@ -36,7 +36,7 @@ describe("crudish stdlib macro", () => {
   it("adds an update operation with one parameter per user field", async () => {
     const { model, errors } = await parseString(
       wrap(`
-        module M { context C {
+        subdomain M { context C {
           aggregate Order with crudish {
             subject: string
             amount: decimal
@@ -55,7 +55,7 @@ describe("crudish stdlib macro", () => {
   it("update body assigns each parameter to the matching field", async () => {
     const { model } = await parseString(
       wrap(`
-        module M { context C {
+        subdomain M { context C {
           aggregate Order with crudish {
             subject: string
             amount: decimal
@@ -77,7 +77,7 @@ describe("crudish stdlib macro", () => {
   it("composes with auditable — audit fields are excluded from update surface", async () => {
     const { model, errors } = await parseString(
       wrap(`
-        module M { context C {
+        subdomain M { context C {
           aggregate Order with auditable, crudish {
             subject: string
             amount: decimal
@@ -109,7 +109,7 @@ describe("crudish stdlib macro", () => {
   ])("excludes user-declared fields marked %s from update params", async (modifier, ty) => {
     const { model, errors } = await parseString(
       wrap(`
-        module M { context C {
+        subdomain M { context C {
           aggregate Order with crudish {
             subject: string
             ${modifier === "managed" ? `frozenAt` : modifier === "internal" ? `flag` : `slug`}: ${ty} ${modifier}
@@ -134,7 +134,7 @@ describe("crudish stdlib macro", () => {
     // the parametrized test above.
     const { model, errors } = await parseString(
       wrap(`
-        module M { context C {
+        subdomain M { context C {
           aggregate Order with crudish {
             subject: string
             rev: int token
@@ -155,7 +155,7 @@ describe("crudish stdlib macro", () => {
     // API key rotation, etc.) but never come back out in reads.
     const { model, errors } = await parseString(
       wrap(`
-        module M { context C {
+        subdomain M { context C {
           aggregate Account with crudish {
             handle: string
             passwordHash: string secret
@@ -172,7 +172,7 @@ describe("crudish stdlib macro", () => {
   it("works with empty aggregate — no params, empty body, still emits update", async () => {
     const { model } = await parseString(
       wrap(`
-        module M { context C {
+        subdomain M { context C {
           aggregate Empty with crudish { }
         }}
       `),
@@ -189,7 +189,7 @@ describe("crudish via IR lowering", () => {
     const { buildLoomModel } = await import("../_helpers/ir.js");
     const ir = await buildLoomModel(`
       system Demo {
-        module M { context C {
+        subdomain M { context C {
           aggregate Order with crudish {
             subject: string
             amount: decimal

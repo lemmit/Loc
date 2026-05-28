@@ -12,13 +12,13 @@ const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
 const parse = (t: string): Model => parser.parse(t).value as Model;
 
 const SRC = `system S {
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Order {
       }
     }
   }
-  module Billing {
+  subdomain Billing {
     context Invoices {
       aggregate Invoice {
       }

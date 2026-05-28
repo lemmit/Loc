@@ -76,7 +76,7 @@ export function groupedLayout(graph: SystemGraph): GroupedLayout {
     }
     let acc = ctxByName.get(ctx);
     if (!acc) {
-      acc = { name: ctx, module: ancestorName(n.ast, "Module"), members: [] };
+      acc = { name: ctx, module: ancestorName(n.ast, "Subdomain"), members: [] };
       ctxByName.set(ctx, acc);
     }
     acc.members.push(n.id);

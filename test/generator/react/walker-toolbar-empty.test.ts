@@ -15,7 +15,7 @@ describe("Toolbar + Empty in walker stdlib", () => {
   it('Toolbar { ... } emits Mantine <Group justify="space-between">', async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Orders {
             route: "/orders"
@@ -25,7 +25,7 @@ describe("Toolbar + Empty in walker stdlib", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -48,14 +48,14 @@ describe("Toolbar + Empty in walker stdlib", () => {
   it("empty Toolbar {} self-closes with the same justify attr", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
             body:  Toolbar {}
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -71,14 +71,14 @@ describe("Toolbar + Empty in walker stdlib", () => {
   it('Empty { "No orders yet" } emits centered dimmed-text placeholder', async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page List {
             route: "/list"
             body:  Empty { "No orders yet" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -95,14 +95,14 @@ describe("Toolbar + Empty in walker stdlib", () => {
   it("Empty {} with no message falls back to default", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
             body:  Empty {}
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -118,7 +118,7 @@ describe("Toolbar + Empty in walker stdlib", () => {
   it("Empty accepts a binary-op message (state interpolation)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -126,7 +126,7 @@ describe("Toolbar + Empty in walker stdlib", () => {
             body:  Empty { "No " + kind + " here" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

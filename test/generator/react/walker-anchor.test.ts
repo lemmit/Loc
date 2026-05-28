@@ -26,7 +26,7 @@ describe("Anchor primitive", () => {
   it('Anchor { "label", to: "/path" } emits <Anchor component={RouterLink} to=...>', async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
@@ -36,7 +36,7 @@ describe("Anchor primitive", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -55,14 +55,14 @@ describe("Anchor primitive", () => {
   it("Anchor without to: emits a bare <Anchor> (no RouterLink import)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Plain {
             route: "/plain"
             body:  Anchor { "Bare link" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -79,14 +79,14 @@ describe("Anchor primitive", () => {
   it("Anchor with route-param ref to: interpolates via template literal", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page User(slug: string) {
             route: "/users/:slug"
             body:  Anchor { "Profile", to: slug }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -103,7 +103,7 @@ describe("Anchor primitive", () => {
   it("page combining navigate (Button to:) + Link (Anchor to:) imports both specifiers", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
@@ -113,7 +113,7 @@ describe("Anchor primitive", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

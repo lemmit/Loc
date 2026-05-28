@@ -4,7 +4,7 @@ import { parseRaw as parse } from "../../_helpers/index.js";
 
 // A canonical multi-level system used by the per-level snapshots below.
 const SRC = `system Sales {
-  module SalesMod {
+  subdomain SalesMod {
     context Orders {
       aggregate Order {
         status: string
@@ -16,7 +16,7 @@ const SRC = `system Sales {
       }
     }
   }
-  module Billing {
+  subdomain Billing {
     context Invoices {
       aggregate Invoice {
       }
@@ -346,7 +346,7 @@ describe("Model v2 — view-graph per level", () => {
 
   it("system view surfaces deployable bindings as edges", () => {
     const SRC_D = `system S {
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Order {
       }
@@ -354,7 +354,7 @@ describe("Model v2 — view-graph per level", () => {
   }
   ui Web {
   }
-  deployable api { platform: hono, modules: Sales, port: 3000 }
+  deployable api { platform: hono, contexts: [Sales], port: 3000 }
   deployable webApp { platform: react, targets: api, ui: Web, port: 3001 }
 }`;
     const g = buildViewGraph(parse(SRC_D), [{ kind: "system", name: "S" }]);

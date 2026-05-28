@@ -117,7 +117,7 @@ describe("enrichment — idempotency", () => {
 
   const SYSTEM_SRC = `
     system Shop {
-      module Sales {
+      subdomain Sales {
         context Orders {
           aggregate Order ids guid {
             customerId: string
@@ -135,7 +135,7 @@ describe("enrichment — idempotency", () => {
           valueobject Money { amount: int  currency: string }
         }
       }
-      deployable api { platform: hono, modules: Sales, port: 3000 }
+      deployable api { platform: hono, contexts: [Sales], port: 3000 }
     }
   `;
 

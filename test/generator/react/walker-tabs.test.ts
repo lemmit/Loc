@@ -31,7 +31,7 @@ describe("Tabs in walker stdlib", () => {
   it("emits Mantine Tabs with List + Panels and slugged values", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Settings {
             route: "/settings"
@@ -41,7 +41,7 @@ describe("Tabs in walker stdlib", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -66,7 +66,7 @@ describe("Tabs in walker stdlib", () => {
   it("multi-word labels slugify to kebab-case", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -76,7 +76,7 @@ describe("Tabs in walker stdlib", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -94,7 +94,7 @@ describe("Tabs in walker stdlib", () => {
   it("nested composition: Stack > Tabs > Stack stays clean", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -107,7 +107,7 @@ describe("Tabs in walker stdlib", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -129,7 +129,7 @@ describe("Tabs in walker stdlib", () => {
   it("non-Tab child in Tabs { ... } renders directly as the panel body with an auto label", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Mixed {
             route: "/mixed"
@@ -139,7 +139,7 @@ describe("Tabs in walker stdlib", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

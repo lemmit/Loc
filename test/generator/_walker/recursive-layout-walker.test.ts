@@ -26,14 +26,14 @@ describe("recursive layout walker", () => {
   it("emits Stack { Heading, Text } into a TSX file with Mantine imports", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Welcome {
             route: "/welcome"
             body:  Stack { Heading { "Welcome to Acme" }, Text { "Pick a destination." } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -58,14 +58,14 @@ describe("recursive layout walker", () => {
   it("App.tsx imports + routes the walker-rendered page", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Welcome {
             route: "/"
             body:  Stack { Heading { "Hello" } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -82,14 +82,14 @@ describe("recursive layout walker", () => {
   it("supports `level:` named arg on Heading", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Welcome {
             route: "/welcome"
             body:  Heading { "Big", level: 1 }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -105,14 +105,14 @@ describe("recursive layout walker", () => {
   it('nested composition: Card { "Stats", Stack { Text { "a" }, Text { "b" } } }', async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Dashboard {
             route: "/dashboard"
             body:  Card { "Stats", Stack { Text { "a" }, Text { "b" } } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -136,14 +136,14 @@ describe("recursive layout walker", () => {
   it("Button emits unwired in v0 (no onClick)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Welcome {
             route: "/welcome"
             body:  Button { "Click me" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -161,14 +161,14 @@ describe("recursive layout walker", () => {
   it("unknown components leave a placeholder comment, no crash", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Mixed {
             route: "/mixed"
             body:  Stack { Heading { "Real" }, SomeUnknownThing(foo: 42) }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

@@ -6,7 +6,7 @@ import type {
   DeployableIR,
   EnrichedLoomModel,
   ExprIR,
-  ModuleIR,
+  SubdomainIR,
   SystemIR,
   TestE2EIR,
   TestStmtIR,
@@ -372,7 +372,7 @@ function validateReactIdReferences(sys: SystemIR, diags: LoomDiagnostic[]): void
   // look up display fields regardless of which module declares the
   // target aggregate.
   const allAggregates = new Map<string, AggregateIR>();
-  for (const m of sys.modules) {
+  for (const m of sys.subdomains) {
     for (const c of m.contexts) {
       for (const a of c.aggregates) allAggregates.set(a.name, a);
     }
@@ -396,8 +396,8 @@ function validateReactIdReferences(sys: SystemIR, diags: LoomDiagnostic[]): void
     // UI generators only emit per-aggregate hooks/queries for
     // these; anything outside is unreachable.
     const mounted = new Set<string>();
-    for (const moduleName of d.moduleNames) {
-      const mod = sys.modules.find((m) => m.name === moduleName);
+    for (const moduleName of d.contextNames) {
+      const mod = sys.subdomains.find((m) => m.name === moduleName);
       if (!mod) continue;
       for (const c of mod.contexts) for (const a of c.aggregates) mounted.add(a.name);
     }
@@ -792,8 +792,8 @@ function firstNonQueryableNode(e: ExprIR): string | null {
 }
 
 function validateSystem(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  const modulesByName = new Map<string, ModuleIR>();
-  for (const m of sys.modules) modulesByName.set(m.name, m);
+  const modulesByName = new Map<string, SubdomainIR>();
+  for (const m of sys.subdomains) modulesByName.set(m.name, m);
   for (const t of sys.e2eTests) {
     validateE2ETest(t, sys, modulesByName, diags);
   }
@@ -802,7 +802,7 @@ function validateSystem(sys: SystemIR, diags: LoomDiagnostic[]): void {
 function validateE2ETest(
   test: TestE2EIR,
   sys: SystemIR,
-  modulesByName: Map<string, ModuleIR>,
+  modulesByName: Map<string, SubdomainIR>,
   diags: LoomDiagnostic[],
 ): void {
   const target = sys.deployables.find((d) => d.name === test.deployableName);
@@ -1146,12 +1146,14 @@ function checkMagicCall(
 
 function collectContexts(
   d: DeployableIR,
-  modulesByName: Map<string, ModuleIR>,
+  modulesByName: Map<string, SubdomainIR>,
 ): BoundedContextIR[] {
+  // D-STORAGE-SPLIT: d.contextNames lists bounded-context names
+  // directly.  Walk every subdomain looking for matches by name.
+  const want = new Set(d.contextNames);
   const out: BoundedContextIR[] = [];
-  for (const name of d.moduleNames) {
-    const m = modulesByName.get(name);
-    if (m) out.push(...m.contexts);
+  for (const m of modulesByName.values()) {
+    for (const c of m.contexts) if (want.has(c.name)) out.push(c);
   }
   return out;
 }
@@ -1705,7 +1707,7 @@ const UNKNOWN_PERMISSION_SENTINEL = "__unknown_permission__:";
 // confusing second diagnostic; better to let the AST layer own it.
 
 function validatePermissions(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  for (const mod of sys.modules) {
+  for (const mod of sys.subdomains) {
     if (mod.permissions.length === 0) continue;
     const seen = new Set<string>();
     for (const p of mod.permissions) {

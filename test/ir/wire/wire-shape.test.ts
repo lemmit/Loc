@@ -140,6 +140,6 @@ describe("enrichLoomModel — frontend `targets:` module inheritance", () => {
     expect(web).toBeDefined();
     const target = sys.deployables.find((d) => d.name === web!.targetName);
     expect(target).toBeDefined();
-    expect(web!.moduleNames.sort()).toEqual([...target!.moduleNames].sort());
+    expect(web!.contextNames.sort()).toEqual([...target!.contextNames].sort());
   });
 });

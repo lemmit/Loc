@@ -43,8 +43,8 @@ describe("playground project loader (VFS-backed)", () => {
         import "./shared/money.ddd"
         import "./orders.ddd"
         system Shop {
-          module M { }
-          deployable api { platform: hono, modules: M }
+          subdomain M { }
+          deployable api { platform: hono, contexts: [C] }
         }
       `,
       "/workspace/shared/money.ddd": `
@@ -174,7 +174,7 @@ describe("playground project loader (VFS-backed)", () => {
       "/workspace/main.ddd": `
         import "./shared/money.ddd"
         system Tiny {
-          module M {
+          subdomain M {
             context Catalog {
               aggregate Product {
                 sku: string
@@ -183,7 +183,7 @@ describe("playground project loader (VFS-backed)", () => {
               repository Products for Product { }
             }
           }
-          deployable api { platform: hono, modules: M }
+          deployable api { platform: hono, contexts: [C] }
         }
       `,
       "/workspace/shared/money.ddd": `

@@ -23,7 +23,7 @@ const repoRoot = path.resolve(here, "..", "..", "..");
 
 const FIXTURE_SOURCE = `system PhoenixShop {
 
-  module Store {
+  subdomain Store {
     context Store {
       aggregate Item {
         name: string
@@ -44,7 +44,7 @@ const FIXTURE_SOURCE = `system PhoenixShop {
 
   deployable shopBackend {
     platform: phoenixLiveView,
-    modules: Store,
+    contexts: [Store],
     serves: StoreApi,
     port: 4000
   }

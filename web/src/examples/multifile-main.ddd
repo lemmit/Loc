@@ -10,7 +10,7 @@ import "./shared/currency.ddd"
 
 system MultiFileStore {
 
-  module Catalog {
+  subdomain Catalog {
     context Products {
       aggregate Product {
         sku: string
@@ -27,7 +27,7 @@ system MultiFileStore {
 
   deployable api {
     platform: hono
-    modules: Catalog
+    contexts: [Catalog]
     port: 8080
   }
 }

@@ -25,7 +25,7 @@ system Storybook {
   // Empty module — the page metamodel doesn't need domain content
   // for a components-only storybook.  An empty context keeps the
   // grammar happy and gives the api deployable something to target.
-  module Empty {
+  subdomain Empty {
     context Empty { }
   }
 
@@ -149,7 +149,7 @@ system Storybook {
   // preview pipeline has something to bundle/boot.
   deployable api {
     platform: hono
-    modules: Empty
+    contexts: [Empty]
     port: 3000
   }
 

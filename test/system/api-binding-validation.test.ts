@@ -30,10 +30,10 @@ describe("api binding validator", () => {
     it("flags duplicate api names", async () => {
       const { errors } = await parse(`
         system S {
-          module Sales { context C { } }
+          subdomain Sales { context C { } }
           api Foo from Sales
           api Foo from Sales
-          deployable api { platform: hono, modules: Sales, port: 3000 }
+          deployable api { platform: hono, contexts: [Sales], port: 3000 }
         }
       `);
       expect(errors.some((e) => /Duplicate api 'Foo'/.test(e))).toBe(true);
@@ -54,9 +54,9 @@ describe("api binding validator", () => {
     it("accepts a valid api declaration", async () => {
       const { errors } = await parse(`
         system S {
-          module Sales { context Orders { aggregate Customer { name: string } } }
+          subdomain Sales { context Orders { aggregate Customer { name: string } } }
           api SalesApi from Sales
-          deployable api { platform: hono, modules: Sales, port: 3000 }
+          deployable api { platform: hono, contexts: [Sales], port: 3000 }
         }
       `);
       expect(errors.filter((e) => /api/.test(e))).toEqual([]);
@@ -67,14 +67,14 @@ describe("api binding validator", () => {
     it("flags duplicate api parameter names within a UI", async () => {
       const { errors } = await parse(`
         system S {
-          module Sales { context C { } }
+          subdomain Sales { context C { } }
           api SalesApi from Sales
           ui WebApp {
             api Sales: SalesApi
             api Sales: SalesApi
             page X { route: "/x" body: Heading { "hi" } }
           }
-          deployable api { platform: hono, modules: Sales, port: 3000 }
+          deployable api { platform: hono, contexts: [Sales], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -86,12 +86,12 @@ describe("api binding validator", () => {
     it("flags ui parameter referencing an undeclared api", async () => {
       const { errors } = await parse(`
         system S {
-          module Sales { context C { } }
+          subdomain Sales { context C { } }
           ui WebApp {
             api Sales: NoSuchApi
             page X { route: "/x" body: Heading { "hi" } }
           }
-          deployable api { platform: hono, modules: Sales, port: 3000 }
+          deployable api { platform: hono, contexts: [Sales], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -103,7 +103,7 @@ describe("api binding validator", () => {
     it("flags an unknown aggregate", async () => {
       const { errors } = await parse(`
         system S {
-          module Sales {
+          subdomain Sales {
             context Orders {
               aggregate Customer { name: string }
               repository Customers for Customer { }
@@ -114,7 +114,7 @@ describe("api binding validator", () => {
             api Sales: SalesApi
             page X { route: "/x" body: Text { Sales.NoSuchAggregate.all.isLoading } }
           }
-          deployable api { platform: hono, modules: Sales, port: 3000 }
+          deployable api { platform: hono, contexts: [Sales], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -126,7 +126,7 @@ describe("api binding validator", () => {
     it("flags an unknown operation on a real aggregate", async () => {
       const { errors } = await parse(`
         system S {
-          module Sales {
+          subdomain Sales {
             context Orders {
               aggregate Customer { name: string }
               repository Customers for Customer { }
@@ -137,7 +137,7 @@ describe("api binding validator", () => {
             api Sales: SalesApi
             page X { route: "/x" body: Text { Sales.Customer.allll.isLoading } }
           }
-          deployable api { platform: hono, modules: Sales, port: 3000 }
+          deployable api { platform: hono, contexts: [Sales], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -151,7 +151,7 @@ describe("api binding validator", () => {
     it("accepts standard CRUD operations: all, byId, create", async () => {
       const { errors } = await parse(`
         system S {
-          module Sales {
+          subdomain Sales {
             context Orders {
               aggregate Customer { name: string }
               repository Customers for Customer { }
@@ -169,7 +169,7 @@ describe("api binding validator", () => {
               }
             }
           }
-          deployable api { platform: hono, modules: Sales, port: 3000 }
+          deployable api { platform: hono, contexts: [Sales], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -179,7 +179,7 @@ describe("api binding validator", () => {
     it("accepts a custom repository finder", async () => {
       const { errors } = await parse(`
         system S {
-          module Sales {
+          subdomain Sales {
             context Orders {
               aggregate Customer { name: string }
               repository Customers for Customer { find byEmail(email: string): Customer? }
@@ -193,7 +193,7 @@ describe("api binding validator", () => {
               body: Text { Sales.Customer.byEmail(email).isLoading }
             }
           }
-          deployable api { platform: hono, modules: Sales, port: 3000 }
+          deployable api { platform: hono, contexts: [Sales], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -204,7 +204,7 @@ describe("api binding validator", () => {
       // `lodash.compact(items)` should not be validated as an api ref.
       const { errors } = await parse(`
         system S {
-          module Sales { context C { } }
+          subdomain Sales { context C { } }
           api SalesApi from Sales
           ui WebApp {
             api Sales: SalesApi
@@ -214,7 +214,7 @@ describe("api binding validator", () => {
               body: Button { "Foo", onClick: e => { lodash.compact.foo(items) } }
             }
           }
-          deployable api { platform: hono, modules: Sales, port: 3000 }
+          deployable api { platform: hono, contexts: [Sales], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);

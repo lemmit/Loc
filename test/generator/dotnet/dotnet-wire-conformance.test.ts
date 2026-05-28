@@ -20,7 +20,7 @@ import { parseString } from "../../_helpers/index.js";
 // ---------------------------------------------------------------------------
 
 const DOTNET_FIXTURE = `system AcmeDotnet {
-  module Sales {
+  subdomain Sales {
     context Sales {
       enum OrderStatus { Draft, Confirmed }
       valueobject Money {
@@ -62,7 +62,7 @@ const DOTNET_FIXTURE = `system AcmeDotnet {
   api SalesApi from Sales
   deployable dotnetApi {
     platform: dotnet
-    modules: Sales
+    contexts: [Sales]
     serves: SalesApi
     port: 8080
   }

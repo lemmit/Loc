@@ -30,7 +30,7 @@ const repoRoot = path.resolve(here, "..", "..", "..");
 
 const FIXTURE_SOURCE = `system MiniLiveView {
 
-  module Sales {
+  subdomain Sales {
     context Sales {
       valueobject Money {
         amount: decimal
@@ -52,12 +52,12 @@ const FIXTURE_SOURCE = `system MiniLiveView {
 
   api SalesApi from Sales
 
-  ui SalesAdmin with scaffold(modules: [Sales]) {
+  ui SalesAdmin with scaffold(subdomains: [Sales]) {
   }
 
   deployable phoenixApp {
     platform: phoenixLiveView,
-    modules: Sales,
+    contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,
     port: 4000
@@ -214,7 +214,7 @@ describe("phoenixLiveView pipeline", () => {
   });
 
   it("emits one LiveView module per scaffolded page + router lines", async () => {
-    // The fixture's `scaffold modules: Sales` synthesises three pages
+    // The fixture's `scaffold contexts: [Sales]` synthesises three pages
     // for the Customer aggregate (list / new / detail).  Each lands
     // as a LiveView module under lib/<app>_web/live/ and contributes
     // a `live "<route>", <Page>Live` line to router.ex.
@@ -302,22 +302,22 @@ describe("phoenixLiveView pipeline", () => {
     // targets: peer; should fail the "no targets on a fullstack"
     // rule (validator restricts targets: to react/static).
     const src = `system MiniBad {
-  module Sales {
+  subdomain Sales {
     context Sales {
       aggregate Customer { name: string  derived display: string = name }
       repository Customers for Customer { }
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin with scaffold(modules: [Sales]) {}
+  ui SalesAdmin with scaffold(subdomains: [Sales]) {}
 
   deployable peer {
     platform: hono,
-    modules: Sales
+    contexts: [Sales]
   }
   deployable phoenixApp {
     platform: phoenixLiveView,
-    modules: Sales,
+    contexts: [Sales],
     targets: peer,
     serves: SalesApi,
     ui: SalesAdmin
@@ -420,16 +420,16 @@ describe("emitApiControllers (api-emit unit)", () => {
   const stubDeployable: DeployableIR = {
     name: "phoenixApp",
     platform: "phoenixLiveView",
-    moduleNames: ["Sales"],
+    contextNames: ["Customers"], dataSourceNames: [],
     port: 4000,
     serves: ["SalesApi"],
     uiBindings: [],
-    moduleBindings: [],
+
   };
 
   const stubSys: SystemIR = {
     name: "Mini",
-    modules: [],
+    subdomains: [], dataSources: [],
     deployables: [stubDeployable],
     e2eTests: [],
     uis: [],
@@ -801,16 +801,16 @@ describe("JWT auth emission (auth-emit unit)", () => {
   const baseDeployable: DeployableIR = {
     name: "phoenixApp",
     platform: "phoenixLiveView",
-    moduleNames: ["Sales"],
+    contextNames: ["Customers"], dataSourceNames: [],
     port: 4000,
     serves: ["SalesApi"],
     uiBindings: [],
-    moduleBindings: [],
+
   };
 
   const baseSys: SystemIR = {
     name: "Mini",
-    modules: [],
+    subdomains: [], dataSources: [],
     deployables: [baseDeployable],
     e2eTests: [],
     uis: [],
@@ -930,7 +930,7 @@ describe("JWT auth emission (auth-emit unit)", () => {
 
 describe("router wiring (orchestrator integration)", () => {
   const AUTH_FIXTURE = `system MiniAuth {
-  module Sales {
+  subdomain Sales {
     context Sales {
       aggregate Customer {
         name: string
@@ -941,7 +941,7 @@ describe("router wiring (orchestrator integration)", () => {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin with scaffold(modules: [Sales]) {
+  ui SalesAdmin with scaffold(subdomains: [Sales]) {
   }
   user {
     id: guid
@@ -949,7 +949,7 @@ describe("router wiring (orchestrator integration)", () => {
   }
   deployable phoenixApp {
     platform: phoenixLiveView,
-    modules: Sales,
+    contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,
     port: 4000,
@@ -1126,7 +1126,7 @@ import { lowerModel } from "../../../src/ir/lower/lower.js";
 import { buildWireSpec } from "../../../src/system/wire-spec.js";
 
 const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
-  module Sales {
+  subdomain Sales {
     context Sales {
       enum OrderStatus { Draft, Confirmed }
       valueobject Money {
@@ -1165,10 +1165,10 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin with scaffold(modules: [Sales]) {}
+  ui SalesAdmin with scaffold(subdomains: [Sales]) {}
   deployable phoenixApp {
     platform: phoenixLiveView
-    modules: Sales
+    contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
     port: 4000
@@ -1698,7 +1698,7 @@ describe("Ash.transaction/2 domain-list form (workflow-emit unit)", () => {
 // ---------------------------------------------------------------------------
 
 const ACME_UI_E2E_SOURCE = `system AcmeUI {
-  module Sales {
+  subdomain Sales {
     context Sales {
       aggregate Customer {
         name: string
@@ -1709,10 +1709,10 @@ const ACME_UI_E2E_SOURCE = `system AcmeUI {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin with scaffold(modules: [Sales]) {}
+  ui SalesAdmin with scaffold(subdomains: [Sales]) {}
   deployable phoenixApp {
     platform: phoenixLiveView
-    modules: Sales
+    contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
     port: 4000
@@ -1786,7 +1786,7 @@ describe("cross-platform UI parity (test e2e ui against phoenixLiveView)", () =>
 // ---------------------------------------------------------------------------
 
 const FORM_FIXTURE = `system AcmeForm {
-  module Sales {
+  subdomain Sales {
     context Sales {
       aggregate Customer {
         name: string
@@ -1802,10 +1802,10 @@ const FORM_FIXTURE = `system AcmeForm {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin with scaffold(modules: [Sales]) {}
+  ui SalesAdmin with scaffold(subdomains: [Sales]) {}
   deployable phoenixApp {
     platform: phoenixLiveView
-    modules: Sales
+    contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
     port: 4000
@@ -1896,16 +1896,16 @@ describe("Per-aggregate controller emission (api-emit unit)", () => {
   const stubDeployable: DeployableIR = {
     name: "phoenixApp",
     platform: "phoenixLiveView",
-    moduleNames: ["Sales"],
+    contextNames: ["Customers"], dataSourceNames: [],
     port: 4000,
     serves: ["SalesApi"],
     uiBindings: [],
-    moduleBindings: [],
+
   };
 
   const stubSys: SystemIR = {
     name: "Mini",
-    modules: [],
+    subdomains: [], dataSources: [],
     deployables: [stubDeployable],
     e2eTests: [],
     uis: [],
@@ -2148,16 +2148,16 @@ describe("Per-operation + per-find route emission (api-emit unit)", () => {
   const stubDeployable: DeployableIR = {
     name: "phoenixApp",
     platform: "phoenixLiveView",
-    moduleNames: ["Sales"],
+    contextNames: ["Customers"], dataSourceNames: [],
     port: 4000,
     serves: ["SalesApi"],
     uiBindings: [],
-    moduleBindings: [],
+
   };
 
   const stubSys: SystemIR = {
     name: "Mini",
-    modules: [],
+    subdomains: [], dataSources: [],
     deployables: [stubDeployable],
     e2eTests: [],
     uis: [],
@@ -2328,15 +2328,15 @@ describe("OpenAPI spec — per-op + per-find paths", () => {
     const deployable: DeployableIR = {
       name: "phoenixApp",
       platform: "phoenixLiveView",
-      moduleNames: ["Sales"],
+      contextNames: ["Customers"], dataSourceNames: [],
       port: 4000,
       serves: ["SalesApi"],
       uiBindings: [],
-      moduleBindings: [],
+  
     };
     const sys: SystemIR = {
       name: "Mini",
-      modules: [],
+      subdomains: [], dataSources: [],
       deployables: [deployable],
       e2eTests: [],
       uis: [],
@@ -2616,7 +2616,7 @@ describe("Ash 3.x compile-correctness regressions", () => {
     // doesn't apply when the caller invokes the module function.
     const src = `
       system Bank {
-        module M {
+        subdomain M {
           context People {
             aggregate Person {
               fullName: string
@@ -2626,7 +2626,7 @@ describe("Ash 3.x compile-correctness regressions", () => {
             repository People for Person {}
           }
         }
-        deployable api { platform: phoenixLiveView, modules: M, port: 4000 }
+        deployable api { platform: phoenixLiveView, contexts: [C], port: 4000 }
       }
     `;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-inspect-redact-"));
@@ -2756,15 +2756,15 @@ describe("renderTelemetry --trace (telemetry-emit unit)", () => {
     const deployable: DeployableIR = {
       name: "phoenix_app",
       platform: "phoenixLiveView",
-      moduleNames: ["Sales"],
+      contextNames: ["Customers"], dataSourceNames: [],
       port: 4000,
       serves: [],
       uiBindings: [],
-      moduleBindings: [],
+  
     };
     const baseSys: SystemIR = {
       name: "Mini",
-      modules: [],
+      subdomains: [], dataSources: [],
       deployables: [deployable],
       e2eTests: [],
       uis: [],
@@ -2801,7 +2801,7 @@ describe("renderTelemetry --trace (telemetry-emit unit)", () => {
 // lowering + op `manage_relationship` mutations.
 describe("reference-collection join tables (Phoenix/Ash)", () => {
   const ROSTER_SOURCE = `system Roster {
-  module Roster {
+  subdomain Roster {
     context Roster {
       aggregate Pokemon { species: string  level: int  derived display: string = species }
       aggregate Trainer {
@@ -2825,8 +2825,8 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
     }
   }
   api RosterApi from Roster
-  ui RosterAdmin with scaffold(modules: [Roster]) { }
-  deployable phoenixApp { platform: phoenixLiveView  modules: Roster  serves: RosterApi  ui: RosterAdmin  port: 4000 }
+  ui RosterAdmin with scaffold(subdomains: [Roster]) { }
+  deployable phoenixApp { platform: phoenixLiveView  contexts: [Roster]  serves: RosterApi  ui: RosterAdmin  port: 4000 }
 }
 `;
 
@@ -2957,7 +2957,7 @@ describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
   it("emits lib/<app>/jason_camel_case.ex with encode_struct/3", async () => {
     const dsl = `
       system Mini {
-        module Sales {
+        subdomain Sales {
           context Sales {
             aggregate Project ids guid {
               name: string
@@ -2966,10 +2966,10 @@ describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
           }
         }
         api SalesApi from Sales
-        ui SalesUi with scaffold(modules: [Sales]) { }
+        ui SalesUi with scaffold(subdomains: [Sales]) { }
         deployable phoenixApp {
           platform: phoenixLiveView
-          modules: Sales
+          contexts: [Sales]
           serves: SalesApi
           ui: SalesUi
           port: 4000
@@ -3006,7 +3006,7 @@ describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
     // their wire shape.
     const dsl = `
       system Mini {
-        module Sales {
+        subdomain Sales {
           context Sales {
             valueobject Money {
               amount: decimal
@@ -3020,10 +3020,10 @@ describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
           }
         }
         api SalesApi from Sales
-        ui SalesUi with scaffold(modules: [Sales]) { }
+        ui SalesUi with scaffold(subdomains: [Sales]) { }
         deployable phoenixApp {
           platform: phoenixLiveView
-          modules: Sales
+          contexts: [Sales]
           serves: SalesApi
           ui: SalesUi
           port: 4000

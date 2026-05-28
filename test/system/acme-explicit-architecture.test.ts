@@ -75,17 +75,19 @@ describe("examples/acme.ddd — explicit architecture migration", () => {
     ]);
   });
 
-  it("backend `api` deployable serves all three contracts + maps each module to primarySql", async () => {
+  it("backend `api` deployable serves all three contracts + binds each context to primarySql via dataSources", async () => {
     const { doc } = await build();
     const sys = lowerModel(doc.parseResult.value as Model).systems[0]!;
     const api = sys.deployables.find((d) => d.name === "api")!;
     expect(api).toBeDefined();
     expect(api.serves.sort()).toEqual(["CatalogApi", "CustomerMgmtApi", "SalesApi"]);
-    // Each module's primary storage is primarySql.
-    for (const mb of api.moduleBindings) {
-      const primary = mb.storages.find((s) => s.role === "primary");
-      expect(primary?.storageName).toBe("primarySql");
-    }
+    // Every state-kind dataSource the api lists points at primarySql.
+    const dataSources = api.dataSourceNames
+      .map((n) => sys.dataSources.find((d) => d.name === n))
+      .filter((d): d is NonNullable<typeof d> => d != null);
+    const stateBindings = dataSources.filter((d) => d.kind === "state");
+    expect(stateBindings.length).toBeGreaterThan(0);
+    for (const ds of stateBindings) expect(ds.storageName).toBe("primarySql");
   });
 
   it("frontend `webApp` deployable binds every UI param to the api backend", async () => {

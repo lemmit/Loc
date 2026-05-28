@@ -14,6 +14,7 @@ import {
   type Aggregate,
   type EntityPart,
   isAggregate,
+  isBoundedContext,
   isComponent,
   isContainment,
   isEntityPart,
@@ -107,6 +108,18 @@ export class DddScopeComputation extends DefaultScopeComputation {
     for (const node of AstUtils.streamAllContents(document.parseResult.value)) {
       if (cancelToken?.isCancellationRequested) break;
       if (isAggregate(node) || isEntityPart(node) || isValueObject(node) || isEnumDecl(node)) {
+        const name = this.nameProvider.getName(node);
+        if (name) {
+          exports.push(this.descriptions.createDescription(node, name, document));
+        }
+      }
+      // D-STORAGE-SPLIT: bounded contexts are exported by bare name so
+      // a `deployable.contexts: [Catalog]` cross-reference (declared as
+      // `[BoundedContext:ID]`) resolves without forcing the source to
+      // spell the qualified path.  The Targetable export below also
+      // produces a qualified-name entry — that one stays for
+      // traceability `covers`/`entitles` references.
+      if (isBoundedContext(node)) {
         const name = this.nameProvider.getName(node);
         if (name) {
           exports.push(this.descriptions.createDescription(node, name, document));

@@ -5,7 +5,7 @@ import {
 } from "../../../web/src/builder/system-v2/deployable-edge-rebind.js";
 
 const SRC = `system S {
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Order {
       }
@@ -15,8 +15,8 @@ const SRC = `system S {
   }
   ui Mobile {
   }
-  deployable api { platform: hono, modules: Sales, port: 3000 }
-  deployable other { platform: hono, modules: Sales, port: 3100 }
+  deployable api { platform: hono, contexts: [Sales], port: 3000 }
+  deployable other { platform: hono, contexts: [Sales], port: 3100 }
   deployable webApp { platform: react, targets: api, ui: Web, port: 3001 }
 }`;
 

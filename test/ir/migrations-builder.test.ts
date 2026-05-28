@@ -21,7 +21,7 @@ import { buildLoomModel } from "../_helpers/index.js";
 
 const SHOP_SOURCE = `
 system Shop {
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Order ids guid {
         customer: Customer id
@@ -36,14 +36,14 @@ system Shop {
       repository Customers for Customer { }
     }
   }
-  deployable api { platform: hono, modules: Sales, port: 3000 }
+  deployable api { platform: hono, contexts: [Sales], port: 3000 }
 }
 `;
 
 async function loadShop() {
   const loom = await buildLoomModel(SHOP_SOURCE);
   const sys = loom.systems[0]!;
-  const module = sys.modules[0]!;
+  const module = sys.subdomains[0]!;
   return { loom, sys, module };
 }
 
@@ -254,9 +254,9 @@ describe("buildMigrations", () => {
     // Two modules, only one is reachable from a needsDb deployable.
     const loom = await buildLoomModel(`
 system Twin {
-  module A { context Ca { aggregate X ids guid { n: int } } }
-  module B { context Cb { aggregate Y ids guid { n: int } } }
-  deployable api { platform: hono, modules: A, port: 3000 }
+  subdomain A { context Ca { aggregate X ids guid { n: int } } }
+  subdomain B { context Cb { aggregate Y ids guid { n: int } } }
+  deployable api { platform: hono, contexts: [A], port: 3000 }
 }
 `);
     const out = buildMigrations(loom.systems[0]!, memorySnapshotStore());
@@ -267,16 +267,16 @@ system Twin {
 describe("migrationsOwner enrichment", () => {
   it("uses the first needsDb deployable for bare modules-list deployables", async () => {
     const { sys } = await loadShop();
-    expect(sys.modules[0]!.migrationsOwner).toBe("api");
+    expect(sys.subdomains[0]!.migrationsOwner).toBe("api");
   });
 
   it("prefers an explicit primary storage binding over declaration order", async () => {
     const loom = await buildLoomModel(`
 system S {
-  module M { context C { aggregate X ids guid { n: int } } }
+  subdomain M { context C { aggregate X ids guid { n: int } } }
   storage pg { type: postgres }
-  deployable first { platform: hono, modules: M, port: 3000 }
-  deployable second { platform: dotnet, modules: M { primary: pg }, port: 3001 }
+  deployable first { platform: hono, contexts: [C], port: 3000 }
+  deployable second { platform: dotnet, contexts: [C], port: 3001 }
 }
 `);
     expect(loom.systems[0]!.modules[0]!.migrationsOwner).toBe("second");

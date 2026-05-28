@@ -13,7 +13,7 @@ const SOURCE = `
   requirement US-002 { type: UserStory  title: "Uncovered" }
 
   system Shop {
-    module Identity {
+    subdomain Identity {
       context Auth {
         aggregate LoginSession {
           operation start() {}
@@ -21,7 +21,7 @@ const SOURCE = `
         }
       }
     }
-    deployable api { platform: hono  modules: Identity }
+    deployable api { platform: hono  contexts: [Identity] }
     test e2e "session can be started" against api verifies TC-002 {}
   }
 
@@ -97,11 +97,11 @@ describe("computeVerification", () => {
       requirement R1 { type: UserStory  title: "a" }
       requirement R2 { type: UserStory  title: "b" }
       system S {
-        module M { context C {
+        subdomain M { context C {
           aggregate Alpha { operation go() {}  test "create works" verifies T1 {} }
           aggregate Beta  { operation go() {}  test "create works" verifies T2 {} }
         } }
-        deployable api { platform: hono  modules: M }
+        deployable api { platform: hono  contexts: [C] }
       }
       testCase T1 verifies R1 { covers [ M.C.Alpha.go ] }
       testCase T2 verifies R2 { covers [ M.C.Beta.go ] }

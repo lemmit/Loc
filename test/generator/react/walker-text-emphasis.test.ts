@@ -27,14 +27,14 @@ async function buildAndGenerate(src: string): Promise<Map<string, string>> {
 function pageSrc(body: string): string {
   return `
     system S {
-      module M { context C { } }
+      subdomain M { context C { } }
       ui WebApp {
         page Home {
           route: "/"
           body: ${body}
         }
       }
-      deployable api { platform: hono, modules: M, port: 3000 }
+      deployable api { platform: hono, contexts: [C], port: 3000 }
       deployable web {
         platform: static
         targets: api

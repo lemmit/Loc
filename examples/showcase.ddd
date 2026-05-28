@@ -55,7 +55,7 @@ system DevPlatform {
     // -----------------------------------------------------------------
     // Projects module — registry of projects + their build pipelines.
     // -----------------------------------------------------------------
-    module Projects {
+    subdomain Projects {
 
         permissions { manageProjects, viewReports }
 
@@ -194,7 +194,7 @@ system DevPlatform {
     // -----------------------------------------------------------------
     // Delivery module — builds + deployments.
     // -----------------------------------------------------------------
-    module Delivery {
+    subdomain Delivery {
         context Builds {
 
             enum BuildState { Queued, Running, Passed, Failed }
@@ -241,7 +241,7 @@ system DevPlatform {
     // -----------------------------------------------------------------
     // Accounts module — engineers (wire-validation showcase).
     // -----------------------------------------------------------------
-    module Accounts {
+    subdomain Accounts {
         context People {
 
             aggregate Engineer {
@@ -425,16 +425,20 @@ system DevPlatform {
     }
 
     // ----- UI 3: scaffold-only (sugar binding target, no api params) -----
-    ui Admin with scaffold(modules: [Accounts]) {
+    ui Admin with scaffold(subdomains: [Accounts]) {
     }
 
-    // ----- Backend deployables (same modules for OpenAPI parity) -----
+    // ----- DataSources: per-(context, kind) bindings to physical storages -----
+    dataSource catalogState  { for: Catalog, kind: state, use: primarySql }
+    dataSource catalogCache  { for: Catalog, kind: cache, use: hotCache }
+    dataSource buildsState   { for: Builds,  kind: state, use: primarySql }
+    dataSource peopleState   { for: People,  kind: state, use: primarySql }
+
+    // ----- Backend deployables (same contexts for OpenAPI parity) -----
     deployable dotnetApi {
         platform: dotnet
-        modules:
-            Projects { primary: primarySql, cache: hotCache },
-            Delivery { primary: primarySql },
-            Accounts { primary: primarySql }
+        contexts: [Catalog, Builds, People]
+        dataSources: [catalogState, catalogCache, buildsState, peopleState]
         serves: ProjectsApi, DeliveryApi, AccountsApi
         port: 8080
         auth: required
@@ -442,10 +446,8 @@ system DevPlatform {
 
     deployable honoApi {
         platform: hono
-        modules:
-            Projects { primary: primarySql },
-            Delivery { primary: primarySql },
-            Accounts { primary: primarySql }
+        contexts: [Catalog, Builds, People]
+        dataSources: [catalogState, buildsState, peopleState]
         serves: ProjectsApi, DeliveryApi, AccountsApi
         port: 3000
         auth: required
@@ -453,10 +455,8 @@ system DevPlatform {
 
     deployable phoenixApi {
         platform: phoenixLiveView
-        modules:
-            Projects { primary: primarySql },
-            Delivery { primary: primarySql },
-            Accounts { primary: primarySql }
+        contexts: [Catalog, Builds, People]
+        dataSources: [catalogState, buildsState, peopleState]
         serves: ProjectsApi, DeliveryApi, AccountsApi
         port: 4000
         auth: required

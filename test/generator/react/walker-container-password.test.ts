@@ -16,14 +16,14 @@ describe("Container + PasswordField primitives", () => {
   it("Container { ...children } emits Mantine <Container> wrapper", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
             body:  Container { Stack { Heading { "Hi" }, Text { "body" } } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -43,14 +43,14 @@ describe("Container + PasswordField primitives", () => {
   it("Container { size: 'sm' } passes the size attr through", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
             body:  Container { Heading { "Compact" }, size: "sm" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -66,14 +66,14 @@ describe("Container + PasswordField primitives", () => {
   it("empty Container {} self-closes", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
             body:  Container {}
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -89,7 +89,7 @@ describe("Container + PasswordField primitives", () => {
   it("PasswordField { 'Password', bind: pwd } wires controlled PasswordInput", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Login {
             route: "/login"
@@ -97,7 +97,7 @@ describe("Container + PasswordField primitives", () => {
             body:  PasswordField { "Password", bind: pwd }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -117,14 +117,14 @@ describe("Container + PasswordField primitives", () => {
   it("PasswordField without bind: emits a label-only stub", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
             body:  PasswordField { "Bare" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -141,7 +141,7 @@ describe("Container + PasswordField primitives", () => {
   it("Container + PasswordField + Field — full sign-in form composes cleanly", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Login {
             route: "/login"
@@ -160,7 +160,7 @@ describe("Container + PasswordField primitives", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

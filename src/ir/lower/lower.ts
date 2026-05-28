@@ -10,6 +10,7 @@ import type {
   Component,
   ConnectionSource,
   Containment,
+  DataSource,
   Deployable,
   DerivedProp,
   EntityPart,
@@ -61,7 +62,6 @@ import {
   isInvariant,
   isLetStmt,
   isMemberSuffix,
-  isModule,
   isNameRef,
   isObjectLit,
   isOperation,
@@ -73,6 +73,7 @@ import {
   isRequirement,
   isRequiresStmt,
   isSolution,
+  isSubdomain,
   isSystem,
   isTestBlock,
   isTestCase,
@@ -94,6 +95,8 @@ import type {
   ConnectionSourceIR,
   ContainmentIR,
   ContextStampIR,
+  DataSourceIR,
+  DataSourceKind,
   DeployableIR,
   DerivedIR,
   EntityPartIR,
@@ -108,9 +111,6 @@ import type {
   MenuBlockIR,
   MenuLinkIR,
   MenuMetaIR,
-  ModuleBindingIR,
-  ModuleIR,
-  ModuleStorageRole,
   OperationIR,
   PageIR,
   PageLayoutIR,
@@ -129,6 +129,7 @@ import type {
   StmtIR,
   StorageIR,
   StorageKind,
+  SubdomainIR,
   SystemIR,
   TestCaseIR,
   TestE2EIR,
@@ -363,8 +364,8 @@ function lowerCodeRefs(refs: readonly Reference<Targetable>[]): CodeRefIR[] {
 
 function codeRefKindOf(node: Targetable): CodeRefKind {
   switch (node.$type) {
-    case "Module":
-      return "module";
+    case "Subdomain":
+      return "subdomain";
     case "BoundedContext":
       return "context";
     case "Aggregate":
@@ -416,15 +417,15 @@ function lowerSystem(sys: System): SystemIR {
       theme = lowerTheme(m);
     }
   }
-  const modules: ModuleIR[] = [];
+  const subdomains: SubdomainIR[] = [];
   const deployables: DeployableIR[] = [];
   const e2eBlocks: TestE2E[] = [];
   // Bare `context` declarations directly under a `system` block live in
-  // an implicit anonymous module so we can index them like any other.
+  // an implicit anonymous subdomain so we can index them like any other.
   const looseContexts: BoundedContextIR[] = [];
   for (const m of sys.members) {
-    if (isModule(m)) {
-      // Module-scoped permissions catalogue.  Multiple
+    if (isSubdomain(m)) {
+      // Subdomain-scoped permissions catalogue.  Multiple
       // `permissions { ... }` blocks merge their declarations;
       // the runtime string is computed once here so emitters and
       // resolvers don't have to spell the convention separately.
@@ -438,13 +439,13 @@ function lowerSystem(sys: System): SystemIR {
           });
         }
       }
-      modules.push({
+      subdomains.push({
         name: m.name,
         contexts: m.contexts.map((c) => lowerContext(c, user, permissions)),
         permissions,
       });
     } else if (isBoundedContext(m)) {
-      // Loose contexts under a system don't sit inside a module,
+      // Loose contexts under a system don't sit inside a subdomain,
       // so `permissions.X` references inside them stay unresolved
       // (the validator will surface a friendly diagnostic).
       looseContexts.push(lowerContext(m, user));
@@ -455,9 +456,9 @@ function lowerSystem(sys: System): SystemIR {
     }
   }
   if (looseContexts.length > 0) {
-    modules.push({ name: "_default", contexts: looseContexts, permissions: [] });
+    subdomains.push({ name: "_default", contexts: looseContexts, permissions: [] });
   }
-  // React deployable's `moduleNames` inheritance from `targets:` is
+  // React deployable's `contextNames` inheritance from `targets:` is
   // an enrichment, not a structural lowering — see
   // `src/ir/enrich/enrichments.ts`.
   // E2E test bodies reference the magic `api.<aggregate>.<method>(…)`
@@ -523,6 +524,28 @@ function lowerSystem(sys: System): SystemIR {
         ...(s.connection ? { connection: lowerConnectionSource(s.connection) } : {}),
       }),
     );
+  const dataSources = sys.members
+    .filter((m): m is DataSource => m.$type === "DataSource")
+    .map(
+      (d): DataSourceIR => ({
+        name: d.name,
+        contextName: d.context?.ref?.name ?? "",
+        kind: d.kind as DataSourceKind,
+        storageName: d.use?.ref?.name ?? "",
+        ...(d.schema ? { schema: d.schema } : {}),
+        ...(d.tablePrefix ? { tablePrefix: d.tablePrefix } : {}),
+        ...(d.keyPrefix ? { keyPrefix: d.keyPrefix } : {}),
+        ...(typeof d.ttl === "number" ? { ttl: d.ttl } : {}),
+        ...(typeof d.every === "number" ? { every: d.every } : {}),
+        ...(typeof d.retain === "number" ? { retain: d.retain } : {}),
+        ...(d.isolationLevel
+          ? {
+              isolationLevel: d.isolationLevel as DataSourceIR["isolationLevel"],
+            }
+          : {}),
+        ...(d.readonly ? { readonly: true } : {}),
+      }),
+    );
   // Named `layout <Name> { … }` SystemMembers (Phase 8).  Each slot's
   // body is a page-body-shaped expression lowered against the same
   // env shape pages use.  No params or state — layouts are static
@@ -532,7 +555,7 @@ function lowerSystem(sys: System): SystemIR {
     .map((l): LayoutIR => lowerLayout(l));
   const built: SystemIR = {
     name: sys.name,
-    modules,
+    subdomains,
     deployables,
     e2eTests,
     user,
@@ -540,6 +563,7 @@ function lowerSystem(sys: System): SystemIR {
     uis,
     apis,
     storages,
+    dataSources,
     layouts,
   };
   // Scaffold expander always runs.  `page.origin` (set during page
@@ -812,21 +836,21 @@ function lowerDeployable(d: Deployable): DeployableIR {
       sourceDeployableName: b.source?.ref?.name ?? "",
     }),
   );
-  // Per-module storage bindings.
-  const moduleBindings = (d.moduleBindings ?? []).map(
-    (b): ModuleBindingIR => ({
-      moduleName: b.name?.ref?.name ?? "",
-      storages: (b.storages ?? []).map((sb) => ({
-        role: sb.role as ModuleStorageRole,
-        storageName: sb.storage?.ref?.name ?? "",
-      })),
-    }),
-  );
+  // D-STORAGE-SPLIT: `contexts:` clause references bounded contexts
+  // directly; `dataSources:` clause references the (context, kind)
+  // bindings the deployable hosts.
+  const contextNames = (d.contextRefs ?? [])
+    .map((r) => r.ref?.name ?? "")
+    .filter(Boolean);
+  const dataSourceNames = (d.dataSourceRefs ?? [])
+    .map((r) => r.ref?.name ?? "")
+    .filter(Boolean);
   return {
     name: d.name,
     platform,
     platformRef,
-    moduleNames: moduleBindings.map((b) => b.moduleName).filter(Boolean),
+    contextNames,
+    dataSourceNames,
     port: d.port ?? defaultPortFor(platform),
     targetName: d.targets?.ref?.name,
     auth,
@@ -835,7 +859,6 @@ function lowerDeployable(d: Deployable): DeployableIR {
     uiFramework,
     serves,
     uiBindings,
-    moduleBindings,
     favicon: d.favicon,
   };
 }
@@ -1176,7 +1199,7 @@ function lowerContext(
   modulePermissions?: PermissionDeclIR[],
 ): BoundedContextIR {
   // Lowering produces a faithful AST projection only.  Auto-included
-  // `findAll`, react `moduleNames` inheritance, and wire-shape
+  // `findAll`, react `contextNames` inheritance, and wire-shape
   // derivation all live in `enrichLoomModel` (src/ir/enrich/enrichments.ts)
   // which runs after lowering.  `user` (when set) threads the
   // system's user-claim shape into every expression context so the

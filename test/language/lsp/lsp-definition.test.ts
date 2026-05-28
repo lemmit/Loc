@@ -134,12 +134,12 @@ describe("DefinitionProvider — built-in cross references", () => {
     await expectDef({
       text: `
         system Acme {
-          module Sales {
+          subdomain Sales {
             context S { aggregate Order { x: int } }
           }
           deployable <|api|> {
             platform: hono
-            modules: Sales
+            contexts: [Sales]
             port: 3000
           }
           deployable web {

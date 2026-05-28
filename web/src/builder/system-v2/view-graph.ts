@@ -15,7 +15,7 @@ import type {
   EntityPart,
   EntityPartMember,
   Model,
-  Module,
+  Subdomain,
   Operation,
   Repository,
   Statement,
@@ -23,7 +23,7 @@ import type {
   SystemMember,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
-import { deployableModules, deployableServes, deployableTargets, deployableUi } from "../system/deployable-bindings";
+import { deployableContexts, deployableServes, deployableTargets, deployableUi } from "../system/deployable-bindings";
 import { computeAggregateRelations, computeEntityPartRelations } from "./aggregate-edges";
 import { computeContextRelations } from "./context-edges";
 
@@ -314,7 +314,7 @@ function systemView(ast: Model, name: string): ViewGraph {
     const childName = (m as { name?: string }).name;
     if (!childName) continue;
     switch (m.$type) {
-      case "Module":
+      case "Subdomain":
         items.push({ id: nid("module", childName), kind: "module", name: childName });
         break;
       case "BoundedContext":
@@ -341,8 +341,8 @@ function systemView(ast: Model, name: string): ViewGraph {
   const edges: VEdge[] = [];
   for (const d of deployables) {
     const src = nid("deployable", d.name);
-    for (const mod of deployableModules(d))
-      edges.push({ id: `bind:${src}->module:${mod}`, source: src, target: nid("module", mod), label: "modules", kind: "binding" });
+    for (const ctx of deployableContexts(d))
+      edges.push({ id: `bind:${src}->context:${ctx}`, source: src, target: nid("context", ctx), label: "contexts", kind: "binding" });
     for (const api of deployableServes(d))
       edges.push({ id: `bind:${src}->api:${api}`, source: src, target: nid("api", api), label: "serves", kind: "binding" });
     const ui = deployableUi(d);
@@ -363,7 +363,7 @@ function moduleView(ast: Model, name: string): ViewGraph {
   for (const m of ast.members) {
     if (m.$type === "System") {
       for (const sm of (m as System).members) {
-        if (sm.$type === "Module" && (sm as Module).name === name) mod = sm as Module;
+        if (sm.$type === "Subdomain" && (sm as Module).name === name) mod = sm as Module;
       }
     }
   }
@@ -561,7 +561,7 @@ function contextView(ast: Model, name: string): ViewGraph {
     } else if (m.$type === "System") {
       for (const sm of (m as System).members) {
         if (sm.$type === "BoundedContext" && (sm as BoundedContext).name === name) ctx = sm as BoundedContext;
-        if (sm.$type === "Module") {
+        if (sm.$type === "Subdomain") {
           for (const c of (sm as Module).contexts) if (c.name === name) ctx = c;
         }
       }
@@ -789,7 +789,7 @@ function aggregateView(ast: Model, name: string): ViewGraph {
           for (const cm of (sm as BoundedContext).members)
             if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) agg = cm as Aggregate;
         }
-        if (sm.$type === "Module") {
+        if (sm.$type === "Subdomain") {
           for (const c of (sm as Module).contexts) {
             for (const cm of c.members)
               if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) agg = cm as Aggregate;
@@ -937,7 +937,7 @@ function findEntityPart(ast: Model, name: string): EntityPart | undefined {
               for (const am of cm.members) if (am.$type === "EntityPart" && am.name === name) return am;
             }
           }
-        } else if (sm.$type === "Module") {
+        } else if (sm.$type === "Subdomain") {
           for (const c of sm.contexts) {
             for (const cm of c.members) {
               if (cm.$type === "Aggregate") {
@@ -1062,7 +1062,7 @@ export function findAggregate(ast: Model, name: string): Aggregate | undefined {
           for (const cm of (sm as BoundedContext).members)
             if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) return cm as Aggregate;
         }
-        if (sm.$type === "Module") {
+        if (sm.$type === "Subdomain") {
           for (const c of (sm as Module).contexts) {
             for (const cm of c.members)
               if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) return cm as Aggregate;
@@ -1092,7 +1092,7 @@ function findWorkflow(ast: Model, name: string): Workflow | undefined {
           const wf = visit((sm as BoundedContext).members);
           if (wf) return wf;
         }
-        if (sm.$type === "Module") {
+        if (sm.$type === "Subdomain") {
           for (const c of (sm as Module).contexts) {
             const wf = visit(c.members);
             if (wf) return wf;
@@ -1157,7 +1157,7 @@ function findRepository(ast: Model, name: string): Repository | undefined {
           const r = visit((sm as BoundedContext).members);
           if (r) return r;
         }
-        if (sm.$type === "Module") {
+        if (sm.$type === "Subdomain") {
           for (const c of (sm as Module).contexts) {
             const r = visit(c.members);
             if (r) return r;

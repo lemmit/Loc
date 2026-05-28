@@ -30,14 +30,14 @@ describe("function + method calls in walker bodies", () => {
   it("bare function-call statement in onClick lambda emits as a JS call", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
             body:  Button { "Save", onClick: e => { saveOrder() } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -53,7 +53,7 @@ describe("function + method calls in walker bodies", () => {
   it("function-call expression in let RHS emits inline", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -64,7 +64,7 @@ describe("function + method calls in walker bodies", () => {
             }}
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -88,7 +88,7 @@ describe("function + method calls in walker bodies", () => {
     // shape).
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -96,7 +96,7 @@ describe("function + method calls in walker bodies", () => {
             body:  Button { "Sync", onClick: e => { Orders.create(draft) } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -114,7 +114,7 @@ describe("function + method calls in walker bodies", () => {
   it("function call in text-position expression renders as JSX expr", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -122,7 +122,7 @@ describe("function + method calls in walker bodies", () => {
             body:  Text { "doubled: " + double(count) }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -138,7 +138,7 @@ describe("function + method calls in walker bodies", () => {
   it("method call with multiple args + state ref still emits placeholder", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -149,7 +149,7 @@ describe("function + method calls in walker bodies", () => {
             body:  Button { "Mix", onClick: e => { mixer.combine(a, b, "extra") } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

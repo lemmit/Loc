@@ -9,7 +9,7 @@ import crudish from "./crudish.macro.js";
 import scaffold from "./scaffold/scaffold.macro.js";
 import scaffoldAggregate from "./scaffold/scaffoldAggregate.macro.js";
 import scaffoldContext from "./scaffold/scaffoldContext.macro.js";
-import scaffoldModule from "./scaffold/scaffoldModule.macro.js";
+import scaffoldSubdomain from "./scaffold/scaffoldSubdomain.macro.js";
 import scaffoldView from "./scaffold/scaffoldView.macro.js";
 import scaffoldWorkflow from "./scaffold/scaffoldWorkflow.macro.js";
 import softDeletable from "./softDelete/softDeletable.macro.js";
@@ -43,13 +43,13 @@ export function loadStdlibMacros(): void {
   // Other capabilities
   registerMacro(crudish);
   // Scaffold family: leaves + composers + top-level dispatcher.
-  // Composability all the way: scaffold → scaffoldModule →
+  // Composability all the way: scaffold → scaffoldSubdomain →
   // scaffoldContext → scaffoldAggregate / Workflow / View.
   registerMacro(scaffoldAggregate);
   registerMacro(scaffoldWorkflow);
   registerMacro(scaffoldView);
   registerMacro(scaffoldContext);
-  registerMacro(scaffoldModule);
+  registerMacro(scaffoldSubdomain);
   registerMacro(scaffold);
 }
 

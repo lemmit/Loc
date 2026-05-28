@@ -34,7 +34,7 @@ async function parseModel(
 
 const SYSTEM = (body: string) => `
 system S {
-  module M {
+  subdomain M {
     context C {
       aggregate Cart ids guid {
         label: string
@@ -51,7 +51,7 @@ ${body}
       }
     }
   }
-  deployable api { platform: hono, modules: M, port: 3000 }
+  deployable api { platform: hono, contexts: [C], port: 3000 }
 }
 `;
 
@@ -94,7 +94,7 @@ system S { module M { context C {
     operation noop(x: int) { precondition x > 0 }
   }
   repository Carts for Cart { find byLabel(label: string): Cart? where this.label == label }
-} } deployable api { platform: hono, modules: M, port: 3000 } }
+} } deployable api { platform: hono, contexts: [C], port: 3000 } }
 `;
     const { warnings } = await parseModel(src);
     expect(warnings.some((w) => /Provenanced field 'total'.*never written/.test(w))).toBe(true);

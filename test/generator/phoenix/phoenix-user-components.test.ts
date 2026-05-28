@@ -15,7 +15,7 @@ import type { Model } from "../../../src/language/generated/ast.js";
 import { generateSystems } from "../../../src/system/index.js";
 
 const SOURCE = `system MiniLiveView {
-  module Sales {
+  subdomain Sales {
     context Sales {
       aggregate Customer {
         name: string
@@ -40,7 +40,7 @@ const SOURCE = `system MiniLiveView {
 
   deployable phoenixApp {
     platform: phoenixLiveView,
-    modules: Sales,
+    contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,
     port: 4000

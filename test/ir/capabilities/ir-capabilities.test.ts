@@ -29,7 +29,7 @@ describe("macro capabilities propagate to AggregateIR", () => {
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }
-        module M { context C with audit {
+        subdomain M { context C with audit {
           aggregate Order with auditable {
             subject: string
           }
@@ -51,7 +51,7 @@ describe("macro capabilities propagate to AggregateIR", () => {
   it("softDelete + softDeletable trio populates contextFilters with one predicate", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M { context C with softDelete {
+        subdomain M { context C with softDelete {
           aggregate Doc with softDeletable {
             subject: string
           }
@@ -77,7 +77,7 @@ describe("macro capabilities propagate to AggregateIR", () => {
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }
-        module M { context C with audit, softDelete {
+        subdomain M { context C with audit, softDelete {
           aggregate Order with auditable, softDeletable {
             subject: string
           }
@@ -96,7 +96,7 @@ describe("macro capabilities propagate to AggregateIR", () => {
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }
-        module M { context C {
+        subdomain M { context C {
           aggregate Order with auditable {
             subject: string
           }
@@ -111,7 +111,7 @@ describe("macro capabilities propagate to AggregateIR", () => {
   it("aggregates without macros have undefined capabilities", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M { context C {
+        subdomain M { context C {
           aggregate Plain {
             subject: string
           }

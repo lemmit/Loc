@@ -93,7 +93,7 @@ export interface MigrationsIR {
    *  compose databases ⇒ each owns its own migration files). */
   module: string;
   /** Optional storage binding name (`pg`, `analyticsDb`).  Empty string when
-   *  the deployable used the bare `modules: Sales` form. */
+   *  the deployable used the bare `contexts: [Sales]` form. */
   storageName: string;
   /** Snapshot read from disk on the previous regen; `null` on first run. */
   baseline: SchemaSnapshot | null;

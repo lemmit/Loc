@@ -27,14 +27,14 @@ requirement AC-001 parent US-001 {
 }
 
 system Shop {
-  module Identity {
+  subdomain Identity {
     context Auth {
       aggregate LoginSession {
         operation start() {}
       }
     }
   }
-  deployable AuthApi { platform: hono  modules: Identity }
+  deployable AuthApi { platform: hono  contexts: [Identity] }
 }
 
 solution SOL-001 for US-001 {

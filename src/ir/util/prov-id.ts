@@ -54,7 +54,7 @@ export function opHasProvSite(op: { statements: StmtIR[] }): boolean {
  *  instrumented provenanced write-site.  Drives emission of the runtime
  *  SDK + the `.loomsnap.json` artefact. */
 export function hasAnyProvSite(sys: SystemIR): boolean {
-  for (const mod of sys.modules) {
+  for (const mod of sys.subdomains) {
     for (const ctx of mod.contexts) {
       for (const agg of ctx.aggregates) {
         for (const op of agg.operations) {

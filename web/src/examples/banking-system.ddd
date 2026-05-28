@@ -36,7 +36,7 @@ system BankingSystem {
     fontFamily: "system-ui, -apple-system, sans-serif"
   }
 
-  module Banking {
+  subdomain Banking {
     context Banking {
 
       enum AccountStatus { Open, Frozen, Closed }
@@ -178,7 +178,7 @@ system BankingSystem {
     }
   }
 
-  ui WebApp with scaffold(modules: [Banking]) {
+  ui WebApp with scaffold(subdomains: [Banking]) {
   }
 
   deployable api { platform: hono, modules: Banking, port: 3000 }

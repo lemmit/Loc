@@ -9,7 +9,7 @@ export type {
   AggregateMember,
   BoundedContext,
   FieldAccess,
-  Module,
+  Subdomain,
   Operation,
   Page,
   Parameter,

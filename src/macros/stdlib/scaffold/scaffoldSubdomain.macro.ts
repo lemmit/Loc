@@ -1,25 +1,25 @@
-import type { Module } from "../../api/index.js";
+import type { Subdomain } from "../../api/index.js";
 import { defineMacro } from "../../api/index.js";
 
 /** Composer: invokes `scaffoldContext` for each bounded context in
- * the named module.  Top of the per-element scaffold composer
- * chain — `scaffold(modules: [M])` itself fans this macro across
- * the user-supplied module list.
+ * the named subdomain.  Top of the per-element scaffold composer
+ * chain — `scaffold(subdomains: [S])` itself fans this macro across
+ * the user-supplied subdomain list.
  *
- * Unfolding `with scaffoldModule(of: Sales)` produces one
+ * Unfolding `with scaffoldSubdomain(of: Sales)` produces one
  * `with scaffoldContext(of: <Ctx>)` per context inside Sales. */
 export default defineMacro({
-  name: "scaffoldModule",
+  name: "scaffoldSubdomain",
   target: "ui",
   apiVersion: 1,
   description:
     "Fans `scaffoldContext` across every bounded context in the named " +
-    "module.  Mid-level composer in the scaffold-macro family.",
+    "subdomain.  Mid-level composer in the scaffold-macro family.",
   params: {
-    of: { kind: "ref", of: "Module" },
+    of: { kind: "ref", of: "Subdomain" },
   },
   expand({ target, args, invokeMacro }) {
-    const mod = args.of as Module;
+    const mod = args.of as Subdomain;
     const out: unknown[] = [];
     for (const ctx of mod.contexts ?? []) {
       out.push(...invokeMacro("scaffoldContext", { target, args: { of: ctx } }));

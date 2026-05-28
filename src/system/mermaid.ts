@@ -6,7 +6,7 @@ import type {
   EntityPartIR,
   FieldIR,
   FunctionIR,
-  ModuleIR,
+  SubdomainIR,
   OperationIR,
   ParamIR,
   SystemIR,
@@ -104,7 +104,7 @@ export function buildDomainDiagram(sys: SystemIR): string {
   const rels = new Set<string>();
   const rel = (s: string): void => void rels.add(s);
 
-  for (const m of sys.modules) {
+  for (const m of sys.subdomains) {
     for (const c of m.contexts) {
       classes.push(`  %% ${m.name} / ${c.name}`);
       for (const e of c.enums) classes.push(...enumClass(e.name, e.values));
@@ -254,7 +254,7 @@ function collectFieldEdges(
 
 export function buildWorkflowDiagram(sys: SystemIR): string {
   const workflows: { ctx: string; wf: WorkflowIR }[] = [];
-  for (const m of sys.modules) {
+  for (const m of sys.subdomains) {
     for (const c of m.contexts) {
       for (const wf of c.workflows) workflows.push({ ctx: c.name, wf });
     }
@@ -372,7 +372,7 @@ export function buildErDiagram(sys: SystemIR): string {
     }
   };
 
-  for (const m of sys.modules) {
+  for (const m of sys.subdomains) {
     for (const c of m.contexts) {
       for (const a of c.aggregates) {
         entities.push(...erEntity(a.name, [`${a.idValueType} id PK`, ...a.fields.map(erAttr)]));
@@ -413,7 +413,7 @@ export function buildErDiagram(sys: SystemIR): string {
 
 export function buildSequenceDiagram(sys: SystemIR): string {
   const wfs: { ctx: string; wf: WorkflowIR }[] = [];
-  for (const m of sys.modules) {
+  for (const m of sys.subdomains) {
     for (const c of m.contexts) {
       for (const wf of c.workflows) wfs.push({ ctx: c.name, wf });
     }
@@ -491,8 +491,8 @@ export function buildDeploymentDiagram(sys: SystemIR): string {
     return lines(...head, `  none["No deployables declared in this system."]`);
   }
 
-  const modules: string[] = sys.modules.map(
-    (m: ModuleIR) => `  ${nid("mod", m.name)}["📦 ${label(m.name)}"]`,
+  const modules: string[] = sys.subdomains.map(
+    (m: SubdomainIR) => `  ${nid("mod", m.name)}["📦 ${label(m.name)}"]`,
   );
   const cluster: string[] = [
     `  subgraph deployables["🚀 Deployables"]`,
@@ -507,8 +507,8 @@ export function buildDeploymentDiagram(sys: SystemIR): string {
   const edges: string[] = [];
   const known = new Set(sys.deployables.map((d) => d.name));
   for (const d of sys.deployables) {
-    for (const mod of d.moduleNames)
-      edges.push(`  ${nid("deploy", d.name)} --> ${nid("mod", mod)}`);
+    for (const ctx of d.contextNames)
+      edges.push(`  ${nid("deploy", d.name)} --> ${nid("ctx", ctx)}`);
     if (d.targetName && known.has(d.targetName)) {
       edges.push(`  ${nid("deploy", d.name)} -.->|calls| ${nid("deploy", d.targetName)}`);
     }

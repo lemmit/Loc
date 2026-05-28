@@ -6,7 +6,7 @@ export { checkBuilderCallType, checkLegacyConstructorCalls } from "./builder-cal
 export {
   checkDeployable,
   checkDeployableDesignPack,
-  checkDeployableModuleStorages,
+  checkDeployableDataSources,
   checkDeployablePlatform,
   checkDeployableServes,
   checkDeployableUiCompose,

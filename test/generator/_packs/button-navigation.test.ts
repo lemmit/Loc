@@ -13,14 +13,14 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
   it("emits useNavigate hook + onClick when to: is a string literal", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
             body:  Stack { Heading { "Welcome" }, Button { "Go to orders", to: "/orders" } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -43,7 +43,7 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
   it("multiple Buttons in a page share one useNavigate hook", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
@@ -53,7 +53,7 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -76,14 +76,14 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
   it("Button without to: stays unwired (no onClick)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
             body:  Button { "Click me" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -101,14 +101,14 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
   it("page combining route params + Button { to: } imports both useParams and useNavigate", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Detail(slug: string) {
             route: "/items/:slug"
             body:  Stack { Heading { slug }, Button { "Back", to: "/" } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -129,14 +129,14 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
   it("Button { to: <param-ref> } interpolates the param via template literal", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home(slug: string) {
             route: "/h/:slug"
             body:  Button { "Open", to: slug }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

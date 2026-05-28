@@ -60,7 +60,7 @@ describe("System graph — emit edges from operation bodies", () => {
 
 describe("System graph — diagnostics attribution", () => {
   const nested = `system S {
-  module M {
+  subdomain M {
     context C {
       aggregate Order {
         qty: int

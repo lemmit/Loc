@@ -103,7 +103,7 @@ function topCallee(expr: ExprIR | undefined): string | undefined {
 
 const SCAFFOLD_AGGREGATE_DDD = `
   system Demo {
-    module Sales {
+    subdomain Sales {
       context Orders {
         aggregate Order {
           subject: string
@@ -119,7 +119,7 @@ const SCAFFOLD_AGGREGATE_DDD = `
     }
     deployable api {
       platform: hono
-      modules: Sales
+      contexts: [Sales]
       serves: SalesApi
       port: 3000
     }
@@ -134,7 +134,7 @@ const SCAFFOLD_AGGREGATE_DDD = `
 
 const SCAFFOLD_WORKFLOW_DDD = `
   system Demo {
-    module Sales {
+    subdomain Sales {
       context Orders {
         aggregate Order { name: string derived display: string = name }
         workflow placeOrder(name: string) {}
@@ -147,7 +147,7 @@ const SCAFFOLD_WORKFLOW_DDD = `
     }
     deployable api {
       platform: hono
-      modules: Sales
+      contexts: [Sales]
       serves: SalesApi
       port: 3000
     }
@@ -162,7 +162,7 @@ const SCAFFOLD_WORKFLOW_DDD = `
 
 const SCAFFOLD_VIEW_DDD = `
   system Demo {
-    module Sales {
+    subdomain Sales {
       context Orders {
         aggregate Order { subject: string  derived display: string = subject }
         view ActiveOrders = Order where subject == "x"
@@ -175,7 +175,7 @@ const SCAFFOLD_VIEW_DDD = `
     }
     deployable api {
       platform: hono
-      modules: Sales
+      contexts: [Sales]
       serves: SalesApi
       port: 3000
     }
@@ -325,7 +325,7 @@ describe("walker-primitive-expander — unresolved targets pass through unchange
     );
     // Minimal SystemIR + UiIR with no aggregates / workflows / views.
     // biome-ignore lint/suspicious/noExplicitAny: minimal mock
-    const sys: any = { modules: [] };
+    const sys: any = { subdomains: [] };
     // biome-ignore lint/suspicious/noExplicitAny: minimal mock
     const ui: any = { name: "App", pages: [] };
     const ctx = buildExpandContext(sys, ui);

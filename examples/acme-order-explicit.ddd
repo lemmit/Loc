@@ -26,7 +26,7 @@ system AcmeOrderExplicit {
 
     api SalesApi from Sales
 
-    module Sales {
+    subdomain Sales {
         context Orders {
 
             enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
@@ -109,9 +109,12 @@ system AcmeOrderExplicit {
         }
     }
 
+    dataSource ordersState { for: Orders, kind: state, use: primarySql }
+
     deployable api {
         platform: hono
-        modules: Sales { primary: primarySql }
+        contexts: [Orders]
+        dataSources: [ordersState]
         serves: SalesApi
         port: 3000
     }

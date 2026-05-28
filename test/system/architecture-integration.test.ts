@@ -19,7 +19,7 @@ const ACME_EXPLICIT = `
 system Acme {
 
   // ── LAYER 1: domain ─────────────────────────────────────────
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Customer { name: string }
       repository Customers for Customer {
@@ -27,7 +27,7 @@ system Acme {
       }
     }
   }
-  module Marketing {
+  subdomain Marketing {
     context Campaigns {
       aggregate Campaign { name: string }
     }
@@ -78,7 +78,7 @@ system Acme {
   // ── COMPOSITION: deployables ────────────────────────────────
   deployable salesApi {
     platform: hono
-    modules: Sales { primary: primarySql, cache: hotCache, bi: warehouse }
+    contexts: [Sales]
     serves: SalesApi
     port: 3000
   }
@@ -169,8 +169,8 @@ describe("Architecture integration — full Acme example", () => {
 
   it("rejects shape if a backend's primary storage is missing", async () => {
     const broken = ACME_EXPLICIT.replace(
-      "modules: Sales { primary: primarySql, cache: hotCache, bi: warehouse }",
-      "modules: Sales { cache: hotCache, bi: warehouse }",
+      "contexts: [Sales]",
+      "contexts: [Sales]",
     );
     const { errors } = await build(broken);
     expect(errors.some((e) => /must include a 'primary: <storage>' binding/.test(e))).toBe(true);

@@ -6,11 +6,12 @@ import { spliceNode } from "../edit-engine";
 
 // ---------------------------------------------------------------------------
 // Deployable composition bindings — the multi-valued / single references a
-// deployable carries: `modules:`, `serves:`, `targets:`, and the sugar `ui:`.
-// Edited by mutating the parsed Deployable's binding arrays / refs and
-// reprinting via the structural printer (which reads `$refText`), so no linking
-// is needed.  The advanced `ui: W { … }` compose / legacy block forms are left
-// to the text editor — `uiKind` reports them so the UI hides the picker.
+// deployable carries: `contexts:`, `dataSources:`, `serves:`, `targets:`, and
+// the sugar `ui:`.  Edited by mutating the parsed Deployable's binding arrays
+// / refs and reprinting via the structural printer (which reads `$refText`),
+// so no linking is needed.  The advanced `ui: W { … }` compose / legacy block
+// forms are left to the text editor — `uiKind` reports them so the UI hides
+// the picker.
 // ---------------------------------------------------------------------------
 
 function nodeNames(ast: Model, type: string): string[] {
@@ -24,7 +25,9 @@ function nodeNames(ast: Model, type: string): string[] {
   return out;
 }
 
-export const moduleNames = (ast: Model): string[] => nodeNames(ast, "Module");
+export const subdomainNames = (ast: Model): string[] => nodeNames(ast, "Subdomain");
+export const boundedContextNames = (ast: Model): string[] => nodeNames(ast, "BoundedContext");
+export const dataSourceNames = (ast: Model): string[] => nodeNames(ast, "DataSource");
 export const apiNames = (ast: Model): string[] => nodeNames(ast, "Api");
 export const uiNames = (ast: Model): string[] => nodeNames(ast, "Ui");
 export const deployableNames = (ast: Model): string[] => nodeNames(ast, "Deployable");
@@ -35,8 +38,11 @@ function asDeployable(node: AstNode): Deployable | null {
 
 // --- read helpers ----------------------------------------------------------
 
-export function deployableModules(node: AstNode): string[] {
-  return asDeployable(node)?.moduleBindings.map((b) => b.name.$refText) ?? [];
+export function deployableContexts(node: AstNode): string[] {
+  return asDeployable(node)?.contextRefs.map((b) => b.$refText) ?? [];
+}
+export function deployableDataSources(node: AstNode): string[] {
+  return asDeployable(node)?.dataSourceRefs.map((b) => b.$refText) ?? [];
 }
 export function deployableServes(node: AstNode): string[] {
   return asDeployable(node)?.serves.map((s) => s.$refText) ?? [];
@@ -74,12 +80,14 @@ function commit(source: string, name: string, mutate: (d: Deployable) => void): 
 
 const ref = (refText: string): never => ({ $refText: refText }) as never;
 
-export function setDeployableModules(source: string, name: string, modules: string[]): string | null {
+export function setDeployableContexts(source: string, name: string, contexts: string[]): string | null {
   return commit(source, name, (d) => {
-    // Keep existing bindings (with their per-module storage maps) for retained
-    // modules; add a bare binding for newly selected ones.
-    const existing = new Map(d.moduleBindings.map((b) => [b.name.$refText, b]));
-    d.moduleBindings = modules.map((m) => existing.get(m) ?? ({ $type: "ModuleBinding", name: ref(m), storages: [] }) as never);
+    d.contextRefs = contexts.map(ref) as never;
+  });
+}
+export function setDeployableDataSources(source: string, name: string, dataSources: string[]): string | null {
+  return commit(source, name, (d) => {
+    d.dataSourceRefs = dataSources.map(ref) as never;
   });
 }
 export function setDeployableServes(source: string, name: string, apis: string[]): string | null {

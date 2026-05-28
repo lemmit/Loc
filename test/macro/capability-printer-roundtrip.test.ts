@@ -26,7 +26,7 @@ function topLevelContext(
     if ((m as { $type?: string }).$type === "System") {
       for (const sm of ((m as { members?: unknown[] }).members ?? []) as unknown[]) {
         if (isBoundedContext(sm as never)) return sm as never;
-        if ((sm as { $type?: string }).$type === "Module") {
+        if ((sm as { $type?: string }).$type === "Subdomain") {
           for (const ctx of ((sm as { contexts?: unknown[] }).contexts ?? []) as unknown[]) {
             return ctx as never;
           }

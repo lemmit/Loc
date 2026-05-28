@@ -19,7 +19,7 @@ describe("per-page menuMeta drives the sidebar", () => {
   it("walker page with menuMeta lands in App.tsx sidebar nav", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Reports {
             route: "/reports"
@@ -27,7 +27,7 @@ describe("per-page menuMeta drives the sidebar", () => {
             body: Heading { "Reports" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -46,7 +46,7 @@ describe("per-page menuMeta drives the sidebar", () => {
   it("multiple pages group by section", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Daily {
             route: "/daily"
@@ -64,7 +64,7 @@ describe("per-page menuMeta drives the sidebar", () => {
             body: Heading { "Settings" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -86,7 +86,7 @@ describe("per-page menuMeta drives the sidebar", () => {
   it("hidden: true skips a page from the sidebar", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Public {
             route: "/p"
@@ -99,7 +99,7 @@ describe("per-page menuMeta drives the sidebar", () => {
             body: Heading { "Secret" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -120,7 +120,7 @@ describe("per-page menuMeta drives the sidebar", () => {
   it("order: N sorts within a section", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Z {
             route: "/z"
@@ -133,7 +133,7 @@ describe("per-page menuMeta drives the sidebar", () => {
             body: Heading { "A" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -154,7 +154,7 @@ describe("per-page menuMeta drives the sidebar", () => {
   it("explicit ui.menu block still wins over per-page menuMeta", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -167,7 +167,7 @@ describe("per-page menuMeta drives the sidebar", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

@@ -27,7 +27,7 @@ describe("source-level capabilities (hand-written, no macro)", () => {
   it("`filter !this.isDeleted` produces contextFilters[0]", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M { context C {
+        subdomain M { context C {
           aggregate Doc {
             subject: string
             isDeleted: bool
@@ -49,7 +49,7 @@ describe("source-level capabilities (hand-written, no macro)", () => {
   it("`stamp onCreate { ... }` produces contextStamps[0]", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M { context C {
+        subdomain M { context C {
           aggregate Doc {
             createdAt: datetime
             subject: string
@@ -70,7 +70,7 @@ describe("source-level capabilities (hand-written, no macro)", () => {
   it('`implements "X"` populates implementsCapabilities', async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M { context C {
+        subdomain M { context C {
           aggregate Doc {
             subject: string
             implements "softDeletable"
@@ -90,7 +90,7 @@ describe("source-level capabilities (hand-written, no macro)", () => {
     // hand should yield identical IR for the capability surface.
     const handIR = await buildLoomModel(`
       system Demo {
-        module M { context C {
+        subdomain M { context C {
           filter for "softDeletable" !this.isDeleted
           aggregate Hand {
             subject: string
@@ -103,7 +103,7 @@ describe("source-level capabilities (hand-written, no macro)", () => {
     `);
     const macroIR = await buildLoomModel(`
       system Demo {
-        module M { context C with softDelete {
+        subdomain M { context C with softDelete {
           aggregate Macro with softDeletable {
             subject: string
           }
@@ -121,7 +121,7 @@ describe("context-level propagation", () => {
   it("`filter` at context level applies to every aggregate inside", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M {
+        subdomain M {
           context C {
             filter !this.isDeleted
             aggregate Order {
@@ -145,7 +145,7 @@ describe("context-level propagation", () => {
   it("`implements` at context level propagates the capability name", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M {
+        subdomain M {
           context C {
             implements "softDeletable"
             aggregate Order {
@@ -163,7 +163,7 @@ describe("context-level propagation", () => {
   it("context-level + aggregate-level capabilities concatenate", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M {
+        subdomain M {
           context C {
             filter !this.isDeleted
             aggregate Order {
@@ -184,7 +184,7 @@ describe("context-level propagation", () => {
   it("context-level `implements` dedupes when aggregate also declares the same", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M {
+        subdomain M {
           context C {
             implements "auditable"
             aggregate Order {
@@ -204,7 +204,7 @@ describe('capability-scoped context filters: `filter for "<name>"`', () => {
   it("propagates only to aggregates with matching `implements`", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M {
+        subdomain M {
           context C {
             filter for "softDeletable" !this.isDeleted
             aggregate Order {
@@ -228,7 +228,7 @@ describe('capability-scoped context filters: `filter for "<name>"`', () => {
   it("unqualified context filter still propagates to every aggregate", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M {
+        subdomain M {
           context C {
             filter !this.isDeleted
             aggregate Order {
@@ -250,7 +250,7 @@ describe('capability-scoped context filters: `filter for "<name>"`', () => {
   it("multiple capability-scoped filters route to the right aggregates", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M {
+        subdomain M {
           context C {
             filter for "softDeletable" !this.isDeleted
             filter for "drafted" !this.isDraft
@@ -290,7 +290,7 @@ describe('capability-scoped context stamps: `stamp for "<name>"`', () => {
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }
-        module M {
+        subdomain M {
           context C {
             stamp for "auditable" onCreate {
               createdAt := now()
@@ -316,7 +316,7 @@ describe("macro-call composition: `*ByDefault` context macros", () => {
   it("`with softDeleteByDefault` on a context fans softDeletable across every aggregate", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M { context C with softDeleteByDefault {
+        subdomain M { context C with softDeleteByDefault {
           aggregate Order { subject: string }
           aggregate Customer { name: string }
         }}
@@ -334,14 +334,14 @@ describe("macro-call composition: `*ByDefault` context macros", () => {
   it("`softDeleteByDefault` matches explicit composition of softDelete + softDeletable", async () => {
     const byDefault = await buildLoomModel(`
       system Demo {
-        module M { context C with softDeleteByDefault {
+        subdomain M { context C with softDeleteByDefault {
           aggregate Order { subject: string }
         }}
       }
     `);
     const explicit = await buildLoomModel(`
       system Demo {
-        module M { context C with softDelete {
+        subdomain M { context C with softDelete {
           aggregate Order with softDeletable { subject: string }
         }}
       }
@@ -356,7 +356,7 @@ describe("macro-call composition: `*ByDefault` context macros", () => {
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }
-        module M { context C with auditedByDefault {
+        subdomain M { context C with auditedByDefault {
           aggregate Order { subject: string }
           aggregate Customer { name: string }
         }}

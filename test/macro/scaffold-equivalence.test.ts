@@ -12,7 +12,7 @@ import { parseString } from "../_helpers/parse.js";
 
 const wrapWith = (uiArgs: string) => `
   system Demo {
-    module Sales {
+    subdomain Sales {
       context Orders {
         aggregate Order { subject: string }
         aggregate Customer { name: string }
@@ -130,7 +130,7 @@ describe("scaffold macro: workflow / view / module selectors", () => {
   });
 
   it("modules fan out into aggregate + workflow + view pages", async () => {
-    const { model, errors } = await parseString(wrapWith("modules: [Sales]"));
+    const { model, errors } = await parseString(wrapWith("subdomains: [Sales]"));
     expect(errors).toEqual([]);
     // Sales contains Order, Customer, placeOrder, ActiveOrders.
     const names = pageNames(model);
@@ -161,7 +161,7 @@ describe("scaffold macro: composition rules", () => {
   it("override-by-name: explicit page wins over scaffold-emitted page", async () => {
     const { model } = await parseString(`
       system Demo {
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order { subject: string }
             repository Orders for Order { }

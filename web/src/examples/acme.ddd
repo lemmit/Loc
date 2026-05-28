@@ -7,7 +7,7 @@
 
 system Acme {
 
-    module Catalog {
+    subdomain Catalog {
         context Products {
 
             valueobject Money {
@@ -40,7 +40,7 @@ system Acme {
         }
     }
 
-    module Sales {
+    subdomain Sales {
         context Orders {
 
             enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
@@ -90,14 +90,14 @@ system Acme {
     // DbContext, exposes the full HTTP surface for the platform.
     deployable api {
         platform: dotnet
-        modules: Catalog, Sales
+        contexts: [Products, Orders]
         port: 8080
     }
 
     // Lightweight read-API on Hono — same Catalog data, no Sales code.
     deployable catalogWeb {
         platform: hono
-        modules: Catalog
+        contexts: [Products]
         port: 3000
     }
 
@@ -106,11 +106,11 @@ system Acme {
     // surface any drift between the platforms' route emission.
     deployable catalogApi {
         platform: dotnet
-        modules: Catalog
+        contexts: [Products]
         port: 8081
     }
 
-    ui WebApp with scaffold(modules: [Catalog, Sales]) {
+    ui WebApp with scaffold(subdomains: [Catalog, Sales]) {
     }
 
     // React + React Query + Zod + Mantine frontend.  Inherits its

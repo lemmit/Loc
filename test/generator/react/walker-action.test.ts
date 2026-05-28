@@ -13,7 +13,7 @@ const buildAndGenerate = generateSystemFiles;
 
 const SRC = `
   system S {
-    module Sales {
+    subdomain Sales {
       context Sales {
         aggregate Order {
           customerId: string
@@ -37,7 +37,7 @@ const SRC = `
     }
     deployable api {
       platform: hono
-      modules: Sales
+      contexts: [Sales]
       serves: SalesApi
       port: 3000
     }

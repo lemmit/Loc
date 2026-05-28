@@ -7,7 +7,7 @@ import { AstUtils, type AstNode } from "langium";
 import type {
   Aggregate,
   Model,
-  Module,
+  Subdomain,
   System,
 } from "../../../../src/language/generated/ast.js";
 import { applyEdits } from "../edit-engine";
@@ -44,7 +44,7 @@ export function addContextSource(source: string, moduleName: string): string | n
   for (const m of ast.members) {
     if (m.$type === "System") {
       for (const sm of (m as System).members) {
-        if (sm.$type === "Module" && (sm as Module).name === moduleName) mod = sm as Module;
+        if (sm.$type === "Subdomain" && (sm as Module).name === moduleName) mod = sm as Module;
       }
     }
   }

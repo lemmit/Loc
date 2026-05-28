@@ -18,11 +18,11 @@
 // container wiring + (when applicable) origin tag.
 
 import { describe, expect, it } from "vitest";
-import type { Aggregate, BoundedContext, Module } from "../../src/language/generated/ast.js";
+import type { Aggregate, BoundedContext, Subdomain } from "../../src/language/generated/ast.js";
 import {
   isAggregate,
   isBoundedContext,
-  isModule,
+  isSubdomain,
 } from "../../src/language/generated/ast.js";
 import type { OriginToken } from "../../src/macros/api/define.js";
 import {
@@ -328,10 +328,10 @@ describe("origin tracking", () => {
 });
 
 describe("cross-decl helpers (aggregatesIn / workflowsIn / viewsIn)", () => {
-  async function parseModule(): Promise<Module> {
+  async function parseSubdomain(): Promise<Subdomain> {
     const { model } = await parseString(`
       system S {
-        module Sales {
+        subdomain Sales {
           context Sales {
             aggregate Order { name: string operation go() {} }
             aggregate Customer { email: string operation go() {} }
@@ -345,32 +345,32 @@ describe("cross-decl helpers (aggregatesIn / workflowsIn / viewsIn)", () => {
     for (const sm of model.members ?? []) {
       if (sm.$type !== "System") continue;
       for (const m of (sm as { members: unknown[] }).members ?? []) {
-        if (isModule(m as Module)) return m as Module;
+        if (isSubdomain(m as Subdomain)) return m as Subdomain;
       }
     }
-    throw new Error("no module found");
+    throw new Error("no subdomain found");
   }
 
-  it("aggregatesIn(module) flattens aggregates across all its contexts", async () => {
-    const mod = await parseModule();
+  it("aggregatesIn(subdomain) flattens aggregates across all its contexts", async () => {
+    const mod = await parseSubdomain();
     const aggs = aggregatesIn(mod);
     expect(aggs.map((a) => a.name)).toEqual(["Order", "Customer"]);
   });
 
   it("aggregatesIn(context) returns only that context's aggregates", async () => {
-    const mod = await parseModule();
+    const mod = await parseSubdomain();
     const ctx = (mod.contexts ?? [])[0] as BoundedContext;
     expect(isBoundedContext(ctx)).toBe(true);
     expect(aggregatesIn(ctx).map((a) => a.name)).toEqual(["Order", "Customer"]);
   });
 
-  it("workflowsIn(module) returns declared workflows", async () => {
-    const mod = await parseModule();
+  it("workflowsIn(subdomain) returns declared workflows", async () => {
+    const mod = await parseSubdomain();
     expect(workflowsIn(mod).map((w) => w.name)).toEqual(["fulfil"]);
   });
 
-  it("viewsIn(module) returns declared views", async () => {
-    const mod = await parseModule();
+  it("viewsIn(subdomain) returns declared views", async () => {
+    const mod = await parseSubdomain();
     expect(viewsIn(mod).map((v) => v.name)).toEqual(["ActiveOrders"]);
   });
 });
@@ -379,7 +379,7 @@ describe("targetFields — Property filter", () => {
   async function parseAggregate(decl: string): Promise<Aggregate> {
     const { model, errors } = await parseString(`
       system Demo {
-        module M { context C {
+        subdomain M { context C {
           aggregate A {
             ${decl}
           }
@@ -390,8 +390,8 @@ describe("targetFields — Property filter", () => {
     for (const sm of model.members ?? []) {
       if (sm.$type !== "System") continue;
       for (const m of (sm as { members: unknown[] }).members ?? []) {
-        if (!isModule(m as Module)) continue;
-        for (const ctx of (m as Module).contexts ?? []) {
+        if (!isSubdomain(m as Subdomain)) continue;
+        for (const ctx of (m as Subdomain).contexts ?? []) {
           for (const cm of (ctx as BoundedContext).members ?? []) {
             if (isAggregate(cm) && cm.name === "A") return cm;
           }

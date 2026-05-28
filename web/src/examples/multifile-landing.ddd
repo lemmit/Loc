@@ -14,7 +14,7 @@ system MultiFileLanding {
   // Hono backend — empty surface but required so the playground's
   // preview pipeline has something to bundle and boot alongside the
   // React frontend.
-  module Empty {
+  subdomain Empty {
     context Stub { }
   }
 
@@ -68,7 +68,7 @@ system MultiFileLanding {
 
   deployable api {
     platform: hono
-    modules: Empty
+    contexts: [Empty]
     port: 3000
   }
 

@@ -27,7 +27,7 @@ async function parse(source: string) {
 }
 
 const SALES_DOMAIN = `
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Customer { name: string }
       repository Customers for Customer { }
@@ -44,7 +44,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           ${SALES_DOMAIN}
           deployable salesApi {
             platform: hono
-            modules: Sales
+            contexts: [Sales]
             serves: SalesApi
             port: 3000
           }
@@ -58,7 +58,7 @@ describe("deployable composition (serves + ui-compose)", () => {
         system S {
           ${SALES_DOMAIN}
           ui WebApp { page X { route: "/x" body: Heading { "hi" } } }
-          deployable api { platform: hono, modules: Sales, port: 3000 }
+          deployable api { platform: hono, contexts: [Sales], port: 3000 }
           deployable webApp {
             platform: static
             targets: api
@@ -79,7 +79,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           ${SALES_DOMAIN}
           deployable salesApi {
             platform: hono
-            modules: Sales
+            contexts: [Sales]
             serves: SalesApi, SalesApi
             port: 3000
           }
@@ -100,7 +100,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            modules: Sales
+            contexts: [Sales]
             serves: SalesApi
             port: 3000
           }
@@ -125,7 +125,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            modules: Sales
+            contexts: [Sales]
             port: 3000
           }
           deployable webApp {
@@ -149,7 +149,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            modules: Sales
+            contexts: [Sales]
             serves: SalesApi
             port: 3000
           }
@@ -180,7 +180,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            modules: Sales
+            contexts: [Sales]
             serves: SalesApi
             port: 3000
           }
@@ -205,8 +205,8 @@ describe("deployable composition (serves + ui-compose)", () => {
     it("flags missing binding when only some params are bound", async () => {
       const { errors } = await parse(`
         system S {
-          module Sales { context C { } }
-          module Marketing { context C { } }
+          subdomain Sales { context C { } }
+          subdomain Marketing { context C { } }
           api SalesApi from Sales
           api MktgApi from Marketing
           ui WebApp {
@@ -216,13 +216,13 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            modules: Sales
+            contexts: [Sales]
             serves: SalesApi
             port: 3000
           }
           deployable mktgApi {
             platform: hono
-            modules: Marketing
+            contexts: [Marketing]
             serves: MktgApi
             port: 3001
           }
@@ -251,7 +251,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            modules: Sales
+            contexts: [Sales]
             serves: SalesApi
             port: 3000
           }
@@ -269,8 +269,8 @@ describe("deployable composition (serves + ui-compose)", () => {
     it("two params from two different backends — fully bound", async () => {
       const { errors } = await parse(`
         system S {
-          module Sales { context Orders { aggregate Customer { name: string } } }
-          module Marketing { context Campaigns { aggregate Campaign { name: string } } }
+          subdomain Sales { context Orders { aggregate Customer { name: string } } }
+          subdomain Marketing { context Campaigns { aggregate Campaign { name: string } } }
           api SalesApi from Sales
           api MktgApi from Marketing
           ui WebApp {
@@ -280,13 +280,13 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            modules: Sales
+            contexts: [Sales]
             serves: SalesApi
             port: 3000
           }
           deployable mktgApi {
             platform: hono
-            modules: Marketing
+            contexts: [Marketing]
             serves: MktgApi
             port: 3001
           }
@@ -304,9 +304,9 @@ describe("deployable composition (serves + ui-compose)", () => {
     it("UI without api params: sugar form `ui: WebApp` is fine", async () => {
       const { errors } = await parse(`
         system S {
-          module M { context C { } }
+          subdomain M { context C { } }
           ui WebApp { page X { route: "/x" body: Heading { "hi" } } }
-          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable api { platform: hono, contexts: [C], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);

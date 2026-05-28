@@ -14,7 +14,7 @@ describe("Group + Grid in walker stdlib", () => {
   it("Group { ...children } emits Mantine <Group> with positional children", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Toolbar {
             route: "/toolbar"
@@ -25,7 +25,7 @@ describe("Group + Grid in walker stdlib", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -47,14 +47,14 @@ describe("Group + Grid in walker stdlib", () => {
   it("empty Group {} self-closes", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Empty {
             route: "/empty"
             body:  Group {}
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -70,7 +70,7 @@ describe("Group + Grid in walker stdlib", () => {
   it('Grid { ...children } wraps each child in <Grid.Col span="auto">', async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Dashboard {
             route: "/dashboard"
@@ -81,7 +81,7 @@ describe("Group + Grid in walker stdlib", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -107,14 +107,14 @@ describe("Group + Grid in walker stdlib", () => {
   it("empty Grid {} self-closes", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Empty {
             route: "/empty"
             body:  Grid {}
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -130,7 +130,7 @@ describe("Group + Grid in walker stdlib", () => {
   it("Stack { Group { ... }, Grid { ... } } — composition stays clean", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Layout {
             route: "/layout"
@@ -140,7 +140,7 @@ describe("Group + Grid in walker stdlib", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

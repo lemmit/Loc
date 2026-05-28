@@ -272,14 +272,14 @@ describe("react generator", () => {
       const doc = await helper(
         `
         system Plain {
-          module M {
+          subdomain M {
             context C {
               aggregate Thing { name: string  derived display: string = name }
               repository Things for Thing { }
             }
           }
-          ui WebApp with scaffold(modules: [M]) { }
-          deployable api { platform: hono, modules: M, port: 3000 }
+          ui WebApp with scaffold(subdomains: [M]) { }
+          deployable api { platform: hono, contexts: [C], port: 3000 }
           deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
         }
       `,
@@ -316,21 +316,21 @@ describe("react generator", () => {
     // explicit page with the layout selector under test.
     const buildSrc = (page: string): string => `
         system Acme {
-          module Sales {
+          subdomain Sales {
             context S {
               aggregate Order { name: string }
               repository Orders for Order { }
             }
           }
           api SalesApi from Sales
-          ui WebApp with scaffold(modules: [Sales]) {
+          ui WebApp with scaffold(subdomains: [Sales]) {
             api Sales: SalesApi
             ${page}
           }
           storage primarySql { type: postgres }
           deployable api {
             platform: hono
-            modules: Sales { primary: primarySql }
+            contexts: [Sales]
             serves: SalesApi
             port: 3001
           }
@@ -415,14 +415,14 @@ describe("react generator", () => {
       const doc = await helper(
         `
         system Untheme {
-          module M {
+          subdomain M {
             context C {
               aggregate A { name: string  derived display: string = name }
               repository As for A { }
             }
           }
-          ui WebApp with scaffold(modules: [M]) { }
-          deployable api { platform: dotnet, modules: M, port: 8080 }
+          ui WebApp with scaffold(subdomains: [M]) { }
+          deployable api { platform: dotnet, contexts: [C], port: 8080 }
           deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
         }
       `,
@@ -712,14 +712,14 @@ describe("react generator", () => {
       const doc = await helper(
         `
         system Demo {
-          module M {
+          subdomain M {
             context C {
               aggregate A { name: string  derived display: string = name }
               repository As for A { }
             }
           }
-          ui WebApp with scaffold(modules: [M]) { }
-          deployable api { platform: dotnet, modules: M, port: 8080 }
+          ui WebApp with scaffold(subdomains: [M]) { }
+          deployable api { platform: dotnet, contexts: [C], port: 8080 }
           deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           test e2e "bad" against web {
             ui.workflows.doesNotExist({})
@@ -749,14 +749,14 @@ describe("react generator", () => {
       const doc = await helper(
         `
         system Demo {
-          module M {
+          subdomain M {
             context C {
               aggregate A { name: string  derived display: string = name }
               repository As for A { }
             }
           }
-          ui WebApp with scaffold(modules: [M]) { }
-          deployable api { platform: dotnet, modules: M, port: 8080 }
+          ui WebApp with scaffold(subdomains: [M]) { }
+          deployable api { platform: dotnet, contexts: [C], port: 8080 }
           deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           test e2e "bad" against web {
             let r = ui.views.doesNotExist()
@@ -855,7 +855,7 @@ describe("react generator", () => {
       const doc = await helper(
         `
           system Acme {
-            module M {
+            subdomain M {
               context Auth {
                 aggregate User {
                   email: string
@@ -865,8 +865,8 @@ describe("react generator", () => {
                 repository Users for User { }
               }
             }
-            ui WebApp with scaffold(modules: [M]) { }
-            deployable api { platform: dotnet, modules: M, port: 8080 }
+            ui WebApp with scaffold(subdomains: [M]) { }
+            deployable api { platform: dotnet, contexts: [C], port: 8080 }
             deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,
@@ -884,7 +884,7 @@ describe("react generator", () => {
       const doc = await helper(
         `
           system Acme {
-            module M {
+            subdomain M {
               context Catalog {
                 aggregate Product {
                   sku:  string check sku.length >= 1 && sku.length <= 32
@@ -894,8 +894,8 @@ describe("react generator", () => {
                 repository Products for Product { }
               }
             }
-            ui WebApp with scaffold(modules: [M]) { }
-            deployable api { platform: dotnet, modules: M, port: 8080 }
+            ui WebApp with scaffold(subdomains: [M]) { }
+            deployable api { platform: dotnet, contexts: [C], port: 8080 }
             deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,
@@ -915,7 +915,7 @@ describe("react generator", () => {
       const doc = await helper(
         `
           system Acme {
-            module M {
+            subdomain M {
               context Acct {
                 aggregate User {
                   username: string
@@ -925,8 +925,8 @@ describe("react generator", () => {
                 repository Users for User { }
               }
             }
-            ui WebApp with scaffold(modules: [M]) { }
-            deployable api { platform: dotnet, modules: M, port: 8080 }
+            ui WebApp with scaffold(subdomains: [M]) { }
+            deployable api { platform: dotnet, contexts: [C], port: 8080 }
             deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,

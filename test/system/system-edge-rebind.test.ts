@@ -12,13 +12,13 @@ const CTX = `context Sales {
 }`;
 
 const SYS = `system S {
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Order {
       }
     }
   }
-  module Billing {
+  subdomain Billing {
     context Inv {
       aggregate Invoice {
       }
@@ -28,14 +28,14 @@ const SYS = `system S {
 }`;
 
 const DEPLOY = `system S {
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Order {
       }
     }
   }
-  deployable api { platform: hono, modules: Sales, port: 4000 }
-  deployable apiV2 { platform: hono, modules: Sales, port: 4001 }
+  deployable api { platform: hono, contexts: [Sales], port: 4000 }
+  deployable apiV2 { platform: hono, contexts: [Sales], port: 4001 }
   deployable webApp { platform: react, targets: api, port: 3001 }
 }`;
 

@@ -4,7 +4,7 @@ import type {
   EnrichedEntityPartIR,
   EnrichedSystemIR,
   EnrichedValueObjectIR,
-  ModuleIR,
+  SubdomainIR,
   TypeIR,
   WireField,
 } from "../ir/types/loom-ir.js";
@@ -59,7 +59,7 @@ export function buildWireSpec(sys: EnrichedSystemIR): WireSpecDoc {
   // System modules each carry their own bounded contexts; collect every
   // one (a context can in theory appear under multiple modules — last
   // write wins, all entries are structurally identical).
-  for (const m of sys.modules) {
+  for (const m of sys.subdomains) {
     for (const ctx of m.contexts) collectContext(ctx, doc);
   }
   return doc;
@@ -167,4 +167,4 @@ export function renderWireSpec(sys: EnrichedSystemIR): string {
 
 // Re-export so `system/index.ts` can import without depending on
 // internal naming.  Prevents accidental coupling.
-export type { ModuleIR };
+export type { SubdomainIR };

@@ -25,7 +25,7 @@ describe("ternary conditional rendering in walker pages", () => {
   it("top-level ternary body renders as function-return conditional", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -33,7 +33,7 @@ describe("ternary conditional rendering in walker pages", () => {
             body:  loading ? Empty { "Loading..." } : Stack { Heading { "Done" } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -58,7 +58,7 @@ describe("ternary conditional rendering in walker pages", () => {
   it("nested ternary as a child of Stack brace-wraps into JSX expr", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -70,7 +70,7 @@ describe("ternary conditional rendering in walker pages", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -89,7 +89,7 @@ describe("ternary conditional rendering in walker pages", () => {
   it("ternary cond accepts a binary expression (state arithmetic)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -100,7 +100,7 @@ describe("ternary conditional rendering in walker pages", () => {
             body:  count > limit ? Heading { "Over" } : Heading { "Under" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -118,14 +118,14 @@ describe("ternary conditional rendering in walker pages", () => {
   it("ternary cond accepts a route-param ref", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Greet(active: string) {
             route: "/g/:active"
             body:  active ? Heading { "Yes" } : Heading { "No" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

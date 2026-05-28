@@ -117,7 +117,7 @@ describe("validators (negative) — UI helper imports", () => {
   it("rejects a helper that shadows a walker stdlib primitive", async () => {
     const { errors } = await parse(`
       system S {
-        module M { context C { aggregate A { name: string } } }
+        subdomain M { context C { aggregate A { name: string } } }
         ui WebApp {
           import helper Stack from "./helpers/stack"
         }
@@ -131,7 +131,7 @@ describe("validators (negative) — UI helper imports", () => {
   it("rejects a duplicate helper import within the same UI", async () => {
     const { errors } = await parse(`
       system S {
-        module M { context C { aggregate A { name: string } } }
+        subdomain M { context C { aggregate A { name: string } } }
         ui WebApp {
           import helper formatPrice from "./helpers/a"
           import helper formatPrice from "./helpers/b"

@@ -90,7 +90,7 @@ function container(d: DeployableIR): string[] {
     `    ${cid(d.name)} = container ${quote(d.name)} {`,
     `      technology ${quote(d.platform)}`,
     // Modules the deployable ships, as components within it.
-    ...d.moduleNames.map((m) => `      ${cid(m)} = component ${quote(m)}`),
+    ...d.contextNames.map((m) => `      ${cid(m)} = component ${quote(m)}`),
     `    }`,
   ];
 }
@@ -149,7 +149,7 @@ export function buildC4Spec(sys: SystemIR): C4Spec {
     kind: "container",
     title: d.name,
     technology: d.platform,
-    children: d.moduleNames.map((m) => ({
+    children: d.contextNames.map((m) => ({
       localId: cid(m),
       kind: "component",
       title: m,

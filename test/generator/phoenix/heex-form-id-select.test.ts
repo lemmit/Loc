@@ -32,7 +32,7 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 
 const phoenixSystem = (orderField: string): string => `
   system Demo {
-    module M {
+    subdomain M {
       context C {
         aggregate Customer {
           name: string
@@ -55,7 +55,7 @@ const phoenixSystem = (orderField: string): string => `
       }
     }
     deployable phoenixApp {
-      platform: phoenixLiveView, modules: M, serves: DemoApi,
+      platform: phoenixLiveView, contexts: [C], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }
@@ -108,7 +108,7 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
     // flows through on submit).
     const files = await generateSystemFiles(`
       system Demo {
-        module M {
+        subdomain M {
           context C {
             aggregate Customer { name: string }
             repository Customers for Customer { }
@@ -124,7 +124,7 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
           page NewOrder { route: "/orders/new" body: CreateForm { of: Order } }
         }
         deployable phoenixApp {
-          platform: phoenixLiveView, modules: M, serves: DemoApi,
+          platform: phoenixLiveView, contexts: [C], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }
@@ -140,7 +140,7 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
   it("multiple distinct `X id` targets all get their own option-load", async () => {
     const files = await generateSystemFiles(`
       system Demo {
-        module M {
+        subdomain M {
           context C {
             aggregate Customer { name: string  derived display: string = name }
             repository Customers for Customer { }
@@ -162,7 +162,7 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
           }
         }
         deployable phoenixApp {
-          platform: phoenixLiveView, modules: M, serves: DemoApi,
+          platform: phoenixLiveView, contexts: [C], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }

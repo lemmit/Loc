@@ -73,6 +73,8 @@ export type DddKeywordNames =
     | "context"
     | "contexts"
     | "covers"
+    | "dataSource"
+    | "dataSources"
     | "datetime"
     | "decimal"
     | "deployable"
@@ -89,8 +91,10 @@ export type DddKeywordNames =
     | "enum"
     | "env"
     | "event"
+    | "eventLog"
     | "eventSourced"
     | "events"
+    | "every"
     | "expect"
     | "expectThrows"
     | "extern"
@@ -117,7 +121,10 @@ export type DddKeywordNames =
     | "int"
     | "internal"
     | "invariant"
+    | "isolationLevel"
     | "kafka"
+    | "keyPrefix"
+    | "kind"
     | "layout"
     | "let"
     | "link"
@@ -129,7 +136,6 @@ export type DddKeywordNames =
     | "match"
     | "meilisearch"
     | "menu"
-    | "module"
     | "modules"
     | "money"
     | "mui"
@@ -155,13 +161,17 @@ export type DddKeywordNames =
     | "react"
     | "readCommitted"
     | "readUncommitted"
+    | "readonly"
     | "redis"
     | "repeatableRead"
+    | "replica"
     | "repository"
     | "required"
     | "requirement"
     | "requires"
+    | "retain"
     | "route"
+    | "schema"
     | "search"
     | "secret"
     | "section"
@@ -172,6 +182,7 @@ export type DddKeywordNames =
     | "shadcn"
     | "sidebar"
     | "slot"
+    | "snapshot"
     | "solution"
     | "sqlite"
     | "stamp"
@@ -180,7 +191,9 @@ export type DddKeywordNames =
     | "static"
     | "storage"
     | "string"
+    | "subdomain"
     | "system"
+    | "tablePrefix"
     | "targets"
     | "test"
     | "testCase"
@@ -190,8 +203,10 @@ export type DddKeywordNames =
     | "token"
     | "transactional"
     | "true"
+    | "ttl"
     | "type"
     | "ui"
+    | "use"
     | "user"
     | "valueobject"
     | "verifies"
@@ -252,6 +267,12 @@ export const ContextMember = 'ContextMember';
 
 export function isContextMember(item: unknown): item is ContextMember {
     return reflection.isInstance(item, ContextMember);
+}
+
+export type DataSourceKind = 'cache' | 'eventLog' | 'replica' | 'snapshot' | 'state';
+
+export function isDataSourceKind(item: unknown): item is DataSourceKind {
+    return item === 'state' || item === 'eventLog' || item === 'snapshot' || item === 'cache' || item === 'replica';
 }
 
 export type DesignPack = 'ashPhoenix' | 'chakra' | 'mantine' | 'mui' | 'shadcn' | string;
@@ -356,12 +377,6 @@ export function isModelMember(item: unknown): item is ModelMember {
     return reflection.isInstance(item, ModelMember);
 }
 
-export type ModuleStorageRole = 'bi' | 'cache' | 'events' | 'primary' | 'search';
-
-export function isModuleStorageRole(item: unknown): item is ModuleStorageRole {
-    return item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi';
-}
-
 export type NamedDecl = Aggregate | EntityPart | EnumDecl | ValueObject;
 
 export const NamedDecl = 'NamedDecl';
@@ -442,7 +457,7 @@ export function isStorageType(item: unknown): item is StorageType {
     return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery';
 }
 
-export type SystemMember = Api | BoundedContext | Deployable | Layout | Module | Storage | TestE2E | ThemeBlock | Ui | UserBlock;
+export type SystemMember = Api | BoundedContext | DataSource | Deployable | Layout | Storage | Subdomain | TestE2E | ThemeBlock | Ui | UserBlock;
 
 export const SystemMember = 'SystemMember';
 
@@ -450,7 +465,7 @@ export function isSystemMember(item: unknown): item is SystemMember {
     return reflection.isInstance(item, SystemMember);
 }
 
-export type Targetable = Aggregate | Api | BoundedContext | Deployable | EventDecl | Module | Operation | Repository | ValueObject | View | Workflow;
+export type Targetable = Aggregate | Api | BoundedContext | Deployable | EventDecl | Operation | Repository | Subdomain | ValueObject | View | Workflow;
 
 export const Targetable = 'Targetable';
 
@@ -514,7 +529,7 @@ export interface Api extends AstNode {
     readonly $container: System;
     readonly $type: 'Api';
     name: string;
-    source: Reference<Module>;
+    source: Reference<Subdomain>;
 }
 
 export const Api = 'Api';
@@ -589,7 +604,7 @@ export function isBoolLit(item: unknown): item is BoolLit {
 }
 
 export interface BoundedContext extends AstNode {
-    readonly $container: Model | Module | System;
+    readonly $container: Model | Subdomain | System;
     readonly $type: 'BoundedContext';
     members: Array<ContextMember>;
     name: string;
@@ -695,6 +710,29 @@ export function isContainment(item: unknown): item is Containment {
     return reflection.isInstance(item, Containment);
 }
 
+export interface DataSource extends AstNode {
+    readonly $container: System;
+    readonly $type: 'DataSource';
+    context?: Reference<BoundedContext>;
+    every?: number;
+    isolationLevel?: IsolationLevel;
+    keyPrefix?: string;
+    kind?: DataSourceKind;
+    name: LooseName;
+    readonly: boolean;
+    retain?: number;
+    schema?: string;
+    tablePrefix?: string;
+    ttl?: number;
+    use?: Reference<Storage>;
+}
+
+export const DataSource = 'DataSource';
+
+export function isDataSource(item: unknown): item is DataSource {
+    return reflection.isInstance(item, DataSource);
+}
+
 export interface DecLit extends AstNode {
     readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'DecLit';
@@ -711,9 +749,10 @@ export interface Deployable extends AstNode {
     readonly $container: System;
     readonly $type: 'Deployable';
     auth?: AuthMode;
+    contextRefs: Array<Reference<BoundedContext>>;
+    dataSourceRefs: Array<Reference<DataSource>>;
     design?: DesignPack;
     favicon?: string;
-    moduleBindings: Array<ModuleBinding>;
     name: LooseName;
     platform: Platform;
     port?: number;
@@ -1304,46 +1343,6 @@ export function isModel(item: unknown): item is Model {
     return reflection.isInstance(item, Model);
 }
 
-export interface Module extends AstNode {
-    readonly $container: System;
-    readonly $type: 'Module';
-    contexts: Array<BoundedContext>;
-    name: string;
-    permissions: Array<PermissionsBlock>;
-}
-
-export const Module = 'Module';
-
-export function isModule(item: unknown): item is Module {
-    return reflection.isInstance(item, Module);
-}
-
-export interface ModuleBinding extends AstNode {
-    readonly $container: Deployable;
-    readonly $type: 'ModuleBinding';
-    name: Reference<Module>;
-    storages: Array<ModuleStorageBinding>;
-}
-
-export const ModuleBinding = 'ModuleBinding';
-
-export function isModuleBinding(item: unknown): item is ModuleBinding {
-    return reflection.isInstance(item, ModuleBinding);
-}
-
-export interface ModuleStorageBinding extends AstNode {
-    readonly $container: ModuleBinding;
-    readonly $type: 'ModuleStorageBinding';
-    role: ModuleStorageRole;
-    storage: Reference<Storage>;
-}
-
-export const ModuleStorageBinding = 'ModuleStorageBinding';
-
-export function isModuleStorageBinding(item: unknown): item is ModuleStorageBinding {
-    return reflection.isInstance(item, ModuleStorageBinding);
-}
-
 export interface MoneyLit extends AstNode {
     readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'MoneyLit';
@@ -1521,7 +1520,7 @@ export function isPermissionDecl(item: unknown): item is PermissionDecl {
 }
 
 export interface PermissionsBlock extends AstNode {
-    readonly $container: Module;
+    readonly $container: Subdomain;
     readonly $type: 'PermissionsBlock';
     decls: Array<PermissionDecl>;
 }
@@ -1804,6 +1803,20 @@ export const StringLit = 'StringLit';
 
 export function isStringLit(item: unknown): item is StringLit {
     return reflection.isInstance(item, StringLit);
+}
+
+export interface Subdomain extends AstNode {
+    readonly $container: System;
+    readonly $type: 'Subdomain';
+    contexts: Array<BoundedContext>;
+    name: string;
+    permissions: Array<PermissionsBlock>;
+}
+
+export const Subdomain = 'Subdomain';
+
+export function isSubdomain(item: unknown): item is Subdomain {
+    return reflection.isInstance(item, Subdomain);
 }
 
 export interface System extends AstNode {
@@ -2146,6 +2159,7 @@ export type DddAstType = {
     ConnectionSource: ConnectionSource
     Containment: Containment
     ContextMember: ContextMember
+    DataSource: DataSource
     DecLit: DecLit
     Deployable: Deployable
     DerivedProp: DerivedProp
@@ -2199,9 +2213,6 @@ export type DddAstType = {
     MenuSection: MenuSection
     Model: Model
     ModelMember: ModelMember
-    Module: Module
-    ModuleBinding: ModuleBinding
-    ModuleStorageBinding: ModuleStorageBinding
     MoneyLit: MoneyLit
     NameRef: NameRef
     NamedDecl: NamedDecl
@@ -2242,6 +2253,7 @@ export type DddAstType = {
     Statement: Statement
     Storage: Storage
     StringLit: StringLit
+    Subdomain: Subdomain
     System: System
     SystemMember: SystemMember
     Targetable: Targetable
@@ -2276,7 +2288,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, ConnectionSource, Containment, ContextMember, DecLit, Deployable, DerivedProp, DescriptionProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, Module, ModuleBinding, ModuleStorageBinding, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SecretConnectionSource, SensitivityClause, ServiceConnectionSource, SlotType, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
+        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, ConnectionSource, Containment, ContextMember, DataSource, DecLit, Deployable, DerivedProp, DescriptionProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SecretConnectionSource, SensitivityClause, ServiceConnectionSource, SlotType, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2286,7 +2298,7 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case Api:
             case Deployable:
-            case Module: {
+            case Subdomain: {
                 return this.isSubtype(SystemMember, supertype) || this.isSubtype(Targetable, supertype);
             }
             case AssignOrCallStmt:
@@ -2345,6 +2357,15 @@ export class DddAstReflection extends AbstractAstReflection {
             case Containment: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype);
             }
+            case DataSource:
+            case Layout:
+            case Storage:
+            case TestE2E:
+            case ThemeBlock:
+            case Ui:
+            case UserBlock: {
+                return this.isSubtype(SystemMember, supertype);
+            }
             case DerivedProp:
             case FunctionDecl:
             case Invariant:
@@ -2383,14 +2404,6 @@ export class DddAstReflection extends AbstractAstReflection {
             case PrimitiveType:
             case SlotType: {
                 return this.isSubtype(BaseType, supertype);
-            }
-            case Layout:
-            case Storage:
-            case TestE2E:
-            case ThemeBlock:
-            case Ui:
-            case UserBlock: {
-                return this.isSubtype(SystemMember, supertype);
             }
             case LayoutMainSlot:
             case LayoutNamedSlot: {
@@ -2439,12 +2452,21 @@ export class DddAstReflection extends AbstractAstReflection {
     getReferenceType(refInfo: ReferenceInfo): string {
         const referenceId = `${refInfo.container.$type}:${refInfo.property}`;
         switch (referenceId) {
-            case 'Api:source':
-            case 'ModuleBinding:name': {
-                return Module;
+            case 'Api:source': {
+                return Subdomain;
             }
             case 'Containment:partType': {
                 return EntityPart;
+            }
+            case 'DataSource:context':
+            case 'Deployable:contextRefs': {
+                return BoundedContext;
+            }
+            case 'DataSource:use': {
+                return Storage;
+            }
+            case 'Deployable:dataSourceRefs': {
+                return DataSource;
             }
             case 'Deployable:serves':
             case 'UiApiParam:apiRef': {
@@ -2464,9 +2486,6 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case 'MenuLink:page': {
                 return Page;
-            }
-            case 'ModuleStorageBinding:storage': {
-                return Storage;
             }
             case 'Repository:aggregate':
             case 'View:source': {
@@ -2639,6 +2658,25 @@ export class DddAstReflection extends AbstractAstReflection {
                     ]
                 };
             }
+            case DataSource: {
+                return {
+                    name: DataSource,
+                    properties: [
+                        { name: 'context' },
+                        { name: 'every' },
+                        { name: 'isolationLevel' },
+                        { name: 'keyPrefix' },
+                        { name: 'kind' },
+                        { name: 'name' },
+                        { name: 'readonly', defaultValue: false },
+                        { name: 'retain' },
+                        { name: 'schema' },
+                        { name: 'tablePrefix' },
+                        { name: 'ttl' },
+                        { name: 'use' }
+                    ]
+                };
+            }
             case DecLit: {
                 return {
                     name: DecLit,
@@ -2652,9 +2690,10 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: Deployable,
                     properties: [
                         { name: 'auth' },
+                        { name: 'contextRefs', defaultValue: [] },
+                        { name: 'dataSourceRefs', defaultValue: [] },
                         { name: 'design' },
                         { name: 'favicon' },
-                        { name: 'moduleBindings', defaultValue: [] },
                         { name: 'name' },
                         { name: 'platform' },
                         { name: 'port' },
@@ -3047,34 +3086,6 @@ export class DddAstReflection extends AbstractAstReflection {
                     ]
                 };
             }
-            case Module: {
-                return {
-                    name: Module,
-                    properties: [
-                        { name: 'contexts', defaultValue: [] },
-                        { name: 'name' },
-                        { name: 'permissions', defaultValue: [] }
-                    ]
-                };
-            }
-            case ModuleBinding: {
-                return {
-                    name: ModuleBinding,
-                    properties: [
-                        { name: 'name' },
-                        { name: 'storages', defaultValue: [] }
-                    ]
-                };
-            }
-            case ModuleStorageBinding: {
-                return {
-                    name: ModuleStorageBinding,
-                    properties: [
-                        { name: 'role' },
-                        { name: 'storage' }
-                    ]
-                };
-            }
             case MoneyLit: {
                 return {
                     name: MoneyLit,
@@ -3383,6 +3394,16 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: StringLit,
                     properties: [
                         { name: 'value' }
+                    ]
+                };
+            }
+            case Subdomain: {
+                return {
+                    name: Subdomain,
+                    properties: [
+                        { name: 'contexts', defaultValue: [] },
+                        { name: 'name' },
+                        { name: 'permissions', defaultValue: [] }
                     ]
                 };
             }

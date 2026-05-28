@@ -93,7 +93,7 @@ describe("IR invariants — every example", () => {
             if (d.platform !== "react") continue;
             const target = sys.deployables.find((t) => t.name === d.targetName);
             expect(target, `${d.name} → ${d.targetName}`).toBeDefined();
-            expect([...d.moduleNames].sort()).toEqual([...target!.moduleNames].sort());
+            expect([...d.contextNames].sort()).toEqual([...target!.contextNames].sort());
           }
         }
       });

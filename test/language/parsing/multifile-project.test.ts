@@ -45,8 +45,8 @@ describe("multi-file project loader", () => {
         import "./orders.ddd"
         import "./shared/money.ddd"
         system Shop {
-          module Sales { }
-          deployable api { platform: hono, modules: Sales }
+          subdomain Sales { }
+          deployable api { platform: hono, contexts: [Sales] }
         }
       `,
       "orders.ddd": `
@@ -104,14 +104,14 @@ describe("multi-file project loader", () => {
       "main.ddd": `
         import "./components.ddd"
         system X {
-          module M { context C { } }
+          subdomain M { context C { } }
           ui Web {
             page Home {
               route: "/"
               body: Hero("Welcome")
             }
           }
-          deployable api { platform: hono, modules: M }
+          deployable api { platform: hono, contexts: [C] }
           deployable web { platform: static, targets: api, ui: Web, port: 3001 }
         }
       `,
@@ -136,8 +136,8 @@ describe("multi-file project loader", () => {
         import "./shared.ddd"
         import "./catalog.ddd"
         system X {
-          module M { }
-          deployable api { platform: hono, modules: M }
+          subdomain M { }
+          deployable api { platform: hono, contexts: [C] }
         }
       `,
       "shared.ddd": `

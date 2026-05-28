@@ -11,7 +11,7 @@ describe("with-clause grammar", () => {
     expect(
       parseRawOk(
         wrap(`
-          module M {
+          subdomain M {
             context C {
               aggregate Order with auditable {
                 subject: string
@@ -27,7 +27,7 @@ describe("with-clause grammar", () => {
     expect(
       parseRawOk(
         wrap(`
-          module M {
+          subdomain M {
             context C {
               aggregate Order with auditable, softDeletable {
                 subject: string
@@ -43,7 +43,7 @@ describe("with-clause grammar", () => {
     expect(
       parseRawOk(
         wrap(`
-          module M {
+          subdomain M {
             context C {
               aggregate Order with softDeletable(field: "archivedAt", timestamp: "archivedOn") {
                 subject: string
@@ -71,7 +71,7 @@ describe("with-clause grammar", () => {
     expect(
       parseRawOk(
         wrap(`
-          module M {
+          subdomain M {
             context C {
               aggregate Order with auditable() {
                 subject: string
@@ -88,7 +88,7 @@ describe("with-clause is optional", () => {
   it("aggregates without `with` still parse cleanly", async () => {
     const { errors } = await parseString(
       wrap(`
-        module M {
+        subdomain M {
           context C {
             aggregate Order {
               subject: string

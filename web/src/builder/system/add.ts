@@ -63,7 +63,7 @@ export function listContextNames(ast: Model): string[] {
 export function listModuleNames(ast: Model): string[] {
   const out: string[] = [];
   for (const n of AstUtils.streamAst(ast)) {
-    if (n.$type === "Module") out.push((n as { name?: string }).name ?? "");
+    if (n.$type === "Subdomain") out.push((n as { name?: string }).name ?? "");
   }
   return out;
 }
@@ -154,7 +154,7 @@ export function addModuleSource(source: string): string | null {
   const ast = parseDdd(source).ast;
   const system = ast.members.find((m): m is System => m.$type === "System");
   if (!system) return null;
-  const name = freshName(ast, "Module");
+  const name = freshName(ast, "Subdomain");
   const text = `\n  module ${name} {\n    context ${name}Ctx {\n    }\n  }\n`;
   const next = insertIntoBlock(source, system, text);
   return parseDdd(next).parserErrors.length === 0 ? next : null;

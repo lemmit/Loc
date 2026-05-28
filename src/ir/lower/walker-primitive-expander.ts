@@ -46,7 +46,7 @@ export function buildExpandContext(sys: SystemIR, ui: UiIR): WalkerExpandContext
   const bcByAggregate = new Map<string, BoundedContextIR>();
   const workflowsByName = new Map<string, import("../types/loom-ir.js").WorkflowIR>();
   const viewsByName = new Map<string, import("../types/loom-ir.js").ViewIR>();
-  for (const m of sys.modules) {
+  for (const m of sys.subdomains) {
     for (const ctx of m.contexts) {
       for (const agg of ctx.aggregates) {
         aggregatesByName.set(agg.name, agg);

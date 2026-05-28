@@ -10,7 +10,7 @@ export default defineMacro({
   apiVersion: 1,
   description:
     "Synthesises a List page for the named view.  Leaf of the scaffold-macro " +
-    "family — invoked by `scaffoldContext` / `scaffoldModule` / `scaffold` " +
+    "family — invoked by `scaffoldContext` / `scaffoldSubdomain` / `scaffold` " +
     "for each view they cover.",
   params: {
     of: { kind: "ref", of: "View" },

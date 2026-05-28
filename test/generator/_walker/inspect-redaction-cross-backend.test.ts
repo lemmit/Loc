@@ -39,7 +39,7 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 // `serviceSlug`).
 const REDACTION_SOURCE = `
   system Bank {
-    module M {
+    subdomain M {
       context People {
         valueobject ContactInfo {
           email: string
@@ -54,9 +54,9 @@ const REDACTION_SOURCE = `
         repository People for Person { }
       }
     }
-    deployable honoApi { platform: hono, modules: M, port: 3000 }
-    deployable dotnetApi { platform: dotnet, modules: M, port: 3001 }
-    deployable elixirApi { platform: phoenixLiveView, modules: M, port: 4000 }
+    deployable honoApi { platform: hono, contexts: [C], port: 3000 }
+    deployable dotnetApi { platform: dotnet, contexts: [C], port: 3001 }
+    deployable elixirApi { platform: phoenixLiveView, contexts: [C], port: 4000 }
   }
 `;
 

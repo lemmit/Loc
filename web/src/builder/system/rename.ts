@@ -18,7 +18,7 @@ import type { NodeKind } from "./model";
 // source, or null if the construct can't be found.
 
 const KIND_TO_TYPE: Record<NodeKind, string> = {
-  module: "Module",
+  module: "Subdomain",
   aggregate: "Aggregate",
   valueobject: "ValueObject",
   event: "EventDecl",

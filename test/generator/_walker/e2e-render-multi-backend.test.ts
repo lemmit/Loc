@@ -28,7 +28,7 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 
 const BANK_THREE_BACKEND = `
   system Bank {
-    module Accounts {
+    subdomain Accounts {
       context Banking {
         aggregate Account {
           balance: int
@@ -38,7 +38,7 @@ const BANK_THREE_BACKEND = `
         repository Accounts for Account { }
       }
     }
-    module Marketing {
+    subdomain Marketing {
       context Promo {
         aggregate Campaign {
           name: string
@@ -47,11 +47,11 @@ const BANK_THREE_BACKEND = `
         repository Campaigns for Campaign { }
       }
     }
-    deployable honoApi { platform: hono, modules: Accounts, port: 3000 }
-    deployable dotnetApi { platform: dotnet, modules: Accounts, port: 3001 }
-    deployable elixirApi { platform: phoenixLiveView, modules: Accounts, port: 4000 }
-    deployable marketingApi { platform: hono, modules: Marketing, port: 3010 }
-    ui WebUi { with scaffold(modules: [Accounts]) }
+    deployable honoApi { platform: hono, contexts: [Accounts], port: 3000 }
+    deployable dotnetApi { platform: dotnet, contexts: [Accounts], port: 3001 }
+    deployable elixirApi { platform: phoenixLiveView, contexts: [Accounts], port: 4000 }
+    deployable marketingApi { platform: hono, contexts: [Marketing], port: 3010 }
+    ui WebUi { with scaffold(subdomains: [Accounts]) }
     deployable webApp { platform: static, targets: honoApi, ui: WebUi, port: 8080 }
 
     test e2e "create an account" against honoApi {

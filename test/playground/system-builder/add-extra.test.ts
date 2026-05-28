@@ -7,7 +7,7 @@ import {
 import { parseRaw as parse } from "../../_helpers/index.js";
 
 const SRC = `system S {
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Order {
       }

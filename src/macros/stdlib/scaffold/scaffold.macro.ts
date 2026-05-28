@@ -1,16 +1,16 @@
-import type { Aggregate, BoundedContext, Module, View, Workflow } from "../../api/index.js";
+import type { Aggregate, BoundedContext, Subdomain, View, Workflow } from "../../api/index.js";
 import { defineMacro, viewsIn, workflowsIn } from "../../api/index.js";
 import { homePage, viewsIndexPage, workflowsIndexPage } from "./_pages.js";
 
 /** Top of the scaffold-macro family: takes any combination of
- * modules / contexts / aggregates / workflows / views, then fans
- * out to the per-element composers (`scaffoldModule`,
+ * subdomains / contexts / aggregates / workflows / views, then fans
+ * out to the per-element composers (`scaffoldSubdomain`,
  * `scaffoldContext`) and leaves (`scaffoldAggregate`,
  * `scaffoldWorkflow`, `scaffoldView`) via `invokeMacro`.
  *
  * Composability all the way down.  Unfold one level on
- * `with scaffold(modules: [Sales])` reveals
- * `with scaffoldModule(of: Sales)`; unfold that to get
+ * `with scaffold(subdomains: [Sales])` reveals
+ * `with scaffoldSubdomain(of: Sales)`; unfold that to get
  * per-context, per-aggregate macros; unfold a single
  * `scaffoldAggregate` to materialise just its three pages as
  * source so you can customise them while leaving the rest of the
@@ -34,13 +34,13 @@ export default defineMacro({
     workflows: { kind: "refList", of: "Workflow" },
     views: { kind: "refList", of: "View" },
     contexts: { kind: "refList", of: "BoundedContext" },
-    modules: { kind: "refList", of: "Module" },
+    subdomains: { kind: "refList", of: "Subdomain" },
   },
   expand({ target, args, invokeMacro }) {
     const out: unknown[] = [];
 
-    for (const m of args.modules as readonly Module[]) {
-      out.push(...invokeMacro("scaffoldModule", { target, args: { of: m } }));
+    for (const m of args.subdomains as readonly Subdomain[]) {
+      out.push(...invokeMacro("scaffoldSubdomain", { target, args: { of: m } }));
     }
     for (const c of args.contexts as readonly BoundedContext[]) {
       out.push(...invokeMacro("scaffoldContext", { target, args: { of: c } }));
@@ -59,10 +59,10 @@ export default defineMacro({
     // we don't pollute the menu with empty WorkflowsIndex /
     // ViewsIndex links.  Computed from args (not from `out.length`,
     // which is 0 in unfold mode because invokeMacro returns []).
-    const modules = args.modules as readonly Module[];
+    const subdomains = args.subdomains as readonly Subdomain[];
     const contexts = args.contexts as readonly BoundedContext[];
     const hasAnyWork =
-      modules.length +
+      subdomains.length +
         contexts.length +
         (args.aggregates as readonly Aggregate[]).length +
         (args.workflows as readonly Workflow[]).length +
@@ -72,12 +72,12 @@ export default defineMacro({
     const hasWorkflowsAnywhere =
       (args.workflows as readonly Workflow[]).length > 0 ||
       contexts.some((c) => workflowsIn(c).length > 0) ||
-      modules.some((m) => workflowsIn(m).length > 0);
+      subdomains.some((m) => workflowsIn(m).length > 0);
     if (hasWorkflowsAnywhere) out.push(workflowsIndexPage());
     const hasViewsAnywhere =
       (args.views as readonly View[]).length > 0 ||
       contexts.some((c) => viewsIn(c).length > 0) ||
-      modules.some((m) => viewsIn(m).length > 0);
+      subdomains.some((m) => viewsIn(m).length > 0);
     if (hasViewsAnywhere) out.push(viewsIndexPage());
 
     return out as never[];

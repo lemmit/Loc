@@ -1383,7 +1383,7 @@ describe("typescript generator", () => {
       const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
       const sys = loom.systems[0]!;
       const dep = sys.deployables.find((d) => d.platform === "hono")!;
-      const contexts = sys.modules.flatMap((m) => m.contexts);
+      const contexts = sys.subdomains.flatMap((m) => m.contexts);
       return generateTypeScriptForContexts(contexts, HONO_V4_PINS, { deployable: dep, sys });
     }
 
@@ -1393,7 +1393,7 @@ describe("typescript generator", () => {
           id: string
           role: string
         }
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order {
               customerId: string
@@ -1408,7 +1408,7 @@ describe("typescript generator", () => {
         }
         deployable api {
           platform: hono
-          modules: Sales
+          contexts: [Sales]
           port: 3000
           auth: required
         }
@@ -1418,7 +1418,7 @@ describe("typescript generator", () => {
     const SRC_NO_AUTH = `
       system Acme {
         user { id: string }
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order { customerId: string }
             repository Orders for Order { }
@@ -1426,7 +1426,7 @@ describe("typescript generator", () => {
         }
         deployable api {
           platform: hono
-          modules: Sales
+          contexts: [Sales]
           port: 3000
         }
       }
@@ -1491,7 +1491,7 @@ describe("typescript generator", () => {
           id: string
           customerId: string
         }
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order {
               customerId: string
@@ -1505,7 +1505,7 @@ describe("typescript generator", () => {
         }
         deployable api {
           platform: hono
-          modules: Sales
+          contexts: [Sales]
           port: 3000
           auth: required
         }
@@ -1543,7 +1543,7 @@ describe("typescript generator", () => {
           id: string
           role: string
         }
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order {
               status: string
@@ -1557,7 +1557,7 @@ describe("typescript generator", () => {
         }
         deployable api {
           platform: hono
-          modules: Sales
+          contexts: [Sales]
           port: 3000
           auth: required
         }

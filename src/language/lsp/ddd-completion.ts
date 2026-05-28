@@ -194,7 +194,7 @@ function detailFor(nd: AstNodeDescription): string | undefined {
       return "enum value";
     case "EventDecl":
       return "event";
-    case "Module":
+    case "Subdomain":
       return "module";
     case "Deployable":
       return "deployable";

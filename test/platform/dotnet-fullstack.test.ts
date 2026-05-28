@@ -41,20 +41,20 @@ async function build(source: string): Promise<Model> {
 
 const FULLSTACK_SOURCE = `
 system FullstackDemo {
-  module Sales { context T {
+  subdomain Sales { context T {
     aggregate Order {
       name: string
       derived display: string = name
     }
     repository Orders for Order { }
   } }
-  ui WebApp with scaffold(modules: [Sales]) { }
-  deployable app { platform: dotnet, modules: Sales, ui: WebApp, port: 8080 }
+  ui WebApp with scaffold(subdomains: [Sales]) { }
+  deployable app { platform: dotnet, contexts: [T], ui: WebApp, port: 8080 }
 }
 `;
 
 const BACKEND_ONLY_SOURCE = `system BackendOnly {
-  module Sales {
+  subdomain Sales {
     context T {
       aggregate Order {
         name: string
@@ -66,7 +66,7 @@ const BACKEND_ONLY_SOURCE = `system BackendOnly {
 
   deployable app {
     platform: dotnet
-    modules: Sales
+    contexts: [T]
     port: 8080
   }
 }
