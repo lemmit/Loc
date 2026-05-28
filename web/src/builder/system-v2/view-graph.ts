@@ -30,7 +30,7 @@ import { computeContextRelations } from "./context-edges";
 export type ViewKind =
   // containers (drillable)
   | "system"
-  | "module"
+  | "subdomain"
   | "context"
   | "aggregate"
   | "entity"
@@ -129,7 +129,7 @@ export interface ViewGraph {
 
 const DRILLABLE: ReadonlySet<ViewKind> = new Set([
   "system",
-  "module",
+  "subdomain",
   "context",
   "aggregate",
   "entity",
@@ -185,7 +185,7 @@ const PIVOT_CONTAINS_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
   "aggregate",
   "field",
   "containment",
-  "module",
+  "subdomain",
   "context",
   "find",
 ]);
@@ -297,7 +297,7 @@ function rootView(ast: Model): ViewGraph {
 }
 
 const SYSTEM_ORDER: readonly ViewKind[] = [
-  "module",
+  "subdomain",
   "context",
   "api",
   "storage",
@@ -315,7 +315,7 @@ function systemView(ast: Model, name: string): ViewGraph {
     if (!childName) continue;
     switch (m.$type) {
       case "Subdomain":
-        items.push({ id: nid("module", childName), kind: "module", name: childName });
+        items.push({ id: nid("subdomain", childName), kind: "subdomain", name: childName });
         break;
       case "BoundedContext":
         items.push({ id: nid("context", childName), kind: "context", name: childName });
@@ -358,20 +358,20 @@ function systemView(ast: Model, name: string): ViewGraph {
   );
 }
 
-function moduleView(ast: Model, name: string): ViewGraph {
-  let mod: Module | undefined;
+function subdomainView(ast: Model, name: string): ViewGraph {
+  let sub: Subdomain | undefined;
   for (const m of ast.members) {
     if (m.$type === "System") {
       for (const sm of (m as System).members) {
-        if (sm.$type === "Subdomain" && (sm as Module).name === name) mod = sm as Module;
+        if (sm.$type === "Subdomain" && (sm as Subdomain).name === name) sub = sm as Subdomain;
       }
     }
   }
-  if (!mod) return { title: name, nodes: [], edges: [] };
-  const items = mod.contexts.map((c) => ({ id: nid("context", c.name), kind: "context" as const, name: c.name }));
+  if (!sub) return { title: name, nodes: [], edges: [] };
+  const items = sub.contexts.map((c) => ({ id: nid("context", c.name), kind: "context" as const, name: c.name }));
   return withRoot(
-    { title: `module ${name}`, nodes: layout(items, ["context"]), edges: [] },
-    "module",
+    { title: `subdomain ${name}`, nodes: layout(items, ["context"]), edges: [] },
+    "subdomain",
     name,
     { connectAll: true },
   );
@@ -553,7 +553,7 @@ function contextLayout(
 }
 
 function contextView(ast: Model, name: string): ViewGraph {
-  // Find by walking; contexts can live at Model level (legacy) or in a Module.
+  // Find by walking; contexts can live at Model level (legacy) or in a Subdomain.
   let ctx: BoundedContext | undefined;
   for (const m of ast.members) {
     if (m.$type === "BoundedContext" && (m as BoundedContext).name === name) {
@@ -562,7 +562,7 @@ function contextView(ast: Model, name: string): ViewGraph {
       for (const sm of (m as System).members) {
         if (sm.$type === "BoundedContext" && (sm as BoundedContext).name === name) ctx = sm as BoundedContext;
         if (sm.$type === "Subdomain") {
-          for (const c of (sm as Module).contexts) if (c.name === name) ctx = c;
+          for (const c of (sm as Subdomain).contexts) if (c.name === name) ctx = c;
         }
       }
     }
@@ -790,7 +790,7 @@ function aggregateView(ast: Model, name: string): ViewGraph {
             if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) agg = cm as Aggregate;
         }
         if (sm.$type === "Subdomain") {
-          for (const c of (sm as Module).contexts) {
+          for (const c of (sm as Subdomain).contexts) {
             for (const cm of c.members)
               if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) agg = cm as Aggregate;
           }
@@ -1063,7 +1063,7 @@ export function findAggregate(ast: Model, name: string): Aggregate | undefined {
             if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) return cm as Aggregate;
         }
         if (sm.$type === "Subdomain") {
-          for (const c of (sm as Module).contexts) {
+          for (const c of (sm as Subdomain).contexts) {
             for (const cm of c.members)
               if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) return cm as Aggregate;
           }
@@ -1093,7 +1093,7 @@ function findWorkflow(ast: Model, name: string): Workflow | undefined {
           if (wf) return wf;
         }
         if (sm.$type === "Subdomain") {
-          for (const c of (sm as Module).contexts) {
+          for (const c of (sm as Subdomain).contexts) {
             const wf = visit(c.members);
             if (wf) return wf;
           }
@@ -1158,7 +1158,7 @@ function findRepository(ast: Model, name: string): Repository | undefined {
           if (r) return r;
         }
         if (sm.$type === "Subdomain") {
-          for (const c of (sm as Module).contexts) {
+          for (const c of (sm as Subdomain).contexts) {
             const r = visit(c.members);
             if (r) return r;
           }
@@ -1190,8 +1190,8 @@ export function buildViewGraph(ast: Model, path: ViewPath): ViewGraph {
   switch (last.kind) {
     case "system":
       return systemView(ast, last.name);
-    case "module":
-      return moduleView(ast, last.name);
+    case "subdomain":
+      return subdomainView(ast, last.name);
     case "context":
       return contextView(ast, last.name);
     case "aggregate":

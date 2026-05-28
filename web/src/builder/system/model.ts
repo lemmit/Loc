@@ -28,7 +28,8 @@ import type {
 // ---------------------------------------------------------------------------
 
 export type NodeKind =
-  | "module"
+  | "subdomain"
+  | "context"
   | "aggregate"
   | "valueobject"
   | "event"
@@ -80,7 +81,8 @@ function emitterId(node: AstNode): string | null {
 // around; the user can drag from here.  Domain kinds on the left, deployment
 // kinds on the right.
 const COLUMN_ORDER: NodeKind[] = [
-  "module",
+  "subdomain",
+  "context",
   "aggregate",
   "valueobject",
   "event",
@@ -260,7 +262,8 @@ export type CoverageStatus = "covered" | "uncovered" | "none";
 // Graph node kind → the CodeRefKind used in traceability qualified names.
 // storage / ui aren't `Targetable`, so they never carry coverage.
 const NODE_KIND_TO_REF: Partial<Record<NodeKind, string>> = {
-  module: "module",
+  subdomain: "subdomain",
+  context: "context",
   aggregate: "aggregate",
   valueobject: "valueobject",
   event: "event",

@@ -6,11 +6,11 @@ import { rebindReference } from "./rebind";
 //
 // Only edges that map to a single, unambiguous cross-reference are drag-
 // rebindable: a repository's `for` aggregate, a `from` source (a view's
-// aggregate, an api's module), and a deployable's `targets` deployable. The
+// aggregate, an api's subdomain), and a deployable's `targets` deployable. The
 // first three go through `rebindReference` (single token rewrite, parse-
 // guarded); `targets` goes through `setDeployableTargets`, which reprints the
 // Deployable from its AST — the deployable's `targets:` slot is a single ref
-// that doesn't change the surrounding form. Multi-valued (deployable `modules`
+// that doesn't change the surrounding form. Multi-valued (deployable `contexts`
 // / `serves`) and derived (`emits`) edges stay inspector-only, as does the
 // form-sensitive deployable `ui` ref: `setDeployableUi` can convert between
 // sugar / compose / block forms and so isn't a no-op surgical rewrite.
@@ -18,10 +18,10 @@ import { rebindReference } from "./rebind";
 
 // `${ownerKind}:${label}` → the node kind the new target must be. The owner
 // kind disambiguates the shared `from` label (view vs api).
-const REBINDABLE: Record<string, "aggregate" | "module" | "deployable"> = {
+const REBINDABLE: Record<string, "aggregate" | "subdomain" | "deployable"> = {
   "repository:for": "aggregate",
   "view:from": "aggregate",
-  "api:from": "module",
+  "api:from": "subdomain",
   "deployable:targets": "deployable",
 };
 

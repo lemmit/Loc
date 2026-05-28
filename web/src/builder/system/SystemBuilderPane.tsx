@@ -23,7 +23,7 @@ import { spliceNode, lineDiff } from "../edit-engine";
 import { buildSystemGraph, coverageByNode, matchNodes, nodeDiagnostics, typeLabel, wireShapeOf, type CoverageStatus, type GraphNode, type NodeKind } from "./model";
 import type { WireField } from "../../../../src/ir/types/loom-ir.js";
 import { loadPositions, savePositions, type Pos } from "./positions";
-import { addConstructSource, addModuleSource, firstAggregateName, listContextNames } from "./add";
+import { addConstructSource, addSubdomainSource, firstAggregateName, listContextNames } from "./add";
 import { groupedLayout } from "./grouped-layout";
 import { isRebindableEdge, rebindEdgeTarget } from "./edge-rebind";
 import { buildLinkedModel } from "./linked-doc";
@@ -66,16 +66,17 @@ import {
 } from "./infra-props";
 import {
   apiNames,
-  deployableModules,
+  boundedContextNames,
+  deployableContexts,
   deployableNames,
   deployableServes,
   deployableTargets,
   deployableUi,
-  moduleNames,
-  setDeployableModules,
+  setDeployableContexts,
   setDeployableServes,
   setDeployableTargets,
   setDeployableUi,
+  subdomainNames,
   uiKind,
   uiNames,
 } from "./deployable-bindings";
@@ -101,7 +102,8 @@ import { ExprSlotEditor, type ExprMode } from "./ExpressionEditor";
 // positions are layout only (not written back).
 
 const KIND_COLOR: Record<NodeKind, string> = {
-  module: "var(--mantine-color-blue-7)",
+  subdomain: "var(--mantine-color-blue-7)",
+  context: "var(--mantine-color-teal-5)",
   aggregate: "var(--mantine-color-teal-7)",
   valueobject: "var(--mantine-color-cyan-8)",
   event: "var(--mantine-color-grape-7)",
@@ -174,8 +176,8 @@ function toRfNodes(
   );
 }
 
-const GROUP_STYLE: Record<"module" | "context", { background: string; border: string }> = {
-  module: { background: "rgba(59,130,246,0.06)", border: "1px solid var(--mantine-color-blue-7)" },
+const GROUP_STYLE: Record<"subdomain" | "context", { background: string; border: string }> = {
+  subdomain: { background: "rgba(59,130,246,0.06)", border: "1px solid var(--mantine-color-blue-7)" },
   context: { background: "rgba(20,184,166,0.07)", border: "1px dashed var(--mantine-color-teal-6)" },
 };
 
@@ -191,7 +193,7 @@ function toGroupedRfNodes(
   layout: ReturnType<typeof groupedLayout>,
 ): Node[] {
   const out: Node[] = [];
-  for (const kind of ["module", "context"] as const) {
+  for (const kind of ["subdomain", "context"] as const) {
     for (const g of layout.groups) {
       if (g.kind !== kind) continue;
       out.push({
@@ -219,7 +221,7 @@ function toGroupedRfNodes(
     }
   }
   for (const n of graph.nodes) {
-    if (n.kind === "module") continue; // modules are group containers in this mode
+    if (n.kind === "subdomain") continue; // subdomains are group containers in this mode
     const p = layout.placements.get(n.id);
     if (p) out.push(leafRfNode(n, diagByNode, coverage, overlay, { x: p.x, y: p.y }, p.parentId ?? undefined));
   }
@@ -463,16 +465,16 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   const hasAggregate = useMemo(() => !!firstAggregateName(parsed.ast), [parsed]);
   const contextNames = useMemo(() => listContextNames(parsed.ast), [parsed]);
-  const moduleNameList = useMemo(() => moduleNames(parsed.ast), [parsed]);
-  const hasModule = moduleNameList.length > 0;
+  const subdomainNameList = useMemo(() => subdomainNames(parsed.ast), [parsed]);
+  const hasSubdomain = subdomainNameList.length > 0;
   // Add-target picks; null means "first" (the default). Clear a stale pick when
-  // the named context / module no longer exists after an edit.
+  // the named context / subdomain no longer exists after an edit.
   const [addContext, setAddContext] = useState<string | null>(null);
-  const [addModuleName, setAddModuleName] = useState<string | null>(null);
+  const [addSubdomainName, setAddSubdomainName] = useState<string | null>(null);
   useEffect(() => {
     if (addContext && !contextNames.includes(addContext)) setAddContext(null);
-    if (addModuleName && !moduleNameList.includes(addModuleName)) setAddModuleName(null);
-  }, [contextNames, moduleNameList, addContext, addModuleName]);
+    if (addSubdomainName && !subdomainNameList.includes(addSubdomainName)) setAddSubdomainName(null);
+  }, [contextNames, subdomainNameList, addContext, addSubdomainName]);
   const typeOptions = useMemo(() => availableTypes(parsed.ast), [parsed]);
   const baseByLabel = useMemo(() => {
     const m = new Map<string, BaseSpec>();
@@ -532,17 +534,17 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     apply(spliceNode(ctx.getSource(), match, ""));
   };
 
-  const addModule = (): void => {
-    const next = addModuleSource(ctx.getSource());
+  const addSubdomain = (): void => {
+    const next = addSubdomainSource(ctx.getSource());
     if (next != null) apply(next);
   };
 
-  // Add a construct into the chosen target context (domain kinds) / module (api),
+  // Add a construct into the chosen target context (domain kinds) / subdomain (api),
   // defaulting to the first when none is picked. Parse-guarded inside `add.ts`.
   const addConstruct = (kind: NodeKind): void => {
     const next = addConstructSource(ctx.getSource(), kind, {
       context: addContext ?? undefined,
-      module: addModuleName ?? undefined,
+      subdomain: addSubdomainName ?? undefined,
     });
     if (next != null) apply(next);
   };
@@ -623,7 +625,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const bindDeployable = (next: string | null): void => {
     if (next != null) apply(next, true);
   };
-  const setModules = (mods: string[]): void => { if (selected) bindDeployable(setDeployableModules(ctx.getSource(), selected.name, mods)); };
+  const setContexts = (cs: string[]): void => { if (selected) bindDeployable(setDeployableContexts(ctx.getSource(), selected.name, cs)); };
   const setServes = (apis: string[]): void => { if (selected) bindDeployable(setDeployableServes(ctx.getSource(), selected.name, apis)); };
   const setTargets = (t: string | null): void => { if (selected) bindDeployable(setDeployableTargets(ctx.getSource(), selected.name, t)); };
   const setUi = (u: string | null): void => { if (selected) bindDeployable(setDeployableUi(ctx.getSource(), selected.name, u)); };
@@ -831,7 +833,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         )}
       </Box>
       <InspectorPanel compact={compact} opened={inspectorOpen} onClose={() => setInspectorOpen(false)}>
-        {(contextNames.length > 1 || moduleNameList.length > 1) && (
+        {(contextNames.length > 1 || subdomainNameList.length > 1) && (
           <Group gap={4} mb={4} wrap="nowrap" align="center">
             <Text size="xs" c="dimmed">Add into</Text>
             {contextNames.length > 1 && (
@@ -846,22 +848,22 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 onChange={setAddContext}
               />
             )}
-            {moduleNameList.length > 1 && (
+            {subdomainNameList.length > 1 && (
               <Select
                 size="xs"
                 w={120}
-                data={moduleNameList}
-                value={addModuleName ?? moduleNameList[0]}
+                data={subdomainNameList}
+                value={addSubdomainName ?? subdomainNameList[0]}
                 allowDeselect={false}
-                data-testid="c4system-add-module-target"
-                aria-label="api source module"
-                onChange={setAddModuleName}
+                data-testid="c4system-add-subdomain-target"
+                aria-label="api source subdomain"
+                onChange={setAddSubdomainName}
               />
             )}
           </Group>
         )}
         <Group gap={4} mb="xs">
-          <Button size="compact-xs" variant="light" data-testid="c4system-add-module" onClick={addModule}>+ Module</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-subdomain" onClick={addSubdomain}>+ Subdomain</Button>
           <Button size="compact-xs" variant="light" data-testid="c4system-add-aggregate" onClick={() => addConstruct("aggregate")}>+ Aggregate</Button>
           <Button size="compact-xs" variant="light" data-testid="c4system-add-valueobject" onClick={() => addConstruct("valueobject")}>+ Value object</Button>
           <Button size="compact-xs" variant="light" data-testid="c4system-add-event" onClick={() => addConstruct("event")}>+ Event</Button>
@@ -871,7 +873,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           <Button size="compact-xs" variant="default" data-testid="c4system-add-storage" onClick={() => addConstruct("storage")}>+ Storage</Button>
           <Button size="compact-xs" variant="default" data-testid="c4system-add-ui" onClick={() => addConstruct("ui")}>+ UI</Button>
           <Button size="compact-xs" variant="default" data-testid="c4system-add-deployable" onClick={() => addConstruct("deployable")}>+ Deployable</Button>
-          <Button size="compact-xs" variant="default" data-testid="c4system-add-api" disabled={!hasModule} onClick={() => addConstruct("api")}>+ API</Button>
+          <Button size="compact-xs" variant="default" data-testid="c4system-add-api" disabled={!hasSubdomain} onClick={() => addConstruct("api")}>+ API</Button>
         </Group>
         {!selected ? (
           <Text size="xs" c="dimmed">Select a node to inspect it, or add a construct.</Text>
@@ -911,7 +913,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             {isRebindKind(selected.kind) && (
               <Select
                 size="xs"
-                label={targetKindOf(selected.kind) === "module" ? "Source module" : selected.kind === "view" ? "Source aggregate" : "Target aggregate"}
+                label={targetKindOf(selected.kind) === "subdomain" ? "Source subdomain" : selected.kind === "view" ? "Source aggregate" : "Target aggregate"}
                 searchable
                 data={rebindTargets(parsed.ast, selected.kind)}
                 value={currentTarget(selected.ast, selected.kind)}
@@ -1094,11 +1096,11 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 </Group>
                 <MultiSelect
                   size="xs"
-                  label="modules"
-                  data={moduleNames(parsed.ast)}
-                  value={deployableModules(selected.ast)}
-                  data-testid="c4system-deployable-modules"
-                  onChange={setModules}
+                  label="contexts"
+                  data={boundedContextNames(parsed.ast)}
+                  value={deployableContexts(selected.ast)}
+                  data-testid="c4system-deployable-contexts"
+                  onChange={setContexts}
                 />
                 <MultiSelect
                   size="xs"
@@ -1308,7 +1310,8 @@ function findByKindName(ast: Model, target: GraphNode): AstNode | null {
 }
 
 const KIND_TO_TYPE: Record<NodeKind, string> = {
-  module: "Module",
+  subdomain: "Subdomain",
+  context: "BoundedContext",
   aggregate: "Aggregate",
   valueobject: "ValueObject",
   event: "EventDecl",

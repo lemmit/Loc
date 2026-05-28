@@ -55,10 +55,10 @@ import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
 import { renameByAstType } from "./rename-extra";
 import {
   apiNames,
-  deployableModules,
+  boundedContextNames,
+  deployableContexts,
   deployableServes,
-  moduleNames,
-  setDeployableModules,
+  setDeployableContexts,
   setDeployableServes,
 } from "../system/deployable-bindings";
 import {
@@ -77,7 +77,7 @@ import {
 
 const KIND_COLOR: Record<ViewKind, string> = {
   system: "var(--mantine-color-indigo-8)",
-  module: "var(--mantine-color-blue-7)",
+  subdomain: "var(--mantine-color-blue-7)",
   context: "var(--mantine-color-cyan-8)",
   aggregate: "var(--mantine-color-teal-7)",
   entity: "var(--mantine-color-teal-6)",
@@ -226,7 +226,7 @@ const EDGE_TYPES = { contains: ContainsEdge } as const;
 // cross-ref). Stmt / root aren't constructs.
 const AST_TYPE_BY_VIEW: Partial<Record<ViewKind, string>> = {
   system: "System",
-  module: "Module",
+  subdomain: "Subdomain",
   context: "BoundedContext",
   aggregate: "Aggregate",
   entity: "EntityPart",
@@ -670,14 +670,14 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           const depName = n.name;
           multiSelects = [
             {
-              label: "modules",
-              data: moduleNames(parsed.ast),
-              value: deployableModules(dep),
+              label: "contexts",
+              data: boundedContextNames(parsed.ast),
+              value: deployableContexts(dep),
               onChange: (v) => {
-                const next = setDeployableModules(ctx.getSource(), depName, v);
+                const next = setDeployableContexts(ctx.getSource(), depName, v);
                 if (next != null) apply(next);
               },
-              testid: "c4system-v2-deployable-modules",
+              testid: "c4system-v2-deployable-contexts",
             },
             {
               label: "serves",

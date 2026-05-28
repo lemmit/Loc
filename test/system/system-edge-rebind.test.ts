@@ -61,8 +61,8 @@ describe("edge drag-rebind", () => {
     expect(next).toContain("view ActiveOrders = Cart where true");
   });
 
-  it("repoints an api's `from` module", () => {
-    const next = rebindEdgeTarget(SYS, "from", "api:OrdersApi", "module:Billing")!;
+  it("repoints an api's `from` subdomain", () => {
+    const next = rebindEdgeTarget(SYS, "from", "api:OrdersApi", "subdomain:Billing")!;
     expect(next).toContain("api OrdersApi from Billing");
   });
 

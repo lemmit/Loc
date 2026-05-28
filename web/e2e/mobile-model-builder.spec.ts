@@ -23,5 +23,5 @@ test("Inspect FAB sits below the overlay and opens the inspector drawer", async 
   await inspect.click();
   // The drawer opens with the inspector content (assert content, not the
   // Mantine drawer root, which is a hidden wrapper).
-  await expect(page.getByTestId("c4system-add-module")).toBeVisible();
+  await expect(page.getByTestId("c4system-add-subdomain")).toBeVisible();
 });

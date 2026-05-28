@@ -1,6 +1,6 @@
 // v2-only construct adders that v1's `add.ts` doesn't expose: inserting a new
-// bounded context into an existing module, and a new operation into an
-// existing aggregate. Same shape as `addConstructSource` / `addModuleSource`:
+// bounded context into an existing subdomain, and a new operation into an
+// existing aggregate. Same shape as `addConstructSource` / `addSubdomainSource`:
 // pure, parse-guarded splice; returns null on lookup failure / parse failure.
 
 import { AstUtils, type AstNode } from "langium";
@@ -36,22 +36,22 @@ function ifParses(candidate: string): string | null {
   return parseDdd(candidate).parserErrors.length === 0 ? candidate : null;
 }
 
-/** Add a new (empty) bounded context to an existing module, returning the new
- *  source or null when the module isn't found / the result wouldn't parse. */
-export function addContextSource(source: string, moduleName: string): string | null {
+/** Add a new (empty) bounded context to an existing subdomain, returning the new
+ *  source or null when the subdomain isn't found / the result wouldn't parse. */
+export function addContextSource(source: string, subdomainName: string): string | null {
   const ast = parseDdd(source).ast;
-  let mod: Module | undefined;
+  let sub: Subdomain | undefined;
   for (const m of ast.members) {
     if (m.$type === "System") {
       for (const sm of (m as System).members) {
-        if (sm.$type === "Subdomain" && (sm as Module).name === moduleName) mod = sm as Module;
+        if (sm.$type === "Subdomain" && (sm as Subdomain).name === subdomainName) sub = sm as Subdomain;
       }
     }
   }
-  if (!mod) return null;
+  if (!sub) return null;
   const name = freshName(ast, "Context");
   const text = `\n    context ${name} {\n    }\n`;
-  return ifParses(insertIntoBlock(source, mod, text));
+  return ifParses(insertIntoBlock(source, sub, text));
 }
 
 /** Add a new no-arg operation to an existing aggregate. */
