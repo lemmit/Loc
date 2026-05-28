@@ -19,6 +19,7 @@
 // any dataSource declarations.
 // ---------------------------------------------------------------------------
 
+import { snake } from "../../util/naming.js";
 import type {
   BoundedContextIR,
   DataSourceIR,
@@ -51,4 +52,44 @@ export function resolveDataSourceForAggregate(
   if (!ctx.aggregates.some((a) => a.name === agg.name)) return undefined;
   const kind = dataSourceKindForAggregate(agg);
   return sys.dataSources.find((d) => d.contextName === ctx.name && d.kind === kind);
+}
+
+/** Per-aggregate dataSource config after implicit defaults are folded
+ *  in.  Returned by {@link resolveDataSourceConfig}; this is what every
+ *  backend emitter (EF Core ToTable, Drizzle pgSchema, AshPostgres
+ *  postgres-block) should consume — not the raw `DataSourceIR`.
+ *
+ *  The defaulting rule that matters:
+ *    - `schema:` omitted → defaults to `snake(context.name)`.  A
+ *      bounded context lands in its own Postgres schema by default;
+ *      explicit `schema: "..."` overrides for legacy-database mapping. */
+export interface ResolvedDataSource {
+  name: string;
+  kind: DataSourceKind;
+  /** Effective Postgres schema — never `undefined` when this
+   *  configuration is returned at all.  Either the DSL `schema:` value
+   *  verbatim, or `snake(context.name)` when DSL omitted it. */
+  schema: string;
+  tablePrefix?: string;
+}
+
+/** Resolve the aggregate's dataSource and fold in implicit defaults.
+ *  Returns `undefined` when no dataSource matches the (context, kind)
+ *  pair — emitters fall back to their pre-dataSource default shape
+ *  (no schema qualifier).  When a binding exists, `.schema` is always
+ *  populated: either from DSL or defaulted to the snake-cased context
+ *  name. */
+export function resolveDataSourceConfig(
+  agg: EnrichedAggregateIR,
+  ctx: BoundedContextIR,
+  sys: SystemIR,
+): ResolvedDataSource | undefined {
+  const ds = resolveDataSourceForAggregate(agg, ctx, sys);
+  if (!ds) return undefined;
+  return {
+    name: ds.name,
+    kind: ds.kind,
+    schema: ds.schema ?? snake(ctx.name),
+    tablePrefix: ds.tablePrefix,
+  };
 }
