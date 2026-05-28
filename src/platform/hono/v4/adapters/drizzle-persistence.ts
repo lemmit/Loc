@@ -1,0 +1,180 @@
+// ---------------------------------------------------------------------------
+// drizzle — the real PersistenceAdapter for the hono platform.  Wraps the
+// existing TypeScript/Hono emit fns (`src/generator/typescript/*` +
+// `src/platform/hono/v4/emit.ts`) so produced source is byte-identical
+// with today's `generateTypeScript` output.
+//
+// Parallel of the dotnet `efcorePersistenceAdapter` (F5a) — same
+// contract, mapped to the Hono backend's drizzle-orm + pg stack.
+// The orchestrator (`src/platform/hono/v4/emit.ts`) still calls the
+// underlying emit fns directly today; this adapter is the public
+// surface the F5d-equivalent (Hono) rewire will dispatch through.
+// ---------------------------------------------------------------------------
+
+import type { EmitCtx, Lines, PersistenceAdapter } from "../../../../generator/_adapters/index.js";
+import { emitTypescriptMigrations } from "../../../../generator/typescript/emit/migrations.js";
+import { renderSchema } from "../../../../generator/typescript/emit/schema.js";
+import { buildRepositoryFile } from "../../../../generator/typescript/repository-builder.js";
+import type {
+  AggregateIR,
+  DataSourceIR,
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+  StorageIR,
+} from "../../../../ir/types/loom-ir.js";
+import { BACKEND_PINS } from "../pins.js";
+
+/** Find the matching repository declaration across the deployable's
+ *  contexts.  Mirrors `findRepoFor` in the dotnet adapter. */
+function findRepoFor(ctx: EmitCtx, aggName: string) {
+  for (const c of ctx.contexts) {
+    const r = c.repositories.find((repo) => repo.aggregateName === aggName);
+    if (r) return r;
+  }
+  return undefined;
+}
+
+/** The owning bounded context for an aggregate — `buildRepositoryFile`
+ *  needs the context to look up view filters that share the table. */
+function contextOf(ctx: EmitCtx, aggName: string): EnrichedBoundedContextIR | undefined {
+  return ctx.contexts.find((c) => c.aggregates.some((a) => a.name === aggName));
+}
+
+const splitLines = (s: string): Lines => s.split("\n");
+
+/** JSON-key lines spliced into `package.json#dependencies`.  Returned
+ *  as `"key": "version",` lines so the consumer can merge them into
+ *  the JSON literal without parsing.  Drizzle + pg only — `hono`,
+ *  `@hono/...`, `zod`, `pino` belong to the framework/style adapters. */
+const persistenceDeps = (): Lines => [
+  `"drizzle-orm": "${BACKEND_PINS.dependencies["drizzle-orm"]}",`,
+  `"pg": "${BACKEND_PINS.dependencies["pg"]}",`,
+];
+
+const persistenceDevDeps = (): Lines => [
+  `"drizzle-kit": "${BACKEND_PINS.devDependencies["drizzle-kit"]}",`,
+  `"@types/pg": "${BACKEND_PINS.devDependencies["@types/pg"]}",`,
+];
+
+export const drizzlePersistenceAdapter: PersistenceAdapter = {
+  name: "drizzle",
+  supportedStrategies: ["stateBased"],
+
+  supports(storageType, kind, persistenceStrategy) {
+    return (
+      persistenceStrategy === "stateBased" &&
+      ["postgres", "mysql", "sqlite"].includes(storageType) &&
+      ["state", "snapshot", "replica"].includes(kind)
+    );
+  },
+
+  emitProjectDeps(_ctx: EmitCtx): Lines {
+    // package.json deps + devDeps for the drizzle stack, JSON-shaped
+    // so the orchestrator rewire can splice them into the existing
+    // `projectPackageJson` literal.  Today `projectPackageJson` reads
+    // `BACKEND_PINS.dependencies` wholesale (framework + persistence
+    // mixed); the F6d-equivalent rewire will collect dep slices from
+    // every adapter the deployable resolved and merge them at the
+    // package.json render boundary.
+    return [...persistenceDeps(), ...persistenceDevDeps()];
+  },
+
+  emitConnectionSetup(_physicalStores: readonly StorageIR[], _ctx: EmitCtx): Lines {
+    // index.ts bootstrap lines that spin up the drizzle pool +
+    // surface pool-error logging.  Mirrors what `renderProjectIndexTs`
+    // splices today.  The DATABASE_URL guard moves with this block
+    // so the same "fail-fast on missing env" check holds.
+    return [
+      `if (!process.env.DATABASE_URL) {`,
+      `  throw new Error(`,
+      `    "DATABASE_URL is required.  Set it in the environment " +`,
+      `      "(e.g. postgres://user:pass@host:5432/db).",`,
+      `  );`,
+      `}`,
+      ``,
+      `const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });`,
+      `// Surface pool-level connection errors on the structured stream — a`,
+      `// dropped backend connection (DB restart, network blip) emits 'error'`,
+      `// on the pool, not per-query.  Without this hook the failure surfaces`,
+      `// only as the NEXT request's 503 from /ready or a 500 from an`,
+      `// aggregate route; logging here gives ops the heads-up + the cause.`,
+      `pool.on("error", (err) => {`,
+      `  baseLogger.warn({`,
+      `    event: "db_disconnected",`,
+      `    reason: err instanceof Error ? err.message : String(err),`,
+      `  });`,
+      `});`,
+      `const db = drizzle(pool, { schema });`,
+    ];
+  },
+
+  emitRepository(agg: AggregateIR, _logical: DataSourceIR, ctx: EmitCtx): Lines {
+    // Wraps `buildRepositoryFile` — the per-aggregate drizzle
+    // repository module.  The orchestrator (`emit.ts`) calls
+    // `buildRepositoryFile` directly today; this adapter is the
+    // forward seam for the rewire.  Logical config (schema /
+    // tablePrefix / readonly) flows through `_logical` for the
+    // schema-aware future; today the existing fn ignores it.
+    const owningCtx = contextOf(ctx, agg.name);
+    if (!owningCtx) return [];
+    const enriched = agg as EnrichedAggregateIR;
+    const repo = findRepoFor(ctx, agg.name);
+    return splitLines(buildRepositoryFile(enriched, repo, owningCtx, !!ctx.emitTrace));
+  },
+
+  emitMigrations(
+    _aggs: readonly AggregateIR[],
+    _physicalStores: readonly StorageIR[],
+    ctx: EmitCtx,
+  ): Lines | null {
+    // Per-deployable migration emission — same pattern the dotnet
+    // efcore adapter uses: collect the multi-file output into a
+    // single Lines stream so the contract (`Lines | null`) holds.
+    // The orchestrator writes these files directly today.
+    if (!ctx.migrations || ctx.migrations.length === 0) return null;
+    const collected = new Map<string, string>();
+    emitTypescriptMigrations(ctx.migrations, collected);
+    const out: string[] = [];
+    for (const [path, content] of [...collected.entries()].sort()) {
+      out.push(`// ---- ${path} ----`);
+      out.push(...content.split("\n"));
+      out.push("");
+    }
+    return out;
+  },
+
+  emitOutbox(_physical: StorageIR, _aggs: readonly AggregateIR[], _ctx: EmitCtx): Lines | null {
+    // Hono outbox emission deferred — same posture as the dotnet
+    // adapter: the validator already rejects integration events
+    // without a transactional store, so reaching here today is a
+    // capability gap.
+    return null;
+  },
+};
+
+/** Drizzle schema emitter — the deployable's `db/schema.ts` file.  Not
+ *  on the formal PersistenceAdapter contract today (the schema is a
+ *  drizzle-specific construct); exposed here in the same shape the
+ *  rewire will use to replace the inline `renderSchema(...)` call in
+ *  `emit.ts`.
+ *
+ *  `renderSchema` takes a single merged context, so we synthesise one
+ *  from every context the deployable hosts — same merge the existing
+ *  orchestrator does inline. */
+export function emitDrizzleSchema(
+  ctx: EmitCtx,
+  options: { audit?: boolean; provenance?: boolean } = {},
+): Lines {
+  const ns = ctx.deployable.name;
+  const merged: EnrichedBoundedContextIR = {
+    name: ns,
+    enums: ctx.contexts.flatMap((c) => c.enums),
+    valueObjects: ctx.contexts.flatMap((c) => c.valueObjects),
+    events: ctx.contexts.flatMap((c) => c.events),
+    aggregates: ctx.contexts.flatMap((c) => c.aggregates),
+    repositories: ctx.contexts.flatMap((c) => c.repositories),
+    workflows: ctx.contexts.flatMap((c) => c.workflows),
+    views: ctx.contexts.flatMap((c) => c.views),
+  };
+  return splitLines(renderSchema(merged, options));
+}
