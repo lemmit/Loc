@@ -6,6 +6,21 @@
 > playground Hono runner (`web/src/runtime/runtime.worker.ts`) and on
 > Loom's per-platform generator pattern (`src/platform/registry.ts`,
 > `docs/platforms.md`).
+>
+> Two real paths are documented here, with different cost/fidelity
+> trade-offs:
+> - **Recommended plan** ("framing A") — Blazor WASM as runtime
+>   substrate + dispatcher + React UI talking via wire. Preserves the
+>   wire-boundary-inside-browser property. See [What this would cost
+>   — phased](#what-this-would-cost--phased).
+> - **Alternative plan** ("framing B") — Blazor WASM end-to-end as a
+>   monolith. Cheaper, requires a new Blazor design pack, gives up the
+>   wire boundary inside the playground demo. See [Alternative plan:
+>   minimal possible dotnet playground
+>   setup](#alternative-plan-minimal-possible-dotnet-playground-setup).
+>
+> The framing choice — what the playground is *for* — drives which
+> plan wins. Pick before starting.
 
 ## Problem
 
@@ -402,35 +417,57 @@ exists and the asymmetry is measured against real reader friction.
 The runtime doesn't change between phases — Phase B is pure surface
 sugar over Phase A's router.
 
-## Why Blazor as the runtime substrate (and not "Blazor end-to-end")
+## Two genuine paths — and which one this proposal recommends depends on what the playground is *for*
 
-There's an alternative path worth flagging because it's tempting and
-*almost* right: skip the dispatcher entirely and use Blazor WASM
-end-to-end. The UI is Blazor, the handlers are injected services,
-component code calls them directly via DI. No HTTP boundary inside
-the browser, no shim, no router.
+There are two architecturally honest answers, and the choice between
+them depends on a framing question about what the playground is
+*for*.
 
-This is **simpler** but **changes what the playground demonstrates.**
+### Framing A — the playground is a faithful preview of the production multi-deployable system
 
-Loom's selling point is that the *system* (backend + UI talking via a
-wire contract) is cross-platform-coherent. The playground today
-runs a real wire boundary: serialised requests cross the worker
-boundary, hit `app.fetch`, and a response serialises back. That's
-what `conformance-parity.yml` is gating.
+If the playground's job is to show a user the same architecture Loom
+emits in production — backend + UI talking via a real wire contract,
+all four backends interchangeable behind it — then the wire boundary
+inside the browser is **load-bearing.** Erasing it for one variant
+quietly turns the demo into something different from what the
+generator produces.
 
-If the .NET variant in the playground is a Blazor monolith, the wire
-boundary disappears inside the demo. The handlers/DTOs/repos still
-work — but the *architecture being shown* is now Blazor, not "ASP.NET
-Core backend + React frontend talking via wire shape." A reviewer
-comparing playground demos would see one variant (Hono) demoing the
-generated system and another variant (Blazor) demoing something
-adjacent but not equivalent.
+In this framing the recommended path is the middle ground:
+**Blazor WASM as the runtime substrate, with `[JSInvokable] Dispatch`
+as the wire entrypoint, React UI unchanged.** Blazor is reduced from
+a UI framework to "the way to run .NET in the browser"; the React
+side talks to it exactly the way it talks to Hono today. This is
+what the phased plan below builds.
 
-The middle ground — **Blazor WASM as the runtime substrate, with
-`[JSInvokable] Dispatch` as the wire entrypoint, React UI unchanged**
-— gets the credibility of Blazor as a Microsoft-supported runtime
-without losing the wire boundary. That's the path this proposal
-recommends.
+### Framing B — the playground is a teaching/exploration tool
+
+If the playground's job is just to demonstrate that the DSL produces
+runnable code in each target language — see your `.ddd` come alive,
+inspect what the .NET handlers look like, click around — then the
+wire boundary is **not** load-bearing. The CI gates
+(`conformance-parity.yml`, the per-backend build workflows) already
+prove cross-backend parity; the playground doesn't have to
+re-demonstrate it for human eyes.
+
+In this framing the recommended path is **Blazor WASM end-to-end:**
+the UI is Blazor components, handlers are injected services,
+component code calls them directly. No dispatcher, no router, no
+shim. Much cheaper to ship. See [Alternative plan: minimal
+possible dotnet playground setup](#alternative-plan-minimal-possible-dotnet-playground-setup)
+below for the full sketch.
+
+### Which framing is right for Loom?
+
+The proposal author's read (from `CLAUDE.md`'s emphasis on
+conformance, wire-spec, parity tests, and the production
+multi-deployable Docker compose model) is that Loom leans toward
+framing A. But this is a real product decision, not a technical one
+— if Loom's product owner reframes the playground as primarily a
+teaching surface, framing B becomes the better engineering
+trade-off, and the difference in cost is large (months vs weeks).
+
+**The phased plan below targets framing A. The alternative plan
+targets framing B. Pick one before starting.**
 
 ## What this would cost — phased
 
@@ -479,6 +516,129 @@ serialisation of result rows).
 
 The Phase B shim layer described above. Pure surface, additive,
 non-blocking.
+
+## Alternative plan: minimal possible dotnet playground setup
+
+This is the framing-B path. Substantially cheaper, with one
+architectural concession: the .NET variant in the playground is a
+Blazor WASM monolith, not "ASP.NET Core backend + React frontend
+talking via wire shape." The wire-boundary-in-browser story applies
+only to the Hono variant; the .NET variant is demonstrated as
+"Blazor on top of the same handlers + repos."
+
+### What gets shipped
+
+1. **`Pglite.Data`** — the `PgliteConnection` / `PgliteCommand` /
+   `PgliteDataReader` package. **Identical to Phase 2 of the
+   recommended plan.** ~500 lines. Open-sourceable on its own.
+2. **A Blazor WASM project template** that the `dotnet-browser`
+   emitter populates. Includes:
+   - `Program.cs` with `WebAssemblyHostBuilder.CreateDefault(args)`,
+     DI registrations, `PgliteConnection` as singleton `IDbConnection`.
+   - One Razor page per UI view in the IR — generated from the
+     same UI primitives the React design pack consumes, but rendered
+     into Razor markup.
+   - Handlers + repos + DTOs — identical to production .NET output
+     except for the EF→Dapper swap and DI registration.
+3. **A Blazor design pack** — new sibling of `designs/mantine/` etc.,
+   rendering UI primitives (`List`/`Detail`/`Form`/`MasterDetail`/
+   `Stack`/`Heading`/`Button`/`Card`/`Toolbar`/`match`) as Razor.
+   This is the meaningful new generator work. The walker target
+   contract (`src/generator/_walker/target.ts`) already abstracts
+   the framework-shaped seams; a `BlazorTarget` implementing it
+   slots in alongside the existing `tsx-target.ts` and
+   `heex-target.ts`.
+4. **Worker integration** — a `dotnet-runtime.worker.ts` that boots
+   Blazor WASM, exposes `pglite.query`, and forwards UI events.
+   Simpler than the framing-A dispatcher because there's no
+   request-shaped marshalling — Blazor's own JSInterop handles
+   component events.
+
+### What does *not* get shipped
+
+- **No router.** Components inject services and call them directly.
+- **No dispatcher.** No `[JSInvokable] Dispatch` entrypoint, no
+  serialised request envelopes, no JSON parameter binding per call.
+- **No Minimal API shim** (Phase B in the recommended plan). Nothing
+  to mimic.
+- **No `[JsonPropertyName]` source-gen for wire conformance** — there's
+  no wire to conform to in this variant. The CI gates still cover
+  production .NET wire shape; the playground variant doesn't.
+
+### What gets gained
+
+- **Months of work disappear.** No router, no dispatcher, no Minimal
+  API shim, no per-DTO source-gen JSON wiring, no worker-side
+  request envelope translation.
+- **No Microsoft-surface treadmill.** The shim doesn't exist;
+  there's nothing to drift.
+- **Smaller Loom surface to maintain.** The `dotnet-browser`
+  PlatformSurface is mostly UI generation (the Blazor design pack)
+  plus the EF→Dapper swap.
+
+### What gets lost
+
+- **The .NET playground demo no longer mirrors the production
+  multi-deployable architecture.** Production emits ASP.NET Core +
+  React talking via HTTP; playground emits Blazor monolith. A user
+  copying playground code into a production project would find the
+  shapes diverge significantly in `Program.cs`, in the UI layer, and
+  in how the UI talks to handlers.
+- **The Blazor design pack is non-trivial.** Razor's component model
+  is different enough from React's that the existing UI primitive
+  emitters can't be lightly reused — a real `BlazorTarget`
+  `WalkerTarget` implementation is needed. This is the dominant cost
+  in this plan.
+- **No cross-backend conformance demonstration inside the
+  playground.** The Hono variant's React UI talking via wire still
+  works; the .NET variant's Blazor UI doesn't participate in the
+  same demonstration. (CI parity gates are unaffected.)
+
+### Cost estimate
+
+| Piece | Recommended plan | This plan |
+|---|---|---|
+| `Pglite.Data` | ~1 week (Phase 2) | ~1 week (same) |
+| Router + dispatcher + parameter binder | ~1 week (Phase 2) | — |
+| Minimal API shim (optional Phase B) | ~1 week | — |
+| `dotnet-browser` emitter — backend code | ~2 weeks (Phase 3) | ~1 week |
+| `dotnet-browser` emitter — UI | — (reuses React) | ~3-4 weeks (new Blazor design pack) |
+| Worker integration | ~3 days (Phase 4) | ~3 days |
+| Source-gen JSON + `[JsonPropertyName]` | ~1 week (Phase 3) | — |
+| **Total** | **~6-7 weeks** | **~5-6 weeks** |
+
+The totals look closer than the rhetoric suggests because the Blazor
+design pack is genuinely expensive — it's the one piece that this
+plan adds rather than removes. If a Blazor design pack would be
+wanted anyway for other reasons (e.g. a `phoenixLiveView`-style
+"Blazor-native" deployable variant in production), then this plan
+becomes much cheaper relative to the recommended one.
+
+### When to pick this plan
+
+- **Pick this** if the playground is primarily a teaching/marketing
+  surface, the Hono variant is sufficient for "see the wire shape
+  working," and demonstrating .NET means "show me C# code working in
+  the browser with real Postgres."
+- **Pick the recommended (framing A) plan** if the playground is the
+  product's primary live demonstration of the multi-deployable wire
+  architecture, and "the .NET variant is a Blazor monolith" would
+  meaningfully misrepresent what Loom emits.
+- **A third option:** ship `Pglite.Data` first as standalone OSS
+  (it's identical in both plans and useful on its own), then defer
+  the rest until the framing decision is forced by a real user need.
+
+### Minimal-minimum: just ship `Pglite.Data`
+
+If even this plan feels like too much, the irreducible kernel is
+`Pglite.Data` alone. Publish it as a standalone NuGet (`Pglite.Data`
+or similar — see the open-source candidate discussion earlier). It
+solves a real, googleable problem ("how do I use Postgres in Blazor
+WASM?") and costs Loom nothing to maintain because it isn't part of
+Loom's playground at all — it's a standalone Microsoft-ecosystem
+artefact. The rest of the .NET playground story (either framing)
+can be picked up later by Loom or by anyone else; `Pglite.Data` is
+the unblocking ingredient.
 
 ## Open questions
 
@@ -547,32 +707,58 @@ non-blocking.
 
 ## Summary
 
-The path is:
+Three honest answers, in decreasing order of likelihood:
 
-1. **PGlite + custom `IDbConnection`** is the linchpin. Without it,
-   nothing else is possible. With it, real unmodified Dapper from
-   NuGet just works.
-2. **Blazor WASM is the substrate** — supported by Microsoft, gives
-   you DI, logging, JSInterop, reflection, source-gen JSON. Not used
-   as a UI framework; used as "the way to run .NET in the browser."
-3. **A small router + `[JSInvokable] Dispatch`** replaces Kestrel and
-   the ASP.NET Core hosting pipeline. ~300 lines.
-4. **Optional Minimal API sugar** layers on top of the router as pure
-   surface. Decouples the architectural decision from the syntactic
-   one.
-5. **A `dotnet-browser` PlatformSurface** in the Loom generator owns
-   the emit differences — mostly DI registration and Dapper-shaped
-   repositories. Handlers, DTOs, and the JSON contract are unchanged.
+### Default: don't do it
 
-Total custom code: the PGlite ADO.NET adapter (~500 lines,
-open-sourceable), the router + dispatcher (~300 lines), and the
-Loom emitter variant (mechanical generator work, shares ~90% with the
-existing `dotnet` emitter). The Minimal API shim is an additional
-~150 lines if Phase B ships.
+The Hono runner already demonstrates the wire shape end-to-end; the
+.NET parity is gated by CI (`conformance-parity.yml`,
+`dotnet-build.yml`, `dotnet-obs-e2e.yml`). Adding a second runnable
+backend to the playground is a lot of work for a marginal demo
+improvement. The playground is one of four ways the generator's
+output gets exercised; the others (the per-backend CI builds) already
+prove the .NET side works. Until a real product need surfaces, this
+proposal sits in `maybe-one-day/`.
 
-This is **a lot of work** for the marginal demo improvement of
-"the .NET backend also runs in the playground." Worth doing only when
-the playground story is mature enough that another runnable backend
-adds clear product value — likely after Phoenix has the same
-question raised, or after a customer asks specifically. Until then,
-this document exists so the path is recoverable.
+### If forced to ship — minimum viable: just `Pglite.Data`
+
+The irreducible kernel is the PGlite ADO.NET adapter (~500 lines).
+Publish as a standalone NuGet. Useful on its own — solves a real
+problem in the Microsoft ecosystem with no current good answer.
+Doesn't commit Loom to anything else.
+
+### If actually doing it — pick a framing first
+
+Two real plans, two real framings. Pick before starting.
+
+**Framing A (recommended plan).** Playground is a faithful preview of
+the production multi-deployable architecture. Wire boundary inside
+the browser is preserved. Total cost ~6-7 weeks.
+
+| Piece | Role |
+|---|---|
+| `Pglite.Data` | The bridge. Unmodified Dapper works on top. |
+| Blazor WASM | Runtime substrate — not used as UI, used as the way to run .NET in the browser. |
+| Router + `[JSInvokable] Dispatch` | ~300 lines replacing Kestrel and the hosting pipeline. |
+| Source-gen `JsonSerializerContext` + explicit `[JsonPropertyName]` | Cross-backend wire conformance. |
+| `dotnet-browser` PlatformSurface | Mostly DI + Dapper repo emission. Handlers/DTOs unchanged. |
+| Optional: Minimal API shim | Pure surface sugar over the router. Decoupled, additive. |
+
+**Framing B (alternative plan — "minimal possible dotnet playground
+setup").** Playground is a teaching/exploration surface. .NET variant
+is a Blazor WASM monolith. No router, no dispatcher, no Minimal API
+shim. Different UI generation (new Blazor design pack instead of
+sharing React). Total cost ~5-6 weeks, dominated by the Blazor design
+pack.
+
+The cost gap is smaller than the rhetoric suggests because framing B
+trades router-and-shim work for a new design pack. **Framing B
+becomes substantially cheaper** if a Blazor design pack would be
+wanted for *other* reasons (a hypothetical production Blazor
+deployable variant, parallel to `phoenixLiveView`). In that world,
+the .NET playground is almost free on top.
+
+This proposal's author leans toward framing A, on the read that
+Loom's identity is "all backends agree on the wire shape, here's
+empirical proof." But this is a product call, not a technical one,
+and reasonable people could pick framing B.
