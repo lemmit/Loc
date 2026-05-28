@@ -1,26 +1,7 @@
 # .NET in the playground — running the generated .NET backend in the browser
 
-> Status: speculative — "maybe one day". No commitment to ship. This is
-> a captured architecture conversation, written down so the path is
-> recoverable if the question comes up again. It builds on the existing
-> playground Hono runner (`web/src/runtime/runtime.worker.ts`) and on
-> Loom's per-platform generator pattern (`src/platform/registry.ts`,
-> `docs/platforms.md`).
->
-> Two real paths are documented here, with different cost/fidelity
-> trade-offs:
-> - **Recommended plan** ("framing A") — Blazor WASM as runtime
->   substrate + dispatcher + React UI talking via wire. Preserves the
->   wire-boundary-inside-browser property. See [What this would cost
->   — phased](#what-this-would-cost--phased).
-> - **Alternative plan** ("framing B") — Blazor WASM end-to-end as a
->   monolith. Cheaper, requires a new Blazor design pack, gives up the
->   wire boundary inside the playground demo. See [Alternative plan:
->   minimal possible dotnet playground
->   setup](#alternative-plan-minimal-possible-dotnet-playground-setup).
->
-> The framing choice — what the playground is *for* — drives which
-> plan wins. Pick before starting.
+> **Most probably won't do.** Captured architecture conversation, filed
+> so the path is recoverable if the question comes up again.
 
 ## Problem
 
