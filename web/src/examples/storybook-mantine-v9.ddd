@@ -203,7 +203,7 @@ system Storybook {
 
   deployable api {
     platform: hono
-    contexts: [Stories]
+    contexts: [Storybook]
     port: 3000
   }
 

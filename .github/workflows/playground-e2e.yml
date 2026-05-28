@@ -133,13 +133,18 @@ jobs:
         run: npm run e2e
 
       # Upload the Playwright HTML report (with embedded trace) on
-      # failure so we can inspect what the browser saw without
-      # re-running locally.  Only the report dir is shipped — the raw
-      # test-results/ tree is redundant with it and would double the
-      # artifact size.  Short retention + max compression keep this
-      # well under the 500MB Actions storage quota.
-      - name: Upload Playwright report on failure
-        if: failure()
+      # failure *or cancellation* so we can inspect what the browser saw
+      # without re-running locally.  Cancellation matters here: when the
+      # suite hits the 75-min job cap it ends as `cancelled`, not
+      # `failure()`, so a plain `failure()` guard shipped zero
+      # diagnostics on exactly the runs we most need to triage (a capped
+      # run can't tell us which spec was slow vs genuinely stuck).  Only
+      # the report dir is shipped — the raw test-results/ tree is
+      # redundant with it and would double the artifact size.  Short
+      # retention + max compression keep this well under the 500MB
+      # Actions storage quota.
+      - name: Upload Playwright report on failure or timeout
+        if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
