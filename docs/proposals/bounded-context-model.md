@@ -2,6 +2,18 @@
 
 > Status: design agreed in conversation, not yet implemented. Coordinates with [`workflow-and-applier.md`](./workflow-and-applier.md) (merged), [`lifecycle-operations.md`](./lifecycle-operations.md) (proposed), and supersedes the per-aggregate-storage stance of [`storage-and-platform-config.md`](./storage-and-platform-config.md) + [`storage-and-platform-config-plan.md`](./storage-and-platform-config-plan.md) + [`storage-and-platform-config-micro-plan.md`](./storage-and-platform-config-micro-plan.md) (those proposals' grammar work mostly survives — the granularity choice is what changes).
 
+> **Pinned decisions** (see [`docs/decisions.md`](../decisions.md)):
+>
+> - **D-GRANULARITY** — bindings are per-context, not per-aggregate
+>   for v1; this proposal's framing is what got pinned.
+> - **D-STORAGE-SPLIT** — three keywords land in v1: `storage`
+>   (physical), `dataSource` (per-context, per-kind binding),
+>   `deployable` (carries `contexts:` and `dataSources:`).
+>   §"Storage instance binding — on the deployable" below is
+>   updated by this decision: the deployable holds
+>   `dataSources: [...]` (a list of `dataSource` refs), not a
+>   `storage: { Context: instance }` map.
+
 ## Problem statement
 
 Today's Loom structural model has six unrelated frictions that resolve together once the bounded context is restated as the central organising unit:

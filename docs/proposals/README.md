@@ -12,6 +12,13 @@ cross-proposal collisions, and pins a topological order across the
 whole corpus. The phase summary in this README is a précis; the
 plan doc is the source of truth.
 
+**Pinned decisions live in [`../decisions.md`](../decisions.md)** —
+when a D-tag (e.g. D-STORAGE-SPLIT, D-GRANULARITY, D-RENAME,
+D-LIFECYCLE-VERB, …) is referenced from a proposal or plan, the
+decisions log is where the binding answer lives. Proposal text that
+predates a pinned decision is annotated with a "Pinned decisions
+affecting this proposal" block at its top.
+
 This README is hand-maintained and was previously stale. If you
 spot drift between a proposal's actual status and the table here,
 update both the entry and `global-implementation-plan.md`.
@@ -54,7 +61,7 @@ Status reflects `origin/main` as of the last refresh of
 
 | Doc | Status | Core addition |
 |---|---|---|
-| [`storage-and-platform-config.md`](./storage-and-platform-config.md) | PARTIAL | Top-level `storage <name> { type }` and deployable role-keyed slots shipped. Remaining: per-aggregate `persistenceStrategy:`, logical bindings (keyword TBD — see D-STORAGE-SPLIT), per-deployable `style:` / `layout:` / `persistence:`, `STORAGE_CAPABILITIES` matrix, adapter contracts. **Granularity decision pending bounded-context-model.md** (BC-level vs per-aggregate). |
+| [`storage-and-platform-config.md`](./storage-and-platform-config.md) | PARTIAL | Top-level `storage <name> { type }` and deployable role-keyed slots shipped. Remaining: per-aggregate `persistenceStrategy:`, logical bindings (now `dataSource` per [D-STORAGE-SPLIT](../decisions.md#d-storage-split--split-the-overloaded-storage-keyword)), per-deployable `style:` / `layout:` / `persistence:`, `STORAGE_CAPABILITIES` matrix, adapter contracts. Granularity is per-context, not per-aggregate ([D-GRANULARITY](../decisions.md#d-granularity--storage-bindings-are-per-context-not-per-aggregate)); per-aggregate `for:` deferred to v2 override. |
 
 ### Type-system family — state, transport, exception-less, criterion
 
@@ -202,12 +209,13 @@ parallel.
 
 ## Cross-proposal coordination notes
 
-- **bounded-context-model.md vs storage proposals.** The
-  bounded-context proposal changes the *granularity* at which
-  persistence binds (BC-level, not per-aggregate). The storage
-  proposal's grammar work mostly survives the reframe, but the
-  per-aggregate `persistenceStrategy:` placement may move up to the
-  BC. Resolve the granularity decision before landing Storage F1.
+- **bounded-context-model.md vs storage proposals.** Pinned via
+  [D-STORAGE-SPLIT](../decisions.md#d-storage-split--split-the-overloaded-storage-keyword)
+  + [D-GRANULARITY](../decisions.md#d-granularity--storage-bindings-are-per-context-not-per-aggregate):
+  three keywords (`storage` physical, `dataSource` per-context+kind,
+  `deployable.dataSources:` binding clause); per-context for v1,
+  per-aggregate deferred. The storage proposal's grammar work
+  largely survives; per-aggregate `for:` does not land in v1.
 
 - **aggregate-inheritance.md ↔ storage.** Original
   `storage: shared | own` for inheritance table layout collides
