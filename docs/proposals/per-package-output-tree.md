@@ -346,22 +346,63 @@ plugin factory.
   contract allows the latter cleanly; **validate this first** before
   committing to a design.
 
-**Effort estimate: 1-2 weeks for a minimal MVP.** Rough sequencing:
+**Effort estimate: 1-2 weeks for a minimal MVP**, delivered in three
+sequenced steps rather than one — the pluggability refactor is worth
+extracting because it has a real second consumer (the existing
+`"custom-vendored"` path follows the same pattern as workspace
+resolution, so the contract is validated by two implementations from
+day one, not speculative).
 
-- Days 1-2 — add workspace dep kind, thread config through
-  `PrepareInput` → engine → worker.
-- Days 3-4 — refactor `planInstall` to intercept workspace packages.
-- Days 5-6 — add workspace resolution branch in
-  `esbuild-vfs-plugin.ts` before `resolveBare()`.
-- Days 7-8 — testing, edge cases (circular deps, missing packages,
-  Vite shim for `_packs/loader-fs.js`).
-- Days 9+ — validation against the realistic generated tree.
+### Sequencing — three steps, not one
 
-**Main risk:** esbuild-wasm's plugin lifecycle. If the resolver can't
-return both `node_modules`-resolved and workspace-resolved paths from
-the same `onResolve` handler, the design needs rework. Probably fine
-(the handler already supports arbitrary VFS paths) but worth a spike
-on day 1.
+**Step 0 — Day-1 spike (blocking).** Confirm esbuild-wasm's
+`onResolve` handler can dispatch across multiple resolution strategies
+in one plugin instance. This isn't dodged by the pluggability refactor;
+the pluggable contract has to fit through whatever esbuild's lifecycle
+allows, so the spike result *shapes the interface*. Probably fine (the
+handler already supports arbitrary VFS paths) but the answer is the
+input to step 1's design.
+
+**Step 1 — Pluggability refactor PR, zero behavior change.**
+Introduce a `ResolutionStrategy` interface (or similar — shape roughly
+`resolve(spec) → PlannedPackage | null`, `install(planned) → vfsFiles`).
+Move the existing registry-fetch path behind it as the default
+strategy. Run the existing `"custom-vendored"` kind through the same
+interface. Tests confirm bit-for-bit identical playground output.
+Touches the same five files listed above but with no new behavior —
+reviewable on its own without referencing the workspace work.
+
+**Step 2 — Workspace PR.** Add `WorkspaceResolutionStrategy` as the
+second real implementation. Thread `workspaceConfig` through
+`PrepareInput` → engine → worker. Smaller diff than step 1 because
+the contract already exists.
+
+Rough day-count under this split:
+
+- Day 1 — spike (step 0).
+- Days 2-5 — pluggability refactor (step 1), behavior-preserving.
+- Days 6-8 — workspace strategy (step 2).
+- Days 9+ — testing edge cases (circular deps, missing packages,
+  Vite shim for `_packs/loader-fs.js`), validation against the
+  realistic generated tree.
+
+**Why this split rather than one PR:**
+
+- Each PR is smaller and independently reviewable.
+- The abstraction is justified by two concrete implementations from
+  the start, not by a single speculative consumer.
+- Future strategies (private registries, offline mirrors,
+  content-addressable caches) inherit the contract without further
+  surgery on the engine.
+- If the workspace PR gets blocked on something downstream
+  (e.g. waiting on the TS generator refactor), step 1 still ships
+  value and unblocks `"custom-vendored"` improvements.
+
+**Main risk:** esbuild-wasm's plugin lifecycle, addressed by the
+step-0 spike. If `onResolve` can't dispatch across strategies in one
+plugin instance, step 1's interface needs to absorb the constraint
+(e.g. a static strategy list known at plugin construction rather than
+dynamic dispatch per call).
 
 **Not in scope for the MVP:** multi-root VFS (the playground would
 treat workspace packages as subdirs of one root, not as independently
@@ -411,4 +452,5 @@ The proposal ships with one new doc:
 - [ ] **Spike day 1**: confirm esbuild-wasm's `onResolve` handler
       can return both `node_modules`-resolved and workspace-resolved
       paths in the same plugin instance. Blocks the playground TODO
-      design.
+      design — the result shapes the `ResolutionStrategy` interface
+      designed in step 1.
