@@ -259,12 +259,81 @@ Whichever directory layout wins, the rule for what goes in a
 | **Data-layer adapters** — repository builders, migrations, query/criterion lowering | Per the micro-plan, in `src/generator/<platform>/persistence/<adapter>/` |
 | **Style adapters** — handler dispatch, DI wiring | Per the micro-plan, in `src/generator/<platform>/styles/<adapter>/` |
 | **Layout adapters** — file-tree shape | Per the micro-plan, in `src/generator/<platform>/layouts/<adapter>/` |
+| **Adapter implementations that diverge by major** — EF8 vs EF10 repository code, Ash 3 vs Ash 4 resource emit, Mediator 2 vs Mediator 3 dispatch | Sub-`v<N>/` inside the adapter directory; the `src/platform/<family>/v<N>/index.ts` wires which sub-version is registered |
 
 This rule is orthogonal to A/B — only the *parent path* of `v<N>/`
-changes. Adapter axes (persistence/style/layout) are not duplicated
-per framework version unless the data-layer pin itself changes
-(drizzle@0.45 vs drizzle@0.50 is in the framework's `v<N>/pins.ts`;
-the drizzle repository builder itself is shared).
+changes.
+
+## When an adapter is both style/persistence-coupled AND version-coupled
+
+Several real adapters live at this intersection:
+
+| Adapter | Axis | Version-coupled because... |
+|---|---|---|
+| `style: cqrs` (dotnet) | style | Mediator 2.x → 3.x changes APIs |
+| `persistence: efcore` | persistence | EF Core 8 → 10 has DSL changes |
+| `persistence: drizzle` | persistence | drizzle 0.45 → 0.50 changes migration syntax |
+| `style: ash` (phoenix) | style | Ash 3 → 4 is a major DSL break — the sharpest case |
+
+The user-facing adapter name (`persistence: efcore`, `style: ash`)
+stays stable across versions; what changes is the implementation
+that fulfills it.
+
+**The rule**: the adapter name is stable; implementations sub-version
+inside the adapter directory; the platform-version's `index.ts`
+binds adapter-name to the right sub-version when it builds the
+registry.
+
+```
+src/generator/phoenix/styles/ash/
+  v3/                            # Ash 3.x DSL — resources, queries, actions
+  v4/                            # Ash 4.x DSL
+  shared/                        # if any — likely thin (heex page rendering is Ash-version-independent)
+  index.ts                       # factory: (ashVersion) => StyleAdapter
+
+src/platform/phoenix-live-view/v1/index.ts
+  # registers ash.v3 as the "ash" style — phoenix 1.8 + Ash 3.x
+src/platform/phoenix-live-view/v2/index.ts
+  # registers ash.v4 as the "ash" style — phoenix 2.0 + Ash 4.x
+```
+
+This makes `src/platform/<family>/v<N>/` the **binding site** between
+the framework-version axis and the adapter axes — its `index.ts`
+declares which framework-major it pins, which transitives `pins.ts`
+locks, and which adapter sub-versions it registers.
+
+### Sub-versioning vs in-place evolution
+
+Adapter sub-`v<N>/` directories are reserved for cases where
+implementations genuinely can't share code. The default is
+in-place evolution.
+
+**Default — bump in place inside `<family>/v<N>/pins.ts` + edit
+the existing adapter dir.** EF Core 8.0.10 → 8.0.15 is a `pins.ts`
+edit, no directory churn. EF Core 8 → 9, if the diff is incremental
+enough, is a `pins.ts` bump plus an edit to
+`src/generator/dotnet/persistence/efcore/` in place. One platform-version
+directory, one EF major active at a time.
+
+**Sub-versioning kicks in only when** keeping both alive is genuinely
+needed. Three reasons that justify it:
+
+1. **A long-lived LTS** — `net8` stays on EF Core 8 for a stability-sensitive
+   downstream, while `net8.efcore9/` exists for users who want the bump.
+   Rare.
+2. **A breaking transitive the framework major doesn't gate** —
+   `drizzle@0.45 → 0.50` changes migration syntax incompatibly but the
+   same hono major works with both, and the project wants users to
+   pin one or the other deliberately. Rare.
+3. **A migration corridor** — both sub-versions temporarily coexist
+   during a major transitive bump so generated projects can opt in;
+   collapsed once the bump lands fully.
+
+In practice, expect one or two `<family>/v<N>.<transitive><M>/`
+directories ever, as deliberate exceptions — not a combinatorial
+explosion. The platform-version directory tracks the **framework**
+major; transitive ORM/style majors evolve inside it via `pins.ts`
+edits and adapter-dir refactors.
 
 ## Migration sequence (assuming the micro-plan lands first)
 
@@ -293,6 +362,128 @@ small:
 Steps 1, 3, 4 are pure refactors with byte-identical output.
 Step 5 (if A) is a wide-but-mechanical rename. Step 7 is the first
 genuine new functionality.
+
+## The end-state tree (for review)
+
+Assuming the micro-plan lands its F1–F8 and this proposal's
+version-axis work lands on top, **with Option B** (status-quo
+hono hoist extended to dotnet/phoenix — the lower-churn path):
+
+```
+src/
+  generator/                         # language + adapters — micro-plan's territory
+    typescript/                      # render-expr, render-stmt, DTOs, VOs, zod-refine
+    dotnet/                          # render-expr, render-stmt, language-level helpers
+      persistence/
+        efcore/                      # v8/  v10/  shared/  index.ts  (sub-version on EF major)
+        dapper/                      # stubbed by micro-plan F5
+        marten/                      # stubbed by micro-plan F5
+      styles/
+        cqrs/                        # v-mediator2/  v-mediator3/  index.ts  (sub-version on Mediator major)
+        layered/                     # stubbed
+      layouts/
+        by-layer.ts  by-feature.ts
+      emit/                          # adapter-agnostic — DTOs, VOs, events, controllers
+    phoenix/                         # render-expr, render-stmt, heex-walker
+      persistence/
+        ashPostgres/                 # v3/  v4/  index.ts  (sub-version on Ash major)
+        ashCommanded/                # stubbed by micro-plan F7
+      styles/
+        ash/                         # v3/  v4/  index.ts  (the Ash-major split)
+        contexts/                    # stubbed
+      layouts/
+        by-layer.ts
+    node/                            # micro-plan F6 — umbrella for TS frameworks
+      persistence/
+        drizzle/                     # shared across hono / express / fastify / nestjs
+        typeorm/                     # future
+        mikroorm/                    # future
+      styles/
+        cqrs/  layered/
+      layouts/
+        by-layer.ts  by-feature.ts
+      emit/                          # framework-agnostic Node bits
+    react/                           # body-walker, tsx-target, page rendering
+    _adapters/                       # micro-plan F3 — persistence/style/layout contracts
+      persistence-surface.ts  style-surface.ts  layout-surface.ts  not-implemented.ts
+    _packs/  _walker/  _obs/
+
+  platform/                          # framework × version — this proposal's territory
+    hono/v4/                         # status quo
+      index.ts                       #   PlatformSurface + loomManifest
+      pins.ts                        #   hono@^4.12 + drizzle pin + adapter sub-version selections
+      emit.ts                        #   orchestrator (reads deployable.config, picks adapters)
+      routes-builder.ts              #   hono-major-coupled
+      view-routes-builder.ts
+      auth-emit.ts                   #   hono auth middleware integration
+      observability-builder.ts       #   hono pino integration
+      workflow-builder.ts            #   hono pipeline integration
+    hono/v5/                         # future hono major
+    express/v5/                      # future TS framework
+    fastify/v5/                      # future TS framework
+    nestjs/v10/                      # future TS framework
+
+    dotnet/v8/                       # ← hoist target for src/platform/dotnet.ts
+      index.ts                       #   PlatformSurface + loomManifest
+      pins.ts                        #   net8 + EF Core 8 + Mediator 2 + FluentValidation pins
+      emit.ts                        #   orchestrator
+      csproj-builder.ts              #   net-major-coupled (TargetFramework)
+      aspnet-host-setup.ts           #   ASP.NET-major-coupled (middleware ordering)
+    dotnet/v10/                      # incoming
+
+    phoenix-live-view/v1/            # ← hoist target for src/platform/phoenix-live-view.ts
+      index.ts
+      pins.ts                        #   phoenix 1.8 + Ash 3 + Elixir/OTP pins
+      emit.ts                        #   orchestrator (registers ash.v3, ashPostgres.v3)
+      mix-exs-builder.ts             #   Elixir/OTP-major-coupled
+    phoenix-live-view/v2/            # incoming (phoenix 2.0 + Ash 4)
+
+    react/
+      index.ts                       # PlatformSurface — version-agnostic
+      v1/  v2/  v3/                  # ← former /stacks (each: stack.json + dep .hbs partials)
+
+    registry.ts  surface.ts  manifest.ts  fs-discovery.ts
+
+designs/                              # UI library × version — unchanged
+  mantine/  shadcn/  mui/  chakra/  ashPhoenix/
+
+packages/                             # publish-shaped wrappers (thin re-exports)
+  backend-hono-v4/
+  backend-dotnet-v8/   backend-dotnet-v10/
+  backend-phoenix-v1/  backend-phoenix-v2/
+  core/  ui-test-driver/
+```
+
+**Note on Option A.** Under Option A (reverse the hono hoist),
+the entire `src/platform/<family>/v<N>/` block above instead lives
+at `src/generator/<platform>/frameworks/<family>/v<N>/`, and
+`src/platform/` shrinks to `{node,dotnet,phoenix,react}.ts` (one
+file each for the `PlatformSurface` record) plus the registry +
+manifest + fs-discovery. Same content, different parent path.
+
+**Notes on the tree above:**
+
+- Sub-`v<N>/` directories inside adapters (e.g.,
+  `persistence/efcore/v8/`, `styles/ash/v3/`) are **deliberate
+  exceptions**, not the default. EF Core 8.0.10 → 8.0.15 is a
+  `pins.ts` edit; EF 8 → 9 might be an in-place refactor of
+  `persistence/efcore/`. The `v<N>/` sub-dirs appear only when
+  the implementations genuinely can't share code (Ash 3 vs 4 is
+  the canonical case).
+- The dotnet `v8/` directory is smaller than one might expect —
+  what was originally going to land there (`workflow-builder.ts`,
+  `cqrs-builder.ts`, `validator-builder.ts`) is actually style-coupled
+  per the micro-plan and lives in `src/generator/dotnet/styles/cqrs/`.
+  Only genuinely net-major-coupled files stay in `v8/`: pins,
+  csproj, ASP.NET host setup.
+- `src/platform/<family>/v<N>/index.ts` is the **binding site**:
+  it reads `pins.ts`, decides which adapter sub-versions to
+  register in `src/platform/registry.ts`, and exposes the
+  resulting `PlatformSurface`.
+- `src/generator/typescript/` survives the micro-plan's `node/`
+  reshape as the *language-level-only* slice (render-expr,
+  render-stmt, DTOs, VOs, zod-refine). Anything framework-coupled
+  moved to `src/generator/node/` or `src/platform/<framework>/v<N>/`.
 
 ## Decisions to confirm
 
