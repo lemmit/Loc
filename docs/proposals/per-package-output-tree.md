@@ -425,6 +425,206 @@ treat workspace packages as subdirs of one root, not as independently
 mounted projects). Sufficient for the proposal's needs; revisit only
 if the single-root assumption hits a real limit.
 
+### Design — `ResolutionStrategy` contract
+
+After studying the actual code paths the right design has a key
+realisation: the **bundle layer doesn't need a strategy seam at all**.
+The pluggability work is concentrated entirely in the
+resolve/install layer.
+
+#### Two seams, one of which doesn't need refactoring
+
+1. **Resolution layer** (`resolve-tree.ts` + `install.ts`) — given a
+   `DependencySpec`, produce "files in `node_modules`-shaped paths."
+   This is where the four existing mechanisms diverge today
+   (registry packument fetch / mirror tarball / vendored files /
+   `RegistryResolver`). **The strategy seam lives here.**
+2. **Bundle layer** (`esbuild-vfs-plugin.ts`) — resolves import
+   specifiers at bundle time. `onResolve` already walks the populated
+   VFS via `resolveBare` against `node_modules`. **If the resolution
+   layer materialises workspace files into the right
+   `node_modules/@<scope>/<name>/` paths, the bundle layer finds them
+   with zero changes.** This dramatically simplifies the design and
+   collapses the step-0 spike's importance — `onResolve` doesn't need
+   to dispatch across strategies if the on-disk layout is uniform.
+
+The C2 prebuilt-vendor path (externalisation) is a **separate
+concern**: it's a bundle-output strategy ("don't bundle this, the
+runtime supplies it"), distinct from a resolution strategy ("here's
+where the package comes from"). Keep `externalizeVendor` as a plugin
+parameter; if it grows multiple variants, give it its own seam later.
+
+#### The existing scaffolding to build on
+
+`web/src/engine/dependencies.ts` already declares the
+forward-looking shape: `DependencyResolution` has four kinds
+(`verified` / `custom-public` / `custom-vendored` / `custom-private`)
+and `RegistryResolver` is documented as "the resolver seam for
+`custom-private`… declared now so adding it later is plug-in work
+behind the engine, not a refactor." The contract below **generalises
+that seam from one kind to all of them**, plus workspace as a fifth.
+
+#### The contract
+
+```ts
+import type { DependencySpec } from "../dependencies.js";
+import type { PlannedPackage } from "./resolve-tree.js";
+import type { TarEntry } from "./targz.js";
+
+export interface ResolutionStrategy {
+  /** Identifier for diagnostics / logging. */
+  readonly id: string;
+
+  /** Does this strategy claim this spec? First match wins; strategies
+   *  are tried in registration order. */
+  matches(spec: DependencySpec): boolean;
+
+  /** Plan the install: resolve metadata + transitive deps for this
+   *  spec.  Returns every package this strategy will be responsible
+   *  for acquiring; the orchestrator collects across strategies. */
+  plan(spec: DependencySpec, ctx: PlanContext): Promise<PlannedPackage[]>;
+
+  /** Acquire the files for a planned package previously returned by
+   *  `plan()`.  Entries have `name` relative to
+   *  `node_modules/<pkg.name>/` — same shape as today's `extract()`. */
+  acquire(planned: PlannedPackage): Promise<TarEntry[]>;
+}
+
+export interface PlanContext {
+  /** Re-enter the orchestrator for transitive deps.  A
+   *  registry-resolved package whose `dependencies` includes a
+   *  workspace package re-dispatches to the workspace strategy. */
+  resolve(name: string, range: string): Promise<PlannedPackage>;
+  /** Read-only view of what's already been planned (dedupe). */
+  readonly planned: ReadonlyMap<string, PlannedPackage>;
+}
+```
+
+#### Mapping the existing mechanisms onto strategies
+
+| Today's mechanism | Strategy | `matches()` | `plan()` | `acquire()` |
+|---|---|---|---|---|
+| Registry (`verified` + `custom-public`) | `RegistryStrategy` | `resolution ∈ {verified, custom-public}` | `fetchPackument` + `maxSatisfying` (current logic in `resolve-tree.ts`) | `fetchTarball(pkg.meta.dist.tarball)` |
+| Mirror Map | **composition** — `MirroredStrategy(inner, mirror)` | delegates to `inner` | delegates to `inner` | check `mirror.get(key)` first, else `inner.acquire` |
+| `custom-vendored` | `VendoredStrategy` | `resolution === custom-vendored` | look up `VendoredPackage` in `DependencySet.vendored` | return its `files` directly |
+| `custom-private` (`RegistryResolver`) | `RegistryResolverStrategy` | `resolution === custom-private` | `resolver.resolve(spec)` → synthesise plan | return `ResolvedTarball.files` |
+| **Workspace (new)** | `WorkspaceStrategy` | `resolution === workspace` | read package's `package.json` from VFS path → synthesise meta | copy files from workspace VFS root |
+
+Two design choices visible in this table:
+
+- **Mirror is composition, not a strategy.** It's an acquisition-time
+  override, not a different resolution source. Modelling it as a
+  wrapper around `RegistryStrategy` keeps "every registry fetch
+  checks the mirror first" exactly as today, without forcing a
+  matcher onto every package.
+- **`PlannedPackage.meta` is the strategy's choice.** Today it's
+  `VersionMeta` (registry packument). Workspace and vendored
+  strategies synthesise a minimal meta (name, version, `dependencies`
+  read from the workspace `package.json`). May become a discriminated
+  union later; for the B3-era stack consumers a synthesised meta is
+  enough.
+
+#### What changes where
+
+1. **`web/src/engine/dependencies.ts`** — add `"workspace"` to
+   `DependencyResolution`. Add `WorkspaceConfig` (`name → vfsPath`)
+   to `DependencySet`.
+2. **`web/src/engine/npm/resolve-tree.ts`** — current `planInstall`
+   logic becomes `RegistryStrategy.plan()`. New top-level
+   `planInstall` becomes a strategy-dispatching loop over
+   `DependencySpec[]`.
+3. **`web/src/engine/npm/install.ts`** — `extract()` becomes
+   strategy-dispatched (the orchestrator looks up which strategy
+   produced each `PlannedPackage` and calls its `acquire`). The
+   `mirror` parameter moves to `MirroredStrategy`.
+4. **`web/src/engine/npm/esbuild-vfs-plugin.ts`** — **no changes.**
+   Once `node_modules` is populated uniformly, `resolveBare` finds
+   everything.
+5. **`web/src/engine/npm-install-bundle-engine.ts`** — wires the
+   strategy list from inputs (workspace config, vendored set,
+   registry resolver, mirror).
+
+Composition example at engine wiring:
+
+```ts
+const strategies: ResolutionStrategy[] = [
+  workspaceConfig && new WorkspaceStrategy(workspaceConfig, vfs),
+  vendored?.length && new VendoredStrategy(vendored),
+  registryResolver && new RegistryResolverStrategy(registryResolver),
+  new MirroredStrategy(new RegistryStrategy(), mirror), // default fallback
+].filter(Boolean);
+```
+
+#### Constraints
+
+- **First-match dispatch.** Strategies are an ordered list, first
+  `matches()` wins. Predictable; no merge semantics.
+- **No cross-strategy coordination at plan time** beyond
+  `PlanContext.resolve` for transitive deps. A registry-resolved
+  package whose transitive is a workspace package re-enters the
+  orchestrator and dispatches to the workspace strategy — clean
+  fall-through.
+- **Strategies own their cache.** `InstallCache` stays as today
+  (keyed by `name@version`); each strategy can opt into it. Workspace
+  strategy probably doesn't (files are live).
+- **Bundle layer stays simple.** The whole point of materialising
+  into `node_modules` paths is to keep `esbuild-vfs-plugin.ts`
+  unchanged. Don't grow a parallel dispatch there.
+
+#### Sequencing — revised against the design
+
+The original three-step plan stands but the contents shift now that
+the bundle layer doesn't need surgery:
+
+- **Step 0 — spike** (1 day). Confirm `WorkspaceStrategy.acquire`
+  copying files into `node_modules/@<scope>/<name>/` actually lets
+  the existing `resolveBare` find them through scoped paths
+  (`@scope/name` joins). Probably yes — `resolveBare` already
+  handles scopes — but verify before committing.
+- **Step 1a — interface + RegistryStrategy** (2-3 days). Extract
+  current `planInstall` + `extract` into `RegistryStrategy`. Engine
+  wires `[new MirroredStrategy(new RegistryStrategy(), mirror)]`.
+  Behaviour bit-for-bit identical. **Reviewable PR.**
+- **Step 1b — VendoredStrategy + RegistryResolverStrategy** (2 days).
+  Wire the existing `vendored` field on `DependencySet` through the
+  new strategy. `custom-private` becomes a real consumer of the
+  contract (even if no production engine ships a `RegistryResolver`
+  yet, the strategy exists). The contract is validated by **three
+  concrete strategies** before workspace lands. **Reviewable PR.**
+- **Step 2 — WorkspaceStrategy** (3 days). Add `"workspace"` to
+  `DependencyResolution`, add `WorkspaceConfig` to `DependencySet`,
+  implement `WorkspaceStrategy`. Thread config through `PrepareInput`.
+  **Reviewable PR.**
+
+Total: ~9 working days, same as before but with each PR meaningfully
+smaller because the bundle-layer changes drop out.
+
+#### Open design questions
+
+1. **Hot-edit semantics for workspace packages.** If the user edits
+   a file in `packages/users-domain/` in the playground, does
+   `WorkspaceStrategy` re-acquire (recopy into `node_modules`) on
+   next bundle? Probably yes, but the trigger needs spec'ing — does
+   it watch VFS writes, or does the engine re-plan from scratch each
+   `prepare()` call?
+2. **Workspace package versions.** Registry packages get a `version`
+   from semver. Workspace packages have whatever's in their on-disk
+   `package.json`. Use that verbatim (and let users see `0.0.0` if
+   that's what's there) or synthesise `"0.0.0-workspace"`? Leaning
+   verbatim — matches pnpm/npm workspace behaviour and the proposal
+   doesn't need version negotiation.
+3. **Transitive workspace deps.** If `@<system>/users-dal` declares
+   `@<system>/users-domain` as a dep, both must be in
+   `WorkspaceConfig`. Auto-discover by reading the root
+   `pnpm-workspace.yaml` from the VFS, or require explicit config?
+   **Lean explicit for the MVP** (less magic, less to debug;
+   auto-discovery can be a layer on top later).
+4. **VFS path for workspace roots.** Do workspace packages live under
+   `/packages/<module>-<layer>/` in the VFS (matching the on-disk
+   tree) or somewhere engine-internal? Probably the former — the
+   playground UI shows the file tree, users expect to see the
+   packages where they are on disk.
+
 ## Recipe document
 
 The proposal ships with one new doc:
