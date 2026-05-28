@@ -48,9 +48,7 @@ describe("playground storybook examples", () => {
   it.each(storybooks)("%s parses without errors", async (file) => {
     const doc = await buildDoc(file);
     const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
-    expect(errors.map((d) => `${d.range.start.line + 1}: ${d.message}`)).toEqual(
-      [],
-    );
+    expect(errors.map((d) => `${d.range.start.line + 1}: ${d.message}`)).toEqual([]);
   });
 
   it.each(storybooks)("%s generates a system", async (file) => {
