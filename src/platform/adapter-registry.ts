@@ -24,12 +24,15 @@ import {
   stubAdapter,
 } from "../generator/_adapters/index.js";
 import { byLayerLayoutAdapter } from "../generator/dotnet/adapters/by-layer-layout.js";
+import { cqrsStyleAdapter } from "../generator/dotnet/adapters/cqrs-style.js";
 import { efcorePersistenceAdapter } from "../generator/dotnet/adapters/efcore-persistence.js";
 import { ashPostgresPersistenceAdapter } from "../generator/phoenix-live-view/adapters/ash-postgres-persistence.js";
+import { ashStyleAdapter } from "../generator/phoenix-live-view/adapters/ash-style.js";
 import { byFeatureLayoutAdapter } from "../generator/phoenix-live-view/adapters/by-feature-layout.js";
 import type { Platform } from "../ir/types/loom-ir.js";
 import { byLayerLayoutAdapter as honoByLayerLayoutAdapter } from "./hono/v4/adapters/by-layer-layout.js";
 import { drizzlePersistenceAdapter } from "./hono/v4/adapters/drizzle-persistence.js";
+import { layeredStyleAdapter } from "./hono/v4/adapters/layered-style.js";
 
 /** Per-platform adapter menu — every supported adapter, keyed by its
  *  registry name.  Stub entries throw `AdapterNotImplementedError` on
@@ -108,17 +111,7 @@ adapterMenus.dotnet = {
       ),
     },
     styles: {
-      cqrs: stubAdapter<StyleAdapter>(
-        "style",
-        "cqrs",
-        "dotnet",
-        () => styleNames(adapterMenus.dotnet),
-        {
-          name: "cqrs",
-          supportedStrategies: ["stateBased", "eventSourced"],
-          supportedLayouts: ["byLayer", "byFeature"],
-        },
-      ),
+      cqrs: cqrsStyleAdapter,
       layered: stubAdapter<StyleAdapter>(
         "style",
         "layered",
@@ -175,17 +168,7 @@ adapterMenus.hono = {
       ),
     },
     styles: {
-      layered: stubAdapter<StyleAdapter>(
-        "style",
-        "layered",
-        "hono",
-        () => styleNames(adapterMenus.hono),
-        {
-          name: "layered",
-          supportedStrategies: ["stateBased"],
-          supportedLayouts: ["byLayer"],
-        },
-      ),
+      layered: layeredStyleAdapter,
       cqrs: stubAdapter<StyleAdapter>(
         "style",
         "cqrs",
@@ -226,17 +209,7 @@ adapterMenus.phoenixLiveView = {
       ashPostgres: ashPostgresPersistenceAdapter,
     },
     styles: {
-      ash: stubAdapter<StyleAdapter>(
-        "style",
-        "ash",
-        "phoenixLiveView",
-        () => styleNames(adapterMenus.phoenixLiveView),
-        {
-          name: "ash",
-          supportedStrategies: ["stateBased"],
-          supportedLayouts: ["byFeature"],
-        },
-      ),
+      ash: ashStyleAdapter,
     },
     layouts: {
       byFeature: byFeatureLayoutAdapter,
