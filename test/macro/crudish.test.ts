@@ -199,7 +199,7 @@ describe("crudish via IR lowering", () => {
     `);
     let found = false;
     for (const s of ir.systems) {
-      for (const m of s.modules) {
+      for (const m of s.subdomains) {
         for (const c of m.contexts) {
           for (const a of c.aggregates) {
             if (a.name !== "Order") continue;

@@ -41,7 +41,7 @@ const ordersListBody = (queryViewBody: string) => `
       api Sales: SalesApi
       page OrdersList { route: "/orders"  body: ${queryViewBody} }
     }
-    deployable api { platform: hono, contexts: [Sales], serves: SalesApi, port: 3000 }
+    deployable api { platform: hono, contexts: [C], serves: SalesApi, port: 3000 }
     deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
   }
 `;

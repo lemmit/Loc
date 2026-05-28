@@ -17,7 +17,7 @@ const SOURCE = `
         }
       }
     }
-    deployable AuthApi { platform: hono  contexts: [Identity] }
+    deployable AuthApi { platform: hono  contexts: [Auth] }
   }
 
   solution SOL-001 for US-001 {
@@ -115,7 +115,7 @@ describe("traceability IR", () => {
   it("emits no traceability artifacts when none are declared", async () => {
     const { files } = generateSystems(
       await parse(
-        `system S { module M { context C { aggregate A { name: string } repository As for A {} } } deployable D { platform: hono  contexts: [C] } }`,
+        `system S { subdomain M { context C { aggregate A { name: string } repository As for A {} } } deployable D { platform: hono  contexts: [C] } }`,
       ),
     );
     expect([...files.keys()].some((k) => k.startsWith(".loom/traceability"))).toBe(false);

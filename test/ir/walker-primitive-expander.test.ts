@@ -119,7 +119,7 @@ const SCAFFOLD_AGGREGATE_DDD = `
     }
     deployable api {
       platform: hono
-      contexts: [Sales]
+      contexts: [Orders]
       serves: SalesApi
       port: 3000
     }
@@ -147,7 +147,7 @@ const SCAFFOLD_WORKFLOW_DDD = `
     }
     deployable api {
       platform: hono
-      contexts: [Sales]
+      contexts: [Orders]
       serves: SalesApi
       port: 3000
     }
@@ -175,7 +175,7 @@ const SCAFFOLD_VIEW_DDD = `
     }
     deployable api {
       platform: hono
-      contexts: [Sales]
+      contexts: [Orders]
       serves: SalesApi
       port: 3000
     }

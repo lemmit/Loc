@@ -17,7 +17,7 @@ function allAggregates(loom: LoomModel): AggregateIR[] {
   const out: AggregateIR[] = [];
   for (const c of loom.contexts) out.push(...c.aggregates);
   for (const s of loom.systems) {
-    for (const m of s.modules) for (const c of m.contexts) out.push(...c.aggregates);
+    for (const m of s.subdomains) for (const c of m.contexts) out.push(...c.aggregates);
   }
   return out;
 }
@@ -30,7 +30,7 @@ function allValueObjects(loom: LoomModel): ValueObjectIR[] {
   const out: ValueObjectIR[] = [];
   for (const c of loom.contexts) out.push(...c.valueObjects);
   for (const s of loom.systems) {
-    for (const m of s.modules) for (const c of m.contexts) out.push(...c.valueObjects);
+    for (const m of s.subdomains) for (const c of m.contexts) out.push(...c.valueObjects);
   }
   return out;
 }

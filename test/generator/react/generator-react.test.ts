@@ -330,7 +330,7 @@ describe("react generator", () => {
           storage primarySql { type: postgres }
           deployable api {
             platform: hono
-            contexts: [Sales]
+            contexts: [S]
             serves: SalesApi
             port: 3001
           }

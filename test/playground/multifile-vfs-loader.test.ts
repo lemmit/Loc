@@ -76,7 +76,7 @@ describe("playground project loader (VFS-backed)", () => {
     expect(loom.rootValueObjects.map((v) => v.name)).toEqual(["Money"]);
     const allCtxs = [
       ...loom.contexts,
-      ...loom.systems.flatMap((s) => s.modules.flatMap((m) => m.contexts)),
+      ...loom.systems.flatMap((s) => s.subdomains.flatMap((m) => m.contexts)),
     ];
     expect(allCtxs.map((c) => c.name)).toContain("Orders");
   });

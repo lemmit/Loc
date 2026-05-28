@@ -1255,7 +1255,7 @@ describe(".NET generator", () => {
         }
         deployable api {
           platform: dotnet
-          contexts: [Sales]
+          contexts: [Orders]
           port: 8080
           auth: required
         }
@@ -1273,7 +1273,7 @@ describe(".NET generator", () => {
         }
         deployable api {
           platform: dotnet
-          contexts: [Sales]
+          contexts: [Orders]
           port: 8080
         }
       }
@@ -1353,7 +1353,7 @@ describe(".NET generator", () => {
         }
         deployable api {
           platform: dotnet
-          contexts: [Sales]
+          contexts: [Orders]
           port: 8080
           auth: required
         }
@@ -1413,7 +1413,7 @@ describe(".NET generator", () => {
         }
         deployable api {
           platform: dotnet
-          contexts: [Sales]
+          contexts: [Orders]
           port: 8080
           auth: required
         }

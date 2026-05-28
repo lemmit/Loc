@@ -78,7 +78,7 @@ system Acme {
   // ── COMPOSITION: deployables ────────────────────────────────
   deployable salesApi {
     platform: hono
-    contexts: [Sales]
+    contexts: [Orders]
     serves: SalesApi
     port: 3000
   }
@@ -169,8 +169,8 @@ describe("Architecture integration — full Acme example", () => {
 
   it("rejects shape if a backend's primary storage is missing", async () => {
     const broken = ACME_EXPLICIT.replace(
-      "contexts: [Sales]",
-      "contexts: [Sales]",
+      "contexts: [Orders]",
+      "contexts: [Orders]",
     );
     const { errors } = await build(broken);
     expect(errors.some((e) => /must include a 'primary: <storage>' binding/.test(e))).toBe(true);

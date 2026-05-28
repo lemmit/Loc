@@ -48,7 +48,7 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [Sales], port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -84,7 +84,7 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [Sales], port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -115,7 +115,7 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [Sales], port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -149,7 +149,7 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [Sales], port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -186,7 +186,7 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [Sales], port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -217,7 +217,7 @@ describe("api binding + walker hook injection", () => {
             body: Text { Sales.Customer.byEmail(email).isLoading }
           }
         }
-        deployable api { platform: hono, contexts: [Sales], port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);

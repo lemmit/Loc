@@ -110,7 +110,7 @@ describe("audited — IR lowering", () => {
   it("flags the audited operation and leaves others unflagged", async () => {
     const { model, errors } = await parseModel(SYSTEM());
     expect(errors).toEqual([]);
-    const cart = lowerModel(model).systems[0]!.modules[0]!.contexts[0]!.aggregates[0]!;
+    const cart = lowerModel(model).systems[0]!.subdomains[0]!.contexts[0]!.aggregates[0]!;
     expect(cart.operations.find((o) => o.name === "cancel")?.audited).toBe(true);
     expect(cart.operations.find((o) => o.name === "touch")?.audited).toBe(false);
   });

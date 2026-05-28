@@ -1408,7 +1408,7 @@ describe("typescript generator", () => {
         }
         deployable api {
           platform: hono
-          contexts: [Sales]
+          contexts: [Orders]
           port: 3000
           auth: required
         }
@@ -1426,7 +1426,7 @@ describe("typescript generator", () => {
         }
         deployable api {
           platform: hono
-          contexts: [Sales]
+          contexts: [Orders]
           port: 3000
         }
       }
@@ -1505,7 +1505,7 @@ describe("typescript generator", () => {
         }
         deployable api {
           platform: hono
-          contexts: [Sales]
+          contexts: [Orders]
           port: 3000
           auth: required
         }
@@ -1557,7 +1557,7 @@ describe("typescript generator", () => {
         }
         deployable api {
           platform: hono
-          contexts: [Sales]
+          contexts: [Orders]
           port: 3000
           auth: required
         }

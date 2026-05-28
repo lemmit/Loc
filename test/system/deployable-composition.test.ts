@@ -44,7 +44,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           ${SALES_DOMAIN}
           deployable salesApi {
             platform: hono
-            contexts: [Sales]
+            contexts: [Orders]
             serves: SalesApi
             port: 3000
           }
@@ -58,7 +58,7 @@ describe("deployable composition (serves + ui-compose)", () => {
         system S {
           ${SALES_DOMAIN}
           ui WebApp { page X { route: "/x" body: Heading { "hi" } } }
-          deployable api { platform: hono, contexts: [Sales], port: 3000 }
+          deployable api { platform: hono, contexts: [Orders], port: 3000 }
           deployable webApp {
             platform: static
             targets: api
@@ -79,7 +79,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           ${SALES_DOMAIN}
           deployable salesApi {
             platform: hono
-            contexts: [Sales]
+            contexts: [Orders]
             serves: SalesApi, SalesApi
             port: 3000
           }
@@ -100,7 +100,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            contexts: [Sales]
+            contexts: [Orders]
             serves: SalesApi
             port: 3000
           }
@@ -125,7 +125,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            contexts: [Sales]
+            contexts: [Orders]
             port: 3000
           }
           deployable webApp {
@@ -149,7 +149,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            contexts: [Sales]
+            contexts: [Orders]
             serves: SalesApi
             port: 3000
           }
@@ -180,7 +180,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            contexts: [Sales]
+            contexts: [Orders]
             serves: SalesApi
             port: 3000
           }
@@ -216,13 +216,13 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            contexts: [Sales]
+            contexts: [Orders]
             serves: SalesApi
             port: 3000
           }
           deployable mktgApi {
             platform: hono
-            contexts: [Marketing]
+            contexts: [Campaigns]
             serves: MktgApi
             port: 3001
           }
@@ -251,7 +251,7 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            contexts: [Sales]
+            contexts: [Orders]
             serves: SalesApi
             port: 3000
           }
@@ -280,13 +280,13 @@ describe("deployable composition (serves + ui-compose)", () => {
           }
           deployable salesApi {
             platform: hono
-            contexts: [Sales]
+            contexts: [Orders]
             serves: SalesApi
             port: 3000
           }
           deployable mktgApi {
             platform: hono
-            contexts: [Marketing]
+            contexts: [Campaigns]
             serves: MktgApi
             port: 3001
           }

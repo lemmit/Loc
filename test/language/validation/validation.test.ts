@@ -1303,7 +1303,7 @@ describe("Loom IR validation (post-lowering)", async () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [Sales], port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: react, targets: api, port: 3001 }
       }
     `);
@@ -2132,12 +2132,12 @@ describe("Loom IR validation (post-lowering)", async () => {
     // Walk the operation IR and assert the permissions ref turned
     // into the runtime-string literal.  This is the contract every
     // backend renders against.
-    const op = loom.systems[0]!.modules[0]!.contexts[0]!.aggregates[0]!.operations[0]!;
+    const op = loom.systems[0]!.subdomains[0]!.contexts[0]!.aggregates[0]!.operations[0]!;
     const pre = op.statements.find((s) => s.kind === "precondition");
     const json = JSON.stringify(pre);
     expect(json).toContain('"value":"sales.ordersCancel"');
     // The module's permissions catalogue is exposed on the IR.
-    const mod = loom.systems[0]!.modules[0]!;
+    const mod = loom.systems[0]!.subdomains[0]!;
     expect(mod.permissions.map((p) => p.runtimeString)).toEqual([
       "sales.ordersConfirm",
       "sales.ordersCancel",
@@ -2356,7 +2356,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     it("rejects an unresolved code reference", async () => {
       const { errors } = await parse(`
         requirement US-001 { type: UserStory  title: "x" }
-        system S { module M { context C { aggregate A { operation go() {} } } } }
+        system S { subdomain M { context C { aggregate A { operation go() {} } } } }
         solution SOL-001 for US-001 { entitles [ M.C.A.missing ] }
       `);
       expect(errors.some((e) => /missing/.test(e))).toBe(true);

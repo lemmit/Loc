@@ -21,7 +21,7 @@ const SOURCE = `
         }
       }
     }
-    deployable api { platform: hono  contexts: [Identity] }
+    deployable api { platform: hono  contexts: [Auth] }
     test e2e "session can be started" against api verifies TC-002 {}
   }
 

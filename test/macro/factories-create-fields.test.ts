@@ -13,7 +13,7 @@ import { writableCreateFields, writableUpdateFields } from "../../src/macros/api
 import { parseString } from "../_helpers/index.js";
 
 async function aggregate(src: string, name: string): Promise<Aggregate> {
-  const { model, errors } = await parseString(`system Demo { module M { context C {
+  const { model, errors } = await parseString(`system Demo { subdomain M { context C {
     ${src}
   }}}`);
   if (errors.length) throw new Error(errors.join("; "));

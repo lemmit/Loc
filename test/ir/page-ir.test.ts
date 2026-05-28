@@ -318,7 +318,7 @@ describe("page metamodel — IR shape", () => {
         }
       }
     `);
-    const order = firstSystem(loom).modules[0]!.contexts[0]!.aggregates.find(
+    const order = firstSystem(loom).subdomains[0]!.contexts[0]!.aggregates.find(
       (a) => a.name === "Order",
     )!;
     const derived = order.derived.find((d) => d.name === "label")!;
@@ -357,7 +357,7 @@ describe("page metamodel — IR shape", () => {
         }
       }
     `);
-    const bag = firstSystem(loom2).modules[0]!.contexts[0]!.aggregates.find(
+    const bag = firstSystem(loom2).subdomains[0]!.contexts[0]!.aggregates.find(
       (a) => a.name === "Bag",
     )!;
     const derived = bag.derived.find((d) => d.name === "count")!;

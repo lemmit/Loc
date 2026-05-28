@@ -139,7 +139,7 @@ describe("DefinitionProvider — built-in cross references", () => {
           }
           deployable <|api|> {
             platform: hono
-            contexts: [Sales]
+            contexts: [S]
             port: 3000
           }
           deployable web {

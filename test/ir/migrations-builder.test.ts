@@ -36,7 +36,7 @@ system Shop {
       repository Customers for Customer { }
     }
   }
-  deployable api { platform: hono, contexts: [Sales], port: 3000 }
+  deployable api { platform: hono, contexts: [Orders], port: 3000 }
 }
 `;
 
@@ -256,7 +256,7 @@ describe("buildMigrations", () => {
 system Twin {
   subdomain A { context Ca { aggregate X ids guid { n: int } } }
   subdomain B { context Cb { aggregate Y ids guid { n: int } } }
-  deployable api { platform: hono, contexts: [A], port: 3000 }
+  deployable api { platform: hono, contexts: [Ca], port: 3000 }
 }
 `);
     const out = buildMigrations(loom.systems[0]!, memorySnapshotStore());
@@ -270,7 +270,7 @@ describe("migrationsOwner enrichment", () => {
     expect(sys.subdomains[0]!.migrationsOwner).toBe("api");
   });
 
-  it("prefers an explicit primary storage binding over declaration order", async () => {
+  it("D-STORAGE-SPLIT: migrationsOwner picks the first needsDb deployable hosting the subdomain's contexts", async () => {
     const loom = await buildLoomModel(`
 system S {
   subdomain M { context C { aggregate X ids guid { n: int } } }
@@ -279,7 +279,8 @@ system S {
   deployable second { platform: dotnet, contexts: [C], port: 3001 }
 }
 `);
-    expect(loom.systems[0]!.modules[0]!.migrationsOwner).toBe("second");
+    // Both deployables host C and both needsDb; declaration order wins.
+    expect(loom.systems[0]!.subdomains[0]!.migrationsOwner).toBe("first");
   });
 });
 

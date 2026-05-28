@@ -90,7 +90,7 @@ describe("multi-file project loader", () => {
     // `loom.contexts`.
     const allContextNames = [
       ...loom.contexts.map((c) => c.name),
-      ...loom.systems.flatMap((s) => s.modules.flatMap((m) => m.contexts.map((c) => c.name))),
+      ...loom.systems.flatMap((s) => s.subdomains.flatMap((m) => m.contexts.map((c) => c.name))),
     ];
     expect(allContextNames).toContain("Orders");
   });
@@ -169,7 +169,7 @@ describe("multi-file project loader", () => {
     // them, hence no errors above.
     const ctxs = [
       ...merged.contexts,
-      ...merged.systems.flatMap((s) => s.modules.flatMap((m) => m.contexts)),
+      ...merged.systems.flatMap((s) => s.subdomains.flatMap((m) => m.contexts)),
     ];
     const catalog = ctxs.find((c) => c.name === "Catalog");
     expect(catalog).toBeDefined();

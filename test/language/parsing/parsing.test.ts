@@ -190,7 +190,7 @@ describe("parsing & validation of examples", () => {
 
         deployable api {
           platform: dotnet
-          contexts: [Sales]
+          contexts: [S]
           port: 8080
           auth: required
         }
@@ -649,7 +649,7 @@ describe("page metamodel — grammar smoke tests", () => {
             }
           }
         }
-        deployable AuthApi { platform: hono  contexts: [Identity] }
+        deployable AuthApi { platform: hono  contexts: [Auth] }
       }
       solution SOL-001 for US-001 {
         title: "Login via aggregate"
