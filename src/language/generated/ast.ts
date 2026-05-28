@@ -87,6 +87,7 @@ export type DddKeywordNames =
     | "entity"
     | "enum"
     | "event"
+    | "eventSourced"
     | "events"
     | "expect"
     | "expectThrows"
@@ -138,6 +139,7 @@ export type DddKeywordNames =
     | "page"
     | "parent"
     | "permissions"
+    | "persistenceStrategy"
     | "phoenixLiveView"
     | "platform"
     | "port"
@@ -169,6 +171,7 @@ export type DddKeywordNames =
     | "sqlite"
     | "stamp"
     | "state"
+    | "stateBased"
     | "static"
     | "storage"
     | "string"
@@ -368,6 +371,12 @@ export function isPageProp(item: unknown): item is PageProp {
     return reflection.isInstance(item, PageProp);
 }
 
+export type PersistenceStrategy = 'eventSourced' | 'stateBased';
+
+export function isPersistenceStrategy(item: unknown): item is PersistenceStrategy {
+    return item === 'stateBased' || item === 'eventSourced';
+}
+
 export type Platform = 'dotnet' | 'hono' | 'phoenixLiveView' | 'react' | 'static' | string;
 
 export function isPlatform(item: unknown): item is Platform {
@@ -478,6 +487,7 @@ export interface Aggregate extends AstNode {
     idKind?: IdKind;
     members: Array<AggregateMember>;
     name: string;
+    persistenceStrategy?: PersistenceStrategy;
     withClause?: WithClause;
 }
 
@@ -2421,6 +2431,7 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'idKind' },
                         { name: 'members', defaultValue: [] },
                         { name: 'name' },
+                        { name: 'persistenceStrategy' },
                         { name: 'withClause' }
                     ]
                 };

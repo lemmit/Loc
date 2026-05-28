@@ -318,7 +318,16 @@ export interface AggregateIR {
    * debug-string emitters (TS `toString()`/`util.inspect.custom`,
    * C# `ToString()` override, Elixir `defimpl Inspect`). */
   inspectDerived?: DerivedIR;
+  /** Persistence strategy declared on the aggregate.  Drives the
+   * `dataSource` kind required by the enclosing context: `stateBased`
+   * → `kind: state`; `eventSourced` → `kind: eventLog`.  Omitted in
+   * the IR when not declared in source (default is `stateBased` at
+   * resolution time, but the IR preserves source fidelity for the
+   * AST → IR → printer round-trip). */
+  persistenceStrategy?: PersistenceStrategy;
 }
+
+export type PersistenceStrategy = "stateBased" | "eventSourced";
 
 /** A single stamping rule attached to an aggregate.  Backends
  * dispatch on `event` and emit assignments for the matching

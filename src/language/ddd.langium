@@ -575,11 +575,15 @@ ValueObjectMember:
 
 Aggregate:
     'aggregate' name=ID ('ids' idKind=IdKind)? withClause=WithClause? '{'
+        ('persistenceStrategy' ':' persistenceStrategy=PersistenceStrategy ','?)?
         members+=AggregateMember*
     '}';
 
 IdKind returns string:
     'guid' | 'int' | 'long' | 'string';
+
+PersistenceStrategy returns string:
+    'stateBased' | 'eventSourced';
 
 // ---- macro `with` clause ----------------------------------------
 //

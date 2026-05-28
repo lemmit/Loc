@@ -444,9 +444,13 @@ function printValueObject(node: ValueObject): string {
 
 function printAggregate(node: Aggregate): string {
   const ids = node.idKind ? ` ids ${node.idKind}` : "";
+  const head: string[] = [];
+  if (node.persistenceStrategy) {
+    head.push(`persistenceStrategy: ${node.persistenceStrategy}`);
+  }
   return block(
     `aggregate ${node.name}${ids}${printWithClause(node.withClause)}`,
-    node.members.map(printStructural),
+    [...head, ...node.members.map(printStructural)],
   );
 }
 
