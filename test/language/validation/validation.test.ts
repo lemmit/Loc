@@ -990,6 +990,176 @@ describe("validation", () => {
       ).toBe(true);
     });
   });
+
+  // -------------------------------------------------------------------
+  // DataSource declaration checks — kind ↔ storage.type compatibility
+  // and per-knob compatibility.  See
+  // src/language/validators/datasource.ts.
+  // -------------------------------------------------------------------
+  describe("dataSource configuration", () => {
+    it("rejects kind: cache backed by a relational storage", async () => {
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate A { x: int } } }
+          storage pg { type: postgres }
+          dataSource cCache { for: C, kind: cache, use: pg }
+        }
+      `);
+      expect(
+        errors.some((e) =>
+          /dataSource 'cCache' kind 'cache' is incompatible with storage 'pg' of type 'postgres'/.test(
+            e,
+          ),
+        ),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("rejects kind: state backed by a kv storage (redis)", async () => {
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate A { x: int } } }
+          storage r { type: redis }
+          dataSource cState { for: C, kind: state, use: r }
+        }
+      `);
+      expect(
+        errors.some((e) =>
+          /dataSource 'cState' kind 'state' is incompatible with storage 'r' of type 'redis'/.test(
+            e,
+          ),
+        ),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("accepts kind: cache backed by redis", async () => {
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate A { x: int } } }
+          storage pg { type: postgres }
+          storage r { type: redis }
+          dataSource cState { for: C, kind: state, use: pg }
+          dataSource cCache { for: C, kind: cache, use: r, ttl: 60 }
+        }
+      `);
+      expect(errors.filter((e) => /dataSource/.test(e))).toEqual([]);
+    });
+
+    it("rejects 'ttl' on kind: state", async () => {
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate A { x: int } } }
+          storage pg { type: postgres }
+          dataSource cState { for: C, kind: state, use: pg, ttl: 60 }
+        }
+      `);
+      expect(
+        errors.some((e) => /dataSource 'cState': 'ttl' is only meaningful on kind: cache/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("rejects 'every' and 'retain' on kind: state", async () => {
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate A { x: int } } }
+          storage pg { type: postgres }
+          dataSource cState { for: C, kind: state, use: pg, every: 100, retain: 5 }
+        }
+      `);
+      expect(
+        errors.some((e) => /'every' is a snapshot-policy knob/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+      expect(
+        errors.some((e) => /'retain' is a snapshot-policy knob/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("rejects 'keyPrefix' on a relational storage", async () => {
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate A { x: int } } }
+          storage pg { type: postgres }
+          dataSource cState { for: C, kind: state, use: pg, keyPrefix: "x:" }
+        }
+      `);
+      expect(
+        errors.some((e) =>
+          /dataSource 'cState': 'keyPrefix' is only meaningful on a key-value storage/.test(e),
+        ),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("rejects 'schema' / 'tablePrefix' on a kv storage", async () => {
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate A { x: int } } }
+          storage r { type: redis }
+          dataSource cCache {
+            for: C, kind: cache, use: r,
+            schema: "x", tablePrefix: "p_"
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /'schema' is only meaningful on a relational storage/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+      expect(
+        errors.some((e) => /'tablePrefix' is only meaningful on a relational storage/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("rejects 'isolationLevel' on kind: cache", async () => {
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate A { x: int } } }
+          storage r { type: redis }
+          dataSource cCache {
+            for: C, kind: cache, use: r,
+            isolationLevel: serializable
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /'isolationLevel' is not meaningful on kind: cache/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("accepts 'every' / 'retain' on kind: eventLog", async () => {
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C {
+            aggregate A { persistenceStrategy: eventSourced  x: int }
+          } }
+          storage pg { type: postgres }
+          dataSource cLog { for: C, kind: eventLog, use: pg, every: 100, retain: 5 }
+        }
+      `);
+      expect(errors.filter((e) => /dataSource/.test(e))).toEqual([]);
+    });
+
+    it("rejects duplicate dataSource names within a system", async () => {
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate A { x: int } } }
+          storage pg { type: postgres }
+          dataSource cState { for: C, kind: state, use: pg }
+          dataSource cState { for: C, kind: state, use: pg }
+        }
+      `);
+      expect(
+        errors.some((e) => /Duplicate dataSource 'cState'/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+  });
 });
 
 describe("Loom IR validation (post-lowering)", async () => {
