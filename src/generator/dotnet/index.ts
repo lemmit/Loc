@@ -9,6 +9,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import { resolveDataSourceForAggregate } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural } from "../../util/naming.js";
 import type { EmitCtx } from "../_adapters/index.js";
@@ -424,9 +425,18 @@ function emitAggregate(
       emitTrace,
     }),
   );
+  // dataSource-driven EF Core configuration: when the system declares
+  // a matching `dataSource X { for: <ctx>, kind: state|eventLog, ... }`
+  // binding, its `schema` / `tablePrefix` flow into the per-aggregate
+  // ToTable args.  Falls back to the existing default-shape output
+  // when no binding exists (byte-identical with pre-dataSource emit).
+  const ds = emitCtx ? resolveDataSourceForAggregate(agg, ctx, emitCtx.sys) : undefined;
   out.set(
     `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
-    renderConfiguration(agg, ns, ctx),
+    renderConfiguration(agg, ns, ctx, {
+      schema: ds?.schema,
+      tablePrefix: ds?.tablePrefix,
+    }),
   );
   // One file per reference-collection association: the join entity
   // class + its EF Core configuration (composite PK, ordinal, FK
