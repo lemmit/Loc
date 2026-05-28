@@ -114,25 +114,19 @@ describe("walker primitives — CodeBlock", () => {
   });
 
   it("named `source:` wins over a positional arg when both are supplied", async () => {
-    const tsx = await emit(
-      `CodeBlock { "ignored", source: "const z = 3", language: "ts" }`,
-    );
+    const tsx = await emit(`CodeBlock { "ignored", source: "const z = 3", language: "ts" }`);
     expect(tsx).toMatch(/<code className="language-ts">const z = 3<\/code>/);
     expect(tsx).not.toMatch(/ignored/);
   });
 
   it("CodeBlock title: emits a wrapping <div> with the title header", async () => {
-    const tsx = await emit(
-      `CodeBlock { source: "npm i", title: "Install", language: "bash" }`,
-    );
+    const tsx = await emit(`CodeBlock { source: "npm i", title: "Install", language: "bash" }`);
     expect(tsx).toMatch(/<div className="loom-code-block-title">Install<\/div>/);
     expect(tsx).toMatch(/<code className="language-bash">npm i<\/code>/);
   });
 
   it("CodeBlock testid: threads onto the outer wrapper", async () => {
-    const tsx = await emit(
-      `CodeBlock { source: "x", language: "ts", testid: "snippet" }`,
-    );
+    const tsx = await emit(`CodeBlock { source: "x", language: "ts", testid: "snippet" }`);
     expect(tsx).toMatch(/\bdata-testid="snippet"/);
   });
 });

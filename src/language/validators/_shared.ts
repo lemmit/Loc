@@ -31,9 +31,9 @@ import {
   isPostfixChain,
   isProperty,
   type LValue,
-  type Subdomain,
   type NameRef,
   type Page,
+  type Subdomain,
   type ValueObject,
 } from "../generated/ast.js";
 import {

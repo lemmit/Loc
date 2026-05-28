@@ -19,11 +19,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Aggregate, BoundedContext, Subdomain } from "../../src/language/generated/ast.js";
-import {
-  isAggregate,
-  isBoundedContext,
-  isSubdomain,
-} from "../../src/language/generated/ast.js";
+import { isAggregate, isBoundedContext, isSubdomain } from "../../src/language/generated/ast.js";
 import type { OriginToken } from "../../src/macros/api/define.js";
 import {
   aggregatesIn,
@@ -32,8 +28,8 @@ import {
   field,
   idRef,
   memberAccess,
-  nameRef,
   namedType,
+  nameRef,
   not,
   nullLit,
   operation,
@@ -44,14 +40,10 @@ import {
   viewsIn,
   workflowsIn,
 } from "../../src/macros/api/factories.js";
+import { _withOrigin, ORIGIN_PROP, originOf } from "../../src/macros/api/factories-internals.js";
 import {
-  ORIGIN_PROP,
-  _withOrigin,
-  originOf,
-} from "../../src/macros/api/factories-internals.js";
-import {
-  boolLit,
   bodyProp,
+  boolLit,
   callExpr,
   nameRefExpr,
   page,
@@ -321,7 +313,9 @@ describe("origin tracking", () => {
   });
 
   it("originOf walks up `$container` chain — a deep child reports its host's origin", () => {
-    const op = _withOrigin(fakeOrigin, () => operation("rotate", [param("n", primType("int"))], []));
+    const op = _withOrigin(fakeOrigin, () =>
+      operation("rotate", [param("n", primType("int"))], []),
+    );
     const innerParam = op.params[0]!;
     expect(originOf(innerParam)).toBe(fakeOrigin);
   });

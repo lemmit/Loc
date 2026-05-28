@@ -123,9 +123,9 @@ describe("validators (negative) — UI helper imports", () => {
         }
       }
     `);
-    expect(
-      errors.some((e) => /Helper 'Stack' shadows the walker stdlib primitive/.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /Helper 'Stack' shadows the walker stdlib primitive/.test(e))).toBe(
+      true,
+    );
   });
 
   it("rejects a duplicate helper import within the same UI", async () => {

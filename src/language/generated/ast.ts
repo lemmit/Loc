@@ -1586,7 +1586,7 @@ export interface Property extends AstNode {
     readonly $type: 'Property';
     access?: FieldAccess;
     check?: Expression;
-    name: 'canonical' | 'connection' | 'description' | 'env' | 'favicon' | 'immutable' | 'instance' | 'internal' | 'literal' | 'managed' | 'money' | 'ogImage' | 'secret' | 'service' | 'token' | string;
+    name: 'canonical' | 'connection' | 'dataSource' | 'dataSources' | 'description' | 'env' | 'eventLog' | 'every' | 'favicon' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'managed' | 'money' | 'ogImage' | 'readonly' | 'replica' | 'retain' | 'schema' | 'secret' | 'service' | 'snapshot' | 'tablePrefix' | 'token' | 'ttl' | 'use' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;

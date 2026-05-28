@@ -35,7 +35,7 @@ import type {
   TypeRef,
   UnaryExpr,
 } from "../../language/generated/ast.js";
-import { isSubdomain, isProperty } from "../../language/generated/ast.js";
+import { isProperty, isSubdomain } from "../../language/generated/ast.js";
 import {
   mkAssignOrCallStmt,
   mkCallArg,

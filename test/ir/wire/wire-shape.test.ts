@@ -129,9 +129,9 @@ describe("enrichLoomModel — auto-includes findAll", () => {
   });
 });
 
-describe("enrichLoomModel — frontend `targets:` module inheritance", () => {
-  it("frontend deployable's moduleNames matches its target's", async () => {
-    // `static` deployables share the legacy `react` module-
+describe("enrichLoomModel — frontend `targets:` context inheritance", () => {
+  it("frontend deployable's contextNames matches its target's", async () => {
+    // `static` deployables share the legacy `react` context-
     // inheritance behaviour.  Match either tag to keep this test
     // resilient through the platform rename.
     const loom = await buildEnrichedModel("examples/acme.ddd");

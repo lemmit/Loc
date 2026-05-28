@@ -429,7 +429,11 @@ function columnTypeEqual(a: ColumnType, b: ColumnType): boolean {
   return true;
 }
 
-function findPrimaryStorageBinding(sys: SystemIR, m: SubdomainIR, ownerName: string): string | null {
+function findPrimaryStorageBinding(
+  sys: SystemIR,
+  m: SubdomainIR,
+  ownerName: string,
+): string | null {
   // D-STORAGE-SPLIT: the primary storage for a subdomain is the
   // physical storage referenced by the owner deployable's `state`
   // dataSource for any context in the subdomain.  Returns the

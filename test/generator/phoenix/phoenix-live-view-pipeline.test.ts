@@ -420,16 +420,17 @@ describe("emitApiControllers (api-emit unit)", () => {
   const stubDeployable: DeployableIR = {
     name: "phoenixApp",
     platform: "phoenixLiveView",
-    contextNames: ["Customers"], dataSourceNames: [],
+    contextNames: ["Customers"],
+    dataSourceNames: [],
     port: 4000,
     serves: ["SalesApi"],
     uiBindings: [],
-
   };
 
   const stubSys: SystemIR = {
     name: "Mini",
-    subdomains: [], dataSources: [],
+    subdomains: [],
+    dataSources: [],
     deployables: [stubDeployable],
     e2eTests: [],
     uis: [],
@@ -801,16 +802,17 @@ describe("JWT auth emission (auth-emit unit)", () => {
   const baseDeployable: DeployableIR = {
     name: "phoenixApp",
     platform: "phoenixLiveView",
-    contextNames: ["Customers"], dataSourceNames: [],
+    contextNames: ["Customers"],
+    dataSourceNames: [],
     port: 4000,
     serves: ["SalesApi"],
     uiBindings: [],
-
   };
 
   const baseSys: SystemIR = {
     name: "Mini",
-    subdomains: [], dataSources: [],
+    subdomains: [],
+    dataSources: [],
     deployables: [baseDeployable],
     e2eTests: [],
     uis: [],
@@ -1896,16 +1898,17 @@ describe("Per-aggregate controller emission (api-emit unit)", () => {
   const stubDeployable: DeployableIR = {
     name: "phoenixApp",
     platform: "phoenixLiveView",
-    contextNames: ["Customers"], dataSourceNames: [],
+    contextNames: ["Customers"],
+    dataSourceNames: [],
     port: 4000,
     serves: ["SalesApi"],
     uiBindings: [],
-
   };
 
   const stubSys: SystemIR = {
     name: "Mini",
-    subdomains: [], dataSources: [],
+    subdomains: [],
+    dataSources: [],
     deployables: [stubDeployable],
     e2eTests: [],
     uis: [],
@@ -2148,16 +2151,17 @@ describe("Per-operation + per-find route emission (api-emit unit)", () => {
   const stubDeployable: DeployableIR = {
     name: "phoenixApp",
     platform: "phoenixLiveView",
-    contextNames: ["Customers"], dataSourceNames: [],
+    contextNames: ["Customers"],
+    dataSourceNames: [],
     port: 4000,
     serves: ["SalesApi"],
     uiBindings: [],
-
   };
 
   const stubSys: SystemIR = {
     name: "Mini",
-    subdomains: [], dataSources: [],
+    subdomains: [],
+    dataSources: [],
     deployables: [stubDeployable],
     e2eTests: [],
     uis: [],
@@ -2328,15 +2332,16 @@ describe("OpenAPI spec — per-op + per-find paths", () => {
     const deployable: DeployableIR = {
       name: "phoenixApp",
       platform: "phoenixLiveView",
-      contextNames: ["Customers"], dataSourceNames: [],
+      contextNames: ["Customers"],
+      dataSourceNames: [],
       port: 4000,
       serves: ["SalesApi"],
       uiBindings: [],
-  
     };
     const sys: SystemIR = {
       name: "Mini",
-      subdomains: [], dataSources: [],
+      subdomains: [],
+      dataSources: [],
       deployables: [deployable],
       e2eTests: [],
       uis: [],
@@ -2756,15 +2761,16 @@ describe("renderTelemetry --trace (telemetry-emit unit)", () => {
     const deployable: DeployableIR = {
       name: "phoenix_app",
       platform: "phoenixLiveView",
-      contextNames: ["Customers"], dataSourceNames: [],
+      contextNames: ["Customers"],
+      dataSourceNames: [],
       port: 4000,
       serves: [],
       uiBindings: [],
-  
     };
     const baseSys: SystemIR = {
       name: "Mini",
-      subdomains: [], dataSources: [],
+      subdomains: [],
+      dataSources: [],
       deployables: [deployable],
       e2eTests: [],
       uis: [],

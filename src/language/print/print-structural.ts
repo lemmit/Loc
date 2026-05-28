@@ -28,7 +28,6 @@ import type {
   MenuBlock,
   MenuLink,
   MenuSection,
-  Subdomain,
   Operation,
   Page,
   PageProp,
@@ -41,6 +40,7 @@ import type {
   StateBlock,
   Statement,
   Storage,
+  Subdomain,
   System,
   TestBlock,
   TestCase,
@@ -282,9 +282,7 @@ function printDataSource(node: import("../generated/ast.js").DataSource): string
   return block(`dataSource ${node.name}`, items);
 }
 
-function printConnectionSource(
-  node: import("../generated/ast.js").ConnectionSource,
-): string {
+function printConnectionSource(node: import("../generated/ast.js").ConnectionSource): string {
   switch (node.$type) {
     case "ServiceConnectionSource":
       return `service(${node.service})`;
@@ -480,10 +478,10 @@ function printAggregate(node: Aggregate): string {
   if (node.persistenceStrategy) {
     head.push(`persistenceStrategy: ${node.persistenceStrategy}`);
   }
-  return block(
-    `aggregate ${node.name}${ids}${printWithClause(node.withClause)}`,
-    [...head, ...node.members.map(printStructural)],
-  );
+  return block(`aggregate ${node.name}${ids}${printWithClause(node.withClause)}`, [
+    ...head,
+    ...node.members.map(printStructural),
+  ]);
 }
 
 function printWithClause(wc: import("../generated/ast.js").WithClause | undefined): string {

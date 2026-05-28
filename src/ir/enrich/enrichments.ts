@@ -163,9 +163,7 @@ function assignMigrationsOwner(
 ): EnrichedSubdomainIR {
   const contextNames = m.contexts.map((c) => c.name);
   const owner = deployables.find(
-    (d) =>
-      platformFor(d.platform).needsDb &&
-      contextNames.some((c) => d.contextNames.includes(c)),
+    (d) => platformFor(d.platform).needsDb && contextNames.some((c) => d.contextNames.includes(c)),
   );
   if (owner) return { ...m, migrationsOwner: owner.name };
   return m;

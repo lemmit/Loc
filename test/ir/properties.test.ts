@@ -86,7 +86,7 @@ describe("IR invariants — every example", () => {
         expect(twice).toEqual(once);
       });
 
-      it("react deployables inherit moduleNames from their target", async () => {
+      it("react deployables inherit contextNames from their target", async () => {
         const loom = await buildEnriched(example);
         for (const sys of loom.systems) {
           for (const d of sys.deployables) {

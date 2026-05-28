@@ -839,12 +839,8 @@ function lowerDeployable(d: Deployable): DeployableIR {
   // D-STORAGE-SPLIT: `contexts:` clause references bounded contexts
   // directly; `dataSources:` clause references the (context, kind)
   // bindings the deployable hosts.
-  const contextNames = (d.contextRefs ?? [])
-    .map((r) => r.ref?.name ?? "")
-    .filter(Boolean);
-  const dataSourceNames = (d.dataSourceRefs ?? [])
-    .map((r) => r.ref?.name ?? "")
-    .filter(Boolean);
+  const contextNames = (d.contextRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
+  const dataSourceNames = (d.dataSourceRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
   return {
     name: d.name,
     platform,
@@ -1318,10 +1314,7 @@ function lowerAggregate(
     contextFilters: filters.length > 0 ? filters : undefined,
     contextStamps: stamps.length > 0 ? stamps : undefined,
     implementsCapabilities: implementsCaps.length > 0 ? implementsCaps : undefined,
-    persistenceStrategy: agg.persistenceStrategy as
-      | "stateBased"
-      | "eventSourced"
-      | undefined,
+    persistenceStrategy: agg.persistenceStrategy as "stateBased" | "eventSourced" | undefined,
   };
 }
 

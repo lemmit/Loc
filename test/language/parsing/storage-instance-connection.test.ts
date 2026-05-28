@@ -9,9 +9,7 @@ describe("storage instance/connection extensions", () => {
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
     const doc = await helper(src, { validation: true });
-    const errors = (doc.diagnostics ?? [])
-      .filter((d) => d.severity === 1)
-      .map((d) => d.message);
+    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message);
     return { model: doc.parseResult.value as Model, errors };
   }
 

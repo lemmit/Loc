@@ -6923,6 +6923,66 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 {
                   "$type": "Keyword",
                   "value": "literal"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "kind"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "schema"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "tablePrefix"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "keyPrefix"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "ttl"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "every"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "retain"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "isolationLevel"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "readonly"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "use"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "eventLog"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "snapshot"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "replica"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "dataSource"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "dataSources"
                 }
               ]
             }

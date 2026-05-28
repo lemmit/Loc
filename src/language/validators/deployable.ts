@@ -286,9 +286,7 @@ export function checkDeployableDesignPack(
  *  IR-layer validator (`src/ir/validate/validate.ts`) — that pass
  *  sees the resolved aggregate persistenceStrategy. */
 export function checkDeployableDataSources(d: Deployable, accept: ValidationAcceptor): void {
-  const contextNames = new Set(
-    (d.contextRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean),
-  );
+  const contextNames = new Set((d.contextRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean));
   const seenKey = new Map<string, string>(); // "<ctx>:<kind>" → dataSource name
   for (const r of d.dataSourceRefs ?? []) {
     const ds = r.ref;

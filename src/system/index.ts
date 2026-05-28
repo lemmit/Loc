@@ -121,7 +121,12 @@ function emitSystem(
 
   for (const d of sys.deployables) {
     const contexts = collectContextsFor(d, modulesByName);
-    const ownedMigrations = migrationsForDeployable(d, migrations, platformFor(d.platform).needsDb, sys);
+    const ownedMigrations = migrationsForDeployable(
+      d,
+      migrations,
+      platformFor(d.platform).needsDb,
+      sys,
+    );
     emitDeployable(sys, d, contexts, out, {
       emitTrace: options.emitTrace,
       migrations: ownedMigrations,

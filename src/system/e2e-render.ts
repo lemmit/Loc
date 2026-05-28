@@ -4,8 +4,8 @@ import type {
   DeployableIR,
   ExprIR,
   FindIR,
-  SubdomainIR,
   OperationIR,
+  SubdomainIR,
   SystemIR,
   TestE2EIR,
   TestStmtIR,
@@ -60,7 +60,10 @@ function apiBasePath(platform: string): string {
   return platform === "phoenixLiveView" ? "/api" : "";
 }
 
-export function renderE2EFile(sys: SystemIR, modulesByName: Map<string, SubdomainIR>): string | null {
+export function renderE2EFile(
+  sys: SystemIR,
+  modulesByName: Map<string, SubdomainIR>,
+): string | null {
   // UI tests go to a separate Playwright spec via the
   // ui-e2e-render path; the vitest api file only carries api tests.
   const apiTests = sys.e2eTests.filter((t) => t.kind === "api");
@@ -198,7 +201,10 @@ function isBackendPlatform(platform: string): boolean {
  *  bounded-context name that owns the aggregate.  Returns undefined
  *  if no context declares an aggregate whose plural-snake name
  *  matches the slug. */
-function findContextForSlug(slug: string, modulesByName: Map<string, SubdomainIR>): string | undefined {
+function findContextForSlug(
+  slug: string,
+  modulesByName: Map<string, SubdomainIR>,
+): string | undefined {
   for (const m of modulesByName.values()) {
     for (const c of m.contexts) {
       for (const a of c.aggregates) {

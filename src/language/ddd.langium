@@ -829,7 +829,13 @@ Property:
         // Storage / connection-source soft keywords — soft in property
         // position so user-declared fields named `env`, `service`, etc.
         // (showcase.ddd: `event BuildPromoted { … env: string … }`) still parse.
-        | 'instance' | 'connection' | 'service' | 'env' | 'literal')
+        | 'instance' | 'connection' | 'service' | 'env' | 'literal'
+        // DataSource clause keys (PR-3) — soft in property position so
+        // user-declared fields named `kind`, `schema`, `every`, etc.
+        // (banking.ddd: `entity AccountTransaction { kind: string }`) still parse.
+        | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
+        | 'retain' | 'isolationLevel' | 'readonly' | 'use'
+        | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?

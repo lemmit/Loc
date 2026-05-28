@@ -52,11 +52,7 @@ function containsScaffoldCall(expr: ExprIR | undefined): boolean {
       if (SCAFFOLD.has(expr.name)) {
         // Home / WorkflowsIndex / ViewsIndex only count when args.length===0;
         // scaffoldList/Details/Operations/NewForm/WorkflowForm/ViewList always count.
-        if (
-          expr.name === "Home" ||
-          expr.name === "WorkflowsIndex" ||
-          expr.name === "ViewsIndex"
-        ) {
+        if (expr.name === "Home" || expr.name === "WorkflowsIndex" || expr.name === "ViewsIndex") {
           return expr.args.length === 0;
         }
         return true;
@@ -67,9 +63,7 @@ function containsScaffoldCall(expr: ExprIR | undefined): boolean {
     case "member":
       return containsScaffoldCall(expr.receiver);
     case "method-call":
-      return (
-        containsScaffoldCall(expr.receiver) || expr.args.some((a) => containsScaffoldCall(a))
-      );
+      return containsScaffoldCall(expr.receiver) || expr.args.some((a) => containsScaffoldCall(a));
     case "binary":
       return containsScaffoldCall(expr.left) || containsScaffoldCall(expr.right);
     case "ternary":
