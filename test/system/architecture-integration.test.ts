@@ -83,9 +83,13 @@ system Acme {
     port: 3000
   }
 
+  dataSource campaignsState { for: Campaigns, kind: state, use: marketingSql }
+  dataSource campaignsCache { for: Campaigns, kind: cache, use: hotCache }
+
   deployable mktgApi {
     platform: hono
-    modules: Marketing { primary: marketingSql, bi: warehouse }
+    contexts: [Campaigns]
+    dataSources: [campaignsState, campaignsCache]
     serves: MarketingApi
     port: 3001
   }
@@ -167,12 +171,7 @@ describe("Architecture integration — full Acme example", () => {
     expect(errors.some((e) => /'mktgApi' does not 'serves: MarketingApi'/.test(e))).toBe(true);
   });
 
-  it("rejects shape if a backend's primary storage is missing", async () => {
-    const broken = ACME_EXPLICIT.replace(
-      "contexts: [Orders]",
-      "contexts: [Orders]",
-    );
-    const { errors } = await build(broken);
-    expect(errors.some((e) => /must include a 'primary: <storage>' binding/.test(e))).toBe(true);
-  });
+  // The legacy "primary storage missing" validation is gone — per
+  // D-STORAGE-SPLIT, the equivalent check (a state-based aggregate's
+  // context needs a `kind: state` dataSource) lives at the IR layer.
 });

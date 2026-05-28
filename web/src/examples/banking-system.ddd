@@ -181,7 +181,7 @@ system BankingSystem {
   ui WebApp with scaffold(subdomains: [Banking]) {
   }
 
-  deployable api { platform: hono, modules: Banking, port: 3000 }
+  deployable api { platform: hono, contexts: [Banking], port: 3000 }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
 }
 

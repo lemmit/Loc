@@ -2626,7 +2626,7 @@ describe("Ash 3.x compile-correctness regressions", () => {
             repository People for Person {}
           }
         }
-        deployable api { platform: phoenixLiveView, contexts: [C], port: 4000 }
+        deployable api { platform: phoenixLiveView, contexts: [People], port: 4000 }
       }
     `;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-inspect-redact-"));

@@ -44,7 +44,7 @@ describe("playground project loader (VFS-backed)", () => {
         import "./orders.ddd"
         system Shop {
           subdomain M { }
-          deployable api { platform: hono, contexts: [C] }
+          deployable api { platform: hono, contexts: [Orders] }
         }
       `,
       "/workspace/shared/money.ddd": `
@@ -183,7 +183,7 @@ describe("playground project loader (VFS-backed)", () => {
               repository Products for Product { }
             }
           }
-          deployable api { platform: hono, contexts: [C] }
+          deployable api { platform: hono, contexts: [Catalog] }
         }
       `,
       "/workspace/shared/money.ddd": `

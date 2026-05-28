@@ -12,21 +12,21 @@
         "technology": "dotnet",
         "children": [
           {
-            "localId": "Catalog",
+            "localId": "Products",
             "kind": "component",
-            "title": "Catalog",
+            "title": "Products",
             "children": []
           },
           {
-            "localId": "Sales",
+            "localId": "Orders",
             "kind": "component",
-            "title": "Sales",
+            "title": "Orders",
             "children": []
           },
           {
-            "localId": "CustomerMgmt",
+            "localId": "Customers",
             "kind": "component",
-            "title": "CustomerMgmt",
+            "title": "Customers",
             "children": []
           }
         ]
@@ -38,15 +38,15 @@
         "technology": "hono",
         "children": [
           {
-            "localId": "Catalog",
+            "localId": "Products",
             "kind": "component",
-            "title": "Catalog",
+            "title": "Products",
             "children": []
           },
           {
-            "localId": "CustomerMgmt",
+            "localId": "Customers",
             "kind": "component",
-            "title": "CustomerMgmt",
+            "title": "Customers",
             "children": []
           }
         ]
@@ -58,15 +58,15 @@
         "technology": "dotnet",
         "children": [
           {
-            "localId": "Catalog",
+            "localId": "Products",
             "kind": "component",
-            "title": "Catalog",
+            "title": "Products",
             "children": []
           },
           {
-            "localId": "CustomerMgmt",
+            "localId": "Customers",
             "kind": "component",
-            "title": "CustomerMgmt",
+            "title": "Customers",
             "children": []
           }
         ]
@@ -78,21 +78,21 @@
         "technology": "static",
         "children": [
           {
-            "localId": "Catalog",
+            "localId": "Products",
             "kind": "component",
-            "title": "Catalog",
+            "title": "Products",
             "children": []
           },
           {
-            "localId": "Sales",
+            "localId": "Orders",
             "kind": "component",
-            "title": "Sales",
+            "title": "Orders",
             "children": []
           },
           {
-            "localId": "CustomerMgmt",
+            "localId": "Customers",
             "kind": "component",
-            "title": "CustomerMgmt",
+            "title": "Customers",
             "children": []
           }
         ]

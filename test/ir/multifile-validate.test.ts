@@ -95,7 +95,7 @@ describe("workspace-uniqueness validation (multi-file)", () => {
       `,
       "a.ddd": `system Shop {
         subdomain M { }
-        deployable api { platform: hono, contexts: [C] }
+        deployable api { platform: hono, contexts: [Sales] }
       }`,
       "b.ddd": `system Shop {
         subdomain M2 { }
@@ -138,7 +138,7 @@ describe("workspace-uniqueness validation (multi-file)", () => {
         import "./sales.ddd"
         system Shop {
           subdomain M { }
-          deployable api { platform: hono, contexts: [C] }
+          deployable api { platform: hono, contexts: [Sales] }
         }
       `,
       "shared.ddd": `

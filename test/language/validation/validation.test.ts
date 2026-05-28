@@ -133,7 +133,7 @@ describe("validation", () => {
     const { errors } = await parse(`
       system S {
         subdomain M { context T { aggregate A { x: int } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         deployable web { platform: react, port: 3001 }
       }
     `);
@@ -144,8 +144,8 @@ describe("validation", () => {
     const { errors } = await parse(`
       system S {
         subdomain M { context T { aggregate A { x: int } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
-        deployable other { platform: hono, contexts: [C], targets: api, port: 3010 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
+        deployable other { platform: hono, contexts: [T], targets: api, port: 3010 }
       }
     `);
     expect(errors.some((e) => /targets/i.test(e))).toBe(true);
@@ -155,7 +155,7 @@ describe("validation", () => {
     const { errors } = await parse(`
       system S {
         subdomain M { context T { aggregate A { x: int } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         deployable webA { platform: react, targets: api, port: 3001 }
         deployable webB { platform: react, targets: webA, port: 3002 }
       }
@@ -282,7 +282,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [C], ui: WebApp, port: 3000 }
+          deployable api { platform: hono, contexts: [T], ui: WebApp, port: 3000 }
         }
       `);
       expect(errors.some((e) => /'ui:' binding is only valid/.test(e))).toBe(true);
@@ -297,7 +297,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: dotnet, contexts: [C], ui: WebApp, port: 8080 }
+          deployable api { platform: dotnet, contexts: [T], ui: WebApp, port: 8080 }
         }
       `);
       expect(errors).toEqual([]);
@@ -307,7 +307,7 @@ describe("validation", () => {
       const { errors } = await parse(`
         system S {
           subdomain M { context T { } }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web { platform: static, targets: api, port: 3001 }
         }
       `);
@@ -319,7 +319,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -331,7 +331,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -347,7 +347,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web {
             platform: static
             targets: api
@@ -368,8 +368,8 @@ describe("validation", () => {
         }
       `);
       // Phase 4: error originates from the macro expander, which
-      // uses the registered macro's arg kind ('Module') in the message.
-      expect(errors.some((e) => /unknown Module 'NotAModule'/.test(e))).toBe(true);
+      // uses the registered macro's arg kind ('Subdomain') in the message.
+      expect(errors.some((e) => /unknown Subdomain 'NotAModule'/.test(e))).toBe(true);
     });
 
     it("rejects a scaffold target of the wrong kind (aggregate listed as module)", async () => {
@@ -385,9 +385,9 @@ describe("validation", () => {
           }
         }
       `);
-      // Order is an Aggregate, not a Module — the lookup against
-      // the Module inventory misses, surfacing as 'unknown Module'.
-      expect(errors.some((e) => /unknown Module 'Order'/.test(e))).toBe(true);
+      // Order is an Aggregate, not a Subdomain — the lookup against
+      // the Subdomain inventory misses, surfacing as 'unknown Subdomain'.
+      expect(errors.some((e) => /unknown Subdomain 'Order'/.test(e))).toBe(true);
     });
 
     it("silently dedupes the same target listed twice within one scaffold call", async () => {
@@ -687,7 +687,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -711,7 +711,7 @@ describe("validation", () => {
           ui WebApp { }
           deployable fullstack {
             platform: phoenixLiveView
-            contexts: [C]
+            contexts: [T]
             ui: WebApp
             port: 4000
             design: shadcn
@@ -730,7 +730,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -748,7 +748,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -775,7 +775,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -797,7 +797,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -822,7 +822,7 @@ describe("validation", () => {
           subdomain M { context T { } }
           deployable api {
             platform: hono
-            contexts: [C]
+            contexts: [T]
             port: 3000
             design: shadcn
           }
@@ -1006,7 +1006,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context T { aggregate Order { x: int } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         test e2e "missing aggregate" against api {
           let _ = api.unknown.create({})
         }
@@ -1024,7 +1024,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context T { aggregate Order { x: int } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         test e2e "bad verb" against api {
           let _ = api.orders.frobnicate({})
         }
@@ -1042,7 +1042,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context T { aggregate Order { customerId: string } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         test e2e "good" against api {
           let o = api.orders.create({ customerId: "c-1" })
           let read = api.orders.getById(o)
@@ -1060,7 +1060,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context T { aggregate Order { x: int } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         test e2e "mutating body" against api {
           x := 1
         }
@@ -1303,7 +1303,7 @@ describe("Loom IR validation (post-lowering)", async () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [Orders], port: 3000 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         deployable web { platform: react, targets: api, port: 3001 }
       }
     `);
@@ -1327,7 +1327,7 @@ describe("Loom IR validation (post-lowering)", async () => {
             aggregate Order { customerId: Customer id }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         deployable web { platform: react, targets: api, port: 3001 }
       }
     `);
@@ -1390,7 +1390,7 @@ describe("Loom IR validation (post-lowering)", async () => {
             aggregate Order { customerId: Customer id }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         deployable web { platform: react, targets: api, port: 3001 }
       }
     `);
@@ -1910,7 +1910,7 @@ describe("Loom IR validation (post-lowering)", async () => {
             repository Orders for Order { }
           }
         }
-        deployable api { platform: dotnet, contexts: [C], port: 8080, auth: required }
+        deployable api { platform: dotnet, contexts: [T], port: 8080, auth: required }
       }
     `);
     const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
@@ -1921,7 +1921,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system Acme {
         subdomain M { context T { aggregate Order { x: int } repository Orders for Order { } } }
-        deployable api { platform: dotnet, contexts: [C], port: 8080, auth: required }
+        deployable api { platform: dotnet, contexts: [T], port: 8080, auth: required }
       }
     `);
     const diags = validateLoomModel(loom);

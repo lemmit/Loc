@@ -3,10 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  deployableModules,
+  deployableContexts,
   deployableServes,
   deployableTargets,
-  setDeployableModules,
+  setDeployableContexts,
   setDeployableServes,
   setDeployableTargets,
   setDeployableUi,
@@ -33,23 +33,19 @@ function deployable(name: string): { $type: string } {
 }
 
 describe("System builder — deployable bindings", () => {
-  it("reads modules / serves / targets / ui kind", () => {
-    expect(deployableModules(deployable("catalogWeb"))).toEqual(["Catalog", "CustomerMgmt"]);
+  it("reads contexts / serves / targets / ui kind", () => {
+    expect(deployableContexts(deployable("catalogWeb"))).toEqual(["Products", "Customers"]);
     expect(deployableServes(deployable("catalogWeb"))).toEqual(["CatalogApi", "CustomerMgmtApi"]);
     expect(deployableTargets(deployable("webApp"))).toBe("api");
     expect(uiKind(deployable("webApp"))).toBe("compose"); // `ui: WebApp { … }` — advanced, hidden from the picker
     expect(uiKind(deployable("catalogWeb"))).toBe("none");
   });
 
-  it("edits the module set, preserving existing storage maps", () => {
-    // Add Sales (bare); keep Catalog / CustomerMgmt with their `{ primary: primarySql }`.
-    const out = setDeployableModules(acme, "catalogWeb", ["Catalog", "CustomerMgmt", "Sales"])!;
-    expect(out).toMatch(/Catalog\s*\{ primary: primarySql \}/);
-    expect(out).toMatch(/CustomerMgmt\s*\{ primary: primarySql \}/);
-    expect(out).toMatch(/Sales/);
-    // Removing down to one keeps its storage map.
-    expect(setDeployableModules(acme, "catalogWeb", ["Catalog"])).toMatch(
-      /modules: Catalog \{ primary: primarySql \}/,
+  it("edits the context set", () => {
+    const out = setDeployableContexts(acme, "catalogWeb", ["Products", "Customers", "Orders"])!;
+    expect(out).toMatch(/contexts:\s*\[Products,\s*Customers,\s*Orders\]/);
+    expect(setDeployableContexts(acme, "catalogWeb", ["Products"])).toMatch(
+      /contexts:\s*\[Products\]/,
     );
   });
 

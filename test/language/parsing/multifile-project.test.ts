@@ -46,7 +46,7 @@ describe("multi-file project loader", () => {
         import "./shared/money.ddd"
         system Shop {
           subdomain Sales { }
-          deployable api { platform: hono, contexts: [Sales] }
+          deployable api { platform: hono, contexts: [Orders] }
         }
       `,
       "orders.ddd": `
@@ -137,7 +137,7 @@ describe("multi-file project loader", () => {
         import "./catalog.ddd"
         system X {
           subdomain M { }
-          deployable api { platform: hono, contexts: [C] }
+          deployable api { platform: hono, contexts: [Catalog] }
         }
       `,
       "shared.ddd": `

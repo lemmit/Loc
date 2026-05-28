@@ -13,25 +13,25 @@ model {
     description 'Loom-generated system'
     api = container 'api' {
       technology 'dotnet'
-      Catalog = component 'Catalog'
-      Sales = component 'Sales'
-      CustomerMgmt = component 'CustomerMgmt'
+      Products = component 'Products'
+      Orders = component 'Orders'
+      Customers = component 'Customers'
     }
     catalogWeb = container 'catalogWeb' {
       technology 'hono'
-      Catalog = component 'Catalog'
-      CustomerMgmt = component 'CustomerMgmt'
+      Products = component 'Products'
+      Customers = component 'Customers'
     }
     catalogApi = container 'catalogApi' {
       technology 'dotnet'
-      Catalog = component 'Catalog'
-      CustomerMgmt = component 'CustomerMgmt'
+      Products = component 'Products'
+      Customers = component 'Customers'
     }
     webApp = container 'webApp' {
       technology 'static'
-      Catalog = component 'Catalog'
-      Sales = component 'Sales'
-      CustomerMgmt = component 'CustomerMgmt'
+      Products = component 'Products'
+      Orders = component 'Orders'
+      Customers = component 'Customers'
     }
     db = database 'PostgreSQL'
 

@@ -28,8 +28,8 @@ system Demo {
   ui Web {
     page Home { body: Text("hi") }
   }
-  deployable api { platform: hono, contexts: [C], port: 3000 }
-  deployable web { platform: react, contexts: [C], targets: api, ui: Web, port: 3001 }
+  deployable api { platform: hono, contexts: [Accounts], port: 3000 }
+  deployable web { platform: react, contexts: [Accounts], targets: api, ui: Web, port: 3001 }
 }
 `;
 

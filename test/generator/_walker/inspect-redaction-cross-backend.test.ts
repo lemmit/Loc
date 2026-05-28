@@ -54,9 +54,9 @@ const REDACTION_SOURCE = `
         repository People for Person { }
       }
     }
-    deployable honoApi { platform: hono, contexts: [C], port: 3000 }
-    deployable dotnetApi { platform: dotnet, contexts: [C], port: 3001 }
-    deployable elixirApi { platform: phoenixLiveView, contexts: [C], port: 4000 }
+    deployable honoApi { platform: hono, contexts: [People], port: 3000 }
+    deployable dotnetApi { platform: dotnet, contexts: [People], port: 3001 }
+    deployable elixirApi { platform: phoenixLiveView, contexts: [People], port: 4000 }
   }
 `;
 

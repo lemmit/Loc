@@ -866,7 +866,7 @@ describe("react generator", () => {
               }
             }
             ui WebApp with scaffold(subdomains: [M]) { }
-            deployable api { platform: dotnet, contexts: [C], port: 8080 }
+            deployable api { platform: dotnet, contexts: [Auth], port: 8080 }
             deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,
@@ -895,7 +895,7 @@ describe("react generator", () => {
               }
             }
             ui WebApp with scaffold(subdomains: [M]) { }
-            deployable api { platform: dotnet, contexts: [C], port: 8080 }
+            deployable api { platform: dotnet, contexts: [Catalog], port: 8080 }
             deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,
@@ -926,7 +926,7 @@ describe("react generator", () => {
               }
             }
             ui WebApp with scaffold(subdomains: [M]) { }
-            deployable api { platform: dotnet, contexts: [C], port: 8080 }
+            deployable api { platform: dotnet, contexts: [Acct], port: 8080 }
             deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,

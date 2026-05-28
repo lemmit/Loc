@@ -11,14 +11,14 @@ flowchart LR
     deploy_catalogApi{{"catalogApi · dotnet"}}
     deploy_webApp{{"webApp · static"}}
   end
-  deploy_api --> mod_Catalog
-  deploy_api --> mod_Sales
-  deploy_api --> mod_CustomerMgmt
-  deploy_catalogWeb --> mod_Catalog
-  deploy_catalogWeb --> mod_CustomerMgmt
-  deploy_catalogApi --> mod_Catalog
-  deploy_catalogApi --> mod_CustomerMgmt
-  deploy_webApp --> mod_Catalog
-  deploy_webApp --> mod_Sales
-  deploy_webApp --> mod_CustomerMgmt
+  deploy_api --> ctx_Products
+  deploy_api --> ctx_Orders
+  deploy_api --> ctx_Customers
+  deploy_catalogWeb --> ctx_Products
+  deploy_catalogWeb --> ctx_Customers
+  deploy_catalogApi --> ctx_Products
+  deploy_catalogApi --> ctx_Customers
+  deploy_webApp --> ctx_Products
+  deploy_webApp --> ctx_Orders
+  deploy_webApp --> ctx_Customers
   deploy_webApp -.->|calls| deploy_api

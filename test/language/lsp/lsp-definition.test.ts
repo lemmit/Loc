@@ -112,16 +112,16 @@ describe("DefinitionProvider — built-in cross references", () => {
     });
   });
 
-  it("modules: <Module> jumps to the Module declaration", async () => {
+  it("contexts: <BoundedContext> jumps to the context declaration", async () => {
     await expectDef({
       text: `
         system Acme {
-          module <|Sales|> {
-            context S { aggregate Order { x: int } }
+          subdomain Sales {
+            context <|S|> { aggregate Order { x: int } }
           }
           deployable api {
             platform: hono
-            modules: <|>Sales
+            contexts: [<|>S]
             port: 3000
           }
         }`,

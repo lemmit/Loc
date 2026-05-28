@@ -236,7 +236,7 @@ function* wireOwners(
 ): Generator<{ kind: "aggregate" | "valueobject"; name: string; wireShape?: WireField[] }> {
   const contexts = [
     ...loom.contexts,
-    ...loom.systems.flatMap((s) => s.modules.flatMap((m) => m.contexts)),
+    ...loom.systems.flatMap((s) => s.subdomains.flatMap((m) => m.contexts)),
   ];
   for (const c of contexts) {
     for (const a of c.aggregates) yield { kind: "aggregate", name: a.name, wireShape: a.wireShape };

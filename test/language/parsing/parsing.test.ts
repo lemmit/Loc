@@ -190,7 +190,7 @@ describe("parsing & validation of examples", () => {
 
         deployable api {
           platform: dotnet
-          contexts: [S]
+          contexts: [Orders]
           port: 8080
           auth: required
         }
@@ -347,7 +347,7 @@ describe("page metamodel — grammar smoke tests", () => {
   it("parses every scaffold selector kind", async () => {
     const { errors } = await parseSnippet(`
       system Acme {
-        ui A with scaffold(subdomains: [M], contexts: [C], aggregates: [Order, Customer], workflows: [placeOrder], views: [ActiveOrders]) {
+        ui A with scaffold(subdomains: [M], contexts: [S], aggregates: [Order, Customer], workflows: [placeOrder], views: [ActiveOrders]) {
         }
       }
     `);

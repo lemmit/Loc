@@ -28,7 +28,7 @@ system Demo {
   api AccountsApi from Accounts
   deployable phoenixApp {
     platform: phoenixLiveView
-    contexts: [C]
+    contexts: [Accounts]
     serves: AccountsApi
     port: 4000
   }

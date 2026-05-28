@@ -359,10 +359,10 @@ describe("Model v2 — view-graph per level", () => {
 }`;
     const g = buildViewGraph(parse(SRC_D), [{ kind: "system", name: "S" }]);
     const labels = g.edges.map((e) => `${e.source} -${e.label}-> ${e.target}`);
-    // api includes module Sales; webApp targets api and mounts Web.
+    // api hosts the Orders context; webApp targets api and mounts Web.
     expect(labels).toEqual(
       expect.arrayContaining([
-        "deployable:api -modules-> module:Sales",
+        "deployable:api -contexts-> context:Orders",
         "deployable:webApp -targets-> deployable:api",
         "deployable:webApp -ui-> ui:Web",
       ]),

@@ -392,14 +392,17 @@ function validateReactIdReferences(sys: SystemIR, diags: LoomDiagnostic[]): void
     // skip the UI-reachability walk.  `mountsUi && !isFrontend` is the
     // dual-mode shape today (frontend-only platforms always declare ui).
     if (!d.uiName && !platformFor(d.platform).isFrontend) continue;
-    // Aggregates mounted by this deployable's `moduleNames` set —
+    // Aggregates mounted by this deployable's `contextNames` set —
     // UI generators only emit per-aggregate hooks/queries for
     // these; anything outside is unreachable.
     const mounted = new Set<string>();
-    for (const moduleName of d.contextNames) {
-      const mod = sys.subdomains.find((m) => m.name === moduleName);
-      if (!mod) continue;
-      for (const c of mod.contexts) for (const a of c.aggregates) mounted.add(a.name);
+    const wantedContexts = new Set(d.contextNames);
+    for (const sd of sys.subdomains) {
+      for (const c of sd.contexts) {
+        if (wantedContexts.has(c.name)) {
+          for (const a of c.aggregates) mounted.add(a.name);
+        }
+      }
     }
 
     // Walk every operation param + every aggregate field that lowers to
