@@ -24,6 +24,7 @@ import {
   stubAdapter,
 } from "../generator/_adapters/index.js";
 import type { Platform } from "../ir/types/loom-ir.js";
+import { byLayerLayoutAdapter as honoByLayerLayoutAdapter } from "./hono/v4/adapters/by-layer-layout.js";
 import { drizzlePersistenceAdapter } from "./hono/v4/adapters/drizzle-persistence.js";
 
 /** Per-platform adapter menu — every supported adapter, keyed by its
@@ -213,13 +214,7 @@ adapterMenus.hono = {
       ),
     },
     layouts: {
-      byLayer: stubAdapter<LayoutAdapter>(
-        "layout",
-        "byLayer",
-        "hono",
-        () => layoutNames(adapterMenus.hono),
-        { name: "byLayer" },
-      ),
+      byLayer: honoByLayerLayoutAdapter,
       byFeature: stubAdapter<LayoutAdapter>(
         "layout",
         "byFeature",
