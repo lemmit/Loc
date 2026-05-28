@@ -2,6 +2,7 @@ import type {
   AggregateIR,
   AssociationIR,
   BoundedContextIR,
+  DataSourceIR,
   EnrichedBoundedContextIR,
   ExprIR,
   FieldIR,
@@ -9,6 +10,27 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines as joinLines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
+
+/** Per-aggregate dataSource lookup the orchestrator passes in.  Lets
+ *  the schema emitter ask "what schema / tablePrefix does THIS
+ *  aggregate's storage binding say?" without coupling to the
+ *  resolver internals.  Returns `undefined` when the system has no
+ *  matching dataSource — the table emits as a plain `pgTable(...)`
+ *  with no schema qualifier, byte-identical with pre-dataSource emit. */
+export type DataSourceLookup = (agg: AggregateIR) => DataSourceIR | undefined;
+
+/** Snake-case a schema name into a valid Drizzle const identifier
+ *  (`tenant_a` → `tenantA` — drizzle convention is camelCase consts
+ *  even though the schema string stays as-declared). */
+function schemaConstName(schemaName: string): string {
+  return lowerFirst(
+    schemaName
+      .split(/[^a-zA-Z0-9]/)
+      .filter(Boolean)
+      .map((part, i) => (i === 0 ? part : part[0]!.toUpperCase() + part.slice(1)))
+      .join(""),
+  );
+}
 
 // All-procedural Drizzle schema emission.  Column generation has too
 // much per-field branching to express cleanly in any template engine,
@@ -23,22 +45,57 @@ import { lowerFirst, plural, snake } from "../../../util/naming.js";
 // once the table has more than a few hundred rows.
 export function renderSchema(
   ctx: EnrichedBoundedContextIR,
-  opts: { audit?: boolean; provenance?: boolean } = {},
+  opts: {
+    audit?: boolean;
+    provenance?: boolean;
+    /** Per-aggregate dataSource lookup — when present, the schema
+     *  emitter routes each table through `pgSchema(...)` (when
+     *  `schema` is set) and prepends `tablePrefix` to the table
+     *  name.  Absent / returns undefined → byte-identical with the
+     *  pre-dataSource single-`pgTable(...)` shape.  Join tables and
+     *  the audit / provenance tables inherit the schema of the
+     *  aggregate they belong to (or stay schemaless when there's no
+     *  binding). */
+    resolveDataSource?: DataSourceLookup;
+  } = {},
 ): string {
+  const lookup = opts.resolveDataSource;
+  // Collect every distinct schema name we'll need across the body so
+  // we can emit ONE `pgSchema(...)` declaration at the top per
+  // schema.  Order: insertion order from the aggregate walk.
+  const schemaNames: string[] = [];
+  const schemaSeen = new Set<string>();
+  const schemaFor = (agg: AggregateIR): string | undefined => {
+    const ds = lookup?.(agg);
+    if (!ds?.schema) return undefined;
+    if (!schemaSeen.has(ds.schema)) {
+      schemaSeen.add(ds.schema);
+      schemaNames.push(ds.schema);
+    }
+    return ds.schema;
+  };
+  const prefixFor = (agg: AggregateIR): string | undefined => lookup?.(agg)?.tablePrefix;
   const tables: string[] = [];
   for (const agg of ctx.aggregates) {
     const indexed = indexedColumnsFor(agg, ctx);
-    tables.push(emitTable(agg.name, agg.fields, undefined, ctx, indexed));
+    const schema = schemaFor(agg);
+    const prefix = prefixFor(agg);
+    tables.push(emitTable(agg.name, agg.fields, undefined, ctx, indexed, { schema, prefix }));
     for (const part of agg.parts) {
-      tables.push(emitTable(part.name, part.fields, agg.name, ctx, new Set()));
+      tables.push(emitTable(part.name, part.fields, agg.name, ctx, new Set(), { schema, prefix }));
     }
     // Many-to-many join tables for `T id[]` reference collections.
+    // Live in the same schema as the owning aggregate so cross-table
+    // FKs stay valid.
     for (const assoc of agg.associations) {
-      tables.push(emitJoinTable(assoc));
+      tables.push(emitJoinTable(assoc, { schema, prefix }));
     }
   }
   if (opts.audit) tables.push(AUDIT_TABLE);
   if (opts.provenance) tables.push(PROVENANCE_TABLE);
+  const schemaDecls = schemaNames.map(
+    (name) => `export const ${schemaConstName(name)} = pgSchema("${name}");`,
+  );
   const enumLines = ctx.enums.map(
     (e) =>
       `export const ${lowerFirst(e.name)}Enum = pgEnum("${snake(e.name)}", [${e.values.map((v) => `"${v}"`).join(", ")}]);`,
@@ -47,9 +104,10 @@ export function renderSchema(
   // calls — every helper here is invoked as a function (`text(...)`,
   // `pgEnum(...)`, etc.), so a `\b<name>\(` scan is exact and keeps the
   // import line free of dead names per the generated-code Biome gate.
-  const body = [...enumLines, "", tables.join("\n\n")].join("\n");
+  const body = [...schemaDecls, ...enumLines, "", tables.join("\n\n")].join("\n");
   const candidates = [
     "pgTable",
+    "pgSchema",
     "text",
     "integer",
     "bigint",
@@ -70,6 +128,7 @@ export function renderSchema(
       "// Auto-generated.",
       `import { ${imports} } from "drizzle-orm/pg-core";`,
       "",
+      ...(schemaDecls.length > 0 ? [...schemaDecls, ""] : []),
       ...enumLines,
       "",
       tables.join("\n\n"),
@@ -82,12 +141,18 @@ export function renderSchema(
  * survives a round-trip, a composite primary key over (owner, target)
  * (so each pair is unique and the save upsert is idempotent), and an
  * index on the target FK for the reverse membership query. */
-function emitJoinTable(assoc: AssociationIR): string {
+function emitJoinTable(
+  assoc: AssociationIR,
+  options: { schema?: string; prefix?: string } = {},
+): string {
   const tableConst = joinTableConstName(assoc);
   const ownerKey = joinColumnName(assoc.ownerFk);
   const targetKey = joinColumnName(assoc.targetFk);
   const lines: string[] = [];
-  lines.push(`export const ${tableConst} = pgTable("${assoc.joinTable}", {`);
+  const baseTable = assoc.joinTable;
+  const tableName = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
+  const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
+  lines.push(`export const ${tableConst} = ${tableFactory}("${tableName}", {`);
   lines.push(`  ${ownerKey}: text("${assoc.ownerFk}").notNull(),`);
   lines.push(`  ${targetKey}: text("${assoc.targetFk}").notNull(),`);
   lines.push(`  ordinal: integer("ordinal").notNull(),`);
@@ -216,10 +281,18 @@ function emitTable(
   parentName: string | undefined,
   ctx: BoundedContextIR,
   indexedColumns: Set<string>,
+  options: { schema?: string; prefix?: string } = {},
 ): string {
-  const tableName = snake(plural(name));
+  const baseTable = snake(plural(name));
+  const tableName = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
   const lines: string[] = [];
-  lines.push(`export const ${lowerFirst(plural(name))} = pgTable("${tableName}", {`);
+  // dataSource-driven schema routing: when the owning aggregate's
+  // dataSource declares `schema: "tenant_a"`, the table goes through
+  // the schema's `.table(...)` factory instead of the top-level
+  // `pgTable(...)` — same shape on the database side, Drizzle
+  // qualifies the SQL with the schema name.
+  const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
+  lines.push(`export const ${lowerFirst(plural(name))} = ${tableFactory}("${tableName}", {`);
   lines.push(`  id: text("id").primaryKey(),`);
   if (parentName) {
     lines.push(`  parentId: text("${snake(parentName)}_id").notNull(),`);

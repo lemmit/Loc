@@ -36,6 +36,7 @@ import {
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
 import { contextsHaveProvenancedField } from "../../../ir/util/prov-id.js";
+import { resolveDataSourceForAggregate } from "../../../ir/util/resolve-datasource.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
@@ -177,7 +178,26 @@ export function generateTypeScriptForContexts(
   out.set("domain/events.ts", renderEvents(merged));
   out.set("domain/errors.ts", ERRORS_TS);
   if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);
-  out.set("db/schema.ts", renderSchema(merged, { audit: emitAudit, provenance: emitProvenance }));
+  // Per-aggregate dataSource lookup — feeds `pgSchema(...)` /
+  // `<schema>.table(...)` / `tablePrefix` routing in `renderSchema`.
+  // Returns `undefined` for systems without a matching binding, which
+  // falls back to the existing plain `pgTable(...)` shape.
+  const resolveDataSource = system
+    ? (agg: import("../../../ir/types/loom-ir.js").AggregateIR) => {
+        const owningCtx = contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
+        return owningCtx
+          ? resolveDataSourceForAggregate(
+              agg as import("../../../ir/types/loom-ir.js").EnrichedAggregateIR,
+              owningCtx,
+              system.sys,
+            )
+          : undefined;
+      }
+    : undefined;
+  out.set(
+    "db/schema.ts",
+    renderSchema(merged, { audit: emitAudit, provenance: emitProvenance, resolveDataSource }),
+  );
   if (merged.workflows.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     out.set("http/workflows.ts", buildWorkflowsFile(merged, aggsByName));
