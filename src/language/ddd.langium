@@ -282,6 +282,8 @@ Api:
 Storage:
     'storage' name=LooseName '{'
         ('type' ':' type=StorageType ','?)
+        ('instance' ':' instance=ID ','?)?
+        ('connection' ':' connection=ConnectionSource ','?)?
     '}';
 
 StorageType returns string:
@@ -290,6 +292,12 @@ StorageType returns string:
     | 'elastic' | 'meilisearch'
     | 'kafka'
     | 'clickhouse' | 'bigquery';
+
+ConnectionSource:
+      {infer ServiceConnectionSource} 'service' '(' service=ID ')'
+    | {infer EnvConnectionSource}     'env'     '(' env=STRING ')'
+    | {infer SecretConnectionSource}  'secret'  '(' secret=ID ')'
+    | {infer LiteralConnectionSource} 'literal' '(' literal=STRING ')';
 
 // ---- ui api parameter ------------------------------------------
 //
@@ -791,7 +799,11 @@ FieldAccess returns string:
 Property:
     name=(ID | 'money' | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
         // Phase 2 page-metadata + favicon keywords — soft in property position.
-        | 'description' | 'ogImage' | 'canonical' | 'favicon')
+        | 'description' | 'ogImage' | 'canonical' | 'favicon'
+        // Storage / connection-source soft keywords — soft in property
+        // position so user-declared fields named `env`, `service`, etc.
+        // (showcase.ddd: `event BuildPromoted { … env: string … }`) still parse.
+        | 'instance' | 'connection' | 'service' | 'env' | 'literal')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -869,7 +881,12 @@ LooseName returns string:
     // Phase 2 page-metadata + favicon keywords.  Admitted as soft so
     // user code can still name fields `description`, `ogImage`,
     // `canonical`, `favicon`.
-    | 'description' | 'ogImage' | 'canonical' | 'favicon';
+    | 'description' | 'ogImage' | 'canonical' | 'favicon'
+    // Storage / dataSource clause + connection-source keywords admitted
+    // as soft so user code can still name a field `env`, `service`,
+    // `instance`, `connection`, or `literal` (showcase.ddd uses
+    // `env: string` as an event field, for instance).
+    | 'instance' | 'connection' | 'service' | 'env' | 'literal';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -934,7 +951,7 @@ EmitStmt:
     '}';
 
 EmitField:
-    name=ID ':' value=Expression;
+    name=LooseName ':' value=Expression;
 
 // Combined assignment / call statement.  We parse an LValue first, then
 // optionally consume a mutation suffix.  Without a suffix the LValue
@@ -1217,7 +1234,11 @@ NameRefIdent returns string:
        // so expressions can read a field named `description`,
        // `ogImage`, etc. (e.g. `description != null` in a derived
        // property — see showcase.ddd).
-       | 'description' | 'ogImage' | 'canonical' | 'favicon';
+       | 'description' | 'ogImage' | 'canonical' | 'favicon'
+       // Storage / connection-source soft keywords — see LooseName for
+       // the rationale.  Admitted here so expressions can read a field
+       // named `env`, `service`, etc.
+       | 'instance' | 'connection' | 'service' | 'env' | 'literal';
 
 // ---------------------------------------------------------------------------
 // Terminals

@@ -51,7 +51,7 @@
     },
     "control-keywords": {
       "name": "keyword.control.ddd",
-      "match": "\\b(precondition|requires|let|emit|match|when|where|else|new|for|from|against|test|e2e|expect|expectThrows|covers|verifies|entitles|serves|targets|modules|aggregates|contexts|events|views|workflows|persistenceStrategy)\\b"
+      "match": "\\b(precondition|requires|let|emit|match|when|where|else|new|for|from|against|test|e2e|expect|expectThrows|covers|verifies|entitles|serves|targets|modules|aggregates|contexts|events|views|workflows|persistenceStrategy|instance|connection|service|env|secret|literal)\\b"
     },
     "modifiers": {
       "name": "storage.modifier.ddd",

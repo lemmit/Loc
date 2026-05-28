@@ -259,7 +259,25 @@ function printLayout(node: Layout): string {
 }
 
 function printStorage(node: Storage): string {
-  return block(`storage ${node.name}`, [`type: ${node.type}`]);
+  const items: string[] = [`type: ${node.type}`];
+  if (node.instance) items.push(`instance: ${node.instance}`);
+  if (node.connection) items.push(`connection: ${printConnectionSource(node.connection)}`);
+  return block(`storage ${node.name}`, items);
+}
+
+function printConnectionSource(
+  node: import("../generated/ast.js").ConnectionSource,
+): string {
+  switch (node.$type) {
+    case "ServiceConnectionSource":
+      return `service(${node.service})`;
+    case "EnvConnectionSource":
+      return `env(${JSON.stringify(node.env)})`;
+    case "SecretConnectionSource":
+      return `secret(${node.secret})`;
+    case "LiteralConnectionSource":
+      return `literal(${JSON.stringify(node.literal)})`;
+  }
 }
 
 function printApi(node: Api): string {

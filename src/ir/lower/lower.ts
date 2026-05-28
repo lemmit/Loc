@@ -8,6 +8,7 @@ import type {
   Api,
   BoundedContext,
   Component,
+  ConnectionSource,
   Containment,
   Deployable,
   DerivedProp,
@@ -90,6 +91,7 @@ import type {
   CodeRefIR,
   CodeRefKind,
   ComponentIR,
+  ConnectionSourceIR,
   ContainmentIR,
   ContextStampIR,
   DeployableIR,
@@ -517,6 +519,8 @@ function lowerSystem(sys: System): SystemIR {
       (s): StorageIR => ({
         name: s.name,
         type: s.type as StorageKind,
+        ...(s.instance ? { instance: s.instance } : {}),
+        ...(s.connection ? { connection: lowerConnectionSource(s.connection) } : {}),
       }),
     );
   // Named `layout <Name> { … }` SystemMembers (Phase 8).  Each slot's
@@ -551,6 +555,19 @@ function lowerSystem(sys: System): SystemIR {
   applyPageOriginSideEffects(built);
   expandInlineScaffoldPrimitiveCalls(built);
   return built;
+}
+
+function lowerConnectionSource(node: ConnectionSource): ConnectionSourceIR {
+  switch (node.$type) {
+    case "ServiceConnectionSource":
+      return { kind: "service", service: node.service };
+    case "EnvConnectionSource":
+      return { kind: "env", env: node.env };
+    case "SecretConnectionSource":
+      return { kind: "secret", secret: node.secret };
+    case "LiteralConnectionSource":
+      return { kind: "literal", literal: node.literal };
+  }
 }
 
 /** Rewrite the inline body primitives `scaffoldDetails(of:)` and

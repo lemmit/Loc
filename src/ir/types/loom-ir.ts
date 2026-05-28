@@ -834,7 +834,22 @@ export interface SystemIR {
 export interface StorageIR {
   name: string;
   type: StorageKind;
+  /** Compose-service handle the deployable shares with the storage,
+   *  used as the host name in generated connection strings.  Optional
+   *  in v1; when omitted the system orchestrator derives a default. */
+  instance?: string;
+  /** Source of the runtime connection string — `service(name)` for
+   *  intra-compose discovery, `env("VAR")` for environment lookup,
+   *  `secret(handle)` for a future secrets-manager binding, or
+   *  `literal("…")` for a hard-coded URL.  Optional in v1. */
+  connection?: ConnectionSourceIR;
 }
+
+export type ConnectionSourceIR =
+  | { kind: "service"; service: string }
+  | { kind: "env"; env: string }
+  | { kind: "secret"; secret: string }
+  | { kind: "literal"; literal: string };
 
 export type StorageKind =
   | "postgres"
