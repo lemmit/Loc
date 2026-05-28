@@ -5,20 +5,20 @@ import type { Model } from "../../../src/language/generated/ast.js";
 import {
   addConstructSource,
   listContextNames,
-  listModuleNames,
+  listSubdomainNames,
 } from "../../../web/src/builder/system/add.js";
 
 const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
 const parse = (t: string): Model => parser.parse(t).value as Model;
 
 const SRC = `system S {
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Order {
       }
     }
   }
-  module Billing {
+  subdomain Billing {
     context Invoices {
       aggregate Invoice {
       }
@@ -40,9 +40,9 @@ function contextOf(src: string, agg: string): string | undefined {
 }
 
 describe("System builder — add target picker", () => {
-  it("lists context and module names in document order", () => {
+  it("lists context and subdomain names in document order", () => {
     expect(listContextNames(parse(SRC))).toEqual(["Orders", "Invoices"]);
-    expect(listModuleNames(parse(SRC))).toEqual(["Sales", "Billing"]);
+    expect(listSubdomainNames(parse(SRC))).toEqual(["Sales", "Billing"]);
   });
 
   it("adds a domain construct into the chosen context", () => {
@@ -64,8 +64,8 @@ describe("System builder — add target picker", () => {
     expect(next).not.toContain("for Order ");
   });
 
-  it("points an api at the chosen module (first by default)", () => {
-    expect(addConstructSource(SRC, "api", { module: "Billing" })!).toContain("from Billing");
+  it("points an api at the chosen subdomain (first by default)", () => {
+    expect(addConstructSource(SRC, "api", { subdomain: "Billing" })!).toContain("from Billing");
     expect(addConstructSource(SRC, "api")!).toContain("from Sales");
   });
 });

@@ -372,7 +372,7 @@ describe("structured expression editor — assignment & emit statement slots", (
 });
 
 describe("structured expression editor — bare call argument slots", () => {
-  const callSrc = `system S { module M { context C {
+  const callSrc = `system S { subdomain M { context C {
   aggregate Order {
     operation go(qty: int) {
       addLine(qty, 5)

@@ -13,7 +13,7 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 const buildAndGenerate = generateSystemFiles;
 
 const SCAFFOLD = `
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Customer { name: string }
       repository Customers for Customer { }
@@ -35,7 +35,7 @@ describe("Button disabled: + loading: named args", () => {
             body: Button { "Save", disabled: busy }
           }
         }
-        deployable api { platform: hono, modules: Sales { primary: pg }, serves: SalesApi, port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -54,7 +54,7 @@ describe("Button disabled: + loading: named args", () => {
             body: Button { "Save", loading: busy }
           }
         }
-        deployable api { platform: hono, modules: Sales { primary: pg }, serves: SalesApi, port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -77,7 +77,7 @@ describe("Button disabled: + loading: named args", () => {
               onClick: e => { Sales.Customer.create.mutate({ name: name }) }}
           }
         }
-        deployable api { platform: hono, modules: Sales { primary: pg }, serves: SalesApi, port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
@@ -98,7 +98,7 @@ describe("Button disabled: + loading: named args", () => {
         ui WebApp {
           page X { route: "/x" body: Button { "Plain" } }
         }
-        deployable api { platform: hono, modules: Sales { primary: pg }, serves: SalesApi, port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);

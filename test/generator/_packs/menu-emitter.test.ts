@@ -28,7 +28,7 @@ describe("menu emitter", () => {
   it("returns undefined when the ui has no explicit menu block", async () => {
     const loom = await buildLoom(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Order { x: int }
             repository Orders for Order { }
@@ -44,7 +44,7 @@ describe("menu emitter", () => {
   it("walks an explicit ui.menu block into NavSectionVM[]", async () => {
     const loom = await buildLoom(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Order { x: int }
             repository Orders for Order { }
@@ -80,7 +80,7 @@ describe("menu emitter", () => {
   it("honours per-link `label:` overrides", async () => {
     const loom = await buildLoom(`
       system S {
-        module M {
+        subdomain M {
           context C { aggregate Order { x: int } repository Orders for Order { } }
         }
         ui WebApp with scaffold(aggregates: [Order]) {
@@ -99,7 +99,7 @@ describe("menu emitter", () => {
   it("emits external links with sentinel `__external:<url>` to value", async () => {
     const loom = await buildLoom(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           menu {
             section "External" {
@@ -119,7 +119,7 @@ describe("menu emitter", () => {
   it("derives correct testIds + activeArgs per archetype kind", async () => {
     const loom = await buildLoom(`
       system S {
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order { x: int }
             repository Orders for Order { }
@@ -127,7 +127,7 @@ describe("menu emitter", () => {
             view ActiveOrders = Order where x > 0
           }
         }
-        ui WebApp with scaffold(modules: [Sales]) {
+        ui WebApp with scaffold(subdomains: [Sales]) {
           menu {
             section "Mixed" {
               link OrderList,
@@ -186,7 +186,7 @@ describe("menu emitter", () => {
     // make it return something non-undefined for the no-menu case.
     const loom = await buildLoom(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Order { x: int }
             repository Orders for Order { }

@@ -1,5 +1,5 @@
 system AcmeLV {
-  module Sales {
+  subdomain Sales {
     context Sales {
       valueobject Money {
         amount: decimal
@@ -19,10 +19,10 @@ system AcmeLV {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin with scaffold(modules: [Sales]) { }
+  ui SalesAdmin with scaffold(subdomains: [Sales]) { }
   deployable phoenixApp {
     platform: phoenixLiveView
-    modules: Sales
+    contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
     port: 4000

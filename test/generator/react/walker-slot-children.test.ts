@@ -13,7 +13,7 @@ describe("Slot + children prop", () => {
   it("component with Slot {} emits children prop in Props interface", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component PageBox(title: string) {
             body: Card { title, Slot {} }
@@ -23,7 +23,7 @@ describe("Slot + children prop", () => {
             body:  Heading { "home" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -48,7 +48,7 @@ describe("Slot + children prop", () => {
   it("page passes extra positionals as JSX children", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component PageBox(title: string) {
             body: Card { title, Slot {} }
@@ -58,7 +58,7 @@ describe("Slot + children prop", () => {
             body:  PageBox { "Welcome", Text { "hi" }, Text { "world" } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -78,7 +78,7 @@ describe("Slot + children prop", () => {
   it("component without Slot {} doesn't get a children prop", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component Plain(s: string) {
             body: Text { s }
@@ -88,7 +88,7 @@ describe("Slot + children prop", () => {
             body:  Plain { "hi" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -105,7 +105,7 @@ describe("Slot + children prop", () => {
   it("named args still map to props even when extras become children", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component Box(title: string, color: string) {
             body: Card { title, Slot {} }
@@ -115,7 +115,7 @@ describe("Slot + children prop", () => {
             body:  Box { "Title", color: "red", Text { "body" } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -133,7 +133,7 @@ describe("Slot + children prop", () => {
   it("zero-arg invocation of a Slot-using component emits a self-closing tag", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component Ghost() {
             body: Card { "ghost", Slot {} }
@@ -143,7 +143,7 @@ describe("Slot + children prop", () => {
             body:  Ghost()
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

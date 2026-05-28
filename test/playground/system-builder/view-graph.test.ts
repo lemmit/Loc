@@ -4,7 +4,7 @@ import { parseRaw as parse } from "../../_helpers/index.js";
 
 // A canonical multi-level system used by the per-level snapshots below.
 const SRC = `system Sales {
-  module SalesMod {
+  subdomain SalesMod {
     context Orders {
       aggregate Order {
         status: string
@@ -16,7 +16,7 @@ const SRC = `system Sales {
       }
     }
   }
-  module Billing {
+  subdomain Billing {
     context Invoices {
       aggregate Invoice {
       }
@@ -79,20 +79,20 @@ describe("Model v2 — view-graph per level", () => {
     expect(g.nodes[0]?.drillable).toBe(true);
   });
 
-  it("system view lists modules and infra (storage in this fixture)", () => {
+  it("system view lists subdomains and infra (storage in this fixture)", () => {
     const g = buildViewGraph(parse(SRC), [{ kind: "system", name: "Sales" }]);
     expect(g.title).toBe("system Sales");
-    expect(ids(g).sort()).toEqual(["module:Billing", "module:SalesMod", "storage:Db"].sort());
-    // Modules drill in; storage is a leaf at this phase.
-    const mod = g.nodes.find((n) => n.id === "module:SalesMod")!;
+    expect(ids(g).sort()).toEqual(["subdomain:Billing", "subdomain:SalesMod", "storage:Db"].sort());
+    // Subdomains drill in; storage is a leaf at this phase.
+    const sub = g.nodes.find((n) => n.id === "subdomain:SalesMod")!;
     const stg = g.nodes.find((n) => n.id === "storage:Db")!;
-    expect(mod.drillable).toBe(true);
+    expect(sub.drillable).toBe(true);
     expect(stg.drillable).toBe(false);
   });
 
-  it("module view lists its contexts", () => {
-    const g = buildViewGraph(parse(SRC), [{ kind: "module", name: "SalesMod" }]);
-    expect(g.title).toBe("module SalesMod");
+  it("subdomain view lists its contexts", () => {
+    const g = buildViewGraph(parse(SRC), [{ kind: "subdomain", name: "SalesMod" }]);
+    expect(g.title).toBe("subdomain SalesMod");
     expect(ids(g)).toEqual(["context:Orders"]);
   });
 
@@ -346,7 +346,7 @@ describe("Model v2 — view-graph per level", () => {
 
   it("system view surfaces deployable bindings as edges", () => {
     const SRC_D = `system S {
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Order {
       }
@@ -354,15 +354,15 @@ describe("Model v2 — view-graph per level", () => {
   }
   ui Web {
   }
-  deployable api { platform: hono, modules: Sales, port: 3000 }
+  deployable api { platform: hono, contexts: [Orders], port: 3000 }
   deployable webApp { platform: react, targets: api, ui: Web, port: 3001 }
 }`;
     const g = buildViewGraph(parse(SRC_D), [{ kind: "system", name: "S" }]);
     const labels = g.edges.map((e) => `${e.source} -${e.label}-> ${e.target}`);
-    // api includes module Sales; webApp targets api and mounts Web.
+    // api hosts the Orders context; webApp targets api and mounts Web.
     expect(labels).toEqual(
       expect.arrayContaining([
-        "deployable:api -modules-> module:Sales",
+        "deployable:api -contexts-> context:Orders",
         "deployable:webApp -targets-> deployable:api",
         "deployable:webApp -ui-> ui:Web",
       ]),

@@ -40,7 +40,7 @@ describe("page metamodel — IR shape", () => {
   it("attaches `uis` to SystemIR (empty when none declared)", async () => {
     const loom = await buildLoom(`
       system Acme {
-        module M { context C { } }
+        subdomain M { context C { } }
       }
     `);
     expect(firstSystem(loom).uis).toEqual([]);
@@ -72,7 +72,7 @@ describe("page metamodel — IR shape", () => {
     expect(firstSystem(loom).uis.map((u) => u.name)).toEqual(["A", "B", "C"]);
   });
 
-  it("`with scaffold(modules: [...])` synthesises pages by AST time", async () => {
+  it("`with scaffold(subdomains: [...])` synthesises pages by AST time", async () => {
     // The `scaffold` macro splices Page AST nodes into the ui's
     // members at the IndexedContent phase; by the time we lower
     // to IR, every page is a regular PageIR with no special
@@ -81,8 +81,8 @@ describe("page metamodel — IR shape", () => {
     // the Phase 4 finalisation commit).
     const loom = await buildLoom(`
       system Acme {
-        module M { context A { aggregate Order { x: int } repository Orders for Order { } } }
-        ui WebApp with scaffold(modules: [M]) {
+        subdomain M { context A { aggregate Order { x: int } repository Orders for Order { } } }
+        ui WebApp with scaffold(subdomains: [M]) {
         }
       }
     `);
@@ -162,7 +162,7 @@ describe("page metamodel — IR shape", () => {
     // the full Breadcrumbs/Heading/QueryView tree.
     const loom = await buildLoom(`
       system Acme {
-        module M { context C { aggregate Customer { name: string } repository Customers for Customer { } } }
+        subdomain M { context C { aggregate Customer { name: string } repository Customers for Customer { } } }
         ui WebApp {
           page CustomerDetail(id: Customer id) {
             route: "/customers/:id"
@@ -205,7 +205,7 @@ describe("page metamodel — IR shape", () => {
   it("lowers a `component` declaration with params + body + state", async () => {
     const loom = await buildLoom(`
       system Acme {
-        module M { context C { aggregate Order { x: int } repository Orders for Order { } } }
+        subdomain M { context C { aggregate Order { x: int } repository Orders for Order { } } }
         ui WebApp {
           component OrderPanel(order: Order) {
             state { tab: string = "summary" }
@@ -303,7 +303,7 @@ describe("page metamodel — IR shape", () => {
   it("lowers `match` outside a page body — in a derived property", async () => {
     const loom = await buildLoom(`
       system Acme {
-        module M {
+        subdomain M {
           context C {
             enum Status { Draft, Confirmed }
             aggregate Order {
@@ -318,7 +318,7 @@ describe("page metamodel — IR shape", () => {
         }
       }
     `);
-    const order = firstSystem(loom).modules[0]!.contexts[0]!.aggregates.find(
+    const order = firstSystem(loom).subdomains[0]!.contexts[0]!.aggregates.find(
       (a) => a.name === "Order",
     )!;
     const derived = order.derived.find((d) => d.name === "label")!;
@@ -330,7 +330,7 @@ describe("page metamodel — IR shape", () => {
     // the body field that prior renderers depend on.
     const _loom = await buildLoom(`
       system Acme {
-        module M {
+        subdomain M {
           context C {
             aggregate Order { x: int }
             repository Orders for Order {
@@ -344,7 +344,7 @@ describe("page metamodel — IR shape", () => {
     // collection-op style filter instead via a derived property.
     const loom2 = await buildLoom(`
       system Acme {
-        module M {
+        subdomain M {
           context C {
             aggregate Bag {
               x: int
@@ -357,7 +357,7 @@ describe("page metamodel — IR shape", () => {
         }
       }
     `);
-    const bag = firstSystem(loom2).modules[0]!.contexts[0]!.aggregates.find(
+    const bag = firstSystem(loom2).subdomains[0]!.contexts[0]!.aggregates.find(
       (a) => a.name === "Bag",
     )!;
     const derived = bag.derived.find((d) => d.name === "count")!;
@@ -382,7 +382,7 @@ describe("page metamodel — IR shape", () => {
     // `uiName` and `uiFramework` undefined.
     const loom = await buildLoom(`
       system Acme {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp { }
         deployable api {
           platform: dotnet
@@ -399,7 +399,7 @@ describe("page metamodel — IR shape", () => {
   it("attaches uiName + uiFramework to deployable IR (block form)", async () => {
     const loom = await buildLoom(`
       system Acme {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp { }
         deployable web {
           platform: static
@@ -478,7 +478,7 @@ describe("page metamodel — IR shape", () => {
   it("Platform enum accepts 'static'", async () => {
     const loom = await buildLoom(`
       system Acme {
-        module M { context C { } }
+        subdomain M { context C { } }
         deployable api { platform: dotnet, port: 8080 }
         deployable web { platform: static, targets: api, port: 3001 }
       }

@@ -53,7 +53,7 @@ system StorefrontSystem {
     fontFamily: "Inter, system-ui, sans-serif"
   }
 
-  module Storefront {
+  subdomain Storefront {
     context Storefront {
 
       enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
@@ -216,10 +216,10 @@ system StorefrontSystem {
     }
   }
 
-  ui WebApp with scaffold(modules: [Storefront]) {
+  ui WebApp with scaffold(subdomains: [Storefront]) {
   }
 
-  deployable api { platform: hono, modules: Storefront, port: 3000 }
+  deployable api { platform: hono, contexts: [Storefront], port: 3000 }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
 
   // System e2e tests.  `against api` (Hono) lowers to vitest + fetch.

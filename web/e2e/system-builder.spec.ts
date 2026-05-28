@@ -238,11 +238,11 @@ test("edits a deployable's composition bindings", async ({ page }) => {
   await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
   await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
 
-  // catalogWeb: modules Catalog + CustomerMgmt — add Sales via the multi-select.
+  // catalogWeb: contexts [Products] — add the Sales context Orders via the multi-select.
   await page.locator('[data-testid="rf__node-deployable:catalogWeb"]').click();
   // Mantine's MultiSelect wrapper intercepts the input click — force it open.
-  await page.getByTestId("c4system-deployable-modules").click({ force: true });
-  await page.getByRole("option", { name: "Sales", exact: true }).click();
+  await page.getByTestId("c4system-deployable-contexts").click({ force: true });
+  await page.getByRole("option", { name: "Orders", exact: true }).click();
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
   // The targets select reads the existing binding (sanity that bindings render).
   await page.locator('[data-testid="rf__node-deployable:webApp"]').click();
@@ -938,10 +938,10 @@ test("previews an edit's source diff before applying when Preview is on", async 
   await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
   await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
 
-  // With Preview on, an edit (add a module) stages its diff in a modal instead
+  // With Preview on, an edit (add a subdomain) stages its diff in a modal instead
   // of committing live; Apply commits it and closes the modal.
   await page.getByTestId("c4system-preview-toggle").click();
-  await page.getByTestId("c4system-add-module").click();
+  await page.getByTestId("c4system-add-subdomain").click();
   // Assert the modal's content (the diff), not the Mantine modal root — the
   // root is a zero-box wrapper Playwright never treats as "visible".
   await expect(page.getByTestId("c4system-preview-diff")).toBeVisible();

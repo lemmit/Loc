@@ -95,7 +95,7 @@ function parseLines(raw: string): PhoenixLogLine[] {
 
 // Minimal Phoenix fixture — just enough to compile and boot.
 const FIXTURE_DDD = `system PhxObs {
-  module Sales {
+  subdomain Sales {
     context Sales {
       aggregate Customer {
         name: string
@@ -106,10 +106,10 @@ const FIXTURE_DDD = `system PhxObs {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin with scaffold(modules: [Sales]) { }
+  ui SalesAdmin with scaffold(subdomains: [Sales]) { }
   deployable phoenixApp {
     platform: phoenixLiveView
-    modules: Sales
+    contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
     port: 4000

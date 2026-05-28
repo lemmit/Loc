@@ -11,7 +11,7 @@ import type {
   EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
   EnrichedLoomModel,
-  EnrichedModuleIR,
+  EnrichedSubdomainIR,
   EnrichedSystemIR,
   EnrichedValueObjectIR,
   EntityPartIR,
@@ -20,9 +20,9 @@ import type {
   FieldIR,
   FindIR,
   LoomModel,
-  ModuleIR,
   RawLoomModel,
   RepositoryIR,
+  SubdomainIR,
   SystemIR,
   TraceabilityIR,
   TypeIR,
@@ -116,19 +116,19 @@ function enrichSystem(
   rootValueObjects: EnrichedValueObjectIR[],
   rootEnums: EnumIR[],
 ): EnrichedSystemIR {
-  // First enrich each module's contexts (auto-findAll, wire-shape).
-  const modules: EnrichedModuleIR[] = sys.modules.map((m) => ({
+  // First enrich each subdomain's contexts (auto-findAll, wire-shape).
+  const subdomains: EnrichedSubdomainIR[] = sys.subdomains.map((m) => ({
     ...m,
     contexts: m.contexts.map((c) => enrichContext(c, rootValueObjects, rootEnums)),
   }));
-  // Then propagate react deployables' module sets from their targets.
-  // Done after module enrichment so frontends see the same enriched
+  // Then propagate react deployables' context sets from their targets.
+  // Done after subdomain enrichment so frontends see the same enriched
   // contexts every other consumer sees.
   const deployables = enrichDeployables(sys.deployables);
-  // Derive `migrationsOwner` per module — the deployable responsible
+  // Derive `migrationsOwner` per subdomain — the deployable responsible
   // for emitting schema migrations.  Runs last because it consults
   // the (now enriched) deployable list.  See `assignMigrationsOwner`.
-  const modulesWithOwner = modules.map((m) => assignMigrationsOwner(m, deployables));
+  const subdomainsWithOwner = subdomains.map((m) => assignMigrationsOwner(m, deployables));
   // Scaffold expansion now runs at the AST
   // level via `src/language/ddd-scaffold-ast-expander.ts` (a
   // `DocumentState.IndexedContent` hook on the shared
@@ -139,37 +139,33 @@ function enrichSystem(
   // any caller that constructs a `LoomModel` outside the standard
   // `parseHelper` / `DocumentBuilder` pipeline (it just returns
   // the existing pages unchanged).
-  return { ...sys, modules: modulesWithOwner, deployables };
+  return { ...sys, subdomains: subdomainsWithOwner, deployables };
 }
 
 // ---------------------------------------------------------------------------
 // Migrations ownership — which deployable is responsible for emitting
-// schema migrations against a given module.
+// schema migrations against a given subdomain.
 //
-// Rule (walk `sys.deployables` in declaration order):
-//   1. First deployable with an explicit `primary` storage binding for
-//      this module wins (`moduleBindings[].storages[].role === "primary"`).
-//   2. Failing that, first deployable that includes the module in
-//      `moduleNames` AND whose platform owns a database.
-//   3. Failing both, leave `migrationsOwner` undefined — no backend
-//      emits migrations for the module (frontend-only modules, etc.).
+// Rule (walk `sys.deployables` in declaration order): the first deployable
+// that hosts any context belonging to the subdomain AND whose platform
+// owns a database wins.  Failing that, leave `migrationsOwner` undefined —
+// no backend emits migrations for the subdomain (frontend-only
+// subdomains, etc.).
 //
 // Database-bearing platforms are read from `PlatformSurface.needsDb` via
 // `platformFor()` — single source of truth, mirrors the `isFrontend` check
 // in `applyTargetsInheritance` below.
 // ---------------------------------------------------------------------------
 
-function assignMigrationsOwner(m: EnrichedModuleIR, deployables: DeployableIR[]): EnrichedModuleIR {
-  const explicit = deployables.find((d) =>
-    d.moduleBindings.some(
-      (mb) => mb.moduleName === m.name && mb.storages.some((s) => s.role === "primary"),
-    ),
+function assignMigrationsOwner(
+  m: EnrichedSubdomainIR,
+  deployables: DeployableIR[],
+): EnrichedSubdomainIR {
+  const contextNames = m.contexts.map((c) => c.name);
+  const owner = deployables.find(
+    (d) => platformFor(d.platform).needsDb && contextNames.some((c) => d.contextNames.includes(c)),
   );
-  if (explicit) return { ...m, migrationsOwner: explicit.name };
-  const implicit = deployables.find(
-    (d) => d.moduleNames.includes(m.name) && platformFor(d.platform).needsDb,
-  );
-  if (implicit) return { ...m, migrationsOwner: implicit.name };
+  if (owner) return { ...m, migrationsOwner: owner.name };
   return m;
 }
 
@@ -494,13 +490,13 @@ function ensureFindAll(
   return out;
 }
 
-/** React frontends inherit their module set from `targets:` so every
- * place that walks `moduleNames` sees the same surface the backend
+/** React frontends inherit their context set from `targets:` so every
+ * place that walks `contextNames` sees the same surface the backend
  * exposes.  No-op if the target isn't found (validator already
  * rejects that case). */
 function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
   return deployables.map((d) => {
-    // `static` deployables share the legacy `react` module-
+    // `static` deployables share the legacy `react` context-
     // inheritance behaviour — they're frontend deployables that
     // serve a built bundle and need to know about every context the
     // target backend exposes (so the page-IR emitter has every
@@ -515,7 +511,7 @@ function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
     if (!platformFor(d.platform).isFrontend || !d.targetName) return d;
     const target = deployables.find((t) => t.name === d.targetName);
     if (!target) return d;
-    return { ...d, moduleNames: [...target.moduleNames] };
+    return { ...d, contextNames: [...target.contextNames] };
   });
 }
 
@@ -666,7 +662,7 @@ function collectExecTests(loom: LoomModel): ExecTest[] {
     }
   };
   for (const sys of loom.systems) {
-    for (const mod of sys.modules) for (const ctx of mod.contexts) fromContext(ctx);
+    for (const mod of sys.subdomains) for (const ctx of mod.contexts) fromContext(ctx);
     // System `test e2e "..."` → `describe("<System> e2e")`, so the
     // runner reports `suite = "<sys.name> e2e"`.
     for (const t of sys.e2eTests) {

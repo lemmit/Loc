@@ -11,7 +11,7 @@ function findAggregate(model: Model, name: string): Aggregate {
   for (const sm of model.members ?? []) {
     if ((sm as any).$type !== "System") continue;
     for (const m of (sm as any).members ?? []) {
-      if (m.$type !== "Module") continue;
+      if (m.$type !== "Subdomain") continue;
       for (const ctx of m.contexts ?? []) {
         for (const cm of ctx.members ?? []) {
           if (isAggregate(cm) && cm.name === name) return cm;
@@ -26,7 +26,7 @@ function findContext(model: Model, name: string): any {
   for (const sm of model.members ?? []) {
     if ((sm as any).$type !== "System") continue;
     for (const m of (sm as any).members ?? []) {
-      if (m.$type !== "Module") continue;
+      if (m.$type !== "Subdomain") continue;
       for (const ctx of m.contexts ?? []) {
         if (ctx.name === name) return ctx;
       }
@@ -39,7 +39,7 @@ describe("auditable stdlib macro", () => {
   it("adds 4 audit fields to the aggregate", async () => {
     const { model, errors } = await parseString(
       wrap(`
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order with auditable {
               subject: string
@@ -62,7 +62,7 @@ describe("auditable stdlib macro", () => {
     // produce the full audit capability.
     const { model } = await parseString(
       wrap(`
-        module Sales {
+        subdomain Sales {
           context Orders with audit {
             aggregate Order with auditable {
               subject: string
@@ -82,7 +82,7 @@ describe("auditable stdlib macro", () => {
   it("composes with softDeletable — no field collisions, all four trio pieces present", async () => {
     const { model, errors } = await parseString(
       wrap(`
-        module Sales {
+        subdomain Sales {
           context Orders with audit, softDelete {
             aggregate Order with auditable, softDeletable {
               subject: string
@@ -122,7 +122,7 @@ describe("softDeletable — fixed field names", () => {
   it("uses isDeleted / deletedAt", async () => {
     const { model } = await parseString(
       wrap(`
-        module M { context C {
+        subdomain M { context C {
           aggregate Doc with softDeletable {
             subject: string
           }
@@ -140,7 +140,7 @@ describe("macro expander diagnostics", () => {
   it("reports unknown macro names with available list", async () => {
     const { errors } = await parseString(
       wrap(`
-        module M { context C {
+        subdomain M { context C {
           aggregate Order with nonexistent {
             subject: string
           }
@@ -176,7 +176,7 @@ describe("override-by-name", () => {
   it("user-declared field with the same name as a macro-added field takes precedence", async () => {
     const { model, errors } = await parseString(
       wrap(`
-        module M { context C {
+        subdomain M { context C {
           aggregate Order with auditable {
             createdAt: datetime
             subject: string

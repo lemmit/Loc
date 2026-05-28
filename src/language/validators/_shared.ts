@@ -31,9 +31,9 @@ import {
   isPostfixChain,
   isProperty,
   type LValue,
-  type Module,
   type NameRef,
   type Page,
+  type Subdomain,
   type ValueObject,
 } from "../generated/ast.js";
 import {
@@ -252,8 +252,8 @@ export function pathString(lv: LValue): string {
 // Page / api helpers used by ui.ts
 // ---------------------------------------------------------------------------
 
-/** Find an Aggregate by name across the contexts of a Module. */
-export function findAggregateInModule(mod: Module, name: string): Aggregate | undefined {
+/** Find an Aggregate by name across the contexts of a Subdomain. */
+export function findAggregateInModule(mod: Subdomain, name: string): Aggregate | undefined {
   for (const ctx of mod.contexts ?? []) {
     for (const am of ctx.members ?? []) {
       if (am.$type === "Aggregate" && am.name === name) return am;

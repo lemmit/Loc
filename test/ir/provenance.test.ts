@@ -34,7 +34,7 @@ async function parseModel(
 
 const SYSTEM = (body: string) => `
 system S {
-  module M {
+  subdomain M {
     context C {
       aggregate Cart ids guid {
         label: string
@@ -51,7 +51,7 @@ ${body}
       }
     }
   }
-  deployable api { platform: hono, modules: M, port: 3000 }
+  deployable api { platform: hono, contexts: [C], port: 3000 }
 }
 `;
 
@@ -86,7 +86,7 @@ describe("provenanced — validation", () => {
   it("warns when a provenanced field is never written", async () => {
     // `total` is provenanced but no operation assigns it here.
     const src = `
-system S { module M { context C {
+system S { subdomain M { context C {
   aggregate Cart ids guid {
     label: string
     derived display: string = label
@@ -94,7 +94,7 @@ system S { module M { context C {
     operation noop(x: int) { precondition x > 0 }
   }
   repository Carts for Cart { find byLabel(label: string): Cart? where this.label == label }
-} } deployable api { platform: hono, modules: M, port: 3000 } }
+} } deployable api { platform: hono, contexts: [C], port: 3000 } }
 `;
     const { warnings } = await parseModel(src);
     expect(warnings.some((w) => /Provenanced field 'total'.*never written/.test(w))).toBe(true);
@@ -111,7 +111,7 @@ describe("provenanced — IR lowering", () => {
     const { model, errors } = await parseModel(SYSTEM(""));
     expect(errors).toEqual([]);
     const loom = enrichLoomModel(lowerModel(model));
-    const cart = loom.systems[0]!.modules[0]!.contexts[0]!.aggregates[0]!;
+    const cart = loom.systems[0]!.subdomains[0]!.contexts[0]!.aggregates[0]!;
     expect(cart.fields.find((f) => f.name === "total")?.provenanced).toBe(true);
 
     const op = cart.operations.find((o) => o.name === "applyTotal")!;
@@ -128,7 +128,7 @@ describe("provenanced — IR lowering", () => {
     const src = SYSTEM("        operation setDiscount(d: int) { discount := d }\n");
     const { model } = await parseModel(src);
     const loom = enrichLoomModel(lowerModel(model));
-    const cart = loom.systems[0]!.modules[0]!.contexts[0]!.aggregates[0]!;
+    const cart = loom.systems[0]!.subdomains[0]!.contexts[0]!.aggregates[0]!;
     const op = cart.operations.find((o) => o.name === "setDiscount")!;
     expect(op.statements.some(stmtHasProv)).toBe(false);
   });
@@ -137,7 +137,7 @@ describe("provenanced — IR lowering", () => {
     const a = enrichLoomModel(lowerModel((await parseModel(SYSTEM(""))).model));
     const b = enrichLoomModel(lowerModel((await parseModel(SYSTEM(""))).model));
     const idOf = (loom: typeof a) =>
-      loom.systems[0]!.modules[0]!.contexts[0]!.aggregates[0]!.operations.find(
+      loom.systems[0]!.subdomains[0]!.contexts[0]!.aggregates[0]!.operations.find(
         (o) => o.name === "applyTotal",
       )!.statements.filter(stmtHasProv)[0]!.prov.snapshotId;
     expect(idOf(a)).toBe(idOf(b));

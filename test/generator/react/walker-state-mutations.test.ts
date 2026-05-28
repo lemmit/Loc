@@ -25,7 +25,7 @@ describe("state + onClick mutations in walker pages", () => {
   it("click counter — useState + state ref + setX in onClick handler", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Counter {
             route: "/counter"
@@ -37,7 +37,7 @@ describe("state + onClick mutations in walker pages", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -64,7 +64,7 @@ describe("state + onClick mutations in walker pages", () => {
   it("page declares state but body never refs it → no useState in shell", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Stale {
             route: "/stale"
@@ -72,7 +72,7 @@ describe("state + onClick mutations in walker pages", () => {
             body:  Heading { "No state in sight" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -91,7 +91,7 @@ describe("state + onClick mutations in walker pages", () => {
   it("string-typed state with no init → empty-string default", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Greet {
             route: "/greet"
@@ -102,7 +102,7 @@ describe("state + onClick mutations in walker pages", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -119,7 +119,7 @@ describe("state + onClick mutations in walker pages", () => {
   it("bool state with init = true → useState<boolean>(true)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Toggle {
             route: "/toggle"
@@ -130,7 +130,7 @@ describe("state + onClick mutations in walker pages", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -147,7 +147,7 @@ describe("state + onClick mutations in walker pages", () => {
   it("multi-statement onClick body emits all stmts in order", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Pair {
             route: "/pair"
@@ -161,7 +161,7 @@ describe("state + onClick mutations in walker pages", () => {
             }}
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -183,7 +183,7 @@ describe("state + onClick mutations in walker pages", () => {
   it("onClick lambda takes priority over to: when both are written", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Confused {
             route: "/x"
@@ -194,7 +194,7 @@ describe("state + onClick mutations in walker pages", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

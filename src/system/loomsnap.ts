@@ -56,7 +56,7 @@ export function buildLoomSnap(
     capturedAt: envelope.capturedAt,
     snapshots: {},
   };
-  for (const m of sys.modules) {
+  for (const m of sys.subdomains) {
     for (const ctx of m.contexts) collectContext(ctx, doc);
   }
   return doc;

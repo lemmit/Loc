@@ -317,7 +317,7 @@ function renderMatrix(loom: LoomModel): string {
 // ---------------------------------------------------------------------------
 
 const KIND_SHAPE: Record<CodeRefKind, [string, string]> = {
-  module: ["[[", "]]"],
+  subdomain: ["[[", "]]"],
   context: ["[[", "]]"],
   aggregate: ["[", "]"],
   operation: ["([", "])"],

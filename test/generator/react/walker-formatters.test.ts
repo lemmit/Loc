@@ -23,14 +23,14 @@ const buildAndGenerate = generateSystemFiles;
 function pageWithBody(body: string): string {
   return `
     system S {
-      module M { context C { } }
+      subdomain M { context C { } }
       ui WebApp {
         page P {
           route: "/p"
           body:  ${body}
         }
       }
-      deployable api { platform: hono, modules: M, port: 3000 }
+      deployable api { platform: hono, contexts: [C], port: 3000 }
       deployable web {
         platform: static
         targets: api
@@ -95,7 +95,7 @@ describe("formatter primitives", () => {
     // We need the page to have a route param to feed the IdLink id.
     const files = await buildAndGenerate(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Customer { name: string }
             repository Customers for Customer { }
@@ -107,7 +107,7 @@ describe("formatter primitives", () => {
             body:  IdLink { customerId, of: Customer }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -127,7 +127,7 @@ describe("formatter primitives", () => {
   it("IdLink testid lands on the root <RouterLink>", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Customer { name: string }
             repository Customers for Customer { }
@@ -139,7 +139,7 @@ describe("formatter primitives", () => {
             body:  IdLink { customerId, of: Customer, testid: "customer-link" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

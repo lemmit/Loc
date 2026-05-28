@@ -1,5 +1,5 @@
 system Roster {
-  module Roster {
+  subdomain Roster {
     context Roster {
       aggregate Pokemon {
         species: string
@@ -31,10 +31,10 @@ system Roster {
     }
   }
   api RosterApi from Roster
-  ui RosterAdmin with scaffold(modules: [Roster]) { }
+  ui RosterAdmin with scaffold(subdomains: [Roster]) { }
   deployable phoenixApp {
     platform: phoenixLiveView
-    modules: Roster
+    contexts: [Roster]
     serves: RosterApi
     ui: RosterAdmin
     port: 4000

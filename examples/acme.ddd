@@ -50,7 +50,7 @@ system Acme {
         fontFamily: "Inter, system-ui, sans-serif"
     }
 
-    module Catalog {
+    subdomain Catalog {
         context Products {
 
             valueobject Money {
@@ -73,7 +73,7 @@ system Acme {
         }
     }
 
-    module Sales {
+    subdomain Sales {
         context Orders {
 
             enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
@@ -187,7 +187,7 @@ system Acme {
     // cross-aggregate state stay domain-only.  The user can also
     // explicitly opt out of the wire layers via `private invariant`.
     // ------------------------------------------------------------------
-    module CustomerMgmt {
+    subdomain CustomerMgmt {
         context Customers {
 
             aggregate Customer {
@@ -264,15 +264,16 @@ system Acme {
     api CustomerMgmtApi from CustomerMgmt
 
     storage primarySql { type: postgres }
+    dataSource productsState  { for: Products, kind: state, use: primarySql }
+    dataSource ordersState    { for: Orders, kind: state, use: primarySql }
+    dataSource customersState { for: Customers, kind: state, use: primarySql }
 
     // Public API on .NET — hosts every bounded context behind one EF
     // DbContext, exposes the full HTTP surface for the platform.
     deployable api {
         platform: dotnet
-        modules:
-            Catalog      { primary: primarySql },
-            Sales        { primary: primarySql },
-            CustomerMgmt { primary: primarySql }
+        contexts: [Products, Orders, Customers]
+        dataSources: [productsState, ordersState, customersState]
         serves: CatalogApi, SalesApi, CustomerMgmtApi
         port: 8080
     }
@@ -281,9 +282,8 @@ system Acme {
     // the v21 wire-validation showcase across both backends).
     deployable catalogWeb {
         platform: hono
-        modules:
-            Catalog      { primary: primarySql },
-            CustomerMgmt { primary: primarySql }
+        contexts: [Products, Customers]
+        dataSources: [productsState, customersState]
         serves: CatalogApi, CustomerMgmtApi
         port: 3000
     }
@@ -294,9 +294,8 @@ system Acme {
     // platforms' route emission.
     deployable catalogApi {
         platform: dotnet
-        modules:
-            Catalog      { primary: primarySql },
-            CustomerMgmt { primary: primarySql }
+        contexts: [Products, Customers]
+        dataSources: [productsState, customersState]
         serves: CatalogApi, CustomerMgmtApi
         port: 8081
     }
@@ -312,7 +311,7 @@ system Acme {
     // through the legacy path and don't reference these params yet;
     // future explicit `page` declarations on the same UI can use
     // them directly (e.g. `body: Sales.Customer.all.data`).
-    ui WebApp with scaffold(modules: [Catalog, Sales, CustomerMgmt]) {
+    ui WebApp with scaffold(subdomains: [Catalog, Sales, CustomerMgmt]) {
         api Catalog:      CatalogApi
         api Sales:        SalesApi
         api CustomerMgmt: CustomerMgmtApi

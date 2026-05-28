@@ -35,7 +35,7 @@ import type {
   TypeRef,
   UnaryExpr,
 } from "../../language/generated/ast.js";
-import { isModule, isProperty } from "../../language/generated/ast.js";
+import { isProperty, isSubdomain } from "../../language/generated/ast.js";
 import {
   mkAssignOrCallStmt,
   mkCallArg,
@@ -411,7 +411,7 @@ export function writableCreateFields(target: Aggregate): readonly Property[] {
 }
 
 // ---------------------------------------------------------------------------
-// Cross-decl accessors — typed views over Module / BoundedContext
+// Cross-decl accessors — typed views over Subdomain / BoundedContext
 // members, computed on the fly.  Used by ui-targeted macros like
 // `scaffold` to walk `mod.aggregates`, `ctx.workflows`, etc.  The
 // raw AST has heterogeneous `members` arrays; these helpers do the
@@ -419,14 +419,14 @@ export function writableCreateFields(target: Aggregate): readonly Property[] {
 // `$type` discriminators.
 // ---------------------------------------------------------------------------
 
-/** Aggregates declared inside a Module (across all its
+/** Aggregates declared inside a Subdomain (across all its
  * BoundedContexts) or directly inside a BoundedContext. */
 export function aggregatesIn(
   parent:
-    | import("../../language/generated/ast.js").Module
+    | import("../../language/generated/ast.js").Subdomain
     | import("../../language/generated/ast.js").BoundedContext,
 ): readonly Aggregate[] {
-  if (isModule(parent)) {
+  if (isSubdomain(parent)) {
     return (parent.contexts ?? []).flatMap(
       (c) => (c.members ?? []).filter((cm) => cm.$type === "Aggregate") as Aggregate[],
     );
@@ -434,14 +434,14 @@ export function aggregatesIn(
   return (parent.members ?? []).filter((m) => m.$type === "Aggregate") as Aggregate[];
 }
 
-/** Workflows declared inside a Module / BoundedContext. */
+/** Workflows declared inside a Subdomain / BoundedContext. */
 export function workflowsIn(
   parent:
-    | import("../../language/generated/ast.js").Module
+    | import("../../language/generated/ast.js").Subdomain
     | import("../../language/generated/ast.js").BoundedContext,
 ): readonly import("../../language/generated/ast.js").Workflow[] {
   type W = import("../../language/generated/ast.js").Workflow;
-  if (isModule(parent)) {
+  if (isSubdomain(parent)) {
     return (parent.contexts ?? []).flatMap(
       (c) => (c.members ?? []).filter((cm) => cm.$type === "Workflow") as W[],
     );
@@ -449,14 +449,14 @@ export function workflowsIn(
   return (parent.members ?? []).filter((m) => m.$type === "Workflow") as W[];
 }
 
-/** Views declared inside a Module / BoundedContext. */
+/** Views declared inside a Subdomain / BoundedContext. */
 export function viewsIn(
   parent:
-    | import("../../language/generated/ast.js").Module
+    | import("../../language/generated/ast.js").Subdomain
     | import("../../language/generated/ast.js").BoundedContext,
 ): readonly import("../../language/generated/ast.js").View[] {
   type V = import("../../language/generated/ast.js").View;
-  if (isModule(parent)) {
+  if (isSubdomain(parent)) {
     return (parent.contexts ?? []).flatMap(
       (c) => (c.members ?? []).filter((cm) => cm.$type === "View") as V[],
     );

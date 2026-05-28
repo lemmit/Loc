@@ -11,7 +11,7 @@ system InventorySystem {
     radius: "lg"
   }
 
-  module Inventory {
+  subdomain Inventory {
     context Inventory {
 
       enum ReservationStatus { Held, Released, Consumed }
@@ -71,9 +71,9 @@ system InventorySystem {
     }
   }
 
-  ui WebApp with scaffold(modules: [Inventory]) {
+  ui WebApp with scaffold(subdomains: [Inventory]) {
   }
 
-  deployable api { platform: hono, modules: Inventory, port: 3000 }
+  deployable api { platform: hono, contexts: [Inventory], port: 3000 }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
 }

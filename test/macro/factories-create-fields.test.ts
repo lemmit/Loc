@@ -13,14 +13,14 @@ import { writableCreateFields, writableUpdateFields } from "../../src/macros/api
 import { parseString } from "../_helpers/index.js";
 
 async function aggregate(src: string, name: string): Promise<Aggregate> {
-  const { model, errors } = await parseString(`system Demo { module M { context C {
+  const { model, errors } = await parseString(`system Demo { subdomain M { context C {
     ${src}
   }}}`);
   if (errors.length) throw new Error(errors.join("; "));
   for (const sm of model.members ?? []) {
     if ((sm as any).$type !== "System") continue;
     for (const m of (sm as any).members ?? []) {
-      if (m.$type !== "Module") continue;
+      if (m.$type !== "Subdomain") continue;
       for (const ctx of (m.contexts as BoundedContext[]) ?? []) {
         for (const cm of ctx.members ?? []) {
           if (isAggregate(cm) && cm.name === name) return cm;

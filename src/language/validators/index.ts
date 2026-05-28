@@ -5,8 +5,8 @@
 export { checkBuilderCallType, checkLegacyConstructorCalls } from "./builder-call.js";
 export {
   checkDeployable,
+  checkDeployableDataSources,
   checkDeployableDesignPack,
-  checkDeployableModuleStorages,
   checkDeployablePlatform,
   checkDeployableServes,
   checkDeployableUiCompose,

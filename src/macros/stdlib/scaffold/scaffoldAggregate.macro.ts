@@ -17,7 +17,7 @@ export default defineMacro({
   description:
     "Synthesises List/New/Detail pages for the named aggregate.  Leaf of " +
     "the scaffold-macro family — invoked by `scaffoldContext` / " +
-    "`scaffoldModule` / `scaffold` for each aggregate they cover.",
+    "`scaffoldSubdomain` / `scaffold` for each aggregate they cover.",
   params: {
     of: { kind: "ref", of: "Aggregate" },
   },

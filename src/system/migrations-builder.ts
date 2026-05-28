@@ -2,12 +2,12 @@ import type {
   AggregateIR,
   AssociationIR,
   EnrichedAggregateIR,
-  EnrichedModuleIR,
+  EnrichedSubdomainIR,
   EnrichedSystemIR,
   EntityPartIR,
   FieldIR,
   IdValueType,
-  ModuleIR,
+  SubdomainIR,
   SystemIR,
   TypeIR,
 } from "../ir/types/loom-ir.js";
@@ -43,7 +43,7 @@ import type { SnapshotStore } from "./snapshot.js";
  *  scheme so existing fixtures stay byte-stable across the refactor. */
 export const BASE_TIMESTAMP = "20260101000000";
 
-export function schemaFromModule(module: EnrichedModuleIR): SchemaSnapshot {
+export function schemaFromModule(module: EnrichedSubdomainIR): SchemaSnapshot {
   const tables: TableShape[] = [];
   for (const agg of collectAggregates(module)) {
     tables.push(tableForAggregate(agg, module.name));
@@ -159,7 +159,7 @@ function diffTable(prev: TableShape, next: TableShape, steps: MigrationStep[]): 
 
 export function buildMigrations(sys: EnrichedSystemIR, snapshots: SnapshotStore): MigrationsIR[] {
   const out: MigrationsIR[] = [];
-  for (const m of sys.modules) {
+  for (const m of sys.subdomains) {
     if (!m.migrationsOwner) continue;
     const next = schemaFromModule(m);
     const baseline = snapshots.read(m.name);
@@ -205,7 +205,7 @@ export function buildMigrations(sys: EnrichedSystemIR, snapshots: SnapshotStore)
 // schemaFromModule helpers
 // ---------------------------------------------------------------------------
 
-function collectAggregates(module: EnrichedModuleIR): EnrichedAggregateIR[] {
+function collectAggregates(module: EnrichedSubdomainIR): EnrichedAggregateIR[] {
   const acc: EnrichedAggregateIR[] = [];
   const ctxs = [...module.contexts].sort((a, b) => a.name.localeCompare(b.name));
   for (const ctx of ctxs) {
@@ -429,13 +429,24 @@ function columnTypeEqual(a: ColumnType, b: ColumnType): boolean {
   return true;
 }
 
-function findPrimaryStorageBinding(sys: SystemIR, m: ModuleIR, ownerName: string): string | null {
+function findPrimaryStorageBinding(
+  sys: SystemIR,
+  m: SubdomainIR,
+  ownerName: string,
+): string | null {
+  // D-STORAGE-SPLIT: the primary storage for a subdomain is the
+  // physical storage referenced by the owner deployable's `state`
+  // dataSource for any context in the subdomain.  Returns the
+  // first such storage name in declaration order.
   const d = sys.deployables.find((x) => x.name === ownerName);
   if (!d) return null;
-  const b = d.moduleBindings.find((mb) => mb.moduleName === m.name);
-  if (!b) return null;
-  const primary = b.storages.find((s) => s.role === "primary");
-  return primary?.storageName ?? null;
+  const contextNames = new Set(m.contexts.map((c) => c.name));
+  for (const dsName of d.dataSourceNames) {
+    const ds = sys.dataSources.find((x) => x.name === dsName);
+    if (!ds || ds.kind !== "state") continue;
+    if (contextNames.has(ds.contextName)) return ds.storageName;
+  }
+  return null;
 }
 
 function describeMigration(steps: MigrationStep[]): string {

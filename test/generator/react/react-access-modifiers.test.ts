@@ -12,7 +12,7 @@ async function gen(src: string): Promise<Map<string, string>> {
 
 const FIXTURE = `
 system Demo {
-  module M {
+  subdomain M {
     context Accounts {
       aggregate Account {
         handle: string
@@ -28,8 +28,8 @@ system Demo {
   ui Web {
     page Home { body: Text("hi") }
   }
-  deployable api { platform: hono, modules: M, port: 3000 }
-  deployable web { platform: react, modules: M, targets: api, ui: Web, port: 3001 }
+  deployable api { platform: hono, contexts: [Accounts], port: 3000 }
+  deployable web { platform: react, contexts: [Accounts], targets: api, ui: Web, port: 3001 }
 }
 `;
 

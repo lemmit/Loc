@@ -31,7 +31,7 @@ describe("walker-side e2e page-object emitter", () => {
   it("emits e2e/pages/<page-snake>.ts for a walker-eligible explicit page", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Welcome {
             route: "/welcome"
@@ -41,7 +41,7 @@ describe("walker-side e2e page-object emitter", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -57,7 +57,7 @@ describe("walker-side e2e page-object emitter", () => {
   it("exposes one Locator getter per static testid (camel-cased name)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Welcome {
             route: "/welcome"
@@ -67,7 +67,7 @@ describe("walker-side e2e page-object emitter", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -83,14 +83,14 @@ describe("walker-side e2e page-object emitter", () => {
   it("parameterised routes emit urlFor + goto with typed params", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page OrderDetail(orderId: string) {
             route: "/orders/:orderId"
             body:  Heading { "Order", testid: "order-detail-h" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -105,7 +105,7 @@ describe("walker-side e2e page-object emitter", () => {
   it("CreateForm { of: } synthesised testids surface as Locator getters", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Order {
               customerId: string
@@ -121,7 +121,7 @@ describe("walker-side e2e page-object emitter", () => {
             body:  CreateForm { of: Order }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -136,7 +136,7 @@ describe("walker-side e2e page-object emitter", () => {
   it("explicit Form testid: prefix replaces the auto-derived namespace", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Order {
               customerId: string
@@ -151,7 +151,7 @@ describe("walker-side e2e page-object emitter", () => {
             body:  CreateForm { of: Order, testid: "place-order" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -166,7 +166,7 @@ describe("walker-side e2e page-object emitter", () => {
   it("scaffold-archetype pages still emit at e2e/pages/<aggregate-camel>.ts (no collision)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Order {
               customerId: string
@@ -177,7 +177,7 @@ describe("walker-side e2e page-object emitter", () => {
         }
         ui WebApp with scaffold(aggregates: [Order]) {
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);

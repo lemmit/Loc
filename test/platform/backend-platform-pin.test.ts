@@ -25,8 +25,8 @@ async function parse(source: string) {
 
 const sys = (platform: string) => `
   system S {
-    module M { context C { } }
-    deployable api { platform: ${platform}, modules: M, port: 3000 }
+    subdomain M { context C { } }
+    deployable api { platform: ${platform}, contexts: [C], port: 3000 }
   }
 `;
 
@@ -55,9 +55,9 @@ describe("platform pin grammar + validation", () => {
   it("still accepts a quoted frontend keyword", async () => {
     const { errors } = await parse(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui W { page Home() { route: "/" body: Heading { "hi" } } }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: "static", targets: api, ui: W, port: 3001 }
       }
     `);
@@ -94,9 +94,9 @@ describe("lowering normalises platform + platformRef", () => {
     const doc = await parseHelper(services.Ddd)(
       `
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui W { page Home() { route: "/" body: Heading { "hi" } } }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: W, port: 3001 }
       }
     `,

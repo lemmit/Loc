@@ -178,7 +178,7 @@ describe("parsing & validation of examples", () => {
           tenantId: string
         }
 
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order {
               customerId: string
@@ -190,7 +190,7 @@ describe("parsing & validation of examples", () => {
 
         deployable api {
           platform: dotnet
-          modules: Sales
+          contexts: [Orders]
           port: 8080
           auth: required
         }
@@ -227,7 +227,7 @@ describe("parsing & validation of examples", () => {
           id: string
           role: string
         }
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order {
               status: string
@@ -255,7 +255,7 @@ describe("parsing & validation of examples", () => {
     const doc = await helper(
       `
       system Acme {
-        module Sales {
+        subdomain Sales {
           permissions {
             ordersConfirm,
             ordersCancel,
@@ -281,7 +281,7 @@ describe("parsing & validation of examples", () => {
       | undefined;
     const sales = sys!.members.find(
       (m): m is import("../../../src/language/generated/ast.js").Module =>
-        m.$type === "Module" && m.name === "Sales",
+        m.$type === "Subdomain" && m.name === "Sales",
     );
     expect(sales!.permissions).toHaveLength(1);
     expect(sales!.permissions[0]!.decls.map((d) => d.name)).toEqual([
@@ -336,8 +336,8 @@ describe("page metamodel — grammar smoke tests", () => {
   it("parses a `ui` block with a `scaffold modules: …` directive", async () => {
     const { errors } = await parseSnippet(`
       system Acme {
-        module Sales { context S { } }
-        ui WebApp with scaffold(modules: [Sales]) {
+        subdomain Sales { context S { } }
+        ui WebApp with scaffold(subdomains: [Sales]) {
         }
       }
     `);
@@ -347,7 +347,7 @@ describe("page metamodel — grammar smoke tests", () => {
   it("parses every scaffold selector kind", async () => {
     const { errors } = await parseSnippet(`
       system Acme {
-        ui A with scaffold(modules: [M], contexts: [C], aggregates: [Order, Customer], workflows: [placeOrder], views: [ActiveOrders]) {
+        ui A with scaffold(subdomains: [M], contexts: [S], aggregates: [Order, Customer], workflows: [placeOrder], views: [ActiveOrders]) {
         }
       }
     `);
@@ -357,7 +357,7 @@ describe("page metamodel — grammar smoke tests", () => {
   it("parses a deployable's empty-block `ui:` sugar binding", async () => {
     const { errors } = await parseSnippet(`
       system Acme {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp { }
         deployable api {
           platform: dotnet
@@ -372,7 +372,7 @@ describe("page metamodel — grammar smoke tests", () => {
   it("parses a deployable's full ui-block binding with framework", async () => {
     const { errors } = await parseSnippet(`
       system Acme {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp { }
         deployable api {
           platform: static
@@ -511,7 +511,7 @@ describe("page metamodel — grammar smoke tests", () => {
             }
           }
         }
-        module M {
+        subdomain M {
           context C {
             enum Status { Draft, Confirmed }
             aggregate Order {
@@ -535,7 +535,7 @@ describe("page metamodel — grammar smoke tests", () => {
     // exercises only the grammar acceptance of the block-body form.
     const { errors } = await parseSnippet(`
       system Acme {
-        module M {
+        subdomain M {
           context C {
             aggregate Order {
               total: int
@@ -576,7 +576,7 @@ describe("page metamodel — grammar smoke tests", () => {
     // so the existing e2e test surface keeps parsing.
     const { errors } = await parseSnippet(`
       system Acme {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui A { }
         deployable api {
           platform: dotnet
@@ -603,7 +603,7 @@ describe("page metamodel — grammar smoke tests", () => {
     // collision.
     const { errors } = await parseSnippet(`
       system Acme {
-        module M {
+        subdomain M {
           context C {
             event Tick {
               order: int,
@@ -641,7 +641,7 @@ describe("page metamodel — grammar smoke tests", () => {
         title: "Valid credentials grant access"
       }
       system Shop {
-        module Identity {
+        subdomain Identity {
           context Auth {
             aggregate LoginSession {
               operation start() {}
@@ -649,7 +649,7 @@ describe("page metamodel — grammar smoke tests", () => {
             }
           }
         }
-        deployable AuthApi { platform: hono  modules: Identity }
+        deployable AuthApi { platform: hono  contexts: [Auth] }
       }
       solution SOL-001 for US-001 {
         title: "Login via aggregate"
@@ -684,8 +684,8 @@ describe("page metamodel — grammar smoke tests", () => {
       `
       requirement US-001 { type: UserStory  title: "x" }
       system S {
-        module M { context C { aggregate A { operation go() {} } } }
-        deployable api { platform: hono  modules: M }
+        subdomain M { context C { aggregate A { operation go() {} } } }
+        deployable api { platform: hono  contexts: [C] }
       }
       solution SOL-001 for US-001 { entitles [ M.C.A.go, api ] }
       `,
@@ -709,7 +709,7 @@ describe("page metamodel — grammar smoke tests", () => {
       `
       requirement US-001 { type: UserStory  title: "x" }
       system Shop {
-        module Identity { context Auth { aggregate LoginSession { operation start() {} } } }
+        subdomain Identity { context Auth { aggregate LoginSession { operation start() {} } } }
       }
       testCase TC-001 verifies US-001 {
         covers [ Identity.Auth.LoginSession.nonexistent ]

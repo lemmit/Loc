@@ -11,7 +11,7 @@ export default defineMacro({
   description:
     "Synthesises a Form page for the named workflow.  Leaf of the " +
     "scaffold-macro family — invoked by `scaffoldContext` / " +
-    "`scaffoldModule` / `scaffold` for each workflow they cover.",
+    "`scaffoldSubdomain` / `scaffold` for each workflow they cover.",
   params: {
     of: { kind: "ref", of: "Workflow" },
   },

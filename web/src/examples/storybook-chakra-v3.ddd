@@ -22,7 +22,7 @@ system Storybook {
     fontFamily: "Inter, system-ui, sans-serif"
   }
 
-  module Stories {
+  subdomain Stories {
     context Storybook {
 
       // Shared types used by stories below.
@@ -198,12 +198,12 @@ system Storybook {
   }
 
   // Hono backend — runs in the playground's runtime worker.
-  ui WebApp with scaffold(modules: [Stories]) {
+  ui WebApp with scaffold(subdomains: [Stories]) {
   }
 
   deployable api {
     platform: hono
-    modules: Stories
+    contexts: [Stories]
     port: 3000
   }
 

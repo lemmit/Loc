@@ -50,7 +50,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
   it("synthesises Page AST nodes for `scaffold aggregates: <Name>`", async () => {
     const { model } = await parseFresh(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Order { x: int }
             repository Orders for Order { }
@@ -73,7 +73,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
   it("synthesises pages for `scaffold modules: <Name>` recursively", async () => {
     const { model } = await parseFresh(`
       system S {
-        module M {
+        subdomain M {
           context A {
             aggregate Order { x: int }
             repository Orders for Order { }
@@ -83,7 +83,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
             repository Customers for Customer { }
           }
         }
-        ui WebApp with scaffold(modules: [M]) {
+        ui WebApp with scaffold(subdomains: [M]) {
         }
       }
     `);
@@ -109,7 +109,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
   it("synthesises pages for workflows + views", async () => {
     const { model } = await parseFresh(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Order { x: int }
             repository Orders for Order { }
@@ -132,7 +132,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
   it("override-by-name: explicit page suppresses the scaffolded one", async () => {
     const { model } = await parseFresh(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Order { x: int }
             repository Orders for Order { }
@@ -172,7 +172,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
     // walk that ScopeComputation uses.
     const { model, errors } = await parseFresh(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Order { x: int }
             repository Orders for Order { }

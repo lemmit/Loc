@@ -17,7 +17,7 @@ function allAggregates(loom: LoomModel): AggregateIR[] {
   const out: AggregateIR[] = [];
   for (const c of loom.contexts) out.push(...c.aggregates);
   for (const s of loom.systems) {
-    for (const m of s.modules) for (const c of m.contexts) out.push(...c.aggregates);
+    for (const m of s.subdomains) for (const c of m.contexts) out.push(...c.aggregates);
   }
   return out;
 }
@@ -30,7 +30,7 @@ function allValueObjects(loom: LoomModel): ValueObjectIR[] {
   const out: ValueObjectIR[] = [];
   for (const c of loom.contexts) out.push(...c.valueObjects);
   for (const s of loom.systems) {
-    for (const m of s.modules) for (const c of m.contexts) out.push(...c.valueObjects);
+    for (const m of s.subdomains) for (const c of m.contexts) out.push(...c.valueObjects);
   }
   return out;
 }
@@ -129,9 +129,9 @@ describe("enrichLoomModel — auto-includes findAll", () => {
   });
 });
 
-describe("enrichLoomModel — frontend `targets:` module inheritance", () => {
-  it("frontend deployable's moduleNames matches its target's", async () => {
-    // `static` deployables share the legacy `react` module-
+describe("enrichLoomModel — frontend `targets:` context inheritance", () => {
+  it("frontend deployable's contextNames matches its target's", async () => {
+    // `static` deployables share the legacy `react` context-
     // inheritance behaviour.  Match either tag to keep this test
     // resilient through the platform rename.
     const loom = await buildEnrichedModel("examples/acme.ddd");
@@ -140,6 +140,6 @@ describe("enrichLoomModel — frontend `targets:` module inheritance", () => {
     expect(web).toBeDefined();
     const target = sys.deployables.find((d) => d.name === web!.targetName);
     expect(target).toBeDefined();
-    expect(web!.moduleNames.sort()).toEqual([...target!.moduleNames].sort());
+    expect(web!.contextNames.sort()).toEqual([...target!.contextNames].sort());
   });
 });

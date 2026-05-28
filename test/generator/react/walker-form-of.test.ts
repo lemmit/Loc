@@ -32,7 +32,7 @@ const buildAndGenerate = generateSystemFiles;
 
 const baseOrderSystem = (body: string) => `
   system S {
-    module M {
+    subdomain M {
       context C {
         aggregate Order {
           customerId: string
@@ -48,7 +48,7 @@ const baseOrderSystem = (body: string) => `
         body:  ${body}
       }
     }
-    deployable api { platform: hono, modules: M, port: 3000 }
+    deployable api { platform: hono, contexts: [C], port: 3000 }
     deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
   }
 `;
@@ -79,7 +79,7 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
   it("excludes optional fields from the create form (scaffold-parity rule)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Order {
               customerId: string
@@ -92,7 +92,7 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
         ui WebApp {
           page CreateOrder { route: "/orders/new"  body: CreateForm { of: Order } }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -107,7 +107,7 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
   it("X id targets auto-inject useAll<TargetPlural>() at page-top", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Customer {
               name: string
@@ -124,7 +124,7 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
         ui WebApp {
           page CreateOrder { route: "/orders/new"  body: CreateForm { of: Order } }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -146,7 +146,7 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
     // regardless of the source-expression shape.
     const files = await buildAndGenerate(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Customer {
               firstName: string
@@ -164,7 +164,7 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
         ui WebApp {
           page CreateOrder { route: "/orders/new"  body: CreateForm { of: Order } }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -215,11 +215,11 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
   it("missing 'of:' or unknown aggregate emits a visible TSX comment placeholder", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Broken { route: "/x"  body: CreateForm {} }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);

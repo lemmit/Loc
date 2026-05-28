@@ -13,7 +13,7 @@ describe("page title via useEffect(document.title)", () => {
   it('static title: "..." emits a useEffect with empty deps', async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
@@ -21,7 +21,7 @@ describe("page title via useEffect(document.title)", () => {
             body:  Heading { "Welcome" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -39,7 +39,7 @@ describe("page title via useEffect(document.title)", () => {
   it("title interpolating a route param adds it to deps + destructures it", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page User(name: string) {
             route: "/u/:name"
@@ -47,7 +47,7 @@ describe("page title via useEffect(document.title)", () => {
             body:  Heading { name }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -66,7 +66,7 @@ describe("page title via useEffect(document.title)", () => {
   it("title interpolating state → useState + useEffect import on one line, state in deps", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Counter {
             route: "/c"
@@ -75,7 +75,7 @@ describe("page title via useEffect(document.title)", () => {
             body:  Button { "+", onClick: e => { count += 1 } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -100,7 +100,7 @@ describe("page title via useEffect(document.title)", () => {
   it("title with both param and state: deps array sorted, both names included", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Hybrid(slug: string) {
             route: "/h/:slug"
@@ -109,7 +109,7 @@ describe("page title via useEffect(document.title)", () => {
             body:  Text { "hi" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -129,14 +129,14 @@ describe("page title via useEffect(document.title)", () => {
   it("page without title emits no useEffect import and no effect line", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Plain {
             route: "/plain"
             body:  Heading { "hi" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

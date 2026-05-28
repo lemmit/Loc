@@ -13,10 +13,10 @@ const DDL = `
   requirement US-001 { type: UserStory  title: "Login" }
   requirement AC-001 parent US-001 { type: AcceptanceCriteria  title: "valid creds" }
   system Shop {
-    module M { context C {
+    subdomain M { context C {
       aggregate A { operation go() {}  test "go works" verifies TC-001 {} }
     } }
-    deployable api { platform: hono  modules: M }
+    deployable api { platform: hono  contexts: [C] }
   }
   testCase TC-001 verifies AC-001 { covers [ M.C.A.go ] }
 `;

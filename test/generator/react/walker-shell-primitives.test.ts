@@ -25,11 +25,11 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 async function emit(body: string): Promise<string> {
   const files = await generateSystemFiles(`
     system S {
-      module M { context C { } }
+      subdomain M { context C { } }
       ui WebApp {
         page P { route: "/p"  body: ${body} }
       }
-      deployable api { platform: hono, modules: M, port: 3000 }
+      deployable api { platform: hono, contexts: [C], port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
     }
   `);

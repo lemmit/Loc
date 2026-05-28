@@ -38,7 +38,7 @@ async function parseModel(
 // deployable.  `extra` is appended into the aggregate body verbatim.
 const SYSTEM = (extra = "", platform = "hono", targets = "") => `
 system S {
-  module M {
+  subdomain M {
     context C {
       aggregate Cart ids guid {
         label: string
@@ -57,7 +57,7 @@ ${extra}
       }
     }
   }
-  deployable api { platform: ${platform}, ${targets || "modules: M,"} port: 3000 }
+  deployable api { platform: ${platform}, ${targets || "contexts: [C],"} port: 3000 }
 }
 `;
 
@@ -110,7 +110,7 @@ describe("audited — IR lowering", () => {
   it("flags the audited operation and leaves others unflagged", async () => {
     const { model, errors } = await parseModel(SYSTEM());
     expect(errors).toEqual([]);
-    const cart = lowerModel(model).systems[0]!.modules[0]!.contexts[0]!.aggregates[0]!;
+    const cart = lowerModel(model).systems[0]!.subdomains[0]!.contexts[0]!.aggregates[0]!;
     expect(cart.operations.find((o) => o.name === "cancel")?.audited).toBe(true);
     expect(cart.operations.find((o) => o.name === "touch")?.audited).toBe(false);
   });

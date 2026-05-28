@@ -31,7 +31,7 @@ describe("api binding + walker hook injection", () => {
   it("UI `api X: Y` parameter + body ref injects useAllAggregates hook at page top", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Customer { name: string }
             repository Customers for Customer { }
@@ -48,7 +48,7 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: Sales, port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -64,7 +64,7 @@ describe("api binding + walker hook injection", () => {
   it("create mutation: `Sales.Customer.create.mutate(...)` in onClick", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Customer { name: string }
             repository Customers for Customer { }
@@ -84,7 +84,7 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: Sales, port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -98,7 +98,7 @@ describe("api binding + walker hook injection", () => {
   it("parameterized query: byId(id) hoists with the arg at hook decl time", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Customer { name: string }
             repository Customers for Customer { find byId(id: string): Customer? }
@@ -115,7 +115,7 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: Sales, port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -131,7 +131,7 @@ describe("api binding + walker hook injection", () => {
   it("multiple references to same op de-dupe to one hook decl", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Customer { name: string }
             repository Customers for Customer { }
@@ -149,7 +149,7 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: Sales, port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -166,7 +166,7 @@ describe("api binding + walker hook injection", () => {
   it("multiple ops on same aggregate share a single import line", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Customer { name: string }
             repository Customers for Customer { }
@@ -186,7 +186,7 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: Sales, port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -203,7 +203,7 @@ describe("api binding + walker hook injection", () => {
   it("custom finder operation: byEmail → useByEmailCustomer with arg", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Customer { name: string }
             repository Customers for Customer { find byEmail(email: string): Customer? }
@@ -217,7 +217,7 @@ describe("api binding + walker hook injection", () => {
             body: Text { Sales.Customer.byEmail(email).isLoading }
           }
         }
-        deployable api { platform: hono, modules: Sales, port: 3000 }
+        deployable api { platform: hono, contexts: [Orders], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -229,14 +229,14 @@ describe("api binding + walker hook injection", () => {
   it("UI without api parameters: existing behaviour unchanged (no hook injection)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
             body: Heading { "hi" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);

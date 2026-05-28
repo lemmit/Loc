@@ -95,7 +95,7 @@ describe("multi-file regression — byte-identical with the single-file baseline
         import "./shared/money.ddd"
         import "./catalog.ddd"
         system Tiny {
-          module M {
+          subdomain M {
             context Catalog {
               aggregate Product {
                 sku: string
@@ -104,7 +104,7 @@ describe("multi-file regression — byte-identical with the single-file baseline
               repository Products for Product { }
             }
           }
-          deployable api { platform: hono, modules: M }
+          deployable api { platform: hono, contexts: [Catalog] }
         }
       `,
       "shared/money.ddd": `

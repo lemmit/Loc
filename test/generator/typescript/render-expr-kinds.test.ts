@@ -40,7 +40,7 @@ describe("ts renderTsExpr — literals", () => {
     expect(renderTsExpr({ kind: "literal", lit: "null", value: "" })).toBe("null");
   });
 
-  it("renders money literals as `new Decimal(\"…\")`", () => {
+  it('renders money literals as `new Decimal("…")`', () => {
     expect(renderTsExpr(litMoney("9.99"))).toBe('new Decimal("9.99")');
   });
 
@@ -92,15 +92,15 @@ describe("ts renderTsExpr — refs", () => {
   });
 
   it("renders `currentUser` ref verbatim", () => {
-    expect(
-      renderTsExpr({ kind: "ref", name: "currentUser", refKind: "current-user" }),
-    ).toBe("currentUser");
+    expect(renderTsExpr({ kind: "ref", name: "currentUser", refKind: "current-user" })).toBe(
+      "currentUser",
+    );
   });
 
   it("renders helper-fn refs with lowerFirst on the name", () => {
-    expect(
-      renderTsExpr({ kind: "ref", name: "FormatName", refKind: "helper-fn" }),
-    ).toBe("this.formatName");
+    expect(renderTsExpr({ kind: "ref", name: "FormatName", refKind: "helper-fn" })).toBe(
+      "this.formatName",
+    );
   });
 });
 
@@ -206,9 +206,7 @@ describe("ts renderTsExpr — call kinds", () => {
   });
 
   it("renders free function call without receiver", () => {
-    expect(
-      renderTsExpr({ kind: "call", callKind: "free", name: "now", args: [] }),
-    ).toBe("now()");
+    expect(renderTsExpr({ kind: "call", callKind: "free", name: "now", args: [] })).toBe("now()");
   });
 });
 
@@ -369,9 +367,9 @@ describe("ts renderTsExpr — match → right-folded ternary", () => {
 
 describe("ts renderTsExpr — lambda, new, list, object", () => {
   it("renders single-expression lambda as `(x) => expr`", () => {
-    expect(
-      renderTsExpr({ kind: "lambda", param: "item", body: thisProp("active") }),
-    ).toBe("(item) => this._active");
+    expect(renderTsExpr({ kind: "lambda", param: "item", body: thisProp("active") })).toBe(
+      "(item) => this._active",
+    );
   });
 
   it("renders block-body lambda as a TODO arrow (not TS-renderable)", () => {
@@ -387,15 +385,13 @@ describe("ts renderTsExpr — lambda, new, list, object", () => {
         partName: "LineItem",
         fields: [{ name: "sku", value: litStr("ABC") }],
       }),
-    ).toBe(
-      'LineItem._create({ id: Ids.newLineItemId(), parentId: this._id, sku: "ABC" })',
-    );
+    ).toBe('LineItem._create({ id: Ids.newLineItemId(), parentId: this._id, sku: "ABC" })');
   });
 
   it("renders list literal as TS array", () => {
-    expect(
-      renderTsExpr({ kind: "list", elements: [litInt("1"), litInt("2"), litInt("3")] }),
-    ).toBe("[1, 2, 3]");
+    expect(renderTsExpr({ kind: "list", elements: [litInt("1"), litInt("2"), litInt("3")] })).toBe(
+      "[1, 2, 3]",
+    );
   });
 
   it("renders object literal as parenthesised TS object", () => {

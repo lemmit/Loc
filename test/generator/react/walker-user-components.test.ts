@@ -13,7 +13,7 @@ describe("user-defined components", () => {
   it("component declaration emits a tsx file with typed Props", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component WelcomeBox(name: string) {
             body: Card { "Hello, " + name, Stack { Text { "Welcome!" } } }
@@ -23,7 +23,7 @@ describe("user-defined components", () => {
             body:  Heading { "home" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -47,7 +47,7 @@ describe("user-defined components", () => {
   it("walker page can invoke a user component with positional args", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component WelcomeBox(name: string) {
             body: Card { "Hi, " + name, Text { "welcome" } }
@@ -57,7 +57,7 @@ describe("user-defined components", () => {
             body:  WelcomeBox("Alice")
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -76,7 +76,7 @@ describe("user-defined components", () => {
   it("user component invocation with a non-string arg renders as JSX expression", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component CounterBadge(n: int) {
             body: Badge { "Count: " + n }
@@ -87,7 +87,7 @@ describe("user-defined components", () => {
             body:  CounterBadge(x)
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -106,7 +106,7 @@ describe("user-defined components", () => {
   it("user component invocation accepts named args", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component LabeledIcon(icon: string, label: string) {
             body: Stack { Text { icon }, Text { label } }
@@ -116,7 +116,7 @@ describe("user-defined components", () => {
             body:  LabeledIcon(icon: "star", label: "Featured")
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -133,7 +133,7 @@ describe("user-defined components", () => {
   it("multiple user components dedupe imports per page", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component Foo(s: string) {
             body: Text { s }
@@ -146,7 +146,7 @@ describe("user-defined components", () => {
             body:  Stack { Foo("a"), Bar("b"), Foo("c") }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -168,7 +168,7 @@ describe("user-defined components", () => {
   it("component invokes another component (cross-component composition)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component Inner(n: string) {
             body: Text { n }
@@ -181,7 +181,7 @@ describe("user-defined components", () => {
             body:  Outer("X")
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -199,14 +199,14 @@ describe("user-defined components", () => {
   it("page with no components emits no components dir", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
             body:  Heading { "hi" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -235,14 +235,14 @@ describe("user-defined components", () => {
       }
 
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
             body: Hero("Welcome")
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -270,7 +270,7 @@ describe("user-defined components", () => {
     // slot.
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component DetailView(heading: slot, primaryAction: slot) {
             body: Stack { heading, primaryAction }
@@ -283,7 +283,7 @@ describe("user-defined components", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -320,7 +320,7 @@ describe("user-defined components", () => {
     // the stdlib walker primitive.
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component Panel(heading: slot?, body: slot) {
             body: Stack { heading, body }
@@ -330,7 +330,7 @@ describe("user-defined components", () => {
             body: Panel { body: Text { "no heading provided" } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -362,7 +362,7 @@ describe("user-defined components", () => {
       }
 
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           component Hero(title: string) {
             body: Text { "ui-scope: " + title }
@@ -372,7 +372,7 @@ describe("user-defined components", () => {
             body: Hero("World")
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -399,7 +399,7 @@ describe("user-defined components", () => {
       }
 
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         layout LandingFrame {
           header { Logo() }
           main
@@ -411,7 +411,7 @@ describe("user-defined components", () => {
             body: Heading { "Hi", level: 1 }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

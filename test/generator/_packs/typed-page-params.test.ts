@@ -20,14 +20,14 @@ describe("typed page parameters in walker-rendered pages", () => {
   it("emits useParams + destructure when a param is referenced", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Hello(name: string) {
             route: "/hello/:name"
             body:  Heading { name }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -48,7 +48,7 @@ describe("typed page parameters in walker-rendered pages", () => {
   it("multi-param pages get a typed object generic + only-used destructure", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate Customer { name: string }
             repository Customers for Customer { }
@@ -60,7 +60,7 @@ describe("typed page parameters in walker-rendered pages", () => {
             body:  Stack { Heading { name }, Text { "Welcome." } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -82,14 +82,14 @@ describe("typed page parameters in walker-rendered pages", () => {
   it("page with params but no ref usage still calls useParams (typed shape preserved)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X(id: string) {
             route: "/x/:id"
             body:  Heading { "static title" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -109,14 +109,14 @@ describe("typed page parameters in walker-rendered pages", () => {
   it("page without params has no useParams hook", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Welcome {
             route: "/welcome"
             body:  Heading { "Welcome" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -134,14 +134,14 @@ describe("typed page parameters in walker-rendered pages", () => {
   it("Text { name } — ref in Text position resolves to {name}", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page User(name: string) {
             route: "/users/:name"
             body:  Text { name }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -157,14 +157,14 @@ describe("typed page parameters in walker-rendered pages", () => {
   it("ref to non-param name still emits as a placeholder (build-warn shape)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Page(realParam: string) {
             route: "/p/:realParam"
             body:  Heading { unknownThing }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -182,14 +182,14 @@ describe("typed page parameters in walker-rendered pages", () => {
   it("Card { name, Stack { ... } } — param ref resolves in Card title position", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Profile(userName: string) {
             route: "/profile/:userName"
             body:  Card { userName, Stack { Text { "hello" } } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

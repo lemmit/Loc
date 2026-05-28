@@ -51,7 +51,7 @@ describe("phoenix renderExpr — literals", () => {
     expect(renderExpr({ kind: "literal", lit: "decimal", value: "1.5" }, ctx)).toBe("1.5");
   });
 
-  it("wraps money literals in Decimal.new(\"…\")", () => {
+  it('wraps money literals in Decimal.new("…")', () => {
     expect(renderExpr(litMoney("9.99"), ctx)).toBe('Decimal.new("9.99")');
   });
 });
@@ -206,7 +206,10 @@ describe("phoenix renderExpr — unary, paren, ternary", () => {
 describe("phoenix renderExpr — convert", () => {
   it("converts string(money) via Decimal.to_string", () => {
     expect(
-      renderExpr({ kind: "convert", target: "string", from: "money", value: thisProp("price") }, ctx),
+      renderExpr(
+        { kind: "convert", target: "string", from: "money", value: thisProp("price") },
+        ctx,
+      ),
     ).toBe("Decimal.to_string(record.price)");
   });
 
@@ -347,9 +350,9 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
   });
 
   it("omits the trailing receiver-comma when a function takes no extra args", () => {
-    expect(
-      renderExpr({ kind: "call", callKind: "function", name: "refresh", args: [] }, ctx),
-    ).toBe("refresh(record)");
+    expect(renderExpr({ kind: "call", callKind: "function", name: "refresh", args: [] }, ctx)).toBe(
+      "refresh(record)",
+    );
   });
 
   it("renders value-object constructor as %ContextModule.Name{…}", () => {
@@ -383,12 +386,9 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
   });
 
   it("renders single-expression lambda as fn x -> expr end", () => {
-    expect(
-      renderExpr(
-        { kind: "lambda", param: "item", body: thisProp("active") },
-        ctx,
-      ),
-    ).toBe("fn item -> record.active end");
+    expect(renderExpr({ kind: "lambda", param: "item", body: thisProp("active") }, ctx)).toBe(
+      "fn item -> record.active end",
+    );
   });
 
   it("renders block-body lambda as a TODO comment (Elixir disallows inline blocks)", () => {

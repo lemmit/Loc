@@ -36,7 +36,7 @@ describe("Table primitive", () => {
     const files = await buildAndGenerate(`
       system S {
         api SalesApi from Sales
-        module Sales {
+        subdomain Sales {
           context C {
             aggregate Order { customerId: string }
             repository Orders for Order { }
@@ -53,7 +53,7 @@ describe("Table primitive", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: Sales, serves: SalesApi, port: 3000 }
+        deployable api { platform: hono, contexts: [C], serves: SalesApi, port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -82,7 +82,7 @@ describe("Table primitive", () => {
     const files = await buildAndGenerate(`
       system S {
         api SalesApi from Sales
-        module Sales {
+        subdomain Sales {
           context C {
             aggregate Order { customerId: string }
             repository Orders for Order { }
@@ -99,7 +99,7 @@ describe("Table primitive", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: Sales, serves: SalesApi, port: 3000 }
+        deployable api { platform: hono, contexts: [C], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
@@ -112,7 +112,7 @@ describe("Table primitive", () => {
     const files = await buildAndGenerate(`
       system S {
         api SalesApi from Sales
-        module Sales {
+        subdomain Sales {
           context C {
             aggregate Order { status: string }
             repository Orders for Order { }
@@ -128,7 +128,7 @@ describe("Table primitive", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: Sales, serves: SalesApi, port: 3000 }
+        deployable api { platform: hono, contexts: [C], serves: SalesApi, port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -147,7 +147,7 @@ describe("Table primitive", () => {
     const files = await buildAndGenerate(`
       system S {
         api SalesApi from Sales
-        module Sales {
+        subdomain Sales {
           context C {
             aggregate Order { x: int }
             repository Orders for Order { }
@@ -164,7 +164,7 @@ describe("Table primitive", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: Sales, serves: SalesApi, port: 3000 }
+        deployable api { platform: hono, contexts: [C], serves: SalesApi, port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -182,7 +182,7 @@ describe("Table primitive", () => {
     const files = await buildAndGenerate(`
       system S {
         api SalesApi from Sales
-        module Sales {
+        subdomain Sales {
           context C {
             aggregate Order { x: int }
             repository Orders for Order { }
@@ -195,7 +195,7 @@ describe("Table primitive", () => {
             body:  Table { rows: Sales.Order.all }
           }
         }
-        deployable api { platform: hono, modules: Sales, serves: SalesApi, port: 3000 }
+        deployable api { platform: hono, contexts: [C], serves: SalesApi, port: 3000 }
         deployable web {
           platform: static
           targets: api

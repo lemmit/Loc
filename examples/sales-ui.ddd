@@ -14,7 +14,7 @@
 // This file does NOT parse with the current Langium grammar; it is
 // the target syntax driving the discussion.
 
-ui SalesAdmin with scaffold(modules: [Catalog], aggregates: [Customer, Product], workflows: [placeOrder], views: [ActiveOrders, OrderSummary, CustomerOrders]) {
+ui SalesAdmin with scaffold(subdomains: [Catalog], aggregates: [Customer, Product], workflows: [placeOrder], views: [ActiveOrders, OrderSummary, CustomerOrders]) {
 
   // ── 1. Mixed-granularity scaffolding ────────────────────────────
   // Catalog: take the whole module.  Sales: cherry-pick — Customer +

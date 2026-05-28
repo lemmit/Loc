@@ -28,8 +28,6 @@ import type {
   MenuBlock,
   MenuLink,
   MenuSection,
-  Module,
-  ModuleBinding,
   Operation,
   Page,
   PageProp,
@@ -42,6 +40,7 @@ import type {
   StateBlock,
   Statement,
   Storage,
+  Subdomain,
   System,
   TestBlock,
   TestCase,
@@ -122,8 +121,8 @@ export function printStructural(node: AstNode): string {
   switch (node.$type) {
     case "System":
       return printSystem(node as System);
-    case "Module":
-      return printModule(node as Module);
+    case "Subdomain":
+      return printSubdomain(node as Subdomain);
     case "Deployable":
       return printDeployable(node as Deployable);
     case "ThemeBlock":
@@ -138,6 +137,8 @@ export function printStructural(node: AstNode): string {
       return printApi(node as Api);
     case "Storage":
       return printStorage(node as Storage);
+    case "DataSource":
+      return printDataSource(node as import("../generated/ast.js").DataSource);
     case "Layout":
       return printLayout(node as Layout);
     case "BoundedContext":
@@ -213,14 +214,14 @@ function printSystem(node: System): string {
   return block(`system ${node.name}`, node.members.map(printStructural));
 }
 
-function printModule(node: Module): string {
+function printSubdomain(node: Subdomain): string {
   // `contexts` and `permissions` are interleaved in source but stored in two
   // arrays; AST equality is per-array, so textual order between them is free.
   const items = [
     ...node.permissions.map(printPermissionsBlock),
     ...node.contexts.map(printBoundedContext),
   ];
-  return block(`module ${node.name}`, items);
+  return block(`subdomain ${node.name}`, items);
 }
 
 function printPermissionsBlock(node: PermissionsBlock): string {
@@ -259,7 +260,39 @@ function printLayout(node: Layout): string {
 }
 
 function printStorage(node: Storage): string {
-  return block(`storage ${node.name}`, [`type: ${node.type}`]);
+  const items: string[] = [`type: ${node.type}`];
+  if (node.instance) items.push(`instance: ${node.instance}`);
+  if (node.connection) items.push(`connection: ${printConnectionSource(node.connection)}`);
+  return block(`storage ${node.name}`, items);
+}
+
+function printDataSource(node: import("../generated/ast.js").DataSource): string {
+  const items: string[] = [];
+  if (node.context) items.push(`for: ${node.context.$refText}`);
+  if (node.kind) items.push(`kind: ${node.kind}`);
+  if (node.use) items.push(`use: ${node.use.$refText}`);
+  if (node.schema) items.push(`schema: ${JSON.stringify(node.schema)}`);
+  if (node.tablePrefix) items.push(`tablePrefix: ${JSON.stringify(node.tablePrefix)}`);
+  if (node.keyPrefix) items.push(`keyPrefix: ${JSON.stringify(node.keyPrefix)}`);
+  if (typeof node.ttl === "number") items.push(`ttl: ${node.ttl}`);
+  if (typeof node.every === "number") items.push(`every: ${node.every}`);
+  if (typeof node.retain === "number") items.push(`retain: ${node.retain}`);
+  if (node.isolationLevel) items.push(`isolationLevel: ${node.isolationLevel}`);
+  if (node.readonly) items.push(`readonly: true`);
+  return block(`dataSource ${node.name}`, items);
+}
+
+function printConnectionSource(node: import("../generated/ast.js").ConnectionSource): string {
+  switch (node.$type) {
+    case "ServiceConnectionSource":
+      return `service(${node.service})`;
+    case "EnvConnectionSource":
+      return `env(${JSON.stringify(node.env)})`;
+    case "SecretConnectionSource":
+      return `secret(${node.secret})`;
+    case "LiteralConnectionSource":
+      return `literal(${JSON.stringify(node.literal)})`;
+  }
 }
 
 function printApi(node: Api): string {
@@ -268,8 +301,11 @@ function printApi(node: Api): string {
 
 function printDeployable(node: Deployable): string {
   const items: string[] = [`platform: ${enumOrString(node.platform, PLATFORM_KEYWORDS)}`];
-  if (node.moduleBindings.length > 0) {
-    items.push(`modules: ${node.moduleBindings.map(printModuleBinding).join(", ")}`);
+  if (node.contextRefs.length > 0) {
+    items.push(`contexts: [${node.contextRefs.map((r) => r.$refText).join(", ")}]`);
+  }
+  if (node.dataSourceRefs.length > 0) {
+    items.push(`dataSources: [${node.dataSourceRefs.map((r) => r.$refText).join(", ")}]`);
   }
   if (node.targets) items.push(`targets: ${node.targets.$refText}`);
   if (node.serves.length > 0) {
@@ -288,12 +324,6 @@ function printDeployable(node: Deployable): string {
   if (node.auth) items.push(`auth: ${node.auth}`);
   if (node.design) items.push(`design: ${enumOrString(node.design, DESIGN_KEYWORDS)}`);
   return block(`deployable ${node.name}`, items);
-}
-
-function printModuleBinding(node: ModuleBinding): string {
-  if (node.storages.length === 0) return node.name.$refText;
-  const roles = node.storages.map((s) => `${s.role}: ${s.storage.$refText}`).join(", ");
-  return `${node.name.$refText} { ${roles} }`;
 }
 
 function printTestE2E(node: TestE2E): string {
@@ -444,10 +474,14 @@ function printValueObject(node: ValueObject): string {
 
 function printAggregate(node: Aggregate): string {
   const ids = node.idKind ? ` ids ${node.idKind}` : "";
-  return block(
-    `aggregate ${node.name}${ids}${printWithClause(node.withClause)}`,
-    node.members.map(printStructural),
-  );
+  const head: string[] = [];
+  if (node.persistenceStrategy) {
+    head.push(`persistenceStrategy: ${node.persistenceStrategy}`);
+  }
+  return block(`aggregate ${node.name}${ids}${printWithClause(node.withClause)}`, [
+    ...head,
+    ...node.members.map(printStructural),
+  ]);
 }
 
 function printWithClause(wc: import("../generated/ast.js").WithClause | undefined): string {

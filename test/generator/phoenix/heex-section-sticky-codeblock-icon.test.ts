@@ -25,7 +25,7 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 
 const phoenixSystem = (uiBody: string): string => `
   system Demo {
-    module M {
+    subdomain M {
       context C {
         aggregate Doc {
           name: string
@@ -42,7 +42,7 @@ const phoenixSystem = (uiBody: string): string => `
       }
     }
     deployable phoenixApp {
-      platform: phoenixLiveView, modules: M, serves: DemoApi,
+      platform: phoenixLiveView, contexts: [C], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }

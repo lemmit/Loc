@@ -1,14 +1,14 @@
 // Per-view "+" palette: a tiny toolbar above the React Flow that exposes the
 // adds that make sense at the current drill level, reusing v1's pure
-// `addConstructSource` / `addModuleSource` (so the same parse-guarded edits
+// `addConstructSource` / `addSubdomainSource` (so the same parse-guarded edits
 // the v1 inspector produces).
 //
 // Phase 3a covers system and context views — the levels v1's add.ts already
-// handles directly. Module-level "+ Context", aggregate-level "+ Operation"
+// handles directly. Subdomain-level "+ Context", aggregate-level "+ Operation"
 // and operation-level "+ Stmt" come in Phase 3b once their pure helpers exist.
 
 import { Button, Group } from "@mantine/core";
-import { addConstructSource, addModuleSource } from "../system/add";
+import { addConstructSource, addSubdomainSource } from "../system/add";
 import { addStatement, type BodyLocator } from "../system/body";
 import { addField, freshFieldName } from "../system/fields";
 import { findAggregate, type ViewPath } from "./view-graph";
@@ -33,8 +33,8 @@ export default function AddPalette({ path, source, onChange }: Props): JSX.Eleme
   if (last.kind === "system") {
     return (
       <Group gap={4} px={6} py={4} bg="dark.6" wrap="wrap" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }} data-testid="c4system-v2-add-palette">
-        <Button size="compact-xs" variant="light" data-testid="c4system-v2-add-module"
-          onClick={() => try_(onChange, addModuleSource(source))}>+ Module</Button>
+        <Button size="compact-xs" variant="light" data-testid="c4system-v2-add-subdomain"
+          onClick={() => try_(onChange, addSubdomainSource(source))}>+ Subdomain</Button>
         <Button size="compact-xs" variant="default" data-testid="c4system-v2-add-api"
           onClick={() => try_(onChange, addConstructSource(source, "api"))}>+ API</Button>
         <Button size="compact-xs" variant="default" data-testid="c4system-v2-add-storage"
@@ -47,7 +47,7 @@ export default function AddPalette({ path, source, onChange }: Props): JSX.Eleme
     );
   }
 
-  if (last.kind === "module") {
+  if (last.kind === "subdomain") {
     return (
       <Group gap={4} px={6} py={4} bg="dark.6" wrap="wrap" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }} data-testid="c4system-v2-add-palette">
         <Button size="compact-xs" variant="light" data-testid="c4system-v2-add-context"

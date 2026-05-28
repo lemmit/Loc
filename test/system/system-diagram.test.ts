@@ -40,7 +40,7 @@ describe("domain.mmd", () => {
   it("renders a class per aggregate with its operations", async () => {
     const sys = (await build("examples/acme.ddd")).systems[0]!;
     const out = buildDomainDiagram(sys);
-    for (const m of sys.modules) {
+    for (const m of sys.subdomains) {
       for (const c of m.contexts) {
         for (const a of c.aggregates) {
           expect(out).toContain(`class ${a.name} {`);
@@ -78,7 +78,7 @@ describe("er.mmd", () => {
     const sys = (await build("examples/acme.ddd")).systems[0]!;
     const out = buildErDiagram(sys);
     expect(out).toContain("erDiagram");
-    for (const m of sys.modules) {
+    for (const m of sys.subdomains) {
       for (const c of m.contexts) {
         for (const a of c.aggregates) {
           expect(out).toContain(`  ${a.name} {`);
@@ -116,7 +116,7 @@ describe("deployment.mmd", () => {
     const out = buildDeploymentDiagram(sys);
     expect(out).toContain("flowchart LR");
     for (const d of sys.deployables) expect(out).toContain(`${d.name} · ${d.platform}`);
-    for (const m of sys.modules) expect(out).toContain(`📦 ${m.name}`);
+    for (const m of sys.subdomains) expect(out).toContain(`📦 ${m.name}`);
     expect(renderDeploymentDiagram(sys).endsWith("\n")).toBe(true);
   });
 });

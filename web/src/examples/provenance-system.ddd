@@ -21,7 +21,7 @@ system OrderingSystem {
     radius: "md"
   }
 
-  module Ordering {
+  subdomain Ordering {
     context Ordering {
 
       aggregate Order ids guid {
@@ -56,9 +56,9 @@ system OrderingSystem {
     }
   }
 
-  ui WebApp with scaffold(modules: [Ordering]) {
+  ui WebApp with scaffold(subdomains: [Ordering]) {
   }
 
-  deployable api { platform: hono, modules: Ordering, port: 3000 }
+  deployable api { platform: hono, contexts: [Ordering], port: 3000 }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
 }

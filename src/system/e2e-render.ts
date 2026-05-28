@@ -4,8 +4,8 @@ import type {
   DeployableIR,
   ExprIR,
   FindIR,
-  ModuleIR,
   OperationIR,
+  SubdomainIR,
   SystemIR,
   TestE2EIR,
   TestStmtIR,
@@ -60,7 +60,10 @@ function apiBasePath(platform: string): string {
   return platform === "phoenixLiveView" ? "/api" : "";
 }
 
-export function renderE2EFile(sys: SystemIR, modulesByName: Map<string, ModuleIR>): string | null {
+export function renderE2EFile(
+  sys: SystemIR,
+  modulesByName: Map<string, SubdomainIR>,
+): string | null {
   // UI tests go to a separate Playwright spec via the
   // ui-e2e-render path; the vitest api file only carries api tests.
   const apiTests = sys.e2eTests.filter((t) => t.kind === "api");
@@ -124,12 +127,12 @@ export function renderE2EFile(sys: SystemIR, modulesByName: Map<string, ModuleIR
 
 function collectContextsFor(
   d: DeployableIR,
-  modulesByName: Map<string, ModuleIR>,
+  modulesByName: Map<string, SubdomainIR>,
 ): BoundedContextIR[] {
+  const want = new Set(d.contextNames);
   const out: BoundedContextIR[] = [];
-  for (const name of d.moduleNames) {
-    const m = modulesByName.get(name);
-    if (m) out.push(...m.contexts);
+  for (const m of modulesByName.values()) {
+    for (const c of m.contexts) if (want.has(c.name)) out.push(c);
   }
   return out;
 }
@@ -150,7 +153,7 @@ function renderTest(t: TestE2EIR, ctx: RenderCtx, nameSuffix = ""): string[] {
  *  the aggregate slugs invoked through the magic `api.<slug>.<method>(...)`
  *  shape.  Drives the multi-backend replay in `renderE2EFile` — a
  *  deployable is compatible with this test only if every collected
- *  slug's owning module is in `deployable.moduleNames`. */
+ *  slug's owning module is in `deployable.contextNames`. */
 function collectReferencedAggregateSlugs(statements: readonly TestStmtIR[]): Set<string> {
   const slugs = new Set<string>();
   const visit = (e: ExprIR): void => {
@@ -194,22 +197,26 @@ function isBackendPlatform(platform: string): boolean {
   return platform !== "react" && platform !== "static";
 }
 
-/** Resolve `<slug>` (snake_plural of an aggregate name) to the module
- *  that owns the aggregate.  Returns undefined if no module declares
- *  an aggregate whose plural-snake name matches the slug. */
-function findModuleForSlug(slug: string, modulesByName: Map<string, ModuleIR>): string | undefined {
+/** Resolve `<slug>` (snake_plural of an aggregate name) to the
+ *  bounded-context name that owns the aggregate.  Returns undefined
+ *  if no context declares an aggregate whose plural-snake name
+ *  matches the slug. */
+function findContextForSlug(
+  slug: string,
+  modulesByName: Map<string, SubdomainIR>,
+): string | undefined {
   for (const m of modulesByName.values()) {
     for (const c of m.contexts) {
       for (const a of c.aggregates) {
-        if (snake(plural(a.name)) === slug) return m.name;
+        if (snake(plural(a.name)) === slug) return c.name;
       }
     }
   }
   return undefined;
 }
 
-/** Select every backend deployable whose `moduleNames` covers each
- *  referenced aggregate's owning module.  The `declared` deployable
+/** Select every backend deployable whose `contextNames` covers each
+ *  referenced aggregate's owning context.  The `declared` deployable
  *  (the one named in `against <name>`) is always included even when
  *  `referenced` is empty — that case is a test that does no api
  *  calls, only `expect`s, and should still run somewhere.  Output is
@@ -218,21 +225,21 @@ function findModuleForSlug(slug: string, modulesByName: Map<string, ModuleIR>): 
 function compatibleBackends(
   referenced: Set<string>,
   deployables: readonly DeployableIR[],
-  modulesByName: Map<string, ModuleIR>,
+  modulesByName: Map<string, SubdomainIR>,
   declared: DeployableIR,
 ): DeployableIR[] {
-  const requiredModules = new Set<string>();
+  const requiredContexts = new Set<string>();
   for (const slug of referenced) {
-    const mod = findModuleForSlug(slug, modulesByName);
-    if (mod) requiredModules.add(mod);
-    // No module owns the slug → the existing `findAggregateBySlug`
+    const ctx = findContextForSlug(slug, modulesByName);
+    if (ctx) requiredContexts.add(ctx);
+    // No context owns the slug → the existing `findAggregateBySlug`
     // check at render time produces a precise error.  Skip here so
     // the declared deployable still runs and surfaces it.
   }
   const out: DeployableIR[] = [];
   for (const d of deployables) {
     if (!isBackendPlatform(d.platform)) continue;
-    const covers = [...requiredModules].every((m) => d.moduleNames.includes(m));
+    const covers = [...requiredContexts].every((c) => d.contextNames.includes(c));
     if (covers) out.push(d);
   }
   // Always include the declared deployable, even if it didn't pass

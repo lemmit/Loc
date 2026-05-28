@@ -7,7 +7,7 @@ import {
 import { parseRaw as parse } from "../../_helpers/index.js";
 
 const SRC = `system S {
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Order {
       }
@@ -20,8 +20,8 @@ describe("v2 add helpers — addContextSource / addOperationSource", () => {
     const next = addContextSource(SRC, "Sales")!;
     expect(next).not.toBeNull();
     expect(next).toContain("context Context1 {");
-    // Containing module should still be intact.
-    expect(next).toMatch(/module Sales \{[\s\S]*context Orders[\s\S]*context Context1[\s\S]*\}/);
+    // Containing subdomain should still be intact.
+    expect(next).toMatch(/subdomain Sales \{[\s\S]*context Orders[\s\S]*context Context1[\s\S]*\}/);
   });
 
   it("returns null for an unknown module", () => {

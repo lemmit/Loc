@@ -117,7 +117,7 @@ describe("enrichment — idempotency", () => {
 
   const SYSTEM_SRC = `
     system Shop {
-      module Sales {
+      subdomain Sales {
         context Orders {
           aggregate Order ids guid {
             customerId: string
@@ -135,7 +135,7 @@ describe("enrichment — idempotency", () => {
           valueobject Money { amount: int  currency: string }
         }
       }
-      deployable api { platform: hono, modules: Sales, port: 3000 }
+      deployable api { platform: hono, contexts: [Orders], port: 3000 }
     }
   `;
 
@@ -164,10 +164,10 @@ describe("enrichment — idempotency", () => {
     const once = await buildLoomModel(SYSTEM_SRC);
     const twice = enrichLoomModel(once as unknown as RawLoomModel);
     const onceOwners = once.systems.flatMap((s) =>
-      s.modules.map((m) => [m.name, m.migrationsOwner] as const),
+      s.subdomains.map((m) => [m.name, m.migrationsOwner] as const),
     );
     const twiceOwners = twice.systems.flatMap((s) =>
-      s.modules.map((m) => [m.name, m.migrationsOwner] as const),
+      s.subdomains.map((m) => [m.name, m.migrationsOwner] as const),
     );
     expect(twiceOwners).toEqual(onceOwners);
   });

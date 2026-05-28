@@ -26,7 +26,7 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 function phoenixSystem(uiOrderBody: string, extras = ""): string {
   return `
   system Demo {
-    module M {
+    subdomain M {
       context C {
         valueobject Money {
           amount: decimal
@@ -50,7 +50,7 @@ function phoenixSystem(uiOrderBody: string, extras = ""): string {
       }
     }
     deployable phoenixApp {
-      platform: phoenixLiveView, modules: M, serves: DemoApi,
+      platform: phoenixLiveView, contexts: [C], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }
@@ -91,7 +91,7 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
     // and emit a select-with-options.
     const files = await generateSystemFiles(`
       system Demo {
-        module M {
+        subdomain M {
           context C {
             enum Currency { USD, EUR, GBP }
             valueobject Price {
@@ -111,7 +111,7 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
           page NewProduct { route: "/products/new" body: CreateForm { of: Product } }
         }
         deployable phoenixApp {
-          platform: phoenixLiveView, modules: M, serves: DemoApi,
+          platform: phoenixLiveView, contexts: [C], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }
@@ -125,7 +125,7 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
   it("optional `Money?` field still routes to nested form", async () => {
     const files = await generateSystemFiles(`
       system Demo {
-        module M {
+        subdomain M {
           context C {
             valueobject Money { amount: decimal currency: string }
             aggregate Product {
@@ -141,7 +141,7 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
           page NewProduct { route: "/products/new" body: CreateForm { of: Product } }
         }
         deployable phoenixApp {
-          platform: phoenixLiveView, modules: M, serves: DemoApi,
+          platform: phoenixLiveView, contexts: [C], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }
@@ -167,7 +167,7 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
     // explicitly against a minimal fixture.
     const files = await generateSystemFiles(`
       system Demo {
-        module M {
+        subdomain M {
           context C {
             valueobject Money { amount: decimal currency: string }
             aggregate Wallet {
@@ -179,9 +179,9 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
           }
         }
         api DemoApi from M
-        ui DemoUi with scaffold(modules: [M]) {}
+        ui DemoUi with scaffold(subdomains: [M]) {}
         deployable phoenixApp {
-          platform: phoenixLiveView, modules: M, serves: DemoApi,
+          platform: phoenixLiveView, contexts: [C], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }

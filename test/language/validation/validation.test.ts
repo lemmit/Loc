@@ -132,8 +132,8 @@ describe("validation", () => {
   it("rejects a react deployable without 'targets:'", async () => {
     const { errors } = await parse(`
       system S {
-        module M { context T { aggregate A { x: int } } }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        subdomain M { context T { aggregate A { x: int } } }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         deployable web { platform: react, port: 3001 }
       }
     `);
@@ -143,9 +143,9 @@ describe("validation", () => {
   it("rejects 'targets:' on a non-react deployable", async () => {
     const { errors } = await parse(`
       system S {
-        module M { context T { aggregate A { x: int } } }
-        deployable api { platform: hono, modules: M, port: 3000 }
-        deployable other { platform: hono, modules: M, targets: api, port: 3010 }
+        subdomain M { context T { aggregate A { x: int } } }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
+        deployable other { platform: hono, contexts: [T], targets: api, port: 3010 }
       }
     `);
     expect(errors.some((e) => /targets/i.test(e))).toBe(true);
@@ -154,8 +154,8 @@ describe("validation", () => {
   it("rejects a react deployable targeting another react deployable", async () => {
     const { errors } = await parse(`
       system S {
-        module M { context T { aggregate A { x: int } } }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        subdomain M { context T { aggregate A { x: int } } }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         deployable webA { platform: react, targets: api, port: 3001 }
         deployable webB { platform: react, targets: webA, port: 3002 }
       }
@@ -280,9 +280,9 @@ describe("validation", () => {
     it("rejects 'ui:' on a 'platform: hono' deployable", async () => {
       const { errors } = await parse(`
         system S {
-          module M { context T { } }
+          subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, modules: M, ui: WebApp, port: 3000 }
+          deployable api { platform: hono, contexts: [T], ui: WebApp, port: 3000 }
         }
       `);
       expect(errors.some((e) => /'ui:' binding is only valid/.test(e))).toBe(true);
@@ -295,9 +295,9 @@ describe("validation", () => {
       // Backend-only dotnet (no `ui:`) keeps working unchanged.
       const { errors } = await parse(`
         system S {
-          module M { context T { } }
+          subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: dotnet, modules: M, ui: WebApp, port: 8080 }
+          deployable api { platform: dotnet, contexts: [T], ui: WebApp, port: 8080 }
         }
       `);
       expect(errors).toEqual([]);
@@ -306,8 +306,8 @@ describe("validation", () => {
     it("rejects a 'platform: static' deployable without a 'ui:' binding", async () => {
       const { errors } = await parse(`
         system S {
-          module M { context T { } }
-          deployable api { platform: hono, modules: M, port: 3000 }
+          subdomain M { context T { } }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web { platform: static, targets: api, port: 3001 }
         }
       `);
@@ -317,9 +317,9 @@ describe("validation", () => {
     it("accepts a 'platform: static' deployable with a 'ui:' binding", async () => {
       const { errors } = await parse(`
         system S {
-          module M { context T { } }
+          subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -329,9 +329,9 @@ describe("validation", () => {
     it("accepts a 'platform: react' deployable with a 'ui:' binding", async () => {
       const { errors } = await parse(`
         system S {
-          module M { context T { } }
+          subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -345,9 +345,9 @@ describe("validation", () => {
       // framework today.
       const { errors } = await parse(`
         system S {
-          module M { context T { } }
+          subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web {
             platform: static
             targets: api
@@ -362,32 +362,32 @@ describe("validation", () => {
     it("rejects a scaffold target that is not a declared module", async () => {
       const { errors } = await parse(`
         system S {
-          module M { context T { } }
-          ui WebApp with scaffold(modules: [NotAModule]) {
+          subdomain M { context T { } }
+          ui WebApp with scaffold(subdomains: [NotAModule]) {
           }
         }
       `);
       // Phase 4: error originates from the macro expander, which
-      // uses the registered macro's arg kind ('Module') in the message.
-      expect(errors.some((e) => /unknown Module 'NotAModule'/.test(e))).toBe(true);
+      // uses the registered macro's arg kind ('Subdomain') in the message.
+      expect(errors.some((e) => /unknown Subdomain 'NotAModule'/.test(e))).toBe(true);
     });
 
     it("rejects a scaffold target of the wrong kind (aggregate listed as module)", async () => {
       const { errors } = await parse(`
         system S {
-          module Sales {
+          subdomain Sales {
             context Orders {
               aggregate Order { x: int }
               repository Orders for Order { }
             }
           }
-          ui WebApp with scaffold(modules: [Order]) {
+          ui WebApp with scaffold(subdomains: [Order]) {
           }
         }
       `);
-      // Order is an Aggregate, not a Module — the lookup against
-      // the Module inventory misses, surfacing as 'unknown Module'.
-      expect(errors.some((e) => /unknown Module 'Order'/.test(e))).toBe(true);
+      // Order is an Aggregate, not a Subdomain — the lookup against
+      // the Subdomain inventory misses, surfacing as 'unknown Subdomain'.
+      expect(errors.some((e) => /unknown Subdomain 'Order'/.test(e))).toBe(true);
     });
 
     it("silently dedupes the same target listed twice within one scaffold call", async () => {
@@ -398,7 +398,7 @@ describe("validation", () => {
       // silently.  Outcome is the same number of pages either way.
       const { errors, model } = await parse(`
         system S {
-          module Sales { context Orders { aggregate Order { x: int } repository Orders for Order { } } }
+          subdomain Sales { context Orders { aggregate Order { x: int } repository Orders for Order { } } }
           ui WebApp with scaffold(aggregates: [Order, Order]) {
           }
         }
@@ -416,14 +416,14 @@ describe("validation", () => {
     it("accepts well-formed scaffold directives (modules / aggregates / views)", async () => {
       const { errors } = await parse(`
         system S {
-          module Sales {
+          subdomain Sales {
             context Orders {
               aggregate Order { status: string }
               repository Orders for Order { }
               view ActiveOrders = Order where status == "open"
             }
           }
-          ui WebApp with scaffold(modules: [Sales], aggregates: [Order], views: [ActiveOrders]) {
+          ui WebApp with scaffold(subdomains: [Sales], aggregates: [Order], views: [ActiveOrders]) {
           }
         }
       `);
@@ -685,9 +685,9 @@ describe("validation", () => {
     it("rejects a heex pack on a react frontend", async () => {
       const { errors } = await parse(`
         system S {
-          module M { context T { } }
+          subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -707,11 +707,11 @@ describe("validation", () => {
     it("rejects a tsx pack on a phoenixLiveView fullstack deployable", async () => {
       const { errors } = await parse(`
         system S {
-          module M { context T { } }
+          subdomain M { context T { } }
           ui WebApp { }
           deployable fullstack {
             platform: phoenixLiveView
-            modules: M
+            contexts: [T]
             ui: WebApp
             port: 4000
             design: shadcn
@@ -728,9 +728,9 @@ describe("validation", () => {
     it("accepts a matching tsx pack on a react frontend", async () => {
       const { errors } = await parse(`
         system S {
-          module M { context T { } }
+          subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -746,9 +746,9 @@ describe("validation", () => {
     it("warns (does not error) on a custom design pack path", async () => {
       const { errors, warnings } = await parse(`
         system S {
-          module M { context T { } }
+          subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -773,9 +773,9 @@ describe("validation", () => {
       // {family, format} as the bareword.
       const { errors } = await parse(`
         system S {
-          module M { context T { } }
+          subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -795,9 +795,9 @@ describe("validation", () => {
       // versions that haven't shipped yet.
       const { errors } = await parse(`
         system S {
-          module M { context T { } }
+          subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable api { platform: hono, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -819,10 +819,10 @@ describe("validation", () => {
     it("warns when 'design:' is set on a deployable with no UI mount", async () => {
       const { errors, warnings } = await parse(`
         system S {
-          module M { context T { } }
+          subdomain M { context T { } }
           deployable api {
             platform: hono
-            modules: M
+            contexts: [T]
             port: 3000
             design: shadcn
           }
@@ -1005,8 +1005,8 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects api.<unknown> in test e2e", async () => {
     const loom = await loomFrom(`
       system S {
-        module M { context T { aggregate Order { x: int } } }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        subdomain M { context T { aggregate Order { x: int } } }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         test e2e "missing aggregate" against api {
           let _ = api.unknown.create({})
         }
@@ -1023,8 +1023,8 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects api.<known>.<unknownVerb> in test e2e", async () => {
     const loom = await loomFrom(`
       system S {
-        module M { context T { aggregate Order { x: int } } }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        subdomain M { context T { aggregate Order { x: int } } }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         test e2e "bad verb" against api {
           let _ = api.orders.frobnicate({})
         }
@@ -1041,8 +1041,8 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("accepts well-formed api e2e tests with no diagnostics", async () => {
     const loom = await loomFrom(`
       system S {
-        module M { context T { aggregate Order { customerId: string } } }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        subdomain M { context T { aggregate Order { customerId: string } } }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         test e2e "good" against api {
           let o = api.orders.create({ customerId: "c-1" })
           let read = api.orders.getById(o)
@@ -1059,8 +1059,8 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects a mutation statement in a test e2e body", async () => {
     const loom = await loomFrom(`
       system S {
-        module M { context T { aggregate Order { x: int } } }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        subdomain M { context T { aggregate Order { x: int } } }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         test e2e "mutating body" against api {
           x := 1
         }
@@ -1295,15 +1295,15 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects X id referencing a non-mounted aggregate (react deployable)", async () => {
     const loom = await loomFrom(`
       system S {
-        module Customers { context C { aggregate Customer { name: string  derived display: string = name } } }
-        module Sales {
+        subdomain Customers { context C { aggregate Customer { name: string  derived display: string = name } } }
+        subdomain Sales {
           context T {
             aggregate Order {
               customerId: Customer id
             }
           }
         }
-        deployable api { platform: hono, modules: Sales, port: 3000 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         deployable web { platform: react, targets: api, port: 3001 }
       }
     `);
@@ -1321,13 +1321,13 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects X id targeting an aggregate without a 'derived display' (react deployable)", async () => {
     const loom = await loomFrom(`
       system S {
-        module M {
+        subdomain M {
           context T {
             aggregate Customer { email: string }
             aggregate Order { customerId: Customer id }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         deployable web { platform: react, targets: api, port: 3001 }
       }
     `);
@@ -1384,13 +1384,13 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("accepts X id when the target is mounted AND has a display field", async () => {
     const loom = await loomFrom(`
       system S {
-        module M {
+        subdomain M {
           context T {
             aggregate Customer { name: string  derived display: string = name }
             aggregate Order { customerId: Customer id }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [T], port: 3000 }
         deployable web { platform: react, targets: api, port: 3001 }
       }
     `);
@@ -1872,7 +1872,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           id: string
           role: string
         }
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order {
               status: string
@@ -1901,7 +1901,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           id: string
           role: string
         }
-        module M {
+        subdomain M {
           context T {
             aggregate Order {
               customerId: string
@@ -1910,7 +1910,7 @@ describe("Loom IR validation (post-lowering)", async () => {
             repository Orders for Order { }
           }
         }
-        deployable api { platform: dotnet, modules: M, port: 8080, auth: required }
+        deployable api { platform: dotnet, contexts: [T], port: 8080, auth: required }
       }
     `);
     const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
@@ -1920,8 +1920,8 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects auth: required when the system has no user block", async () => {
     const loom = await loomFrom(`
       system Acme {
-        module M { context T { aggregate Order { x: int } repository Orders for Order { } } }
-        deployable api { platform: dotnet, modules: M, port: 8080, auth: required }
+        subdomain M { context T { aggregate Order { x: int } repository Orders for Order { } } }
+        deployable api { platform: dotnet, contexts: [T], port: 8080, auth: required }
       }
     `);
     const diags = validateLoomModel(loom);
@@ -1944,7 +1944,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           id: string
           id: int
         }
-        module M { context T { aggregate Order { x: int } repository Orders for Order { } } }
+        subdomain M { context T { aggregate Order { x: int } repository Orders for Order { } } }
       }
     `);
     const diags = validateLoomModel(loom);
@@ -1961,7 +1961,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system Acme {
         user { id: string, role: string }
-        module M {
+        subdomain M {
           context T {
             aggregate Order {
               status: string
@@ -1987,7 +1987,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system Acme {
         user { id: string }
-        module M {
+        subdomain M {
           context T {
             aggregate Order {
               x: string
@@ -2013,7 +2013,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system Acme {
         user { id: string, role: string }
-        module M {
+        subdomain M {
           context T {
             aggregate Order {
               status: string
@@ -2035,7 +2035,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system Acme {
         user { id: string }
-        module M {
+        subdomain M {
           context T {
             aggregate Order { customerId: string }
             repository Orders for Order {
@@ -2053,7 +2053,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system Acme {
         user { id: string, customerId: string }
-        module M {
+        subdomain M {
           context T {
             aggregate Order { customerId: string, status: string }
             repository Orders for Order { }
@@ -2070,7 +2070,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system Acme {
         user { id: string, customerId: string }
-        module M {
+        subdomain M {
           context T {
             aggregate Customer {
               name: string
@@ -2112,7 +2112,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           id: string
           permissions: string[]
         }
-        module Sales {
+        subdomain Sales {
           permissions { ordersConfirm, ordersCancel }
           context Orders {
             aggregate Order {
@@ -2132,12 +2132,12 @@ describe("Loom IR validation (post-lowering)", async () => {
     // Walk the operation IR and assert the permissions ref turned
     // into the runtime-string literal.  This is the contract every
     // backend renders against.
-    const op = loom.systems[0]!.modules[0]!.contexts[0]!.aggregates[0]!.operations[0]!;
+    const op = loom.systems[0]!.subdomains[0]!.contexts[0]!.aggregates[0]!.operations[0]!;
     const pre = op.statements.find((s) => s.kind === "precondition");
     const json = JSON.stringify(pre);
     expect(json).toContain('"value":"sales.ordersCancel"');
     // The module's permissions catalogue is exposed on the IR.
-    const mod = loom.systems[0]!.modules[0]!;
+    const mod = loom.systems[0]!.subdomains[0]!;
     expect(mod.permissions.map((p) => p.runtimeString)).toEqual([
       "sales.ordersConfirm",
       "sales.ordersCancel",
@@ -2151,7 +2151,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           id: string
           permissions: string[]
         }
-        module Sales {
+        subdomain Sales {
           permissions { ordersConfirm }
           context Orders {
             aggregate Order {
@@ -2180,7 +2180,7 @@ describe("Loom IR validation (post-lowering)", async () => {
   it("rejects duplicate permission names within a module", async () => {
     const loom = await loomFrom(`
       system Acme {
-        module Sales {
+        subdomain Sales {
           permissions {
             ordersConfirm,
             ordersConfirm
@@ -2210,7 +2210,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           id: string
           permissions: string[]
         }
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order {
               status: string
@@ -2324,7 +2324,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         requirement US-001 { type: UserStory  title: "Login"  status: InProgress  priority: 1 }
         requirement AC-001 parent US-001 { type: AcceptanceCriteria  title: "Valid creds" }
         system S {
-          module M { context C { aggregate A { operation go() {} } } }
+          subdomain M { context C { aggregate A { operation go() {} } } }
         }
         solution SOL-001 for US-001 { title: "x"  entitles [ M.C.A.go ] }
         testCase TC-001 verifies AC-001 { title: "t"  covers [ M.C.A.go ] }
@@ -2356,7 +2356,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     it("rejects an unresolved code reference", async () => {
       const { errors } = await parse(`
         requirement US-001 { type: UserStory  title: "x" }
-        system S { module M { context C { aggregate A { operation go() {} } } } }
+        system S { subdomain M { context C { aggregate A { operation go() {} } } } }
         solution SOL-001 for US-001 { entitles [ M.C.A.missing ] }
       `);
       expect(errors.some((e) => /missing/.test(e))).toBe(true);

@@ -16,8 +16,8 @@ describe("validator: react deployable requires `ui:`", () => {
   it("emits `loom.react-deployable-missing-ui` on a react deployable with no ui binding", async () => {
     const { errors } = await parseString(`
       system S {
-        module M { context C { aggregate A { x: int } } }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        subdomain M { context C { aggregate A { x: int } } }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: react, targets: api, port: 3001 }
       }
     `);
@@ -34,9 +34,9 @@ describe("validator: react deployable requires `ui:`", () => {
   it("accepts a react deployable with an explicit `ui:` binding", async () => {
     const { errors } = await parseString(`
       system S {
-        module M { context C { aggregate A { x: int } } }
+        subdomain M { context C { aggregate A { x: int } } }
         ui WebApp { }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -52,14 +52,14 @@ describe("validator: react deployable requires `ui:`", () => {
     // modules — equivalent to the legacy per-aggregate fallback.
     const { errors } = await parseString(`
       system S {
-        module M {
+        subdomain M {
           context C {
             aggregate A { name: string  derived display: string = name }
             repository As for A { }
           }
         }
-        ui WebApp with scaffold(modules: [M]) { }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        ui WebApp with scaffold(subdomains: [M]) { }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -74,8 +74,8 @@ describe("validator: react deployable requires `ui:`", () => {
     // new rule is react-only and doesn't double-fire on `static`.
     const { errors } = await parseString(`
       system S {
-        module M { context C { aggregate A { x: int } } }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        subdomain M { context C { aggregate A { x: int } } }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, port: 3001 }
       }
     `);

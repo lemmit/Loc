@@ -51,7 +51,7 @@ system SalesSystem {
     fontFamily: "Inter, system-ui, sans-serif"
   }
 
-  module Sales {
+  subdomain Sales {
     context Sales {
 
       enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
@@ -165,12 +165,16 @@ system SalesSystem {
 
   // Hono backend — runs in the playground's runtime worker
   // (PGlite under the hood).
-  ui WebApp with scaffold(modules: [Sales]) {
+  ui WebApp with scaffold(subdomains: [Sales]) {
   }
+
+  storage primary { type: postgres }
+  dataSource salesState { for: Sales, kind: state, use: primary }
 
   deployable api {
     platform: hono
-    modules: Sales
+    contexts: [Sales]
+    dataSources: [salesState]
     port: 3000
   }
 

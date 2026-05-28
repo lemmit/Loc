@@ -11,7 +11,7 @@
 
 system ActionShowcase {
 
-  module Sales {
+  subdomain Sales {
     context Sales {
       aggregate Order {
         customerId: string
@@ -61,7 +61,7 @@ system ActionShowcase {
 
   deployable api {
     platform: hono
-    modules: Sales
+    contexts: [Sales]
     serves: SalesApi
     port: 3000
   }

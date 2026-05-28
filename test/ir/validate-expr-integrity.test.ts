@@ -32,7 +32,7 @@ import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 
 const FIXTURE = `system Mini {
-  module M {
+  subdomain M {
     context C {
       event OrderPlaced { name: string }
       aggregate Order {
@@ -56,7 +56,7 @@ const FIXTURE = `system Mini {
   }
   deployable api {
     platform: hono
-    modules: M
+    contexts: [C]
     serves: MiniApi
     port: 3000
   }

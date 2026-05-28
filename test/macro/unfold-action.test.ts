@@ -168,14 +168,14 @@ context Sales with audit, softDelete {
 
   it("threads ref-list args through unfold (scaffold with modules: [Sales])", async () => {
     // Regression: pre-fix, unfold ran the macro with empty `{}`
-    // args, so `scaffold(modules: [Sales])` recorded no invocations.
+    // args, so `scaffold(subdomains: [Sales])` recorded no invocations.
     // After the resolveMacroArgs wiring + the scaffold-family
-    // refactor, the top-level macro fans `scaffoldModule(of: Sales)`
+    // refactor, the top-level macro fans `scaffoldSubdomain(of: Sales)`
     // via `invokeMacro` — which the one-level unfold turns into a
-    // `with scaffoldModule(of: Sales)` clause on the ui.
+    // `with scaffoldSubdomain(of: Sales)` clause on the ui.
     const source = `
 system Demo {
-  module Sales {
+  subdomain Sales {
     context S {
       aggregate Order {
         subject: string
@@ -183,31 +183,31 @@ system Demo {
       repository Orders for Order { }
     }
   }
-  ui Admin with scaffold(modules: [Sales]) { }
+  ui Admin with scaffold(subdomains: [Sales]) { }
 }
 `;
     const unfolded = await unfold(source, "scaffold");
     // The composer call is gone, replaced by the per-module child:
     expect(unfolded).not.toMatch(/with scaffold\(/);
-    expect(unfolded).toMatch(/with scaffoldModule\(of: Sales\)/);
+    expect(unfolded).toMatch(/with scaffoldSubdomain\(of: Sales\)/);
     // The shared index pages (direct emissions) get inlined:
     expect(unfolded).toMatch(/page Home/);
     // NOT flattened all the way — per-aggregate pages stay opaque
-    // behind the scaffoldModule call; users drill further if they
+    // behind the scaffoldSubdomain call; users drill further if they
     // want the OrderList/OrderDetail breakdown.
     expect(unfolded).not.toMatch(/page OrderList/);
     expect(unfolded).not.toMatch(/page OrderDetail/);
   });
 
   it("scaffold composability lets users drill to single-aggregate granularity", async () => {
-    // Three-level drill: scaffold(modules: [Sales]) →
-    // scaffoldModule(of: Sales) → scaffoldContext(of: S) →
+    // Three-level drill: scaffold(subdomains: [Sales]) →
+    // scaffoldSubdomain(of: Sales) → scaffoldContext(of: S) →
     // scaffoldAggregate(of: Order) → raw page declarations.  Proves
     // the composer chain lets users materialise just one aggregate's
     // scaffold while leaving the rest of the UI under macros.
     const source = `
 system Demo {
-  module Sales {
+  subdomain Sales {
     context S {
       aggregate Order {
         subject: string
@@ -215,12 +215,12 @@ system Demo {
       repository Orders for Order { }
     }
   }
-  ui Admin with scaffold(modules: [Sales]) { }
+  ui Admin with scaffold(subdomains: [Sales]) { }
 }
 `;
     let result = await unfold(source, "scaffold");
-    expect(result).toMatch(/with scaffoldModule\(of: Sales\)/);
-    result = await unfold(result, "scaffoldModule");
+    expect(result).toMatch(/with scaffoldSubdomain\(of: Sales\)/);
+    result = await unfold(result, "scaffoldSubdomain");
     expect(result).toMatch(/with scaffoldContext\(of: S\)/);
     result = await unfold(result, "scaffoldContext");
     expect(result).toMatch(/with scaffoldAggregate\(of: Order\)/);

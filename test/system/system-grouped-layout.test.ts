@@ -4,7 +4,7 @@ import { buildSystemGraph } from "../../web/src/builder/system/model.js";
 import { parseRaw as parse } from "../_helpers/index.js";
 
 const SYSTEM = `system S {
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Order {
       }
@@ -12,7 +12,7 @@ const SYSTEM = `system S {
       }
     }
   }
-  module Billing {
+  subdomain Billing {
     context Invoices {
       aggregate Invoice {
       }

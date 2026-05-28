@@ -7,7 +7,7 @@ import type { NodeKind } from "./model";
 // ---------------------------------------------------------------------------
 // Adding constructs to a system from the Model builder. Domain constructs land
 // in a bounded context (the user picks which when there's more than one);
-// `api` references a module (likewise pickable); infra constructs (storage / ui
+// `api` references a subdomain (likewise pickable); infra constructs (storage / ui
 // / deployable) live at system scope. Every add is parse-guarded — an edit that
 // wouldn't parse is rejected (returns null) rather than written.
 // ---------------------------------------------------------------------------
@@ -59,11 +59,11 @@ export function listContextNames(ast: Model): string[] {
   return contexts(ast).map((c) => c.name);
 }
 
-/** Module names, in document order (for the `api from <module>` picker). */
-export function listModuleNames(ast: Model): string[] {
+/** Subdomain names, in document order (for the `api from <subdomain>` picker). */
+export function listSubdomainNames(ast: Model): string[] {
   const out: string[] = [];
   for (const n of AstUtils.streamAst(ast)) {
-    if (n.$type === "Module") out.push((n as { name?: string }).name ?? "");
+    if (n.$type === "Subdomain") out.push((n as { name?: string }).name ?? "");
   }
   return out;
 }
@@ -83,14 +83,14 @@ function firstAggregateIn(ctx: BoundedContext): string | undefined {
 }
 
 // Minimal-but-valid source for a freshly added construct. repository / view
-// reference an aggregate in their own context; `api` references a module —
+// reference an aggregate in their own context; `api` references a subdomain —
 // returning null (so the add is skipped) when no such target exists.
 function constructTemplate(
   kind: NodeKind,
   name: string,
   ast: Model,
   container: AstNode,
-  opts: { module?: string },
+  opts: { subdomain?: string },
 ): string | null {
   switch (kind) {
     case "aggregate":
@@ -116,8 +116,8 @@ function constructTemplate(
     case "deployable":
       return `\n  deployable ${name} {\n    platform: hono\n  }\n`;
     case "api": {
-      const mod = opts.module ?? listModuleNames(ast)[0];
-      return mod ? `\n  api ${name} from ${mod}\n` : null;
+      const sub = opts.subdomain ?? listSubdomainNames(ast)[0];
+      return sub ? `\n  api ${name} from ${sub}\n` : null;
     }
     default:
       return null;
@@ -126,12 +126,12 @@ function constructTemplate(
 
 /** Add a construct to `source`, returning the new source or null if it can't be
  *  placed / wouldn't parse. `opts.context` picks the target bounded context for
- *  domain kinds (defaults to the first); `opts.module` picks the `api` source
- *  module (defaults to the first). */
+ *  domain kinds (defaults to the first); `opts.subdomain` picks the `api` source
+ *  subdomain (defaults to the first). */
 export function addConstructSource(
   source: string,
   kind: NodeKind,
-  opts: { context?: string; module?: string } = {},
+  opts: { context?: string; subdomain?: string } = {},
 ): string | null {
   const ast = parseDdd(source).ast;
   let container: AstNode | undefined;
@@ -149,13 +149,13 @@ export function addConstructSource(
   return parseDdd(next).parserErrors.length === 0 ? next : null;
 }
 
-/** Add a module (with a starter context) at system scope. */
-export function addModuleSource(source: string): string | null {
+/** Add a subdomain (with a starter context) at system scope. */
+export function addSubdomainSource(source: string): string | null {
   const ast = parseDdd(source).ast;
   const system = ast.members.find((m): m is System => m.$type === "System");
   if (!system) return null;
-  const name = freshName(ast, "Module");
-  const text = `\n  module ${name} {\n    context ${name}Ctx {\n    }\n  }\n`;
+  const name = freshName(ast, "Subdomain");
+  const text = `\n  subdomain ${name} {\n    context ${name}Ctx {\n    }\n  }\n`;
   const next = insertIntoBlock(source, system, text);
   return parseDdd(next).parserErrors.length === 0 ? next : null;
 }

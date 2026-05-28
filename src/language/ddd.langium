@@ -34,7 +34,7 @@ System:
     '}';
 
 SystemMember:
-    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | Layout;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | DataSource | Layout;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -84,18 +84,18 @@ TestE2E:
         body+=TestStatement*
     '}';
 
-Module:
-    'module' name=ID '{'
+Subdomain:
+    'subdomain' name=ID '{'
         (contexts+=BoundedContext | permissions+=PermissionsBlock)*
     '}';
 
-// Per-module permission catalogue.  Each declaration becomes a typed
+// Per-subdomain permission catalogue.  Each declaration becomes a typed
 // identifier (`permissions.<name>`) usable in operation / workflow /
 // view-bind expressions; lowering rewrites the reference to its
-// runtime string `<lowercase-module>.<name>` so handlers can compare
+// runtime string `<lowercase-subdomain>.<name>` so handlers can compare
 // against `currentUser.permissions: string[]` claims without
 // hand-spelling the strings.  Multiple `permissions { ... }` blocks
-// in one module merge their declarations.
+// in one subdomain merge their declarations.
 PermissionsBlock:
     'permissions' '{'
         (decls+=PermissionDecl (','? decls+=PermissionDecl)* ','?)?
@@ -107,12 +107,20 @@ PermissionDecl:
 Deployable:
     'deployable' name=LooseName '{'
         ('platform' ':' platform=Platform ','?)
-        // Slice 11.27 — modules can carry per-module storage role
-        // bindings.  Two surface forms:
-        //   modules: Sales, Marketing                            // bare list (legacy)
-        //   modules: Sales { primary: pg, cache: redis },        // per-module storage map
-        //            Marketing { primary: pg }
-        ('modules' ':' moduleBindings+=ModuleBinding (',' moduleBindings+=ModuleBinding)* ','?)?
+        // D-STORAGE-SPLIT: contexts the deployable hosts (semantic
+        // change from the legacy `modules:` clause — refs are
+        // BoundedContext, not the subdomain wrappers).  All v1
+        // deployables list contexts directly; per-(context, kind)
+        // storage bindings live on the parallel `dataSources:` clause.
+        ('contexts' ':' '[' contextRefs+=[BoundedContext:ID] (',' contextRefs+=[BoundedContext:ID])* ','? ']' ','?)?
+        // D-STORAGE-SPLIT: the deployable's dataSource ↔ context bindings.
+        // Each ref points at a system-level `dataSource { for: …, kind: …,
+        // use: … }` declaration.  Validator enforces (a) every listed
+        // dataSource's `for:` is one of `contexts:` above; (b) per
+        // (context, kind) uniqueness; (c) every aggregate's required
+        // kind (state / eventLog / cache / snapshot / replica) has a
+        // matching dataSource for its hosting context.
+        ('dataSources' ':' '[' dataSourceRefs+=[DataSource:LooseName] (',' dataSourceRefs+=[DataSource:LooseName])* ','? ']' ','?)?
         ('targets' ':' targets=[Deployable:LooseName] ','?)?
         // Slice 11.26 — explicit api composition.  Backend deployables
         // declare which contracts they serve via `serves:`.  Frontend
@@ -153,19 +161,29 @@ UiComposeBinding:
 UiParamBinding:
     name=LooseName ':' source=[Deployable:LooseName];
 
-// Slice 11.27 — `modules:` entry on a backend deployable.  Bare
-// form (`Sales`) for backward compat; brace form (`Sales { primary:
-// pg, cache: redis }`) binds storage instances to the module's
-// roles.  Validator (Slice 11.27) enforces that role names are in
-// the v0 enum and storage refs resolve.
-ModuleBinding:
-    name=[Module:ID] ('{' (storages+=ModuleStorageBinding (',' storages+=ModuleStorageBinding)* ','?)? '}')?;
+// D-STORAGE-SPLIT: the per-(context, kind) binding from a context's
+// aggregates to a physical `storage`.  All `for:` / `kind:` / `use:`
+// are required by the validator; declared as optional in the grammar
+// so missing-field diagnostics are friendlier than a hard parse
+// error.  Per-kind config keys (schema, every, retain, …) are
+// validated against the resolved storage's `type`.
+DataSource:
+    'dataSource' name=LooseName '{'
+        ('for'  ':' context=[BoundedContext:ID] ','?)?
+        ('kind' ':' kind=DataSourceKind ','?)?
+        ('use'  ':' use=[Storage:LooseName] ','?)?
+        ('schema'         ':' schema=STRING ','?)?
+        ('tablePrefix'    ':' tablePrefix=STRING ','?)?
+        ('keyPrefix'      ':' keyPrefix=STRING ','?)?
+        ('ttl'            ':' ttl=INT ','?)?
+        ('every'          ':' every=INT ','?)?
+        ('retain'         ':' retain=INT ','?)?
+        ('isolationLevel' ':' isolationLevel=IsolationLevel ','?)?
+        ('readonly'       ':' readonly?='true' ','?)?
+    '}';
 
-ModuleStorageBinding:
-    role=ModuleStorageRole ':' storage=[Storage:LooseName];
-
-ModuleStorageRole returns string:
-    'primary' | 'cache' | 'search' | 'events' | 'bi';
+DataSourceKind returns string:
+    'state' | 'eventLog' | 'snapshot' | 'cache' | 'replica';
 
 UiSugarBinding:
     'ui' ':' ref=[Ui:ID] ','?;
@@ -261,7 +279,7 @@ UiHelperImport:
 // Peer to module / ui / deployable.  Pure declarative — what's
 // available; consumers (ui, deployable) reference it by name.
 Api:
-    'api' name=ID 'from' source=[Module:ID];
+    'api' name=ID 'from' source=[Subdomain:ID];
 
 // ---- storage declaration (system-level) ------------------------
 //
@@ -282,6 +300,8 @@ Api:
 Storage:
     'storage' name=LooseName '{'
         ('type' ':' type=StorageType ','?)
+        ('instance' ':' instance=ID ','?)?
+        ('connection' ':' connection=ConnectionSource ','?)?
     '}';
 
 StorageType returns string:
@@ -290,6 +310,12 @@ StorageType returns string:
     | 'elastic' | 'meilisearch'
     | 'kafka'
     | 'clickhouse' | 'bigquery';
+
+ConnectionSource:
+      {infer ServiceConnectionSource} 'service' '(' service=ID ')'
+    | {infer EnvConnectionSource}     'env'     '(' env=STRING ')'
+    | {infer SecretConnectionSource}  'secret'  '(' secret=ID ')'
+    | {infer LiteralConnectionSource} 'literal' '(' literal=STRING ')';
 
 // ---- ui api parameter ------------------------------------------
 //
@@ -428,7 +454,15 @@ StateField:
 // aggregate / context member positions; everywhere else they remain
 // admissible identifiers.
 StateFieldName returns string:
-    ID | 'filter' | 'stamp' | 'implements';
+    ID | 'filter' | 'stamp' | 'implements'
+    // DataSource clause keys (PR-3 / D-STORAGE-SPLIT) are admitted as
+    // soft so user pages can still declare a state field named `kind`,
+    // `schema`, `every`, etc.  Without this, `state { kind: string }`
+    // stopped parsing the moment `'kind'` appeared as a literal in the
+    // `DataSource` rule.
+    | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
+    | 'retain' | 'isolationLevel' | 'readonly' | 'use'
+    | 'eventLog' | 'snapshot' | 'replica';
 
 // ---- menu ---------------------------------------------------------------
 
@@ -541,7 +575,7 @@ QualifiedName returns string:
 // may `cover`.  Intentionally broad — anything from a whole module
 // down to a single operation, plus deployables and api contracts.
 type Targetable =
-    Module | BoundedContext | Aggregate | ValueObject | EventDecl
+    Subdomain | BoundedContext | Aggregate | ValueObject | EventDecl
   | Repository | Workflow | View | Operation | Deployable | Api;
 
 // ---------------------------------------------------------------------------
@@ -575,11 +609,15 @@ ValueObjectMember:
 
 Aggregate:
     'aggregate' name=ID ('ids' idKind=IdKind)? withClause=WithClause? '{'
+        ('persistenceStrategy' ':' persistenceStrategy=PersistenceStrategy ','?)?
         members+=AggregateMember*
     '}';
 
 IdKind returns string:
     'guid' | 'int' | 'long' | 'string';
+
+PersistenceStrategy returns string:
+    'stateBased' | 'eventSourced';
 
 // ---- macro `with` clause ----------------------------------------
 //
@@ -787,7 +825,17 @@ FieldAccess returns string:
 Property:
     name=(ID | 'money' | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
         // Phase 2 page-metadata + favicon keywords — soft in property position.
-        | 'description' | 'ogImage' | 'canonical' | 'favicon')
+        | 'description' | 'ogImage' | 'canonical' | 'favicon'
+        // Storage / connection-source soft keywords — soft in property
+        // position so user-declared fields named `env`, `service`, etc.
+        // (showcase.ddd: `event BuildPromoted { … env: string … }`) still parse.
+        | 'instance' | 'connection' | 'service' | 'env' | 'literal'
+        // DataSource clause keys (PR-3) — soft in property position so
+        // user-declared fields named `kind`, `schema`, `every`, etc.
+        // (banking.ddd: `entity AccountTransaction { kind: string }`) still parse.
+        | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
+        | 'retain' | 'isolationLevel' | 'readonly' | 'use'
+        | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -865,7 +913,19 @@ LooseName returns string:
     // Phase 2 page-metadata + favicon keywords.  Admitted as soft so
     // user code can still name fields `description`, `ogImage`,
     // `canonical`, `favicon`.
-    | 'description' | 'ogImage' | 'canonical' | 'favicon';
+    | 'description' | 'ogImage' | 'canonical' | 'favicon'
+    // Storage / dataSource clause + connection-source keywords admitted
+    // as soft so user code can still name a field `env`, `service`,
+    // `instance`, `connection`, or `literal` (showcase.ddd uses
+    // `env: string` as an event field, for instance).
+    | 'instance' | 'connection' | 'service' | 'env' | 'literal'
+    // DataSource clause keys (PR-3) admitted as soft so user code can
+    // still use `kind`, `schema`, `every`, etc. as parameter / property
+    // / loose-name positions.  `cache` is already admitted above
+    // (storage roles), `for` predates this PR as a hard keyword.
+    | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
+    | 'retain' | 'isolationLevel' | 'readonly' | 'use'
+    | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -930,7 +990,7 @@ EmitStmt:
     '}';
 
 EmitField:
-    name=ID ':' value=Expression;
+    name=LooseName ':' value=Expression;
 
 // Combined assignment / call statement.  We parse an LValue first, then
 // optionally consume a mutation suffix.  Without a suffix the LValue
@@ -1213,7 +1273,17 @@ NameRefIdent returns string:
        // so expressions can read a field named `description`,
        // `ogImage`, etc. (e.g. `description != null` in a derived
        // property — see showcase.ddd).
-       | 'description' | 'ogImage' | 'canonical' | 'favicon';
+       | 'description' | 'ogImage' | 'canonical' | 'favicon'
+       // Storage / connection-source soft keywords — see LooseName for
+       // the rationale.  Admitted here so expressions can read a field
+       // named `env`, `service`, etc.
+       | 'instance' | 'connection' | 'service' | 'env' | 'literal'
+       // DataSource clause keys (PR-3) — admitted as bare NameRefs so
+       // expression bodies can reference a state/property field named
+       // `kind` (`Field { kind + ":", bind: v }` in walker tests).
+       | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
+       | 'retain' | 'isolationLevel' | 'readonly' | 'use'
+       | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources';
 
 // ---------------------------------------------------------------------------
 // Terminals

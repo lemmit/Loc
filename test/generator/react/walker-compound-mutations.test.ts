@@ -18,7 +18,7 @@ describe("+= / -= in onClick mutations", () => {
   it("count += 1 lowers to setCount(count + 1)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Counter {
             route: "/c"
@@ -29,7 +29,7 @@ describe("+= / -= in onClick mutations", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -46,7 +46,7 @@ describe("+= / -= in onClick mutations", () => {
   it("count -= 1 lowers to setCount(count - 1)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Counter {
             route: "/c"
@@ -54,7 +54,7 @@ describe("+= / -= in onClick mutations", () => {
             body:  Button { "-", onClick: e => { count -= 1 } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -70,7 +70,7 @@ describe("+= / -= in onClick mutations", () => {
   it("compound rhs expression: count += step * 2", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Counter {
             route: "/c"
@@ -81,7 +81,7 @@ describe("+= / -= in onClick mutations", () => {
             body:  Button { "Bump", onClick: e => { count += step * 2 } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -98,7 +98,7 @@ describe("+= / -= in onClick mutations", () => {
   it("mixed +=, -=, := in one onClick handler all emit in order", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Counter {
             route: "/c"
@@ -114,7 +114,7 @@ describe("+= / -= in onClick mutations", () => {
             }}
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -135,7 +135,7 @@ describe("+= / -= in onClick mutations", () => {
     // doing nothing at runtime (a dead button).  It must now throw.
     const build = buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page P {
             route: "/p"
@@ -143,7 +143,7 @@ describe("+= / -= in onClick mutations", () => {
             body:  Button { "x", onClick: e => { draft.note := 1 } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

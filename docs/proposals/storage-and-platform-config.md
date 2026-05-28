@@ -1,7 +1,30 @@
 # Proposal: Storage and Platform Config Redesign
 
-**Status:** Draft. Output of a design conversation. Not yet implemented.
+**Status:** Draft. Output of a design conversation. Partially superseded — see decision note below.
 **Scope:** Make the data layer explicit in deployable composition; introduce per-aggregate persistence strategy; expose generator/architecture choices on the deployable's platform config; preserve backward compatibility.
+
+> **Pinned decisions affecting this proposal** (see [`docs/decisions.md`](../decisions.md)):
+>
+> - **D-STORAGE-SPLIT** — the keyword `storage` covers physical
+>   instances only. The logical (aggregate-to-physical) form
+>   described in §3.2 is renamed to `dataSource` and binds at
+>   `(context, kind)` granularity; references to "logical storage"
+>   below should read as `dataSource`. The deployable's binding
+>   clause is `dataSources:`.
+> - **D-GRANULARITY** — bindings are per-context, not per-aggregate.
+>   The per-aggregate `for: <Aggregate>` syntax in §3.2/§3.3 does
+>   not land in v1; it is deferred to a v2 override mechanism.
+>   §2.1 invariant 4 ("BC = semantic boundary only … no storage
+>   homogeneity") is superseded — read v1 as "storage homogeneity
+>   per context is the default."
+> - **D-ENV-SWAP** — the §3.8 `overrides` block is deferred out of
+>   the F1 micro-plan; per-environment swap in v1 uses alternate
+>   `dataSource` decls picked by the test deployable.
+>
+> The §1 motivation, §2.1 invariants 1–3 and 5, §3.1 physical
+> storage grammar, and most of §3.4–§3.7 (per-aggregate persistence
+> strategy, event publish markers, deployable platform config,
+> `persistence:` shorthand) survive intact and inform F1 grammar.
 
 ---
 

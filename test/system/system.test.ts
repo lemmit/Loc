@@ -57,7 +57,7 @@ describe("system / module / deployable", () => {
     // catalog_web (Hono, modules: Catalog) sees Product but NOT Order.
     expect(files.has("catalog_web/domain/product.ts")).toBe(true);
     expect(files.has("catalog_web/domain/order.ts")).toBe(false);
-    // api (.NET, modules: Catalog, Sales) sees both.
+    // api (.NET, contexts: [Catalog], Sales) sees both.
     const apiFiles = [...files.keys()].filter((k) => k.startsWith("api/"));
     expect(apiFiles.some((k) => /Domain\/Products\/Product\.cs$/.test(k))).toBe(true);
     expect(apiFiles.some((k) => /Domain\/Orders\/Order\.cs$/.test(k))).toBe(true);

@@ -206,7 +206,7 @@ export class DddValidator {
         }
 
         for (const sm of m.members) {
-          if (sm.$type === "Module") {
+          if (sm.$type === "Subdomain") {
             for (const ctx of sm.contexts) checkContext(ctx, accept);
           } else if (sm.$type === "BoundedContext") {
             checkContext(sm, accept);

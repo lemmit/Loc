@@ -7,7 +7,7 @@ import type { NodeKind } from "./model";
 // ---------------------------------------------------------------------------
 // Rebind a construct's single outgoing reference from the inspector:
 //   repository … for <Aggregate>     (repository → aggregate)
-//   api …        from <Module>        (api → module)
+//   api …        from <Subdomain>     (api → subdomain)
 //   view …       from <Aggregate>     (view → aggregate)
 //
 // A reference's `$refNode` is the CST node of the referenced *name token* (set
@@ -30,8 +30,8 @@ const KIND_TO_TYPE: Record<RebindKind, string> = {
 };
 
 /** What the reference points at — drives both the option list and the label. */
-export function targetKindOf(kind: RebindKind): "aggregate" | "module" {
-  return kind === "api" ? "module" : "aggregate";
+export function targetKindOf(kind: RebindKind): "aggregate" | "subdomain" {
+  return kind === "api" ? "subdomain" : "aggregate";
 }
 
 function refOf(node: AstNode, kind: RebindKind): Reference | undefined {
@@ -60,7 +60,7 @@ export function currentTarget(node: AstNode, kind: RebindKind): string | null {
 
 /** Candidate target names for the rebind Select. */
 export function rebindTargets(ast: Model, kind: RebindKind): string[] {
-  const wantType = targetKindOf(kind) === "module" ? "Module" : "Aggregate";
+  const wantType = targetKindOf(kind) === "subdomain" ? "Subdomain" : "Aggregate";
   const out = new Set<string>();
   for (const n of AstUtils.streamAst(ast)) {
     const name = (n as { name?: unknown }).name;

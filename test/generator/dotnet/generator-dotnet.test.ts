@@ -1226,7 +1226,7 @@ describe(".NET generator", () => {
       const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
       const sys = loom.systems[0]!;
       const dep = sys.deployables.find((d) => d.platform === "dotnet")!;
-      const contexts = sys.modules.flatMap((m) => m.contexts);
+      const contexts = sys.subdomains.flatMap((m) => m.contexts);
       const ns = dep.name[0]!.toUpperCase() + dep.name.slice(1);
       return generateDotnetForContexts(contexts, ns, {
         deployable: dep,
@@ -1240,7 +1240,7 @@ describe(".NET generator", () => {
           id: string
           role: string
         }
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order {
               customerId: string
@@ -1255,7 +1255,7 @@ describe(".NET generator", () => {
         }
         deployable api {
           platform: dotnet
-          modules: Sales
+          contexts: [Orders]
           port: 8080
           auth: required
         }
@@ -1265,7 +1265,7 @@ describe(".NET generator", () => {
     const SRC_NO_AUTH = `
       system Acme {
         user { id: string }
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order { customerId: string }
             repository Orders for Order { }
@@ -1273,7 +1273,7 @@ describe(".NET generator", () => {
         }
         deployable api {
           platform: dotnet
-          modules: Sales
+          contexts: [Orders]
           port: 8080
         }
       }
@@ -1339,7 +1339,7 @@ describe(".NET generator", () => {
           id: string
           customerId: string
         }
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order {
               customerId: string
@@ -1353,7 +1353,7 @@ describe(".NET generator", () => {
         }
         deployable api {
           platform: dotnet
-          modules: Sales
+          contexts: [Orders]
           port: 8080
           auth: required
         }
@@ -1399,7 +1399,7 @@ describe(".NET generator", () => {
           id: string
           role: string
         }
-        module Sales {
+        subdomain Sales {
           context Orders {
             aggregate Order {
               status: string
@@ -1413,7 +1413,7 @@ describe(".NET generator", () => {
         }
         deployable api {
           platform: dotnet
-          modules: Sales
+          contexts: [Orders]
           port: 8080
           auth: required
         }

@@ -79,7 +79,7 @@ export function checkDeployable(
   if (d.platform === "react" && !hasUiBinding) {
     accept(
       "error",
-      `React deployable '${d.name}' must declare a 'ui:' binding — every page now flows through the page metamodel. Add 'ui: <UiName>' (use 'ui <UiName> { with scaffold(modules: [...]) }' for the bulk-CRUD case).`,
+      `React deployable '${d.name}' must declare a 'ui:' binding — every page now flows through the page metamodel. Add 'ui: <UiName>' (use 'ui <UiName> { with scaffold(subdomains: [...]) }' for the bulk-CRUD case).`,
       { node: d, property: "name", code: "loom.react-deployable-missing-ui" },
     );
   }
@@ -134,11 +134,11 @@ export function checkDeployable(
         { node: d, property: "targets" },
       );
     }
-    if ((d.moduleBindings ?? []).length > 0) {
+    if ((d.contextRefs ?? []).length > 0) {
       accept(
         "warning",
-        `Frontend deployable '${d.name}' inherits modules from its target '${target.name}'; the explicit 'modules:' list is ignored.`,
-        { node: d, property: "moduleBindings" },
+        `Frontend deployable '${d.name}' inherits contexts from its target '${target.name}'; the explicit 'contexts:' list is ignored.`,
+        { node: d, property: "contextRefs" },
       );
     }
     void siblings;
@@ -155,7 +155,7 @@ export function checkDeployable(
   // Explicit api composition checks.
   checkDeployableServes(d, accept);
   checkDeployableUiCompose(d, accept);
-  checkDeployableModuleStorages(d, accept);
+  checkDeployableDataSources(d, accept);
 }
 
 /** Validate the `platform:` value now that the grammar admits an
@@ -278,59 +278,39 @@ export function checkDeployableDesignPack(
   }
 }
 
-/** `modules: <M> { primary: <Storage>, ... }`
- *  per-module storage map validations.
- *    - Each storage ref must resolve.
- *    - No duplicate role within one module's brace block.
- *    - Brace blocks only valid on backend platforms (frontends
- *      don't persist anything; the storage map there is a smell).
- *    - Each module must have AT LEAST a `primary:` storage when
- *      its aggregates persist.  v0 relaxation: only enforce
- *      `primary:` when the brace block is non-empty (so existing
- *      bare `modules: Sales` deployables keep working).  Bare
- *      list still defaults to "no explicit storage; use generator
- *      defaults". */
-export function checkDeployableModuleStorages(d: Deployable, accept: ValidationAcceptor): void {
-  const isBackend = platformOwnsBackend(d.platform);
-  for (const mb of d.moduleBindings ?? []) {
-    const block = mb.storages ?? [];
-    if (block.length === 0) continue; // bare-list form
-    if (!isBackend) {
+/** D-STORAGE-SPLIT: deployable `dataSources:` list validations.
+ *    - Every listed dataSource's `for:` context must be in `contexts:`.
+ *    - Per (`for:`, `kind:`) uniqueness within one deployable.
+ *  Per-aggregate-strategy / kind coverage checks ("state-based
+ *  aggregate's context needs `kind: state` listed") live in the
+ *  IR-layer validator (`src/ir/validate/validate.ts`) — that pass
+ *  sees the resolved aggregate persistenceStrategy. */
+export function checkDeployableDataSources(d: Deployable, accept: ValidationAcceptor): void {
+  const contextNames = new Set((d.contextRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean));
+  const seenKey = new Map<string, string>(); // "<ctx>:<kind>" → dataSource name
+  for (const r of d.dataSourceRefs ?? []) {
+    const ds = r.ref;
+    if (!ds) continue;
+    const ctxName = ds.context?.ref?.name;
+    if (!ctxName) continue;
+    if (!contextNames.has(ctxName)) {
       accept(
         "error",
-        `'modules: <M> { ... }' storage block is only valid on a backend deployable (got platform '${d.platform}').`,
-        { node: mb, property: "name" },
+        `Deployable '${d.name}' lists dataSource '${ds.name}' whose 'for: ${ctxName}' is not in 'contexts:'.  Add ${ctxName} to 'contexts:' or remove the dataSource.`,
+        { node: d, property: "dataSourceRefs" },
       );
       continue;
     }
-    const seenRoles = new Set<string>();
-    let hasPrimary = false;
-    for (const sb of block) {
-      const role = sb.role;
-      if (seenRoles.has(role)) {
-        accept(
-          "error",
-          `Module '${mb.name?.$refText}' on deployable '${d.name}' binds role '${role}' more than once.`,
-          { node: sb, property: "role" },
-        );
-      } else {
-        seenRoles.add(role);
-      }
-      if (role === "primary") hasPrimary = true;
-      if (!sb.storage?.ref) {
-        accept(
-          "error",
-          `Module '${mb.name?.$refText}' on deployable '${d.name}' references undeclared storage '${sb.storage?.$refText ?? "<missing>"}' for role '${role}'.`,
-          { node: sb, property: "storage" },
-        );
-      }
-    }
-    if (!hasPrimary) {
+    const key = `${ctxName}:${ds.kind ?? "<unknown>"}`;
+    const prior = seenKey.get(key);
+    if (prior) {
       accept(
         "error",
-        `Module '${mb.name?.$refText}' on deployable '${d.name}' must include a 'primary: <storage>' binding (transactional persistence).`,
-        { node: mb, property: "name" },
+        `Deployable '${d.name}' has two dataSources for (${ctxName}, kind: ${ds.kind}): '${prior}' and '${ds.name}'.  Pick exactly one per (context, kind).`,
+        { node: d, property: "dataSourceRefs" },
       );
+    } else {
+      seenKey.set(key, ds.name);
     }
   }
 }

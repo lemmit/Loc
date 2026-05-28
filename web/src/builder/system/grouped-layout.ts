@@ -15,7 +15,7 @@ import type { SystemGraph } from "./model";
 
 export interface GroupBox {
   id: string;
-  kind: "module" | "context";
+  kind: "subdomain" | "context";
   name: string;
   /** Parent group id (a context's module), or null for a top-level group. */
   parentId: string | null;
@@ -45,7 +45,7 @@ const PAD_TOP = 30; // room for the group's label
 const COLS = 2;
 
 const contextGroupId = (name: string): string => `group:context:${name}`;
-const moduleGroupId = (name: string): string => `group:module:${name}`;
+const subdomainGroupId = (name: string): string => `group:module:${name}`;
 
 /** Name of the nearest ancestor of `node` with the given `$type`. */
 function ancestorName(node: AstNode, type: string): string | undefined {
@@ -68,7 +68,7 @@ export function groupedLayout(graph: SystemGraph): GroupedLayout {
   const ctxByName = new Map<string, CtxAcc>();
   const ungrouped: string[] = [];
   for (const n of graph.nodes) {
-    if (n.kind === "module") continue; // modules become group containers
+    if (n.kind === "subdomain") continue; // modules become group containers
     const ctx = ancestorName(n.ast, "BoundedContext");
     if (!ctx) {
       ungrouped.push(n.id);
@@ -76,7 +76,7 @@ export function groupedLayout(graph: SystemGraph): GroupedLayout {
     }
     let acc = ctxByName.get(ctx);
     if (!acc) {
-      acc = { name: ctx, module: ancestorName(n.ast, "Module"), members: [] };
+      acc = { name: ctx, module: ancestorName(n.ast, "Subdomain"), members: [] };
       ctxByName.set(ctx, acc);
     }
     acc.members.push(n.id);
@@ -105,29 +105,29 @@ export function groupedLayout(graph: SystemGraph): GroupedLayout {
 
   // 3. Group contexts under their module (or leave module-less contexts as
   //    top-level groups). Compute module sizes from stacked contexts.
-  const moduleOf = new Map<string, string[]>(); // module name → context names
+  const subdomainOf = new Map<string, string[]>(); // module name → context names
   const topLevelContexts: string[] = [];
   for (const acc of ctxByName.values()) {
     if (acc.module) {
-      const list = moduleOf.get(acc.module) ?? [];
+      const list = subdomainOf.get(acc.module) ?? [];
       list.push(acc.name);
-      moduleOf.set(acc.module, list);
+      subdomainOf.set(acc.module, list);
     } else {
       topLevelContexts.push(acc.name);
     }
   }
 
   // Lay contexts out vertically inside a module; returns the module's size.
-  const placeContextsInModule = (moduleName: string): { width: number; height: number } => {
+  const placeContextsInSubdomain = (subdomainName: string): { width: number; height: number } => {
     let y = PAD_TOP;
     let maxW = 0;
-    for (const ctxName of moduleOf.get(moduleName) ?? []) {
+    for (const ctxName of subdomainOf.get(subdomainName) ?? []) {
       const size = ctxSize.get(ctxName)!;
       groups.push({
         id: contextGroupId(ctxName),
         kind: "context",
         name: ctxName,
-        parentId: moduleGroupId(moduleName),
+        parentId: subdomainGroupId(subdomainName),
         x: PAD,
         y,
         width: size.width,
@@ -142,12 +142,12 @@ export function groupedLayout(graph: SystemGraph): GroupedLayout {
   // 4. Arrange the top-level groups (modules + module-less contexts) in a row.
   let x = 0;
   let rowHeight = 0;
-  for (const moduleName of moduleOf.keys()) {
-    const size = placeContextsInModule(moduleName);
+  for (const subdomainName of subdomainOf.keys()) {
+    const size = placeContextsInSubdomain(subdomainName);
     groups.push({
-      id: moduleGroupId(moduleName),
-      kind: "module",
-      name: moduleName,
+      id: subdomainGroupId(subdomainName),
+      kind: "subdomain",
+      name: subdomainName,
       parentId: null,
       x,
       y: 0,

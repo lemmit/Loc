@@ -58,7 +58,7 @@ export type ParamType =
  * macro needs it. */
 export type NamedDeclKind =
   | "Aggregate"
-  | "Module"
+  | "Subdomain"
   | "BoundedContext"
   | "Workflow"
   | "View"

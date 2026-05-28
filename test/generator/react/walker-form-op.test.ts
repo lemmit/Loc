@@ -16,7 +16,7 @@ const buildAndGenerate = generateSystemFiles;
 
 const SRC = `
   system S {
-    module Sales {
+    subdomain Sales {
       context Sales {
         aggregate Order {
           customerId: string
@@ -34,7 +34,7 @@ const SRC = `
     }
     deployable api {
       platform: hono
-      modules: Sales
+      contexts: [Sales]
       serves: SalesApi
       port: 3000
     }
@@ -98,7 +98,7 @@ describe("scaffold detail page — operation modals", () => {
 // involved here).
 const COMPONENT_SRC = `
   system S {
-    module Sales {
+    subdomain Sales {
       context Sales {
         aggregate Order {
           customerId: string
@@ -116,7 +116,7 @@ const COMPONENT_SRC = `
       }
       page Home { route: "/" body: Text { "hi" } }
     }
-    deployable api { platform: hono modules: Sales serves: SalesApi port: 3000 }
+    deployable api { platform: hono contexts: [Sales] serves: SalesApi port: 3000 }
     deployable web {
       platform: static
       targets: api

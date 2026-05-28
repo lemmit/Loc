@@ -109,11 +109,8 @@ describe("printExpr — literals", () => {
     expect(printExpr(nw)).toBe("now()");
   });
 
-  it("MoneyLit prints as `money(\"…\")`", async () => {
-    const m = await derivedExpr(
-      `x: money  derived n: money = money("9.99")`,
-      "n",
-    );
+  it('MoneyLit prints as `money("…")`', async () => {
+    const m = await derivedExpr(`x: money  derived n: money = money("9.99")`, "n");
     expect(printExpr(m)).toBe('money("9.99")');
   });
 
@@ -147,20 +144,14 @@ describe("printExpr — binary precedence + spacing", () => {
   });
 
   it("TernaryExpr renders with `cond ? then : else` spacing", async () => {
-    const e = await derivedExpr(
-      `x: int  derived label: string = x > 0 ? "pos" : "neg"`,
-      "label",
-    );
+    const e = await derivedExpr(`x: int  derived label: string = x > 0 ? "pos" : "neg"`, "label");
     expect(printExpr(e)).toBe('x > 0 ? "pos" : "neg"');
   });
 });
 
 describe("printExpr — postfix chain (member + call)", () => {
   it("renders dotted member access without spaces around `.`", async () => {
-    const e = await derivedExpr(
-      `email: string  derived ok: bool = email.length > 0`,
-      "ok",
-    );
+    const e = await derivedExpr(`email: string  derived ok: bool = email.length > 0`, "ok");
     expect(printExpr(e)).toBe("email.length > 0");
   });
 
@@ -219,18 +210,12 @@ describe("printExpr — match", () => {
 
 describe("printExpr — primitive conversion", () => {
   it("renders `string(x)` round-trip", async () => {
-    const e = await derivedExpr(
-      `n: int  derived label: string = string(n)`,
-      "label",
-    );
+    const e = await derivedExpr(`n: int  derived label: string = string(n)`, "label");
     expect(printExpr(e)).toBe("string(n)");
   });
 
   it("renders `money(x)` round-trip", async () => {
-    const e = await derivedExpr(
-      `n: int  derived amt: money = money(n)`,
-      "amt",
-    );
+    const e = await derivedExpr(`n: int  derived amt: money = money(n)`, "amt");
     expect(printExpr(e)).toBe("money(n)");
   });
 });
@@ -242,10 +227,7 @@ describe("printExpr — receivers (`this`, `id`)", () => {
   });
 
   it("IdRef prints as the bare `id`", async () => {
-    const e = await derivedExpr(
-      `name: string  derived label: string = name + string(id)`,
-      "label",
-    );
+    const e = await derivedExpr(`name: string  derived label: string = name + string(id)`, "label");
     expect(printExpr(e)).toBe("name + string(id)");
   });
 });

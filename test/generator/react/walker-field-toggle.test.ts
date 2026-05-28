@@ -31,7 +31,7 @@ describe("Field + Toggle with bind: state binding", () => {
   it("Field { 'Label', bind: name } wires controlled TextInput to state", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Form {
             route: "/form"
@@ -39,7 +39,7 @@ describe("Field + Toggle with bind: state binding", () => {
             body:  Field { "Your name", bind: name }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -61,7 +61,7 @@ describe("Field + Toggle with bind: state binding", () => {
   it("Toggle { 'Label', bind: active } wires controlled Switch to bool state", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Pref {
             route: "/pref"
@@ -69,7 +69,7 @@ describe("Field + Toggle with bind: state binding", () => {
             body:  Toggle { "Active", bind: active }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -89,7 +89,7 @@ describe("Field + Toggle with bind: state binding", () => {
   it("complete interactive form: state + Field + Toggle + Button + Text", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Profile {
             route: "/profile"
@@ -106,7 +106,7 @@ describe("Field + Toggle with bind: state binding", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -133,14 +133,14 @@ describe("Field + Toggle with bind: state binding", () => {
   it("Field without bind: emits an uncontrolled label-only stub", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
             body:  Field { "Bare" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -159,7 +159,7 @@ describe("Field + Toggle with bind: state binding", () => {
   it("Field label accepts a binary-op (state interpolation in label)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -170,7 +170,7 @@ describe("Field + Toggle with bind: state binding", () => {
             body:  Field { kind + ":", bind: v }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

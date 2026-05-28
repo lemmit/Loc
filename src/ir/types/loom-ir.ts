@@ -318,7 +318,16 @@ export interface AggregateIR {
    * debug-string emitters (TS `toString()`/`util.inspect.custom`,
    * C# `ToString()` override, Elixir `defimpl Inspect`). */
   inspectDerived?: DerivedIR;
+  /** Persistence strategy declared on the aggregate.  Drives the
+   * `dataSource` kind required by the enclosing context: `stateBased`
+   * → `kind: state`; `eventSourced` → `kind: eventLog`.  Omitted in
+   * the IR when not declared in source (default is `stateBased` at
+   * resolution time, but the IR preserves source fidelity for the
+   * AST → IR → printer round-trip). */
+  persistenceStrategy?: PersistenceStrategy;
 }
+
+export type PersistenceStrategy = "stateBased" | "eventSourced";
 
 /** A single stamping rule attached to an aggregate.  Backends
  * dispatch on `event` and emit assignments for the matching
@@ -611,12 +620,12 @@ export type EnrichedBoundedContextIR = Omit<BoundedContextIR, "aggregates" | "va
   valueObjects: EnrichedValueObjectIR[];
 };
 
-export type EnrichedModuleIR = Omit<ModuleIR, "contexts"> & {
+export type EnrichedSubdomainIR = Omit<SubdomainIR, "contexts"> & {
   contexts: EnrichedBoundedContextIR[];
 };
 
-export type EnrichedSystemIR = Omit<SystemIR, "modules"> & {
-  modules: EnrichedModuleIR[];
+export type EnrichedSystemIR = Omit<SystemIR, "subdomains"> & {
+  subdomains: EnrichedSubdomainIR[];
 };
 
 // ---------------------------------------------------------------------------
@@ -641,7 +650,7 @@ export interface RequirementIR {
  *  resolved AST node's type at lowering time so backends never
  *  re-resolve. */
 export type CodeRefKind =
-  | "module"
+  | "subdomain"
   | "context"
   | "aggregate"
   | "operation"
@@ -773,11 +782,11 @@ export interface VerificationIR {
   };
 }
 
-/** A deployment plan: modules grouping bounded contexts, plus the
- * deployable artefacts that ship subsets of those modules. */
+/** A deployment plan: subdomains grouping bounded contexts, plus the
+ * deployable artefacts that ship subsets of those contexts. */
 export interface SystemIR {
   name: string;
-  modules: ModuleIR[];
+  subdomains: SubdomainIR[];
   deployables: DeployableIR[];
   e2eTests: TestE2EIR[];
   /** Optional system-wide user-claim shape.  Populated when the source
@@ -805,11 +814,16 @@ export interface SystemIR {
    *  deployables `serves:` a named api; frontend deployables
    *  `consumes:` an api from a named target. */
   apis: ApiIR[];
-  /** Storage declarations at system scope.  Each is a typed slot
-   *  the deployable composition picks up via `modules: <M> {
-   *  primary: <Storage>, cache: <Storage>, ... }`.  Reusable across
-   *  deployables. */
+  /** Storage declarations at system scope.  Each is a physical
+   *  infrastructure instance referenced from a `dataSource` binding.
+   *  Reusable across deployables. */
   storages: StorageIR[];
+  /** DataSource declarations at system scope.  Each binds a
+   *  `(BoundedContext, DataSourceKind)` pair to a physical storage,
+   *  optionally with per-kind config (`schema:` / `every:` / `ttl:` /
+   *  …).  Deployables list which dataSources they host via the
+   *  `dataSources:` clause. */
+  dataSources: DataSourceIR[];
   /** Named `layout <Name> { … }` SystemMembers (Phase 8).  Pages
    *  reference one via `layout: <Name>` — the React generator emits
    *  one `<Name>Layout` wrapper component per entry and routes
@@ -825,7 +839,22 @@ export interface SystemIR {
 export interface StorageIR {
   name: string;
   type: StorageKind;
+  /** Compose-service handle the deployable shares with the storage,
+   *  used as the host name in generated connection strings.  Optional
+   *  in v1; when omitted the system orchestrator derives a default. */
+  instance?: string;
+  /** Source of the runtime connection string — `service(name)` for
+   *  intra-compose discovery, `env("VAR")` for environment lookup,
+   *  `secret(handle)` for a future secrets-manager binding, or
+   *  `literal("…")` for a hard-coded URL.  Optional in v1. */
+  connection?: ConnectionSourceIR;
 }
+
+export type ConnectionSourceIR =
+  | { kind: "service"; service: string }
+  | { kind: "env"; env: string }
+  | { kind: "secret"; secret: string }
+  | { kind: "literal"; literal: string };
 
 export type StorageKind =
   | "postgres"
@@ -1140,38 +1169,64 @@ export type MenuLinkIR =
 
 // ---------------------------------------------------------------------------
 
-export interface ModuleIR {
+export interface SubdomainIR {
   name: string;
   contexts: BoundedContextIR[];
-  /** Permission catalogue declared via per-module `permissions { ... }`
-   *  blocks.  Empty when the module declares none.  Each entry's
+  /** Permission catalogue declared via per-subdomain `permissions { ... }`
+   *  blocks.  Empty when the subdomain declares none.  Each entry's
    *  `runtimeString` is the value backends compare against
    *  `currentUser.permissions[]` claims; the source-side identifier
    *  (`name`) is what `permissions.<name>` references resolve to in
    *  expression bodies. */
   permissions: PermissionDeclIR[];
-  /** Name of the deployable that owns migrations for this module's
+  /** Name of the deployable that owns migrations for this subdomain's
    *  primary persistent storage.  Populated by `enrichLoomModel` — the
-   *  first deployable (in declaration order) whose `moduleBindings`
-   *  entry for this module declares a `primary` storage role wins;
-   *  failing that, the first deployable that includes the module and
-   *  whose platform `needsDb`.  Undefined when no deployable matches
-   *  (frontend-only modules, etc.) — backends MUST emit migrations
-   *  only when `module.migrationsOwner === deployable.name`. */
+   *  first backend deployable (in declaration order) that hosts any
+   *  context from this subdomain and whose platform `needsDb`.
+   *  Undefined when no deployable matches (frontend-only subdomains,
+   *  etc.) — backends MUST emit migrations only when
+   *  `subdomain.migrationsOwner === deployable.name`. */
   migrationsOwner?: string;
 }
 
-/** One permission declared in a module's `permissions { }` block. */
+/** One permission declared in a subdomain's `permissions { }` block. */
 export interface PermissionDeclIR {
   /** Source-side identifier used as `permissions.<name>` in
    *  expression bodies. */
   name: string;
   /** Runtime string emitted when a `permissions.<name>` reference
-   *  lowers to a literal — `<lowercased-module>.<name>`.  Stable
+   *  lowers to a literal — `<lowercased-subdomain>.<name>`.  Stable
    *  across regens so claim payloads can be expressed in plain
    *  strings on the wire. */
   runtimeString: string;
 }
+
+/** D-STORAGE-SPLIT: a per-(context, kind) binding from a domain
+ *  context to a physical `storage`.  Carries per-kind config
+ *  validated against the resolved storage's `type`. */
+export interface DataSourceIR {
+  name: string;
+  /** Name of the BoundedContext the binding applies to. */
+  contextName: string;
+  /** Which datalogue kind this binding satisfies for the context. */
+  kind: DataSourceKind;
+  /** Name of the physical `storage` declaration this binding routes to. */
+  storageName: string;
+  schema?: string;
+  tablePrefix?: string;
+  keyPrefix?: string;
+  /** Cache TTL in seconds.  Validator requires storage type to be
+   *  cache-capable (e.g. redis) when this is set. */
+  ttl?: number;
+  /** Snapshot policy: take a snapshot every N events. */
+  every?: number;
+  /** Snapshot policy: retain at most N snapshots per stream. */
+  retain?: number;
+  isolationLevel?: "readUncommitted" | "readCommitted" | "repeatableRead" | "serializable";
+  readonly?: boolean;
+}
+
+export type DataSourceKind = "state" | "eventLog" | "snapshot" | "cache" | "replica";
 
 // `static` is the page-metamodel's UI-only deployable kind: builds a
 // Vite bundle and serves it via a small static-asset host (nginx in
@@ -1200,9 +1255,13 @@ export interface DeployableIR {
    *  not here).  The system orchestrator's dispatch keys on `platform`
    *  while every family has exactly one registered version. */
   platformRef: string;
-  /** Names of modules included in this deployable.  For react frontends,
-   * inherited from the targeted backend deployable. */
-  moduleNames: string[];
+  /** Names of bounded contexts hosted by this deployable.  For react
+   * frontends, inherited from the targeted backend deployable. */
+  contextNames: string[];
+  /** Names of dataSource declarations the deployable wires up.
+   *  Empty for frontend-only deployables.  Validator enforces that
+   *  every listed dataSource's `for:` is one of `contextNames`. */
+  dataSourceNames: string[];
   /** HTTP port the deployable's web server listens on. */
   port: number;
   /** Backend deployable this frontend talks to.  Set only when
@@ -1262,12 +1321,6 @@ export interface DeployableIR {
    *  param's contract).  Empty for backend deployables and for
    *  frontends whose UI declares no api parameters. */
   uiBindings: UiParamBindingIR[];
-  /** Per-module storage bindings on a backend
-   *  deployable.  Each entry corresponds to one `modules:` entry
-   *  with an optional brace block (`Sales { primary: pg, cache:
-   *  redis }`).  Bare-list form (`modules: Sales, Marketing`)
-   *  produces entries with empty `storages` arrays. */
-  moduleBindings: ModuleBindingIR[];
   /** Optional favicon path — relative to the source `.ddd` file.
    *  Carried verbatim through lowering; the React generator
    *  resolves the path, copies the referenced file into
@@ -1285,20 +1338,6 @@ export interface UiParamBindingIR {
   /** Name of the backend deployable that supplies the param's contract. */
   sourceDeployableName: string;
 }
-
-/** Per-module storage bindings on a backend
- *  deployable.  Each entry binds a module's role-keyed storage
- *  slot to a system-scope storage declaration. */
-export interface ModuleBindingIR {
-  /** Module the bindings apply to. */
-  moduleName: string;
-  /** Role → storage-name map (`primary`, `cache`, `search`,
-   *  `events`, `bi`).  Empty when the source declared the bare
-   *  `modules: Sales` form (no brace block). */
-  storages: { role: ModuleStorageRole; storageName: string }[];
-}
-
-export type ModuleStorageRole = "primary" | "cache" | "search" | "events" | "bi";
 
 // ---------------------------------------------------------------------------
 // Statements
@@ -1567,7 +1606,7 @@ export const lit = (kind: LiteralKind, value: string): ExprIR => ({
 export function allContexts(loom: LoomModel): BoundedContextIR[] {
   const out: BoundedContextIR[] = [];
   for (const sys of loom.systems) {
-    for (const m of sys.modules) out.push(...m.contexts);
+    for (const m of sys.subdomains) out.push(...m.contexts);
   }
   out.push(...loom.contexts);
   return out;

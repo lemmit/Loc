@@ -12,7 +12,7 @@ async function gen(src: string): Promise<Map<string, string>> {
 
 const FIXTURE = `
 system Demo {
-  module M {
+  subdomain M {
     context Accounts {
       aggregate Account {
         handle: string
@@ -28,7 +28,7 @@ system Demo {
   api AccountsApi from Accounts
   deployable phoenixApp {
     platform: phoenixLiveView
-    modules: M
+    contexts: [Accounts]
     serves: AccountsApi
     port: 4000
   }

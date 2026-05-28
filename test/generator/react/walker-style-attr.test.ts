@@ -22,7 +22,7 @@ async function buildAndGenerate(src: string): Promise<Map<string, string>> {
 }
 
 const DEPLOYABLES = `
-  deployable api { platform: hono, modules: M, port: 3000 }
+  deployable api { platform: hono, contexts: [C], port: 3000 }
   deployable web {
     platform: static
     targets: api
@@ -35,7 +35,7 @@ describe("walker style: escape hatch — React emission", () => {
   it("Container { style: {...} } emits style={{...}} on the root JSX element", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
@@ -57,7 +57,7 @@ describe("walker style: escape hatch — React emission", () => {
   it("Stack { style: {...} } emits style on the root element", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
@@ -77,7 +77,7 @@ describe("walker style: escape hatch — React emission", () => {
   it("primitive without style: emits no style attribute", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"
@@ -100,7 +100,7 @@ describe("walker style: escape hatch — React emission", () => {
     // entry routed in directly (the IR accepts arbitrary key strings).
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Home {
             route: "/"

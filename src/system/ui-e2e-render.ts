@@ -3,8 +3,8 @@ import type {
   BoundedContextIR,
   DeployableIR,
   ExprIR,
-  ModuleIR,
   OperationIR,
+  SubdomainIR,
   SystemIR,
   TestE2EIR,
   TestStmtIR,
@@ -53,7 +53,7 @@ interface RenderCtx {
 
 export function renderUIE2EFile(
   sys: SystemIR,
-  modulesByName: Map<string, ModuleIR>,
+  modulesByName: Map<string, SubdomainIR>,
   reactDeployable: DeployableIR,
 ): string | null {
   // Only emit a spec for the UI tests that target THIS frontend.
@@ -121,12 +121,12 @@ export function renderUIE2EFile(
 
 function collectContextsFor(
   d: DeployableIR,
-  modulesByName: Map<string, ModuleIR>,
+  modulesByName: Map<string, SubdomainIR>,
 ): BoundedContextIR[] {
+  const want = new Set(d.contextNames);
   const out: BoundedContextIR[] = [];
-  for (const name of d.moduleNames) {
-    const m = modulesByName.get(name);
-    if (m) out.push(...m.contexts);
+  for (const m of modulesByName.values()) {
+    for (const c of m.contexts) if (want.has(c.name)) out.push(c);
   }
   return out;
 }

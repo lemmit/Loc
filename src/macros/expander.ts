@@ -34,7 +34,7 @@ import {
   type Aggregate,
   isAggregate,
   isBoundedContext,
-  isModule,
+  isSubdomain,
   isSystem,
   isUi,
   isView,
@@ -121,7 +121,7 @@ export function registerMacroExpander(shared: LangiumSharedServices): void {
 
 interface Inventory {
   Aggregate: Map<string, AstNode>;
-  Module: Map<string, AstNode>;
+  Subdomain: Map<string, AstNode>;
   BoundedContext: Map<string, AstNode>;
   Workflow: Map<string, AstNode>;
   View: Map<string, AstNode>;
@@ -132,7 +132,7 @@ interface Inventory {
 function buildInventory(model: Model): Inventory {
   const inv: Inventory = {
     Aggregate: new Map(),
-    Module: new Map(),
+    Subdomain: new Map(),
     BoundedContext: new Map(),
     Workflow: new Map(),
     View: new Map(),
@@ -143,7 +143,7 @@ function buildInventory(model: Model): Inventory {
     const named = node as AstNode & { name?: string };
     if (typeof named.name !== "string") continue;
     if (isAggregate(node)) inv.Aggregate.set(named.name, node);
-    else if (isModule(node)) inv.Module.set(named.name, node);
+    else if (isSubdomain(node)) inv.Subdomain.set(named.name, node);
     else if (isBoundedContext(node)) inv.BoundedContext.set(named.name, node);
     else if (isWorkflow(node)) inv.Workflow.set(named.name, node);
     else if (isView(node)) inv.View.set(named.name, node);

@@ -18,14 +18,14 @@ describe("expressions in text positions", () => {
   it('Heading { "Hello, " + name } emits the binary op as a JSX expr', async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Greet(name: string) {
             route: "/greet/:name"
             body:  Heading { "Hello, " + name }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -45,7 +45,7 @@ describe("expressions in text positions", () => {
   it("Text { count + 1 } emits state arithmetic", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Counter {
             route: "/c"
@@ -56,7 +56,7 @@ describe("expressions in text positions", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -74,7 +74,7 @@ describe("expressions in text positions", () => {
   it("Stat slots accept binary ops in either position", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Dashboard {
             route: "/d"
@@ -85,7 +85,7 @@ describe("expressions in text positions", () => {
             body:  Stat { "Active: " + count, total - count }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -108,14 +108,14 @@ describe("expressions in text positions", () => {
   it("Card title accepts a binary-op expression", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page UserCard(name: string) {
             route: "/users/:name"
             body:  Card { "Profile: " + name, Text { "hello" } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -134,7 +134,7 @@ describe("expressions in text positions", () => {
   it("Card with state-ref title (no longer needs param-only fallback)", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page S {
             route: "/s"
@@ -142,7 +142,7 @@ describe("expressions in text positions", () => {
             body:  Card { label, Text { "body" } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -161,14 +161,14 @@ describe("expressions in text positions", () => {
   it("Card { child-only } — call in first slot stays as content, no title", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Plain {
             route: "/plain"
             body:  Card { Text { "just content" } }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -186,14 +186,14 @@ describe("expressions in text positions", () => {
   it("Text { 42 } emits the int literal as a JSX expr", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page N {
             route: "/n"
             body:  Text { 42 }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

@@ -19,7 +19,7 @@ system PokemonWorld {
     // ──────────────────────────────────────────────────────────────
     // Roster — the creatures and the people who collect them.
     // ──────────────────────────────────────────────────────────────
-    module Roster {
+    subdomain Roster {
 
         context Creatures {
 
@@ -153,7 +153,7 @@ system PokemonWorld {
     // ──────────────────────────────────────────────────────────────
     // Combat — what trainers do with their creatures.
     // ──────────────────────────────────────────────────────────────
-    module Combat {
+    subdomain Combat {
 
         context Battles {
 
@@ -241,17 +241,20 @@ system PokemonWorld {
     api CombatApi from Combat
 
     storage primarySql { type: postgres }
+    dataSource creaturesState { for: Creatures, kind: state, use: primarySql }
+    dataSource trainersState  { for: Trainers,  kind: state, use: primarySql }
+    dataSource battlesState   { for: Battles,   kind: state, use: primarySql }
+    dataSource arenasState    { for: Arenas,    kind: state, use: primarySql }
 
     deployable api {
         platform: hono
-        modules:
-            Roster { primary: primarySql },
-            Combat { primary: primarySql }
+        contexts: [Creatures, Trainers, Battles, Arenas]
+        dataSources: [creaturesState, trainersState, battlesState, arenasState]
         serves: RosterApi, CombatApi
         port: 8080
     }
 
-    ui Trainerdex with scaffold(modules: [Roster, Combat]) {
+    ui Trainerdex with scaffold(subdomains: [Roster, Combat]) {
         api Roster: RosterApi
         api Combat: CombatApi
     }

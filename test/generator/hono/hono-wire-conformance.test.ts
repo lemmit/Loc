@@ -20,7 +20,7 @@ import { parseString } from "../../_helpers/index.js";
 // ---------------------------------------------------------------------------
 
 const HONO_FIXTURE = `system AcmeHono {
-  module Sales {
+  subdomain Sales {
     context Sales {
       enum OrderStatus { Draft, Confirmed }
       valueobject Money {
@@ -62,7 +62,7 @@ const HONO_FIXTURE = `system AcmeHono {
   api SalesApi from Sales
   deployable honoApi {
     platform: hono
-    modules: Sales
+    contexts: [Sales]
     serves: SalesApi
     port: 3000
   }

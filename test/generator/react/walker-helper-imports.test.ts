@@ -36,7 +36,7 @@ describe("UI-level helper imports", () => {
   it("emits an import line for a helper actually used in a body", async () => {
     const { files, diagnostics } = await parse(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           import helper formatPrice from "./helpers/price"
           page X {
@@ -44,7 +44,7 @@ describe("UI-level helper imports", () => {
             body:  Text { formatPrice(99) }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -59,7 +59,7 @@ describe("UI-level helper imports", () => {
   it("declared-but-unused helpers don't emit an import line", async () => {
     const { files, diagnostics } = await parse(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           import helper formatPrice from "./helpers/price"
           import helper formatDate  from "./helpers/date"
@@ -68,7 +68,7 @@ describe("UI-level helper imports", () => {
             body:  Text { formatPrice(99) }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -81,7 +81,7 @@ describe("UI-level helper imports", () => {
   it("multiple helpers from the same path collapse into one import line", async () => {
     const { files } = await parse(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           import helper formatPrice    from "./helpers/format"
           import helper formatQuantity from "./helpers/format"
@@ -93,7 +93,7 @@ describe("UI-level helper imports", () => {
             }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -107,7 +107,7 @@ describe("UI-level helper imports", () => {
   it("helper as a top-level body call emits a brace-wrapped JSX expression", async () => {
     const { files } = await parse(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           import helper RenderBanner from "./helpers/banner"
           page X {
@@ -115,7 +115,7 @@ describe("UI-level helper imports", () => {
             body:  RenderBanner("hi")
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -128,12 +128,12 @@ describe("UI-level helper imports", () => {
   it("validator rejects helper names that shadow stdlib primitives", async () => {
     const { diagnostics } = await parse(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           import helper Stack from "./helpers/stack"
           page X { route: "/x"  body: Heading { "hi" } }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -144,13 +144,13 @@ describe("UI-level helper imports", () => {
   it("validator rejects duplicate helper imports within the same UI", async () => {
     const { diagnostics } = await parse(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           import helper formatPrice from "./helpers/a"
           import helper formatPrice from "./helpers/b"
           page X { route: "/x"  body: Heading { "hi" } }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);

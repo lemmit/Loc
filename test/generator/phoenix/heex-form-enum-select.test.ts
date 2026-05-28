@@ -26,7 +26,7 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 function phoenixSystemWithEnum(enumBody: string, fieldType = "OrderStatus"): string {
   return `
   system Demo {
-    module M {
+    subdomain M {
       context C {
         enum OrderStatus ${enumBody}
         aggregate Order {
@@ -45,7 +45,7 @@ function phoenixSystemWithEnum(enumBody: string, fieldType = "OrderStatus"): str
       }
     }
     deployable phoenixApp {
-      platform: phoenixLiveView, modules: M, serves: DemoApi,
+      platform: phoenixLiveView, contexts: [C], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }

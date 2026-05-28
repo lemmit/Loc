@@ -15,7 +15,7 @@ describe("NumberField + Loader primitives", () => {
   it("NumberField { 'Qty', bind: qty } wires controlled NumberInput", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Form {
             route: "/form"
@@ -23,7 +23,7 @@ describe("NumberField + Loader primitives", () => {
             body:  NumberField { "Quantity", bind: qty }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -44,7 +44,7 @@ describe("NumberField + Loader primitives", () => {
   it("NumberField with decimal-typed state", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page Form {
             route: "/form"
@@ -52,7 +52,7 @@ describe("NumberField + Loader primitives", () => {
             body:  NumberField { "Price", bind: price }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -69,14 +69,14 @@ describe("NumberField + Loader primitives", () => {
   it("NumberField without bind: emits a label-only stub", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
             body:  NumberField { "Bare" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -93,7 +93,7 @@ describe("NumberField + Loader primitives", () => {
   it("Loader {} emits a default Mantine spinner", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
@@ -101,7 +101,7 @@ describe("NumberField + Loader primitives", () => {
             body:  loading ? Loader {} : Heading { "Done" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -118,14 +118,14 @@ describe("NumberField + Loader primitives", () => {
   it("Loader { size: 'lg' } emits the size attr", async () => {
     const files = await buildAndGenerate(`
       system S {
-        module M { context C { } }
+        subdomain M { context C { } }
         ui WebApp {
           page X {
             route: "/x"
             body:  Loader { size: "lg" }
           }
         }
-        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
