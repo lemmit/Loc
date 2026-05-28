@@ -425,6 +425,37 @@ treat workspace packages as subdirs of one root, not as independently
 mounted projects). Sufficient for the proposal's needs; revisit only
 if the single-root assumption hits a real limit.
 
+#### Playground = preview, CI = enforcement
+
+The playground's in-browser engine is flat-install only (BFS,
+highest-wins, single `/node_modules` root — see
+`web/src/engine/npm/resolve-tree.ts`). It cannot replicate pnpm's
+strict-isolation behaviour because the browser VFS doesn't do
+meaningful symlinks, and implementing real per-package isolation
+would be a much larger project than the resolution-strategy refactor.
+
+So the playground is going to be **pnpm-shaped (`workspace:*`
+protocol via `WorkspaceStrategy`) but npm-behaved (flat install)**.
+Architectural violations between generated packages would silently
+work in the playground and only surface when CI runs real `pnpm
+install` against the emitted tree.
+
+**This is fine** for two reasons:
+
+1. **The playground's input surface is the `.ddd` file, not the
+   generated code.** Users never see or edit `package.json`,
+   `csproj`, or import statements in generated packages — only the
+   generator can produce a boundary violation, and that's caught by
+   the existing per-backend CI gates (`LOOM_TS_BUILD`,
+   `LOOM_DOTNET_BUILD`, etc.) running against real package managers.
+2. **If a user introduces hand-written code that violates a
+   boundary, it's their code to fix.** The playground's job is
+   preview; enforcement lives one layer down in real package-manager
+   land.
+
+No "the playground enforces your architecture" promise gets made, so
+no mismatch to discover later.
+
 ### Design — `ResolutionStrategy` contract
 
 After studying the actual code paths the right design has a key
