@@ -454,7 +454,15 @@ StateField:
 // aggregate / context member positions; everywhere else they remain
 // admissible identifiers.
 StateFieldName returns string:
-    ID | 'filter' | 'stamp' | 'implements';
+    ID | 'filter' | 'stamp' | 'implements'
+    // DataSource clause keys (PR-3 / D-STORAGE-SPLIT) are admitted as
+    // soft so user pages can still declare a state field named `kind`,
+    // `schema`, `every`, etc.  Without this, `state { kind: string }`
+    // stopped parsing the moment `'kind'` appeared as a literal in the
+    // `DataSource` rule.
+    | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
+    | 'retain' | 'isolationLevel' | 'readonly' | 'use'
+    | 'eventLog' | 'snapshot' | 'replica';
 
 // ---- menu ---------------------------------------------------------------
 
@@ -904,7 +912,14 @@ LooseName returns string:
     // as soft so user code can still name a field `env`, `service`,
     // `instance`, `connection`, or `literal` (showcase.ddd uses
     // `env: string` as an event field, for instance).
-    | 'instance' | 'connection' | 'service' | 'env' | 'literal';
+    | 'instance' | 'connection' | 'service' | 'env' | 'literal'
+    // DataSource clause keys (PR-3) admitted as soft so user code can
+    // still use `kind`, `schema`, `every`, etc. as parameter / property
+    // / loose-name positions.  `cache` is already admitted above
+    // (storage roles), `for` predates this PR as a hard keyword.
+    | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
+    | 'retain' | 'isolationLevel' | 'readonly' | 'use'
+    | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1256,7 +1271,13 @@ NameRefIdent returns string:
        // Storage / connection-source soft keywords — see LooseName for
        // the rationale.  Admitted here so expressions can read a field
        // named `env`, `service`, etc.
-       | 'instance' | 'connection' | 'service' | 'env' | 'literal';
+       | 'instance' | 'connection' | 'service' | 'env' | 'literal'
+       // DataSource clause keys (PR-3) — admitted as bare NameRefs so
+       // expression bodies can reference a state/property field named
+       // `kind` (`Field { kind + ":", bind: v }` in walker tests).
+       | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
+       | 'retain' | 'isolationLevel' | 'readonly' | 'use'
+       | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources';
 
 // ---------------------------------------------------------------------------
 // Terminals
