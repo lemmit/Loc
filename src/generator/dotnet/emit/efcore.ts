@@ -87,9 +87,15 @@ export function renderConfiguration(
   agg: EnrichedAggregateIR,
   ns: string,
   ctx: BoundedContextIR,
+  /** Per-aggregate dataSource config — `schema` flows into a two-arg
+   *  `b.ToTable("orders", "tenant_a")`; `tablePrefix` prepends the
+   *  snake-case plural ("tenant_a_orders").  Absent today on systems
+   *  that don't declare any dataSource bindings — output stays
+   *  byte-identical when both fields are undefined. */
+  options: { schema?: string; tablePrefix?: string } = {},
 ): string {
   const fieldConfigs = agg.fields.flatMap((f) => fieldConfigLines(f, "        ", "b"));
-  const containmentLines = agg.contains.flatMap((c) => containmentConfigLines(c, agg));
+  const containmentLines = agg.contains.flatMap((c) => containmentConfigLines(c, agg, options));
   // Reference-collection (`Id<T>[]`) fields are persisted via a
   // separate join entity (see `join-entities.ts`), so the public
   // `List<TargetId>` accessor on the root must be unmapped — without
@@ -133,7 +139,13 @@ export function renderConfiguration(
       "{",
       `    public void Configure(EntityTypeBuilder<${agg.name}> b)`,
       "    {",
-      `        b.ToTable("${snake(plural(agg.name))}");`,
+      // dataSource-driven table mapping.  `tablePrefix` lands first
+      // (it shifts the local table name); `schema` is the second arg
+      // when set so EF Core places the entity in the right Postgres
+      // schema.  Both default to undefined → byte-identical with the
+      // existing single-arg ToTable on systems without dataSource
+      // declarations.
+      `        b.ToTable(${renderTableArgs(plural(agg.name), options)});`,
       "        b.HasKey(x => x.Id);",
       `        b.Property(x => x.Id).HasConversion(v => v.Value, v => new ${agg.name}Id(v));`,
       ...fieldConfigs,
@@ -219,7 +231,11 @@ function fieldConfigLines(f: FieldIR, indent: string, builder: string): string[]
   return [];
 }
 
-function containmentConfigLines(c: ContainmentIR, agg: AggregateIR): string[] {
+function containmentConfigLines(
+  c: ContainmentIR,
+  agg: AggregateIR,
+  options: { schema?: string; tablePrefix?: string } = {},
+): string[] {
   if (!c.collection) {
     return [`        b.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)});`];
   }
@@ -231,11 +247,38 @@ function containmentConfigLines(c: ContainmentIR, agg: AggregateIR): string[] {
     "        // private backing field instead.",
     `        b.Ignore(x => x.${upperFirst(c.name)});`,
     `        b.OwnsMany<${c.partName}>("_${c.name}", o => {`,
-    `            o.ToTable("${snake(plural(c.partName))}");`,
+    // Containment part tables inherit the aggregate's dataSource
+    // schema + prefix — both halves of the parent / part live in
+    // the same physical store.
+    `            o.ToTable(${renderTableArgs(plural(c.partName), options)});`,
     '            o.WithOwner().HasForeignKey("ParentId");',
     "            o.HasKey(x => x.Id);",
     `            o.Property(x => x.Id).HasConversion(v => v.Value, v => new ${c.partName}Id(v));`,
     ...partFieldLines,
     "        });",
   ];
+}
+
+/** Compose the argument list for an EF Core `.ToTable(...)` call.
+ *  Pure — does not touch the IR; takes the local table name (caller
+ *  already plural-cased it) and the optional `schema` / `tablePrefix`
+ *  from a resolved dataSource binding.  Output forms:
+ *
+ *    no options       → `"orders"`
+ *    schema only      → `"orders", "tenant_a"`
+ *    tablePrefix only → `"tenant_a_orders"`
+ *    both             → `"tenant_a_orders", "shared"`
+ *
+ *  Byte-identical with the legacy single-arg ToTable when no
+ *  options are supplied. */
+function renderTableArgs(
+  pluralName: string,
+  options: { schema?: string; tablePrefix?: string },
+): string {
+  const baseTable = snake(pluralName);
+  const tableName = options.tablePrefix ? `${options.tablePrefix}${baseTable}` : baseTable;
+  if (options.schema) {
+    return `"${tableName}", "${options.schema}"`;
+  }
+  return `"${tableName}"`;
 }

@@ -1,12 +1,17 @@
 import type {
+  AggregateIR,
   BoundedContextIR,
   DeployableIR,
+  EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import { resolveDataSourceForAggregate } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import type { EmitCtx } from "../_adapters/index.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
+import { ashStyleAdapter } from "./adapters/ash-style.js";
 import { type ApiRoute, emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
@@ -82,9 +87,20 @@ export function generatePhoenixLiveViewProject(
   const appName = toSnakeApp(deployable.name);
   const appModule = toModulePrefix(appName);
 
+  // Per-aggregate dataSource lookup — feeds `postgres do schema "…"
+  // end` + `tablePrefix` routing in each Ash.Resource's `postgres`
+  // block.  Returns `undefined` for systems without a matching
+  // binding, which falls back to the existing default-shape emit.
+  const resolveDataSource = (agg: AggregateIR) => {
+    const owningCtx = contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
+    return owningCtx
+      ? resolveDataSourceForAggregate(agg as EnrichedAggregateIR, owningCtx, sys)
+      : undefined;
+  };
+
   // --- Per-context domain files -------------------------------------------
   for (const ctx of contexts) {
-    emitContext(appName, ctx, appModule, out);
+    emitContext(appName, ctx, appModule, out, { resolveDataSource });
   }
 
   // --- Workflow + view files -----------------------------------------------
@@ -183,6 +199,7 @@ export function generatePhoenixLiveViewProject(
     authEnabled,
     emitTrace,
     out,
+    migrations ?? [],
   );
 
   return out;
@@ -197,6 +214,11 @@ function emitContext(
   ctx: EnrichedBoundedContextIR,
   appModule: string,
   out: Map<string, string>,
+  options: {
+    resolveDataSource?: (
+      agg: AggregateIR,
+    ) => import("../../ir/types/loom-ir.js").DataSourceIR | undefined;
+  } = {},
 ): void {
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
@@ -223,7 +245,9 @@ function emitContext(
   // / aggregate invariants) and validate-clause emission are produced by
   // emitAggregateResources.
   const allResources: string[] = [];
-  const aggFiles = emitAggregateResources(ctx, appModule, appName);
+  const aggFiles = emitAggregateResources(ctx, appModule, appName, {
+    resolveDataSource: options.resolveDataSource,
+  });
   for (const [path, content] of aggFiles) out.set(path, content);
   for (const agg of ctx.aggregates) {
     allResources.push(`${contextModule}.${upperFirst(agg.name)}`);
@@ -429,13 +453,14 @@ function emitShellFiles(
   appName: string,
   appModule: string,
   deployable: DeployableIR,
-  _sys: SystemIR,
+  sys: SystemIR,
   contexts: BoundedContextIR[],
   liveRoutes: LiveRoute[],
   apiRoutes: ApiRoute[],
   authEnabled: boolean,
   emitTrace: boolean | undefined,
   out: Map<string, string>,
+  migrations: MigrationsIR[],
 ): void {
   const port = deployable.port ?? 4000;
 
@@ -506,8 +531,25 @@ function emitShellFiles(
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderErrorJson(appModule));
   out.set(`lib/${appName}_web/controllers/error_html.ex`, renderErrorHtml(appModule));
 
-  // Config
-  out.set("config/config.exs", renderConfigExs(appName, appModule, contexts));
+  // Config — `config/config.exs` includes the `config :<app>,
+  // ash_domains: [...]` registration block.  Phoenix is always
+  // system-mode (the generator entry takes deployable + sys), so we
+  // can ALWAYS dispatch through the `ashStyleAdapter.emitDi` here.
+  // The shell helper widened its `contexts` parameter to
+  // `BoundedContextIR[]` years ago; the caller always passes the
+  // enriched flavour, so this `as` keeps the EmitCtx contract honest
+  // without touching every shell-helper signature.
+  const emitCtx: EmitCtx = {
+    deployable,
+    contexts: contexts as EnrichedBoundedContextIR[],
+    sys,
+    migrations,
+    emitTrace,
+  };
+  out.set(
+    "config/config.exs",
+    renderConfigExs(appName, appModule, contexts, ashStyleAdapter.emitDi(emitCtx)),
+  );
   out.set("config/dev.exs", renderDevExs(appName, appModule, port));
   out.set("config/prod.exs", renderProdExs(appName, appModule));
   out.set("config/runtime.exs", renderRuntimeExs(appName, appModule));
@@ -1585,13 +1627,26 @@ end
 `;
 }
 
-function renderConfigExs(appName: string, appModule: string, contexts: BoundedContextIR[]): string {
+function renderConfigExs(
+  appName: string,
+  appModule: string,
+  contexts: BoundedContextIR[],
+  ashDomainsBlock?: readonly string[],
+): string {
   // Ash 3.x requires every domain to be registered here; without it
   // `mix compile --warnings-as-errors` rejects with
   // "Domain <Mod> is not present in :ash_domains".  Domains are
   // \`<appModule>.<PascalContextName>\` (matching what
   // emitAggregateResources emits as the resource's :domain).
-  const ashDomains = contexts.map((ctx) => `${appModule}.${upperFirst(ctx.name)}`).join(", ");
+  //
+  // System-mode emit passes the block in via `ashDomainsBlock` (the
+  // `ashStyleAdapter.emitDi` output — F7d adapter-dispatch seam);
+  // legacy single-context emit synthesises it locally so the function
+  // stays standalone.
+  const ashLines = ashDomainsBlock ?? [
+    `config :${appName},`,
+    `  ash_domains: [${contexts.map((ctx) => `${appModule}.${upperFirst(ctx.name)}`).join(", ")}]`,
+  ];
   return `# Auto-generated.
 import Config
 
@@ -1606,8 +1661,7 @@ config :${appName}, ${appModule}Web.Endpoint,
     layout: false
   ]
 
-config :${appName},
-  ash_domains: [${ashDomains}]
+${ashLines.join("\n")}
 
 config :phoenix, :json_library, Jason
 

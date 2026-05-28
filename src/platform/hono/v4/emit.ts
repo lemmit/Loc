@@ -7,6 +7,8 @@
 // only the framework-neutral helpers (render-expr/stmt, templates,
 // zod-refine) in core.
 
+// Hono-framework builders now live in this package (P2b) — siblings.
+import type { EmitCtx } from "../../../generator/_adapters/index.js";
 import { emitTypescriptMigrations } from "../../../generator/typescript/emit/migrations.js";
 import {
   renderAggregate,
@@ -34,9 +36,11 @@ import {
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
 import { contextsHaveProvenancedField } from "../../../ir/util/prov-id.js";
+import { resolveDataSourceForAggregate } from "../../../ir/util/resolve-datasource.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { lowerFirst } from "../../../util/naming.js";
-// Hono-framework builders now live in this package (P2b) — siblings.
+import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
+import { layeredStyleAdapter } from "./adapters/layered-style.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitObservabilityFiles } from "./observability-builder.js";
 import { buildRoutesFile } from "./routes-builder.js";
@@ -174,7 +178,26 @@ export function generateTypeScriptForContexts(
   out.set("domain/events.ts", renderEvents(merged));
   out.set("domain/errors.ts", ERRORS_TS);
   if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);
-  out.set("db/schema.ts", renderSchema(merged, { audit: emitAudit, provenance: emitProvenance }));
+  // Per-aggregate dataSource lookup — feeds `pgSchema(...)` /
+  // `<schema>.table(...)` / `tablePrefix` routing in `renderSchema`.
+  // Returns `undefined` for systems without a matching binding, which
+  // falls back to the existing plain `pgTable(...)` shape.
+  const resolveDataSource = system
+    ? (agg: import("../../../ir/types/loom-ir.js").AggregateIR) => {
+        const owningCtx = contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
+        return owningCtx
+          ? resolveDataSourceForAggregate(
+              agg as import("../../../ir/types/loom-ir.js").EnrichedAggregateIR,
+              owningCtx,
+              system.sys,
+            )
+          : undefined;
+      }
+    : undefined;
+  out.set(
+    "db/schema.ts",
+    renderSchema(merged, { audit: emitAudit, provenance: emitProvenance, resolveDataSource }),
+  );
   if (merged.workflows.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     out.set("http/workflows.ts", buildWorkflowsFile(merged, aggsByName));
@@ -185,6 +208,21 @@ export function generateTypeScriptForContexts(
   }
   out.set("http/index.ts", renderHttpIndex(merged, { authRequired }));
 
+  // Adapter dispatch context — present only in system-mode emit so
+  // routes-file emission can route through the layered StyleAdapter +
+  // byLayer LayoutAdapter.  Other per-aggregate emissions (aggregate
+  // module, repository, extern handler, tests) still write inline
+  // paths; future slices can move them under the persistence adapter +
+  // additional layout categories.
+  const emitCtx: EmitCtx | undefined = system
+    ? {
+        deployable: system.deployable,
+        contexts,
+        sys: system.sys,
+        migrations: system.migrations,
+        emitTrace,
+      }
+    : undefined;
   // Per-aggregate emission stays per-context — each aggregate file
   // and its repository / routes are emitted in the context that
   // owns the aggregate.
@@ -199,10 +237,22 @@ export function generateTypeScriptForContexts(
         `db/repositories/${lowerFirst(agg.name)}-repository.ts`,
         buildRepositoryFile(agg, repo, ctx, emitTrace),
       );
-      out.set(
-        `http/${lowerFirst(agg.name)}.routes.ts`,
-        buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance, emitTrace),
-      );
+      // Routes file — adapter-dispatched in system mode (the layered
+      // StyleAdapter re-derives audit / provenance gates from
+      // ctx.contexts so the output matches `buildRoutesFile(...,
+      // emitAudit, emitProvenance, emitTrace)` byte-for-byte); direct
+      // call in legacy single-context mode.
+      if (emitCtx) {
+        const artifacts = layeredStyleAdapter.emitForAggregate?.(agg, emitCtx) ?? [];
+        for (const artifact of artifacts) {
+          out.set(byLayerLayoutAdapter.pathFor(artifact, emitCtx), artifact.content);
+        }
+      } else {
+        out.set(
+          `http/${lowerFirst(agg.name)}.routes.ts`,
+          buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance, emitTrace),
+        );
+      }
       if (agg.operations.some((o) => o.extern)) {
         out.set(`domain/${lowerFirst(agg.name)}-extern.ts`, buildExternHandlersFile(agg, ctx));
       }
