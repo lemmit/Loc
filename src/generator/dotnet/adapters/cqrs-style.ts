@@ -70,8 +70,13 @@ function categoriseCqrsPath(path: string): DotnetArtifactCategory {
   }
   if (path.startsWith("Application/") && path.includes("/Requests/")) return "request-dto";
   if (path.startsWith("Application/") && path.includes("/Responses/")) return "response-dto";
-  if (path.startsWith("Application/") && path.includes("/Extern/")) {
-    if (path.includes("/I") && path.endsWith("Handler.cs")) return "extern-handler-interface";
+  if (path.startsWith("Application/") && path.includes("/Handlers/")) {
+    // Extern operations emit a per-op interface plus a dev-stub
+    // implementation: `IXAggHandler.cs` (interface, named `I…`) and
+    // `DevStub…Handler.cs` (concrete stub).  Both live under the
+    // per-aggregate `Handlers/` folder.
+    const bare = path.split("/").pop()!;
+    if (bare.startsWith("I") && bare.endsWith("Handler.cs")) return "extern-handler-interface";
     return "extern-handler-stub";
   }
   if (path.startsWith("Api/")) return "controller";
