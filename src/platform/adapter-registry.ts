@@ -23,6 +23,8 @@ import {
   type StyleAdapter,
   stubAdapter,
 } from "../generator/_adapters/index.js";
+import { byLayerLayoutAdapter } from "../generator/dotnet/adapters/by-layer-layout.js";
+import { efcorePersistenceAdapter } from "../generator/dotnet/adapters/efcore-persistence.js";
 import type { Platform } from "../ir/types/loom-ir.js";
 
 /** Per-platform adapter menu — every supported adapter, keyed by its
@@ -67,27 +69,14 @@ function layoutNames(entry: PlatformAdapterEntry | undefined): string[] {
 const adapterMenus: Partial<Record<Platform, PlatformAdapterEntry>> = {};
 
 // `.NET` — EF Core + Dapper + Marten persistence; CQRS + layered style;
-// byLayer + byFeature layout.  EF + CQRS + byLayer are today's real
-// emitter output (registered as stubs here pending the F5 seam refactor
-// that moves the existing dotnet emitter under `persistence/efcore/`,
-// `styles/cqrs/`, `layouts/by-layer.ts`).
+// byLayer + byFeature layout.  `efcore` is the REAL adapter (F5a)
+// wrapping the existing dotnet emit fns; `cqrs` + `byLayer` are the
+// next slices (F5b / F5c).  Today's pipeline still calls the emit fns
+// directly; the future orchestrator rewire dispatches through these.
 adapterMenus.dotnet = {
   adapters: {
     persistence: {
-      efcore: stubAdapter<PersistenceAdapter>(
-        "persistence",
-        "efcore",
-        "dotnet",
-        () => persistenceNames(adapterMenus.dotnet),
-        {
-          name: "efcore",
-          supportedStrategies: ["stateBased"],
-          supports: (type, kind, strategy) =>
-            strategy === "stateBased" &&
-            ["postgres", "mysql", "sqlite", "inMemory"].includes(type) &&
-            ["state", "snapshot", "replica"].includes(kind),
-        },
-      ),
+      efcore: efcorePersistenceAdapter,
       dapper: stubAdapter<PersistenceAdapter>(
         "persistence",
         "dapper",
@@ -139,13 +128,7 @@ adapterMenus.dotnet = {
       ),
     },
     layouts: {
-      byLayer: stubAdapter<LayoutAdapter>(
-        "layout",
-        "byLayer",
-        "dotnet",
-        () => layoutNames(adapterMenus.dotnet),
-        { name: "byLayer" },
-      ),
+      byLayer: byLayerLayoutAdapter,
       byFeature: stubAdapter<LayoutAdapter>(
         "layout",
         "byFeature",
