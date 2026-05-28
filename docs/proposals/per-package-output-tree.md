@@ -256,6 +256,118 @@ Recommendation: **a single coordinated PR per backend**, in this order:
 Partial rollouts will be more painful than the cutover. Don't try to
 thread backwards-compat across the two shapes.
 
+## Package manager — npm in toolchain, pnpm in emitted output
+
+Two separate decisions kept separate:
+
+- **Loom's own repo** stays on **npm**. Single-package project with a
+  flat dep tree; none of pnpm's wins (strictness, monorepo speed,
+  `workspace:*`) apply. Switching would mean converting the lockfile,
+  updating every CI workflow, and the `prepare` lifecycle script — real
+  cost, near-zero benefit.
+- **Generated output** moves to **pnpm**. The proposal's core claim
+  — "dependency direction is visible in manifests" — needs pnpm's
+  strict-by-default behavior to actually be enforced at runtime. Under
+  npm/yarn workspaces a generated `-api` package could `import` from
+  `-domain` without declaring the dep (hoisting makes it work
+  silently), which would let the architecture lie. Touches
+  `docker/dockerfile.hbs` (`pnpm install --frozen-lockfile` +
+  `pnpm run build`) and the workspace root manifest.
+
+Yarn skipped entirely: Yarn 1 is legacy, Yarn 2+/PnP introduces a
+different mental model with worse ecosystem compatibility, and the
+community has fragmented.
+
+No fragmentation worries on the other backends — NuGet + `dotnet`
+CLI + SDK-style `.csproj` is universal in .NET; Mix + Hex + `mix.exs`
+is universal in Elixir.
+
+## TODO — Playground workspace support
+
+The Loom Playground (`web/`) runs an in-browser bundler
+(`NpmInstallBundleEngine` — `web/src/engine/npm-install-bundle-engine.ts`)
+that fetches real npm tarballs and bundles via esbuild-wasm against a
+single-root VFS. **It has zero concept of workspace-local packages**:
+grepping `web/src/engine/` for `workspace|monorepo|workspaces` returns
+zero hits. So the multi-package shape collides with the playground
+architecture regardless of which package manager the emitted output
+uses — `workspace:*` and path-based local resolution are equally
+unsupported.
+
+This is a **TODO**, not an open question — playground support is
+required for the multi-package shape to ship, otherwise the playground
+silently regresses to "can't bundle Loom's own output."
+
+### Initial research — how far are we?
+
+The architecture is **not fundamentally hostile** to workspace
+resolution, but workspace support is **not a plug-in**. The change
+touches surface area from the dependency model down to the esbuild
+plugin factory.
+
+**Files needing changes:**
+
+1. **`web/src/engine/dependencies.ts`** — add a `"workspace"` /
+   `"local"` resolution kind alongside the existing `"custom-vendored"`
+   precedent. The dependency model has the shape for this already.
+2. **`web/src/engine/npm/resolve-tree.ts`** — currently fetches every
+   package from the registry. Needs to intercept workspace packages
+   before registry lookup and return a synthetic `PlannedPackage`
+   pointing at local VFS paths.
+3. **`web/src/engine/npm/install.ts`** — install orchestrator always
+   calls `extract()` → `fetchTarball()`. For workspace packages, skip
+   extraction and write project files directly from the VFS. The
+   existing `mirror` parameter is a precedent for local overrides.
+4. **`web/src/engine/npm/esbuild-vfs-plugin.ts`** — the resolver is
+   pluggable-ish (accepts `aliases` + `externalizeVendor`) but
+   workspace packages would need to be injected at plugin
+   construction time. Add a workspace-root mapping
+   (`@<system>/<module>-domain` → `/<module>-domain` path in VFS)
+   and insert workspace resolution **before** the `resolveBare()`
+   call.
+5. **`web/src/engine/node-resolve.ts`** — clean and pure, reusable
+   as-is. `resolveBare()` already works against any `FileSource`.
+6. **`PrepareInput`** in the engine — currently passes only
+   `honoEntry` / `reactEntry`; needs a `workspaceConfig?: { [packageName]: vfsPath }`
+   threaded through.
+
+**Open architectural decisions for the playground side:**
+
+- **Single shared `node_modules` or one per workspace root?** Cheapest
+  is single (hoist) but loses fidelity with pnpm's strict layout.
+- **Can workspace packages participate in the install phase, or do
+  they sidestep it?** Sidestepping (treat like vendored) is simpler
+  but doesn't reflect that the package lives in the same VFS and can
+  be edited live.
+- **esbuild plugin lifecycle** — the plugin is created once per
+  bundle, not per request. Workspace paths need to either be baked
+  into the plugin factory contract or smuggled in via a closure when
+  the worker initializes. Untested whether esbuild-wasm's plugin
+  contract allows the latter cleanly; **validate this first** before
+  committing to a design.
+
+**Effort estimate: 1-2 weeks for a minimal MVP.** Rough sequencing:
+
+- Days 1-2 — add workspace dep kind, thread config through
+  `PrepareInput` → engine → worker.
+- Days 3-4 — refactor `planInstall` to intercept workspace packages.
+- Days 5-6 — add workspace resolution branch in
+  `esbuild-vfs-plugin.ts` before `resolveBare()`.
+- Days 7-8 — testing, edge cases (circular deps, missing packages,
+  Vite shim for `_packs/loader-fs.js`).
+- Days 9+ — validation against the realistic generated tree.
+
+**Main risk:** esbuild-wasm's plugin lifecycle. If the resolver can't
+return both `node_modules`-resolved and workspace-resolved paths from
+the same `onResolve` handler, the design needs rework. Probably fine
+(the handler already supports arbitrary VFS paths) but worth a spike
+on day 1.
+
+**Not in scope for the MVP:** multi-root VFS (the playground would
+treat workspace packages as subdirs of one root, not as independently
+mounted projects). Sufficient for the proposal's needs; revisit only
+if the single-root assumption hits a real limit.
+
 ## Recipe document
 
 The proposal ships with one new doc:
@@ -296,3 +408,7 @@ The proposal ships with one new doc:
 - [ ] Resolve the five open questions above.
 - [ ] Decide whether `docs/recipes/` is a new top-level doc area or
       folds into `docs/tools.md`.
+- [ ] **Spike day 1**: confirm esbuild-wasm's `onResolve` handler
+      can return both `node_modules`-resolved and workspace-resolved
+      paths in the same plugin instance. Blocks the playground TODO
+      design.
