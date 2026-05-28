@@ -33,6 +33,7 @@ import type {
   OperationIR,
   RepositoryIR,
 } from "../../../../ir/types/loom-ir.js";
+import { contextsHaveProvenancedField } from "../../../../ir/util/prov-id.js";
 import { lowerFirst } from "../../../../util/naming.js";
 import { buildRoutesFile } from "../routes-builder.js";
 import type { HonoArtifactCategory } from "./by-layer-layout.js";
@@ -83,17 +84,29 @@ export const layeredStyleAdapter: StyleAdapter = {
     // ONE artifact (the routes file) per aggregate with the
     // `http-routes` byLayer category so the layout adapter routes
     // it to `http/<lowerFirst>.routes.ts`.
+    //
+    // Audit + provenance gates are re-derived from the context
+    // surface — same predicates the orchestrator computes inline
+    // (`emit.ts:contextsHaveProvenancedField` / per-op `audited`
+    // flag).  Threaded as flags so the orchestrator rewire can drop
+    // the inline call and dispatch through this adapter without
+    // losing the gate behavior.
     const owningCtx = contextOf(ctx, agg.name);
     if (!owningCtx) return [];
     const enriched = agg as EnrichedAggregateIR;
     const repo = findRepoFor(owningCtx, agg.name);
-    // Audit + provenance + trace flags mirror the orchestrator's call
-    // site (`emit.ts`); today the orchestrator computes them from the
-    // deployable's settings + the system-wide audit gate.  We pass
-    // `false` for audit/provenance today (the orchestrator's gate
-    // doesn't currently flow into the adapter signature); `emitTrace`
-    // threads through normally.
-    const content = buildRoutesFile(enriched, repo, owningCtx, false, false, !!ctx.emitTrace);
+    const emitProvenance = contextsHaveProvenancedField(ctx.contexts);
+    const emitAudit = ctx.contexts.some((c) =>
+      c.aggregates.some((a) => a.operations.some((o) => o.audited)),
+    );
+    const content = buildRoutesFile(
+      enriched,
+      repo,
+      owningCtx,
+      emitAudit,
+      emitProvenance,
+      !!ctx.emitTrace,
+    );
     const category: HonoArtifactCategory = "http-routes";
     return [
       {
