@@ -36,23 +36,36 @@ function isRefCollection(t: TypeIR): boolean {
 // Module name:  <AppModule>.<CtxModule>.<AggModule>
 // ---------------------------------------------------------------------------
 
+/** Per-aggregate dataSource lookup the orchestrator passes in.  When
+ *  present, the resource's `postgres do … end` block picks up the
+ *  binding's `schema` / `tablePrefix` config.  Returns `undefined` →
+ *  byte-identical with the pre-dataSource resource emit. */
+export type DataSourceLookup = (
+  agg: AggregateIR,
+) => import("../../ir/types/loom-ir.js").DataSourceIR | undefined;
+
 export function emitAggregateResources(
   ctx: EnrichedBoundedContextIR,
   appModule: string,
   appSnake: string,
+  options: { resolveDataSource?: DataSourceLookup } = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
   const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
   const ctxSnake = snake(ctx.name);
 
   for (const agg of ctx.aggregates) {
+    const ds = options.resolveDataSource?.(agg);
+    const aggOpts = { schema: ds?.schema, prefix: ds?.tablePrefix };
     const path = `lib/${appSnake}/${ctxSnake}/${snake(agg.name)}.ex`;
-    out.set(path, renderAggregateResource(agg, ctx, appModule, ctxModule));
+    out.set(path, renderAggregateResource(agg, ctx, appModule, ctxModule, aggOpts));
     // Also emit entity-part resources (contained entities become
-    // Ash.Resource embedded/joined resources).
+    // Ash.Resource embedded/joined resources).  Parts inherit the
+    // owning aggregate's schema + prefix — they always live in the
+    // same physical store as the root.
     for (const part of agg.parts) {
       const partPath = `lib/${appSnake}/${ctxSnake}/${snake(part.name)}.ex`;
-      out.set(partPath, renderEntityPartResource(part, agg, ctx, appModule, ctxModule));
+      out.set(partPath, renderEntityPartResource(part, agg, ctx, appModule, ctxModule, aggOpts));
     }
   }
   return out;
@@ -67,10 +80,21 @@ function renderAggregateResource(
   ctx: BoundedContextIR,
   appModule: string,
   ctxModule: string,
+  options: { schema?: string; prefix?: string } = {},
 ): string {
   const moduleName = `${ctxModule}.${upperFirst(agg.name)}`;
-  const tableSnake = snake(plural(agg.name));
+  const baseTable = snake(plural(agg.name));
+  const tableSnake = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
   const repoModule = `${appModule}.Repo`;
+  // AshPostgres `postgres do` block — table + repo always present;
+  // `schema "<name>"` only when the dataSource binding declares one.
+  // Same pattern Ash docs use for placing a resource in a non-`public`
+  // Postgres schema.
+  const postgresBlockLines: string[] = [
+    `    table "${tableSnake}"`,
+    ...(options.schema ? [`    schema "${options.schema}"`] : []),
+    `    repo ${repoModule}`,
+  ];
 
   const renderCtx: RenderCtx = { thisName: "record", contextModule: ctxModule, agg };
 
@@ -130,8 +154,7 @@ function renderAggregateResource(
     data_layer: AshPostgres.DataLayer
 
   postgres do
-    table "${tableSnake}"
-    repo ${repoModule}
+${postgresBlockLines.join("\n")}
   end
 
   attributes do
@@ -154,11 +177,20 @@ function renderEntityPartResource(
   _ctx: BoundedContextIR,
   appModule: string,
   ctxModule: string,
+  options: { schema?: string; prefix?: string } = {},
 ): string {
   const moduleName = `${ctxModule}.${upperFirst(part.name)}`;
-  const tableSnake = snake(plural(part.name));
+  const baseTable = snake(plural(part.name));
+  const tableSnake = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
   const repoModule = `${appModule}.Repo`;
   const parentFk = `${snake(part.parentName)}_id`;
+  // Parts inherit the owning aggregate's `schema` from the same
+  // dataSource binding — no separate per-part config today.
+  const postgresBlockLines: string[] = [
+    `    table "${tableSnake}"`,
+    ...(options.schema ? [`    schema "${options.schema}"`] : []),
+    `    repo ${repoModule}`,
+  ];
 
   const renderCtx: RenderCtx = { thisName: "record", contextModule: ctxModule };
 
@@ -180,8 +212,7 @@ function renderEntityPartResource(
     data_layer: AshPostgres.DataLayer
 
   postgres do
-    table "${tableSnake}"
-    repo ${repoModule}
+${postgresBlockLines.join("\n")}
   end
 
   attributes do

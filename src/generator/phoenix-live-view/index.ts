@@ -1,10 +1,13 @@
 import type {
+  AggregateIR,
   BoundedContextIR,
   DeployableIR,
+  EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import { resolveDataSourceForAggregate } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx } from "../_adapters/index.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
@@ -84,9 +87,20 @@ export function generatePhoenixLiveViewProject(
   const appName = toSnakeApp(deployable.name);
   const appModule = toModulePrefix(appName);
 
+  // Per-aggregate dataSource lookup — feeds `postgres do schema "…"
+  // end` + `tablePrefix` routing in each Ash.Resource's `postgres`
+  // block.  Returns `undefined` for systems without a matching
+  // binding, which falls back to the existing default-shape emit.
+  const resolveDataSource = (agg: AggregateIR) => {
+    const owningCtx = contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
+    return owningCtx
+      ? resolveDataSourceForAggregate(agg as EnrichedAggregateIR, owningCtx, sys)
+      : undefined;
+  };
+
   // --- Per-context domain files -------------------------------------------
   for (const ctx of contexts) {
-    emitContext(appName, ctx, appModule, out);
+    emitContext(appName, ctx, appModule, out, { resolveDataSource });
   }
 
   // --- Workflow + view files -----------------------------------------------
@@ -200,6 +214,11 @@ function emitContext(
   ctx: EnrichedBoundedContextIR,
   appModule: string,
   out: Map<string, string>,
+  options: {
+    resolveDataSource?: (
+      agg: AggregateIR,
+    ) => import("../../ir/types/loom-ir.js").DataSourceIR | undefined;
+  } = {},
 ): void {
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
@@ -226,7 +245,9 @@ function emitContext(
   // / aggregate invariants) and validate-clause emission are produced by
   // emitAggregateResources.
   const allResources: string[] = [];
-  const aggFiles = emitAggregateResources(ctx, appModule, appName);
+  const aggFiles = emitAggregateResources(ctx, appModule, appName, {
+    resolveDataSource: options.resolveDataSource,
+  });
   for (const [path, content] of aggFiles) out.set(path, content);
   for (const agg of ctx.aggregates) {
     allResources.push(`${contextModule}.${upperFirst(agg.name)}`);
