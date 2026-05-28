@@ -23,6 +23,7 @@ import {
   type StyleAdapter,
   stubAdapter,
 } from "../generator/_adapters/index.js";
+import { byLayerLayoutAdapter } from "../generator/dotnet/adapters/by-layer-layout.js";
 import { efcorePersistenceAdapter } from "../generator/dotnet/adapters/efcore-persistence.js";
 import type { Platform } from "../ir/types/loom-ir.js";
 
@@ -127,13 +128,7 @@ adapterMenus.dotnet = {
       ),
     },
     layouts: {
-      byLayer: stubAdapter<LayoutAdapter>(
-        "layout",
-        "byLayer",
-        "dotnet",
-        () => layoutNames(adapterMenus.dotnet),
-        { name: "byLayer" },
-      ),
+      byLayer: byLayerLayoutAdapter,
       byFeature: stubAdapter<LayoutAdapter>(
         "layout",
         "byFeature",
