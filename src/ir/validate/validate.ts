@@ -1,9 +1,12 @@
+import { platformOwnsBackend } from "../../language/validators/data/platform-rules.js";
 import { allPlatforms, platformFor } from "../../platform/registry.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  DataSourceIR,
   DeployableIR,
+  EnrichedAggregateIR,
   EnrichedLoomModel,
   ExprIR,
   SubdomainIR,
@@ -13,6 +16,7 @@ import type {
   TypeIR,
 } from "../types/loom-ir.js";
 import { allContexts, findUsesCurrentUser } from "../types/loom-ir.js";
+import { dataSourceKindForAggregate } from "../util/resolve-datasource.js";
 
 // ---------------------------------------------------------------------------
 // Loom IR validator — semantic checks that need the full IR (not just
@@ -49,6 +53,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   validateWorkspaceUniqueness(loom, diags);
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
+    validateDataSourceCoverage(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
@@ -799,6 +804,58 @@ function validateSystem(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const m of sys.subdomains) modulesByName.set(m.name, m);
   for (const t of sys.e2eTests) {
     validateE2ETest(t, sys, modulesByName, diags);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// DataSource coverage — every backend deployable must declare a
+// matching `dataSource` for every (context, persistence-kind) pair it
+// hosts.  A stateBased aggregate needs `kind: state`; an eventSourced
+// aggregate needs `kind: eventLog`.  Without a binding, the emitter
+// has no schema / connection routing config to emit — so the omission
+// is an authoring mistake, not a meaningful default.
+//
+// Only fires for backend deployables (dotnet, hono, phoenixLiveView).
+// Frontend-only platforms (react, static) own no database and can't
+// have a dataSource to point at.
+// ---------------------------------------------------------------------------
+function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  const dsByName = new Map<string, DataSourceIR>();
+  for (const d of sys.dataSources) dsByName.set(d.name, d);
+
+  for (const dep of sys.deployables) {
+    if (!platformOwnsBackend(dep.platform)) continue;
+    // Resolve the listed dataSources to their (ctx, kind) coverage set.
+    const covered = new Set<string>();
+    for (const dsName of dep.dataSourceNames ?? []) {
+      const ds = dsByName.get(dsName);
+      if (!ds) continue;
+      covered.add(`${ds.contextName}:${ds.kind}`);
+    }
+    // For every hosted aggregate, demand a matching dataSource entry.
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const kind = dataSourceKindForAggregate(agg as EnrichedAggregateIR);
+        const key = `${ctxName}:${kind}`;
+        if (covered.has(key)) continue;
+        diags.push({
+          severity: "error",
+          message:
+            `Deployable '${dep.name}' hosts aggregate '${ctxName}.${agg.name}' ` +
+            `(persistenceStrategy: ${agg.persistenceStrategy ?? "stateBased"}, ` +
+            `needs dataSource kind: ${kind}) but lists no matching dataSource. ` +
+            `Declare ` +
+            `\`dataSource ${lowerFirst(ctxName)}${kind === "state" ? "State" : "EventLog"} ` +
+            `{ for: ${ctxName}, kind: ${kind}, use: <storage> }\` ` +
+            `and add it to '${dep.name}'\`s 'dataSources:' list.`,
+          source: `${sys.name}/${dep.name}`,
+        });
+      }
+    }
   }
 }
 

@@ -161,11 +161,15 @@ system StorefrontDotnet {
   ui WebApp with scaffold(subdomains: [Storefront]) {
   }
 
+  storage primary { type: postgres }
+  dataSource storefrontState { for: Storefront, kind: state, use: primary }
+
   // Single fullstack .NET deployable — backend on /api/*, SPA
   // (shadcn pack for variety) served from wwwroot/ at /.
   deployable app {
     platform: dotnet
     contexts: [Storefront]
+    dataSources: [storefrontState]
     ui: WebApp
     port: 8080
     design: shadcn

@@ -1042,7 +1042,11 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context T { aggregate Order { customerId: string } } }
-        deployable api { platform: hono, contexts: [T], port: 3000 }
+        storage pg { type: postgres }
+        dataSource tState { for: T, kind: state, use: pg }
+        deployable api {
+          platform: hono, contexts: [T], dataSources: [tState], port: 3000
+        }
         test e2e "good" against api {
           let o = api.orders.create({ customerId: "c-1" })
           let read = api.orders.getById(o)
@@ -1390,7 +1394,11 @@ describe("Loom IR validation (post-lowering)", async () => {
             aggregate Order { customerId: Customer id }
           }
         }
-        deployable api { platform: hono, contexts: [T], port: 3000 }
+        storage pg { type: postgres }
+        dataSource tState { for: T, kind: state, use: pg }
+        deployable api {
+          platform: hono, contexts: [T], dataSources: [tState], port: 3000
+        }
         deployable web { platform: react, targets: api, port: 3001 }
       }
     `);
@@ -1910,7 +1918,12 @@ describe("Loom IR validation (post-lowering)", async () => {
             repository Orders for Order { }
           }
         }
-        deployable api { platform: dotnet, contexts: [T], port: 8080, auth: required }
+        storage pg { type: postgres }
+        dataSource tState { for: T, kind: state, use: pg }
+        deployable api {
+          platform: dotnet, contexts: [T], dataSources: [tState],
+          port: 8080, auth: required
+        }
       }
     `);
     const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
@@ -2233,6 +2246,98 @@ describe("Loom IR validation (post-lowering)", async () => {
       ),
       JSON.stringify(diags),
     ).toBe(true);
+  });
+
+  // -------------------------------------------------------------------
+  // dataSource coverage — every backend deployable must declare a
+  // matching dataSource per (hosted-context, persistenceStrategy→kind)
+  // pair.  See validateDataSourceCoverage in src/ir/validate/validate.ts.
+  // -------------------------------------------------------------------
+
+  it("rejects a backend deployable that hosts a state-based aggregate without a kind:state dataSource", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C { aggregate A { x: int } } }
+        storage pg { type: postgres }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(
+      errors.some(
+        (d) =>
+          /Deployable 'api' hosts aggregate 'C\.A'/.test(d.message) &&
+          /kind: state/.test(d.message),
+      ),
+      JSON.stringify(errors),
+    ).toBe(true);
+  });
+
+  it("rejects a backend deployable that hosts an eventSourced aggregate without a kind:eventLog dataSource", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C {
+          aggregate Invoice { persistenceStrategy: eventSourced  amount: int }
+        } }
+        storage pg { type: postgres }
+        dataSource cState { for: C, kind: state, use: pg }
+        deployable api {
+          platform: hono, contexts: [C], dataSources: [cState], port: 3000
+        }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    // The state binding doesn't cover the eventSourced aggregate.
+    expect(
+      errors.some(
+        (d) =>
+          /Deployable 'api' hosts aggregate 'C\.Invoice'/.test(d.message) &&
+          /kind: eventLog/.test(d.message),
+      ),
+      JSON.stringify(errors),
+    ).toBe(true);
+  });
+
+  it("accepts when every hosted (context, kind) has a matching dataSource", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C { aggregate A { x: int } } }
+        storage pg { type: postgres }
+        dataSource cState { for: C, kind: state, use: pg }
+        deployable api {
+          platform: hono, contexts: [C], dataSources: [cState], port: 3000
+        }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  it("doesn't fire for frontend-only deployables (react / static)", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C { aggregate A { x: int } } }
+        storage pg { type: postgres }
+        dataSource cState { for: C, kind: state, use: pg }
+        deployable api {
+          platform: hono, contexts: [C], dataSources: [cState], port: 3000
+        }
+        deployable web { platform: react, targets: api, port: 3001 }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  it("doesn't fire for empty contexts (no aggregates)", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context Empty { } }
+        deployable api { platform: hono, contexts: [Empty], port: 3000 }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
   // -------------------------------------------------------------------

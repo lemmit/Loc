@@ -74,6 +74,12 @@ system InventorySystem {
   ui WebApp with scaffold(subdomains: [Inventory]) {
   }
 
-  deployable api { platform: hono, contexts: [Inventory], port: 3000 }
+  storage primary { type: postgres }
+  dataSource inventoryState { for: Inventory, kind: state, use: primary }
+
+  deployable api {
+    platform: hono, contexts: [Inventory],
+    dataSources: [inventoryState], port: 3000
+  }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
 }

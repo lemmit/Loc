@@ -16,7 +16,11 @@ const DDL = `
     subdomain M { context C {
       aggregate A { operation go() {}  test "go works" verifies TC-001 {} }
     } }
-    deployable api { platform: hono  contexts: [C] }
+    storage pg { type: postgres }
+    dataSource cState { for: C, kind: state, use: pg }
+    deployable api {
+      platform: hono  contexts: [C]  dataSources: [cState]
+    }
   }
   testCase TC-001 verifies AC-001 { covers [ M.C.A.go ] }
 `;

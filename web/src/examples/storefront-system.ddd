@@ -219,7 +219,13 @@ system StorefrontSystem {
   ui WebApp with scaffold(subdomains: [Storefront]) {
   }
 
-  deployable api { platform: hono, contexts: [Storefront], port: 3000 }
+  storage primary { type: postgres }
+  dataSource storefrontState { for: Storefront, kind: state, use: primary }
+
+  deployable api {
+    platform: hono, contexts: [Storefront],
+    dataSources: [storefrontState], port: 3000
+  }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
 
   // System e2e tests.  `against api` (Hono) lowers to vitest + fetch.
