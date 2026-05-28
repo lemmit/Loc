@@ -348,10 +348,24 @@ plugin factory.
 
 **Effort estimate: 1-2 weeks for a minimal MVP**, delivered in three
 sequenced steps rather than one — the pluggability refactor is worth
-extracting because it has a real second consumer (the existing
-`"custom-vendored"` path follows the same pattern as workspace
-resolution, so the contract is validated by two implementations from
-day one, not speculative).
+extracting because **the engine already contains three disjoint
+ad-hoc "skip the registry" mechanisms** that would be consolidated
+under one contract:
+
+- the `mirror?: Map<string, string>` parameter in
+  `web/src/engine/npm/install.ts:29` (same-origin tarball override,
+  used by the deployed playground's `npm-mirror/` directory),
+- the `"custom-vendored"` resolution kind in
+  `web/src/engine/dependencies.ts:28` (user-supplied package files,
+  bypasses the registry entirely),
+- the prebuilt-vendor (C2) path in
+  `web/src/engine/npm/esbuild-vfs-plugin.ts` (different layer —
+  bundle-time externalization — but the same family of
+  "don't fetch this normally").
+
+The contract is validated by **at least three existing consumers
+before workspace becomes the fourth**, so the abstraction is
+"consolidate the present" rather than "design for the future."
 
 ### Sequencing — three steps, not one
 
@@ -389,14 +403,16 @@ Rough day-count under this split:
 **Why this split rather than one PR:**
 
 - Each PR is smaller and independently reviewable.
-- The abstraction is justified by two concrete implementations from
-  the start, not by a single speculative consumer.
-- Future strategies (private registries, offline mirrors,
-  content-addressable caches) inherit the contract without further
-  surgery on the engine.
-- If the workspace PR gets blocked on something downstream
-  (e.g. waiting on the TS generator refactor), step 1 still ships
-  value and unblocks `"custom-vendored"` improvements.
+- The abstraction is justified by three existing concrete consumers
+  (`mirror`, `"custom-vendored"`, prebuilt vendor) before workspace
+  becomes the fourth — consolidating existing ad-hoc mechanisms, not
+  designing for hypothetical future ones.
+- Step 1 ships value independently: today the three mechanisms have
+  separate code paths and parameters threaded to different places;
+  unifying them simplifies the engine even before workspace lands.
+- If the workspace PR gets blocked on something downstream (e.g.
+  waiting on the TS generator refactor), step 1 still ships and
+  unblocks future work on the existing mechanisms.
 
 **Main risk:** esbuild-wasm's plugin lifecycle, addressed by the
 step-0 spike. If `onResolve` can't dispatch across strategies in one
