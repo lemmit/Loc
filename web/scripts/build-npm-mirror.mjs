@@ -39,6 +39,7 @@ const EXAMPLES = [
   "web/src/examples/banking-system.ddd",
   "web/src/examples/inventory-system.ddd",
   "web/src/examples/storybook-mantine.ddd",
+  "web/src/examples/storybook-mantine-v9.ddd",
   "web/src/examples/storybook-shadcn.ddd",
   "web/src/examples/storybook-shadcn-v4.ddd",
   "web/src/examples/storybook-mui.ddd",
