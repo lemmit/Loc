@@ -25,6 +25,8 @@ import {
 } from "../generator/_adapters/index.js";
 import { byLayerLayoutAdapter } from "../generator/dotnet/adapters/by-layer-layout.js";
 import { efcorePersistenceAdapter } from "../generator/dotnet/adapters/efcore-persistence.js";
+import { ashPostgresPersistenceAdapter } from "../generator/phoenix-live-view/adapters/ash-postgres-persistence.js";
+import { byFeatureLayoutAdapter } from "../generator/phoenix-live-view/adapters/by-feature-layout.js";
 import type { Platform } from "../ir/types/loom-ir.js";
 import { byLayerLayoutAdapter as honoByLayerLayoutAdapter } from "./hono/v4/adapters/by-layer-layout.js";
 import { drizzlePersistenceAdapter } from "./hono/v4/adapters/drizzle-persistence.js";
@@ -221,20 +223,7 @@ adapterMenus.hono = {
 adapterMenus.phoenixLiveView = {
   adapters: {
     persistence: {
-      ashPostgres: stubAdapter<PersistenceAdapter>(
-        "persistence",
-        "ashPostgres",
-        "phoenixLiveView",
-        () => persistenceNames(adapterMenus.phoenixLiveView),
-        {
-          name: "ashPostgres",
-          supportedStrategies: ["stateBased"],
-          supports: (type, kind, strategy) =>
-            strategy === "stateBased" &&
-            type === "postgres" &&
-            ["state", "snapshot", "replica"].includes(kind),
-        },
-      ),
+      ashPostgres: ashPostgresPersistenceAdapter,
     },
     styles: {
       ash: stubAdapter<StyleAdapter>(
@@ -250,13 +239,7 @@ adapterMenus.phoenixLiveView = {
       ),
     },
     layouts: {
-      byFeature: stubAdapter<LayoutAdapter>(
-        "layout",
-        "byFeature",
-        "phoenixLiveView",
-        () => layoutNames(adapterMenus.phoenixLiveView),
-        { name: "byFeature" },
-      ),
+      byFeature: byFeatureLayoutAdapter,
     },
   },
   defaults: {
