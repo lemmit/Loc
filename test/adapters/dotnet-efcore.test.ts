@@ -100,7 +100,7 @@ describe("efcore PersistenceAdapter (real)", () => {
     // Repository surfaces the user-declared find.
     expect(joined).toContain("ByName(");
     // Namespace derives from the deployable name.
-    expect(joined).toContain("namespace api.Infrastructure.Repositories;");
+    expect(joined).toContain("namespace Api.Infrastructure.Repositories;");
   });
 
   it("emitMigrations returns null when ctx has no migrations", async () => {

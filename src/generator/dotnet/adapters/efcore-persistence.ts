@@ -19,10 +19,11 @@ import { buildFindBodies } from "../find-emit.js";
 
 /** Per-deployable namespace — every dotnet emit fn keys off it for
  *  `using` directives + class declarations.  Mirrors the `ns` parameter
- *  the orchestrator threads through today (always `deployable.name` in
- *  system-mode emit). */
+ *  the orchestrator threads through today — `deployable.name` with
+ *  the first letter capitalised (see `src/platform/dotnet.ts:emitProject`). */
 function nsOf(ctx: EmitCtx): string {
-  return ctx.deployable.name;
+  const name = ctx.deployable.name;
+  return name[0]!.toUpperCase() + name.slice(1);
 }
 
 /** Find the matching repository declaration in any of the deployable's

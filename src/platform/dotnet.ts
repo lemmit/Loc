@@ -23,6 +23,17 @@ const dotnetPlatform: PlatformSurface = {
   reservedRepositoryFindNames: new Set(["saveAsync", "getByIdAsync"]),
   emitProject({ contexts, deployable, sys, migrations }): Map<string, string> {
     const namespace = deployable.name[0]!.toUpperCase() + deployable.name.slice(1);
+    // The orchestrator dispatches per-aggregate CQRS emission + byLayer
+    // path routing through adapters when given a pair.  Passing them
+    // explicitly here (rather than resolving via the registry) avoids
+    // a load-time cycle: adapter-registry ← cqrs-style ← cqrs-emit ←
+    // dto-mapping ← ir/enrich/enrichments ← platform/registry ←
+    // platform/dotnet.  The generator imports its own adapters
+    // directly from sibling files (`src/generator/dotnet/adapters/`)
+    // — that's not a layering violation because both live under
+    // `src/generator/dotnet/`.  Future per-deployable
+    // `persistence:` / `style:` / `layout:` overrides will resolve
+    // through the registry at this seam.
     return generateDotnetForContexts(contexts, namespace, { deployable, sys, migrations });
   },
   composeService({ slug }): ComposeServiceShape {

@@ -32,8 +32,14 @@ import {
 import { emitCqrs } from "../cqrs-emit.js";
 import type { DotnetArtifactCategory } from "./by-layer-layout.js";
 
+/** Namespace string the dotnet emitter threads everywhere as `ns`.
+ *  The orchestrator computes it as `deployable.name` with the first
+ *  letter capitalised (see `src/platform/dotnet.ts:emitProject`); the
+ *  adapter mirrors that so adapter-dispatched emit produces the same
+ *  `using <Ns>.…;` + `namespace <Ns>.…;` lines as the direct path. */
 function nsOf(ctx: EmitCtx): string {
-  return ctx.deployable.name;
+  const name = ctx.deployable.name;
+  return name[0]!.toUpperCase() + name.slice(1);
 }
 
 function contextOf(ctx: EmitCtx, aggName: string): EnrichedBoundedContextIR | undefined {
