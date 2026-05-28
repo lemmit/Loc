@@ -24,6 +24,7 @@ import {
   stubAdapter,
 } from "../generator/_adapters/index.js";
 import type { Platform } from "../ir/types/loom-ir.js";
+import { drizzlePersistenceAdapter } from "./hono/v4/adapters/drizzle-persistence.js";
 
 /** Per-platform adapter menu — every supported adapter, keyed by its
  *  registry name.  Stub entries throw `AdapterNotImplementedError` on
@@ -162,27 +163,16 @@ adapterMenus.dotnet = {
   },
 };
 
-// `hono` — the Node backend.  Existing emitter is a hand-rolled
-// drizzle + postgres + per-aggregate routes setup; the F6 seam
-// refactor + `platform: hono` → `platform: node { framework: hono }`
-// rename lands the real adapter wiring.
+// `hono` — the Node backend.  `drizzle` is the REAL adapter (F6a)
+// wrapping the existing TypeScript/Hono emit fns (mirrors the dotnet
+// efcore adapter from F5a); `prisma` stays a stub.  Today's pipeline
+// still calls the emit fns directly; the F6d-equivalent rewire
+// dispatches through this adapter.  The `platform: hono` → `platform:
+// node { framework: hono }` rename is deferred to its own slice.
 adapterMenus.hono = {
   adapters: {
     persistence: {
-      drizzle: stubAdapter<PersistenceAdapter>(
-        "persistence",
-        "drizzle",
-        "hono",
-        () => persistenceNames(adapterMenus.hono),
-        {
-          name: "drizzle",
-          supportedStrategies: ["stateBased"],
-          supports: (type, kind, strategy) =>
-            strategy === "stateBased" &&
-            ["postgres", "mysql", "sqlite"].includes(type) &&
-            ["state", "snapshot", "replica"].includes(kind),
-        },
-      ),
+      drizzle: drizzlePersistenceAdapter,
       prisma: stubAdapter<PersistenceAdapter>(
         "persistence",
         "prisma",
