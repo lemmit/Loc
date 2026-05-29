@@ -127,6 +127,12 @@ layer that consumes it.
 | [`authorization.md`](./authorization.md) | PROPOSED | `DataKey` hierarchical scoping; `policy { data { … } operations { … } fields { … } }` reachability, operation/view/workflow gates, field masking. Pinned per D-POLICY-STYLE over the function-style alternative. Phases 1–4 in Phase 3.2; phases 5–7 (`exists`, field rules, `implies`) in Phase 5. |
 | [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md) | PROPOSED | `tenancy by user.tenantId` at system level; `crossTenant` / `platform` aggregate modifiers; auto-stamped `TenantId` column + EF/Drizzle/Ash query filter. Ships before authorization phase 1 (DataKey leftmost = TenantId). |
 
+### On-ramp & day-one runtime
+
+| Doc | Status | Core addition |
+|---|---|---|
+| [`quickstart-and-day-one-batteries.md`](./quickstart-and-day-one-batteries.md) | PROPOSED | Collapses zero-to-running into `ddd new` + npm publish + a quick-start stack default; adds a unified `ddd dev` watch/regenerate/live loop and a one-command `ddd deploy <target>` (Fly/Render/Railway) over the existing Dockerfiles + compose + per-deployable DBs; and the universal runtime constructs the model can't express today — turnkey `auth { providers }` with login/signup UI + sessions + default-deny (completing `auth.md`'s known holes), `job` (scheduled/event-triggered), `email`, object `storage` + `File`/`Upload`, and `seed`. Strictly additive; opt-in models emit byte-identically. |
+
 ### UX / output
 
 | Doc | Status | Core addition |
