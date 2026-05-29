@@ -604,6 +604,11 @@ defmodule ${appModule}.MixProject do
       {:ash, "~> 3.24"},
       {:ash_postgres, "~> 2.0"},
       {:ash_phoenix, "~> 2.0"},
+      # Ash.Policy.Authorizer (used by \`requires\`-guarded operations) solves
+      # its policy graph with a SAT solver at runtime.  simple_sat is pure
+      # Elixir (no C NIF), so it builds in the slim release image without a
+      # toolchain — preferred over picosat_elixir for the docker target.
+      {:simple_sat, "~> 0.1"},
       # ash_postgres' ResourceGenerator (lib/resource_generator/spec.ex)
       # references Igniter.Inflex and Owl.IO at compile time.  Both are
       # optional deps for the \`mix ash_postgres.gen.resources\` task
