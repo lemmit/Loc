@@ -672,7 +672,7 @@ MacroArgValue:
     | {infer MacroArgRefList} '[' (refs+=ID (',' refs+=ID)*)? ']';
 
 AggregateMember:
-    Containment | DerivedProp | Invariant | FunctionDecl | Operation | EntityPart | TestBlock | Property
+    Containment | DerivedProp | Invariant | FunctionDecl | Operation | Create | Destroy | EntityPart | TestBlock | Property
     | FilterDecl | StampDecl | ImplementsDecl;
 
 // ---- capability source surface ----------------------------------
@@ -885,6 +885,30 @@ Operation:
         body+=Statement*
     '}';
 
+// Lifecycle factory action — `create [name](params) { body }`.  The
+// body populates a pre-bound fresh `this`; the framework owns
+// persistence (allocate id → persist → return the populated
+// instance).  Parens are required — a factory almost always takes
+// arguments.  An unnamed `create(...)` is the aggregate's canonical
+// creator.  Lowers to an `OperationIR` with `kind: "create"`; never
+// joins `agg.operations` (which stays mutate-only).  See
+// docs/proposals/lifecycle-operations.md.
+Create:
+    'create' (name=ID)? '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
+        body+=Statement*
+    '}';
+
+// Lifecycle terminator — `destroy [name][(params)] { body }`.  The
+// instance is loaded by id; the body runs (cleanup / soft-delete
+// state) and the framework removes it.  A body that throws aborts
+// removal — the precondition mechanism.  Parens are optional so the
+// canonical hard delete reads `destroy { }`.  Lowers to an
+// `OperationIR` with `kind: "destroy"`.
+Destroy:
+    'destroy' (name=ID)? ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? '{'
+        body+=Statement*
+    '}';
+
 Parameter:
     name=LooseName ':' type=TypeRef;
 
@@ -1025,7 +1049,11 @@ LValue:
 
 LValueIdent returns string:
     ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
-       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
+       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
+       // Soft-admit the lifecycle keywords so a bare-statement call
+       // target like `ui.products.create({...})` parses (mirrors
+       // MemberName).
+       | 'create' | 'destroy';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)
@@ -1110,6 +1138,13 @@ MemberName returns string:
     ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
        | 'filter' | 'stamp' | 'implements'
+       // `create` / `destroy` are hard keywords for the lifecycle
+       // member rules (`Create` / `Destroy`) but must stay admissible
+       // after `.` so the e2e + page surfaces keep parsing —
+       // `Order.create({...})`, `api.products.create(...)`,
+       // `Sales.Customer.create.mutate(...)`.  Magic-identifier
+       // dispatch lives in lowering, not the grammar.
+       | 'create' | 'destroy'
        // `where` is a hard keyword in `FindDecl` (`find foo(): T where ...`)
        // and `View` (`view X = Y where ...` and the full form's `from Y where`),
        // but it's also the collection-op name in `arr.where(λ)` — see
@@ -1274,6 +1309,12 @@ NameRefIdent returns string:
     // `id` is intentionally excluded: it's the magic identifier handled by
     // IdRef and would create an ambiguity with IdRef inside PrimaryExpr.
     ID | 'permissions' | 'ui' | 'api' | 'money'
+       // Lifecycle keywords admitted as bare NameRefs so an expression
+       // can use one as the receiver of a member access — e.g. the
+       // generated-hook handle in a page lambda
+       // (`onSubmit: v => create.mutateAsync(v)`).  They only act as
+       // hard keywords at aggregate-member position (`Create`/`Destroy`).
+       | 'create' | 'destroy'
        | 'contains' | 'page' | 'component' | 'state' | 'menu'
        | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'

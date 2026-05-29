@@ -73,6 +73,7 @@ export type DddKeywordNames =
     | "context"
     | "contexts"
     | "covers"
+    | "create"
     | "dataSource"
     | "dataSources"
     | "datetime"
@@ -81,6 +82,7 @@ export type DddKeywordNames =
     | "derived"
     | "description"
     | "design"
+    | "destroy"
     | "dotnet"
     | "e2e"
     | "elastic"
@@ -223,7 +225,7 @@ export type DddKeywordNames =
 
 export type DddTokenNames = DddTerminalNames | DddKeywordNames;
 
-export type AggregateMember = Containment | DerivedProp | EntityPart | FilterDecl | FunctionDecl | ImplementsDecl | Invariant | Operation | Property | StampDecl | TestBlock;
+export type AggregateMember = Containment | Create | DerivedProp | Destroy | EntityPart | FilterDecl | FunctionDecl | ImplementsDecl | Invariant | Operation | Property | StampDecl | TestBlock;
 
 export const AggregateMember = 'AggregateMember';
 
@@ -355,10 +357,10 @@ export function isLooseName(item: unknown): item is LooseName {
     return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'dataSource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'id' | 'modules' | 'permissions' | 'ui' | 'views' | 'workflows' | string;
+export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'id' | 'modules' | 'permissions' | 'ui' | 'views' | 'workflows' | string;
 
 export function isLValueIdent(item: unknown): item is LValueIdent {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'create' || item === 'destroy' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type MacroArgValue = MacroArgBool | MacroArgInt | MacroArgRef | MacroArgRefList | MacroArgString;
@@ -369,10 +371,10 @@ export function isMacroArgValue(item: unknown): item is MacroArgValue {
     return reflection.isInstance(item, MacroArgValue);
 }
 
-export type MemberName = 'aggregates' | 'api' | 'contains' | 'contexts' | 'filter' | 'id' | 'implements' | 'modules' | 'permissions' | 'stamp' | 'ui' | 'views' | 'where' | 'workflows' | string;
+export type MemberName = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'filter' | 'id' | 'implements' | 'modules' | 'permissions' | 'stamp' | 'ui' | 'views' | 'where' | 'workflows' | string;
 
 export function isMemberName(item: unknown): item is MemberName {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'where' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'create' || item === 'destroy' || item === 'where' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type ModelMember = BoundedContext | Component | EnumDecl | Requirement | Solution | System | TestCase | ValueObject;
@@ -391,10 +393,10 @@ export function isNamedDecl(item: unknown): item is NamedDecl {
     return reflection.isInstance(item, NamedDecl);
 }
 
-export type NameRefIdent = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'connection' | 'contains' | 'contexts' | 'dataSource' | 'dataSources' | 'description' | 'design' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'filter' | 'framework' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'readonly' | 'replica' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'use' | 'views' | 'workflows' | string;
+export type NameRefIdent = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'connection' | 'contains' | 'contexts' | 'create' | 'dataSource' | 'dataSources' | 'description' | 'design' | 'destroy' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'filter' | 'framework' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'readonly' | 'replica' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'use' | 'views' | 'workflows' | string;
 
 export function isNameRefIdent(item: unknown): item is NameRefIdent {
-    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'dataSource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'create' || item === 'destroy' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'dataSource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type PageProp = BodyProp | CanonicalProp | DescriptionProp | LayoutProp | OgImageProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
@@ -546,7 +548,7 @@ export function isApi(item: unknown): item is Api {
 }
 
 export interface AssignOrCallStmt extends AstNode {
-    readonly $container: Lambda | Operation | StampDecl | TestBlock | TestE2E | Workflow;
+    readonly $container: Create | Destroy | Lambda | Operation | StampDecl | TestBlock | TestE2E | Workflow;
     readonly $type: 'AssignOrCallStmt';
     op?: '+=' | '-=' | ':=';
     target: LValue;
@@ -717,6 +719,20 @@ export function isContainment(item: unknown): item is Containment {
     return reflection.isInstance(item, Containment);
 }
 
+export interface Create extends AstNode {
+    readonly $container: Aggregate;
+    readonly $type: 'Create';
+    body: Array<Statement>;
+    name?: string;
+    params: Array<Parameter>;
+}
+
+export const Create = 'Create';
+
+export function isCreate(item: unknown): item is Create {
+    return reflection.isInstance(item, Create);
+}
+
 export interface DataSource extends AstNode {
     readonly $container: System;
     readonly $type: 'DataSource';
@@ -803,6 +819,20 @@ export function isDescriptionProp(item: unknown): item is DescriptionProp {
     return reflection.isInstance(item, DescriptionProp);
 }
 
+export interface Destroy extends AstNode {
+    readonly $container: Aggregate;
+    readonly $type: 'Destroy';
+    body: Array<Statement>;
+    name?: string;
+    params: Array<Parameter>;
+}
+
+export const Destroy = 'Destroy';
+
+export function isDestroy(item: unknown): item is Destroy {
+    return reflection.isInstance(item, Destroy);
+}
+
 export interface EmitField extends AstNode {
     readonly $container: EmitStmt;
     readonly $type: 'EmitField';
@@ -817,7 +847,7 @@ export function isEmitField(item: unknown): item is EmitField {
 }
 
 export interface EmitStmt extends AstNode {
-    readonly $container: Lambda | Operation | TestBlock | TestE2E | Workflow;
+    readonly $container: Create | Destroy | Lambda | Operation | TestBlock | TestE2E | Workflow;
     readonly $type: 'EmitStmt';
     event: Reference<EventDecl>;
     fields: Array<EmitField>;
@@ -1096,7 +1126,7 @@ export function isLayoutProp(item: unknown): item is LayoutProp {
 }
 
 export interface LetStmt extends AstNode {
-    readonly $container: Lambda | Operation | TestBlock | TestE2E | Workflow;
+    readonly $container: Create | Destroy | Lambda | Operation | TestBlock | TestE2E | Workflow;
     readonly $type: 'LetStmt';
     expr: Expression;
     name: string;
@@ -1491,7 +1521,7 @@ export function isPageMenuMeta(item: unknown): item is PageMenuMeta {
 }
 
 export interface Parameter extends AstNode {
-    readonly $container: Component | FindDecl | FunctionDecl | Operation | Page | Workflow;
+    readonly $container: Component | Create | Destroy | FindDecl | FunctionDecl | Operation | Page | Workflow;
     readonly $type: 'Parameter';
     name: LooseName;
     type: TypeRef;
@@ -1553,7 +1583,7 @@ export function isPostfixChain(item: unknown): item is PostfixChain {
 }
 
 export interface PreconditionStmt extends AstNode {
-    readonly $container: Lambda | Operation | TestBlock | TestE2E | Workflow;
+    readonly $container: Create | Destroy | Lambda | Operation | TestBlock | TestE2E | Workflow;
     readonly $type: 'PreconditionStmt';
     expr: Expression;
 }
@@ -1660,7 +1690,7 @@ export function isRequiresProp(item: unknown): item is RequiresProp {
 }
 
 export interface RequiresStmt extends AstNode {
-    readonly $container: Lambda | Operation | Workflow;
+    readonly $container: Create | Destroy | Lambda | Operation | Workflow;
     readonly $type: 'RequiresStmt';
     expr: Expression;
 }
@@ -2167,11 +2197,13 @@ export type DddAstType = {
     ConnectionSource: ConnectionSource
     Containment: Containment
     ContextMember: ContextMember
+    Create: Create
     DataSource: DataSource
     DecLit: DecLit
     Deployable: Deployable
     DerivedProp: DerivedProp
     DescriptionProp: DescriptionProp
+    Destroy: Destroy
     EmitField: EmitField
     EmitStmt: EmitStmt
     EntityPart: EntityPart
@@ -2296,7 +2328,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, ConnectionSource, Containment, ContextMember, DataSource, DecLit, Deployable, DerivedProp, DescriptionProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SecretConnectionSource, SensitivityClause, ServiceConnectionSource, SlotType, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
+        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, ConnectionSource, Containment, ContextMember, Create, DataSource, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SecretConnectionSource, SensitivityClause, ServiceConnectionSource, SlotType, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2364,6 +2396,11 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case Containment: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype);
+            }
+            case Create:
+            case Destroy:
+            case TestBlock: {
+                return this.isSubtype(AggregateMember, supertype);
             }
             case DataSource:
             case Layout:
@@ -2444,9 +2481,6 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case StateBlock: {
                 return this.isSubtype(ComponentDecl, supertype) || this.isSubtype(PageProp, supertype);
-            }
-            case TestBlock: {
-                return this.isSubtype(AggregateMember, supertype);
             }
             case ValueObject: {
                 return this.isSubtype(ContextMember, supertype) || this.isSubtype(ModelMember, supertype) || this.isSubtype(NamedDecl, supertype) || this.isSubtype(Targetable, supertype);
@@ -2667,6 +2701,16 @@ export class DddAstReflection extends AbstractAstReflection {
                     ]
                 };
             }
+            case Create: {
+                return {
+                    name: Create,
+                    properties: [
+                        { name: 'body', defaultValue: [] },
+                        { name: 'name' },
+                        { name: 'params', defaultValue: [] }
+                    ]
+                };
+            }
             case DataSource: {
                 return {
                     name: DataSource,
@@ -2730,6 +2774,16 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: DescriptionProp,
                     properties: [
                         { name: 'value' }
+                    ]
+                };
+            }
+            case Destroy: {
+                return {
+                    name: Destroy,
+                    properties: [
+                        { name: 'body', defaultValue: [] },
+                        { name: 'name' },
+                        { name: 'params', defaultValue: [] }
                     ]
                 };
             }

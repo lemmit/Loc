@@ -6,7 +6,9 @@ import type {
   Aggregate,
   BoundedContext,
   Containment,
+  Create,
   DerivedProp,
+  Destroy,
   EntityPart,
   Model,
   ValueObject,
@@ -15,7 +17,9 @@ import {
   isAggregate,
   isAssignOrCallStmt,
   isContainment,
+  isCreate,
   isDerivedProp,
+  isDestroy,
   isEntityPart,
   isFunctionDecl,
   isInvariant,
@@ -25,7 +29,7 @@ import {
   isValueObject,
 } from "../generated/ast.js";
 import { envForAggregate, envForPart, envForValueObject } from "./_shared.js";
-import { checkOperation } from "./statements.js";
+import { checkCreate, checkDestroy, checkOperation } from "./statements.js";
 import { checkDerived, checkFunction, checkInvariant, checkPropertyCheck } from "./types.js";
 
 /** `slot` is a UI-only element-shaped param marker — meaningful only
@@ -173,6 +177,8 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
     }
     if (isFunctionDecl(m)) checkFunction(m, agg, undefined, accept);
     if (isOperation(m)) checkOperation(m, agg, accept);
+    if (isCreate(m)) checkCreate(m, agg, accept);
+    if (isDestroy(m)) checkDestroy(m, agg, accept);
     if (isProperty(m) && m.access === "token" && m.type?.optional) {
       // A `token` field is echoed by the client on every update so the
       // server can identify the target / detect concurrency conflicts.
@@ -196,6 +202,50 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
         { node: m, property: "provenanced", code: "loom.provenanced-never-written" },
       );
     }
+  }
+  checkLifecycleConflicts(agg, accept);
+}
+
+/** Name-uniqueness rules for the lifecycle `create` / `destroy`
+ * keywords: at most one canonical (unnamed) of each kind, and no two
+ * named actions of the same kind sharing a name (lifecycle-operations.md
+ * validator rules).  Create-vs-destroy names may coincide — they route
+ * to different verbs/paths — so the two kinds are checked independently. */
+function checkLifecycleConflicts(agg: Aggregate, accept: ValidationAcceptor): void {
+  const creates = agg.members.filter(isCreate);
+  const destroys = agg.members.filter(isDestroy);
+  checkActionKindConflicts(creates, agg, "create", accept);
+  checkActionKindConflicts(destroys, agg, "destroy", accept);
+}
+
+function checkActionKindConflicts(
+  actions: readonly (Create | Destroy)[],
+  agg: Aggregate,
+  kind: "create" | "destroy",
+  accept: ValidationAcceptor,
+): void {
+  const seenNames = new Set<string>();
+  let canonicalSeen = false;
+  for (const a of actions) {
+    if (a.name == null) {
+      if (canonicalSeen) {
+        accept(
+          "error",
+          `Aggregate '${agg.name}' declares more than one canonical (unnamed) '${kind}'; at most one is allowed.`,
+          { node: a, keyword: kind, code: `loom.canonical-${kind}-conflict` },
+        );
+      }
+      canonicalSeen = true;
+      continue;
+    }
+    if (seenNames.has(a.name)) {
+      accept(
+        "error",
+        `Aggregate '${agg.name}' declares two '${kind} ${a.name}' actions; names must be unique within a kind.`,
+        { node: a, property: "name", code: `loom.${kind}-name-conflict` },
+      );
+    }
+    seenNames.add(a.name);
   }
 }
 

@@ -10,9 +10,11 @@ import type {
   Component,
   ConnectionSource,
   Containment,
+  Create,
   DataSource,
   Deployable,
   DerivedProp,
+  Destroy,
   EntityPart,
   EnumDecl,
   EventDecl,
@@ -26,6 +28,7 @@ import type {
   Model,
   Operation,
   Page,
+  Parameter,
   Property,
   Repository,
   Requirement,
@@ -50,8 +53,10 @@ import {
   isBoundedContext,
   isComponent,
   isContainment,
+  isCreate,
   isDeployable,
   isDerivedProp,
+  isDestroy,
   isEmitStmt,
   isEntityPart,
   isEnumDecl,
@@ -112,6 +117,7 @@ import type {
   MenuLinkIR,
   MenuMetaIR,
   OperationIR,
+  OperationKind,
   PageIR,
   PageLayoutIR,
   PageMetadataIR,
@@ -1287,6 +1293,13 @@ function lowerAggregate(
   const operations = (agg.members.filter(isOperation) as Operation[]).map((op) =>
     lowerOperation(op, inner),
   );
+  // Lifecycle actions — kept in their own arrays so `operations`
+  // (consumed by every existing route/OpenAPI/page-object emitter) stays
+  // mutate-only until per-kind emission lands (Phase 3).
+  const creates = (agg.members.filter(isCreate) as Create[]).map((c) => lowerCreate(c, inner));
+  const destroys = (agg.members.filter(isDestroy) as Destroy[]).map((d) => lowerDestroy(d, inner));
+  const canonicalCreate = creates.find((c) => c.canonical) ?? null;
+  const canonicalDestroy = destroys.find((d) => d.canonical) ?? null;
   const tests: TestIR[] = [];
   for (const m of agg.members) {
     if (isTestBlock(m)) tests.push(lowerTest(m, inner));
@@ -1310,6 +1323,10 @@ function lowerAggregate(
     invariants,
     functions,
     operations,
+    creates,
+    destroys,
+    canonicalCreate,
+    canonicalDestroy,
     parts,
     tests,
     contextFilters: filters.length > 0 ? filters : undefined,
@@ -1795,26 +1812,94 @@ function lowerFunction(f: FunctionDecl, env: Env): FunctionIR {
 }
 
 function lowerOperation(op: Operation, env: Env): OperationIR {
+  return lowerActionBody(
+    {
+      kind: "mutate",
+      name: op.name,
+      canonical: false,
+      params: op.params,
+      body: op.body,
+      visibility: op.private ? "private" : "public",
+      extern: !!op.extern,
+      audited: !!op.audited,
+    },
+    env,
+  );
+}
+
+// `create` / `destroy` share `operation`'s param + body shape; the
+// kind tag (not the body syntax) carries the lifecycle asymmetry.  An
+// unnamed declaration is the aggregate's canonical creator / terminator
+// — its synthesised IR `name` is the keyword itself, and `canonical` is
+// set so the Phase-2 route enrichment can route it to the bare
+// collection URL.  create / destroy are never `private` / `extern` /
+// `audited` (no grammar slot), so those default off.
+function lowerCreate(c: Create, env: Env): OperationIR {
+  return lowerActionBody(
+    {
+      kind: "create",
+      name: c.name ?? "create",
+      canonical: c.name == null,
+      params: c.params,
+      body: c.body,
+      visibility: "public",
+      extern: false,
+      audited: false,
+    },
+    env,
+  );
+}
+
+function lowerDestroy(d: Destroy, env: Env): OperationIR {
+  return lowerActionBody(
+    {
+      kind: "destroy",
+      name: d.name ?? "destroy",
+      canonical: d.name == null,
+      params: d.params,
+      body: d.body,
+      visibility: "public",
+      extern: false,
+      audited: false,
+    },
+    env,
+  );
+}
+
+interface ActionSpec {
+  kind: OperationKind;
+  name: string;
+  canonical: boolean;
+  params: Parameter[];
+  body: Statement[];
+  visibility: "public" | "private";
+  extern: boolean;
+  audited: boolean;
+}
+
+function lowerActionBody(spec: ActionSpec, env: Env): OperationIR {
   let inner = env;
   const params: ParamIR[] = [];
-  for (const p of op.params) {
+  for (const p of spec.params) {
     const t = lowerType(p.type);
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
   const stmts: StmtIR[] = [];
-  for (const s of op.body) {
+  for (const s of spec.body) {
     const result = lowerStatement(s, inner);
     stmts.push(result.stmt);
     inner = result.envAfter;
   }
   return {
-    name: op.name,
-    visibility: op.private ? "private" : "public",
+    name: spec.name,
+    kind: spec.kind,
+    canonical: spec.canonical,
+    visibility: spec.visibility,
     params,
     statements: stmts,
-    extern: !!op.extern,
-    audited: !!op.audited,
+    extern: spec.extern,
+    audited: spec.audited,
   };
 }
 

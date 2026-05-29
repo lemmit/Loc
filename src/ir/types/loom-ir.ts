@@ -202,8 +202,24 @@ export interface FunctionIR {
   body: ExprIR;
 }
 
+/** Lifecycle kind of an aggregate action (lifecycle-operations.md).
+ * `mutate` is today's `operation` keyword; `create` / `destroy` are the
+ * factory / terminator keywords.  The kind tag — not the body syntax —
+ * carries the lifecycle asymmetry; bodies are identical across kinds. */
+export type OperationKind = "create" | "mutate" | "destroy";
+
 export interface OperationIR {
   name: string;
+  /** Lifecycle kind discriminator.  Absent ⇒ `"mutate"` (the legacy
+   * `operation` keyword and every pre-lifecycle IR literal).
+   * `agg.operations` only ever holds `"mutate"` actions; `"create"` /
+   * `"destroy"` actions live in `agg.creates` / `agg.destroys`. */
+  kind?: OperationKind;
+  /** True for an unnamed canonical `create(...)` / `destroy { }`.  The
+   * synthesised `name` is then the keyword itself (`"create"` /
+   * `"destroy"`).  Drives the bare-collection-URL route slug derived in
+   * Phase 2 (`urlStyle` enrichment).  Only meaningful on create/destroy. */
+  canonical?: boolean;
   visibility: "public" | "private";
   params: ParamIR[];
   statements: StmtIR[];
@@ -272,7 +288,24 @@ export interface AggregateIR {
   derived: DerivedIR[];
   invariants: InvariantIR[];
   functions: FunctionIR[];
+  /** Mutate-kind actions only (the legacy `operation` keyword).
+   * `create` / `destroy` actions are intentionally NOT here — they live
+   * in `creates` / `destroys` so the ~50 existing operation consumers
+   * (route emitters, OpenAPI, page-objects, …) keep seeing only
+   * mutate-style endpoints until per-kind emission lands (Phase 3). */
   operations: OperationIR[];
+  /** `kind: "create"` lifecycle factory actions.  Populated by lowering;
+   * empty array when the aggregate declares none.  Not yet consumed by
+   * backends (Phase 3). */
+  creates?: OperationIR[];
+  /** `kind: "destroy"` lifecycle terminator actions.  Populated by
+   * lowering; empty array when none. */
+  destroys?: OperationIR[];
+  /** The single unnamed canonical `create`, if declared, else null.
+   * Convenience accessor over `creates`. */
+  canonicalCreate?: OperationIR | null;
+  /** The single unnamed canonical `destroy`, if declared, else null. */
+  canonicalDestroy?: OperationIR | null;
   parts: EntityPartIR[];
   tests: TestIR[];
   /** Canonical JSON-on-the-wire field list.  Populated by
