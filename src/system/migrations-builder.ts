@@ -21,6 +21,7 @@ import type {
   SchemaSnapshot,
   TableShape,
 } from "../ir/types/migrations-ir.js";
+import { isDocumentShaped, resolveDataSourceConfig } from "../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../util/naming.js";
 import type { SnapshotStore } from "./snapshot.js";
 
@@ -43,9 +44,25 @@ import type { SnapshotStore } from "./snapshot.js";
  *  scheme so existing fixtures stay byte-stable across the refactor. */
 export const BASE_TIMESTAMP = "20260101000000";
 
-export function schemaFromModule(module: EnrichedSubdomainIR): SchemaSnapshot {
+export function schemaFromModule(
+  module: EnrichedSubdomainIR,
+  /** Per-aggregate document predicate (D-DOCUMENT-AXIS).  A document
+   *  aggregate (`normalised(false)`) collapses to a single
+   *  `(id, data jsonb, version)` table — its parts fold into `data` and
+   *  its reference collections become id arrays inside `data`, so neither
+   *  part tables nor join tables are emitted.  Defaults to the
+   *  aggregate-header value; `buildMigrations` passes a binding-aware
+   *  predicate so a per-projection `dataSource normalised:` override is
+   *  honoured (the schema stays consistent with the EF/Drizzle/Ash
+   *  emitters, which resolve the same way via `isDocumentShaped`). */
+  isDocument: (agg: EnrichedAggregateIR) => boolean = (agg) => agg.normalised === false,
+): SchemaSnapshot {
   const tables: TableShape[] = [];
   for (const agg of collectAggregates(module)) {
+    if (isDocument(agg)) {
+      tables.push(documentTableForAggregate(agg, module.name));
+      continue;
+    }
     tables.push(tableForAggregate(agg, module.name));
     for (const part of agg.parts) {
       tables.push(tableForPart(part, agg, module.name));
@@ -61,6 +78,30 @@ export function schemaFromModule(module: EnrichedSubdomainIR): SchemaSnapshot {
   }
   tables.sort((a, b) => a.name.localeCompare(b.name));
   return { schemaVersion: 1, tables };
+}
+
+/** Document-shaped aggregate (`normalised(false)`): the whole aggregate
+ *  tree is one JSON document, so the table is the canonical document
+ *  triple — `id` (PK), `data` (the serialised tree, JSONB), and `version`
+ *  (the single-value optimistic-concurrency token; invariant §2.2#1 —
+ *  the document is written and concurrency-checked as one unit).  No part
+ *  or join tables: contained parts live inside `data`, and cross-aggregate
+ *  `X id` / `X id[]` references stay references but ride inside `data` as
+ *  id strings / arrays. */
+function documentTableForAggregate(agg: AggregateIR, ownerModule: string): TableShape {
+  const tableName = plural(snake(agg.name));
+  return {
+    name: tableName,
+    ownerModule,
+    columns: [
+      { name: "id", type: idColumnType(agg.idValueType), nullable: false },
+      { name: "data", type: { kind: "json" }, nullable: false },
+      { name: "version", type: { kind: "int" }, nullable: false },
+    ],
+    primaryKey: ["id"],
+    foreignKeys: [],
+    indexes: [],
+  };
 }
 
 export function diffSchema(prev: SchemaSnapshot | null, next: SchemaSnapshot): MigrationStep[] {
@@ -161,7 +202,17 @@ export function buildMigrations(sys: EnrichedSystemIR, snapshots: SnapshotStore)
   const out: MigrationsIR[] = [];
   for (const m of sys.subdomains) {
     if (!m.migrationsOwner) continue;
-    const next = schemaFromModule(m);
+    // Binding-aware document predicate: resolve each aggregate's effective
+    // saving shape via its (context, kind) dataSource binding so a
+    // per-projection `normalised:` override matches what the backend
+    // emitters produce.  Falls back to the aggregate header when the
+    // aggregate's owning context can't be located within the module.
+    const isDocument = (agg: EnrichedAggregateIR): boolean => {
+      const ctx = m.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
+      if (!ctx) return agg.normalised === false;
+      return isDocumentShaped(agg, resolveDataSourceConfig(agg, ctx, sys));
+    };
+    const next = schemaFromModule(m, isDocument);
     const baseline = snapshots.read(m.name);
     const steps = diffSchema(baseline, next);
     const storageName = findPrimaryStorageBinding(sys, m, m.migrationsOwner) ?? "";
