@@ -2,12 +2,12 @@ import type {
   AggregateIR,
   AssociationIR,
   BoundedContextIR,
-  DataSourceIR,
   EnrichedBoundedContextIR,
   ExprIR,
   FieldIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js";
 import { lines as joinLines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 
@@ -16,20 +16,26 @@ import { lowerFirst, plural, snake } from "../../../util/naming.js";
  *  aggregate's storage binding say?" without coupling to the
  *  resolver internals.  Returns `undefined` when the system has no
  *  matching dataSource — the table emits as a plain `pgTable(...)`
- *  with no schema qualifier, byte-identical with pre-dataSource emit. */
-export type DataSourceLookup = (agg: AggregateIR) => DataSourceIR | undefined;
+ *  with no schema qualifier, byte-identical with pre-dataSource emit.
+ *  When defined, `.schema` is always populated (defaulted to
+ *  `snake(context.name)` when the DSL omits `schema:`). */
+export type DataSourceLookup = (agg: AggregateIR) => ResolvedDataSource | undefined;
 
-/** Snake-case a schema name into a valid Drizzle const identifier
- *  (`tenant_a` → `tenantA` — drizzle convention is camelCase consts
- *  even though the schema string stays as-declared). */
+/** Snake-case a schema name into a valid Drizzle const identifier with
+ *  a `Schema` suffix (`sales` → `salesSchema`).  The suffix is what
+ *  keeps the pgSchema declaration from colliding with a table const of
+ *  the same lemma — e.g. context `Orders` defaults its schema to
+ *  `"orders"` and the `Order` aggregate emits a table const `orders`,
+ *  so the schema needs to live under a distinct name. */
 function schemaConstName(schemaName: string): string {
-  return lowerFirst(
+  const camel = lowerFirst(
     schemaName
       .split(/[^a-zA-Z0-9]/)
       .filter(Boolean)
       .map((part, i) => (i === 0 ? part : part[0]!.toUpperCase() + part.slice(1)))
       .join(""),
   );
+  return `${camel}Schema`;
 }
 
 // All-procedural Drizzle schema emission.  Column generation has too

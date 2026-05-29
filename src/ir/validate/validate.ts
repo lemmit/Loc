@@ -1,9 +1,12 @@
+import { platformOwnsBackend } from "../../language/validators/data/platform-rules.js";
 import { allPlatforms, platformFor } from "../../platform/registry.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  DataSourceIR,
   DeployableIR,
+  EnrichedAggregateIR,
   EnrichedLoomModel,
   ExprIR,
   SubdomainIR,
@@ -13,6 +16,7 @@ import type {
   TypeIR,
 } from "../types/loom-ir.js";
 import { allContexts, findUsesCurrentUser } from "../types/loom-ir.js";
+import { dataSourceKindForAggregate } from "../util/resolve-datasource.js";
 
 // ---------------------------------------------------------------------------
 // Loom IR validator — semantic checks that need the full IR (not just
@@ -49,6 +53,8 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   validateWorkspaceUniqueness(loom, diags);
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
+    validateDataSourceCoverage(sys, diags);
+    validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
@@ -799,6 +805,188 @@ function validateSystem(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const m of sys.subdomains) modulesByName.set(m.name, m);
   for (const t of sys.e2eTests) {
     validateE2ETest(t, sys, modulesByName, diags);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// DataSource coverage — every backend deployable must declare a
+// matching `dataSource` for every (context, persistence-kind) pair it
+// hosts.  A stateBased aggregate needs `kind: state`; an eventSourced
+// aggregate needs `kind: eventLog`.  Without a binding, the emitter
+// has no schema / connection routing config to emit — so the omission
+// is an authoring mistake, not a meaningful default.
+//
+// Only fires for backend deployables (dotnet, hono, phoenixLiveView).
+// Frontend-only platforms (react, static) own no database and can't
+// have a dataSource to point at.
+// ---------------------------------------------------------------------------
+function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  const dsByName = new Map<string, DataSourceIR>();
+  for (const d of sys.dataSources) dsByName.set(d.name, d);
+
+  for (const dep of sys.deployables) {
+    if (!platformOwnsBackend(dep.platform)) continue;
+    // Resolve the listed dataSources to their (ctx, kind) coverage set.
+    const covered = new Set<string>();
+    for (const dsName of dep.dataSourceNames ?? []) {
+      const ds = dsByName.get(dsName);
+      if (!ds) continue;
+      covered.add(`${ds.contextName}:${ds.kind}`);
+    }
+    // For every hosted aggregate, demand a matching dataSource entry.
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const kind = dataSourceKindForAggregate(agg as EnrichedAggregateIR);
+        const key = `${ctxName}:${kind}`;
+        if (covered.has(key)) continue;
+        diags.push({
+          severity: "error",
+          message:
+            `Deployable '${dep.name}' hosts aggregate '${ctxName}.${agg.name}' ` +
+            `(persistenceStrategy: ${agg.persistenceStrategy ?? "stateBased"}, ` +
+            `needs dataSource kind: ${kind}) but lists no matching dataSource. ` +
+            `Declare ` +
+            `\`dataSource ${lowerFirst(ctxName)}${kind === "state" ? "State" : "EventLog"} ` +
+            `{ for: ${ctxName}, kind: ${kind}, use: <storage> }\` ` +
+            `and add it to '${dep.name}'\`s 'dataSources:' list.`,
+          source: `${sys.name}/${dep.name}`,
+        });
+      }
+    }
+
+    // Inverse direction: a dataSource listed on a deployable but
+    // covering nothing in the hosted contexts is dead config.  An
+    // `eventLog` binding against a context that has only stateBased
+    // aggregates routes no data; a `state` binding when every
+    // aggregate is eventSourced is similarly inert.  This catches
+    // edits-in-progress (renamed a strategy and forgot to drop the
+    // old binding) and copy-paste from another deployable.  Warning
+    // (not error) because the user may be staging a binding for an
+    // aggregate they're about to add — but we still want it on the
+    // Problems panel.
+    const hostedContexts = new Set(dep.contextNames);
+    for (const dsName of dep.dataSourceNames ?? []) {
+      const ds = dsByName.get(dsName);
+      if (!ds) continue;
+      if (!hostedContexts.has(ds.contextName)) continue;
+      // The 'for: <ctx> not in contexts:' error is already raised by
+      // the AST validator (checkDeployableDataSources); skip here so
+      // the user gets one diagnostic per mistake, not two.
+      const ctx = ctxByName.get(ds.contextName);
+      if (!ctx) continue;
+      const reason = coverageGapReason(ds.kind, ctx);
+      if (!reason) continue;
+      diags.push({
+        severity: "warning",
+        message:
+          `Deployable '${dep.name}' lists dataSource '${ds.name}' (kind: ${ds.kind}) for ` +
+          `context '${ds.contextName}', but ${reason}.  This binding routes no data — ` +
+          `remove it, or add an aggregate whose persistenceStrategy needs kind: ${ds.kind}.`,
+        source: `${sys.name}/${dep.name}`,
+      });
+    }
+  }
+}
+
+/** Returns a human-readable reason a dataSource of `kind` covers
+ *  nothing in `ctx`, or undefined when the binding is exercised by
+ *  at least one aggregate.  Encodes the dataSource-kind → aggregate-
+ *  predicate matrix:
+ *    - state    → needs at least one stateBased aggregate
+ *    - eventLog → needs at least one eventSourced aggregate
+ *    - snapshot → needs at least one eventSourced aggregate
+ *      (snapshot policy applies to ES streams)
+ *    - cache    → needs at least one aggregate of any strategy
+ *    - replica  → needs at least one aggregate of any strategy
+ */
+function coverageGapReason(kind: string, ctx: BoundedContextIR): string | undefined {
+  const aggs = ctx.aggregates;
+  if (aggs.length === 0) return "the context declares no aggregates";
+  const hasState = aggs.some((a) => (a.persistenceStrategy ?? "stateBased") === "stateBased");
+  const hasES = aggs.some((a) => a.persistenceStrategy === "eventSourced");
+  if (kind === "state" && !hasState) {
+    return "every aggregate is eventSourced (none need kind: state persistence)";
+  }
+  if ((kind === "eventLog" || kind === "snapshot") && !hasES) {
+    return "no aggregate is eventSourced (kind: " + kind + " has no event stream to back)";
+  }
+  // cache / replica only require at least one aggregate, already
+  // checked above.
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Honest-note pass: warn on dataSource knobs the AST validator accepts
+// but no current emitter consumes.
+//
+// At time of writing, three knobs route through to generated code:
+//   - `schema`       — EF Core ToTable, Drizzle pgSchema, AshPostgres
+//                      `postgres.schema`
+//   - `tablePrefix`  — same three emitters (table-name prefix)
+//
+// The other six knobs validate against the kind/storage compatibility
+// matrix in `src/language/validators/datasource.ts` but no emitter
+// reads them.  Setting one is a no-op at runtime:
+//
+//   - `ttl`            — would gate a Redis-backed cache adapter that
+//                        doesn't exist yet
+//   - `every` / `retain` — would gate snapshot policy on an event-
+//                        sourced persister (Marten / hono-ES adapter)
+//                        that doesn't exist yet
+//   - `readonly`       — would gate a replica-aware DbContext that
+//                        doesn't exist yet
+//   - `keyPrefix`      — would gate the same Redis cache adapter
+//                        gated by `ttl`
+//
+// `isolationLevel` used to be on this list; it now flows through
+// `resolveWorkflowIsolation` into the .NET BeginTransactionAsync and
+// Phoenix `Ash.transaction` opts when a workflow in the context is
+// transactional and doesn't carry its own per-workflow isolation.
+//
+// We surface this as a warning at IR-validate time so the author sees
+// "validation accepts this but it's a no-op" instead of believing the
+// knob has effect.  When an adapter lands that consumes one of these,
+// the corresponding entry comes off the list — the truth-telling is
+// in code, not in a doc that goes stale.
+// ---------------------------------------------------------------------------
+
+interface UnwiredKnob {
+  property: keyof DataSourceIR;
+  description: string;
+}
+
+const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
+  { property: "ttl", description: "no Redis-backed cache adapter is implemented yet" },
+  {
+    property: "every",
+    description: "no event-sourced persister with snapshot policy is implemented yet",
+  },
+  {
+    property: "retain",
+    description: "no event-sourced persister with snapshot policy is implemented yet",
+  },
+  { property: "readonly", description: "no replica-aware persister is implemented yet" },
+  { property: "keyPrefix", description: "no Redis-backed cache adapter is implemented yet" },
+];
+
+function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const ds of sys.dataSources) {
+    for (const knob of UNWIRED_KNOBS) {
+      const value = ds[knob.property];
+      if (value === undefined) continue;
+      diags.push({
+        severity: "warning",
+        message:
+          `dataSource '${ds.name}' sets '${knob.property}', but ${knob.description}.  ` +
+          `The value is accepted by validation and persisted in the IR but no current ` +
+          `emitter consumes it — this is a no-op at runtime.`,
+        source: `${sys.name}/${ds.name}`,
+      });
+    }
   }
 }
 

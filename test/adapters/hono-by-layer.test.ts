@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { EmitCtx } from "../../src/generator/_adapters/index.js";
-import { resolveLayout } from "../../src/platform/adapter-registry.js";
+import { resolveLayout } from "../../src/platform/resolve-adapters.js";
 import {
   byLayerLayoutAdapter,
   type HonoArtifact,

@@ -34,6 +34,8 @@ Major landings since the original plan was drafted:
 | `component` as ModelMember (#629) + slot-typed params (#632, validator #643) | Workspace-wide components — consumed by loom-forms |
 | HEEx form primitives, Phase D Slices A–D (#631, #634, #635, #636, #637) | Phoenix form primitives partially landed — slots into loom-forms backend work |
 | `react: require ui:` (#606) — legacy archetype fallback removed | No more dual codepaths in later UI proposals |
+| Storage adapter taxonomy + orchestrator rewire (#681–#691: F3 contracts, F5/F6/F7 real persistence/style/layout adapters + dispatch) | `persistence`/`style`/`layout` adapter seam is real on all three backends; emit dispatches through it |
+| **D-ADAPTER-HOME dissolve** — central `adapter-registry.ts` removed; each backend carries its menu on its `PlatformSurface`; `resolve-adapters.ts` reads the discovered surface | Adapter contracts done; `resolve*` is the ready seam. Next consumer = the per-deployable adapter-selection feature (below), not standalone wiring |
 
 Per-proposal state on `origin/main`:
 
@@ -43,7 +45,7 @@ Per-proposal state on `origin/main`:
 | `observability.md` | SHIPPED (catalog + 3 backends + `LOOM_OBS_E2E_*` gates) | None in scope |
 | `audit-and-logging.md` | PARTIAL — `audited` boolean lands; Hono emits load→mutate→save→audit | Promote to `audited(actions \| access \| events \| off)`; `AuditRecord` shape; before/after snapshots; .NET Mediator behaviour; access-audit query pipeline |
 | `sensitivity-and-compliance.md` | PARTIAL — phases 1 + 2-lite shipped | Phase 2 full (`authorized(<tag>,…)`); Phase 3 (`mask:` DTOs + React); Phase 4 (sink-call classification) |
-| `storage-and-platform-config.md` | PARTIAL — top-level `storage <name> { type }` + deployable role-keyed slots exist | Per-aggregate `persistenceStrategy:`; logical binding (keyword TBD — see "Known issues"); per-deployable `style:` / `layout:` / `persistence:`; `STORAGE_CAPABILITIES` matrix; adapter contracts |
+| `storage-and-platform-config.md` | PARTIAL — top-level `storage` + `dataSource` + role-keyed slots + the persistence/style/layout **adapter taxonomy** (F3–F7) exist; adapters live on the `PlatformSurface` (D-ADAPTER-HOME) | **Next gated step: per-deployable `persistence:` / `style:` / `layout:` selection** — grammar + `DeployableIR` fields → system orchestrator resolves via `resolve-adapters.ts` + validator capability-checks (`supports`, `supportedLayouts`). This is what *consumes* `resolve*`; build when there's a pull for a non-default adapter. Plus `STORAGE_CAPABILITIES` matrix; per-aggregate `for:` deferred to v2 (D-GRANULARITY) |
 | Everything else in scope | NOT STARTED | Full per each doc's internal phasing |
 
 ## New proposals on main
@@ -55,6 +57,8 @@ Per-proposal state on `origin/main`:
 | `i18n-strings.md` | Bans `+` in user-visible slots; mandates template literals; ICU placeholder lowering with stable content-hash keys | None | ~5 d, folds into i18n |
 | `i18n.md` | First-class i18n: ICU catalogs, content-hash keys, named `text { }` entries, `ddd i18n sync` three-way merge, per-backend adapters | i18n-strings | 7 phases, ~4 weeks |
 | `workflow-and-applier.md` | Ash-style `create` actions, applier separation, sagas deferred | None | TBD per proposal phasing |
+| `platform-directory-layout.md` | Framework-version axis for backend code. **Option A rejected (D-BACKEND-PKG)**; backend layout follows the packaging-split (per-version packages); hono hoist stays as package-staging | packaging-split lands; gated on F-series + `node` rename | per backend, after F-series |
+| `per-package-output-tree.md` | Per-layer **output** packages ("Loom as ORM"). Output-side twin of packaging-split; expressible as a `LayoutAdapter` | playground workspace support | deferred — large one-time bill |
 
 ## In scope
 

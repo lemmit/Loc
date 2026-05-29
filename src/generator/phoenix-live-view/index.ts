@@ -7,7 +7,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
-import { resolveDataSourceForAggregate } from "../../ir/util/resolve-datasource.js";
+import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx } from "../_adapters/index.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
@@ -94,7 +94,7 @@ export function generatePhoenixLiveViewProject(
   const resolveDataSource = (agg: AggregateIR) => {
     const owningCtx = contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
     return owningCtx
-      ? resolveDataSourceForAggregate(agg as EnrichedAggregateIR, owningCtx, sys)
+      ? resolveDataSourceConfig(agg as EnrichedAggregateIR, owningCtx, sys)
       : undefined;
   };
 
@@ -105,7 +105,7 @@ export function generatePhoenixLiveViewProject(
 
   // --- Workflow + view files -----------------------------------------------
   for (const ctx of contexts) {
-    emitWorkflows(appName, ctx, appModule, out);
+    emitWorkflows(appName, ctx, appModule, out, sys);
     emitViews(appName, ctx, appModule, out);
   }
 
@@ -217,7 +217,7 @@ function emitContext(
   options: {
     resolveDataSource?: (
       agg: AggregateIR,
-    ) => import("../../ir/types/loom-ir.js").DataSourceIR | undefined;
+    ) => import("../../ir/util/resolve-datasource.js").ResolvedDataSource | undefined;
   } = {},
 ): void {
   const ctxSnake = snake(ctx.name);

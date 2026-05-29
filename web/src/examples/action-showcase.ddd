@@ -59,9 +59,13 @@ system ActionShowcase {
     }
   }
 
+  storage primary { type: postgres }
+  dataSource salesState { for: Sales, kind: state, use: primary }
+
   deployable api {
     platform: hono
     contexts: [Sales]
+    dataSources: [salesState]
     serves: SalesApi
     port: 3000
   }

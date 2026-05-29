@@ -181,7 +181,13 @@ system BankingSystem {
   ui WebApp with scaffold(subdomains: [Banking]) {
   }
 
-  deployable api { platform: hono, contexts: [Banking], port: 3000 }
+  storage primary { type: postgres }
+  dataSource bankingState { for: Banking, kind: state, use: primary }
+
+  deployable api {
+    platform: hono, contexts: [Banking],
+    dataSources: [bankingState], port: 3000
+  }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
 }
 

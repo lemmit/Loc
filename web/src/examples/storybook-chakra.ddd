@@ -201,9 +201,13 @@ system Storybook {
   ui WebApp with scaffold(subdomains: [Stories]) {
   }
 
+  storage primary { type: postgres }
+  dataSource storybookState { for: Storybook, kind: state, use: primary }
+
   deployable api {
     platform: hono
     contexts: [Storybook]
+    dataSources: [storybookState]
     port: 3000
   }
 

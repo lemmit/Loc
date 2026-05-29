@@ -5,7 +5,9 @@ import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import {
   dataSourceKindForAggregate,
+  resolveDataSourceConfig,
   resolveDataSourceForAggregate,
+  resolveWorkflowIsolation,
 } from "../../src/ir/util/resolve-datasource.js";
 import { parseValid } from "../_helpers/parse.js";
 
@@ -88,8 +90,9 @@ describe("resolveDataSourceForAggregate", () => {
     const receipt = ctx.aggregates.find((a) => a.name === "Receipt")!;
     const ds = resolveDataSourceForAggregate(receipt, ctx, sys);
     expect(ds?.name).toBe("receiptsState");
-    // No schema declared on this binding → undefined (emitter falls back
-    // to the default single-arg ToTable).
+    // No schema declared on this binding → raw IR value is undefined.
+    // (The defaulting to `snake(ctx.name)` lives in resolveDataSourceConfig,
+    // not the raw resolver — see resolveDataSourceConfig tests below.)
     expect(ds?.schema).toBeUndefined();
   });
 
@@ -101,5 +104,157 @@ describe("resolveDataSourceForAggregate", () => {
     const order = ordersCtx.aggregates.find((a) => a.name === "Order")!;
     // Order belongs to Orders, not Billing → no match.
     expect(resolveDataSourceForAggregate(order, billingCtx, sys)).toBeUndefined();
+  });
+});
+
+describe("resolveDataSourceConfig (with implicit defaults)", () => {
+  it("passes the DSL `schema:` through verbatim when set", async () => {
+    const loom = enrichLoomModel(lowerModel(await parseValid(SRC)));
+    const sys = loom.systems[0]!;
+    const ctx = sys.subdomains[0]!.contexts.find((c) => c.name === "Orders")!;
+    const order = ctx.aggregates.find((a) => a.name === "Order")!;
+    const cfg = resolveDataSourceConfig(order, ctx, sys);
+    expect(cfg?.schema).toBe("orders");
+    expect(cfg?.name).toBe("ordersState");
+  });
+
+  it("defaults schema to snake(context.name) when DSL omits `schema:`", async () => {
+    const loom = enrichLoomModel(lowerModel(await parseValid(SRC)));
+    const sys = loom.systems[0]!;
+    const ctx = sys.subdomains[0]!.contexts.find((c) => c.name === "Billing")!;
+    const receipt = ctx.aggregates.find((a) => a.name === "Receipt")!;
+    const cfg = resolveDataSourceConfig(receipt, ctx, sys);
+    // Billing context, no DSL schema → defaulted to "billing".
+    expect(cfg?.schema).toBe("billing");
+  });
+
+  it("returns undefined when no dataSource matches (no implicit default)", async () => {
+    // Construct a system whose deployable has no dataSource for the
+    // hosted (context, kind) pair.  Resolver returns undefined; emitter
+    // falls back to its pre-dataSource default shape.
+    const noDsSrc = `
+system Sys {
+  subdomain Sales { context Orders { aggregate Order { name: string } } }
+  storage primary { type: postgres }
+  deployable api { platform: dotnet, contexts: [Orders], port: 5000 }
+}`;
+    const loom = enrichLoomModel(lowerModel(await parseValid(noDsSrc)));
+    const sys = loom.systems[0]!;
+    const ctx = sys.subdomains[0]!.contexts[0]!;
+    const order = ctx.aggregates[0]!;
+    expect(resolveDataSourceConfig(order, ctx, sys)).toBeUndefined();
+  });
+
+  it("snake-cases a multi-word context name for the default", async () => {
+    const camelSrc = `
+system Sys {
+  subdomain S { context OrderHistory { aggregate Snapshot { tag: string } } }
+  storage primary { type: postgres }
+  dataSource oh { for: OrderHistory, kind: state, use: primary }
+  deployable api {
+    platform: dotnet, contexts: [OrderHistory], dataSources: [oh], port: 5000
+  }
+}`;
+    const loom = enrichLoomModel(lowerModel(await parseValid(camelSrc)));
+    const sys = loom.systems[0]!;
+    const ctx = sys.subdomains[0]!.contexts[0]!;
+    const agg = ctx.aggregates[0]!;
+    const cfg = resolveDataSourceConfig(agg, ctx, sys);
+    // OrderHistory → order_history.
+    expect(cfg?.schema).toBe("order_history");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveWorkflowIsolation — workflow.transactional(<level>) overrides the
+// state-kind dataSource's `isolationLevel:` default; otherwise the dataSource
+// value flows through; otherwise undefined.
+// ---------------------------------------------------------------------------
+
+describe("resolveWorkflowIsolation", () => {
+  async function build(src: string) {
+    const loom = enrichLoomModel(lowerModel(await parseValid(src)));
+    const sys = loom.systems[0]!;
+    const ctx = sys.subdomains[0]!.contexts[0]!;
+    return { sys, ctx };
+  }
+
+  it("returns the workflow's explicit level when set", async () => {
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C {
+    aggregate A { x: int }
+    workflow doIt() transactional(serializable) { }
+  } }
+  storage pg { type: postgres }
+  dataSource cState {
+    for: C, kind: state, use: pg, isolationLevel: readCommitted
+  }
+  deployable api {
+    platform: dotnet, contexts: [C], dataSources: [cState], port: 5000
+  }
+}`);
+    const wf = ctx.workflows[0]!;
+    expect(resolveWorkflowIsolation(wf, ctx, sys)).toBe("serializable");
+  });
+
+  it("falls back to the dataSource isolationLevel when workflow has none", async () => {
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C {
+    aggregate A { x: int }
+    workflow doIt() transactional { }
+  } }
+  storage pg { type: postgres }
+  dataSource cState {
+    for: C, kind: state, use: pg, isolationLevel: repeatableRead
+  }
+  deployable api {
+    platform: dotnet, contexts: [C], dataSources: [cState], port: 5000
+  }
+}`);
+    const wf = ctx.workflows[0]!;
+    expect(resolveWorkflowIsolation(wf, ctx, sys)).toBe("repeatableRead");
+  });
+
+  it("returns undefined when neither workflow nor dataSource sets a level", async () => {
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C {
+    aggregate A { x: int }
+    workflow doIt() transactional { }
+  } }
+  storage pg { type: postgres }
+  dataSource cState { for: C, kind: state, use: pg }
+  deployable api {
+    platform: dotnet, contexts: [C], dataSources: [cState], port: 5000
+  }
+}`);
+    const wf = ctx.workflows[0]!;
+    expect(resolveWorkflowIsolation(wf, ctx, sys)).toBeUndefined();
+  });
+
+  it("only consults the state-kind dataSource, not eventLog/cache/etc.", async () => {
+    // The state-kind dataSource has no isolationLevel; an eventLog
+    // dataSource for the same context does — and is correctly ignored.
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C {
+    aggregate A { x: int }
+    aggregate B { persistenceStrategy: eventSourced  y: int }
+    workflow doIt() transactional { }
+  } }
+  storage pg { type: postgres }
+  dataSource cState { for: C, kind: state, use: pg }
+  dataSource cLog {
+    for: C, kind: eventLog, use: pg, isolationLevel: serializable
+  }
+  deployable api {
+    platform: dotnet, contexts: [C], dataSources: [cState, cLog], port: 5000
+  }
+}`);
+    const wf = ctx.workflows[0]!;
+    // The state binding has no level; eventLog binding is ignored.
+    expect(resolveWorkflowIsolation(wf, ctx, sys)).toBeUndefined();
   });
 });

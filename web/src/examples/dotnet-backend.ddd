@@ -109,9 +109,13 @@ system SalesBackend {
   // a separate frontend deployable in your own .ddd source if you
   // want a split-deployment topology; or use `storefront-dotnet.ddd`
   // for the single-container fullstack shape.
+  storage primary { type: postgres }
+  dataSource salesState { for: Sales, kind: state, use: primary }
+
   deployable api {
     platform: dotnet
     contexts: [Sales]
+    dataSources: [salesState]
     port: 8080
   }
 }

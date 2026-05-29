@@ -9,7 +9,7 @@ import {
   byFeatureLayoutAdapter,
   type PhoenixArtifact,
 } from "../../src/generator/phoenix-live-view/adapters/by-feature-layout.js";
-import { resolveLayout } from "../../src/platform/adapter-registry.js";
+import { resolveLayout } from "../../src/platform/resolve-adapters.js";
 
 // The phoenix paths are deployable-scoped — pathFor reads
 // `ctx.deployable.name` to derive the snake-case app prefix.  We

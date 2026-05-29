@@ -146,7 +146,8 @@ system Storybook {
   }
 
   // Hono backend — empty but required so the playground's
-  // preview pipeline has something to bundle/boot.
+  // preview pipeline has something to bundle/boot.  No dataSource
+  // needed because the Empty context declares no aggregates.
   deployable api {
     platform: hono
     contexts: [Empty]
