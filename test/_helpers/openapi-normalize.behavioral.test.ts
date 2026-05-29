@@ -15,12 +15,12 @@ import {
 // behaviourally equal".  Each block isolates one relaxation / addition.
 
 describe("openapi-normalize — behavioural equivalence", () => {
-  // A backend (Hono/Phoenix) that names its list response as a component
-  // `{type: array, items: $ref}` must compare equal to one (.NET) that
-  // inlines `array<element>` at the operation.
-  // TEMPORARY DROP-IN TOLERANCE (#705): once .NET emits the named wrapper
-  // these assertions flip to "exact name comparison; inline-array drifts".
-  describe("list-wrapper resolution", () => {
+  // All three backends now name the list response as a component
+  // (`ProjectListResponse`) — .NET via the ListResponseWrapperFilter (#705).
+  // The wrapper is compared by NAME (the tolerance that resolved it to an
+  // inline `array<element>` is gone): named-vs-named is clean; a
+  // hypothetical inline-array backend now drifts.
+  describe("list-wrapper naming", () => {
     const named: OpenApiSpec = {
       paths: {
         "/projects": {
@@ -69,22 +69,25 @@ describe("openapi-normalize — behavioural equivalence", () => {
       components: { schemas: { ProjectResponse: { type: "object", properties: { id: {} } } } },
     };
 
-    it("resolves a named array-wrapper $ref to array<element>", () => {
-      expect(responseBodySchemas(named).get("GET /projects")).toBe("array<ProjectResponse>");
+    it("compares a named array-wrapper $ref by name; inline array stays array<element>", () => {
+      expect(responseBodySchemas(named).get("GET /projects")).toBe("ProjectListResponse");
       expect(responseBodySchemas(inlined).get("GET /projects")).toBe("array<ProjectResponse>");
     });
 
-    it("excludes the list-wrapper component from schemaNames", () => {
-      expect(schemaNames(named).has("ProjectListResponse")).toBe(false);
+    it("includes the list-wrapper component in schemaNames", () => {
+      expect(schemaNames(named).has("ProjectListResponse")).toBe(true);
       expect(schemaNames(named).has("ProjectResponse")).toBe(true);
     });
 
-    it("named-wrapper and inline-array specs are a clean diff", () => {
-      const diff = diffSpecs({ name: "hono", spec: named }, { name: "dotnet", spec: inlined });
-      expect(diff.responseBodyDiffs).toEqual([]);
-      expect(diff.onlySchemasRef).toEqual([]);
-      expect(diff.onlySchemasOther).toEqual([]);
-      expect(isCleanDiff(diff)).toBe(true);
+    it("two named-wrapper specs are clean; named-vs-inline now drifts", () => {
+      const clean = diffSpecs({ name: "hono", spec: named }, { name: "dotnet", spec: named });
+      expect(isCleanDiff(clean)).toBe(true);
+
+      const drift = diffSpecs({ name: "hono", spec: named }, { name: "dotnet", spec: inlined });
+      // The wrapper schema is one-sided + the response body refs differ.
+      expect(drift.onlySchemasRef).toEqual(["ProjectListResponse"]);
+      expect(drift.responseBodyDiffs.length).toBe(1);
+      expect(isCleanDiff(drift)).toBe(false);
     });
   });
 
