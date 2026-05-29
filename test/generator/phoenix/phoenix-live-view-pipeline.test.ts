@@ -2356,12 +2356,16 @@ describe("OpenAPI spec — per-op + per-find paths", () => {
       appModule: "PhoenixApp",
     });
     const spec = files.get("lib/phoenix_app_web/api/sales_api_spec.ex")!;
-    // Per-op path
+    // Per-op path.  operationId is the SHARED canonical camelCase token
+    // (src/ir/util/openapi-ids.ts) — byte-identical to Hono and .NET, so a
+    // client generated from one backend's spec is a drop-in replacement
+    // against the others.  (The Elixir code-interface calls above stay
+    // snake_case — that's internal, not the wire surface.)
     expect(spec).toMatch(/"\/projects\/\{id\}\/archive"/);
-    expect(spec).toMatch(/operationId: "archive_project"/);
+    expect(spec).toMatch(/operationId: "archiveProject"/);
     // Per-find path
     expect(spec).toMatch(/"\/projects\/by_name"/);
-    expect(spec).toMatch(/operationId: "by_name_project"/);
+    expect(spec).toMatch(/operationId: "byNameProject"/);
     // Auto-`all` find must NOT have its own path entry.
     expect(spec).not.toMatch(/"\/projects\/all"/);
   });
