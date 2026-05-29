@@ -241,10 +241,10 @@ system PokemonWorld {
     api CombatApi from Combat
 
     storage primarySql { type: postgres }
-    dataSource creaturesState { for: Creatures, kind: state, use: primarySql }
-    dataSource trainersState  { for: Trainers,  kind: state, use: primarySql }
-    dataSource battlesState   { for: Battles,   kind: state, use: primarySql }
-    dataSource arenasState    { for: Arenas,    kind: state, use: primarySql }
+    resource creaturesState { for: Creatures, kind: state, use: primarySql }
+    resource trainersState  { for: Trainers,  kind: state, use: primarySql }
+    resource battlesState   { for: Battles,   kind: state, use: primarySql }
+    resource arenasState    { for: Arenas,    kind: state, use: primarySql }
 
     deployable api {
         platform: hono

@@ -17,7 +17,7 @@ const DDL = `
       aggregate A { operation go() {}  test "go works" verifies TC-001 {} }
     } }
     storage pg { type: postgres }
-    dataSource cState { for: C, kind: state, use: pg }
+    resource cState { for: C, kind: state, use: pg }
     deployable api {
       platform: hono  contexts: [C]  dataSources: [cState]
     }

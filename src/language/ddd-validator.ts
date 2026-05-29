@@ -10,10 +10,10 @@ import type { ValidationAcceptor, ValidationChecks } from "langium";
 import type { DddServices } from "./ddd-module.js";
 import type {
   Api,
-  DataSource,
   DddAstType,
   Deployable,
   Model,
+  Resource,
   Storage,
   System,
   ThemeBlock,
@@ -237,14 +237,14 @@ export class DddValidator {
         //   - storage-shaped knobs (schema, tablePrefix, keyPrefix)
         //     match the resolved storage's type.
         // See `src/language/validators/datasource.ts`.
-        const dataSources = m.members.filter((sm) => sm.$type === "DataSource") as DataSource[];
-        const dataSourceNamesSeen = new Map<string, DataSource>();
+        const dataSources = m.members.filter((sm) => sm.$type === "Resource") as Resource[];
+        const dataSourceNamesSeen = new Map<string, Resource>();
         for (const ds of dataSources) {
           const prior = dataSourceNamesSeen.get(ds.name);
           if (prior) {
             accept(
               "error",
-              `Duplicate dataSource '${ds.name}'; dataSource names must be unique within a system.`,
+              `Duplicate resource '${ds.name}'; resource names must be unique within a system.`,
               { node: ds, property: "name" },
             );
           } else {

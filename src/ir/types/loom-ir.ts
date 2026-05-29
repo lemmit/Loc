@@ -685,6 +685,9 @@ export type EnrichedSubdomainIR = Omit<SubdomainIR, "contexts"> & {
 
 export type EnrichedSystemIR = Omit<SystemIR, "subdomains"> & {
   subdomains: EnrichedSubdomainIR[];
+  /** Derived logical needs, one per `(context, required kind)` — the
+   *  implicit "need" layer (RFC §3.3).  Populated by `enrichLoomModel`. */
+  needs: NeedIR[];
 };
 
 // ---------------------------------------------------------------------------
@@ -907,6 +910,9 @@ export interface StorageIR {
    *  `secret(handle)` for a future secrets-manager binding, or
    *  `literal("…")` for a hard-coded URL.  Optional in v1. */
   connection?: ConnectionSourceIR;
+  /** Generic vendor-parameter map (region, bucket, vhost, …), validated
+   *  per sourceType against the registry config schema. */
+  config?: readonly ConfigEntryIR[];
 }
 
 export type ConnectionSourceIR =
@@ -914,6 +920,19 @@ export type ConnectionSourceIR =
   | { kind: "env"; env: string }
   | { kind: "secret"; secret: string }
   | { kind: "literal"; literal: string };
+
+/** A single generic `config` entry value (RFC §3.1/§8) — a typed scalar
+ *  so the registry's per-sourceType config schema can validate it. */
+export type ConfigValueIR =
+  | { kind: "string"; value: string }
+  | { kind: "int"; value: number }
+  | { kind: "bool"; value: boolean };
+
+/** One `key: value` pair from a `config { … }` map, in declaration order. */
+export interface ConfigEntryIR {
+  key: string;
+  value: ConfigValueIR;
+}
 
 export type StorageKind =
   | "postgres"
@@ -925,7 +944,10 @@ export type StorageKind =
   | "meilisearch"
   | "kafka"
   | "clickhouse"
-  | "bigquery";
+  | "bigquery"
+  | "awsS3"
+  | "rabbitmq"
+  | "restApi";
 
 /** System-level `theme { ... }` block.  Tokens are semantic so the
  *  same source applies to whatever target the React generator
@@ -1294,9 +1316,35 @@ export interface DataSourceIR {
    *  default `true`.  Carried through the IR; emission is a later
    *  slice. */
   normalised?: boolean;
+  /** Generic vendor-parameter map for the binding (RFC §3.2). */
+  config?: readonly ConfigEntryIR[];
 }
 
-export type DataSourceKind = "state" | "eventLog" | "snapshot" | "cache" | "replica";
+export type DataSourceKind =
+  | "state"
+  | "eventLog"
+  | "snapshot"
+  | "cache"
+  | "replica"
+  | "objectStore"
+  | "queue"
+  | "api";
+
+/** A derived, implicit logical *need*: what a bounded context requires
+ *  of its data layer, independent of the technology that satisfies it
+ *  (RFC §3.3).  Needs are not authored — they are derived during
+ *  enrichment from how the context's aggregates persist, and threaded
+ *  onto `EnrichedSystemIR.needs`.  A `resource` binding satisfies a need
+ *  when its `sourceType` supports the need's `kind` and offers all the
+ *  need's `capabilities` (validated in IR; RFC §5). */
+export interface NeedIR {
+  /** The bounded context that has the need. */
+  contextName: string;
+  /** The required (surface) kind — the `(context, kind)` routing key. */
+  kind: DataSourceKind;
+  /** Capabilities the context requires within that kind. */
+  capabilities: readonly string[];
+}
 
 // `static` is the page-metamodel's UI-only deployable kind: builds a
 // Vite bundle and serves it via a small static-asset host (nginx in

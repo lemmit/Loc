@@ -39,6 +39,7 @@ import {
   renderJoinEntity,
   renderJoinEntityConfiguration,
   renderNoopDispatcher,
+  renderProblemDetailsFilter,
   renderProgram,
   renderRepositoryImpl,
   renderRepositoryInterface,
@@ -217,6 +218,7 @@ function emitProjectFromContexts(
   // arm is gated on the same flag.
   const usesValidators = merged.aggregates.some(hasAnyWireValidator);
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
+  out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
@@ -483,6 +485,7 @@ function emitInfrastructure(
 ): void {
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(ctx, ns));
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
+  out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
 }
 
 function emitProject(

@@ -34,7 +34,7 @@ System:
     '}';
 
 SystemMember:
-    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | DataSource | Layout;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | Resource | Layout;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -120,7 +120,7 @@ Deployable:
         // (context, kind) uniqueness; (c) every aggregate's required
         // kind (state / eventLog / cache / snapshot / replica) has a
         // matching dataSource for its hosting context.
-        ('dataSources' ':' '[' dataSourceRefs+=[DataSource:LooseName] (',' dataSourceRefs+=[DataSource:LooseName])* ','? ']' ','?)?
+        ('dataSources' ':' '[' dataSourceRefs+=[Resource:LooseName] (',' dataSourceRefs+=[Resource:LooseName])* ','? ']' ','?)?
         ('targets' ':' targets=[Deployable:LooseName] ','?)?
         // Slice 11.26 — explicit api composition.  Backend deployables
         // declare which contracts they serve via `serves:`.  Frontend
@@ -162,13 +162,14 @@ UiParamBinding:
     name=LooseName ':' source=[Deployable:LooseName];
 
 // D-STORAGE-SPLIT: the per-(context, kind) binding from a context's
-// aggregates to a physical `storage`.  All `for:` / `kind:` / `use:`
-// are required by the validator; declared as optional in the grammar
-// so missing-field diagnostics are friendlier than a hard parse
+// aggregates to a physical `storage` — the RFC's `resource` (the
+// configured realization of a logical need).  All `for:` / `kind:` /
+// `use:` are required by the validator; declared as optional in the
+// grammar so missing-field diagnostics are friendlier than a hard parse
 // error.  Per-kind config keys (schema, every, retain, …) are
 // validated against the resolved storage's `type`.
-DataSource:
-    'dataSource' name=LooseName '{'
+Resource:
+    'resource' name=LooseName '{'
         ('for'  ':' context=[BoundedContext:ID] ','?)?
         ('kind' ':' kind=DataSourceKind ','?)?
         ('use'  ':' use=[Storage:LooseName] ','?)?
@@ -181,10 +182,12 @@ DataSource:
         ('isolationLevel' ':' isolationLevel=IsolationLevel ','?)?
         ('readonly'       ':' readonly?='true' ','?)?
         ('normalised'     ':' normalised=BoolFlag ','?)?
+        ('config' ':' '{' (config+=ConfigEntry (',' config+=ConfigEntry)* ','?)? '}' ','?)?
     '}';
 
 DataSourceKind returns string:
-    'state' | 'eventLog' | 'snapshot' | 'cache' | 'replica';
+    'state' | 'eventLog' | 'snapshot' | 'cache' | 'replica'
+    | 'objectStore' | 'queue' | 'api';
 
 UiSugarBinding:
     'ui' ':' ref=[Ui:ID] ','?;
@@ -304,14 +307,29 @@ Storage:
         ('type' ':' type=StorageType ','?)
         ('instance' ':' instance=ID ','?)?
         ('connection' ':' connection=ConnectionSource ','?)?
+        ('config' ':' '{' (config+=ConfigEntry (',' config+=ConfigEntry)* ','?)? '}' ','?)?
     '}';
+
+// Generic vendor-parameter map (RFC §3.1/§8).  Keys are validated per
+// sourceType against the registry's config schema in IR validation; no
+// per-vendor clause keywords are introduced.
+ConfigEntry:
+    key=LooseName ':' value=ConfigValue;
+
+ConfigValue:
+      {infer StringConfigValue} value=STRING
+    | {infer IntConfigValue}    value=INT
+    | {infer BoolConfigValue}   value=BoolLiteral;
+
+BoolLiteral returns string: 'true' | 'false';
 
 StorageType returns string:
       'postgres' | 'mysql' | 'sqlite' | 'inMemory'
     | 'redis'
     | 'elastic' | 'meilisearch'
     | 'kafka'
-    | 'clickhouse' | 'bigquery';
+    | 'clickhouse' | 'bigquery'
+    | 'awsS3' | 'rabbitmq' | 'restApi';
 
 ConnectionSource:
       {infer ServiceConnectionSource} 'service' '(' service=ID ')'
@@ -464,7 +482,7 @@ StateFieldName returns string:
     // `DataSource` rule.
     | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
     | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-    | 'eventLog' | 'snapshot' | 'replica';
+    | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config';
 
 // ---- menu ---------------------------------------------------------------
 
@@ -848,7 +866,7 @@ Property:
         // (banking.ddd: `entity AccountTransaction { kind: string }`) still parse.
         | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
         | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-        | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources')
+        | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -962,10 +980,11 @@ LooseName returns string:
     // (storage roles), `for` predates this PR as a hard keyword.
     | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
     | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-    | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources'
-    // Api-body keywords (lifecycle Phase 2) admitted as soft so user
-    // code can still name a field `resource` or `urlStyle`.
-    | 'urlStyle' | 'resource';
+    | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources'
+    // Api-body keyword (lifecycle Phase 2 / D-URLSTYLE) admitted as soft
+    // so user code can still name a field `urlStyle`.  (`resource` is
+    // already soft-admitted just above.)
+    | 'urlStyle';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1340,8 +1359,8 @@ NameRefIdent returns string:
        // `kind` (`Field { kind + ":", bind: v }` in walker tests).
        | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
        | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-       | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources'
-       | 'urlStyle' | 'resource';
+       | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources'
+       | 'urlStyle';
 
 // ---------------------------------------------------------------------------
 // Terminals

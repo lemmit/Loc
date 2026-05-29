@@ -515,11 +515,15 @@ describe("typescript generator", () => {
       // Variables block; the cast bridges to the parent app's
       // requestIdMiddleware without leaking `any`).
       expect(routes).toMatch(/\.get\("requestId"\) \?\? ""/);
-      // Every status arm carries trace_id.
-      expect(routes).toMatch(/error: err\.message, trace_id \}, 403/);
-      expect(routes).toMatch(/error: err\.message, trace_id \}, 400/);
-      expect(routes).toMatch(/error: err\.message, trace_id \}, 404/);
-      expect(routes).toMatch(/error: "internal", trace_id \}, 500/);
+      // RFC 7807: trace_id rides the x-request-id response header (off the
+      // body); each status arm returns an application/problem+json body.
+      expect(routes).toMatch(
+        /"content-type": "application\/problem\+json", "x-request-id": trace_id/,
+      );
+      expect(routes).toMatch(/return problem\(403, "Forbidden", err\.message\)/);
+      expect(routes).toMatch(/return problem\(400, "Bad Request", err\.message\)/);
+      expect(routes).toMatch(/return problem\(404, "Not Found", err\.message\)/);
+      expect(routes).toMatch(/return problem\(500, "Internal Server Error", "internal"\)/);
     });
 
     it("routes emit catalog log events at the right levels via the bound child logger", async () => {
@@ -758,10 +762,8 @@ describe("typescript generator", () => {
       expect(routes).toMatch(/throw new ExternHandlerError\("confirm", "Order", err\);/);
       // onError checks ExternHandlerError before the generic 500.
       expect(routes).toMatch(/if \(err instanceof ExternHandlerError\)/);
-      // Generic 500 fallback survives unchanged for unknown errors.
-      // trace_id is threaded alongside the existing error
-      // field, so the envelope shape is `{ error, trace_id }`.
-      expect(routes).toMatch(/return c\.json\(\{ error: "internal", trace_id \}, 500\)/);
+      // Generic 500 fallback returns an RFC 7807 problem body.
+      expect(routes).toMatch(/return problem\(500, "Internal Server Error", "internal"\)/);
     });
 
     it("does NOT register a defaultHook on OpenAPIHono (Zod's 400 stays the contract)", async () => {
@@ -1583,12 +1585,10 @@ describe("typescript generator", () => {
     it("http/<aggregate>.routes.ts maps ForbiddenError to 403 in app.onError", async () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const route = files.get("http/order.routes.ts")!;
-      // trace_id is threaded alongside the existing error field, so the
-      // envelope shape is `{ error, trace_id }`.  The onError arm now
-      // logs the catalog event before returning, so the test matches the
-      // 403 response line independently of the surrounding `{ ... }` arm.
+      // The onError arm logs the catalog event, then returns an RFC 7807
+      // problem body (403 Forbidden) via the shared `problem(...)` responder.
       expect(route).toMatch(/if \(err instanceof ForbiddenError\) \{/);
-      expect(route).toMatch(/return c\.json\(\{ error: err\.message, trace_id \}, 403\);/);
+      expect(route).toMatch(/return problem\(403, "Forbidden", err\.message\);/);
     });
   });
 

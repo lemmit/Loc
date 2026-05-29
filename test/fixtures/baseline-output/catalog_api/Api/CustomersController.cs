@@ -24,6 +24,8 @@ public sealed class CustomersController : ControllerBase
     public CustomersController(IMediator mediator, ILogger<CustomersController> log) { _mediator = mediator; _log = log; }
 
     [HttpPost]
+    [ProducesResponseType(typeof(CreateCustomerResponse), 201)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<ActionResult<CreateCustomerResponse>> CreateCustomer([FromBody] CreateCustomerRequest request)
     {
         var cmd = new CreateCustomerCommand(
@@ -37,6 +39,8 @@ public sealed class CustomersController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [ProducesResponseType(typeof(CustomerResponse), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<ActionResult<CustomerResponse>> GetCustomerById([FromRoute] Guid id)
     {
         var response = await _mediator.Send(new GetCustomerByIdQuery(new CustomerId(id)));
@@ -44,6 +48,7 @@ public sealed class CustomersController : ControllerBase
     }
 
     [HttpGet]
+    [ProducesResponseType(typeof(IReadOnlyList<CustomerResponse>), 200)]
     public async Task<ActionResult<IReadOnlyList<CustomerResponse>>> AllCustomer()
     {
         var result = await _mediator.Send(new AllQuery());
@@ -51,6 +56,8 @@ public sealed class CustomersController : ControllerBase
     }
 
     [HttpGet("by_email")]
+    [ProducesResponseType(typeof(CustomerResponse), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<ActionResult<CustomerResponse?>> ByEmailCustomer([FromQuery] string email)
     {
         var result = await _mediator.Send(new ByEmailQuery(email));

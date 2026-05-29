@@ -240,7 +240,13 @@ export function buildRoutesFile(
   lines.push(
     `export const ${agg.name}ListResponse = z.array(${agg.name}Response).openapi("${agg.name}ListResponse");`,
   );
-  lines.push(`const ErrorResponse = z.object({ error: z.string() }).openapi("ErrorResponse");`);
+  // RFC 7807 problem body — the shared cross-backend error contract.  All
+  // fields optional (matching .NET's framework ProblemDetails schema, which
+  // marks none required); trace correlation rides the `x-request-id`
+  // response header, not the body, so the body stays byte-identical.
+  lines.push(
+    `const ProblemDetails = z.object({ type: z.string().nullish(), title: z.string().nullish(), status: z.number().int().nullish(), detail: z.string().nullish(), instance: z.string().nullish() }).openapi("ProblemDetails");`,
+  );
   lines.push("");
 
   // The router.  Audited / provenanced aggregates also receive `db` +
@@ -270,6 +276,10 @@ export function buildRoutesFile(
   lines.push(`          description: "Created",`);
   lines.push(`          content: { "application/json": { schema: Create${agg.name}Response } },`);
   lines.push(`        },`);
+  // create → 400 (domain / validation), per the shared error matrix.
+  lines.push(
+    `        400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
   lines.push(`      },`);
   lines.push(`    }),`);
   lines.push(`    async (c) => {`);
@@ -314,14 +324,14 @@ export function buildRoutesFile(
     `        200: { description: "OK", content: { "application/json": { schema: ${agg.name}Response } } },`,
   );
   lines.push(
-    `        404: { description: "Not found", content: { "application/json": { schema: ErrorResponse } } },`,
+    `        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   lines.push(`      },`);
   lines.push(`    }),`);
   lines.push(`    async (c) => {`);
   lines.push(`      const { id } = c.req.valid("param");`);
   lines.push(`      const found = await repo.findById(Ids.${agg.name}Id(id));`);
-  lines.push(`      if (!found) return c.json({ error: "not_found" }, 404);`);
+  lines.push(`      if (!found) throw new AggregateNotFoundError("not_found");`);
   if (emitTrace) {
     // toWire isn't trivial — bind once so it's not run twice between
     // Object.keys and c.json.
@@ -385,32 +395,39 @@ export function buildRoutesFile(
   // the per-request child logger, so the line auto-carries request_id.
   // No more bare console.error — pino handles serialization, redaction,
   // and level filtering.
+  // RFC 7807 responder — `application/problem+json` body + `x-request-id`
+  // header (trace correlation moved off the body so it's byte-identical to
+  // .NET / Phoenix).  `instance` is the request path; `type` is `about:blank`
+  // (no per-error type registry).  Shared shape across all error arms.
+  lines.push(
+    `    const problem = (status: 400 | 403 | 404 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
+  );
   lines.push(`    if (err instanceof ForbiddenError) {`);
   lines.push(
     `      ${renderHonoLogCall("forbidden", `aggregate: "${agg.name}", message: err.message, status: 403`)}`,
   );
-  lines.push(`      return c.json({ error: err.message, trace_id }, 403);`);
+  lines.push(`      return problem(403, "Forbidden", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof DomainError) {`);
   lines.push(
     `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: 400`)}`,
   );
-  lines.push(`      return c.json({ error: err.message, trace_id }, 400);`);
+  lines.push(`      return problem(400, "Bad Request", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof AggregateNotFoundError) {`);
   lines.push(`      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`);
-  lines.push(`      return c.json({ error: err.message, trace_id }, 404);`);
+  lines.push(`      return problem(404, "Not Found", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof ExternHandlerError) {`);
   lines.push(
     `      ${renderHonoLogCall("externHandlerThrew", "aggregate: err.aggName, op: err.opName, error: err.message")}`,
   );
-  lines.push(`      return c.json({ error: err.message, trace_id }, 500);`);
+  lines.push(`      return problem(500, "Internal Server Error", err.message);`);
   lines.push(`    }`);
   lines.push(
     `    ${renderHonoLogCall("internalError", "error: err instanceof Error ? err.message : String(err), status: 500")}`,
   );
-  lines.push(`    return c.json({ error: "internal", trace_id }, 500);`);
+  lines.push(`    return problem(500, "Internal Server Error", "internal");`);
   lines.push(`  });`);
   lines.push("");
   lines.push(`  return app;`);
@@ -471,6 +488,13 @@ function emitOperationRoute(
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
+  // operation → 400 (domain) + 404 (aggregate not found), per the matrix.
+  out.push(
+    `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  out.push(
+    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (c) => {`);
@@ -621,7 +645,7 @@ function emitFindRoute(
   );
   if (find.returnType.kind === "optional") {
     out.push(
-      `      404: { description: "Not found", content: { "application/json": { schema: ErrorResponse } } },`,
+      `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
   }
   out.push(`    },`);
@@ -649,7 +673,7 @@ function emitFindRoute(
       `    return c.json(result.map((r) => repo.toWire(r)) as z.infer<typeof ${agg.name}Response>[], 200);`,
     );
   } else if (find.returnType.kind === "optional") {
-    out.push(`    if (result == null) return c.json({ error: "not_found" }, 404);`);
+    out.push(`    if (result == null) throw new AggregateNotFoundError("not_found");`);
     if (emitTrace) {
       out.push(`    const wire = repo.toWire(result);`);
       out.push(

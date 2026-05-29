@@ -20,14 +20,14 @@ describe(".loom/datasources.md", () => {
       system Acme {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
-        dataSource cState { for: C, kind: state, use: pg }
+        resource cState { for: C, kind: state, use: pg }
         deployable api {
           platform: hono, contexts: [C], dataSources: [cState], port: 3000
         }
       }
     `);
     const md = renderDataSourcesMd(sys);
-    expect(md).toContain("# Acme — dataSource routing");
+    expect(md).toContain("# Acme — resource routing");
   });
 
   it("renders a per-deployable table with one row per dataSource", async () => {
@@ -35,7 +35,7 @@ describe(".loom/datasources.md", () => {
       system S {
         subdomain M { context Orders { aggregate Order { x: int } } }
         storage pg { type: postgres }
-        dataSource ordersState { for: Orders, kind: state, use: pg }
+        resource ordersState { for: Orders, kind: state, use: pg }
         deployable api {
           platform: hono, contexts: [Orders],
           dataSources: [ordersState], port: 3000
@@ -54,7 +54,7 @@ describe(".loom/datasources.md", () => {
       system S {
         subdomain M { context CustomerOrders { aggregate Order { x: int } } }
         storage pg { type: postgres }
-        dataSource s { for: CustomerOrders, kind: state, use: pg }
+        resource s { for: CustomerOrders, kind: state, use: pg }
         deployable api {
           platform: hono, contexts: [CustomerOrders],
           dataSources: [s], port: 3000
@@ -70,7 +70,7 @@ describe(".loom/datasources.md", () => {
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
-        dataSource s { for: C, kind: state, use: pg, schema: "legacy_app" }
+        resource s { for: C, kind: state, use: pg, schema: "legacy_app" }
         deployable api {
           platform: hono, contexts: [C], dataSources: [s], port: 3000
         }
@@ -87,8 +87,8 @@ describe(".loom/datasources.md", () => {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
         storage r  { type: redis }
-        dataSource cState { for: C, kind: state, use: pg }
-        dataSource cCache { for: C, kind: cache, use: r }
+        resource cState { for: C, kind: state, use: pg }
+        resource cCache { for: C, kind: cache, use: r }
         deployable api {
           platform: hono, contexts: [C],
           dataSources: [cState, cCache], port: 3000
@@ -108,8 +108,8 @@ describe(".loom/datasources.md", () => {
           context B { aggregate Two { y: int } }
         }
         storage pg { type: postgres }
-        dataSource aState { for: A, kind: state, use: pg }
-        dataSource bState { for: B, kind: state, use: pg }
+        resource aState { for: A, kind: state, use: pg }
+        resource bState { for: B, kind: state, use: pg }
         deployable api {
           platform: hono, contexts: [A, B],
           dataSources: [aState, bState], port: 3000
@@ -121,13 +121,13 @@ describe(".loom/datasources.md", () => {
     expect(md).toMatch(/\| pg \| postgres \| .*api → A \(state\).*api → B \(state\)/);
   });
 
-  it("flags a storage with no dataSource pointing at it as '_unused_'", async () => {
+  it("flags a storage with no resource pointing at it as '_unused_'", async () => {
     const sys = await buildSys(`
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
         storage unused { type: redis }
-        dataSource s { for: C, kind: state, use: pg }
+        resource s { for: C, kind: state, use: pg }
         deployable api {
           platform: hono, contexts: [C], dataSources: [s], port: 3000
         }
@@ -142,8 +142,8 @@ describe(".loom/datasources.md", () => {
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
-        dataSource s     { for: C, kind: state, use: pg }
-        dataSource extra { for: C, kind: cache, use: pg }
+        resource s     { for: C, kind: state, use: pg }
+        resource extra { for: C, kind: cache, use: pg }
         deployable api {
           platform: hono, contexts: [C], dataSources: [s], port: 3000
         }
@@ -159,7 +159,7 @@ describe(".loom/datasources.md", () => {
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
-        dataSource s { for: C, kind: state, use: pg }
+        resource s { for: C, kind: state, use: pg }
         deployable api {
           platform: hono, contexts: [C], dataSources: [s], port: 3000
         }

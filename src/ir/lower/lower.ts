@@ -8,10 +8,10 @@ import type {
   Api,
   BoundedContext,
   Component,
+  ConfigEntry,
   ConnectionSource,
   Containment,
   Create,
-  DataSource,
   Deployable,
   DerivedProp,
   Destroy,
@@ -32,6 +32,7 @@ import type {
   Property,
   Repository,
   Requirement,
+  Resource,
   Solution,
   StateField,
   Statement,
@@ -97,6 +98,7 @@ import type {
   CodeRefIR,
   CodeRefKind,
   ComponentIR,
+  ConfigEntryIR,
   ConnectionSourceIR,
   ContainmentIR,
   ContextStampIR,
@@ -529,10 +531,11 @@ function lowerSystem(sys: System): SystemIR {
         type: s.type as StorageKind,
         ...(s.instance ? { instance: s.instance } : {}),
         ...(s.connection ? { connection: lowerConnectionSource(s.connection) } : {}),
+        ...(s.config.length ? { config: s.config.map(lowerConfigEntry) } : {}),
       }),
     );
   const dataSources = sys.members
-    .filter((m): m is DataSource => m.$type === "DataSource")
+    .filter((m): m is Resource => m.$type === "Resource")
     .map(
       (d): DataSourceIR => ({
         name: d.name,
@@ -552,6 +555,7 @@ function lowerSystem(sys: System): SystemIR {
           : {}),
         ...(d.readonly ? { readonly: true } : {}),
         ...(d.normalised == null ? {} : { normalised: d.normalised === "true" }),
+        ...(d.config.length ? { config: d.config.map(lowerConfigEntry) } : {}),
       }),
     );
   // Named `layout <Name> { … }` SystemMembers (Phase 8).  Each slot's
@@ -587,6 +591,18 @@ function lowerSystem(sys: System): SystemIR {
   applyPageOriginSideEffects(built);
   expandInlineScaffoldPrimitiveCalls(built);
   return built;
+}
+
+function lowerConfigEntry(entry: ConfigEntry): ConfigEntryIR {
+  const v = entry.value;
+  switch (v.$type) {
+    case "StringConfigValue":
+      return { key: entry.key, value: { kind: "string", value: v.value } };
+    case "IntConfigValue":
+      return { key: entry.key, value: { kind: "int", value: v.value } };
+    case "BoolConfigValue":
+      return { key: entry.key, value: { kind: "bool", value: v.value === "true" } };
+  }
 }
 
 function lowerConnectionSource(node: ConnectionSource): ConnectionSourceIR {

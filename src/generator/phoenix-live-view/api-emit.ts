@@ -279,11 +279,15 @@ ${actions}
   # Error helpers
   # ---------------------------------------------------------------------------
 
+  # RFC 7807 problem body — application/problem+json + x-request-id header
+  # (trace correlation off the body so it's byte-identical to Hono / .NET).
   defp error_response(conn, reason) do
     trace_id = get_resp_header(conn, "x-request-id") |> List.first("unknown")
+    body = Jason.encode!(%{type: "about:blank", title: "Bad Request", status: 400, detail: inspect(reason), instance: conn.request_path})
     conn
-    |> put_status(:bad_request)
-    |> json(%{error: inspect(reason), trace_id: trace_id})
+    |> put_resp_content_type("application/problem+json")
+    |> put_resp_header("x-request-id", trace_id)
+    |> send_resp(400, body)
   end
 end
 `;
@@ -383,10 +387,12 @@ function renderViewAction(
 
       {:error, reason} ->
         trace_id = get_resp_header(conn, "x-request-id") |> List.first("unknown")
+        body = Jason.encode!(%{type: "about:blank", title: "Internal Server Error", status: 500, detail: inspect(reason), instance: conn.request_path})
 
         conn
-        |> put_status(:internal_server_error)
-        |> json(%{error: inspect(reason), trace_id: trace_id})
+        |> put_resp_content_type("application/problem+json")
+        |> put_resp_header("x-request-id", trace_id)
+        |> send_resp(500, body)
     end
   end`;
 }

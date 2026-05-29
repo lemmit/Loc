@@ -79,8 +79,8 @@ system Sys {
     }
   }
   storage pg { type: postgres }
-  dataSource cartEvents   { for: Shopping, kind: eventLog, use: pg }
-  dataSource cartSnapshot { for: Shopping, kind: snapshot, use: pg, normalised: false }
+  resource cartEvents   { for: Shopping, kind: eventLog, use: pg }
+  resource cartSnapshot { for: Shopping, kind: snapshot, use: pg, normalised: false }
   deployable api {
     platform: dotnet
     contexts: [Shopping]

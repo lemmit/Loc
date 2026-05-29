@@ -109,20 +109,24 @@ export function buildViewsRoutesFile(
   lines.push(
     `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
   );
+  // RFC 7807 responder — application/problem+json + x-request-id header.
   lines.push(
-    `    if (err instanceof ForbiddenError) return c.json({ error: err.message, trace_id }, 403);`,
+    `    const problem = (status: 400 | 403 | 404 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
   );
   lines.push(
-    `    if (err instanceof DomainError) return c.json({ error: err.message, trace_id }, 400);`,
+    `    if (err instanceof ForbiddenError) return problem(403, "Forbidden", err.message);`,
   );
   lines.push(
-    `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message, trace_id }, 404);`,
+    `    if (err instanceof DomainError) return problem(400, "Bad Request", err.message);`,
   );
   lines.push(
-    `    if (err instanceof ExternHandlerError) { console.error(err); return c.json({ error: err.message, trace_id }, 500); }`,
+    `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
+  );
+  lines.push(
+    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", err.message); }`,
   );
   lines.push(`    console.error(err);`);
-  lines.push(`    return c.json({ error: "internal", trace_id }, 500);`);
+  lines.push(`    return problem(500, "Internal Server Error", "internal");`);
   lines.push(`  });`);
   lines.push("");
   lines.push(`  return app;`);
