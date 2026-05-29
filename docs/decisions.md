@@ -229,8 +229,9 @@ sits anomalously inside the aggregate body. Full analysis in
   `stateBased→state` mapping becomes an **identity**.
 - `persistedAs` **renames + relocates** the shipped body
   `persistenceStrategy: stateBased | eventSourced` → header
-  `persistedAs(eventLog | state)`. Breaking change; accept-both/warn
-  migration.
+  `persistedAs(eventLog | state)`. Breaking change; **hard cutover** —
+  `persistenceStrategy:` is removed (not accepted in parallel);
+  existing `.ddd` sources migrate in one step (codemod offered).
 - **All** aggregate-level config lives on the **header** as paren
   modifiers (`ids`, `with`, `extends`, `persistedAs(…)`,
   `normalised(…)`, `inheritanceUsing(…)`; bare `abstract`/`audited`).
@@ -252,30 +253,29 @@ sits anomalously inside the aggregate body. Full analysis in
   event has a matching `apply`; **direct state mutation is an error**.
 - `persistedAs(state)` (default / absent): operations mutate state
   directly; no `apply` required.
-- `persistedAs` is **explicit** (default `state`), **not silently
-  inferred** from the body. A non-error lint MAY *suggest*
-  `persistedAs(eventLog)` when a state aggregate already follows the
-  emit+apply discipline. *(Open sub-question 1.)*
+- `persistedAs` is **explicit**, default `state` (omitted entirely
+  for state-based aggregates). **No inference and no suggestion lint** —
+  the validator only enforces body↔mode consistency (above).
 - `normalised(false)` requires the context to resolve a
   document-capable store/adapter; it constrains the `snapshot` binding
   under `persistedAs(eventLog)`, the `state` binding under
   `persistedAs(state)`.
 - Interaction (D-ES-TPH, generalised): a `persistedAs(eventLog)`
-  concrete subtype of a shared base is forced to its own partition
-  (`ownTable`/`own`) regardless of `normalised`.
+  concrete subtype of a `sharedTable` base is forced to `ownTable`
+  regardless of `normalised`.
 
-**Open sub-questions** (recommended answers; ratify to promote to PINNED):
+**Sub-questions.**
 
-1. **`persistedAs` inference** — explicit-with-default + suggest-lint
-   (recommended) vs infer-from-body.
-2. **`json` shape-hint** — plain `json` only for v1; `json<T>` later
-   (recommended).
-3. **Snapshot cadence for `eventLog` + document** — reuse the
+1. **`persistedAs` inference** — **RESOLVED: explicit, default `state`,
+   no inference, no lint.**
+2. **`json` shape-hint** — **RESOLVED: plain `json` for v1**; `json<T>`
+   out of scope.
+3. **Snapshot cadence for `eventLog` + document** — OPEN; reuse the
    `snapshot` `dataSource`'s `every:` (recommended) vs a header arg.
-4. **Per-projection vs per-aggregate `normalised`** — one shape per
-   aggregate in v1; per-projection deferred (recommended).
-5. **Real document DB** — Postgres-JSONB only in v1 (Marten's bet);
-   `StorageType += mongo` deferred (recommended).
+4. **Per-projection vs per-aggregate `normalised`** — OPEN; one shape
+   per aggregate in v1, per-projection deferred (recommended).
+5. **Real document DB** — OPEN; Postgres-JSONB only in v1 (Marten's
+   bet), `StorageType += mongo` deferred (recommended).
 
 **Affects.**
 
@@ -283,8 +283,9 @@ sits anomalously inside the aggregate body. Full analysis in
 - `aggregate-inheritance.md` — its `storage: shared|own` header clause
   is renamed by D-RENAME (below) to the `inheritanceUsing(…)` paren
   header modifier; same header line.
-- Shipped grammar — `persistenceStrategy:` (body) deprecated for
-  `persistedAs(…)` (header); accept-both/warn during migration.
+- Shipped grammar — `persistenceStrategy:` (body) **removed** in favour
+  of `persistedAs(…)` (header); hard cutover, one-step source migration
+  (codemod).
 - `resolve-datasource.ts` — mode→kind mapping collapses to identity.
 
 ---
@@ -299,8 +300,8 @@ PINNED here when ratified.
 
 | Tag | Concern | Recommended answer (source) |
 |---|---|---|
-| D-RENAME | Aggregate-inheritance layout key naming + syntax | **Amended by D-DOCUMENT-AXIS §4:** header paren modifier `inheritanceUsing(shareTable \| ownTable)` (was `inheritanceStrategy: …`). Value-rename to medium-neutral `shared \| own` recommended — `normalised(false)` shows the axis isn't table-specific. (`aggregate-inheritance.md` + `document-and-json-hierarchies.md` §4a) |
-| D-ES-TPH | ES concrete subtype of TPH abstract | Force `inheritanceUsing(ownTable)` (own partition); generalises across `normalised` per D-DOCUMENT-AXIS (`aggregate-inheritance.md`) |
+| D-RENAME | Aggregate-inheritance layout key naming + syntax | **Amended by D-DOCUMENT-AXIS §4:** header paren modifier `inheritanceUsing(sharedTable \| ownTable)` (was `inheritanceStrategy: …`). Values kept **table-baked**, spelled `sharedTable \| ownTable` (refines pinned `shareTable` → `sharedTable`, reads as "shared table"); medium-neutral `shared\|own` rejected. (`aggregate-inheritance.md` + `document-and-json-hierarchies.md` §4a) |
+| D-ES-TPH | ES concrete subtype of TPH abstract | Force `inheritanceUsing(ownTable)` for a `persistedAs(eventLog)` concrete of a `sharedTable` base; generalises across `normalised` per D-DOCUMENT-AXIS (`aggregate-inheritance.md`) |
 | D1–D4, D14–D15 | Type-system carrier name / discriminator / postfix vs prefix ML syntax | Per `implementation-plan.md` D-table; locked before P3 |
 | D-POLICY-STYLE | Authorization grammar shape | `policy { data { … } operations { … } fields { … } }` reachability over function-style (`authorization.md`) |
 | D-LIFECYCLE-VERB | Lifecycle URL style default | `urlStyle: literal \| resource` (`lifecycle-operations.md`) |

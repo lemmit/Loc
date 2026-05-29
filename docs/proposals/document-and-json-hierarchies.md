@@ -1,6 +1,6 @@
 # Proposal: Documents and JSON-Based Hierarchies
 
-**Status:** Draft. Output of a design conversation. Options-gathering — no decision pinned yet.
+**Status:** Decisions sealed. Core direction **PINNED** as [D-DOCUMENT-AXIS](../decisions.md) (D-RENAME amended alongside). Sub-questions 3–5 (snapshot cadence, per-projection shape, real document DB) remain OPEN. Implementation not yet started.
 **Scope:** Survey how Loom should let a modeller persist a hierarchy as a *document* (a single JSON tree) instead of a normalised set of tables, and whether "document" deserves to be a declaration kind next to `aggregate`/`entity`, a field type, a persistence strategy, or some combination. Compares against Marten, EF Core, and MongoDB-style modelling. Ends with a recommendation.
 
 > **Pinned decisions affecting this proposal** (see [`docs/decisions.md`](../decisions.md)):
@@ -14,13 +14,13 @@
 >   per-aggregate, in v1. Any per-aggregate document override is a v2
 >   concern and must be flagged as such.
 >
-> A new decision tag **D-DOCUMENT-AXIS** is *requested* by this
-> proposal: settle whether "document" is a domain-modelling axis, a
-> storage axis, or both. §7 records the recommended answer; it is
-> **OPEN** until ratified.
+> **D-DOCUMENT-AXIS** is now **PINNED** in [`docs/decisions.md`](../decisions.md)
+> (core axes, header syntax, the event-sourcing validation contract,
+> `json` field type, document-is-not-a-peer). Sub-questions 3–5 there
+> remain OPEN. This proposal is its decision record.
 >
-> **Direction taken in this revision** (from the design conversation,
-> not yet a pinned D-tag): two **orthogonal and different-in-kind**
+> **Direction (now pinned as D-DOCUMENT-AXIS):** two **orthogonal and
+> different-in-kind**
 > per-aggregate axes — both speak the `dataSource` vocabulary but
 > capture different things:
 >
@@ -98,7 +98,7 @@ The decisive realisation from the design conversation: **document-vs-relational 
   2. **Storing as a log** (persistence): the append-only event stream is the durable record of truth.
 
   These are inseparable — that *is* what event-sourcing is. The keyword foregrounds facet 2 (the keyword *is* the truth kind); facet 1 rides along as the validated consequence. Crucially, this truth-kind is a *different* storing concern from Axis 2 below: the log is always a stream of JSON events; Axis 2 governs only the **derived read model / snapshot**. Default is `persistedAs(state)`, usually omitted.
-  > **Naming reconciliation.** Today this is the shipped body clause `persistenceStrategy: stateBased | eventSourced` (`ddd.langium:612`, `:619`, threaded to `loom-ir.ts:327`). This proposal renames it to the header modifier `persistedAs(eventLog | state)`: (a) it moves to the header (no config in the body, §4); (b) it adopts the paren modifier form, parallel to `normalised(…)` / `inheritanceUsing(…)`; (c) its **values change to `eventLog` / `state`** to match the `dataSource` `kind` vocabulary — so `resolve-datasource.ts`'s current `eventSourced → eventLog` / `stateBased → state` translation becomes an identity. The English concept names stay "event-sourced" / "state-based"; the *keyword values* are `eventLog` / `state`. Breaking change — needs a back-compat/migration path (D-DOCUMENT-AXIS).
+  > **Naming reconciliation.** Today this is the shipped body clause `persistenceStrategy: stateBased | eventSourced` (`ddd.langium:612`, `:619`, threaded to `loom-ir.ts:327`). This proposal renames it to the header modifier `persistedAs(eventLog | state)`: (a) it moves to the header (no config in the body, §4); (b) it adopts the paren modifier form, parallel to `normalised(…)` / `inheritanceUsing(…)`; (c) its **values change to `eventLog` / `state`** to match the `dataSource` `kind` vocabulary — so `resolve-datasource.ts`'s current `eventSourced → eventLog` / `stateBased → state` translation becomes an identity. The English concept names stay "event-sourced" / "state-based"; the *keyword values* are `eventLog` / `state`. Breaking change — **hard cutover**: `persistenceStrategy:` is removed, sources migrate in one step via codemod (D-DOCUMENT-AXIS).
 
 - **Axis 2 — saving** (`normalised(true | false)`): *how the materialised state/snapshot is physically laid out.* New, per-aggregate, default `normalised` (full backward compatibility).
 
@@ -209,17 +209,17 @@ A `persistedAs(state)` aggregate with `normalised(false)` is equally valid (whol
 
   **Shape.** Two header shapes, by argument-arity:
   - **Argument-less markers → bare:** `abstract`, shipped boolean `audited`.
-  - **Value-bearing modifiers → `name(value)`:** `persistedAs(eventLog)`, `normalised(false)`, `inheritanceUsing(shareTable)`. This matches the existing modifier-application family (`audited(actions)`, `with audit(...)`) and reads as "selector(choice)". Defaults — `persistedAs(state)`, `normalised(true)` — are rarely written.
+  - **Value-bearing modifiers → `name(value)`:** `persistedAs(eventLog)`, `normalised(false)`, `inheritanceUsing(sharedTable)`. This matches the existing modifier-application family (`audited(actions)`, `with audit(...)`) and reads as "selector(choice)". Defaults — `persistedAs(state)`, `normalised(true)` — are rarely written.
 
   **Binding block keeps colon.** Inside a `dataSource { kind: snapshot, use: pg, normalised: false }` every entry is `key: value`, so `normalised:` stays a colon entry *there* — a paren would clash with its siblings. So `normalised` is a paren *modifier* on the aggregate header but a colon *entry* in the binding block; each context is internally consistent.
 
   **Two frictions (both touch settled artefacts) — tracked under D-DOCUMENT-AXIS:**
-  1. **D-RENAME is PINNED as `inheritanceStrategy: shareTable | ownTable`.** This proposal amends it on three counts, all to be settled together (§8 Q6): **key** `inheritanceStrategy` → **`inheritanceUsing`** (reads as a phrase — "inheritance using shareTable"); **syntax** colon → paren; and (open) **values** `shareTable`/`ownTable` → `shared`/`own`.
-  2. **`persistenceStrategy:` is shipped** (colon, in body, values `stateBased | eventSourced`). Renaming it to a header `persistedAs(eventLog | state)` — moving to the header, paren form, *and* changing the values to `eventLog`/`state` — is a breaking grammar change needing a back-compat/migration path (accept both, warn on the old form).
+  1. **D-RENAME (was `inheritanceStrategy: shareTable | ownTable`) is amended** on three counts (D-DOCUMENT-AXIS, §8 Q6): **key** `inheritanceStrategy` → **`inheritanceUsing`** (reads as a phrase — "inheritance using sharedTable"); **syntax** colon → paren header modifier; **values** kept table-baked and respelled `shareTable` → **`sharedTable`** (reads as "shared table"). Medium-neutral `shared`/`own` was considered and **rejected**.
+  2. **`persistenceStrategy:` is shipped** (colon, in body, values `stateBased | eventSourced`). Renaming it to a header `persistedAs(eventLog | state)` — header, paren, *and* value change to `eventLog`/`state` — is a breaking grammar change. Resolved (D-DOCUMENT-AXIS): **hard cutover** — `persistenceStrategy:` is removed (not accepted in parallel); sources migrate in one step via codemod.
 
 #### 4a. Interaction with inheritance (`inheritanceUsing`, was `inheritanceStrategy` / D-RENAME; D-ES-TPH)
 
-`normalised` and the inheritance toggle (pinned as `inheritanceStrategy: shareTable | ownTable` by D-RENAME; renamed by this proposal to `inheritanceUsing(…)`) are **near-orthogonal — they answer different questions**:
+`normalised` and the inheritance toggle (pinned as `inheritanceStrategy: sharedTable | ownTable` by D-RENAME; renamed by this proposal to `inheritanceUsing(…)`) are **near-orthogonal — they answer different questions**:
 
 - `normalised` chooses the **medium**: relational tables vs one JSON document.
 - `inheritanceUsing` chooses the **partitioning** across a hierarchy: shared vs per-concrete.
@@ -228,12 +228,12 @@ Both questions are meaningful in both media, so they compose as a 2×2:
 
 | | `normalised(true)` | `normalised(false)` |
 |---|---|---|
-| `shareTable` | **TPH** — one table + discriminator | one document collection + `_type` discriminator (Mongo single-collection / Marten hierarchy) |
+| `sharedTable` | **TPH** — one table + discriminator | one document collection + `_type` discriminator (Mongo single-collection / Marten hierarchy) |
 | `ownTable` | **TPC** — table per concrete | document collection per concrete |
 
 Two consequences:
 
-1. **The pinned value names bake in "table".** `shareTable`/`ownTable` read wrong in the `normalised(false)` column ("shareTable… but it's a JSON collection?"). The *pre-D-RENAME* proposal text used the medium-neutral `shared`/`own`, which survives a non-table medium. **`normalised(false)` is new evidence that the layout axis is not table-specific** — so this proposal flags **revisiting D-RENAME toward `inheritanceUsing(shared | own)`** as an open decision (see §8 Q6). Until decided, the proposal phrases the axis medium-neutrally.
+1. **The value names keep "table" by decision.** `normalised(false)` is evidence the layout axis is not strictly table-specific (in the document column `sharedTable` means "one document collection + discriminator"), and medium-neutral `shared`/`own` was considered. It was **rejected** (D-DOCUMENT-AXIS / §8 Q6): the values stay `sharedTable`/`ownTable`, with "table" read as vestigial under `normalised(false)`.
 2. **D-ES-TPH generalises across the medium.** Its rule — *an `eventSourced` concrete subtype of a shared base is forced to `ownTable`* — is about **partitioning, not tables**: an event-sourced concrete needs its own stream, so it cannot live in a shared partition whether that partition is a discriminated table or a discriminated document collection. The constraint holds unchanged in the `document` column (forced own collection/stream).
 
 ### Option 5 — Storage-layer wiring for the `normalised` axis *(infra half of Option 4)*
@@ -306,19 +306,19 @@ aggregate ShoppingCart
 
 // ── an inheritance hierarchy showing the layout axes ──────────────────
 abstract aggregate Party              // abstract base                       (aggregate-inheritance, proposed)
-  inheritanceUsing(shareTable)     // TPH: one `parties` table + discriminator   (D-RENAME: renamed from inheritanceStrategy, colon→paren)
+  inheritanceUsing(sharedTable)     // TPH: one `parties` table + discriminator   (D-RENAME: renamed from inheritanceStrategy, colon→paren)
   audited                             // boolean capability                  (shipped, header)
 {
   name  string
   email string
 }
 
-aggregate Customer extends Party persistedAs(state) {   // shares the `parties` table (shareTable + normalised = TPH)
+aggregate Customer extends Party persistedAs(state) {   // shares the `parties` table (sharedTable + normalised = TPH)
   creditLimit Money
 }
 
 aggregate Auditor extends Party
-  persistedAs(eventLog)               // D-ES-TPH: an ES concrete of a shareTable base …
+  persistedAs(eventLog)               // D-ES-TPH: an ES concrete of a sharedTable base …
   inheritanceUsing(ownTable)       // … is FORCED to ownTable — own stream/table, not the shared one
 {
   clearanceLevel int
@@ -332,7 +332,7 @@ aggregate Auditor extends Party
 | `ids guid` | id kind | existing grammar |
 | `persistedAs(eventLog\|state)` | **truth kind** — event log vs current state (+ the validated apply-always/no-direct-mutation body contract) | renamed from shipped body `persistenceStrategy:` *(§2.3/§4 reconcile)* |
 | `normalised(true\|false)` | **saving** — read-model/snapshot shape (`false` = document) | this proposal *(paren header modifier, §4 syntax note)* |
-| `inheritanceUsing(shareTable\|ownTable)` | inheritance **partitioning** | D-RENAME (pinned; renamed from `inheritanceStrategy`, colon→paren, §4) |
+| `inheritanceUsing(sharedTable\|ownTable)` | inheritance **partitioning** | D-RENAME (pinned; renamed from `inheritanceStrategy`, colon→paren, §4) |
 | `extends` / `abstract` | inheritance | aggregate-inheritance (proposed) |
 | `with audit, softDelete` | macros | existing |
 | `audited` | capability | shipped |
@@ -405,7 +405,7 @@ This keeps the domain model honest (the aggregate API is unchanged regardless of
 3. For event-log + document, what is the snapshot/projection cadence — every event (inline projection, Marten's default), every N events, or on-demand? Does this belong on the aggregate (a cadence arg, e.g. `normalised(false, every: …)`), on the `snapshot` `dataSource` (`every:` already exists in D-STORAGE-SPLIT's per-kind config), or both? Leaning: reuse the `snapshot` binding's `every:`.
 4. Does a real document DB (`StorageType += mongo`) ever justify itself, or is Postgres-JSONB-everywhere (Marten's own bet) sufficient for Loom's target users? If JSONB-on-Postgres suffices, `normalised(false)` never needs a non-Postgres engine.
 5. For `eventSourced` aggregates, can the shape legitimately be `normalised` (projections to tables) and `document` (projection to one JSON doc) *per projection*, or is it one shape per aggregate? v1: one per aggregate (per D-GRANULARITY spirit); per-projection deferred.
-6. **Should pinned D-RENAME be revisited (key + syntax + values)?** This proposal amends D-RENAME three ways: **key** `inheritanceStrategy` → `inheritanceUsing` (reads as "inheritance using shareTable"); **syntax** colon → paren (header modifier, §4); **values** — `normalised(false)` (§4a) shows the layout axis is not table-specific, yet D-RENAME pinned the medium-baked `shareTable`/`ownTable`. For values: **(a)** keep `shareTable`/`ownTable`, treat "table" as vestigial under `normalised(false)`, add a validator note; **(b)** go medium-neutral `inheritanceUsing(shared | own)`, which reads correctly across both media. Touches a PINNED decision — maintainer call. Leaning: adopt the key+syntax rename, and (b) for values.
+6. **(Resolved — D-RENAME amended.)** D-RENAME becomes `inheritanceUsing(sharedTable | ownTable)`: **key** `inheritanceStrategy` → `inheritanceUsing`; **syntax** colon → paren header modifier; **values** kept table-baked, respelled `shareTable` → `sharedTable`. Medium-neutral `shared`/`own` rejected.
 
 ---
 
