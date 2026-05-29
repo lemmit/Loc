@@ -7,8 +7,9 @@ import type {
   ViewIR,
 } from "../../ir/types/loom-ir.js";
 import { viewUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
-import { projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
+import { dtoParam, projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
 import { renderCsExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -63,9 +64,10 @@ function responseRecordName(view: ViewIR, agg: AggregateIR): string {
 
 function renderRowRecord(view: ViewIR, ctx: EnrichedBoundedContextIR, ns: string): string {
   const fields = view
-    .output!.fields.map((f) => `${wireType(f.type, ctx, "response")} ${upperFirst(f.name)}`)
+    .output!.fields.map((f) => dtoParam(wireType(f.type, ctx, "response"), upperFirst(f.name)))
     .join(", ");
   return `// Auto-generated.
+using System.ComponentModel.DataAnnotations;
 using ${ns}.Domain.ValueObjects;
 using ${ns}.Domain.Enums;
 
@@ -298,7 +300,7 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
     const responseType = `IReadOnlyList<${recordName}>`;
     blocks.push(
       `    [HttpGet("${snake(view.name)}")]\n` +
-        `    public async Task<ActionResult<${responseType}>> ${upperFirst(view.name)}()\n` +
+        `    public async Task<ActionResult<${responseType}>> ${upperFirst(camelId(opView(view.name)))}()\n` +
         `    {\n` +
         `        var result = await _mediator.Send(new ${upperFirst(view.name)}Query());\n` +
         `        return Ok(result);\n` +

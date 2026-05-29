@@ -17,7 +17,7 @@ public sealed class OrdersWorkflowsController : ControllerBase
     public OrdersWorkflowsController(IMediator mediator) => _mediator = mediator;
 
     [HttpPost("place_order")]
-    public async Task<IActionResult> PlaceOrder([FromBody] PlaceOrderRequest request)
+    public async Task<IActionResult> PlaceOrderWorkflow([FromBody] PlaceOrderRequest request)
     {
         var cmd = new PlaceOrderCommand(
             request.CustomerId,

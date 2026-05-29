@@ -7,6 +7,7 @@ import type {
   ViewIR,
 } from "../../../ir/types/loom-ir.js";
 import { viewUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { camelId, opView } from "../../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -151,7 +152,7 @@ function emitViewRoute(
   out.push(`    method: "get",`);
   out.push(`    path: "/${snake(view.name)}",`);
   out.push(`    tags: ["views", "${aggSlug}"],`);
-  out.push(`    operationId: "${lowerFirst(view.name)}View",`);
+  out.push(`    operationId: "${camelId(opView(view.name))}",`);
   out.push(`    responses: {`);
   out.push(
     `      200: { description: "OK", content: { "application/json": { schema: ${responseSchema} } } },`,

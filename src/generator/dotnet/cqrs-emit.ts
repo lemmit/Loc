@@ -13,6 +13,7 @@ import {
   aggregateResponseParams,
   csIdValueClrType,
   domainToRequestExpr,
+  dtoParam,
   entityResponseParams,
   projectEntityExpr,
   valueObjectsUsedBy,
@@ -88,7 +89,7 @@ function emitResponseDtos(
     records.push({
       name: `${vo.name}Response`,
       params: vo.fields
-        .map((f) => `${wireType(f.type, ctx, "response")} ${upperFirst(f.name)}`)
+        .map((f) => dtoParam(wireType(f.type, ctx, "response"), upperFirst(f.name)))
         .join(", "),
     });
   }
@@ -104,7 +105,7 @@ function emitResponseDtos(
   });
   records.push({
     name: `Create${agg.name}Response`,
-    params: `${csIdValueClrType(agg.idValueType)} Id`,
+    params: dtoParam(csIdValueClrType(agg.idValueType), "Id"),
   });
   out.set(
     `Application/${aggFolder}/Responses/${agg.name}Responses.cs`,
@@ -128,7 +129,7 @@ function emitRequestDtos(
     records.push({
       name: `${vo.name}Request`,
       params: vo.fields
-        .map((f) => `${wireType(f.type, ctx, "request")} ${upperFirst(f.name)}`)
+        .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name), "request"))
         .join(", "),
     });
   }
@@ -140,14 +141,14 @@ function emitRequestDtos(
   records.push({
     name: `Create${agg.name}Request`,
     params: requiredFields
-      .map((f) => `${wireType(f.type, ctx, "request")} ${upperFirst(f.name)}`)
+      .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name), "request"))
       .join(", "),
   });
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     records.push({
       name: `${upperFirst(op.name)}Request`,
       params: op.params
-        .map((p) => `${wireType(p.type, ctx, "request")} ${upperFirst(p.name)}`)
+        .map((p) => dtoParam(wireType(p.type, ctx, "request"), upperFirst(p.name), "request"))
         .join(", "),
     });
   }

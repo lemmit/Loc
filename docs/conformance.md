@@ -2,9 +2,28 @@
 
 The conformance harness is the cross-backend gate that catches generator
 drift between Hono / .NET / Phoenix. One DSL source describes one
-contract; all three backends should emit OpenAPI specs that agree on
-that contract. This doc describes the nine dimensions the harness
-diffs, how to read a divergence report, and how to extend it.
+contract; all three backends emit OpenAPI specs whose **wire surface is
+structurally identical** — same operations, operationIds, component
+schema names, field names, required sets, enum value-sets, response
+cardinality, and path-param types.
+
+The guarantee is **drop-in replacement**: a client generated from one
+backend's spec (NSwag, openapi-generator, Heyapi, …) must bind unmodified
+against any other backend. That makes the published contract a
+*structural* equality, not a looser behavioral equivalence — an
+operationId casing difference or a renamed list-response schema is a real
+break, even if the two specs "describe the same behavior."
+
+What stays idiomatic per backend is the **internal generated code**, never
+the spec a client consumes: Swashbuckle vs `@hono/zod-openapi` vs
+OpenApiSpex as the emitter, C# PascalCase controller-method names, the
+framework plumbing. Error bodies follow API best practice — RFC 7807
+`application/problem+json` — produced through each backend's idiomatic
+mechanism (.NET `AddProblemDetails`, a Hono problem responder, Phoenix's
+equivalent) but converging on the same 7807 wire shape.
+
+This doc describes the dimensions the harness diffs, how to read a
+divergence report, and how to extend it.
 
 For the runner workflow (CLI, docker, env vars) see
 [`tools.md`](tools.md#cross-platform-openapi-parity-check). For the
@@ -100,6 +119,39 @@ diff focused on app-authored contracts.
 TS/Hono-only wire extension (only the TS backend persists lineage).
 Without the filter, every provenanced field on the showcase would read
 as a Hono-only divergence.
+
+### Temporary drop-in tolerances (tracked)
+
+Two relaxations in `schemaNames` / `schemaRefName` are **interim** — they
+let the gate stay green while the generators are brought up to the full
+drop-in surface. Each is annotated in `test/_helpers/openapi-normalize.ts`
+with the tracking issue and removed once the generator work lands:
+
+- **#705 — named list-response wrapper.** Hono/Phoenix emit a named
+  `<Agg>ListResponse` component; .NET inlines `array<element>`. Until .NET
+  emits the wrapper, `isListWrapperSchema` filters it from `schemaNames`
+  and `schemaRefName` resolves the named wrapper down to `array<element>`.
+- **#706 — shared RFC 7807 `ProblemDetails` error body.** .NET is 7807-
+  native; Hono emits an `ErrorResponse` envelope and Phoenix emits no
+  error body. Until both emit `ProblemDetails`, the error-body schema is
+  filtered. (Note: the `.NET`-only `ValidationProblemDetails` /
+  `HttpValidationProblemDetails` validation envelopes stay filtered even
+  after #706 — they have no cross-backend counterpart.)
+
+### Per-pair strict gating
+
+The gate compares three pairs (`hono↔dotnet`, `hono↔phoenix`,
+`dotnet↔phoenix`). `STRICT_PAIRS` in `test/e2e/e2e.test.ts` controls which
+pairs hard-fail under `LOOM_E2E_STRICT_PARITY=1`:
+
+- **`hono↔dotnet`** — byte-identical (#707), gated **strict**.
+- **`hono↔phoenix` / `dotnet↔phoenix`** — **report-only** (logged, non-
+  blocking) pending **#716**: Phoenix still carries pre-existing wire-shape
+  divergences (no named enum schemas, full-entity create response, named
+  view wrappers vs bare arrays, required create-bools). When #716 lands,
+  the Phoenix pairs move into `STRICT_PAIRS`. Report-only keeps the
+  Phoenix findings visible on every run without blocking the (clean)
+  hono↔dotnet contract.
 
 ---
 

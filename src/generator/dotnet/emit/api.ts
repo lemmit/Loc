@@ -1,7 +1,22 @@
 import type { AggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
+import {
+  camelId,
+  type OpIdTokens,
+  opCreate,
+  opFind,
+  opGetById,
+  opOperation,
+} from "../../../ir/util/openapi-ids.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall, renderDotnetLogCallWithException } from "../../_obs/render-dotnet.js";
+
+/** Controller action method name = PascalCase of the shared operationId,
+ *  so Program.cs's `CustomOperationIds` (lower-first of the action name)
+ *  yields the exact camelCase operationId Hono/Phoenix emit. */
+function actionName(tokens: OpIdTokens): string {
+  return upperFirst(camelId(tokens));
+}
 
 // ASP.NET Core controller emission.  One controller per aggregate root,
 // dispatching every endpoint through Mediator (`ISender`).  The
@@ -87,7 +102,7 @@ export function renderController(
       : [];
     return [
       `    [HttpPost("{id}/${snake(op.name)}")]`,
-      `    public async Task<IActionResult> ${upperFirst(op.name)}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}Request request)`,
+      `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}Request request)`,
       "    {",
       ...wireInLine,
       // Business-narrative line — what the controller was asked to do,
@@ -124,7 +139,7 @@ export function renderController(
         : "        return Ok(result);";
     return [
       `    [HttpGet${f.isRoot ? "" : `("${snake(f.name)}")`}]`,
-      `    public async Task<ActionResult<${responseType}>> ${upperFirst(f.name)}(${f.queryRouteParams})`,
+      `    public async Task<ActionResult<${responseType}>> ${actionName(opFind(agg.name, f.name))}(${f.queryRouteParams})`,
       "    {",
       `        var result = await _mediator.Send(new ${upperFirst(f.name)}Query(${f.queryConstructorArgs}));`,
       returnLine,
@@ -166,7 +181,7 @@ export function renderController(
       `    public ${className}(IMediator mediator, ILogger<${className}> log) { _mediator = mediator; _log = log; }`,
       "",
       "    [HttpPost]",
-      `    public async Task<ActionResult<Create${agg.name}Response>> Create([FromBody] Create${agg.name}Request request)`,
+      `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
       "    {",
       `        var cmd = new Create${agg.name}Command(`,
       ...createBody,
@@ -180,11 +195,11 @@ export function renderController(
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "id", valueExpr: "id.Value" },
       ])}`,
-      `        return CreatedAtAction(nameof(GetById), new { id = id.Value }, new Create${agg.name}Response(id.Value));`,
+      `        return CreatedAtAction(nameof(${actionName(opGetById(agg.name))}), new { id = id.Value }, new Create${agg.name}Response(id.Value));`,
       "    }",
       "",
       '    [HttpGet("{id}")]',
-      `    public async Task<ActionResult<${agg.name}Response>> GetById([FromRoute] ${shape.idClrType} id)`,
+      `    public async Task<ActionResult<${agg.name}Response>> ${actionName(opGetById(agg.name))}([FromRoute] ${shape.idClrType} id)`,
       "    {",
       `        var response = await _mediator.Send(new Get${agg.name}ByIdQuery(new ${agg.name}Id(id)));`,
       "        return response is null ? NotFound() : Ok(response);",

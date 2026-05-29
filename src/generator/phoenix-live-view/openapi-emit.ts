@@ -7,6 +7,7 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
+  EnumIR,
   FieldIR,
   ParamIR,
   SystemIR,
@@ -20,6 +21,16 @@ import {
   type WirePrimitive,
   wireTypeInfo,
 } from "../../ir/types/wire-types.js";
+import {
+  camelId,
+  opCreate,
+  opFind,
+  opGetById,
+  opList,
+  opOperation,
+  opView,
+  opWorkflow,
+} from "../../ir/util/openapi-ids.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { ApiRoute } from "./api-emit.js";
 
@@ -115,6 +126,19 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
       if (emittedVOs.has(vo.name)) continue;
       emittedVOs.add(vo.name);
       files.set(`${schemaDir}/${snake(vo.name)}.ex`, renderValueObjectSchema(vo, webModule));
+    }
+  }
+
+  // Enum schemas — a named string schema carrying the allowed value-set,
+  // referenced by `$ref` from any enum-typed property.  De-duplicated by
+  // name (a root-level enum is folded into every context's enum list by
+  // the enrich pass, so the same enum can appear more than once).
+  const emittedEnums = new Set<string>();
+  for (const ctx of contexts) {
+    for (const en of ctx.enums) {
+      if (emittedEnums.has(en.name)) continue;
+      emittedEnums.add(en.name);
+      files.set(`${schemaDir}/${snake(en.name)}.ex`, renderEnumSchema(en, webModule));
     }
   }
 
@@ -221,7 +245,7 @@ function renderApiSpec(
     pathEntries.push(`      "/workflows/${slug}" => %OpenApiSpex.PathItem{
         post: %OpenApiSpex.Operation{
           summary: "Run ${wf.name} workflow",
-          operationId: "run_${slug}",
+          operationId: "${camelId(opWorkflow(wf.name))}",
           tags: ["workflows"],
           requestBody: %OpenApiSpex.RequestBody{
             required: true,
@@ -246,7 +270,7 @@ function renderApiSpec(
     pathEntries.push(`      "/views/${slug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "Query ${view.name} view",
-          operationId: "query_${slug}",
+          operationId: "${camelId(opView(view.name))}",
           tags: ["views"],
           responses: %{
             200 => %OpenApiSpex.Response{
@@ -290,7 +314,7 @@ function renderApiSpec(
       `      "/${aggSlug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "List ${agg.name}",
-          operationId: "list_${snake(agg.name)}",
+          operationId: "${camelId(opList(agg.name))}",
           tags: ["${aggSlug}"],
           responses: %{
             200 => %OpenApiSpex.Response{
@@ -301,7 +325,7 @@ function renderApiSpec(
         },
         post: %OpenApiSpex.Operation{
           summary: "Create ${agg.name}",
-          operationId: "create_${snake(agg.name)}",
+          operationId: "${camelId(opCreate(agg.name))}",
           tags: ["${aggSlug}"],
           requestBody: %OpenApiSpex.RequestBody{
             required: true,
@@ -320,7 +344,7 @@ function renderApiSpec(
       `      "/${aggSlug}/{id}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "Get ${agg.name} by id",
-          operationId: "get_${snake(agg.name)}_by_id",
+          operationId: "${camelId(opGetById(agg.name))}",
           tags: ["${aggSlug}"],
           parameters: [
             %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
@@ -344,7 +368,7 @@ function renderApiSpec(
         `      "/${aggSlug}/{id}/${opSnake}" => %OpenApiSpex.PathItem{
         post: %OpenApiSpex.Operation{
           summary: "${op.name} on ${agg.name}",
-          operationId: "${opSnake}_${snake(agg.name)}",
+          operationId: "${camelId(opOperation(agg.name, op.name))}",
           tags: ["${aggSlug}"],
           parameters: [
             %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
@@ -377,7 +401,7 @@ function renderApiSpec(
           `      "/${aggSlug}/${findSnake}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "${find.name} on ${agg.name}",
-          operationId: "${findSnake}_${snake(agg.name)}",
+          operationId: "${camelId(opFind(agg.name, find.name))}",
           tags: ["${aggSlug}"],
           responses: %{
             200 => %OpenApiSpex.Response{
@@ -474,8 +498,11 @@ function openApiType(t: TypeIR): string {
     case "id":
       return OPENAPI_ID_VALUE[info.idValueType!]!;
     case "enum":
-      // Enums travel as strings on the wire.
-      return "%OpenApiSpex.Schema{type: :string}";
+      // Enums travel as strings on the wire, but carry their allowed
+      // value-set via a named schema component so clients (and the
+      // cross-backend enum value-set parity dimension) see the
+      // constraint — matching Hono's z.enum(...).openapi(name).
+      return `%OpenApiSpex.Reference{"$ref": "#/components/schemas/${info.base}"}`;
     case "valueObject":
       return `%OpenApiSpex.Reference{"$ref": "#/components/schemas/${info.base}"}`;
     case "entity":
@@ -540,6 +567,26 @@ ${propsBlock}
   })
 end
 `;
+}
+
+function renderEnumSchema(en: EnumIR, webModule: string): string {
+  const moduleName = `${webModule}.Api.Schemas.${en.name}`;
+  const values = en.values.map((v) => `"${v}"`).join(", ");
+  return [
+    "# Auto-generated.",
+    `defmodule ${moduleName} do`,
+    `  @moduledoc "OpenApiSpex schema for #{__MODULE__}."`,
+    "",
+    "  require OpenApiSpex",
+    "",
+    "  OpenApiSpex.schema(%{",
+    `    title: "${en.name}",`,
+    `    type: :string,`,
+    `    enum: [${values}]`,
+    `  })`,
+    `end`,
+    "",
+  ].join("\n");
 }
 
 function renderValueObjectSchema(vo: ValueObjectIR, webModule: string): string {

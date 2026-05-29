@@ -30,9 +30,15 @@ function renderDtoFile(
   group: "Requests" | "Responses",
 ): string {
   const recs = args.records.map((r) => `public sealed record ${r.name}(${r.params});\n\n`).join("");
+  // `using …Domain.Enums` lets a DTO field carry the enum TYPE (paired
+  // with a global JsonStringEnumConverter for string-on-the-wire) so
+  // Swashbuckle emits a named enum schema.  The `Domain/Enums/_namespace.cs`
+  // marker guarantees the namespace always resolves, even with no enums.
   return `// Auto-generated.
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using ${args.ns}.Domain.Enums;
 
 namespace ${args.ns}.Application.${plural(args.aggName)}.${group};
 

@@ -1,10 +1,12 @@
 // Auto-generated.
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using CatalogApi.Domain.Enums;
 
 namespace CatalogApi.Application.Customers.Responses;
 
-public sealed record CustomerResponse(Guid Id, string Username, string Email, int Age, string Display);
+public sealed record CustomerResponse([property: Required] Guid Id, [property: Required] string Username, [property: Required] string Email, [property: Required] int Age, [property: Required] string Display);
 
-public sealed record CreateCustomerResponse(Guid Id);
+public sealed record CreateCustomerResponse([property: Required] Guid Id);
 

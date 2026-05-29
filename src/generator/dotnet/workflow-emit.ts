@@ -8,11 +8,13 @@ import {
   type WorkflowIR,
   type WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
+import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   csIdValueClrType,
   domainToRequestExpr,
+  dtoParam,
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
@@ -107,9 +109,10 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
 
 function renderRequestDto(wf: WorkflowIR, ctx: EnrichedBoundedContextIR, ns: string): string {
   const params = wf.params
-    .map((p) => `${wireType(p.type, ctx, "request")} ${upperFirst(p.name)}`)
+    .map((p) => dtoParam(wireType(p.type, ctx, "request"), upperFirst(p.name), "request"))
     .join(", ");
   return `// Auto-generated.
+using System.ComponentModel.DataAnnotations;
 using ${ns}.Domain.ValueObjects;
 using ${ns}.Domain.Enums;
 
@@ -508,7 +511,7 @@ function renderController(ctx: EnrichedBoundedContextIR, ns: string, routePrefix
       .join(",\n            ");
     blocks.push(
       `    [HttpPost("${snake(wf.name)}")]\n` +
-        `    public async Task<IActionResult> ${upperFirst(wf.name)}([FromBody] ${upperFirst(wf.name)}Request request)\n` +
+        `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflow(wf.name)))}([FromBody] ${upperFirst(wf.name)}Request request)\n` +
         `    {\n` +
         `        var cmd = new ${upperFirst(wf.name)}Command(\n            ${cmdArgs});\n` +
         `        await _mediator.Send(cmd);\n` +

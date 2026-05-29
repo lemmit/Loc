@@ -19,6 +19,6 @@ public sealed class ActiveOrdersHandler : IQueryHandler<ActiveOrdersQuery, IRead
     public async ValueTask<IReadOnlyList<OrderResponse>> Handle(ActiveOrdersQuery q, CancellationToken ct)
     {
         var domain = await _repo.ActiveOrders(ct);
-        return domain.Select(d => new OrderResponse(d.Id.Value, d.CustomerId, d.Status.ToString(), d.PlacedAt.ToUniversalTime().ToString("o"), d.Lines.Select(__e => new OrderLineResponse(__e.Id.Value, __e.ProductId.Value, __e.Quantity)).ToList())).ToList();
+        return domain.Select(d => new OrderResponse(d.Id.Value, d.CustomerId, d.Status, d.PlacedAt.ToUniversalTime().ToString("o"), d.Lines.Select(__e => new OrderLineResponse(__e.Id.Value, __e.ProductId.Value, __e.Quantity)).ToList())).ToList();
     }
 }
