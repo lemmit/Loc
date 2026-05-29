@@ -35,6 +35,7 @@ import {
 import {
   camelId,
   opCreate,
+  opDestroy,
   opFind,
   opGetById,
   opList,
@@ -348,6 +349,40 @@ export function buildRoutesFile(
   lines.push(`    },`);
   lines.push(`  );`);
   lines.push("");
+
+  // Canonical destroy → DELETE /{id} (hard delete).  Gated on the IR
+  // lifecycle: emitted only when the aggregate has an unnamed `destroy`
+  // (declared or via `crudish`), so plain aggregates' route files are
+  // unchanged.  crudish's destroy is empty-bodied — load (404 guard),
+  // then hard-delete (children/join rows cascade via FK).
+  if (agg.canonicalDestroy) {
+    lines.push(`  app.openapi(`);
+    lines.push(`    createRoute({`);
+    lines.push(`      method: "delete",`);
+    lines.push(`      path: "/{id}",`);
+    lines.push(`      tags: ["${snake(plural(agg.name))}"],`);
+    lines.push(`      operationId: "${camelId(opDestroy(agg.name))}",`);
+    lines.push(`      request: { params: z.object({ id: z.string().uuid() }) },`);
+    lines.push(`      responses: {`);
+    lines.push(`        204: { description: "No Content" },`);
+    lines.push(
+      `        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+    // NOTE: deleting a still-referenced aggregate (cross-aggregate `X id` FK
+    // is `restrict`) currently surfaces as a 500; mapping the PG FK
+    // violation to a 409 is a follow-up.
+    lines.push(`      },`);
+    lines.push(`    }),`);
+    lines.push(`    async (c) => {`);
+    lines.push(`      const { id } = c.req.valid("param");`);
+    // getById throws AggregateNotFoundError (→ 404) when absent.
+    lines.push(`      await repo.getById(Ids.${agg.name}Id(id));`);
+    lines.push(`      await repo.delete(Ids.${agg.name}Id(id));`);
+    lines.push(`      return c.body(null, 204);`);
+    lines.push(`    },`);
+    lines.push(`  );`);
+    lines.push("");
+  }
 
   // Operations.
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
