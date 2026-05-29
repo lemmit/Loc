@@ -368,16 +368,33 @@ export function buildRoutesFile(
     lines.push(
       `        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
-    // NOTE: deleting a still-referenced aggregate (cross-aggregate `X id` FK
-    // is `restrict`) currently surfaces as a 500; mapping the PG FK
-    // violation to a 409 is a follow-up.
+    // Deleting a still-referenced aggregate trips a Postgres
+    // foreign_key_violation (cross-aggregate `X id` FK is ON DELETE
+    // RESTRICT) → 409 Conflict.
+    lines.push(
+      `        409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
     lines.push(`      },`);
     lines.push(`    }),`);
     lines.push(`    async (c) => {`);
     lines.push(`      const { id } = c.req.valid("param");`);
     // getById throws AggregateNotFoundError (→ 404) when absent.
     lines.push(`      await repo.getById(Ids.${agg.name}Id(id));`);
-    lines.push(`      await repo.delete(Ids.${agg.name}Id(id));`);
+    lines.push(`      try {`);
+    lines.push(`        await repo.delete(Ids.${agg.name}Id(id));`);
+    lines.push(`      } catch (err) {`);
+    // PG foreign_key_violation (SQLSTATE 23503) — the row is still
+    // referenced.  Map to a 409 problem locally so the shared onError
+    // (and every other route's behaviour) stays untouched.
+    lines.push(
+      `        if (err && typeof err === "object" && (err as { code?: string }).code === "23503") {`,
+    );
+    lines.push(
+      `          return c.body(JSON.stringify({ type: "about:blank", title: "Conflict", status: 409, detail: "${agg.name} is still referenced and cannot be deleted.", instance: c.req.path }), 409, { "content-type": "application/problem+json" });`,
+    );
+    lines.push(`        }`);
+    lines.push(`        throw err;`);
+    lines.push(`      }`);
     lines.push(`      return c.body(null, 204);`);
     lines.push(`    },`);
     lines.push(`  );`);

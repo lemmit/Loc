@@ -40,6 +40,9 @@ describe(".NET canonical-destroy → DELETE /{id}", () => {
       "await _mediator.Send(new DestroyWidgetCommand(new WidgetId(id)));",
     );
     expect(controller).toContain("return NoContent();");
+    // FK-violation (still-referenced) → 409 mapped locally.
+    expect(controller).toContain("catch (Microsoft.EntityFrameworkCore.DbUpdateException)");
+    expect(controller).toContain('Status = 409, Detail = "Widget is still referenced');
   });
 
   it("emits the Destroy command + handler (load → 404 guard → repo.DeleteAsync)", async () => {

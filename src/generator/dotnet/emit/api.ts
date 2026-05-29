@@ -249,9 +249,21 @@ export function renderController(
             '    [HttpDelete("{id}")]',
             "    [ProducesResponseType(204)]",
             ...producesProblem("getById"),
+            "    [ProducesResponseType(typeof(ProblemDetails), 409)]",
             `    public async Task<IActionResult> ${actionName(opDestroy(agg.name))}([FromRoute] ${shape.idClrType} id)`,
             "    {",
-            `        await _mediator.Send(new Destroy${agg.name}Command(new ${agg.name}Id(id)));`,
+            "        try",
+            "        {",
+            `            await _mediator.Send(new Destroy${agg.name}Command(new ${agg.name}Id(id)));`,
+            "        }",
+            // EF wraps a Postgres foreign_key_violation in DbUpdateException
+            // when the row is still referenced (cross-aggregate `X id` FK is
+            // ON DELETE RESTRICT) → 409 Conflict.  Caught locally so the
+            // shared DomainExceptionFilter stays untouched.
+            "        catch (Microsoft.EntityFrameworkCore.DbUpdateException)",
+            "        {",
+            `            return Conflict(new ProblemDetails { Title = "Conflict", Status = 409, Detail = "${agg.name} is still referenced and cannot be deleted." });`,
+            "        }",
             "        return NoContent();",
             "    }",
             "",
