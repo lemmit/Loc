@@ -5,6 +5,7 @@
 export {
   renderController,
   renderExceptionFilter,
+  renderListWrapperFilter,
   renderProblemDetailsFilter,
 } from "./emit/api.js";
 export { renderAuditableInterceptor } from "./emit/auditable-interceptor.tpl.js";

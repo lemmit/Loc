@@ -413,3 +413,77 @@ public sealed class ProblemDetailsResponsesFilter : IOperationFilter
 }
 `;
 }
+
+/** Swashbuckle document filter — promotes inline `array<XResponse>` list
+ *  responses to named component schemas (`XResponse` → `XListResponse`;
+ *  full-form views: `XRow` → `XResponse`), matching the Hono / Phoenix
+ *  backends which name the wrapper.  Swashbuckle inlines any IEnumerable
+ *  type, so the only reliable way to get a named array component is to
+ *  add it + retarget the responses here.  The element→wrapper map is baked
+ *  in from the IR (no runtime name guessing). */
+export function renderListWrapperFilter(
+  ns: string,
+  pairs: ReadonlyArray<{ element: string; wrapper: string }>,
+): string {
+  const wrappersExpr =
+    pairs.length === 0
+      ? "Array.Empty<(string Element, string Wrapper)>()"
+      : `new[]
+    {
+${pairs.map((p) => `        ("${p.element}", "${p.wrapper}"),`).join("\n")}
+    }`;
+  return `// Auto-generated.
+using System;
+using Microsoft.OpenApi.Models;
+using Swashbuckle.AspNetCore.SwaggerGen;
+
+namespace ${ns}.Api;
+
+public sealed class ListResponseWrapperFilter : IDocumentFilter
+{
+    private static readonly (string Element, string Wrapper)[] Wrappers = ${wrappersExpr};
+
+    public void Apply(OpenApiDocument doc, DocumentFilterContext context)
+    {
+        // Add the named wrapper component for each element schema present.
+        foreach (var (element, wrapper) in Wrappers)
+        {
+            if (doc.Components.Schemas.ContainsKey(element) && !doc.Components.Schemas.ContainsKey(wrapper))
+            {
+                doc.Components.Schemas[wrapper] = new OpenApiSchema
+                {
+                    Type = "array",
+                    Items = new OpenApiSchema
+                    {
+                        Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = element }
+                    }
+                };
+            }
+        }
+
+        // Retarget inline array responses to the named wrapper $ref.
+        foreach (var path in doc.Paths.Values)
+        foreach (var operation in path.Operations.Values)
+        foreach (var response in operation.Responses.Values)
+        foreach (var media in response.Content.Values)
+        {
+            var schema = media.Schema;
+            if (schema?.Type == "array" && schema.Items?.Reference?.Id is string elementId)
+            {
+                foreach (var (element, wrapper) in Wrappers)
+                {
+                    if (element == elementId)
+                    {
+                        media.Schema = new OpenApiSchema
+                        {
+                            Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = wrapper }
+                        };
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+`;
+}
