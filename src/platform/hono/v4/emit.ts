@@ -179,6 +179,7 @@ export function generateTypeScriptForContexts(
     repositories: contexts.flatMap((c) => c.repositories),
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
+    criteria: contexts.flatMap((c) => c.criteria),
   };
 
   out.set("domain/ids.ts", renderIds(merged));

@@ -6,6 +6,7 @@ import type {
   BinaryChain,
   BoundedContext,
   BuilderCall,
+  Criterion,
   EntityPart,
   EntityPartMember,
   Expression,
@@ -28,6 +29,7 @@ import {
   isBuilderCall,
   isCallSuffix,
   isContainment,
+  isCriterion,
   isDecLit,
   isDerivedProp,
   isEmitStmt,
@@ -87,6 +89,7 @@ import {
   findEntityByName,
   findFunctionInEnv,
   findValueObjectByName,
+  inAggregate,
   lowerType,
   USER_SHAPE_NAME,
   withLocal,
@@ -272,6 +275,16 @@ function applySuffixToRecv(
     // head), produce the same `call` IR the old CallExpr branch did;
     // resolution of callKind matches the original semantics.
     if (recv.kind === "ref") {
+      // Parameterised criterion call (`InRegion("EU")`) — inline the
+      // predicate body with the call arguments substituted for its
+      // parameters.  Produces an ordinary boolean expression.
+      const crit = findCriterionInEnv(env, recv.name);
+      if (crit) {
+        return {
+          recv: inlineCriterion(crit, args, env),
+          recvType: { kind: "primitive", name: "bool" },
+        };
+      }
       const callKind = resolveCallKind(recv.name, env);
       const callIR: ExprIR = {
         kind: "call",
@@ -552,7 +565,57 @@ function hoistStyleArg<E extends { name?: string; value: Expression }>(
   return { remainingEntries: remaining, style };
 }
 
+/** Locate a `criterion` declaration by name in the enclosing context. */
+function findCriterionInEnv(env: Env, name: string): Criterion | undefined {
+  if (!env.ctx) return undefined;
+  for (const m of env.ctx.members) {
+    if (isCriterion(m) && m.name === name) return m;
+  }
+  return undefined;
+}
+
+/** Inline a criterion reference into the host expression.  Re-lowers the
+ *  predicate body in a scope whose candidate is the criterion's `of <T>`
+ *  aggregate (so the body's bare field names / `this` rebind to the host
+ *  receiver) and whose parameters are substituted by the caller's
+ *  already-lowered argument expressions.  Composition (`A && B`) needs no
+ *  special handling — it is ordinary boolean operators over inlined
+ *  predicates, so the result flows through the same expression→SQL path a
+ *  hand-written inline filter does.  A reference cycle is broken by
+ *  leaving the inner reference unresolved; `loom.criterion-cycle` reports
+ *  it. */
+function inlineCriterion(c: Criterion, args: ExprIR[], env: Env): ExprIR {
+  const stack = env.criterionStack ?? [];
+  if (stack.includes(c.name)) {
+    return { kind: "ref", name: c.name, refKind: "unknown" };
+  }
+  // The body sees only the candidate + its own parameters: start from a
+  // fresh local scope but keep ctx / user / module-permissions so
+  // `currentUser`, enum values, and sibling criteria still resolve.
+  let bodyEnv: Env = { ...env, locals: new Map(), criterionArgs: undefined };
+  const targetType = lowerType(c.target);
+  if (targetType.kind === "entity") {
+    const candidate = findEntityByName(env, targetType.name);
+    if (candidate && isAggregate(candidate)) bodyEnv = inAggregate(bodyEnv, candidate);
+  }
+  const argMap = new Map<string, ExprIR>();
+  c.params.forEach((p, i) => {
+    const a = args[i];
+    if (a) argMap.set(p.name, a);
+  });
+  bodyEnv = { ...bodyEnv, criterionArgs: argMap, criterionStack: [...stack, c.name] };
+  return lowerExpr(c.body, bodyEnv);
+}
+
 function resolveNameRef(name: string, env: Env): ExprIR {
+  // Criterion-parameter substitution — while inlining a criterion body, a
+  // bare reference to one of its parameters resolves to the caller's
+  // already-lowered argument expression.  Wins over candidate fields so a
+  // parameter shadows a field of the same name (matches function-body
+  // parameter scoping).
+  if (env.criterionArgs?.has(name)) {
+    return env.criterionArgs.get(name) as ExprIR;
+  }
   // `currentUser` magic identifier — resolves to a synthetic entity
   // shape backed by the system's `user { ... }` block.  Always wins
   // over locals so a let-binding can't shadow it.  When no user block
@@ -602,6 +665,16 @@ function resolveNameRef(name: string, env: Env): ExprIR {
       if (isFunctionDecl(m) && m.name === name) {
         return { kind: "ref", name, refKind: "helper-fn" };
       }
+    }
+  }
+  // Parameterless criterion reference — inline the predicate body.  A
+  // parameterised criterion referenced bare (no argument list) falls
+  // through to the unresolved path; the validator reports the arity
+  // mismatch (`loom.criterion-arity`).
+  {
+    const crit = findCriterionInEnv(env, name);
+    if (crit && crit.params.length === 0) {
+      return inlineCriterion(crit, [], env);
     }
   }
   // Enum value lookup — only when an enclosing context exists.  E2E
@@ -793,6 +866,14 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     // — the result type is the function's return type / VO type, then
     // we walk remaining suffixes.
     if (first && isCallSuffix(first) && isNameRef(expr.head)) {
+      // Criterion call (`InRegion("EU")`) types as a boolean predicate.
+      if (findCriterionInEnv(env, expr.head.name)) {
+        curType = { kind: "primitive", name: "bool" };
+        for (let i = 1; i < expr.suffixes.length; i++) {
+          curType = inferSuffixType(curType, expr.suffixes[i]!, env);
+        }
+        return curType;
+      }
       const fn = findFunctionInEnv(env, expr.head.name);
       if (fn) curType = lowerType(fn.returnType);
       else {
@@ -811,6 +892,12 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     return curType;
   }
   if (isNameRef(expr)) {
+    // Criterion-parameter substitution — type of the bound argument.
+    const arg = env.criterionArgs?.get(expr.name);
+    if (arg) return "type" in arg && arg.type ? arg.type : { kind: "primitive", name: "string" };
+    // Parameterless criterion reference types as a boolean predicate.
+    const crit = findCriterionInEnv(env, expr.name);
+    if (crit && crit.params.length === 0) return { kind: "primitive", name: "bool" };
     const ref = resolveNameRef(expr.name, env);
     if (ref.kind === "ref" && ref.type) return ref.type;
     return { kind: "primitive", name: "string" };

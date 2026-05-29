@@ -1,6 +1,13 @@
 # Criterion — predicates for filtering, validation, and operation gates
 
-> Status: proposal. **Resolves D23**. Depends on
+> Status: **PARTIAL** — the core (`criterion` declaration + body
+> validation + inline use in every existing boolean-expression position:
+> `view`/`find` `where`, invariants, operation preconditions) is shipped;
+> see [`docs/criterion.md`](../criterion.md). The remaining surfaces
+> (`Repo.findAll(criterion, …)`, `when <Criterion>` + `can-<op>`,
+> `from <Criterion>(args)`) depend on the unshipped exception-less /
+> payload-transport layers and stay on paper for now. **Resolves D23**.
+> Depends on
 > [`payload-transport-layer.md`](./payload-transport-layer.md) (carrier
 > generics + tagged unions) and
 > [`exception-less.md`](./exception-less.md) (`or`-unions, `?`
