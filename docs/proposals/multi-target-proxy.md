@@ -1,11 +1,9 @@
 # Multi-target frontends — same-origin proxy story
 
-> **Status:** unadopted proposal. Sibling of
-> `../plans/backend-packages.md` (gateway platforms reuse the
-> out-of-tree package story). The design questions at the
-> bottom — especially the *scope* one (do we really want to
-> express every cross-cutting concern in the DSL, or pick a
-> minimal vocabulary plus an escape hatch?) — are still open.
+> **Status:** approved proposal — implementation pending. Sibling
+> of `../plans/backend-packages.md` (gateway platforms reuse the
+> out-of-tree package story). Vocabulary scope (open question #1)
+> is still genuinely open and will be re-decided during slice 6.
 
 ## The problem
 
@@ -202,7 +200,6 @@ gains the gateway families.
 +         ('defaults' '{' defaults=ProxyPolicy '}')?
 +         ('routes' ':' '[' routes+=ProxyRoute
 +                          (',' routes+=ProxyRoute)* ','? ']')?
-+         (raw+=ProxyRawBlock)*               // see "Escape hatches" below
 +     '}';
 +
 + ProxyRoute:
@@ -217,8 +214,7 @@ gains the gateway families.
 +     ('rateLimit'  ':' rateLimit=Rate    ','?)?
 +     ('path'       ':' rewriteFrom=STRING '->' rewriteTo=STRING ','?)?
 +     ('websocket'  ':' websocket=Bool    ','?)?
-+     ('headers'    '{' headers=HeadersBlock '}')?
-+     (raw+=ProxyRawBlock)*;                  // route-scoped escape hatch
++     ('headers'    '{' headers=HeadersBlock '}')?;
 
   Platform returns string:
       'hono' | 'dotnet' | 'react' | 'phoenixLiveView'
@@ -254,8 +250,6 @@ In `src/language/validators/deployable.ts` and
 | `loom.proxy-auth-unknown` | `auth:` value isn't in the existing `AuthMode` enum. |
 | `loom.proxy-rate-limit-unit` | `rateLimit:` window isn't `s`/`min`/`h`. |
 | `loom.proxy-header-forward-conflict` | Header listed in both `add` and `forward` for the same route. |
-| `loom.proxy-raw-unknown-family` | A `raw <family> { … }` block names a family that's not registered as a `PlatformSurface`. |
-| `loom.proxy-raw-dead` | Warning. A `raw <family> { … }` block is present but no deployable in the system uses that family. |
 | `loom.proxy-slot-unsupported` | A policy slot is used that the resolved gateway's `PlatformSurface.proxySlots` doesn't include. |
 
 The "kind" distinction between **application platform** (today's
@@ -271,18 +265,16 @@ One enrichment field per non-static deployable, added in phase ⑥
 ```ts
 // On EnrichedDeployableIR
 readonly proxyRoutes?: {
-  readonly mode: 'mounted-in-host' | 'gateway';
+  readonly mode:   'mounted-in-host' | 'gateway';
   readonly routes: readonly ProxyRouteIR[];
-  readonly rawByFamily?: ReadonlyMap<string, readonly string[]>;
 };
 
 type ProxyRouteIR = {
-  prefix:    string;          // "/api/billing" or "/"
-  target:    string;          // compose service name
-  port:      number;
-  module?:   string;          // present for api routes
-  policy:    ProxyPolicyIR;   // empty {} when bare-ref
-  rawByFamily?: ReadonlyMap<string, readonly string[]>;
+  prefix:   string;          // "/api/billing" or "/"
+  target:   string;          // compose service name
+  port:     number;
+  module?:  string;          // present for api routes
+  policy:   ProxyPolicyIR;   // empty {} when bare-ref
 };
 
 type ProxyPolicyIR = {
@@ -323,9 +315,9 @@ Derivation rules:
 The compose builder reads `proxyRoutes` and either:
 
 - **`mounted-in-host`** → delegates to the host's
-  `PlatformSurface.emitProxyMounts(routes, raw)`.
+  `PlatformSurface.emitProxyMounts(routes)`.
 - **`gateway`** → calls the gateway's
-  `PlatformSurface.emitProject({ routes, raw, listenPort })`.
+  `PlatformSurface.emitProject({ routes, listenPort })`.
 
 ## `PlatformSurface` contract diff
 
@@ -356,7 +348,6 @@ export interface PlatformSurface {
    */
   readonly emitProxyMounts?: (
     routes: readonly ProxyRouteIR[],
-    raw:    ReadonlyMap<string, readonly string[]>,
     ctx:    HostEmitCtx,
   ) => void;
 }
@@ -498,120 +489,70 @@ moves to the escape hatch (see below).
 The IR carries `timeoutMs: 30_000`; each surface knows how to
 spell it.
 
-### Escape hatches
+### Escape hatch — override files, not DSL
 
 The typed vocabulary above intentionally captures the 80%
 case. The other 20% — Caddy `@matcher` blocks, nginx
 `proxy_buffer_size` tuning, YARP custom `Transforms` beyond
 path/headers, OAuth token introspection, mTLS to upstreams — is
-**family-specific** by definition. The DSL needs a way to express
-it without either (a) inflating the typed vocabulary with slots
-that only one family supports or (b) forcing the user to drop
-out of Loom entirely.
+**family-specific** by definition. Rather than carry it into
+the DSL as `raw <family> { … }` blocks, we lean on every gateway
+family's own include / layered-config mechanism. The user drops
+a sidecar file next to the generated one and the proxy merges
+them at boot. **Loom never touches the override file.**
 
-Proposed: **`raw <family> { … }` blocks**, available both at the
-proxy-block level and per-route. Each block is gated on the
-target family — only emitted when the resolved
-`PlatformSurface.family` matches.
+| Family | Include mechanism | Generated → emits | User edits |
+|---|---|---|---|
+| Caddy | `import` directive | `gateway/Caddyfile` ends with `import conf.d/*.caddy` | `gateway/conf.d/*.caddy` |
+| nginx | `include` directive | `gateway/nginx.conf` ends with `include conf.d/*.conf;` | `gateway/conf.d/*.conf` |
+| Traefik | file-provider directory | provider config points at `gateway/dynamic/` | `gateway/dynamic/*.yml` |
+| Ocelot | `AddOcelot()` env-layering | `gateway/ocelot.json` + autoload `ocelot.user.json` | `gateway/ocelot.user.json` |
+| YARP (dotnet host) | ASP.NET config layering | `acmeHost/appsettings.Generated.json` + autoload `appsettings.User.json` | `acmeHost/appsettings.User.json` |
+| Hono (in-process) | conditional dynamic import | host code does `if (existsSync('./proxy.user.ts')) await import(...)` | `acmeHost/src/proxy/proxy.user.ts` |
+| Phoenix (in-process) | conditional require in endpoint | endpoint conditionally imports `proxy_user.ex` | `acmeHost/lib/.../proxy_user.ex` |
 
-```ddd
-proxy {
-  defaults { timeout: 5s }
+Each `PlatformSurface` declares its override-file path(s) and
+the include-line / autoload shim it has to emit. The generator
+emits the shim; the user creates and version-controls the
+override file. **Everything else falls out:**
 
-  // Proxy-level raw — emits once into the gateway config, regardless of routes.
-  raw caddy {
-    """
-    @internal header X-Internal "true"
-    handle @internal { respond "internal-only" 403 }
-    """
-  }
-
-  routes: [
-    billingApi,
-
-    inventoryApi {
-      timeout:   30s
-      websocket: true
-
-      // Route-level raw — emits inside the inventory route only.
-      raw nginx {
-        """
-        proxy_buffer_size       128k;
-        proxy_buffers           4 256k;
-        proxy_busy_buffers_size 256k;
-        """
-      }
-      raw yarp {
-        """
-        "Transforms": [
-          { "RequestHeaderRemove": "X-Forwarded-For" }
-        ]
-        """
-      }
-    },
-  ]
-}
-```
-
-Design notes on the escape hatch:
-
-- **String content is opaque to Loom** — the validator parses
-  the *block* (family name, syntax) but the *contents* go through
-  as-is. We deliberately do not attempt to lint Caddyfile /
-  nginx.conf / YARP-JSON; that's the gateway family's job at boot.
-- **Source stays portable** — multiple `raw <family> { … }`
-  siblings can coexist for one route. Swap `platform: caddy` →
-  `platform: nginx` and you keep whichever `raw nginx { … }`
-  you already wrote; the `raw caddy { … }` becomes a noop. The
-  validator warns (`loom.proxy-raw-dead`) about raws no
-  deployable uses, so dead config is visible.
-- **Insertion points are family-defined** — each gateway
-  surface declares two splice points: `proxyLevelRawSplice`
-  (top-of-config) and `routeRawSplice(routeId)` (inside a
-  specific route). The IR holds the strings; the surface
-  decides where they land. For Caddy that's "inside the
-  `:port { … }` site block" and "inside the matching `handle`
-  block"; for YARP it's "inside the top-level `Routes` map" and
-  "inside the route's JSON object".
-- **The capability is per-family** — a gateway surface that
-  doesn't support raw blocks (e.g. an experimental in-tree
-  family during bootstrap) sets `proxyRaw: null` on its
-  surface; using `raw <family> { … }` against it errors with
-  `loom.proxy-raw-unsupported`. Out-of-tree gateways inherit
-  this knob.
-- **Per-route raw + typed slot on the same route** is fine —
-  enrichment emits the typed slot's translation *first*, then
-  the raw block, so raw overrides win (the same semantics as
-  hand-edited config files). Validator warns when a raw clearly
-  reproduces a typed slot ("you wrote `raw caddy { read_timeout
-  30s }` but the route already has `timeout: 30s`").
+- **Source stays portable** — the override file lives in the
+  output tree, not in `.ddd`. Swapping `platform: caddy → nginx`
+  changes the generated `Caddyfile` to an `nginx.conf` and
+  switches which override file the user has. Their previous
+  override stays in git history; switching means rewriting it
+  for the new family (which is true today and not avoidable —
+  the directives are different).
+- **Full LSP / linting for the override** — the user is editing
+  a real `.caddy` / `.conf` / `.json` / `.ts` / `.ex` file with
+  whatever tooling already exists for that family. Loom doesn't
+  have to host a second grammar.
+- **Eject path is trivial** — delete the include line, copy the
+  generated content into your own file, you own the whole thing.
+  Same shape as `eject` in any scaffolding tool.
+- **Per-route overrides** are family-native — Caddy users add a
+  `handle /api/reports/*` block in `conf.d/`; nginx users add a
+  matching `location /api/reports/`. The override file's
+  directives win because they're loaded after the generated
+  block (each family's standard precedence).
+- **No new DSL surface** — no grammar additions, no validator
+  rules for raw blocks, no IR fields for splicing, no per-family
+  splice-point contract on `PlatformSurface`. The whole escape
+  hatch is a generator-side convention.
 
 The minimal v1 commits to:
 
-1. **`raw <family> { """ ... """ }`** with triple-quoted
-   strings (already in Loom's terminal set — used for `text`
-   docstring slots elsewhere; check).
-2. **Proxy-level + route-level** scopes. No nested raws inside
-   raws.
-3. **Validator parses the family name and the block boundaries**
-   only. Contents are byte-spliced.
-4. **One gateway surface in v1 with a fully-defined raw splice
-   contract** — probably Caddy, where the directive boundaries
-   are unambiguous.
-
-What v1 deliberately does **not** ship:
-
-- **Conditional raws** (`raw caddy when production { … }`).
-  Environment-conditional config is a separate axis; deferred.
-- **Raw blocks on in-process backends** (`raw hono { … }`).
-  In-process proxies are TypeScript / C# / Elixir; the right
-  escape hatch there is "write a regular handler in your project
-  and skip `proxy { … }` for that route." Open question whether
-  to surface this guidance in a diagnostic.
-- **Raw at `defaults` level.** Raises ordering and override-
-  resolution problems we don't want to commit to before seeing
-  real use cases. Per-route + proxy-level covers the empirical
-  cases.
+1. Each `PlatformSurface` (application + gateway) defines
+   `proxyOverridePath: string | string[]` and the include /
+   autoload shim string it must emit.
+2. Generator emits the shim **always** for any deployable that
+   has a `proxy { … }` block — even when the user hasn't
+   created the override file yet, so the path is documented and
+   ready.
+3. Override files are listed in `.loomignore` defaults so
+   `ddd generate` never overwrites them.
+4. `docs/tools.md` gets a per-family table of "where to put your
+   overrides" mirroring the table above.
 
 ---
 
@@ -977,45 +918,47 @@ Same .ddd, `platform: caddy` swap → `Caddyfile`:
 Same source, two very different deployment targets. The policy
 intent is preserved; the spelling isn't.
 
-### Example 7 — Escape hatch for nginx-specific buffer tuning
+### Example 7 — Override file for nginx-specific buffer tuning
 
 The SPA is fine on every platform, but one upstream returns
 multi-megabyte JSON payloads and the team is committed to nginx.
-They reach for the escape hatch on that one route.
+They reach for the override-file escape hatch — no DSL change at
+all.
 
 ```ddd
 deployable gateway {
   platform: nginx,
   port:     80,
   proxy {
-    routes: [
-      webApp,
-      billingApi,
-      reportingApi {
-        timeout: 60s
-        raw nginx {
-          """
-          proxy_buffer_size       128k;
-          proxy_buffers           4 256k;
-          proxy_busy_buffers_size 256k;
-          """
-        }
-      },
-    ]
+    routes: [webApp, billingApi, reportingApi { timeout: 60s }]
   }
 }
 ```
 
-The `raw nginx { … }` body is spliced verbatim into the
-generated `location /api/reporting/ { … }` block, after the
-`proxy_read_timeout 60s` line that the typed `timeout: 60s`
-slot emitted.
+Generator emits `gateway/nginx.conf` ending with:
 
-If the team later switches to `platform: caddy`, the source still
-parses and the gateway still builds — the `raw nginx { … }`
-becomes a dead block (validator warns:
-`loom.proxy-raw-dead nginx`) until they either delete it or
-add a sibling `raw caddy { … }`.
+```nginx
+include /etc/nginx/conf.d/*.conf;
+```
+
+The team creates `gateway/conf.d/reporting-buffers.conf`:
+
+```nginx
+location /api/reporting/ {
+  proxy_buffer_size       128k;
+  proxy_buffers           4 256k;
+  proxy_busy_buffers_size 256k;
+  proxy_pass              http://reportingApi:3003/;
+  proxy_read_timeout      60s;
+}
+```
+
+nginx's normal precedence rules pick the more-specific block; the
+team gets full nginx tooling for their override (linting,
+formatting, syntax highlighting); Loom never re-runs the
+override on `ddd generate`. Switching to `platform: caddy`
+later: delete `conf.d/`, write `Caddyfile.d/` equivalents.
+Same effort as today, but the *Loom* surface stays unchanged.
 
 ---
 
@@ -1071,21 +1014,12 @@ choices look obvious that aren't:
    the 90% case; the function form is what you reach for when
    you actually care. Defer the function form until the first
    user asks.
-9. **Triple-quoted strings for `raw` blocks** — confirm the
-   terminal is available (Loom already uses it for `text`
-   docstring slots, but the `raw` body has different escape
-   needs).
-10. **Raw blocks on in-process backends** (`raw hono { … }`).
-    In-process proxies are TS/C#/Elixir — the right escape
-    hatch there is "write a regular handler in your project
-    and skip the typed route." Surface that guidance as a
-    diagnostic, or just leave it to docs?
-11. **`platform: react` + `proxy.routes` for SPA-served APIs**
-    is impossible (no server), but does `platform: react`
-    benefit from a `proxy.headers` block on its own static
-    serving (CSP, COEP/COOP)? Probably yes — but that's a
-    different feature than this proposal addresses. Worth a
-    cross-ref.
+9. **`platform: react` + a CSP `proxy.headers` block.** The SPA
+   has no server-side proxy, but the static-serving step (the
+   react surface's `emitProject`) could honour a `headers { add
+   Content-Security-Policy: "…" }` block applied to every
+   response. That's a different feature than this proposal
+   addresses; worth a cross-ref but not in v1.
 
 ## Sequencing
 
@@ -1114,20 +1048,20 @@ If this lands, the suggested slice order keeps each step small:
    (`timeout`, `headers`, `websocket`). Defer `retry` /
    `rateLimit` / `auth` / `path` until the open-question
    review.
-7. **Add `raw <family> { … }` blocks** (proxy-level + route-
-   level) — Caddy first since its splice points are
-   unambiguous. Validator: `loom.proxy-raw-unknown-family`,
-   `loom.proxy-raw-dead`.
+7. **Emit the override-file include shim** from every gateway
+   and every mounted-host surface, with their override paths
+   listed in `.loomignore`. `docs/tools.md` gains a per-family
+   override-path table.
 8. **Second gateway family — `nginx`** — to prove the kind is
    pluggable. Then `traefik`, then `ocelot`. Each one
-   declares `proxySlots` honestly; raw splice contract is
-   per-family.
+   declares `proxySlots` honestly.
 9. **Wire the out-of-tree `kind: "gateway"` resolver** in
    `fs-discovery.ts` once we have two in-tree families to
    pattern off.
 10. **Revisit the open-question list** before adding the
     deferred typed slots (`retry`, `rateLimit`, `auth`, `path`).
-    Some of them may stay escape-hatch-only.
+    Some may stay override-file-only — that's a fine landing
+    point.
 
 Each step keeps `npm test` green and only one CI matrix cell
 (`LOOM_E2E`, `LOOM_DOTNET_BUILD`, etc.) changes scope at a time.
