@@ -239,7 +239,18 @@ function collectContextsFor(
   const want = new Set(d.contextNames);
   const out: EnrichedBoundedContextIR[] = [];
   for (const mod of modulesByName.values()) {
-    for (const c of mod.contexts) if (want.has(c.name)) out.push(c);
+    for (const c of mod.contexts) {
+      if (!want.has(c.name)) continue;
+      // Abstract bases (aggregate-inheritance.md) emit nothing of their own:
+      // no table, repository, or routes. Strip them from the generation view
+      // here — a single chokepoint that covers all four backends — so each
+      // platform sees only concrete aggregates. Concretes already carry the
+      // base's fields via the wireShape merge (enrichContext), so dropping the
+      // base loses no shape. (`ownTable`/TPC: each concrete is a standalone
+      // table. `sharedTable`/TPH is gated as not-implemented in IR-validate.)
+      const concrete = c.aggregates.filter((a) => !a.isAbstract);
+      out.push(concrete.length === c.aggregates.length ? c : { ...c, aggregates: concrete });
+    }
   }
   return out;
 }

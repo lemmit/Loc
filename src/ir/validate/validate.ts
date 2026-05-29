@@ -87,7 +87,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateViews(c, diags);
     validateCurrentUserScope(c, diags);
     validatePermissionRefs(c, diags);
-    validateInheritanceUnwired(c, diags);
+    validateInheritanceStorage(c, diags);
   }
   validateExprIntegrity(loom, diags);
   return diags;
@@ -1105,27 +1105,47 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
   // per-backend `supportedShapes` capability check, not warned as inert.
 ];
 
-// Aggregate-inheritance (aggregate-inheritance.md, I2/I3) — truth-telling
-// while only the foundation has landed.  I1 shipped the surface + validators;
-// the I2 foundation merges a concrete's inherited base fields into its
-// `wireShape` (so DTOs carry the shared shape).  What is NOT yet generated:
-// the table strategy (`sharedTable` TPH / `ownTable` TPC), the `kind`
-// discriminator column, polymorphic `Party id` foreign keys, and base-type
-// queries (`find all Party`).  Warn so no one mistakes the inherited wire
-// shape for working storage.  Drop this warning when I2/I3 emission lands.
-function validateInheritanceUnwired(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+// Aggregate-inheritance storage gate (aggregate-inheritance.md, I2/I3).
+//
+// `ownTable` (TPC) emission is wired: the abstract base is dropped from the
+// generation view (system/index.ts `collectContextsFor`) and each concrete
+// emits as a standalone table carrying the merged base + own fields (the
+// `wireShape` merge in enrichContext). No discriminator, no shared base
+// table — so nothing extra is needed and we stay quiet.
+//
+// `sharedTable` (TPH) is NOT implemented: it needs a `kind` discriminator
+// column, a tagged-union wire shape, polymorphic `Party id` foreign keys,
+// and a single-scan `find all Party`. Until that lands, gate it as an error
+// (not a warning) so a `sharedTable` hierarchy fails the build rather than
+// silently emitting per-concrete tables that drop the polymorphism the
+// author asked for. `sharedTable` is the omitted-modifier default, so an
+// inheritance hierarchy with no `inheritanceUsing(…)` trips this too — the
+// author must opt into `ownTable` explicitly while TPH is unimplemented.
+const DEFAULT_INHERITANCE_LAYOUT = "sharedTable" as const;
+
+function validateInheritanceStorage(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  const byName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   for (const agg of ctx.aggregates) {
     if (!agg.isAbstract && !agg.extendsAggregate) continue;
+    // A concrete's layout defaults to its base's (resolved within the
+    // context); a per-concrete `inheritanceUsing(…)` override wins. The
+    // abstract base uses its own declared layout. Either way an omitted
+    // modifier means `sharedTable` (TPH), the documented default.
+    const base = agg.extendsAggregate ? byName.get(agg.extendsAggregate) : undefined;
+    const effective = agg.inheritanceUsing ?? base?.inheritanceUsing ?? DEFAULT_INHERITANCE_LAYOUT;
+    if (effective !== "sharedTable") continue;
     const role = agg.isAbstract ? "abstract base" : `extends ${agg.extendsAggregate}`;
-    const layout = agg.inheritanceUsing ? `, inheritanceUsing(${agg.inheritanceUsing})` : "";
+    const how = agg.inheritanceUsing
+      ? "inheritanceUsing(sharedTable)"
+      : "the omitted-modifier default (sharedTable)";
     diags.push({
-      severity: "warning",
+      severity: "error",
       message:
-        `aggregate '${agg.name}' participates in inheritance (${role}${layout}), but ` +
-        `inheritance storage emission is not wired yet. Concrete subtypes inherit base fields ` +
-        `into their wire shape (I2 foundation); the table strategy (sharedTable TPH / ownTable ` +
-        `TPC), discriminator column, polymorphic 'X id' references, and base-type queries are ` +
-        `not yet generated. Tracked in aggregate-inheritance.md I2/I3.`,
+        `aggregate '${agg.name}' (${role}) resolves to sharedTable (TPH) inheritance via ` +
+        `${how}, but TPH storage emission is not implemented yet (it needs a discriminator ` +
+        `column, tagged-union wire shape, and polymorphic 'X id' keys). Declare ` +
+        `'inheritanceUsing(ownTable)' on the hierarchy to use the implemented per-concrete ` +
+        `(TPC) layout. Tracked in aggregate-inheritance.md I2/I3.`,
       source: `${ctx.name}/${agg.name}`,
     });
   }

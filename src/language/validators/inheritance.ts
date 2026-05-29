@@ -10,8 +10,15 @@
 // the meantime.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
-import type { Aggregate, Model, Repository } from "../generated/ast.js";
-import { isAggregate, isCreate, isDestroy, isOperation, isRepository } from "../generated/ast.js";
+import type { Aggregate, IdType, Model, Repository } from "../generated/ast.js";
+import {
+  isAggregate,
+  isCreate,
+  isDestroy,
+  isIdType,
+  isOperation,
+  isRepository,
+} from "../generated/ast.js";
 
 /** Default inheritance layout for a participant that omits the
  *  `inheritanceUsing(…)` modifier: TPH (`sharedTable`) — the simplest DSL
@@ -22,9 +29,11 @@ const DEFAULT_LAYOUT = "sharedTable" as const;
 export function checkInheritance(model: Model, accept: ValidationAcceptor): void {
   const aggregates: Aggregate[] = [];
   const repositories: Repository[] = [];
+  const idTypes: IdType[] = [];
   for (const node of AstUtils.streamAllContents(model)) {
     if (isAggregate(node)) aggregates.push(node);
     else if (isRepository(node)) repositories.push(node);
+    else if (isIdType(node)) idTypes.push(node);
   }
 
   for (const agg of aggregates) {
@@ -117,6 +126,27 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
         `'repository ${repo.name} for ${target.name}': '${target.name}' is an abstract ` +
           `aggregate and has no repository of its own. Repositories belong to concrete subtypes.`,
         { node: repo, property: "aggregate", code: "loom.abstract-repository" },
+      );
+    }
+  }
+
+  // Rule 6 — a polymorphic `Base id` reference to an abstract base is not
+  // supported yet.  Under `ownTable` (TPC) the proposal forbids it outright
+  // (the FK target is ambiguous across the per-concrete tables); under
+  // `sharedTable` (TPH) it would target the single base table, but TPH
+  // emission is not implemented yet (gated in IR-validate).  Until one of
+  // those lands, reject the reference with a concrete fix rather than emitting
+  // a dangling FK.  (A bare `Base` type ref is already steered to `Base id` by
+  // `loom.bare-aggregate-in-type`; this catches the `id` form that survives.)
+  for (const idType of idTypes) {
+    const target = idType.target?.ref;
+    if (isAggregate(target) && target.isAbstract) {
+      accept(
+        "error",
+        `'${target.name} id' references the abstract base '${target.name}', which has no ` +
+          `single table to key against. Polymorphic references to an abstract base are not ` +
+          `supported yet — reference a concrete subtype's id (e.g. 'Customer id') instead.`,
+        { node: idType, property: "target", code: "loom.polymorphic-id-ref-unsupported" },
       );
     }
   }

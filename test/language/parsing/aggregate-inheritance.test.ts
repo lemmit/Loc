@@ -13,6 +13,7 @@ import { lowerModel } from "../../../src/ir/lower/lower.js";
 import { validateLoomModel } from "../../../src/ir/validate/validate.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Aggregate, Model } from "../../../src/language/generated/ast.js";
+import { generateSystems } from "../../../src/system/index.js";
 import { parseValid } from "../../_helpers/parse.js";
 
 async function parse(src: string) {
@@ -208,13 +209,98 @@ system Sys {
     expect(names).toEqual(["id", "name", "tier"]);
   });
 
-  it("warns that inheritance storage emission is not wired yet (IR-validate)", async () => {
+  it("emits no inheritance diagnostic for an ownTable (TPC) hierarchy (IR-validate)", async () => {
+    // SRC declares inheritanceUsing(ownTable) on both base and concrete —
+    // TPC emission is wired (each concrete is a standalone table; the base
+    // is dropped from the generation view), so validation stays quiet.
     const diags = validateLoomModel(enrichLoomModel(lowerModel(await parseValid(SRC))));
-    const warns = diags.filter(
-      (d) =>
-        d.severity === "warning" && /inheritance storage emission is not wired/.test(d.message),
-    );
-    // one for the abstract base, one for the concrete subtype.
-    expect(warns.map((w) => w.source).sort()).toEqual(["Parties/Customer", "Parties/Party"]);
+    const inheritance = diags.filter((d) => /TPH|TPC|inheritance/i.test(d.message));
+    expect(inheritance).toEqual([]);
+  });
+});
+
+describe("aggregate inheritance — storage gate + ownTable emission (I2/I3)", () => {
+  const codes = (es: { code?: string | number }[]) =>
+    es.map((e) => e.code).filter((c): c is string => typeof c === "string");
+
+  const OWN_TABLE = `
+system Sys {
+  subdomain Parties {
+    context Parties {
+      abstract aggregate Party inheritanceUsing(ownTable) { name: string email: string }
+      aggregate Customer extends Party inheritanceUsing(ownTable) { creditLimit: decimal }
+    }
+  }
+  storage primary { type: postgres }
+  resource partiesState { for: Parties, kind: state, use: primary }
+  deployable api {
+    platform: hono
+    contexts: [Parties]
+    dataSources: [partiesState]
+    port: 3000
+  }
+}
+`;
+
+  it("gates a sharedTable (TPH) hierarchy as a not-implemented error (IR-validate)", async () => {
+    const SHARED = `
+system Sys {
+  subdomain Sales {
+    context Parties {
+      abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+      aggregate Customer extends Party inheritanceUsing(sharedTable) { creditLimit: decimal }
+    }
+  }
+}
+`;
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(await parseValid(SHARED))));
+    const errors = diags.filter((d) => d.severity === "error" && /TPH/.test(d.message));
+    // both the abstract base and the concrete subtype resolve to sharedTable.
+    expect(errors.map((e) => e.source).sort()).toEqual(["Parties/Customer", "Parties/Party"]);
+  });
+
+  it("gates an inheritance hierarchy with no inheritanceUsing(…) (sharedTable default) as an error", async () => {
+    const DEFAULTED = `
+system Sys {
+  subdomain Sales {
+    context Parties {
+      abstract aggregate Party { name: string }
+      aggregate Customer extends Party { creditLimit: decimal }
+    }
+  }
+}
+`;
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(await parseValid(DEFAULTED))));
+    const errors = diags.filter((d) => d.severity === "error" && /sharedTable/.test(d.message));
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it("drops the abstract base from the generation view — no parties table/repo, concretes emit", async () => {
+    const model = await parseValid(OWN_TABLE);
+    const { files } = generateSystems(model);
+    const all = [...files.values()].join("\n");
+    // The concrete subtype emits its standalone table (carrying the merged
+    // base fields); the abstract base emits no table of its own. (The
+    // `pgSchema("parties")` namespace is the context schema, not a base table.)
+    expect(all).toMatch(/\.table\("customers"/);
+    expect(all).not.toMatch(/\.table\("parties"/);
+    // Inherited base fields ride along on the concrete's table.
+    expect(all).toMatch(/text\("email"\)/);
+    expect(all).toMatch(/numeric\("credit_limit"\)/);
+    // The abstract base emits no domain / repository / routes files either.
+    const paths = [...files.keys()];
+    expect(paths.some((p) => /customer/i.test(p))).toBe(true);
+    expect(paths.some((p) => /domain\/party|party-repository|party\.routes/i.test(p))).toBe(false);
+  });
+
+  it("rejects a polymorphic 'Base id' reference to an abstract base (loom.polymorphic-id-ref-unsupported)", async () => {
+    const { errors } = await parse(`
+      context T {
+        abstract aggregate Party inheritanceUsing(ownTable) { name: string }
+        aggregate Customer extends Party inheritanceUsing(ownTable) { creditLimit: decimal }
+        aggregate Order { buyer: Party id }
+      }
+    `);
+    expect(codes(errors)).toContain("loom.polymorphic-id-ref-unsupported");
   });
 });

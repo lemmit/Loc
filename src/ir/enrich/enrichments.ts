@@ -592,6 +592,12 @@ function ensureFindAll(
 ): RepositoryIR[] {
   const out = existing.map((r) => ({ ...r, finds: [...r.finds] }));
   for (const agg of aggregates) {
+    // Abstract bases (aggregate-inheritance.md) are never instantiated and
+    // own no repository — `loom.abstract-repository` rejects an explicit one,
+    // and we must not synthesise an implicit `findAll` repo for them either
+    // (it would dangle against a base that emits no table). Concretes carry
+    // the base's fields via the wireShape merge and keep their own findAll.
+    if (agg.isAbstract) continue;
     let repo = out.find((r) => r.aggregateName === agg.name);
     if (!repo) {
       repo = { name: `${agg.name}s`, aggregateName: agg.name, finds: [] };
