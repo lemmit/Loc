@@ -30,6 +30,10 @@ describe.skipIf(!ENABLED)(
       "examples/banking.ddd",
       "examples/inventory.ddd",
       "examples/roster.ddd",
+      // crudish lifecycle — the only example that emits a canonical
+      // destroy, so this cell is what compiles the Hono DELETE route +
+      // repo `delete()` paths.
+      "examples/lifecycle.ddd",
     ])("%s — `ddd generate ts` output type-checks + tsup-bundles", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
       try {

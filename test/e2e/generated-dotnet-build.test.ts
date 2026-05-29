@@ -38,6 +38,10 @@ describe.skipIf(!ENABLED)(
       "examples/banking.ddd",
       "examples/inventory.ddd",
       "examples/roster.ddd",
+      // crudish lifecycle — the only example that emits a canonical
+      // destroy, so this cell is what compiles the .NET [HttpDelete] +
+      // Destroy<Agg>Command + repo DeleteAsync paths.
+      "examples/lifecycle.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {
