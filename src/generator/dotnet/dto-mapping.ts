@@ -104,9 +104,21 @@ export function wireType(
  *  not append `?` — exactly the optional→nullable mapping.  This matches
  *  Hono/Phoenix, which mark every non-optional field required.  `[property:
  *  Required]` targets the generated property (not the ctor param) so
- *  Swashbuckle's DataAnnotations reader picks it up. */
-export function dtoParam(csType: string, name: string): string {
-  const required = !csType.endsWith("?");
+ *  Swashbuckle's DataAnnotations reader picks it up.
+ *
+ *  Exception: a non-nullable `bool` in a REQUEST is NOT required.  ASP.NET
+ *  model-binding defaults an omitted bool to `false` (no error), matching
+ *  Hono's `z.coerce.boolean()` (coerces `undefined` → `false`); both
+ *  backends accept the field's omission, so neither marks it required.
+ *  Numbers differ — `z.coerce.number()` rejects `undefined`, so numeric
+ *  request fields stay required on both sides. */
+export function dtoParam(
+  csType: string,
+  name: string,
+  dir: "request" | "response" = "response",
+): string {
+  const optionalBoolRequest = dir === "request" && csType === "bool";
+  const required = !csType.endsWith("?") && !optionalBoolRequest;
   return `${required ? "[property: Required] " : ""}${csType} ${name}`;
 }
 

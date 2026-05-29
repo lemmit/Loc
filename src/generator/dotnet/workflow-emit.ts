@@ -109,7 +109,7 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
 
 function renderRequestDto(wf: WorkflowIR, ctx: EnrichedBoundedContextIR, ns: string): string {
   const params = wf.params
-    .map((p) => dtoParam(wireType(p.type, ctx, "request"), upperFirst(p.name)))
+    .map((p) => dtoParam(wireType(p.type, ctx, "request"), upperFirst(p.name), "request"))
     .join(", ");
   return `// Auto-generated.
 using System.ComponentModel.DataAnnotations;

@@ -129,7 +129,7 @@ function emitRequestDtos(
     records.push({
       name: `${vo.name}Request`,
       params: vo.fields
-        .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name)))
+        .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name), "request"))
         .join(", "),
     });
   }
@@ -141,14 +141,14 @@ function emitRequestDtos(
   records.push({
     name: `Create${agg.name}Request`,
     params: requiredFields
-      .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name)))
+      .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name), "request"))
       .join(", "),
   });
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     records.push({
       name: `${upperFirst(op.name)}Request`,
       params: op.params
-        .map((p) => dtoParam(wireType(p.type, ctx, "request"), upperFirst(p.name)))
+        .map((p) => dtoParam(wireType(p.type, ctx, "request"), upperFirst(p.name), "request"))
         .join(", "),
     });
   }
