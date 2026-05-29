@@ -511,6 +511,10 @@ function renderController(ctx: EnrichedBoundedContextIR, ns: string, routePrefix
       .join(",\n            ");
     blocks.push(
       `    [HttpPost("${snake(wf.name)}")]\n` +
+        // Explicit success (NoContent → 204) so the added error
+        // [ProducesResponseType] doesn't suppress Swashbuckle's 2xx inference.
+        `    [ProducesResponseType(204)]\n` +
+        `    [ProducesResponseType(typeof(ProblemDetails), 400)]\n` +
         `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflow(wf.name)))}([FromBody] ${upperFirst(wf.name)}Request request)\n` +
         `    {\n` +
         `        var cmd = new ${upperFirst(wf.name)}Command(\n            ${cmdArgs});\n` +

@@ -53,22 +53,19 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         }
         if (context.Exception is ForbiddenException fe)
         {
-            context.Result = new ObjectResult(new { error = fe.Message, trace_id })
-            {
-                StatusCode = 403,
-            };
+            context.Result = Problem(context, 403, "Forbidden", fe.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is DomainException de)
         {
-            context.Result = new BadRequestObjectResult(new { error = de.Message, trace_id });
+            context.Result = Problem(context, 400, "Bad Request", de.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is AggregateNotFoundException nf)
         {
-            context.Result = new NotFoundObjectResult(new { error = nf.Message, trace_id });
+            context.Result = Problem(context, 404, "Not Found", nf.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
@@ -82,10 +79,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             // server-side via the catalog's extern_handler_threw
             // event — same shape the Hono onError arm emits.
             _log.LogError(xh, "{Event} aggregate={Aggregate} op={Op} error={Error}", "extern_handler_threw", xh.AggName, xh.OpName, xh.Message);
-            context.Result = new ObjectResult(new { error = xh.Message, trace_id })
-            {
-                StatusCode = 500,
-            };
+            context.Result = Problem(context, 500, "Internal Server Error", xh.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
@@ -93,10 +87,27 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         // catalog's internal_error event; return a sanitized payload
         // to the client.  Matching the Hono fallback envelope.
         _log.LogError(context.Exception, "{Event} error={Error} status={Status}", "internal_error", context.Exception.Message, 500);
-        context.Result = new ObjectResult(new { error = "internal", trace_id })
-        {
-            StatusCode = 500,
-        };
+        context.Result = Problem(context, 500, "Internal Server Error", "internal", trace_id);
         context.ExceptionHandled = true;
+    }
+
+    // RFC 7807 problem responder — application/problem+json body +
+    // x-request-id header (trace correlation moves off the body so it's
+    // byte-identical to Hono / Phoenix).  Shared by every non-validation arm.
+    private static IActionResult Problem(ExceptionContext context, int status, string title, string detail, string traceId)
+    {
+        context.HttpContext.Response.Headers["x-request-id"] = traceId;
+        return new ObjectResult(new ProblemDetails
+        {
+            Type = "about:blank",
+            Title = title,
+            Status = status,
+            Detail = detail,
+            Instance = context.HttpContext.Request.Path,
+        })
+        {
+            StatusCode = status,
+            ContentTypes = { "application/problem+json" },
+        };
     }
 }
