@@ -3,10 +3,10 @@ import { useParams, Link as RouterLink } from "react-router";
 import { UpdateRequest, useUpdateProduct } from "../../api/product";
 import { KeyValueRow } from "../../lib/format";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Alert, Anchor, Breadcrumbs, Button, Card, Group, Skeleton, Stack, Text, TextInput, Title } from "@mantine/core";
+import { Alert, Anchor, Breadcrumbs, Button, Card, Fieldset, Group, NumberInput, Skeleton, Stack, Text, TextInput, Title } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { useProductById } from "../../api/product";
 function openUpdateModal(mut: ReturnType<typeof useUpdateProduct>): void {
   modals.open({
@@ -16,9 +16,9 @@ function openUpdateModal(mut: ReturnType<typeof useUpdateProduct>): void {
 }
 
 function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateProduct>; onClose: () => void }) {
-  const { register, handleSubmit, formState: { errors } } = useForm<UpdateRequest>({
+  const { register, handleSubmit, control, formState: { errors } } = useForm<UpdateRequest>({
     resolver: zodResolver(UpdateRequest),
-    defaultValues: { sku: "", price: "" },
+    defaultValues: { sku: "", price: { amount: 0, currency: "" } },
   });
   return (
     <form
@@ -36,7 +36,20 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateProduct>
       <Stack>
         <TextInput label="Sku" {...register("sku")} data-testid="products-op-update-input-sku" error={errors.sku?.message} />
 
-        <TextInput label="Price" {...register("price")} data-testid="products-op-update-input-price" error={errors.price?.message} />
+        <Fieldset legend="Price" variant="filled" radius="md" data-testid="products-op-update-input-price">
+          <Stack gap="sm">
+            <Controller
+          control={control}
+          name="price.amount"
+          render={({ field, fieldState }) => (
+            <NumberInput label="Amount" data-testid="products-op-update-input-price-amount" decimalScale={2} fixedDecimalScale value={field.value as number | "" | undefined} onChange={(v) => field.onChange(typeof v === "number" ? v : Number(v) || 0)} error={fieldState.error?.message} />
+          )}
+        />
+
+<TextInput label="Currency" {...register("price.currency")} data-testid="products-op-update-input-price-currency" error={errors.price?.currency?.message} />
+
+          </Stack>
+        </Fieldset>
 
         <Group justify="flex-end" mt="sm">
           <Button variant="default" onClick={onClose}>Cancel</Button>

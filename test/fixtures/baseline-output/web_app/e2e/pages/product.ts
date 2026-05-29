@@ -90,7 +90,12 @@ export class ProductDetailPage {
       await this.page.getByTestId("products-op-update-input-sku").fill(input.sku!);
     }
     if (input.price !== undefined) {
-      await this.page.getByTestId("products-op-update-input-price").fill(input.price!);
+      if (input.price!.amount !== undefined) {
+        await this.page.getByTestId("products-op-update-input-price-amount").fill(String(input.price!.amount));
+      }
+      if (input.price!.currency !== undefined) {
+        await this.page.getByTestId("products-op-update-input-price-currency").fill(input.price!.currency!);
+      }
     }
     await this.page.getByTestId("products-op-update-submit").click();
     await this.page.getByTestId("products-op-update-form").waitFor({ state: "detached" });

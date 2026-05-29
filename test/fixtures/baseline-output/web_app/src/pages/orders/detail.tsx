@@ -103,9 +103,9 @@ function openUpdateModal(mut: ReturnType<typeof useUpdateOrder>): void {
 }
 
 function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateOrder>; onClose: () => void }) {
-  const { register, handleSubmit, formState: { errors } } = useForm<UpdateRequest>({
+  const { register, handleSubmit, control, formState: { errors } } = useForm<UpdateRequest>({
     resolver: zodResolver(UpdateRequest),
-    defaultValues: { customerId: "", status: "", placedAt: "" },
+    defaultValues: { customerId: "", status: "Draft", placedAt: "" },
   });
   return (
     <form
@@ -123,7 +123,13 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateOrder>; 
       <Stack>
         <TextInput label="Customer Id" {...register("customerId")} data-testid="orders-op-update-input-customerId" error={errors.customerId?.message} />
 
-        <TextInput label="Status" {...register("status")} data-testid="orders-op-update-input-status" error={errors.status?.message} />
+        <Controller
+          control={control}
+          name="status"
+          render={({ field, fieldState }) => (
+            <Select label="Status" data-testid="orders-op-update-input-status" data={ ["Draft","Confirmed","Shipped","Cancelled"] } allowDeselect={false} value={field.value as string} onChange={(v) => field.onChange(v)} error={fieldState.error?.message} />
+          )}
+        />
 
         <TextInput label="Placed At" {...register("placedAt")} data-testid="orders-op-update-input-placedAt" type="datetime-local" error={errors.placedAt?.message} />
 

@@ -3,6 +3,7 @@ import type {
   Aggregate,
   BoundedContext,
   EntityPart,
+  EnumDecl,
   FunctionDecl,
   Operation,
   TypeRef,
@@ -139,15 +140,15 @@ export function inScopeNames(env: Env): ScopeCandidate[] {
 // Types
 // ---------------------------------------------------------------------------
 
-export function lowerType(t: TypeRef | undefined): TypeIR {
+export function lowerType(t: TypeRef | undefined, env?: Env): TypeIR {
   if (!t) return { kind: "primitive", name: "string" };
-  let inner = lowerBase(t);
+  let inner = lowerBase(t, env);
   if (t.array) inner = { kind: "array", element: inner };
   if (t.optional) inner = { kind: "optional", inner };
   return inner;
 }
 
-function lowerBase(t: TypeRef): TypeIR {
+function lowerBase(t: TypeRef, env?: Env): TypeIR {
   const base = t.base;
   if (isPrimitiveType(base)) return { kind: "primitive", name: base.name };
   if (isSlotType(base)) return { kind: "slot" };
@@ -176,11 +177,26 @@ function lowerBase(t: TypeRef): TypeIR {
   }
   if (isNamedType(base)) {
     const target = base.target?.ref;
-    if (!target) return { kind: "primitive", name: "string" };
-    if (isEnumDecl(target)) return { kind: "enum", name: target.name };
-    if (isValueObject(target)) return { kind: "valueobject", name: target.name };
-    if (isAggregate(target)) return { kind: "entity", name: target.name };
-    if (isEntityPart(target)) return { kind: "entity", name: target.name };
+    if (target) {
+      if (isEnumDecl(target)) return { kind: "enum", name: target.name };
+      if (isValueObject(target)) return { kind: "valueobject", name: target.name };
+      if (isAggregate(target)) return { kind: "entity", name: target.name };
+      if (isEntityPart(target)) return { kind: "entity", name: target.name };
+    }
+    // Macro-emitted reference without a `$refNode` — Langium's default
+    // Linker skips it silently (same hazard the IdType branch handles
+    // above), so `ref` stays undefined even though the decl is in scope.
+    // Resolve the reference text against the lowering env so a synthesised
+    // param keeps its value-object / enum type instead of collapsing to
+    // `string` (the bug that broke `crudish` update params on VO/enum
+    // fields).
+    const refText = base.target?.$refText;
+    if (refText && env) {
+      if (findValueObjectByName(env, refText)) return { kind: "valueobject", name: refText };
+      if (findEnumByName(env, refText)) return { kind: "enum", name: refText };
+      if (findEntityByName(env, refText)) return { kind: "entity", name: refText };
+    }
+    return { kind: "primitive", name: "string" };
   }
   return { kind: "primitive", name: "string" };
 }
@@ -206,6 +222,14 @@ export function findValueObjectByName(env: Env, name: string): ValueObject | und
   if (!env.ctx) return undefined;
   for (const m of env.ctx.members) {
     if (isValueObject(m) && m.name === name) return m;
+  }
+  return undefined;
+}
+
+export function findEnumByName(env: Env, name: string): EnumDecl | undefined {
+  if (!env.ctx) return undefined;
+  for (const m of env.ctx.members) {
+    if (isEnumDecl(m) && m.name === name) return m;
   }
   return undefined;
 }

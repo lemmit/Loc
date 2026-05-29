@@ -73,7 +73,7 @@ public sealed class ProductsController : ControllerBase
         var cmd = new UpdateCommand(
             new ProductId(id),
             request.Sku,
-            request.Price
+            new Money(request.Price.Amount, request.Price.Currency)
         );
         await _mediator.Send(cmd);
         return NoContent();

@@ -19,7 +19,7 @@ const CreateProductResponse = z.object({ id: z.string() }).openapi("CreateProduc
 
 const UpdateRequest = z.object({
   sku: z.string(),
-  price: z.string(),
+  price: MoneySchema,
 }).openapi("UpdateRequest");
 
 const BySkuQuery = z.object({
@@ -132,7 +132,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       const body = c.req.valid("json");
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "operation_invoked", aggregate: "Product", op: "update", id });
       const aggregate = await repo.getById(Ids.ProductId(id));
-      aggregate.update(body.sku, body.price);
+      aggregate.update(body.sku, new Money(body.price.amount, body.price.currency));
       await repo.save(aggregate);
       return c.body(null, 204);
     },

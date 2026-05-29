@@ -22,7 +22,7 @@ export const ConfirmRequest = z.object({
 export type ConfirmRequest = z.infer<typeof ConfirmRequest>;
 export const UpdateRequest = z.object({
   customerId: z.string(),
-  status: z.string(),
+  status: OrderStatusSchema,
   placedAt: z.string(),
 });
 export type UpdateRequest = z.infer<typeof UpdateRequest>;

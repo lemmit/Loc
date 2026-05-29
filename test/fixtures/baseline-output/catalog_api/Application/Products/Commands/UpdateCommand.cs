@@ -6,4 +6,4 @@ using CatalogApi.Domain.Enums;
 
 namespace CatalogApi.Application.Products.Commands;
 
-public sealed record UpdateCommand(ProductId Id, string Sku, string Price) : ICommand;
+public sealed record UpdateCommand(ProductId Id, string Sku, Money Price) : ICommand;

@@ -134,7 +134,13 @@ export class OrderDetailPage {
       await this.page.getByTestId("orders-op-update-input-customerId").fill(input.customerId!);
     }
     if (input.status !== undefined) {
-      await this.page.getByTestId("orders-op-update-input-status").fill(input.status!);
+      {
+        const __sel = this.page.getByTestId("orders-op-update-input-status");
+        await __sel.click();
+        const __listbox = this.page.locator('[role="listbox"]').filter({ has: this.page.getByRole("option", { name: input.status!, exact: true }) });
+        await __listbox.waitFor({ state: "visible" });
+        await __listbox.getByRole("option", { name: input.status!, exact: true }).click();
+      }
     }
     if (input.placedAt !== undefined) {
       await this.page.getByTestId("orders-op-update-input-placedAt").fill(input.placedAt!.slice(0, 19));

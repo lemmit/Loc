@@ -49,7 +49,7 @@ public sealed class Order
         AssertInvariants();
     }
 
-    public void Update(string customerId, string status, DateTime placedAt)
+    public void Update(string customerId, OrderStatus status, DateTime placedAt)
     {
         CustomerId = customerId;
         Status = status;

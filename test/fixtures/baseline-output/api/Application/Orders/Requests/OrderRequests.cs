@@ -12,5 +12,5 @@ public sealed record AddLineRequest([property: Required] Guid ProductId, [proper
 
 public sealed record ConfirmRequest();
 
-public sealed record UpdateRequest([property: Required] string CustomerId, [property: Required] string Status, [property: Required] string PlacedAt);
+public sealed record UpdateRequest([property: Required] string CustomerId, [property: Required] OrderStatus Status, [property: Required] string PlacedAt);
 

@@ -1823,7 +1823,7 @@ function lowerFunction(f: FunctionDecl, env: Env): FunctionIR {
   let inner = env;
   const params: ParamIR[] = [];
   for (const p of f.params) {
-    const t = lowerType(p.type);
+    const t = lowerType(p.type, env);
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
@@ -1905,7 +1905,7 @@ function lowerActionBody(spec: ActionSpec, env: Env): OperationIR {
   let inner = env;
   const params: ParamIR[] = [];
   for (const p of spec.params) {
-    const t = lowerType(p.type);
+    const t = lowerType(p.type, env);
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
@@ -1949,7 +1949,7 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
   let inner = env;
   const params: ParamIR[] = [];
   for (const p of wf.params) {
-    const t = lowerType(p.type);
+    const t = lowerType(p.type, env);
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }

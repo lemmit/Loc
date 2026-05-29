@@ -1,14 +1,11 @@
-import type { AggregateMember } from "../../language/generated/ast.js";
+import type { AggregateMember, TypeRef } from "../../language/generated/ast.js";
 import {
   assignStmt,
   create,
   defineMacro,
   destroy,
-  memberAccess,
-  mkIdType,
-  mkNamedType,
-  mkPrimitiveType,
-  mkTypeRef,
+  idRef,
+  namedType,
   nameRef,
   operation,
   param,
@@ -93,59 +90,30 @@ export default defineMacro({
   },
 });
 
-/** Deep-clone a TypeRef so the macro-built parameter doesn't
- * share AST identity with the aggregate's field.  Without the
- * clone, Langium's `$container` invariant would break: a single
- * TypeRef node would have two parents (the original field and
- * the synthesised parameter).
+/** Rebuild a field's TypeRef as a fresh, macro-tagged param type.
  *
- * Implementation note: structuredClone would also copy
- * `$container` / `$cstNode` references which are not safe to
- * duplicate.  We instead rebuild the small TypeRef tree manually.
- * This is intentionally limited to the shapes the stdlib emits;
- * extend when a new shape is needed. */
-function cloneType(
-  t: import("../../language/generated/ast.js").TypeRef,
-): import("../../language/generated/ast.js").TypeRef {
-  const cloned = mkTypeRef({
-    $type: "TypeRef",
-    array: t.array,
-    optional: t.optional,
-    base: cloneBase(t.base),
-  });
-  // Re-parent the base node: $container metadata is required by
-  // Langium's AST invariants but not in the AstLiteral input contract,
-  // so we set it on the freshly-built node post-construction.
-  const inner = cloned.base as { $container?: unknown; $containerProperty?: unknown };
-  inner.$container = cloned;
-  inner.$containerProperty = "base";
-  return cloned;
-}
-
-function cloneBase(
-  b: import("../../language/generated/ast.js").BaseType,
-): import("../../language/generated/ast.js").BaseType {
+ * Uses the blessed `primType` / `idRef` / `namedType` factories rather
+ * than hand-rolling `mk*` nodes: the factories origin-tag the node and
+ * build a reference the expander re-links after splicing, so a `Money`
+ * value-object / `OrderStatus` enum / `X id` field keeps its resolved
+ * type on the synthesised param.  Hand-rolled `mkNamedType` references
+ * never re-linked, so such params silently lowered to `string` — the
+ * bug this replaces (only ever exercised by primitive fields before).
+ *
+ * Array / optional flags carry across; the factories own `$container`
+ * wiring + origin tagging. */
+function cloneType(t: TypeRef): TypeRef {
+  const opts = { array: !!t.array, optional: !!t.optional };
+  const b = t.base;
   if (b.$type === "PrimitiveType") {
-    return mkPrimitiveType({ $type: "PrimitiveType", name: b.name });
+    // `primType`'s name union omits `json` (a valid primitive); the
+    // factory passes the name straight to `mkPrimitiveType`, so the cast
+    // is sound at runtime.
+    return primType(b.name as Parameters<typeof primType>[0], opts);
   }
   if (b.$type === "IdType") {
-    return mkIdType({
-      $type: "IdType",
-      target: { $refText: b.target.$refText } as import("langium").Reference<
-        import("../../language/generated/ast.js").Aggregate
-      >,
-    });
+    return idRef(b.target.$refText, opts);
   }
-  // NamedType
-  return mkNamedType({
-    $type: "NamedType",
-    target: {
-      $refText: (b as { target: { $refText: string } }).target.$refText,
-    } as import("langium").Reference<import("../../language/generated/ast.js").NamedDecl>,
-  });
+  // NamedType — value object or enum.
+  return namedType((b as { target: { $refText: string } }).target.$refText, opts);
 }
-
-// Imports are kept available for the input-typed variant; the void
-// references silence the unused-import warning.
-void memberAccess;
-void primType;

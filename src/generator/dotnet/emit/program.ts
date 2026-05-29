@@ -152,8 +152,7 @@ using (var scope = app.Services.CreateScope())
   return `// Auto-generated.
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using FluentValidation;
-using ${ns}.Api;
+${usesValidators ? "using FluentValidation;\n" : ""}using ${ns}.Api;
 using ${ns}.Domain.Common;
 using ${ns}.Infrastructure.Persistence;
 using ${ns}.Infrastructure.Events;${authUsing}

@@ -16,7 +16,7 @@ export type CreateProductRequest = z.infer<typeof CreateProductRequest>;
 
 export const UpdateRequest = z.object({
   sku: z.string(),
-  price: z.string(),
+  price: MoneySchema,
 });
 export type UpdateRequest = z.infer<typeof UpdateRequest>;
 
