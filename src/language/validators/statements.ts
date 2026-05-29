@@ -3,10 +3,12 @@
 // `lvalueIsDerived` helpers that target type-resolution / derived-
 // rejection logic on the lhs of an assignment.
 
-import type { AstNode, ValidationAcceptor } from "langium";
+import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
 import type {
   Aggregate,
   AssignOrCallStmt,
+  Create,
+  Destroy,
   EmitStmt,
   LValue,
   Operation,
@@ -17,8 +19,11 @@ import {
   isDerivedProp,
   isEmitStmt,
   isLetStmt,
+  isMemberSuffix,
+  isPostfixChain,
   isPreconditionStmt,
   isRequiresStmt,
+  isThisRef,
 } from "../generated/ast.js";
 import {
   type DddType,
@@ -44,6 +49,11 @@ import {
   warnSensitivityDrop,
 } from "./_shared.js";
 
+/** An aggregate action whose body reuses operation-body statement
+ * rules: today's `operation`, plus the lifecycle `create` / `destroy`
+ * keywords.  Body type-checking is identical across the three. */
+type ActionLike = Operation | Create | Destroy;
+
 export function checkOperation(op: Operation, agg: Aggregate, accept: ValidationAcceptor): void {
   // `audited` instruments the operation's HTTP route handler; a private
   // operation has no route, so the modifier produces no audit record.
@@ -65,10 +75,45 @@ export function checkOperation(op: Operation, agg: Aggregate, accept: Validation
   }
 }
 
+/** Shared body type-check for the lifecycle `create` / `destroy`
+ * keywords — binds params, walks the body through the same statement
+ * checks as `operation`.  The kind tag carries the lifecycle
+ * asymmetry; the body discipline is identical. */
+function checkActionBody(node: Create | Destroy, agg: Aggregate, accept: ValidationAcceptor): void {
+  const bindings = new Map<string, { type: DddType; origin: AstNode }>();
+  for (const p of node.params) bindings.set(p.name, { type: paramType(p), origin: p });
+  let env: Env = makeEnv(envForAggregate(agg), bindings, { aggregate: agg });
+  for (const stmt of node.body) {
+    env = checkStatement(stmt, agg, node, env, accept);
+  }
+}
+
+export function checkCreate(c: Create, agg: Aggregate, accept: ValidationAcceptor): void {
+  checkActionBody(c, agg, accept);
+  // `this.id` is unassigned inside a create body — the id is allocated
+  // at persistence, after the body runs, so reading it has no defined
+  // semantics (lifecycle-operations.md, body rule 2).
+  for (const node of AstUtils.streamAllContents(c)) {
+    if (!isPostfixChain(node) || !isThisRef(node.head)) continue;
+    const first = node.suffixes[0];
+    if (first && isMemberSuffix(first) && first.member === "id") {
+      accept(
+        "error",
+        `Cannot read 'this.id' inside the create action on aggregate '${agg.name}' — the id is not assigned until persistence, after the body runs.`,
+        { node: first, property: "member", code: "loom.this-id-in-create" },
+      );
+    }
+  }
+}
+
+export function checkDestroy(d: Destroy, agg: Aggregate, accept: ValidationAcceptor): void {
+  checkActionBody(d, agg, accept);
+}
+
 export function checkStatement(
   stmt: Statement,
   agg: Aggregate,
-  op: Operation,
+  op: ActionLike,
   env: Env,
   accept: ValidationAcceptor,
 ): Env {
@@ -112,7 +157,7 @@ export function checkStatement(
 export function checkAssignOrCall(
   stmt: AssignOrCallStmt,
   agg: Aggregate,
-  op: Operation,
+  op: ActionLike,
   env: Env,
   accept: ValidationAcceptor,
 ): void {
@@ -221,7 +266,7 @@ export function checkEmit(stmt: EmitStmt, env: Env, accept: ValidationAcceptor):
 export function checkCallStmt(
   stmt: AssignOrCallStmt,
   agg: Aggregate,
-  op: Operation,
+  op: ActionLike,
   accept: ValidationAcceptor,
 ): void {
   const lv = stmt.target;
