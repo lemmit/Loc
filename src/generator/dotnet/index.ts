@@ -177,7 +177,7 @@ function emitProjectFromContexts(
     for (const agg of ctx.aggregates) {
       emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace, emitCtx);
     }
-    emitWorkflows(ctx, ns, out, { routePrefix });
+    emitWorkflows(ctx, ns, out, { routePrefix, sys: system?.sys });
     emitViews(ctx, ns, out, { routePrefix });
   }
   // DbContext + project shell are emitted once, with all aggregates

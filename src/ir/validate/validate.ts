@@ -937,12 +937,15 @@ function coverageGapReason(kind: string, ctx: BoundedContextIR): string | undefi
 //   - `every` / `retain` — would gate snapshot policy on an event-
 //                        sourced persister (Marten / hono-ES adapter)
 //                        that doesn't exist yet
-//   - `isolationLevel` — transaction isolation not yet plumbed
-//                        through the EF Core / Drizzle / Ash paths
 //   - `readonly`       — would gate a replica-aware DbContext that
 //                        doesn't exist yet
 //   - `keyPrefix`      — would gate the same Redis cache adapter
 //                        gated by `ttl`
+//
+// `isolationLevel` used to be on this list; it now flows through
+// `resolveWorkflowIsolation` into the .NET BeginTransactionAsync and
+// Phoenix `Ash.transaction` opts when a workflow in the context is
+// transactional and doesn't carry its own per-workflow isolation.
 //
 // We surface this as a warning at IR-validate time so the author sees
 // "validation accepts this but it's a no-op" instead of believing the
@@ -965,10 +968,6 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
   {
     property: "retain",
     description: "no event-sourced persister with snapshot policy is implemented yet",
-  },
-  {
-    property: "isolationLevel",
-    description: "transaction isolation is not yet plumbed through any backend",
   },
   { property: "readonly", description: "no replica-aware persister is implemented yet" },
   { property: "keyPrefix", description: "no Redis-backed cache adapter is implemented yet" },
