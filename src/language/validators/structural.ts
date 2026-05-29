@@ -2,6 +2,7 @@
 // sanity, aggregate / entity-part / value-object structural rules.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { writableCreateFields } from "../../macros/api/factories.js";
 import type {
   Aggregate,
   BoundedContext,
@@ -134,6 +135,7 @@ export function checkContext(ctx: BoundedContext, accept: ValidationAcceptor): v
 }
 
 export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void {
+  checkConstructible(agg, accept);
   // Ensure unique part names within the aggregate
   const partNames = new Set<string>();
   let displayDerived: DerivedProp | undefined;
@@ -218,6 +220,31 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
  * named actions of the same kind sharing a name (lifecycle-operations.md
  * validator rules).  Create-vs-destroy names may coincide — they route
  * to different verbs/paths — so the two kinds are checked independently. */
+/** An aggregate should be constructible: either it declares a `create`
+ * (explicit, or contributed by `crudish`) or every required create-input
+ * field carries a default, so a parameterless create can be synthesised.
+ * Otherwise there's no way to supply the undefaulted field's value.
+ *
+ * Staged rollout: emitted as a WARNING for now (the implicit hard-coded
+ * create still backs these aggregates).  Flips to an error once the
+ * examples are migrated and the hard-coded create is removed. */
+function checkConstructible(agg: Aggregate, accept: ValidationAcceptor): void {
+  if (agg.members.some(isCreate)) return;
+  const undefaulted = writableCreateFields(agg).filter(
+    (f) => !f.type?.optional && f.default == null,
+  );
+  if (undefaulted.length === 0) return;
+  accept(
+    "warning",
+    `Aggregate '${agg.name}' is not constructible without the implicit create: it declares no 'create' and the required field(s) ${undefaulted
+      .map((f) => `'${f.name}'`)
+      .join(
+        ", ",
+      )} have no default. Add a 'create(...)' (or 'with crudish'), or give the field(s) a default value.`,
+    { node: agg, property: "name", code: "loom.not-constructible" },
+  );
+}
+
 function checkLifecycleConflicts(agg: Aggregate, accept: ValidationAcceptor): void {
   const creates = agg.members.filter(isCreate);
   const destroys = agg.members.filter(isDestroy);
