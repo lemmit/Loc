@@ -230,19 +230,25 @@ describe(".NET generator", () => {
       expect(mapPos).toBeGreaterThan(ourPos);
     });
 
-    it("DomainExceptionFilter threads Activity.TraceId into every error envelope", async () => {
+    it("DomainExceptionFilter threads the trace id onto the RFC 7807 response", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
       const filter = files.get("Api/DomainExceptionFilter.cs")!;
       // trace_id pulled off the ambient Activity (set by ASP.NET on
       // every request).  Empty string when no Activity is active.
       expect(filter).toMatch(/var trace_id = Activity\.Current\?\.TraceId\.ToString\(\) \?\? "";/);
-      // Every arm of the filter includes trace_id in its envelope.
-      expect(filter).toMatch(/error = fe\.Message, trace_id/);
-      expect(filter).toMatch(/error = de\.Message, trace_id/);
-      expect(filter).toMatch(/error = nf\.Message, trace_id/);
-      expect(filter).toMatch(/error = xh\.Message, trace_id/);
-      expect(filter).toMatch(/error = "internal", trace_id/);
+      // Trace correlation now rides the x-request-id response header (off
+      // the RFC 7807 body); each arm returns a ProblemDetails via Problem(...).
+      expect(filter).toMatch(/Response\.Headers\["x-request-id"\] = traceId;/);
+      expect(filter).toMatch(/Problem\(context, 403, "Forbidden", fe\.Message, trace_id\)/);
+      expect(filter).toMatch(/Problem\(context, 400, "Bad Request", de\.Message, trace_id\)/);
+      expect(filter).toMatch(/Problem\(context, 404, "Not Found", nf\.Message, trace_id\)/);
+      expect(filter).toMatch(
+        /Problem\(context, 500, "Internal Server Error", xh\.Message, trace_id\)/,
+      );
+      expect(filter).toMatch(
+        /Problem\(context, 500, "Internal Server Error", "internal", trace_id\)/,
+      );
     });
   });
 
@@ -372,10 +378,11 @@ describe(".NET generator", () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
       const filter = files.get("Api/DomainExceptionFilter.cs")!;
-      // ExternHandlerException arm exists and lands on 500.
+      // ExternHandlerException arm exists and lands on a 500 ProblemDetails.
       expect(filter).toMatch(/context\.Exception is ExternHandlerException xh/);
-      expect(filter).toMatch(/error = xh\.Message/);
-      expect(filter).toMatch(/StatusCode = 500/);
+      expect(filter).toMatch(
+        /Problem\(context, 500, "Internal Server Error", xh\.Message, trace_id\)/,
+      );
       // Logs the inner cause server-side via the neutral log-event
       // catalog (Phase 8 .NET).  Template uses `{Event}` head + per-field
       // `{Pascal}` placeholders so a Serilog/structured sink can filter
@@ -1203,16 +1210,34 @@ describe(".NET generator", () => {
     expect(plain).not.toMatch(/IsolationLevel/);
   });
 
+  it("emits a ListResponseWrapperFilter mapping <Agg>Response → <Agg>ListResponse (#705)", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    const filter = files.get("Api/ListResponseWrapperFilter.cs")!;
+    expect(filter).toMatch(/class ListResponseWrapperFilter : IDocumentFilter/);
+    // Every aggregate gets an element→wrapper pair so the inline list
+    // response is promoted to the named component the other backends emit.
+    expect(filter).toMatch(/\("OrderResponse", "OrderListResponse"\)/);
+    // Registered as a Swashbuckle document filter.
+    const program = files.get("Program.cs")!;
+    expect(program).toMatch(/c\.DocumentFilter<ListResponseWrapperFilter>\(\)/);
+  });
+
   it("DomainExceptionFilter catches unhandled exceptions as sanitized 500", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
     const filter = files.get("Api/DomainExceptionFilter.cs")!;
     expect(filter).toMatch(/ILogger<DomainExceptionFilter>/);
-    expect(filter).toMatch(/StatusCode = 500/);
-    expect(filter).toMatch(/error = "internal"/);
-    // Domain-specific paths still mapped.
-    expect(filter).toMatch(/BadRequestObjectResult/);
-    expect(filter).toMatch(/NotFoundObjectResult/);
+    // Generic fallback → sanitized 500 ProblemDetails ("internal", no leak).
+    expect(filter).toMatch(
+      /Problem\(context, 500, "Internal Server Error", "internal", trace_id\)/,
+    );
+    // The Problem helper builds an RFC 7807 ProblemDetails with the status.
+    expect(filter).toMatch(/new ProblemDetails/);
+    expect(filter).toMatch(/ContentTypes = \{ "application\/problem\+json" \}/);
+    // Domain-specific paths still mapped (400 / 404).
+    expect(filter).toMatch(/Problem\(context, 400, "Bad Request", de\.Message, trace_id\)/);
+    expect(filter).toMatch(/Problem\(context, 404, "Not Found", nf\.Message, trace_id\)/);
   });
 
   // -------------------------------------------------------------------------
@@ -1437,7 +1462,7 @@ describe(".NET generator", () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const filter = files.get("Api/DomainExceptionFilter.cs")!;
       expect(filter).toMatch(/is ForbiddenException/);
-      expect(filter).toMatch(/StatusCode = 403/);
+      expect(filter).toMatch(/Problem\(context, 403, "Forbidden", fe\.Message, trace_id\)/);
     });
 
     it("Domain.Common emits ForbiddenException", async () => {

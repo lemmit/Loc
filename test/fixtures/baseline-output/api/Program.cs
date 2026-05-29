@@ -110,6 +110,12 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new() { Title = "Api", Version = "v1" });
+    // RFC 7807: rewrite declared 4xx/5xx responses to
+    // application/problem+json carrying ProblemDetails (matches Hono/Phoenix).
+    c.OperationFilter<ProblemDetailsResponsesFilter>();
+    // Promote inline array list responses to named <Agg>ListResponse
+    // components (matches Hono/Phoenix, which name the wrapper).
+    c.DocumentFilter<ListResponseWrapperFilter>();
     // Mark non-nullable reference-type properties as required in the
     // schema — matches Hono/Phoenix, which mark every non-optional field
     // required.  Without this Swashbuckle leaves the required set empty.

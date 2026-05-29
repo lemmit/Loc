@@ -583,6 +583,9 @@ function emitController(
         .filter((o) => o.visibility === "public")
         .map((op) => ({
           name: op.name,
+          // URL segment from routeSlug (D-URLSTYLE); name stays the verb
+          // for the C# action method + command type.
+          routeSlug: op.routeSlug,
           cmdArgs: op.params.map((p) =>
             wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx, usings),
           ),

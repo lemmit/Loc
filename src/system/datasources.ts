@@ -1,11 +1,8 @@
+import { isRelational } from "../ir/source-types.js";
 import type { DataSourceIR, DeployableIR, StorageIR, SystemIR } from "../ir/types/loom-ir.js";
 import { platformOwnsBackend } from "../language/validators/data/platform-rules.js";
 import { lines } from "../util/code-builder.js";
 import { snake } from "../util/naming.js";
-
-// Storage types that support per-context schema namespacing — same
-// set the Phase A emit-side defaulting uses (`resolveDataSourceConfig`).
-const RELATIONAL_STORAGE_TYPES = new Set(["postgres", "mysql", "sqlite", "inMemory"]);
 
 // ---------------------------------------------------------------------------
 // `.loom/datasources.md` — a derived markdown view of how `dataSource`
@@ -39,10 +36,10 @@ export function renderDataSourcesMd(sys: SystemIR): string {
   for (const st of sys.storages) storageByName.set(st.name, st);
 
   const out: string[] = [];
-  out.push(`# ${sys.name} — dataSource routing`);
+  out.push(`# ${sys.name} — resource routing`);
   out.push("");
   out.push(
-    "Derived view of how `dataSource` declarations route domain contexts to physical storage.",
+    "Derived view of how `resource` declarations route domain contexts to physical storage.",
   );
   out.push(
     "Authoritative source is the `.ddd` model; the validators (`src/ir/validate/validate.ts` +",
@@ -68,7 +65,7 @@ export function renderDataSourcesMd(sys: SystemIR): string {
       if (rows.length === 0) {
         out.push("_No dataSource bindings._");
       } else {
-        out.push("| Context | Kind | DataSource | Storage | Storage type | Schema | TablePrefix |");
+        out.push("| Context | Kind | Resource | Storage | Storage type | Schema | TablePrefix |");
         out.push("| --- | --- | --- | --- | --- | --- | --- |");
         for (const r of rows) {
           out.push(
@@ -163,7 +160,7 @@ function collectRows(
  *  and render as `n/a`. */
 function effectiveSchema(ds: DataSourceIR, st: StorageIR | undefined): string {
   if (ds.schema != null) return ds.schema;
-  if (st && RELATIONAL_STORAGE_TYPES.has(st.type)) return `${snake(ds.contextName)} _(default)_`;
+  if (st && isRelational(st.type)) return `${snake(ds.contextName)} _(default)_`;
   return "n/a";
 }
 

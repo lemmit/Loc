@@ -10,10 +10,10 @@ import type { ValidationAcceptor, ValidationChecks } from "langium";
 import type { DddServices } from "./ddd-module.js";
 import type {
   Api,
-  DataSource,
   DddAstType,
   Deployable,
   Model,
+  Resource,
   Storage,
   System,
   ThemeBlock,
@@ -186,6 +186,27 @@ export class DddValidator {
             );
           }
         }
+        // urlStyle conflict: a subdomain surfaced by two apis with
+        // different `urlStyle` makes its aggregates' route slugs
+        // ambiguous.  Enrichment takes the first-declared style; warn on
+        // the rest so the conflict is visible (D-URLSTYLE).
+        const urlStyleBySubdomain = new Map<string, "literal" | "resource">();
+        for (const api of apis) {
+          const sub = api.source?.$refText;
+          if (!sub) continue;
+          const style: "literal" | "resource" =
+            api.urlStyle === "resource" ? "resource" : "literal";
+          const prior = urlStyleBySubdomain.get(sub);
+          if (prior === undefined) {
+            urlStyleBySubdomain.set(sub, style);
+          } else if (prior !== style) {
+            accept(
+              "warning",
+              `api '${api.name}' sets urlStyle '${style}' on subdomain '${sub}', which another api already surfaces as '${prior}'.  The first-declared style ('${prior}') wins; route slugs use it.`,
+              { node: api, property: "urlStyle", code: "loom.subdomain-conflicting-urlstyle" },
+            );
+          }
+        }
 
         // Storage declaration checks.
         //   - Names unique within the system.
@@ -216,14 +237,14 @@ export class DddValidator {
         //   - storage-shaped knobs (schema, tablePrefix, keyPrefix)
         //     match the resolved storage's type.
         // See `src/language/validators/datasource.ts`.
-        const dataSources = m.members.filter((sm) => sm.$type === "DataSource") as DataSource[];
-        const dataSourceNamesSeen = new Map<string, DataSource>();
+        const dataSources = m.members.filter((sm) => sm.$type === "Resource") as Resource[];
+        const dataSourceNamesSeen = new Map<string, Resource>();
         for (const ds of dataSources) {
           const prior = dataSourceNamesSeen.get(ds.name);
           if (prior) {
             accept(
               "error",
-              `Duplicate dataSource '${ds.name}'; dataSource names must be unique within a system.`,
+              `Duplicate resource '${ds.name}'; resource names must be unique within a system.`,
               { node: ds, property: "name" },
             );
           } else {

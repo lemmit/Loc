@@ -34,7 +34,7 @@ System:
     '}';
 
 SystemMember:
-    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | DataSource | Layout;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | Resource | Layout;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -120,7 +120,7 @@ Deployable:
         // (context, kind) uniqueness; (c) every aggregate's required
         // kind (state / eventLog / cache / snapshot / replica) has a
         // matching dataSource for its hosting context.
-        ('dataSources' ':' '[' dataSourceRefs+=[DataSource:LooseName] (',' dataSourceRefs+=[DataSource:LooseName])* ','? ']' ','?)?
+        ('dataSources' ':' '[' dataSourceRefs+=[Resource:LooseName] (',' dataSourceRefs+=[Resource:LooseName])* ','? ']' ','?)?
         ('targets' ':' targets=[Deployable:LooseName] ','?)?
         // Slice 11.26 — explicit api composition.  Backend deployables
         // declare which contracts they serve via `serves:`.  Frontend
@@ -162,13 +162,14 @@ UiParamBinding:
     name=LooseName ':' source=[Deployable:LooseName];
 
 // D-STORAGE-SPLIT: the per-(context, kind) binding from a context's
-// aggregates to a physical `storage`.  All `for:` / `kind:` / `use:`
-// are required by the validator; declared as optional in the grammar
-// so missing-field diagnostics are friendlier than a hard parse
+// aggregates to a physical `storage` — the RFC's `resource` (the
+// configured realization of a logical need).  All `for:` / `kind:` /
+// `use:` are required by the validator; declared as optional in the
+// grammar so missing-field diagnostics are friendlier than a hard parse
 // error.  Per-kind config keys (schema, every, retain, …) are
 // validated against the resolved storage's `type`.
-DataSource:
-    'dataSource' name=LooseName '{'
+Resource:
+    'resource' name=LooseName '{'
         ('for'  ':' context=[BoundedContext:ID] ','?)?
         ('kind' ':' kind=DataSourceKind ','?)?
         ('use'  ':' use=[Storage:LooseName] ','?)?
@@ -181,10 +182,12 @@ DataSource:
         ('isolationLevel' ':' isolationLevel=IsolationLevel ','?)?
         ('readonly'       ':' readonly?='true' ','?)?
         ('shape'          ':' shape=SavingShape ','?)?
+        ('config' ':' '{' (config+=ConfigEntry (',' config+=ConfigEntry)* ','?)? '}' ','?)?
     '}';
 
 DataSourceKind returns string:
-    'state' | 'eventLog' | 'snapshot' | 'cache' | 'replica';
+    'state' | 'eventLog' | 'snapshot' | 'cache' | 'replica'
+    | 'objectStore' | 'queue' | 'api';
 
 UiSugarBinding:
     'ui' ':' ref=[Ui:ID] ','?;
@@ -280,7 +283,8 @@ UiHelperImport:
 // Peer to module / ui / deployable.  Pure declarative — what's
 // available; consumers (ui, deployable) reference it by name.
 Api:
-    'api' name=ID 'from' source=[Subdomain:ID];
+    'api' name=ID 'from' source=[Subdomain:ID]
+        ('{' ('urlStyle' ':' urlStyle=('literal' | 'resource'))? '}')?;
 
 // ---- storage declaration (system-level) ------------------------
 //
@@ -303,14 +307,29 @@ Storage:
         ('type' ':' type=StorageType ','?)
         ('instance' ':' instance=ID ','?)?
         ('connection' ':' connection=ConnectionSource ','?)?
+        ('config' ':' '{' (config+=ConfigEntry (',' config+=ConfigEntry)* ','?)? '}' ','?)?
     '}';
+
+// Generic vendor-parameter map (RFC §3.1/§8).  Keys are validated per
+// sourceType against the registry's config schema in IR validation; no
+// per-vendor clause keywords are introduced.
+ConfigEntry:
+    key=LooseName ':' value=ConfigValue;
+
+ConfigValue:
+      {infer StringConfigValue} value=STRING
+    | {infer IntConfigValue}    value=INT
+    | {infer BoolConfigValue}   value=BoolLiteral;
+
+BoolLiteral returns string: 'true' | 'false';
 
 StorageType returns string:
       'postgres' | 'mysql' | 'sqlite' | 'inMemory'
     | 'redis'
     | 'elastic' | 'meilisearch'
     | 'kafka'
-    | 'clickhouse' | 'bigquery';
+    | 'clickhouse' | 'bigquery'
+    | 'awsS3' | 'rabbitmq' | 'restApi';
 
 ConnectionSource:
       {infer ServiceConnectionSource} 'service' '(' service=ID ')'
@@ -463,7 +482,7 @@ StateFieldName returns string:
     // `DataSource` rule.
     | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
     | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-    | 'eventLog' | 'snapshot' | 'replica';
+    | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config';
 
 // ---- menu ---------------------------------------------------------------
 
@@ -675,7 +694,7 @@ MacroArgValue:
     | {infer MacroArgRefList} '[' (refs+=ID (',' refs+=ID)*)? ']';
 
 AggregateMember:
-    Containment | DerivedProp | Invariant | FunctionDecl | Operation | EntityPart | TestBlock | Property
+    Containment | DerivedProp | Invariant | FunctionDecl | Operation | Create | Destroy | EntityPart | TestBlock | Property
     | FilterDecl | StampDecl | ImplementsDecl;
 
 // ---- capability source surface ----------------------------------
@@ -850,7 +869,7 @@ Property:
         // (banking.ddd: `entity AccountTransaction { kind: string }`) still parse.
         | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
         | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-        | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources')
+        | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -885,6 +904,30 @@ FunctionDecl:
 
 Operation:
     (private?='private')? 'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' (extern?='extern')? (audited?='audited')? '{'
+        body+=Statement*
+    '}';
+
+// Lifecycle factory action — `create [name](params) { body }`.  The
+// body populates a pre-bound fresh `this`; the framework owns
+// persistence (allocate id → persist → return the populated
+// instance).  Parens are required — a factory almost always takes
+// arguments.  An unnamed `create(...)` is the aggregate's canonical
+// creator.  Lowers to an `OperationIR` with `kind: "create"`; never
+// joins `agg.operations` (which stays mutate-only).  See
+// docs/proposals/lifecycle-operations.md.
+Create:
+    'create' (name=ID)? '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
+        body+=Statement*
+    '}';
+
+// Lifecycle terminator — `destroy [name][(params)] { body }`.  The
+// instance is loaded by id; the body runs (cleanup / soft-delete
+// state) and the framework removes it.  A body that throws aborts
+// removal — the precondition mechanism.  Parens are optional so the
+// canonical hard delete reads `destroy { }`.  Lowers to an
+// `OperationIR` with `kind: "destroy"`.
+Destroy:
+    'destroy' (name=ID)? ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? '{'
         body+=Statement*
     '}';
 
@@ -940,7 +983,11 @@ LooseName returns string:
     // (storage roles), `for` predates this PR as a hard keyword.
     | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
     | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-    | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources';
+    | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources'
+    // Api-body keyword (lifecycle Phase 2 / D-URLSTYLE) admitted as soft
+    // so user code can still name a field `urlStyle`.  (`resource` is
+    // already soft-admitted just above.)
+    | 'urlStyle';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1028,7 +1075,11 @@ LValue:
 
 LValueIdent returns string:
     ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
-       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
+       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
+       // Soft-admit the lifecycle keywords so a bare-statement call
+       // target like `ui.products.create({...})` parses (mirrors
+       // MemberName).
+       | 'create' | 'destroy';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)
@@ -1113,6 +1164,13 @@ MemberName returns string:
     ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
        | 'filter' | 'stamp' | 'implements'
+       // `create` / `destroy` are hard keywords for the lifecycle
+       // member rules (`Create` / `Destroy`) but must stay admissible
+       // after `.` so the e2e + page surfaces keep parsing —
+       // `Order.create({...})`, `api.products.create(...)`,
+       // `Sales.Customer.create.mutate(...)`.  Magic-identifier
+       // dispatch lives in lowering, not the grammar.
+       | 'create' | 'destroy'
        // `where` is a hard keyword in `FindDecl` (`find foo(): T where ...`)
        // and `View` (`view X = Y where ...` and the full form's `from Y where`),
        // but it's also the collection-op name in `arr.where(λ)` — see
@@ -1277,6 +1335,12 @@ NameRefIdent returns string:
     // `id` is intentionally excluded: it's the magic identifier handled by
     // IdRef and would create an ambiguity with IdRef inside PrimaryExpr.
     ID | 'permissions' | 'ui' | 'api' | 'money'
+       // Lifecycle keywords admitted as bare NameRefs so an expression
+       // can use one as the receiver of a member access — e.g. the
+       // generated-hook handle in a page lambda
+       // (`onSubmit: v => create.mutateAsync(v)`).  They only act as
+       // hard keywords at aggregate-member position (`Create`/`Destroy`).
+       | 'create' | 'destroy'
        | 'contains' | 'page' | 'component' | 'state' | 'menu'
        | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
@@ -1298,7 +1362,8 @@ NameRefIdent returns string:
        // `kind` (`Field { kind + ":", bind: v }` in walker tests).
        | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
        | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-       | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources';
+       | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources'
+       | 'urlStyle';
 
 // ---------------------------------------------------------------------------
 // Terminals

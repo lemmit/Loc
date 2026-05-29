@@ -25,6 +25,8 @@ public sealed class OrdersController : ControllerBase
     public OrdersController(IMediator mediator, ILogger<OrdersController> log) { _mediator = mediator; _log = log; }
 
     [HttpPost]
+    [ProducesResponseType(typeof(CreateOrderResponse), 201)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<ActionResult<CreateOrderResponse>> CreateOrder([FromBody] CreateOrderRequest request)
     {
         var cmd = new CreateOrderCommand(
@@ -38,6 +40,8 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [ProducesResponseType(typeof(OrderResponse), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<ActionResult<OrderResponse>> GetOrderById([FromRoute] Guid id)
     {
         var response = await _mediator.Send(new GetOrderByIdQuery(new OrderId(id)));
@@ -45,6 +49,9 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpPost("{id}/add_line")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<IActionResult> AddLineOrder([FromRoute] Guid id, [FromBody] AddLineRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "addLine", id);
@@ -58,6 +65,9 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpPost("{id}/confirm")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<IActionResult> ConfirmOrder([FromRoute] Guid id, [FromBody] ConfirmRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "confirm", id);
@@ -69,6 +79,7 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpGet]
+    [ProducesResponseType(typeof(IReadOnlyList<OrderResponse>), 200)]
     public async Task<ActionResult<IReadOnlyList<OrderResponse>>> AllOrder()
     {
         var result = await _mediator.Send(new AllQuery());
@@ -76,6 +87,7 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpGet("by_customer")]
+    [ProducesResponseType(typeof(IReadOnlyList<OrderResponse>), 200)]
     public async Task<ActionResult<IReadOnlyList<OrderResponse>>> ByCustomerOrder([FromQuery] string customerId)
     {
         var result = await _mediator.Send(new ByCustomerQuery(customerId));

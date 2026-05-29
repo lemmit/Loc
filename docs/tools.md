@@ -178,80 +178,53 @@ sub-second feedback on real-world models.
 
 ## Migrations workflow
 
-Loom does **not** own migration history — that's deferred to the
-native tools (Drizzle Kit and EF Core), which are battle-tested for
-schema diffs, FKs, indexes, custom SQL, and conflict handling.  The
-generated projects ship pre-wired so this is a single command.
+Loom **owns migration generation** end-to-end via a snapshot-and-diff
+pipeline.  Each `generate system` run compares the current source
+against a checked-in baseline at
+`.loom/snapshots/<Subdomain>.snapshot.json`, derives a platform-neutral
+`MigrationsIR` (`src/ir/types/migrations-ir.ts`), and the per-backend
+emitters translate that into a single dated migration file per
+backend.  Subsequent regens emit only the delta — adding a property
+produces one `ALTER TABLE … ADD COLUMN …` per backend.  See
+[`generators.md` § Migrations](generators.md) for the per-platform
+output table and the runtime application path.
 
-Loom never writes to `db/migrations/` (TS) or
-`Infrastructure/Persistence/Migrations/` (.NET), so user-authored
-migrations are immune to regeneration regardless of `.loomignore`.
-
-### TypeScript / Drizzle
-
-After `ddd generate ts ... -o ./out`:
-
-```bash
-cd out
-npm install
-npm run db:generate    # diff db/schema.ts vs. snapshot, emit SQL into db/migrations/
-npm run db:migrate     # apply pending migrations to DATABASE_URL
-npm run dev            # start the Hono server
-```
-
-Subsequent edits to the `.ddd` source:
+The user-facing workflow is **regenerate, then run**:
 
 ```bash
-ddd generate ts ./model.ddd -o ./out   # regenerates db/schema.ts
+ddd generate system ./model.ddd -o ./out   # emits SQL/migrations alongside the rest
 cd out
-npm run db:generate                    # diff against the snapshot
-npm run db:migrate                     # apply
+docker compose up                          # backends apply migrations at boot
 ```
 
-`npm run db:push` is also available for prototype workflows where you
-don't want migration files yet — it diffs the live database directly
-against the schema and applies changes in-place.
+There is no separate `db:generate` / `dotnet ef migrations add` step
+— Loom owns the diff.  Both backends self-apply on boot:
 
-### .NET / EF Core
+| Backend | Files emitted | Applied by |
+|---|---|---|
+| Hono (Drizzle) | `<deployable>/db/migrations/<ts>_<name>.sql` + `db/migrations/meta/_journal.json` | `drizzle-orm/node-postgres/migrator`'s `migrate()` called from `index.ts` at startup; `npm run db:migrate` also wired for out-of-band runs. |
+| .NET (EF Core) | `<deployable>/Infrastructure/Persistence/Migrations/<Ts>_<Name>.cs` with `b.Sql(...)` raw-SQL `Up` / `Down` bodies | `db.Database.Migrate()` in `Program.cs` at startup (idempotent — EF's `__EFMigrationsHistory` table tracks what's been applied). |
+| Phoenix (Ash/Ecto) | `<deployable>/priv/repo/migrations/<ts>_<name>.exs` Ecto migrations | `mix ecto.migrate` from the entrypoint script; `mix ecto.setup` on first boot. |
 
-After `ddd generate dotnet ... -o ./out`:
-
-```bash
-cd out
-dotnet restore
-dotnet ef migrations add Initial \
-    -s . -p . \
-    -o Infrastructure/Persistence/Migrations
-dotnet ef database update
-dotnet run
-```
-
-Subsequent edits:
-
-```bash
-ddd generate dotnet ./model.ddd -o ./out   # regenerates EF configurations
-cd out
-dotnet ef migrations add <Description>
-dotnet ef database update
-```
-
-The generated `.csproj` references `Microsoft.EntityFrameworkCore.Tools`
-with `PrivateAssets="all"` so the `dotnet ef` command works
-out-of-the-box.
+The `.loom/snapshots/<Subdomain>.snapshot.json` files are
+repo-checked-in baselines — committing them is what gives the next
+regen something to diff against.  `ddd snapshot` (a separate
+command, for provenance) does NOT touch them; those are governed by
+`src/system/snapshot.ts` and rewritten on every `generate system`.
 
 ### Renames
 
-Both Drizzle Kit and EF Core detect renames heuristically; both will
-prompt you to confirm.  Loom doesn't currently emit explicit rename
-hints — if a rename is misdetected as a drop+add, you can hand-edit
-the migration before applying.
+Column / table renames are not detected — they emit as drop+add,
+which destroys data.  Until a `@migration(rename: "old")` annotation
+ships, hand-edit the dated migration file to a single
+`RENAME COLUMN` (or equivalent) before committing the regen.
 
 ### Cross-backend data migrations
 
-Out of scope for Loom.  When you need to write a data migration
-(populate a column, transform values, etc.), write it in whichever
-backend's native form — Drizzle SQL or an EF `Migration.Up` body.
-Loom doesn't try to translate between them.
+Out of scope for Loom.  When you need to populate a column or
+transform values, write it in whichever backend's native form —
+raw SQL inside the Drizzle `.sql` migration or an EF `Migration.Up`
+body.  Loom doesn't try to translate between them.
 
 ---
 

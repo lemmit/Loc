@@ -27,6 +27,7 @@ import { lowerModel } from "../../../ir/lower/lower.js";
 import {
   type BoundedContextIR,
   contextUsesMoney,
+  type DataSourceIR,
   type DeployableIR,
   type EnrichedBoundedContextIR,
   type FieldIR,
@@ -42,6 +43,7 @@ import type { Model } from "../../../language/generated/ast.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
 import { layeredStyleAdapter } from "./adapters/layered-style.js";
+import { resourceAdapterFor } from "./adapters/resource-clients.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitObservabilityFiles } from "./observability-builder.js";
 import { buildRoutesFile } from "./routes-builder.js";
@@ -286,8 +288,46 @@ export function generateTypeScriptForContexts(
   // Server bundle size matters; client-side React always ships the
   // dep.  Detected by walking the IR rather than scanning the rendered
   // strings.
+  // Resource clients (objectStore / queue / api) — boot-time client
+  // modules for the new infrastructure kinds the deployable wires
+  // (RFC §Phase 2.4 foundation).  Additive + gated: a deployable with
+  // no such resources emits nothing, so existing models stay
+  // byte-identical.  No call-sites — those land with the workflow-level
+  // consumption surface (Phase 4).
+  const resourceDeps: Record<string, string> = {};
+  const resourceImports: string[] = [];
+  if (system) {
+    const wired = new Set(system.deployable.dataSourceNames);
+    const storeType = new Map(system.sys.storages.map((s) => [s.name, s.type] as const));
+    const bySourceType = new Map<string, DataSourceIR[]>();
+    for (const r of system.sys.dataSources) {
+      if (!wired.has(r.name)) continue;
+      if (r.kind !== "objectStore" && r.kind !== "queue" && r.kind !== "api") continue;
+      const st = storeType.get(r.storageName);
+      if (!st) continue;
+      const group = bySourceType.get(st);
+      if (group) group.push(r);
+      else bySourceType.set(st, [r]);
+    }
+    const resourceCtx: EmitCtx = {
+      deployable: system.deployable,
+      contexts,
+      sys: system.sys,
+    };
+    for (const [sourceType, group] of bySourceType) {
+      const adapter = resourceAdapterFor(sourceType);
+      if (!adapter) continue;
+      out.set(
+        `resources/${sourceType}.ts`,
+        `${adapter.emitClientModule(group, system.sys.storages, resourceCtx).join("\n")}\n`,
+      );
+      Object.assign(resourceDeps, adapter.emitProjectDeps(resourceCtx));
+      resourceImports.push(`import "./resources/${sourceType}";`);
+    }
+  }
+
   const projectUsesMoney = contexts.some(contextUsesMoney);
-  out.set("package.json", projectPackageJson(pins, { withMoney: projectUsesMoney }));
+  out.set("package.json", projectPackageJson(pins, { withMoney: projectUsesMoney, resourceDeps }));
   // Shared primitive-schema helpers — one home for non-trivial wire
   // shapes (today: `moneySchema`).  Emitted only when something in
   // the project uses money so non-money projects' tsc surface stays
@@ -299,7 +339,11 @@ export function generateTypeScriptForContexts(
   out.set("tsup.config.ts", TSUP_CONFIG);
   out.set(
     "index.ts",
-    renderProjectIndexTs(hasMigrations, authRequired ? system?.sys.user : undefined),
+    renderProjectIndexTs(
+      hasMigrations,
+      authRequired ? system?.sys.user : undefined,
+      resourceImports,
+    ),
   );
   out.set("drizzle.config.ts", DRIZZLE_CONFIG);
   out.set("Dockerfile", DOCKERFILE_TS);
@@ -323,7 +367,10 @@ export interface BackendPins {
   devDependencies: Record<string, string>;
 }
 
-function projectPackageJson(pins: BackendPins, opts: { withMoney: boolean }): string {
+function projectPackageJson(
+  pins: BackendPins,
+  opts: { withMoney: boolean; resourceDeps?: Record<string, string> },
+): string {
   return (
     JSON.stringify(
       {
@@ -350,6 +397,7 @@ function projectPackageJson(pins: BackendPins, opts: { withMoney: boolean }): st
         dependencies: {
           ...pins.dependencies,
           ...(opts.withMoney ? { "decimal.js": "^10.4.3" } : {}),
+          ...(opts.resourceDeps ?? {}),
         },
         devDependencies: { ...pins.devDependencies },
       },
@@ -458,7 +506,15 @@ export default defineConfig({
 });
 `;
 
-function renderProjectIndexTs(runMigrationsAtBoot: boolean, userShape?: UserIR): string {
+function renderProjectIndexTs(
+  runMigrationsAtBoot: boolean,
+  userShape?: UserIR,
+  resourceImports: readonly string[] = [],
+): string {
+  // Side-effect imports for the resource-client modules (objectStore /
+  // queue / api) so their clients instantiate at boot.  Empty for
+  // deployables with no such resources — byte-identical to before.
+  const resourceImportBlock = resourceImports.length > 0 ? `${resourceImports.join("\n")}\n` : "";
   const migImport = runMigrationsAtBoot
     ? `import { migrate } from "drizzle-orm/node-postgres/migrator";\n`
     : "";
@@ -482,7 +538,7 @@ import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
 ${migImport}${authStubImport}import { baseLogger } from "./obs/log";
-
+${resourceImportBlock}
 // Fail fast on a missing DATABASE_URL.  Without this an unset value
 // surfaces as a confusing pg connection refusal mid-request; we'd
 // rather die at boot with a clear pointer to the env var.

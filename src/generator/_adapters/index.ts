@@ -21,6 +21,10 @@ export type {
   SavingShape,
 } from "./persistence-surface.js";
 export type {
+  ResourceAdapter,
+  ResourceCapabilities,
+} from "./resource-surface.js";
+export type {
   LayoutShape,
   StyleAdapter,
   StyleCapabilities,

@@ -390,7 +390,7 @@ system Shop {
 });
 
 describe("buildMigrations — per-projection binding override", () => {
-  it("honours a `dataSource shape: document` even when the aggregate header is shape(relational)", async () => {
+  it("honours a `resource shape: document` even when the aggregate header is shape(relational)", async () => {
     const loom = await buildLoomModel(`
 system Shop {
   subdomain Sales {
@@ -400,7 +400,7 @@ system Shop {
     }
   }
   storage pg { type: postgres }
-  dataSource cartsState { for: Orders, kind: state, use: pg, shape: document }
+  resource cartsState { for: Orders, kind: state, use: pg, shape: document }
   deployable api { platform: dotnet, contexts: [Orders], dataSources: [cartsState], port: 5000 }
 }
 `);

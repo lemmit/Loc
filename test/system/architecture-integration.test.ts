@@ -83,8 +83,8 @@ system Acme {
     port: 3000
   }
 
-  dataSource campaignsState { for: Campaigns, kind: state, use: marketingSql }
-  dataSource campaignsCache { for: Campaigns, kind: cache, use: hotCache }
+  resource campaignsState { for: Campaigns, kind: state, use: marketingSql }
+  resource campaignsCache { for: Campaigns, kind: cache, use: hotCache }
 
   deployable mktgApi {
     platform: hono

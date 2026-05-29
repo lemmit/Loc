@@ -104,6 +104,10 @@ export function buildWorkflowsFile(
     }
     body.push(`}).openapi("${upperFirst(wf.name)}Request");`);
   }
+  // Shared RFC 7807 error body (deduped by name across router files).
+  body.push(
+    `const ProblemDetails = z.object({ type: z.string().nullish(), title: z.string().nullish(), status: z.number().int().nullish(), detail: z.string().nullish(), instance: z.string().nullish() }).openapi("ProblemDetails");`,
+  );
   body.push("");
 
   body.push(`export function workflowsRoutes(`);
@@ -122,20 +126,22 @@ export function buildWorkflowsFile(
   body.push(
     `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
   );
+  // RFC 7807 responder — application/problem+json + x-request-id header.
   body.push(
-    `    if (err instanceof ForbiddenError) return c.json({ error: err.message, trace_id }, 403);`,
+    `    const problem = (status: 400 | 403 | 404 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
   );
   body.push(
-    `    if (err instanceof DomainError) return c.json({ error: err.message, trace_id }, 400);`,
+    `    if (err instanceof ForbiddenError) return problem(403, "Forbidden", err.message);`,
+  );
+  body.push(`    if (err instanceof DomainError) return problem(400, "Bad Request", err.message);`);
+  body.push(
+    `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
   );
   body.push(
-    `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message, trace_id }, 404);`,
-  );
-  body.push(
-    `    if (err instanceof ExternHandlerError) { console.error(err); return c.json({ error: err.message, trace_id }, 500); }`,
+    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", err.message); }`,
   );
   body.push(`    console.error(err);`);
-  body.push(`    return c.json({ error: "internal", trace_id }, 500);`);
+  body.push(`    return problem(500, "Internal Server Error", "internal");`);
   body.push(`  });`);
   body.push("");
   body.push(`  return app;`);
@@ -222,6 +228,10 @@ function emitWorkflowRoute(
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
+  // workflow → 400 (domain / validation), per the shared error matrix.
+  out.push(
+    `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);

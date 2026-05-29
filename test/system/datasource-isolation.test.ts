@@ -1,4 +1,4 @@
-// End-to-end coverage for `dataSource X { isolationLevel: <level> }`
+// End-to-end coverage for `resource X { isolationLevel: <level> }`
 // flowing into the .NET BeginTransactionAsync call and the Phoenix
 // Ash.transaction `isolation_level:` opt.  The resolver helper is
 // unit-tested in `test/ir/resolve-datasource.test.ts`; this gate
@@ -18,7 +18,7 @@ async function emit(src: string) {
   return generateSystems(doc.parseResult.value as Model).files;
 }
 
-describe("dataSource isolationLevel — end-to-end emit", () => {
+describe("resource isolationLevel — end-to-end emit", () => {
   it(".NET workflow handler picks up the dataSource's isolationLevel when the workflow doesn't set its own", async () => {
     const files = await emit(`
       system Sys {
@@ -41,7 +41,7 @@ describe("dataSource isolationLevel — end-to-end emit", () => {
           }
         }
         storage pg { type: postgres }
-        dataSource cState {
+        resource cState {
           for: C, kind: state, use: pg, isolationLevel: serializable
         }
         deployable api {
@@ -56,7 +56,7 @@ describe("dataSource isolationLevel — end-to-end emit", () => {
     expect(body).toMatch(/using System\.Data;/);
   });
 
-  it(".NET workflow's explicit isolation overrides the dataSource default", async () => {
+  it(".NET workflow's explicit isolation overrides the resource default", async () => {
     const files = await emit(`
       system Sys {
         subdomain M {
@@ -78,7 +78,7 @@ describe("dataSource isolationLevel — end-to-end emit", () => {
           }
         }
         storage pg { type: postgres }
-        dataSource cState {
+        resource cState {
           for: C, kind: state, use: pg, isolationLevel: serializable
         }
         deployable api {
@@ -88,12 +88,12 @@ describe("dataSource isolationLevel — end-to-end emit", () => {
     `);
     const handler = [...files.keys()].find((k) => k.endsWith("BumpCreditHandler.cs"));
     const body = files.get(handler!)!;
-    // Workflow-level readCommitted wins over dataSource serializable.
+    // Workflow-level readCommitted wins over resource serializable.
     expect(body).toMatch(/BeginTransactionAsync\(IsolationLevel\.ReadCommitted, ct\)/);
     expect(body).not.toMatch(/Serializable/);
   });
 
-  it(".NET non-transactional workflow ignores the dataSource isolationLevel entirely", async () => {
+  it(".NET non-transactional workflow ignores the resource isolationLevel entirely", async () => {
     const files = await emit(`
       system Sys {
         subdomain M {
@@ -115,7 +115,7 @@ describe("dataSource isolationLevel — end-to-end emit", () => {
           }
         }
         storage pg { type: postgres }
-        dataSource cState {
+        resource cState {
           for: C, kind: state, use: pg, isolationLevel: serializable
         }
         deployable api {
@@ -130,7 +130,7 @@ describe("dataSource isolationLevel — end-to-end emit", () => {
     expect(body).not.toMatch(/IsolationLevel/);
   });
 
-  it("Phoenix workflow picks up the dataSource isolationLevel via Ash.transaction opts", async () => {
+  it("Phoenix workflow picks up the resource isolationLevel via Ash.transaction opts", async () => {
     const files = await emit(`
       system Sys {
         subdomain M {
@@ -154,7 +154,7 @@ describe("dataSource isolationLevel — end-to-end emit", () => {
         api CApi from C
         ui Admin with scaffold(subdomains: [M]) { }
         storage pg { type: postgres }
-        dataSource cState {
+        resource cState {
           for: C, kind: state, use: pg, isolationLevel: repeatableRead
         }
         deployable phoenixApp {

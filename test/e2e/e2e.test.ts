@@ -40,15 +40,6 @@ const ENABLED = process.env.LOOM_E2E === "1";
 // drift between Hono / .NET / Phoenix at PR time.
 const STRICT_PARITY = process.env.LOOM_E2E_STRICT_PARITY === "1";
 
-// Per-pair strict allowlist.  `hono↔dotnet` is byte-identical (#707) and
-// gated strictly.  The two Phoenix pairs still carry pre-existing wire-shape
-// divergences (enum schemas, {id} create response, bare-array views, required
-// bools) tracked by #716 — they run REPORT-ONLY (logged, non-blocking) until
-// that lands, at which point they move back into this set.  Keeping the gate
-// strict for the clean pair stops hono↔dotnet from silently regressing while
-// the Phoenix work is in flight.
-const STRICT_PAIRS = new Set<string>(["hono ↔ dotnet"]);
-
 // Parity-only mode (per-PR CI tier): build + boot only the three backends
 // and run only the OpenAPI parity check — skip the behavioral DSL suite and
 // the Playwright UI run (and the React frontend builds they need).  The
@@ -345,6 +336,8 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
           console.warn(`  schemas only on ${refName}:`, diff.onlySchemasRef);
         if (diff.fieldDiffs.length) console.warn("  fields:", diff.fieldDiffs);
         if (diff.requiredDiffs.length) console.warn("  required:", diff.requiredDiffs);
+        if (diff.propertyTypeDiffs.length)
+          console.warn("  property types:", diff.propertyTypeDiffs);
         if (diff.paramTypeDiffs.length) console.warn("  path-param types:", diff.paramTypeDiffs);
         if (diff.requestBodyDiffs.length)
           console.warn("  request-body schemas:", diff.requestBodyDiffs);
@@ -352,10 +345,12 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
           console.warn("  response-body schemas:", diff.responseBodyDiffs);
         if (diff.operationIdDiffs.length) console.warn("  operationIds:", diff.operationIdDiffs);
         if (diff.enumValueDiffs.length) console.warn("  enum value-sets:", diff.enumValueDiffs);
+        if (diff.errorResponseDiffs.length)
+          console.warn("  error responses:", diff.errorResponseDiffs);
       }
 
       const pair = `${refName} ↔ ${otherName}`;
-      if (STRICT_PARITY && STRICT_PAIRS.has(pair)) {
+      if (STRICT_PARITY) {
         expect(diff.onlyRef, `ops only on ${refName} (${pair})`).toEqual([]);
         expect(diff.onlyOther, `ops only on ${otherName} (${pair})`).toEqual([]);
         expect(diff.cardMismatches, `cardinality drift (${pair})`).toEqual([]);
@@ -363,11 +358,13 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         expect(diff.onlySchemasOther, `schemas only on ${otherName} (${pair})`).toEqual([]);
         expect(diff.fieldDiffs, `field-set drift (${pair})`).toEqual([]);
         expect(diff.requiredDiffs, `required-set drift (${pair})`).toEqual([]);
+        expect(diff.propertyTypeDiffs, `property-type drift (${pair})`).toEqual([]);
         expect(diff.paramTypeDiffs, `path-param type drift (${pair})`).toEqual([]);
         expect(diff.requestBodyDiffs, `request-body schema drift (${pair})`).toEqual([]);
         expect(diff.responseBodyDiffs, `response-body schema drift (${pair})`).toEqual([]);
         expect(diff.operationIdDiffs, `operationId drift (${pair})`).toEqual([]);
         expect(diff.enumValueDiffs, `enum value-set drift (${pair})`).toEqual([]);
+        expect(diff.errorResponseDiffs, `error-response drift (${pair})`).toEqual([]);
       }
     }
 

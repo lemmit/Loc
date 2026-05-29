@@ -1,4 +1,5 @@
 import type { AggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
+import { errorStatuses, type OpErrorKind } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
   type OpIdTokens,
@@ -18,6 +19,16 @@ function actionName(tokens: OpIdTokens): string {
   return upperFirst(camelId(tokens));
 }
 
+/** `[ProducesResponseType]` attribute lines declaring the RFC 7807 error
+ *  responses for an operation kind (from the shared matrix).  A Swashbuckle
+ *  operation filter (see Program.cs) rewrites their content-type to
+ *  `application/problem+json` so the emitted spec matches Hono/Phoenix. */
+function producesProblem(kind: OpErrorKind, indent = "    "): string[] {
+  return errorStatuses(kind).map(
+    (s) => `${indent}[ProducesResponseType(typeof(ProblemDetails), ${s})]`,
+  );
+}
+
 // ASP.NET Core controller emission.  One controller per aggregate root,
 // dispatching every endpoint through Mediator (`ISender`).  The
 // controller never sees the domain class — only the request/response
@@ -31,7 +42,7 @@ function actionName(tokens: OpIdTokens): string {
 interface ControllerShape {
   idClrType: string;
   createCmdArgs: string[];
-  publicOps: Array<{ name: string; cmdArgs: string[]; paramNames: string[] }>;
+  publicOps: Array<{ name: string; routeSlug?: string; cmdArgs: string[]; paramNames: string[] }>;
   finds: Array<{
     name: string;
     isRoot: boolean;
@@ -101,7 +112,12 @@ export function renderController(
         ]
       : [];
     return [
-      `    [HttpPost("{id}/${snake(op.name)}")]`,
+      `    [HttpPost("{id}/${snake(op.routeSlug ?? op.name)}")]`,
+      // Declare the success response explicitly — once any
+      // [ProducesResponseType] is present, Swashbuckle stops inferring the
+      // 2xx body from the action signature, so it must be spelled out.
+      "    [ProducesResponseType(204)]",
+      ...producesProblem("operation"),
       `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}Request request)`,
       "    {",
       ...wireInLine,
@@ -137,8 +153,20 @@ export function renderController(
       f.returnShape === "optional"
         ? "        return result is null ? NotFound() : Ok(result);"
         : "        return Ok(result);";
+    // Non-nullable success type for [ProducesResponseType] (typeof can't
+    // carry a `?` nullable annotation).
+    const successType =
+      f.returnShape === "list" ? `IReadOnlyList<${agg.name}Response>` : `${agg.name}Response`;
     return [
       `    [HttpGet${f.isRoot ? "" : `("${snake(f.name)}")`}]`,
+      `    [ProducesResponseType(typeof(${successType}), 200)]`,
+      ...producesProblem(
+        f.returnShape === "optional"
+          ? "findOptional"
+          : f.returnShape === "list"
+            ? "findList"
+            : "findSingle",
+      ),
       `    public async Task<ActionResult<${responseType}>> ${actionName(opFind(agg.name, f.name))}(${f.queryRouteParams})`,
       "    {",
       `        var result = await _mediator.Send(new ${upperFirst(f.name)}Query(${f.queryConstructorArgs}));`,
@@ -181,6 +209,8 @@ export function renderController(
       `    public ${className}(IMediator mediator, ILogger<${className}> log) { _mediator = mediator; _log = log; }`,
       "",
       "    [HttpPost]",
+      `    [ProducesResponseType(typeof(Create${agg.name}Response), 201)]`,
+      ...producesProblem("create"),
       `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
       "    {",
       `        var cmd = new Create${agg.name}Command(`,
@@ -199,6 +229,8 @@ export function renderController(
       "    }",
       "",
       '    [HttpGet("{id}")]',
+      `    [ProducesResponseType(typeof(${agg.name}Response), 200)]`,
+      ...producesProblem("getById"),
       `    public async Task<ActionResult<${agg.name}Response>> ${actionName(opGetById(agg.name))}([FromRoute] ${shape.idClrType} id)`,
       "    {",
       `        var response = await _mediator.Send(new Get${agg.name}ByIdQuery(new ${agg.name}Id(id)));`,
@@ -282,22 +314,19 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         }
         if (context.Exception is ForbiddenException fe)
         {
-            context.Result = new ObjectResult(new { error = fe.Message, trace_id })
-            {
-                StatusCode = 403,
-            };
+            context.Result = Problem(context, 403, "Forbidden", fe.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is DomainException de)
         {
-            context.Result = new BadRequestObjectResult(new { error = de.Message, trace_id });
+            context.Result = Problem(context, 400, "Bad Request", de.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is AggregateNotFoundException nf)
         {
-            context.Result = new NotFoundObjectResult(new { error = nf.Message, trace_id });
+            context.Result = Problem(context, 404, "Not Found", nf.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
@@ -315,10 +344,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
               { name: "op", valueExpr: "xh.OpName" },
               { name: "error", valueExpr: "xh.Message" },
             ])}
-            context.Result = new ObjectResult(new { error = xh.Message, trace_id })
-            {
-                StatusCode = 500,
-            };
+            context.Result = Problem(context, 500, "Internal Server Error", xh.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
@@ -329,11 +355,134 @@ public sealed class DomainExceptionFilter : IExceptionFilter
           { name: "error", valueExpr: "context.Exception.Message" },
           { name: "status", valueExpr: "500" },
         ])}
-        context.Result = new ObjectResult(new { error = "internal", trace_id })
-        {
-            StatusCode = 500,
-        };
+        context.Result = Problem(context, 500, "Internal Server Error", "internal", trace_id);
         context.ExceptionHandled = true;
+    }
+
+    // RFC 7807 problem responder — application/problem+json body +
+    // x-request-id header (trace correlation moves off the body so it's
+    // byte-identical to Hono / Phoenix).  Shared by every non-validation arm.
+    private static IActionResult Problem(ExceptionContext context, int status, string title, string detail, string traceId)
+    {
+        context.HttpContext.Response.Headers["x-request-id"] = traceId;
+        return new ObjectResult(new ProblemDetails
+        {
+            Type = "about:blank",
+            Title = title,
+            Status = status,
+            Detail = detail,
+            Instance = context.HttpContext.Request.Path,
+        })
+        {
+            StatusCode = status,
+            ContentTypes = { "application/problem+json" },
+        };
+    }
+}
+`;
+}
+
+/** Swashbuckle operation filter — rewrites every declared 4xx/5xx response
+ *  to `application/problem+json` carrying the shared `ProblemDetails`
+ *  schema.  `[ProducesResponseType(typeof(ProblemDetails), …)]` on each
+ *  action declares WHICH statuses; this filter normalises the content-type
+ *  (Swashbuckle defaults error responses to `application/json`) so the
+ *  emitted spec's error contract matches Hono / Phoenix (RFC 7807). */
+export function renderProblemDetailsFilter(ns: string): string {
+  return `// Auto-generated.
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.OpenApi.Models;
+using Swashbuckle.AspNetCore.SwaggerGen;
+
+namespace ${ns}.Api;
+
+public sealed class ProblemDetailsResponsesFilter : IOperationFilter
+{
+    public void Apply(OpenApiOperation operation, OperationFilterContext context)
+    {
+        var schema = context.SchemaGenerator.GenerateSchema(typeof(ProblemDetails), context.SchemaRepository);
+        foreach (var (code, response) in operation.Responses)
+        {
+            if (code.Length == 3 && (code[0] == '4' || code[0] == '5'))
+            {
+                response.Content.Clear();
+                response.Content["application/problem+json"] = new OpenApiMediaType { Schema = schema };
+            }
+        }
+    }
+}
+`;
+}
+
+/** Swashbuckle document filter — promotes inline `array<XResponse>` list
+ *  responses to named component schemas (`XResponse` → `XListResponse`;
+ *  full-form views: `XRow` → `XResponse`), matching the Hono / Phoenix
+ *  backends which name the wrapper.  Swashbuckle inlines any IEnumerable
+ *  type, so the only reliable way to get a named array component is to
+ *  add it + retarget the responses here.  The element→wrapper map is baked
+ *  in from the IR (no runtime name guessing). */
+export function renderListWrapperFilter(
+  ns: string,
+  pairs: ReadonlyArray<{ element: string; wrapper: string }>,
+): string {
+  const wrappersExpr =
+    pairs.length === 0
+      ? "Array.Empty<(string Element, string Wrapper)>()"
+      : `new[]
+    {
+${pairs.map((p) => `        ("${p.element}", "${p.wrapper}"),`).join("\n")}
+    }`;
+  return `// Auto-generated.
+using System;
+using Microsoft.OpenApi.Models;
+using Swashbuckle.AspNetCore.SwaggerGen;
+
+namespace ${ns}.Api;
+
+public sealed class ListResponseWrapperFilter : IDocumentFilter
+{
+    private static readonly (string Element, string Wrapper)[] Wrappers = ${wrappersExpr};
+
+    public void Apply(OpenApiDocument doc, DocumentFilterContext context)
+    {
+        // Add the named wrapper component for each element schema present.
+        foreach (var (element, wrapper) in Wrappers)
+        {
+            if (doc.Components.Schemas.ContainsKey(element) && !doc.Components.Schemas.ContainsKey(wrapper))
+            {
+                doc.Components.Schemas[wrapper] = new OpenApiSchema
+                {
+                    Type = "array",
+                    Items = new OpenApiSchema
+                    {
+                        Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = element }
+                    }
+                };
+            }
+        }
+
+        // Retarget inline array responses to the named wrapper $ref.
+        foreach (var path in doc.Paths.Values)
+        foreach (var operation in path.Operations.Values)
+        foreach (var response in operation.Responses.Values)
+        foreach (var media in response.Content.Values)
+        {
+            var schema = media.Schema;
+            if (schema?.Type == "array" && schema.Items?.Reference?.Id is string elementId)
+            {
+                foreach (var (element, wrapper) in Wrappers)
+                {
+                    if (element == elementId)
+                    {
+                        media.Schema = new OpenApiSchema
+                        {
+                            Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = wrapper }
+                        };
+                        break;
+                    }
+                }
+            }
+        }
     }
 }
 `;

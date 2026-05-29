@@ -2,7 +2,12 @@
 // The original monolithic file was split so each emitter lives next to
 // the AST node it serves.  Keep imports stable for callers of this module.
 
-export { renderController, renderExceptionFilter } from "./emit/api.js";
+export {
+  renderController,
+  renderExceptionFilter,
+  renderListWrapperFilter,
+  renderProblemDetailsFilter,
+} from "./emit/api.js";
 export { renderAuditableInterceptor } from "./emit/auditable-interceptor.tpl.js";
 export { renderCommon, renderNoopDispatcher } from "./emit/common.js";
 export {

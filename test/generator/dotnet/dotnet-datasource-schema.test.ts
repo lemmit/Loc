@@ -1,7 +1,7 @@
 // dataSource.schema + dataSource.tablePrefix → EF Core ToTable args.
 //
 // Proves the storage-and-platform-config promise on the .NET backend:
-// `dataSource X { for: <ctx>, kind: state, use: <pg>, schema: "sales" }`
+// `resource X { for: <ctx>, kind: state, use: <pg>, schema: "sales" }`
 // produces `b.ToTable("orders", "sales")` in the per-aggregate
 // Configuration.cs (with `tablePrefix` prepending the local table
 // name).  Verifies byte-identical default behavior when no schema /
@@ -54,10 +54,10 @@ function configFor(files: Map<string, string>): string {
   return files.get(path!)!;
 }
 
-describe("dataSource → EF Core ToTable (.NET)", () => {
+describe("resource → EF Core ToTable (.NET)", () => {
   it("defaults schema to snake(context.name) when DSL omits `schema:`", async () => {
     const files = await generate(
-      baseSystem(`dataSource ordersState { for: Orders, kind: state, use: primary }`),
+      baseSystem(`resource ordersState { for: Orders, kind: state, use: primary }`),
     );
     const cfg = configFor(files);
     // Implicit default — context Orders → schema "orders".
@@ -68,7 +68,7 @@ describe("dataSource → EF Core ToTable (.NET)", () => {
   it("threads explicit `schema:` into the second arg of ToTable", async () => {
     const files = await generate(
       baseSystem(
-        `dataSource ordersState { for: Orders, kind: state, use: primary, schema: "sales" }`,
+        `resource ordersState { for: Orders, kind: state, use: primary, schema: "sales" }`,
       ),
     );
     const cfg = configFor(files);
@@ -80,7 +80,7 @@ describe("dataSource → EF Core ToTable (.NET)", () => {
   it("prepends `tablePrefix` and keeps the default ctx schema", async () => {
     const files = await generate(
       baseSystem(
-        `dataSource ordersState { for: Orders, kind: state, use: primary, tablePrefix: "sales_" }`,
+        `resource ordersState { for: Orders, kind: state, use: primary, tablePrefix: "sales_" }`,
       ),
     );
     const cfg = configFor(files);
@@ -92,7 +92,7 @@ describe("dataSource → EF Core ToTable (.NET)", () => {
   it("combines explicit schema + tablePrefix when both are set", async () => {
     const files = await generate(
       baseSystem(
-        `dataSource ordersState { for: Orders, kind: state, use: primary, schema: "legacy", tablePrefix: "sales_" }`,
+        `resource ordersState { for: Orders, kind: state, use: primary, schema: "legacy", tablePrefix: "sales_" }`,
       ),
     );
     const cfg = configFor(files);

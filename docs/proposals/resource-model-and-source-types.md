@@ -91,7 +91,7 @@ carrying the per-binding configuration. It is the configured realization of a
 logical need.
 
 ```ddd
-resource ordersDb    { for: Orders, kind: database,    use: primarySql, schema: "orders" }
+resource ordersDb    { for: Orders, kind: state,       use: primarySql, schema: "orders" }
 resource ordersFiles { for: Orders, kind: objectStore, use: fileStore }
 resource orderJobs   { for: Orders, kind: queue,       use: jobBus }
 resource payApi      { for: Orders, kind: api,         use: payments }
@@ -181,7 +181,13 @@ keywords.
 
 - **`kind`** is the semantic role and the primary contract between a need and a
   provider: `database | eventLog | cache | objectStore | queue | api`. It is the
-  one dimension surfaced to users (on `resource`).
+  one dimension surfaced to users (on `resource`). **Surface note:** the
+  user-facing `kind:` keyword keeps the fine-grained persistence values
+  (`state | eventLog | snapshot | cache | replica`) and *adds* the new infra roles
+  (`objectStore | queue | api`); the registry reasons in the coarse infra kinds and
+  maps `state`/`snapshot`/`replica` onto `database` + a refining capability. This
+  keeps `kind:` as the `(context, kind)` routing discriminator while the
+  capability reframe stays internal.
 - **`capability`** refines a kind. The persistence roles Loom already
   distinguishes — `state`, `snapshot`, `replica` — are capabilities under
   `database`; `eventLog` and `cache` are kinds in their own right with their own
@@ -251,10 +257,11 @@ Invariants:
 
 ```ddd
 storage primarySql { type: postgres }
-resource ordersDb  { for: Orders, kind: database, use: primarySql, schema: "orders" }
+resource ordersDb  { for: Orders, kind: state, use: primarySql, schema: "orders" }
 ```
-Reached through `sql`; `state` / `snapshot` / `replica` are capabilities chosen by
-the aggregate's persistence and derived into the need.
+Reached through `sql`; the surface `kind:` stays fine-grained (`state` / `snapshot`
+/ `replica`), which the registry models as capabilities under `database` and
+derives into the need.
 
 ### 6.2 Postgres-backed event log
 
@@ -312,23 +319,39 @@ unused.
   `need.capabilities ⊆ sourceType.capabilities` check.
 - No behavior change in emitters for relational/eventLog/cache.
 
-**Phase 2 — New kinds: object store, queue, external API.**
+**Phase 2 — New kinds: object store, queue, external API.** *(model + compose
+delivered; backend client emission deferred — see note.)*
 - Add `awsS3`, `rabbitmq`, `restApi` (and siblings) to the `type:` enumeration and
   the registry; add `objectStore`, `queue`, `api` to the `kind:` enumeration; add
-  their capabilities/interfaces to the registry.
-- Add the generic `config` map on `storage`/`resource` for vendor parameters.
-- Compose integration: emit the corresponding services / connection wiring; at
-  least one backend gains object-store, queue, and external-API client surfaces.
+  their capabilities/interfaces to the registry. ✓
+- Add the generic `config` map on `storage`/`resource` for vendor parameters,
+  validated against the registry schema. ✓
+- Compose integration: emit dev sidecars for the new-kind storages (minio for
+  `awsS3`, `rabbitmq`), gated so existing models stay byte-identical. ✓
 - Validation for the new kind↔sourceType↔capability combinations, driven by the
-  registry.
+  registry. ✓
+- **Deferred — backend client emission.** Emitting object-store / queue /
+  external-API *clients* into a backend depends on a way for domain logic to
+  *consume* a resource (e.g. put a blob, enqueue a job, call an API). That
+  consumption surface is a **workflow-level** concern, designed separately (see
+  Phase 4); emitting clients with no caller would be speculative scaffolding, so it
+  waits on that design. The persistence-adapter emit seam is also not yet wired
+  into real backend output (an in-progress refactor), which the consumption work
+  would build on.
 
-**Phase 3 — Interface selection & capability authoring (optional surface).**
+**Phase 3 — Interface selection & custom-sourceType plugins.**
 - Surface `interface` selection where an operation can choose among multiple valid
   interfaces (e.g. S3 `rest` vs `sdk`).
-- Consider explicit `requires:` authoring on top of the already-threaded need (a
-  future, additive surface).
 - Custom-sourceType plugins via the out-of-tree backend story (registry entries
   contributed by `packages/` discovered at load time).
+- (`requires:` authoring is deferred — the need layer stays implicit.)
+
+**Phase 4 — Workflow-level resource consumption (future, separate design).**
+The surface by which workflows/operations *use* a resource — the caller of the
+deferred Phase-2 clients — is its own design effort and gates backend client
+emission. Once defined, it plugs into the already-threaded `NeedIR` (needs would
+then be derived from actual consumption, not just aggregate persistence) and the
+registry's per-kind interfaces.
 
 ---
 

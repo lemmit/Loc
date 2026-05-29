@@ -209,10 +209,14 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
           action: ":destroy",
         });
         for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+          // URL segment from routeSlug (D-URLSTYLE); the Phoenix action
+          // atom (and the matching controller `def`) stay the op verb so
+          // `post "/cancels" → :cancel → def cancel` under :resource.
           const opSnake = snake(op.name);
+          const opPath = snake(op.routeSlug ?? op.name);
           apiRoutes.push({
             method: "post",
-            path: `/${aggPlural}/:id/${opSnake}`,
+            path: `/${aggPlural}/:id/${opPath}`,
             controller: controllerLocal,
             action: `:${opSnake}`,
           });
@@ -279,11 +283,15 @@ ${actions}
   # Error helpers
   # ---------------------------------------------------------------------------
 
+  # RFC 7807 problem body — application/problem+json + x-request-id header
+  # (trace correlation off the body so it's byte-identical to Hono / .NET).
   defp error_response(conn, reason) do
     trace_id = get_resp_header(conn, "x-request-id") |> List.first("unknown")
+    body = Jason.encode!(%{type: "about:blank", title: "Bad Request", status: 400, detail: inspect(reason), instance: conn.request_path})
     conn
-    |> put_status(:bad_request)
-    |> json(%{error: inspect(reason), trace_id: trace_id})
+    |> put_resp_content_type("application/problem+json")
+    |> put_resp_header("x-request-id", trace_id)
+    |> send_resp(400, body)
   end
 end
 `;
@@ -383,10 +391,12 @@ function renderViewAction(
 
       {:error, reason} ->
         trace_id = get_resp_header(conn, "x-request-id") |> List.first("unknown")
+        body = Jason.encode!(%{type: "about:blank", title: "Internal Server Error", status: 500, detail: inspect(reason), instance: conn.request_path})
 
         conn
-        |> put_status(:internal_server_error)
-        |> json(%{error: inspect(reason), trace_id: trace_id})
+        |> put_resp_content_type("application/problem+json")
+        |> put_resp_header("x-request-id", trace_id)
+        |> send_resp(500, body)
     end
   end`;
 }
@@ -436,7 +446,7 @@ ${wireInLine}    record = ${contextModule}.create_${aggSnake}!(params)
     ])}
     conn
     |> put_status(:created)
-    |> json(record)
+    |> json(%{id: record.id})
   end
 
   @doc "PATCH /api/${aggPlural}/:id"
@@ -485,9 +495,10 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
   const opActions: string[] = [];
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     const opSnake = snake(op.name);
+    const opPath = snake(op.routeSlug ?? op.name);
     const argReads = op.params.map((p) => `params[${JSON.stringify(snake(p.name))}]`).join(", ");
     const callArgs = argReads.length > 0 ? `id, ${argReads}` : "id";
-    opActions.push(`  @doc "POST /api/${aggPlural}/:id/${opSnake}"
+    opActions.push(`  @doc "POST /api/${aggPlural}/:id/${opPath}"
   def ${opSnake}(conn, %{"id" => id} = params) do
     _ = params
     ${contextModule}.${opSnake}_${aggSnake}!(${callArgs})

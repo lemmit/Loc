@@ -62,6 +62,72 @@ export function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
 }
 
 /**
+ * Normalised *type* signature for one property schema — the structural kind,
+ * dialect-folded so the three backends' equivalent shapes read identically:
+ *
+ *   - nullable union (`oneOf`/`anyOf` with a `null` member — zod-openapi) or
+ *     OAS-3.1 `type: ["string","null"]` → the underlying non-null type
+ *     (optionality is already covered by `requiredSet`, so it's folded out);
+ *   - `$ref` → `ref:<ComponentName>` (so a property pointing at a different
+ *     nested schema across backends is caught);
+ *   - `array` → `array<element-signature>`;
+ *   - otherwise the JSON `type` (`string` / `integer` / `number` / …).
+ *
+ * `format` is deliberately NOT part of the signature: it's the most
+ * dialect-divergent facet (Swashbuckle emits `int32`/`date-time` where the
+ * others omit it) and path-parameter formats are already compared by
+ * `pathParamSignatures`.  This dimension targets the structural-kind blind
+ * spot — e.g. a field that is `string` on one backend and `integer` on
+ * another — which nothing else catches.
+ */
+function propTypeSig(schema: unknown): string {
+  if (!schema || typeof schema !== "object") return "unknown";
+  const s = schema as {
+    type?: string | string[];
+    $ref?: string;
+    items?: unknown;
+    oneOf?: unknown[];
+    anyOf?: unknown[];
+  };
+  // Fold nullable unions down to the single non-null member.
+  const union = s.oneOf ?? s.anyOf;
+  if (Array.isArray(union)) {
+    const nonNull = union.filter((m) => {
+      const t = (m as { type?: string | string[] }).type;
+      return !(t === "null" || (Array.isArray(t) && t.every((x) => x === "null")));
+    });
+    if (nonNull.length === 1) return propTypeSig(nonNull[0]);
+    return nonNull.map(propTypeSig).sort().join("|");
+  }
+  if (s.$ref) {
+    const m = s.$ref.match(/^#\/components\/schemas\/(.+)$/);
+    return m ? `ref:${m[1]}` : "ref";
+  }
+  let t = s.type;
+  if (Array.isArray(t)) t = t.find((x) => x !== "null");
+  if (t === "array") return `array<${propTypeSig(s.items)}>`;
+  return t ?? "object";
+}
+
+/**
+ * Per-property normalised type signature for a named component schema —
+ * `Map<propertyName, signature>` (see `propTypeSig`).  Drives the
+ * `propertyTypeDiffs` dimension, which catches same-name-different-type
+ * drift inside request/response bodies that the name/required/cardinality
+ * dimensions miss.
+ */
+export function propertyTypes(spec: OpenApiSpec, schemaName: string): Map<string, string> {
+  const schema = spec.components?.schemas?.[schemaName];
+  const props = (schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {};
+  const out = new Map<string, string>();
+  for (const [k, v] of Object.entries(props)) {
+    if (k.endsWith("_provenance")) continue;
+    out.set(k, propTypeSig(v));
+  }
+  return out;
+}
+
+/**
  * All named component schemas in a spec, minus framework-emitted noise
  * (e.g. Swashbuckle's `ProblemDetails`, OpenApiSpex's internal types) that
  * isn't part of the cross-backend contract.  Used by the parity diff to
@@ -70,59 +136,23 @@ export function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
  * on a hardcoded "schemas to check" list that goes stale.
  */
 export function schemaNames(spec: OpenApiSpec): Set<string> {
-  // TEMPORARY DROP-IN TOLERANCE — tracked by:
-  //   • #706 — shared RFC 7807 `ProblemDetails` error body (Hono still emits
-  //     an `ErrorResponse` envelope; Phoenix emits no error body).  Once both
-  //     emit `ProblemDetails`, drop `ProblemDetails` + `ErrorResponse` from
-  //     this set so the shared error body is COMPARED, not filtered.
-  //   • #705 — .NET named list-response wrapper (`<Agg>ListResponse`).  Once
-  //     .NET emits the wrapper, drop `isListWrapperSchema` below so the
-  //     wrapper is part of the compared schema set.
-  // Under full drop-in only the genuinely-per-backend schemas stay filtered:
-  // .NET-only validation envelopes and the TS-only provenance lineage.
+  // The shared RFC 7807 `ProblemDetails` error body (#706) and the named
+  // list-response wrappers (`<Agg>ListResponse`, full-form-view
+  // `<View>Response`) (#705) are COMPARED across backends — all three
+  // publish them.  Only the genuinely-per-backend schemas are filtered:
   const IDIOMATIC_SCHEMAS = new Set([
-    // Swashbuckle (.NET) error envelopes.
-    "ProblemDetails",
+    // Swashbuckle (.NET) model-state validation envelopes — auto-emitted
+    // for `[ApiController]` 400s; no cross-backend counterpart.  (The
+    // shared `ProblemDetails` body is NOT filtered — it's compared.)
     "ValidationProblemDetails",
     "HttpValidationProblemDetails",
-    // Error *bodies* are idiomatic per backend — Hono names an
-    // `ErrorResponse` envelope, .NET returns `ProblemDetails`, Phoenix
-    // declares no error body.  Only the error *status codes* are
-    // behavioural, so the envelope schema itself is excluded.  (#706 makes
-    // these a single shared `ProblemDetails` body and removes the tolerance.)
-    "ErrorResponse",
     // Co-located provenance lineage is a TS/Hono-only wire extension
     // (only the TS backend persists lineage) — consistent with the
     // per-field `_provenance` exclusion in `fieldSet` / `requiredSet`.
     "ProvenanceLineage",
   ]);
   const schemas = spec.components?.schemas ?? {};
-  return new Set(
-    Object.keys(schemas).filter(
-      (n) => !IDIOMATIC_SCHEMAS.has(n) && !isListWrapperSchema(schemas[n]),
-    ),
-  );
-}
-
-/**
- * True for a "list wrapper" component — a named schema that is just
- * `{ type: array, items: { $ref } }`.  Hono/zod-openapi and Phoenix emit
- * the list response as a named component (`ProjectListResponse`); .NET
- * inlines `array<ProjectResponse>` at the operation.  Both express the
- * same behaviour, so the wrapper *name* is representational, not an
- * independent schema: `responseBodySchemas` resolves it to
- * `array<element>` and the element schema (`ProjectResponse`) is compared
- * on its own.  Excluding the wrapper keeps it from reading as a one-sided
- * `onlySchemas` divergence between a named-wrapper backend and an
- * inline-array backend.
- *
- * TEMPORARY DROP-IN TOLERANCE (#705): once .NET emits its own named
- * `<Agg>ListResponse` wrapper, this filter — and the wrapper resolution in
- * `schemaRefName` — should be removed so the wrapper name is compared
- * exactly across backends.
- */
-function isListWrapperSchema(schema: OpenApiSchema | undefined): boolean {
-  return schema?.type === "array" && Boolean(schema.items?.$ref);
+  return new Set(Object.keys(schemas).filter((n) => !IDIOMATIC_SCHEMAS.has(n)));
 }
 
 /**
@@ -249,26 +279,15 @@ export function normalisePath(p: string): string {
  */
 function schemaRefName(
   schema: { $ref?: string; type?: string; items?: { $ref?: string } } | undefined,
-  spec: OpenApiSpec,
 ): string | null {
   if (!schema) return null;
   // Direct ref: response body schema points at a named component.
   if (schema.$ref) {
     const m = schema.$ref.match(/^#\/components\/schemas\/(.+)$/);
     if (!m) return null;
-    const name = m[1]!;
-    // Resolve a named list-wrapper component to its inline equivalent so
-    // `$ref:ProjectListResponse` (Hono/Phoenix) compares equal to an
-    // inline `array<ProjectResponse>` (.NET) — behavioural parity over
-    // representational naming.  TEMPORARY DROP-IN TOLERANCE (#705): drop
-    // this resolution once .NET emits the named wrapper so the ref name is
-    // compared exactly.
-    const target = spec.components?.schemas?.[name];
-    if (target?.type === "array" && target.items?.$ref) {
-      const im = target.items.$ref.match(/^#\/components\/schemas\/(.+)$/);
-      if (im) return `array<${im[1]}>`;
-    }
-    return name;
+    // The named component (incl. list wrappers like `ProjectListResponse`)
+    // is compared by name — all three backends now emit the wrapper (#705).
+    return m[1]!;
   }
   // Array wrapper: `{ type: array, items: { $ref: ... } }`.  Annotated
   // with the array marker so the diff distinguishes single-item from
@@ -307,7 +326,7 @@ export function requestBodySchemas(spec: OpenApiSpec): Map<string, string> {
         };
       };
       const schema = op.requestBody?.content?.["application/json"]?.schema;
-      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema, spec) ?? "");
+      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema) ?? "");
     }
   }
   return out;
@@ -362,7 +381,43 @@ export function responseBodySchemas(spec: OpenApiSpec): Map<string, string> {
       };
       const ok = op.responses?.["200"] ?? op.responses?.["201"];
       const schema = ok?.content?.["application/json"]?.schema;
-      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema, spec) ?? "");
+      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema) ?? "");
+    }
+  }
+  return out;
+}
+
+/**
+ * Per-operation RFC 7807 error-response signature.  For each operation,
+ * the ascending set of declared 4xx/5xx responses paired with the
+ * component schema each carries under `application/problem+json` — e.g.
+ * `400:ProblemDetails,404:ProblemDetails`.  Every backend declares the
+ * SAME set (driven by `src/ir/util/openapi-errors.ts`), so drift here —
+ * a missing status, a divergent body schema, or an error served as plain
+ * `application/json` instead of `application/problem+json` (which reads as
+ * `(none)`) — is a real cross-backend error-contract break.
+ */
+export function errorResponses(spec: OpenApiSpec): Map<string, string> {
+  const PROBLEM_JSON = "application/problem+json";
+  const out = new Map<string, string>();
+  for (const [p, item] of Object.entries(spec.paths ?? {})) {
+    if (isInfraPath(p)) continue;
+    for (const [m, raw] of Object.entries(item)) {
+      const method = m.toUpperCase();
+      if (!HTTP_METHODS.includes(method)) continue;
+      const op = raw as {
+        responses?: Record<
+          string,
+          { content?: Record<string, { schema?: { $ref?: string; type?: string } }> }
+        >;
+      };
+      const parts: string[] = [];
+      for (const [code, resp] of Object.entries(op.responses ?? {})) {
+        if (!/^[45]\d\d$/.test(code)) continue;
+        const schema = resp.content?.[PROBLEM_JSON]?.schema;
+        parts.push(`${code}:${schemaRefName(schema) ?? "(none)"}`);
+      }
+      out.set(`${method} ${normalisePath(p)}`, parts.sort().join(","));
     }
   }
   return out;
@@ -454,6 +509,11 @@ export interface ParityDiff {
   fieldDiffs: string[];
   /** Per-schema `required: [...]` drift on the intersection. */
   requiredDiffs: string[];
+  /** Per-property *type* drift on the intersection of shared schemas ×
+   * shared properties — a field that is e.g. `string` on one backend and
+   * `integer` on another (folded over nullable/format dialect noise; see
+   * `propTypeSig`).  Closes the same-name-different-type blind spot. */
+  propertyTypeDiffs: string[];
   /** Per-op path-parameter type drift on the intersection (e.g. one
    * backend declares `{type: string}`, another `{type: string, format:
    * uuid}`). */
@@ -478,6 +538,12 @@ export interface ParityDiff {
    * component schemas — a backend accepting a different allowed-value
    * set for the same enum (`Visibility`, `BuildState`). */
   enumValueDiffs: string[];
+  /** Per-op RFC 7807 error-response drift on the intersection — a
+   * backend declaring a different set of 4xx/5xx responses, a different
+   * body schema, or serving the error as `application/json` instead of
+   * `application/problem+json`.  The error contract is part of drop-in
+   * replacement: a client's error handling binds to these. */
+  errorResponseDiffs: string[];
 }
 
 /**
@@ -521,6 +587,7 @@ export function diffSpecs(
 
   const fieldDiffs: string[] = [];
   const requiredDiffs: string[] = [];
+  const propertyTypeDiffs: string[] = [];
   for (const schema of sharedSchemas) {
     const refFields = fieldSet(ref.spec, schema);
     const otherFields = fieldSet(other.spec, schema);
@@ -528,6 +595,20 @@ export function diffSpecs(
     const onlyB = [...otherFields].filter((f) => !refFields.has(f)).sort();
     if (onlyA.length || onlyB.length) {
       fieldDiffs.push(`${schema}: only-${ref.name}=[${onlyA}] only-${other.name}=[${onlyB}]`);
+    }
+    // Per-property type drift on the field intersection (a field present on
+    // both sides whose normalised type differs — `string` vs `integer`).
+    // A field missing on one side surfaces in `fieldDiffs`, not here.
+    const refTypes = propertyTypes(ref.spec, schema);
+    const otherTypes = propertyTypes(other.spec, schema);
+    for (const [prop, refSig] of refTypes) {
+      const otherSig = otherTypes.get(prop);
+      if (otherSig === undefined) continue;
+      if (refSig !== otherSig) {
+        propertyTypeDiffs.push(
+          `${schema}.${prop}: ${ref.name}=${refSig}, ${other.name}=${otherSig}`,
+        );
+      }
     }
     // Intersection-based required diff: if a field doesn't exist on a
     // side, its required status on the other side is moot — surfaces in
@@ -624,6 +705,23 @@ export function diffSpecs(
     }
   }
 
+  // Per-op RFC 7807 error-response drift on the op intersection.  Each
+  // backend declares the SAME status set per operation (from the shared
+  // `openapi-errors` matrix), each carrying `ProblemDetails` under
+  // `application/problem+json`.  Drift = a missing/extra status, a
+  // divergent body schema, or a wrong content-type.
+  const refErrors = errorResponses(ref.spec);
+  const otherErrors = errorResponses(other.spec);
+  const errorResponseDiffs: string[] = [];
+  for (const op of refErrors.keys()) {
+    if (!otherErrors.has(op)) continue;
+    const r = refErrors.get(op) ?? "";
+    const o = otherErrors.get(op) ?? "";
+    if (r !== o) {
+      errorResponseDiffs.push(`${op}: ${ref.name}=[${r}], ${other.name}=[${o}]`);
+    }
+  }
+
   return {
     refName: ref.name,
     otherName: other.name,
@@ -634,11 +732,13 @@ export function diffSpecs(
     onlySchemasOther,
     fieldDiffs,
     requiredDiffs,
+    propertyTypeDiffs,
     paramTypeDiffs,
     requestBodyDiffs,
     responseBodyDiffs,
     operationIdDiffs,
     enumValueDiffs,
+    errorResponseDiffs,
   };
 }
 
@@ -652,10 +752,12 @@ export function isCleanDiff(diff: ParityDiff): boolean {
     diff.onlySchemasOther.length === 0 &&
     diff.fieldDiffs.length === 0 &&
     diff.requiredDiffs.length === 0 &&
+    diff.propertyTypeDiffs.length === 0 &&
     diff.paramTypeDiffs.length === 0 &&
     diff.requestBodyDiffs.length === 0 &&
     diff.responseBodyDiffs.length === 0 &&
     diff.operationIdDiffs.length === 0 &&
-    diff.enumValueDiffs.length === 0
+    diff.enumValueDiffs.length === 0 &&
+    diff.errorResponseDiffs.length === 0
   );
 }

@@ -1,5 +1,6 @@
 import { platformFor } from "../../platform/registry.js";
-import { snake } from "../../util/naming.js";
+import { plural, snake } from "../../util/naming.js";
+import { defaultInterfaceFor } from "../source-types.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -19,7 +20,10 @@ import type {
   ExprIR,
   FieldIR,
   FindIR,
+  LoomInterface,
   LoomModel,
+  NeedIR,
+  OperationIR,
   RawLoomModel,
   RepositoryIR,
   SubdomainIR,
@@ -116,10 +120,23 @@ function enrichSystem(
   rootValueObjects: EnrichedValueObjectIR[],
   rootEnums: EnumIR[],
 ): EnrichedSystemIR {
-  // First enrich each subdomain's contexts (auto-findAll, wire-shape).
+  // Resolve each subdomain's lifecycle URL style from the api(s) that
+  // surface it (`api X from <subdomain>`).  An aggregate belongs to one
+  // subdomain, so this uniquely determines its actions' route slugs.
+  // First-declared api wins if two surface the same subdomain with
+  // differing styles (the validator warns — see checkApiUrlStyle).
+  const urlStyleBySubdomain = new Map<string, "literal" | "resource">();
+  for (const a of sys.apis) {
+    if (!urlStyleBySubdomain.has(a.sourceModule))
+      urlStyleBySubdomain.set(a.sourceModule, a.urlStyle);
+  }
+  // First enrich each subdomain's contexts (auto-findAll, wire-shape,
+  // routeSlug).
   const subdomains: EnrichedSubdomainIR[] = sys.subdomains.map((m) => ({
     ...m,
-    contexts: m.contexts.map((c) => enrichContext(c, rootValueObjects, rootEnums)),
+    contexts: m.contexts.map((c) =>
+      enrichContext(c, rootValueObjects, rootEnums, urlStyleBySubdomain.get(m.name) ?? "literal"),
+    ),
   }));
   // Then propagate react deployables' context sets from their targets.
   // Done after subdomain enrichment so frontends see the same enriched
@@ -129,6 +146,13 @@ function enrichSystem(
   // for emitting schema migrations.  Runs last because it consults
   // the (now enriched) deployable list.  See `assignMigrationsOwner`.
   const subdomainsWithOwner = subdomains.map((m) => assignMigrationsOwner(m, deployables));
+  // Derive the implicit logical needs (RFC §3.3): one per (context,
+  // required kind), read off how each context's aggregates persist.
+  const needs = deriveNeeds(subdomainsWithOwner);
+  // Resolve each resource's default access interface (RFC §3.5) from
+  // its sourceType + kind.  Per-operation overrides land with the
+  // consumption surface (Phase 4).
+  const resourceInterfaces = deriveResourceInterfaces(sys);
   // Scaffold expansion now runs at the AST
   // level via `src/language/ddd-scaffold-ast-expander.ts` (a
   // `DocumentState.IndexedContent` hook on the shared
@@ -139,7 +163,58 @@ function enrichSystem(
   // any caller that constructs a `LoomModel` outside the standard
   // `parseHelper` / `DocumentBuilder` pipeline (it just returns
   // the existing pages unchanged).
-  return { ...sys, subdomains: subdomainsWithOwner, deployables };
+  return { ...sys, subdomains: subdomainsWithOwner, deployables, needs, resourceInterfaces };
+}
+
+// Resolve the default access interface for every resource from its
+// sourceType (via the storage it `use:`s) and kind.  RFC §3.5.
+function deriveResourceInterfaces(sys: SystemIR): Record<string, LoomInterface> {
+  const storeType = new Map(sys.storages.map((s) => [s.name, s.type] as const));
+  const out: Record<string, LoomInterface> = {};
+  for (const r of sys.dataSources) {
+    const sourceType = storeType.get(r.storageName);
+    if (!sourceType) continue;
+    const iface = defaultInterfaceFor(sourceType, r.kind);
+    if (iface) out[r.name] = iface;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Need derivation — the implicit "need" layer (RFC §3.3).
+//
+// A context's aggregates determine which data kinds it requires:
+//   - `state`    when at least one aggregate is persistedAs(state) (the
+//                default) — it needs a primary state store;
+//   - `eventLog` when at least one aggregate is persistedAs(eventLog) —
+//                it needs an event stream.
+// (snapshot / cache / replica are optional secondary stores, never
+// *required* by an aggregate, so they are not needs.)  Capabilities are
+// the base set each kind implies; a `resource`'s sourceType must offer
+// them (checked in IR validation).  Mirrors `coverageGapReason` in
+// `src/ir/validate/validate.ts`.
+// ---------------------------------------------------------------------------
+
+function deriveNeeds(subdomains: EnrichedSubdomainIR[]): NeedIR[] {
+  const needs: NeedIR[] = [];
+  for (const sub of subdomains) {
+    for (const ctx of sub.contexts) {
+      if (ctx.aggregates.length === 0) continue;
+      const hasState = ctx.aggregates.some((a) => (a.persistedAs ?? "state") === "state");
+      const hasEventLog = ctx.aggregates.some((a) => a.persistedAs === "eventLog");
+      if (hasState) {
+        needs.push({
+          contextName: ctx.name,
+          kind: "state",
+          capabilities: ["state", "crud", "query"],
+        });
+      }
+      if (hasEventLog) {
+        needs.push({ contextName: ctx.name, kind: "eventLog", capabilities: ["append", "read"] });
+      }
+    }
+  }
+  return needs;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +248,7 @@ export function enrichContext(
   ctx: BoundedContextIR,
   rootValueObjects: EnrichedValueObjectIR[] = [],
   rootEnums: EnumIR[] = [],
+  urlStyle: "literal" | "resource" = "literal",
 ): EnrichedBoundedContextIR {
   // Fold the ambient root-level VOs / enums into the context's
   // effective set so every per-context emitter sees them as if they
@@ -186,12 +262,24 @@ export function enrichContext(
     ...rootValueObjects.filter((v) => !ownVoNames.has(v.name)),
   ];
   const enums = [...ctx.enums, ...rootEnums.filter((e) => !ownEnumNames.has(e.name))];
-  const aggregates = ctx.aggregates.map((a) => enrichAggregate(a, valueObjects));
+  const aggregates = ctx.aggregates.map((a) => enrichAggregate(a, valueObjects, urlStyle));
   const repositories = ensureFindAll(aggregates, ctx.repositories);
   return { ...ctx, valueObjects, enums, aggregates, repositories };
 }
 
-function enrichAggregate(agg: AggregateIR, contextVOs: ValueObjectIR[]): EnrichedAggregateIR {
+/** Derive an action's HTTP path segment from the surfacing api's
+ * urlStyle (D-URLSTYLE).  Canonical (unnamed) actions resolve to the
+ * bare collection / canonical-id URL, signalled by `undefined`. */
+function routeSlugFor(op: OperationIR, urlStyle: "literal" | "resource"): string | undefined {
+  if (op.canonical) return undefined;
+  return urlStyle === "resource" ? plural(op.name) : op.name;
+}
+
+function enrichAggregate(
+  agg: AggregateIR,
+  contextVOs: ValueObjectIR[],
+  urlStyle: "literal" | "resource" = "literal",
+): EnrichedAggregateIR {
   const parts = agg.parts.map(enrichPart);
   const fields = agg.fields.map(resolveFieldAccess);
   // Synthesize a `derived inspect: string = <structural>` when the user
@@ -211,9 +299,21 @@ function enrichAggregate(agg: AggregateIR, contextVOs: ValueObjectIR[]): Enriche
   // agg so the wire spec is idempotent (second enrichment finds the
   // synthesized inspect already in `derived` and doesn't double-add,
   // and `resolveFieldAccess` skips fields that already carry access).
+  // Stamp routeSlug on every lifecycle action.  New objects (don't
+  // mutate shared refs); canonicalCreate/Destroy are re-pointed at the
+  // freshly-stamped array entries.
+  const stamp = (o: OperationIR): OperationIR => ({ ...o, routeSlug: routeSlugFor(o, urlStyle) });
+  const operations = agg.operations.map(stamp);
+  const creates = agg.creates?.map(stamp);
+  const destroys = agg.destroys?.map(stamp);
   const resolved: AggregateIR = { ...agg, derived, fields };
   return {
     ...resolved,
+    operations,
+    creates,
+    destroys,
+    canonicalCreate: creates?.find((c) => c.canonical) ?? null,
+    canonicalDestroy: destroys?.find((d) => d.canonical) ?? null,
     parts,
     wireShape: wireFieldsForAggregate(resolved),
     associations: associationsForAggregate(resolved),

@@ -633,7 +633,10 @@ describe("emitApiControllers (api-emit unit)", () => {
     expect(ctrl).toMatch(/Plug\.RequestId/);
     expect(ctrl).toMatch(/x-request-id/);
     expect(ctrl).toMatch(/get_resp_header\(conn, "x-request-id"\)/);
-    expect(ctrl).toMatch(/trace_id: trace_id/);
+    // RFC 7807 (#706): error_response returns application/problem+json and
+    // puts the trace id on the x-request-id response header (off the body).
+    expect(ctrl).toMatch(/put_resp_content_type\("application\/problem\+json"\)/);
+    expect(ctrl).toMatch(/put_resp_header\("x-request-id", trace_id\)/);
   });
 
   it("does NOT emit workflows_controller.ex when deployable serves nothing", () => {
@@ -1264,9 +1267,10 @@ describe("cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
     // placeOrder workflow → POST /workflows/place_order
     expect(spec).toMatch(/"\/workflows\/place_order"/);
     expect(spec).toMatch(/PlaceOrderRequest/);
-    // ActiveOrders view → GET /views/active_orders
+    // ActiveOrders is a shorthand view → GET /views/active_orders reusing
+    // the aggregate's OrderListResponse (matching Hono/.NET), #705.
     expect(spec).toMatch(/"\/views\/active_orders"/);
-    expect(spec).toMatch(/ActiveOrdersResponse/);
+    expect(spec).toMatch(/active_orders"[\s\S]*?OrderListResponse/);
   });
 
   it("Aggregate CRUD endpoints surface in the paths object", async () => {
@@ -3060,5 +3064,140 @@ describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
     expect(moneyEx!).toMatch(
       /PhoenixApp\.JasonCamelCase\.encode_struct\(value, \[:amount, :currency\], opts\)/,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #716 — Phoenix OpenAPI wire-surface parity with Hono/.NET.
+//   - enum/part refs are MODULE atoms (so OpenApiSpex registers them)
+//   - create endpoints return { id } (Create<Agg>Response)
+//   - views return a bare array (items: element-module ref)
+//   - request bools are not marked required
+// ---------------------------------------------------------------------------
+
+const WIRE_SOURCE = `system MiniWire {
+
+  subdomain Sales {
+    context Sales {
+      enum Status { Open, Closed }
+
+      aggregate Order {
+        name: string
+        status: Status
+        active: bool
+        derived display: string = name
+      }
+      repository Orders for Order { }
+
+      view ActiveOrders = Order where active == true
+    }
+  }
+
+  api SalesApi from Sales
+
+  ui SalesAdmin with scaffold(subdomains: [Sales]) {
+  }
+
+  deployable phoenixApp {
+    platform: phoenixLiveView,
+    contexts: [Sales],
+    serves: SalesApi,
+    ui: SalesAdmin,
+    port: 4000
+  }
+}
+`;
+
+describe("phoenix wire-surface parity (#716)", () => {
+  async function wireFiles(): Promise<Map<string, string>> {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pwire-"));
+    const file = path.join(dir, "wire.ddd");
+    fs.writeFileSync(file, WIRE_SOURCE);
+    const services = createDddServices(NodeFileSystem);
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
+    await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+    if (errors.length > 0) {
+      throw new Error(`Validation errors:\n${errors.map((e) => `  ${e.message}`).join("\n")}`);
+    }
+    const { files } = generateSystems(doc.parseResult.value as Model);
+    return files;
+  }
+
+  const SCHEMA = "phoenix_app/lib/phoenix_app_web/api/schemas";
+
+  it("references enum + part schemas as MODULE atoms (so they register in components)", async () => {
+    const files = await wireFiles();
+    const resp = files.get(`${SCHEMA}/order_response.ex`)!;
+    // Module atom, NOT a raw %OpenApiSpex.Reference{"$ref": ...}.
+    expect(resp).toMatch(/status: PhoenixAppWeb\.Api\.Schemas\.Status/);
+    expect(resp).not.toMatch(/status: %OpenApiSpex\.Reference/);
+  });
+
+  it("emits a Create<Agg>Response { id } schema and the create op references it", async () => {
+    const files = await wireFiles();
+    const createResp = files.get(`${SCHEMA}/create_order_response.ex`)!;
+    expect(createResp).toMatch(/title: "CreateOrderResponse"/);
+    expect(createResp).toMatch(/properties: %\{\s*id:/);
+    expect(createResp).toMatch(/required: \[:id\]/);
+    const spec = files.get("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex")!;
+    expect(spec).toMatch(/schema: PhoenixAppWeb\.Api\.Schemas\.CreateOrderResponse/);
+  });
+
+  it("create controller action returns just the id", async () => {
+    const files = await wireFiles();
+    const ctrl = files.get("phoenix_app/lib/phoenix_app_web/controllers/orders_controller.ex")!;
+    expect(ctrl).toMatch(/json\(%\{id: record\.id\}\)/);
+  });
+
+  it("shorthand view reuses the aggregate's <Agg>ListResponse (no per-view schema) (#705)", async () => {
+    const files = await wireFiles();
+    // Shorthand views project to the source aggregate's list response —
+    // matching Hono/.NET — so no `<View>Response` schema is emitted…
+    expect(files.has(`${SCHEMA}/active_orders_response.ex`)).toBe(false);
+    // …and the view path references `OrderListResponse`.
+    const spec = files.get("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex")!;
+    expect(spec).toMatch(
+      /"\/views\/active_orders"[\s\S]*?schema: PhoenixAppWeb\.Api\.Schemas\.OrderListResponse/,
+    );
+  });
+
+  it("does not mark a request bool field required", async () => {
+    const files = await wireFiles();
+    const createReq = files.get(`${SCHEMA}/create_order_request.ex`)!;
+    // `active` (bool) present as a property…
+    expect(createReq).toMatch(/active: %OpenApiSpex\.Schema\{type: :boolean\}/);
+    // …but absent from the required list (name/status stay required).
+    expect(createReq).toMatch(/required: \[:name, :status\]/);
+  });
+
+  // #706 — RFC 7807 ProblemDetails error body.
+  it("emits a ProblemDetails schema and declares it on the create op (400)", async () => {
+    const files = await wireFiles();
+    const problem = files.get(`${SCHEMA}/problem_details.ex`)!;
+    expect(problem).toMatch(/title: "ProblemDetails"/);
+    expect(problem).toMatch(/status: %OpenApiSpex\.Schema\{type: :integer\}/);
+    const spec = files.get("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex")!;
+    // create → 400 under application/problem+json referencing ProblemDetails.
+    expect(spec).toMatch(
+      /400 => %OpenApiSpex\.Response\{[\s\S]*?"application\/problem\+json"[\s\S]*?Schemas\.ProblemDetails/,
+    );
+    // getById → 404 (the bare "Not found" response is replaced).
+    expect(spec).toMatch(/404 => %OpenApiSpex\.Response\{[\s\S]*?Schemas\.ProblemDetails/);
+    expect(spec).not.toMatch(/404 => %OpenApiSpex\.Response\{description: "Not found"\}/);
+  });
+
+  it("controller error_response returns application/problem+json", async () => {
+    const files = await wireFiles();
+    // Orders has no workflow; assert on whichever controller carries the
+    // shared error_response helper (workflows) — fall back to any controller.
+    const ctrl = [...files.entries()].find(
+      ([k, v]) => k.endsWith("_controller.ex") && v.includes("error_response"),
+    )?.[1];
+    if (ctrl) {
+      expect(ctrl).toMatch(/put_resp_content_type\("application\/problem\+json"\)/);
+    }
   });
 });

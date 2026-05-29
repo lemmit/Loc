@@ -22,6 +22,12 @@ import {
   wireTypeInfo,
 } from "../../ir/types/wire-types.js";
 import {
+  errorStatuses,
+  type OpErrorKind,
+  PROBLEM_JSON,
+  problemTitle,
+} from "../../ir/util/openapi-errors.js";
+import {
   camelId,
   opCreate,
   opFind,
@@ -129,6 +135,10 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     }
   }
 
+  // Shared RFC 7807 error body — referenced by every operation's declared
+  // 4xx/5xx responses (see errorResponseEntries).
+  files.set(`${schemaDir}/problem_details.ex`, renderProblemDetailsSchema(webModule));
+
   // Enum schemas — a named string schema carrying the allowed value-set,
   // referenced by `$ref` from any enum-typed property.  De-duplicated by
   // name (a root-level enum is folded into every context's enum list by
@@ -172,6 +182,11 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
       `${schemaDir}/create_${snake(agg.name)}_request.ex`,
       renderCreateRequestSchema(agg, webModule),
     );
+    // Create response — `{ id }`, matching Hono/.NET's Create<Agg>Response
+    files.set(
+      `${schemaDir}/create_${snake(agg.name)}_response.ex`,
+      renderCreateResponseSchema(agg, webModule),
+    );
     // Per-operation request schemas
     for (const op of agg.operations.filter((o) => o.visibility === "public")) {
       files.set(
@@ -190,12 +205,18 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     );
   }
 
-  // View response schemas
+  // View response schemas: full-form views get a named element row
+  // (`<View>Row`) + the `<View>Response` wrapper.  Shorthand views reuse the
+  // source aggregate's `<Agg>ListResponse` (emitted with the aggregate
+  // above) — matching Hono/.NET — so they emit no per-view schema.
   for (const { ctx, view } of allViews) {
-    files.set(
-      `${schemaDir}/${snake(view.name)}_response.ex`,
-      renderViewResponseSchema(view, ctx, webModule),
-    );
+    if (view.output) {
+      files.set(`${schemaDir}/${snake(view.name)}_row.ex`, renderViewRowSchema(view, webModule));
+      files.set(
+        `${schemaDir}/${snake(view.name)}_response.ex`,
+        renderViewResponseSchema(view, ctx, webModule),
+      );
+    }
   }
 
   // --- OpenAPI controller ---------------------------------------------------
@@ -216,6 +237,23 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
 // ---------------------------------------------------------------------------
 // Spec module renderer
 // ---------------------------------------------------------------------------
+
+/** RFC 7807 error response-map entries (with a leading comma) for an
+ *  operation kind, from the shared matrix.  Each declared 4xx/5xx response
+ *  carries the `ProblemDetails` schema MODULE under `application/problem+json`
+ *  — matching Hono/.NET so the conformance gate's error-response dimension
+ *  compares equal. */
+function errorResponseEntries(kind: OpErrorKind, schemasModule: string): string {
+  return errorStatuses(kind)
+    .map(
+      (s) => `,
+            ${s} => %OpenApiSpex.Response{
+              description: "${problemTitle(s)}",
+              content: %{"${PROBLEM_JSON}" => %OpenApiSpex.MediaType{schema: ${schemasModule}.ProblemDetails}}
+            }`,
+    )
+    .join("");
+}
 
 function renderApiSpec(
   _appModule: string,
@@ -257,7 +295,7 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "Success",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :object}}}
-            }
+            }${errorResponseEntries("workflow", schemasModule)}
           }
         }
       }`);
@@ -266,7 +304,11 @@ function renderApiSpec(
   // View paths: GET /views/<slug>
   for (const { view } of allViews) {
     const slug = snake(view.name);
-    const respMod = `${schemasModule}.${upperFirst(view.name)}Response`;
+    // Shorthand views reuse the aggregate's `<Agg>ListResponse`; full-form
+    // views project to their own `<View>Response`.  Matches Hono/.NET.
+    const respMod = view.output
+      ? `${schemasModule}.${upperFirst(view.name)}Response`
+      : `${schemasModule}.${view.aggregateName}ListResponse`;
     pathEntries.push(`      "/views/${slug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "Query ${view.name} view",
@@ -310,6 +352,7 @@ function renderApiSpec(
     const respMod = `${schemasModule}.${agg.name}Response`;
     const listRespMod = `${schemasModule}.${agg.name}ListResponse`;
     const createReqMod = `${schemasModule}.Create${agg.name}Request`;
+    const createRespMod = `${schemasModule}.Create${agg.name}Response`;
     pathEntries.push(
       `      "/${aggSlug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
@@ -336,8 +379,8 @@ function renderApiSpec(
           responses: %{
             201 => %OpenApiSpex.Response{
               description: "Created",
-              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${respMod}}}
-            }
+              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${createRespMod}}}
+            }${errorResponseEntries("create", schemasModule)}
           }
         }
       }`,
@@ -353,8 +396,7 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${respMod}}}
-            },
-            404 => %OpenApiSpex.Response{description: "Not found"}
+            }${errorResponseEntries("getById", schemasModule)}
           }
         }
       }`,
@@ -362,7 +404,9 @@ function renderApiSpec(
 
     // Per-operation paths: POST /<plural>/{id}/<op>
     for (const op of agg.operations.filter((o) => o.visibility === "public")) {
-      const opSnake = snake(op.name);
+      // Spec path must track the route's URL segment (routeSlug, D-URLSTYLE);
+      // operationId + request module stay keyed on op.name.
+      const opSnake = snake(op.routeSlug ?? op.name);
       const opReqMod = `${schemasModule}.${upperFirst(op.name)}Request`;
       pathEntries.push(
         `      "/${aggSlug}/{id}/${opSnake}" => %OpenApiSpex.PathItem{
@@ -380,7 +424,7 @@ function renderApiSpec(
             }
           },
           responses: %{
-            204 => %OpenApiSpex.Response{description: "No Content"}
+            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("operation", schemasModule)}
           }
         }
       }`,
@@ -397,6 +441,12 @@ function renderApiSpec(
         const findSnake = snake(find.name);
         const isArrayReturn = find.returnType.kind === "array";
         const findRespMod = isArrayReturn ? listRespMod : respMod;
+        const findKind: OpErrorKind =
+          find.returnType.kind === "optional"
+            ? "findOptional"
+            : isArrayReturn
+              ? "findList"
+              : "findSingle";
         pathEntries.push(
           `      "/${aggSlug}/${findSnake}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
@@ -407,7 +457,7 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${findRespMod}}}
-            }
+            }${errorResponseEntries(findKind, schemasModule)}
           }
         }
       }`,
@@ -483,14 +533,22 @@ const OPENAPI_ID_VALUE: Record<string, string> = {
   string: "%OpenApiSpex.Schema{type: :string}",
 };
 
-/** Map a TypeIR to an OpenApiSpex %Schema{} literal snippet. */
-function openApiType(t: TypeIR): string {
+/** Map a TypeIR to an OpenApiSpex %Schema{} literal snippet.
+ *  `schemasModule` is the `<Web>.Api.Schemas` prefix: enum / entity refs
+ *  are emitted as the bare schema MODULE atom (not a raw
+ *  `%OpenApiSpex.Reference{}`) so OpenApiSpex's `resolve_schema_modules`
+ *  pulls them into `components.schemas` — a raw `$ref` string is left
+ *  dangling and never registered (the bug that dropped `Visibility` /
+ *  `BuildState` / `PipelineResponse` from the Phoenix spec).  Value
+ *  objects stay raw refs: Hono/.NET don't publish them as named
+ *  components, so registering them would add a Phoenix-only schema. */
+function openApiType(t: TypeIR, schemasModule: string): string {
   const info = wireTypeInfo(t, "response");
   // Nullable rides on the parent property (`required[]`), not the
   // child schema — peel through.
-  if (info.isNullable) return openApiType(peelNullable(t));
+  if (info.isNullable) return openApiType(peelNullable(t), schemasModule);
   if (info.isCollection) {
-    return `%OpenApiSpex.Schema{type: :array, items: ${openApiType(peelCollection(t))}}`;
+    return `%OpenApiSpex.Schema{type: :array, items: ${openApiType(peelCollection(t), schemasModule)}}`;
   }
   switch (info.refKind) {
     case "primitive":
@@ -498,20 +556,31 @@ function openApiType(t: TypeIR): string {
     case "id":
       return OPENAPI_ID_VALUE[info.idValueType!]!;
     case "enum":
-      // Enums travel as strings on the wire, but carry their allowed
-      // value-set via a named schema component so clients (and the
-      // cross-backend enum value-set parity dimension) see the
-      // constraint — matching Hono's z.enum(...).openapi(name).
-      return `%OpenApiSpex.Reference{"$ref": "#/components/schemas/${info.base}"}`;
+      // Named string schema carrying the value-set.  Module atom → the
+      // resolver registers it in components and rewrites to a `$ref`.
+      return `${schemasModule}.${info.base}`;
     case "valueObject":
+      // Raw ref — VOs are not published as named components (parity with
+      // Hono/.NET, which inline them).
       return `%OpenApiSpex.Reference{"$ref": "#/components/schemas/${info.base}"}`;
     case "entity":
-      return `%OpenApiSpex.Reference{"$ref": "#/components/schemas/${info.base}Response"}`;
+      // Containment part → its `<Part>Response`, as a module atom so the
+      // part schema is registered in components.
+      return `${schemasModule}.${info.base}Response`;
   }
 }
 
-/** Render a list of fields into OpenApiSpex properties + required list. */
-function renderProperties(fields: Array<{ name: string; type: TypeIR; optional: boolean }>): {
+/** Render a list of fields into OpenApiSpex properties + required list.
+ *  `isRequest` drops non-nullable `bool` fields from the `required` list:
+ *  Phoenix's controller (like Hono's `z.coerce.boolean()` and .NET's
+ *  model-binding) treats an omitted request bool as `false`, so neither
+ *  backend marks request bools required — matching keeps the parity gate
+ *  green. */
+function renderProperties(
+  fields: Array<{ name: string; type: TypeIR; optional: boolean }>,
+  schemasModule: string,
+  isRequest = false,
+): {
   propsLines: string[];
   requiredAtoms: string[];
 } {
@@ -527,9 +596,12 @@ function renderProperties(fields: Array<{ name: string; type: TypeIR; optional: 
   // as `only-phoenix=[created_at,...]`.
   for (const f of fields) {
     const key = f.name;
-    const schema = openApiType(f.type);
+    const schema = openApiType(f.type, schemasModule);
     propsLines.push(`      ${key}: ${schema}`);
-    if (!f.optional) requiredAtoms.push(`:${key}`);
+    const info = wireTypeInfo(f.type, isRequest ? "request" : "response");
+    const optionalBoolRequest =
+      isRequest && !info.isNullable && info.refKind === "primitive" && info.primitive === "bool";
+    if (!f.optional && !optionalBoolRequest) requiredAtoms.push(`:${key}`);
   }
 
   return { propsLines, requiredAtoms };
@@ -546,8 +618,10 @@ function renderSchemaModule(
   moduleName: string,
   schemaTitle: string,
   fields: Array<{ name: string; type: TypeIR; optional: boolean }>,
+  schemasModule: string,
+  isRequest = false,
 ): string {
-  const { propsLines, requiredAtoms } = renderProperties(fields);
+  const { propsLines, requiredAtoms } = renderProperties(fields, schemasModule, isRequest);
   const propsBlock = propsLines.length > 0 ? propsLines.join(",\n") : "      # no properties";
   const requiredBlock = requiredAtoms.length > 0 ? `[${requiredAtoms.join(", ")}]` : "[]";
 
@@ -564,6 +638,31 @@ defmodule ${moduleName} do
 ${propsBlock}
     },
     required: ${requiredBlock}
+  })
+end
+`;
+}
+
+/** RFC 7807 ProblemDetails schema module — the shared error body.  All
+ *  fields optional (matching .NET's framework schema + the Hono zod schema),
+ *  so the cross-backend field/required sets compare equal. */
+function renderProblemDetailsSchema(webModule: string): string {
+  return `# Auto-generated.
+defmodule ${webModule}.Api.Schemas.ProblemDetails do
+  @moduledoc "RFC 7807 problem details — the shared cross-backend error body."
+
+  require OpenApiSpex
+
+  OpenApiSpex.schema(%{
+    title: "ProblemDetails",
+    type: :object,
+    properties: %{
+      type: %OpenApiSpex.Schema{type: :string},
+      title: %OpenApiSpex.Schema{type: :string},
+      status: %OpenApiSpex.Schema{type: :integer},
+      detail: %OpenApiSpex.Schema{type: :string},
+      instance: %OpenApiSpex.Schema{type: :string}
+    }
   })
 end
 `;
@@ -598,7 +697,7 @@ function renderValueObjectSchema(vo: ValueObjectIR, webModule: string): string {
       optional: f.optional,
     }),
   );
-  return renderSchemaModule(moduleName, vo.name, fields);
+  return renderSchemaModule(moduleName, vo.name, fields, `${webModule}.Api.Schemas`);
 }
 
 function renderPartResponseSchema(part: EnrichedEntityPartIR, webModule: string): string {
@@ -608,13 +707,46 @@ function renderPartResponseSchema(part: EnrichedEntityPartIR, webModule: string)
   // actually serves — same contract the .NET / Hono / React backends
   // follow.
   const wireFields = forApiRead(wireShapeFor(part));
-  return renderSchemaModule(moduleName, `${part.name}Response`, wireFieldsToProps(wireFields));
+  return renderSchemaModule(
+    moduleName,
+    `${part.name}Response`,
+    wireFieldsToProps(wireFields),
+    `${webModule}.Api.Schemas`,
+  );
 }
 
 function renderAggregateResponseSchema(agg: EnrichedAggregateIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.${agg.name}Response`;
   const wireFields = forApiRead(wireShapeFor(agg));
-  return renderSchemaModule(moduleName, `${agg.name}Response`, wireFieldsToProps(wireFields));
+  return renderSchemaModule(
+    moduleName,
+    `${agg.name}Response`,
+    wireFieldsToProps(wireFields),
+    `${webModule}.Api.Schemas`,
+  );
+}
+
+/** Create-response schema — `{ id }` only, matching Hono/.NET's
+ *  `Create<Agg>Response`.  The create endpoint returns just the new id. */
+function renderCreateResponseSchema(agg: AggregateIR, webModule: string): string {
+  const moduleName = `${webModule}.Api.Schemas.Create${agg.name}Response`;
+  const idSchema = OPENAPI_ID_VALUE[agg.idValueType] ?? OPENAPI_ID_VALUE.guid;
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc "OpenApiSpex schema for #{__MODULE__}."
+
+  require OpenApiSpex
+
+  OpenApiSpex.schema(%{
+    title: "Create${agg.name}Response",
+    type: :object,
+    properties: %{
+      id: ${idSchema}
+    },
+    required: [:id]
+  })
+end
+`;
 }
 
 function renderAggregateListResponseSchema(agg: AggregateIR, webModule: string): string {
@@ -646,7 +778,13 @@ function renderCreateRequestSchema(agg: AggregateIR, webModule: string): string 
   )
     .filter((f: FieldIR) => !f.optional)
     .map((f: FieldIR) => ({ name: f.name, type: f.type, optional: false }));
-  return renderSchemaModule(moduleName, `Create${agg.name}Request`, fields);
+  return renderSchemaModule(
+    moduleName,
+    `Create${agg.name}Request`,
+    fields,
+    `${webModule}.Api.Schemas`,
+    true,
+  );
 }
 
 function renderOperationRequestSchema(
@@ -664,7 +802,7 @@ function renderOperationRequestSchema(
     }),
   );
   void agg;
-  return renderSchemaModule(moduleName, schemaName, fields);
+  return renderSchemaModule(moduleName, schemaName, fields, `${webModule}.Api.Schemas`, true);
 }
 
 function renderWorkflowRequestSchema(
@@ -680,48 +818,54 @@ function renderWorkflowRequestSchema(
       optional: false,
     }),
   );
-  return renderSchemaModule(moduleName, schemaName, fields);
+  return renderSchemaModule(moduleName, schemaName, fields, `${webModule}.Api.Schemas`, true);
 }
 
+/** The schema module for one element of a view's result list.  Full-form
+ *  views (with declared `output`) get a dedicated `<View>Row`; shorthand
+ *  views reuse the source aggregate's `<Agg>Response`. */
+function viewItemModule(
+  view: import("../../ir/types/loom-ir.js").ViewIR,
+  schemasModule: string,
+): string {
+  return view.output
+    ? `${schemasModule}.${upperFirst(view.name)}Row`
+    : `${schemasModule}.${view.aggregateName}Response`;
+}
+
+/** Full-form view row schema — the named element type (`<View>Row`)
+ *  referenced by the view's list-response wrapper.  Emitted only for
+ *  views with a declared `output`. */
+function renderViewRowSchema(
+  view: import("../../ir/types/loom-ir.js").ViewIR,
+  webModule: string,
+): string {
+  const schemasModule = `${webModule}.Api.Schemas`;
+  const rowName = `${upperFirst(view.name)}Row`;
+  const fields = (view.output?.fields ?? []).map((f: FieldIR) => ({
+    name: f.name,
+    type: f.type,
+    optional: f.optional,
+  }));
+  return renderSchemaModule(`${schemasModule}.${rowName}`, rowName, fields, schemasModule);
+}
+
+/** View list-response wrapper — a bare `array` whose `items` reference the
+ *  element schema MODULE (so OpenApiSpex registers it and rewrites to a
+ *  `$ref`).  This makes the wrapper a structural list-wrapper that the
+ *  conformance harness resolves to `array<element>`, matching Hono/.NET's
+ *  inline array — instead of the old inline-object form that read as a
+ *  Phoenix-only named schema. */
 function renderViewResponseSchema(
   view: import("../../ir/types/loom-ir.js").ViewIR,
   ctx: EnrichedBoundedContextIR,
   webModule: string,
 ): string {
+  void ctx;
+  const schemasModule = `${webModule}.Api.Schemas`;
   const schemaName = `${upperFirst(view.name)}Response`;
-  const moduleName = `${webModule}.Api.Schemas.${schemaName}`;
-
-  let fields: Array<{ name: string; type: TypeIR; optional: boolean }>;
-
-  if (view.output) {
-    // Full-form view: use declared output fields
-    fields = view.output.fields.map((f: FieldIR) => ({
-      name: f.name,
-      type: f.type,
-      optional: f.optional,
-    }));
-  } else {
-    // Shorthand view: use source aggregate's wire shape, filtered
-    // for API exposure — drops `internal` and `secret` fields.
-    const sourceAgg = ctx.aggregates.find((a) => a.name === view.aggregateName);
-    if (sourceAgg) {
-      const wireFields = forApiRead(wireShapeFor(sourceAgg));
-      fields = wireFieldsToProps(wireFields);
-    } else {
-      fields = [];
-    }
-  }
-
-  // View responses are arrays (list queries)
-  const itemSchemaLines = renderProperties(fields);
-  const propsBlock =
-    itemSchemaLines.propsLines.length > 0
-      ? itemSchemaLines.propsLines.join(",\n")
-      : "      # no properties";
-  const requiredBlock =
-    itemSchemaLines.requiredAtoms.length > 0
-      ? `[${itemSchemaLines.requiredAtoms.join(", ")}]`
-      : "[]";
+  const moduleName = `${schemasModule}.${schemaName}`;
+  const itemModule = viewItemModule(view, schemasModule);
 
   return `# Auto-generated.
 defmodule ${moduleName} do
@@ -732,13 +876,7 @@ defmodule ${moduleName} do
   OpenApiSpex.schema(%{
     title: "${schemaName}",
     type: :array,
-    items: %OpenApiSpex.Schema{
-      type: :object,
-      properties: %{
-${propsBlock}
-      },
-      required: ${requiredBlock}
-    }
+    items: ${itemModule}
   })
 end
 `;

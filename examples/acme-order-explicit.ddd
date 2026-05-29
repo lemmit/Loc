@@ -109,7 +109,7 @@ system AcmeOrderExplicit {
         }
     }
 
-    dataSource ordersState { for: Orders, kind: state, use: primarySql }
+    resource ordersState { for: Orders, kind: state, use: primarySql }
 
     deployable api {
         platform: hono

@@ -220,7 +220,7 @@ system StorefrontSystem {
   }
 
   storage primary { type: postgres }
-  dataSource storefrontState { for: Storefront, kind: state, use: primary }
+  resource storefrontState { for: Storefront, kind: state, use: primary }
 
   deployable api {
     platform: hono, contexts: [Storefront],

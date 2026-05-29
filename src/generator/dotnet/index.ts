@@ -15,7 +15,7 @@ import {
   resolveDataSourceConfig,
 } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
-import { plural } from "../../util/naming.js";
+import { plural, upperFirst } from "../../util/naming.js";
 import type { EmitCtx } from "../_adapters/index.js";
 import { generateReactForContexts } from "../react/index.js";
 import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
@@ -45,7 +45,9 @@ import {
   renderId,
   renderJoinEntity,
   renderJoinEntityConfiguration,
+  renderListWrapperFilter,
   renderNoopDispatcher,
+  renderProblemDetailsFilter,
   renderProgram,
   renderRepositoryImpl,
   renderRepositoryInterface,
@@ -228,6 +230,11 @@ function emitProjectFromContexts(
   // arm is gated on the same flag.
   const usesValidators = merged.aggregates.some(hasAnyWireValidator);
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
+  out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
+  out.set(
+    "Api/ListResponseWrapperFilter.cs",
+    renderListWrapperFilter(ns, listWrapperPairs(contexts)),
+  );
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
@@ -279,6 +286,30 @@ function emitProjectFromContexts(
     }
     out.set("ClientApp/.gitignore", "node_modules\ndist\n");
   }
+}
+
+/** Element-schema → named-wrapper pairs for the list-response document
+ *  filter.  Mirrors Hono/Phoenix naming: every aggregate's `<Agg>Response`
+ *  → `<Agg>ListResponse` (also covers shorthand views, which reuse it), and
+ *  each full-form view's `<View>Row` → `<View>Response`. */
+function listWrapperPairs(
+  contexts: readonly EnrichedBoundedContextIR[],
+): Array<{ element: string; wrapper: string }> {
+  const pairs: Array<{ element: string; wrapper: string }> = [];
+  for (const ctx of contexts) {
+    for (const agg of ctx.aggregates) {
+      pairs.push({ element: `${agg.name}Response`, wrapper: `${agg.name}ListResponse` });
+    }
+    for (const view of ctx.views) {
+      if (view.output) {
+        pairs.push({
+          element: `${upperFirst(view.name)}Row`,
+          wrapper: `${upperFirst(view.name)}Response`,
+        });
+      }
+    }
+  }
+  return pairs;
 }
 
 function emitContext(
@@ -533,6 +564,8 @@ function emitInfrastructure(
     renderDbContext(ctx, ns, documentAggNames([ctx])),
   );
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
+  out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
+  out.set("Api/ListResponseWrapperFilter.cs", renderListWrapperFilter(ns, listWrapperPairs([ctx])));
 }
 
 function emitProject(

@@ -1,4 +1,4 @@
-// Unit tests for the per-aggregate dataSource resolver.
+// Unit tests for the per-aggregate resource resolver.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -31,11 +31,11 @@ system Sys {
   }
   storage primary { type: postgres }
   storage events { type: postgres }
-  dataSource ordersState { for: Orders, kind: state, use: primary, schema: "orders" }
-  dataSource ordersEventLog {
+  resource ordersState { for: Orders, kind: state, use: primary, schema: "orders" }
+  resource ordersEventLog {
     for: Orders, kind: eventLog, use: events, schema: "events", tablePrefix: "orders_"
   }
-  dataSource receiptsState { for: Billing, kind: state, use: primary }
+  resource receiptsState { for: Billing, kind: state, use: primary }
   deployable api {
     platform: dotnet
     contexts: [Orders, Billing]
@@ -128,10 +128,10 @@ describe("resolveDataSourceConfig (with implicit defaults)", () => {
     expect(cfg?.schema).toBe("billing");
   });
 
-  it("returns undefined when no dataSource matches (no implicit default)", async () => {
-    // Construct a system whose deployable has no dataSource for the
+  it("returns undefined when no resource matches (no implicit default)", async () => {
+    // Construct a system whose deployable has no resource for the
     // hosted (context, kind) pair.  Resolver returns undefined; emitter
-    // falls back to its pre-dataSource default shape.
+    // falls back to its pre-resource default shape.
     const noDsSrc = `
 system Sys {
   subdomain Sales { context Orders { aggregate Order { name: string } } }
@@ -150,7 +150,7 @@ system Sys {
 system Sys {
   subdomain S { context OrderHistory { aggregate Snapshot { tag: string } } }
   storage primary { type: postgres }
-  dataSource oh { for: OrderHistory, kind: state, use: primary }
+  resource oh { for: OrderHistory, kind: state, use: primary }
   deployable api {
     platform: dotnet, contexts: [OrderHistory], dataSources: [oh], port: 5000
   }
@@ -187,7 +187,7 @@ system Sys {
     workflow doIt() transactional(serializable) { }
   } }
   storage pg { type: postgres }
-  dataSource cState {
+  resource cState {
     for: C, kind: state, use: pg, isolationLevel: readCommitted
   }
   deployable api {
@@ -198,7 +198,7 @@ system Sys {
     expect(resolveWorkflowIsolation(wf, ctx, sys)).toBe("serializable");
   });
 
-  it("falls back to the dataSource isolationLevel when workflow has none", async () => {
+  it("falls back to the resource isolationLevel when workflow has none", async () => {
     const { sys, ctx } = await build(`
 system Sys {
   subdomain M { context C {
@@ -206,7 +206,7 @@ system Sys {
     workflow doIt() transactional { }
   } }
   storage pg { type: postgres }
-  dataSource cState {
+  resource cState {
     for: C, kind: state, use: pg, isolationLevel: repeatableRead
   }
   deployable api {
@@ -217,7 +217,7 @@ system Sys {
     expect(resolveWorkflowIsolation(wf, ctx, sys)).toBe("repeatableRead");
   });
 
-  it("returns undefined when neither workflow nor dataSource sets a level", async () => {
+  it("returns undefined when neither workflow nor resource sets a level", async () => {
     const { sys, ctx } = await build(`
 system Sys {
   subdomain M { context C {
@@ -225,7 +225,7 @@ system Sys {
     workflow doIt() transactional { }
   } }
   storage pg { type: postgres }
-  dataSource cState { for: C, kind: state, use: pg }
+  resource cState { for: C, kind: state, use: pg }
   deployable api {
     platform: dotnet, contexts: [C], dataSources: [cState], port: 5000
   }
@@ -235,8 +235,8 @@ system Sys {
   });
 
   it("only consults the state-kind dataSource, not eventLog/cache/etc.", async () => {
-    // The state-kind dataSource has no isolationLevel; an eventLog
-    // dataSource for the same context does — and is correctly ignored.
+    // The state-kind resource has no isolationLevel; an eventLog
+    // resource for the same context does — and is correctly ignored.
     const { sys, ctx } = await build(`
 system Sys {
   subdomain M { context C {
@@ -245,8 +245,8 @@ system Sys {
     workflow doIt() transactional { }
   } }
   storage pg { type: postgres }
-  dataSource cState { for: C, kind: state, use: pg }
-  dataSource cLog {
+  resource cState { for: C, kind: state, use: pg }
+  resource cLog {
     for: C, kind: eventLog, use: pg, isolationLevel: serializable
   }
   deployable api {
@@ -280,7 +280,7 @@ describe("isDocumentShaped", () => {
 system Sys {
   subdomain M { context C { aggregate A { x: int } } }
   storage pg { type: postgres }
-  dataSource cState { for: C, kind: state, use: pg }
+  resource cState { for: C, kind: state, use: pg }
   deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 5000 }
 }`);
     const a = agg(ctx, "A");
@@ -292,14 +292,14 @@ system Sys {
 system Sys {
   subdomain M { context C { aggregate A shape(document) { x: int } } }
   storage pg { type: postgres }
-  dataSource cState { for: C, kind: state, use: pg }
+  resource cState { for: C, kind: state, use: pg }
   deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 5000 }
 }`);
     const a = agg(ctx, "A");
     expect(isDocumentShaped(a, resolveDataSourceConfig(a, ctx, sys))).toBe(true);
   });
 
-  it("honours the aggregate header even with no dataSource binding at all", async () => {
+  it("honours the aggregate header even with no resource binding at all", async () => {
     const { sys, ctx } = await build(`
 system Sys {
   subdomain M { context C { aggregate A shape(document) { x: int } } }
@@ -316,7 +316,7 @@ system Sys {
 system Sys {
   subdomain M { context C { aggregate A shape(relational) { x: int } } }
   storage pg { type: postgres }
-  dataSource cState { for: C, kind: state, use: pg, shape: document }
+  resource cState { for: C, kind: state, use: pg, shape: document }
   deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 5000 }
 }`);
     const a = agg(ctx, "A");
@@ -328,7 +328,7 @@ system Sys {
 system Sys {
   subdomain M { context C { aggregate A shape(document) { x: int } } }
   storage pg { type: postgres }
-  dataSource cState { for: C, kind: state, use: pg, shape: relational }
+  resource cState { for: C, kind: state, use: pg, shape: relational }
   deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 5000 }
 }`);
     const a = agg(ctx, "A");

@@ -2,7 +2,7 @@
 // do … end` block.
 //
 // Mirrors the sibling dotnet + hono PRs on the third backend: a
-// `dataSource X { for: <ctx>, kind: state, use: <pg>, schema:
+// `resource X { for: <ctx>, kind: state, use: <pg>, schema:
 // "sales" }` clause makes every aggregate's Ash.Resource module
 // declare `schema "sales"` inside its `postgres do … end` block.
 // `tablePrefix` prepends the local table name.
@@ -54,10 +54,10 @@ function resourceFor(files: Map<string, string>, basename: string): string {
   return files.get(path!)!;
 }
 
-describe("dataSource → AshPostgres postgres do block (Phoenix)", () => {
+describe("resource → AshPostgres postgres do block (Phoenix)", () => {
   it("defaults schema to snake(context.name) when DSL omits `schema:`", async () => {
     const files = await generate(
-      baseSystem(`dataSource ordersState { for: Orders, kind: state, use: primary }`),
+      baseSystem(`resource ordersState { for: Orders, kind: state, use: primary }`),
     );
     const r = resourceFor(files, "order.ex");
     expect(r).toContain(`table "orders"`);
@@ -73,7 +73,7 @@ describe("dataSource → AshPostgres postgres do block (Phoenix)", () => {
   it("threads explicit `schema:` into the postgres block", async () => {
     const files = await generate(
       baseSystem(
-        `dataSource ordersState { for: Orders, kind: state, use: primary, schema: "sales" }`,
+        `resource ordersState { for: Orders, kind: state, use: primary, schema: "sales" }`,
       ),
     );
     const r = resourceFor(files, "order.ex");
@@ -88,7 +88,7 @@ describe("dataSource → AshPostgres postgres do block (Phoenix)", () => {
   it("prepends `tablePrefix` and keeps the default ctx schema", async () => {
     const files = await generate(
       baseSystem(
-        `dataSource ordersState { for: Orders, kind: state, use: primary, tablePrefix: "sales_" }`,
+        `resource ordersState { for: Orders, kind: state, use: primary, tablePrefix: "sales_" }`,
       ),
     );
     const r = resourceFor(files, "order.ex");
@@ -102,7 +102,7 @@ describe("dataSource → AshPostgres postgres do block (Phoenix)", () => {
   it("combines schema + tablePrefix when both are set", async () => {
     const files = await generate(
       baseSystem(
-        `dataSource ordersState { for: Orders, kind: state, use: primary, schema: "legacy", tablePrefix: "sales_" }`,
+        `resource ordersState { for: Orders, kind: state, use: primary, schema: "legacy", tablePrefix: "sales_" }`,
       ),
     );
     const r = resourceFor(files, "order.ex");

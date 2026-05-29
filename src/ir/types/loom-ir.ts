@@ -202,8 +202,30 @@ export interface FunctionIR {
   body: ExprIR;
 }
 
+/** Lifecycle kind of an aggregate action (lifecycle-operations.md).
+ * `mutate` is today's `operation` keyword; `create` / `destroy` are the
+ * factory / terminator keywords.  The kind tag — not the body syntax —
+ * carries the lifecycle asymmetry; bodies are identical across kinds. */
+export type OperationKind = "create" | "mutate" | "destroy";
+
 export interface OperationIR {
   name: string;
+  /** Lifecycle kind discriminator.  Absent ⇒ `"mutate"` (the legacy
+   * `operation` keyword and every pre-lifecycle IR literal).
+   * `agg.operations` only ever holds `"mutate"` actions; `"create"` /
+   * `"destroy"` actions live in `agg.creates` / `agg.destroys`. */
+  kind?: OperationKind;
+  /** True for an unnamed canonical `create(...)` / `destroy { }`.  The
+   * synthesised `name` is then the keyword itself (`"create"` /
+   * `"destroy"`).  Drives the bare-collection-URL route slug derived in
+   * Phase 2 (`urlStyle` enrichment).  Only meaningful on create/destroy. */
+  canonical?: boolean;
+  /** HTTP path segment for this action, derived in enrichment from the
+   * surfacing api's `urlStyle` (D-URLSTYLE).  `undefined` ⇒ a canonical
+   * action ⇒ the bare collection / canonical-id URL.  Otherwise the
+   * action `name` (`urlStyle: literal`) or its plural (`resource`).
+   * Consumed by Phase-3 route emitters; no backend reads it yet. */
+  routeSlug?: string;
   visibility: "public" | "private";
   params: ParamIR[];
   statements: StmtIR[];
@@ -272,7 +294,24 @@ export interface AggregateIR {
   derived: DerivedIR[];
   invariants: InvariantIR[];
   functions: FunctionIR[];
+  /** Mutate-kind actions only (the legacy `operation` keyword).
+   * `create` / `destroy` actions are intentionally NOT here — they live
+   * in `creates` / `destroys` so the ~50 existing operation consumers
+   * (route emitters, OpenAPI, page-objects, …) keep seeing only
+   * mutate-style endpoints until per-kind emission lands (Phase 3). */
   operations: OperationIR[];
+  /** `kind: "create"` lifecycle factory actions.  Populated by lowering;
+   * empty array when the aggregate declares none.  Not yet consumed by
+   * backends (Phase 3). */
+  creates?: OperationIR[];
+  /** `kind: "destroy"` lifecycle terminator actions.  Populated by
+   * lowering; empty array when none. */
+  destroys?: OperationIR[];
+  /** The single unnamed canonical `create`, if declared, else null.
+   * Convenience accessor over `creates`. */
+  canonicalCreate?: OperationIR | null;
+  /** The single unnamed canonical `destroy`, if declared, else null. */
+  canonicalDestroy?: OperationIR | null;
   parts: EntityPartIR[];
   tests: TestIR[];
   /** Canonical JSON-on-the-wire field list.  Populated by
@@ -661,6 +700,14 @@ export type EnrichedSubdomainIR = Omit<SubdomainIR, "contexts"> & {
 
 export type EnrichedSystemIR = Omit<SystemIR, "subdomains"> & {
   subdomains: EnrichedSubdomainIR[];
+  /** Derived logical needs, one per `(context, required kind)` — the
+   *  implicit "need" layer (RFC §3.3).  Populated by `enrichLoomModel`. */
+  needs: NeedIR[];
+  /** Resolved default access interface per resource name (RFC §3.5),
+   *  derived from the resource's sourceType + kind.  A consuming
+   *  operation may override it once the consumption surface exists
+   *  (Phase 4); until then this is the per-resource default. */
+  resourceInterfaces: Record<string, LoomInterface>;
 };
 
 // ---------------------------------------------------------------------------
@@ -883,6 +930,9 @@ export interface StorageIR {
    *  `secret(handle)` for a future secrets-manager binding, or
    *  `literal("…")` for a hard-coded URL.  Optional in v1. */
   connection?: ConnectionSourceIR;
+  /** Generic vendor-parameter map (region, bucket, vhost, …), validated
+   *  per sourceType against the registry config schema. */
+  config?: readonly ConfigEntryIR[];
 }
 
 export type ConnectionSourceIR =
@@ -890,6 +940,19 @@ export type ConnectionSourceIR =
   | { kind: "env"; env: string }
   | { kind: "secret"; secret: string }
   | { kind: "literal"; literal: string };
+
+/** A single generic `config` entry value (RFC §3.1/§8) — a typed scalar
+ *  so the registry's per-sourceType config schema can validate it. */
+export type ConfigValueIR =
+  | { kind: "string"; value: string }
+  | { kind: "int"; value: number }
+  | { kind: "bool"; value: boolean };
+
+/** One `key: value` pair from a `config { … }` map, in declaration order. */
+export interface ConfigEntryIR {
+  key: string;
+  value: ConfigValueIR;
+}
 
 export type StorageKind =
   | "postgres"
@@ -901,7 +964,10 @@ export type StorageKind =
   | "meilisearch"
   | "kafka"
   | "clickhouse"
-  | "bigquery";
+  | "bigquery"
+  | "awsS3"
+  | "rabbitmq"
+  | "restApi";
 
 /** System-level `theme { ... }` block.  Tokens are semantic so the
  *  same source applies to whatever target the React generator
@@ -1025,6 +1091,11 @@ export interface ApiIR {
   name: string;
   /** Source module the api derives its surface from. */
   sourceModule: string;
+  /** URL slug style for lifecycle actions surfaced by this api.
+   *  `"literal"` (default) emits the action name verbatim; `"resource"`
+   *  pluralises it.  Drives `OperationIR.routeSlug` derivation in
+   *  enrichment (D-URLSTYLE / lifecycle-operations.md Phase 2). */
+  urlStyle: "literal" | "resource";
 }
 
 /** UI api parameter — local handle + which api it expects. */
@@ -1264,9 +1335,40 @@ export interface DataSourceIR {
    *  aggregate header's `shape(…)` (see {@link SavingShape} /
    *  {@link effectiveSavingShape}).  Omitted → the header decides. */
   shape?: SavingShape;
+  /** Generic vendor-parameter map for the binding (RFC §3.2). */
+  config?: readonly ConfigEntryIR[];
 }
 
-export type DataSourceKind = "state" | "eventLog" | "snapshot" | "cache" | "replica";
+export type DataSourceKind =
+  | "state"
+  | "eventLog"
+  | "snapshot"
+  | "cache"
+  | "replica"
+  | "objectStore"
+  | "queue"
+  | "api";
+
+/** Access mode used to reach a source in a given context (RFC §3.5).
+ *  Owned here (the IR vocabulary); the sourceType registry declares
+ *  which interfaces each `(sourceType, kind)` exposes. */
+export type LoomInterface = "sql" | "rest" | "graphql" | "webSocket" | "amqp" | "sdk";
+
+/** A derived, implicit logical *need*: what a bounded context requires
+ *  of its data layer, independent of the technology that satisfies it
+ *  (RFC §3.3).  Needs are not authored — they are derived during
+ *  enrichment from how the context's aggregates persist, and threaded
+ *  onto `EnrichedSystemIR.needs`.  A `resource` binding satisfies a need
+ *  when its `sourceType` supports the need's `kind` and offers all the
+ *  need's `capabilities` (validated in IR; RFC §5). */
+export interface NeedIR {
+  /** The bounded context that has the need. */
+  contextName: string;
+  /** The required (surface) kind — the `(context, kind)` routing key. */
+  kind: DataSourceKind;
+  /** Capabilities the context requires within that kind. */
+  capabilities: readonly string[];
+}
 
 // `static` is the page-metamodel's UI-only deployable kind: builds a
 // Vite bundle and serves it via a small static-asset host (nginx in
