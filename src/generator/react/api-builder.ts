@@ -169,6 +169,24 @@ export function buildApiModule(
   lines.push(`}`);
   lines.push("");
 
+  // useDelete<Agg> — canonical hard delete (DELETE /<tag>/{id}).  Gated on
+  // the IR lifecycle: emitted only when the aggregate has a canonical
+  // `destroy` (declared or via `crudish`), so plain aggregates' API modules
+  // are unchanged.  Pairs with the `api.delete` helper, which the shell
+  // emits under the same condition.
+  if (agg.canonicalDestroy) {
+    lines.push(`export function useDelete${agg.name}() {`);
+    lines.push(`  const qc = useQueryClient();`);
+    lines.push(`  return useMutation({`);
+    lines.push(`    mutationFn: async (id: string) => {`);
+    lines.push(`      await api.delete(\`/${tag}/\${id}\`);`);
+    lines.push(`    },`);
+    lines.push(`    onSuccess: () => qc.invalidateQueries({ queryKey: ${aggKey} }),`);
+    lines.push(`  });`);
+    lines.push(`}`);
+    lines.push("");
+  }
+
   // use<Op><Agg> — one per public operation.
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     // URL segment from routeSlug (D-URLSTYLE); the hook name + request
