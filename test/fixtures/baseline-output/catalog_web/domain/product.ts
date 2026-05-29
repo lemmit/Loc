@@ -23,6 +23,12 @@ export class Product {
   get inspect(): string { return "Product(" + "id: " + String(this._id) + ", " + "sku: " + "'" + this._sku + "'" + ", " + "price: " + "Money(" + "amount: " + String(this._price.amount) + ", " + "currency: " + "'" + this._price.currency + "'" + ")" + ")"; }
   toString(): string { return this.inspect; }
   [Symbol.for("nodejs.util.inspect.custom")](): string { return this.inspect; }
+  public update(sku: string, price: string): void {
+    this._sku = sku;
+    this._price = price;
+    this._assertInvariants();
+  }
+
   pullEvents(): Events.DomainEvent[] {
     const out = this._events;
     this._events = [];

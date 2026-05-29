@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import type { Page, Locator } from "@playwright/test";
 import { expect } from "@playwright/test";
-import type { CreateOrderRequest, AddLineRequest, OrderResponse } from "../../src/api/order";
+import type { CreateOrderRequest, AddLineRequest, UpdateRequest, OrderResponse } from "../../src/api/order";
 
 export class OrderListPage {
   static readonly url = "/orders";
@@ -122,6 +122,25 @@ export class OrderDetailPage {
     await this.page.getByTestId("orders-op-confirm").click();
     await this.page.getByTestId("orders-op-confirm-submit").click();
     await this.page.getByTestId("orders-op-confirm-form").waitFor({ state: "detached" });
+    await this.page.waitForLoadState("networkidle");
+    return this;
+  }
+
+  /** update — opens the modal, fills the form, submits. */
+  async update(input: UpdateRequest): Promise<this> {
+    await this.page.getByTestId("orders-op-update").click();
+    await this.page.getByTestId("orders-op-update-form").waitFor();
+    if (input.customerId !== undefined) {
+      await this.page.getByTestId("orders-op-update-input-customerId").fill(input.customerId!);
+    }
+    if (input.status !== undefined) {
+      await this.page.getByTestId("orders-op-update-input-status").fill(input.status!);
+    }
+    if (input.placedAt !== undefined) {
+      await this.page.getByTestId("orders-op-update-input-placedAt").fill(input.placedAt!.slice(0, 19));
+    }
+    await this.page.getByTestId("orders-op-update-submit").click();
+    await this.page.getByTestId("orders-op-update-form").waitFor({ state: "detached" });
     await this.page.waitForLoadState("networkidle");
     return this;
   }

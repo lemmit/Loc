@@ -17,6 +17,10 @@ const CreateProductRequest = z.object({
 }).openapi("CreateProductRequest");
 const CreateProductResponse = z.object({ id: z.string() }).openapi("CreateProductResponse");
 
+const UpdateRequest = z.object({
+  sku: z.string(),
+  price: z.string(),
+}).openapi("UpdateRequest");
 
 const BySkuQuery = z.object({
   sku: z.string(),
@@ -76,6 +80,61 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       const found = await repo.findById(Ids.ProductId(id));
       if (!found) throw new AggregateNotFoundError("not_found");
       return c.json(repo.toWire(found) as z.infer<typeof ProductResponse>, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "delete",
+      path: "/{id}",
+      tags: ["products"],
+      operationId: "destroyProduct",
+      request: { params: z.object({ id: z.string().uuid() }) },
+      responses: {
+        204: { description: "No Content" },
+        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
+        409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },
+      },
+    }),
+    async (c) => {
+      const { id } = c.req.valid("param");
+      await repo.getById(Ids.ProductId(id));
+      try {
+        await repo.delete(Ids.ProductId(id));
+      } catch (err) {
+        if (err && typeof err === "object" && (err as { code?: string }).code === "23503") {
+          return c.body(JSON.stringify({ type: "about:blank", title: "Conflict", status: 409, detail: "Product is still referenced and cannot be deleted.", instance: c.req.path }), 409, { "content-type": "application/problem+json" });
+        }
+        throw err;
+      }
+      return c.body(null, 204);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/{id}/update",
+      tags: ["products"],
+      operationId: "updateProduct",
+      request: {
+        params: z.object({ id: z.string().uuid() }),
+        body: { content: { "application/json": { schema: UpdateRequest } } },
+      },
+      responses: {
+        204: { description: "No content" },
+        400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
+        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
+      },
+    }),
+    async (c) => {
+      const { id } = c.req.valid("param");
+      const body = c.req.valid("json");
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "operation_invoked", aggregate: "Product", op: "update", id });
+      const aggregate = await repo.getById(Ids.ProductId(id));
+      aggregate.update(body.sku, body.price);
+      await repo.save(aggregate);
+      return c.body(null, 204);
     },
   );
 

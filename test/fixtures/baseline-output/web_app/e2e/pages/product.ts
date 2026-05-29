@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import type { Page, Locator } from "@playwright/test";
 import { expect } from "@playwright/test";
-import type { CreateProductRequest, ProductResponse } from "../../src/api/product";
+import type { CreateProductRequest, UpdateRequest, ProductResponse } from "../../src/api/product";
 
 export class ProductListPage {
   static readonly url = "/products";
@@ -80,6 +80,22 @@ export class ProductDetailPage {
   /** Locator for a primitive / enum field's value cell. */
   field<K extends keyof ProductResponse>(name: K): Locator {
     return this.page.getByTestId(`products-detail-${String(name)}`);
+  }
+
+  /** update — opens the modal, fills the form, submits. */
+  async update(input: UpdateRequest): Promise<this> {
+    await this.page.getByTestId("products-op-update").click();
+    await this.page.getByTestId("products-op-update-form").waitFor();
+    if (input.sku !== undefined) {
+      await this.page.getByTestId("products-op-update-input-sku").fill(input.sku!);
+    }
+    if (input.price !== undefined) {
+      await this.page.getByTestId("products-op-update-input-price").fill(input.price!);
+    }
+    await this.page.getByTestId("products-op-update-submit").click();
+    await this.page.getByTestId("products-op-update-form").waitFor({ state: "detached" });
+    await this.page.waitForLoadState("networkidle");
+    return this;
   }
 
 }

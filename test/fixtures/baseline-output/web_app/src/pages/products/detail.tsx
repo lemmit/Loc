@@ -1,12 +1,56 @@
 // Auto-generated.  Do not edit by hand.
 import { useParams, Link as RouterLink } from "react-router";
+import { UpdateRequest, useUpdateProduct } from "../../api/product";
 import { KeyValueRow } from "../../lib/format";
-import { Alert, Anchor, Breadcrumbs, Card, Group, Skeleton, Stack, Text, Title } from "@mantine/core";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Alert, Anchor, Breadcrumbs, Button, Card, Group, Skeleton, Stack, Text, TextInput, Title } from "@mantine/core";
+import { modals } from "@mantine/modals";
+import { notifications } from "@mantine/notifications";
+import { useForm } from "react-hook-form";
 import { useProductById } from "../../api/product";
+function openUpdateModal(mut: ReturnType<typeof useUpdateProduct>): void {
+  modals.open({
+    title: "Update",
+    children: <UpdateForm mut={mut} onClose={() => modals.closeAll()} />,
+  });
+}
+
+function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateProduct>; onClose: () => void }) {
+  const { register, handleSubmit, formState: { errors } } = useForm<UpdateRequest>({
+    resolver: zodResolver(UpdateRequest),
+    defaultValues: { sku: "", price: "" },
+  });
+  return (
+    <form
+      data-testid="products-op-update-form"
+      onSubmit={handleSubmit(async (vals) => {
+        try {
+          await mut.mutateAsync(vals);
+          notifications.show({ color: "green", message: "Update succeeded" });
+          onClose();
+        } catch (e) {
+          notifications.show({ color: "red", message: (e as Error).message });
+        }
+      })}
+    >
+      <Stack>
+        <TextInput label="Sku" {...register("sku")} data-testid="products-op-update-input-sku" error={errors.sku?.message} />
+
+        <TextInput label="Price" {...register("price")} data-testid="products-op-update-input-price" error={errors.price?.message} />
+
+        <Group justify="flex-end" mt="sm">
+          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mut.isPending} data-testid="products-op-update-submit">Update</Button>
+        </Group>
+      </Stack>
+    </form>
+  );
+}
 
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
   const productById = useProductById(id);
+  const update = useUpdateProduct(id ?? "");
   return (
     <Stack data-testid="products-detail">
       <Breadcrumbs>
@@ -39,7 +83,10 @@ export default function ProductDetail() {
           </Card>
         ) }
       </>
-      <Group />
+      <Group>
+        <Button variant="filled" onClick={() => openUpdateModal(update)} data-testid="products-op-update">Update</Button>
+    
+      </Group>
     </Stack>
   );
 }

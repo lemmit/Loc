@@ -20,6 +20,12 @@ export type AddLineRequest = z.infer<typeof AddLineRequest>;
 export const ConfirmRequest = z.object({
 });
 export type ConfirmRequest = z.infer<typeof ConfirmRequest>;
+export const UpdateRequest = z.object({
+  customerId: z.string(),
+  status: z.string(),
+  placedAt: z.string(),
+});
+export type UpdateRequest = z.infer<typeof UpdateRequest>;
 
 export const ByCustomerQuery = z.object({
   customerId: z.string(),
@@ -75,6 +81,16 @@ export function useCreateOrder() {
   });
 }
 
+export function useDeleteOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/orders/${id}`);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
+  });
+}
+
 export function useAddLineOrder(id: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -93,6 +109,19 @@ export function useConfirmOrder(id: string) {
   return useMutation({
     mutationFn: async (input: ConfirmRequest) => {
       await api.post(`/orders/${id}/confirm`, input);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["orders", id] });
+      qc.invalidateQueries({ queryKey: ["orders"] });
+    },
+  });
+}
+
+export function useUpdateOrder(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: UpdateRequest) => {
+      await api.post(`/orders/${id}/update`, input);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["orders", id] });

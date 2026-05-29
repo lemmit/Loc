@@ -56,6 +56,10 @@ export class CustomerRepository {
     }
   }
 
+  async delete(id: Ids.CustomerId): Promise<void> {
+    await this.db.delete(schema.customers).where(eq(schema.customers.id, id));
+  }
+
   async all(): Promise<Customer[]> {
     const rootRows = await this.db.select().from(schema.customers);
     if (rootRows.length === 0) {

@@ -48,6 +48,23 @@ public sealed class OrdersController : ControllerBase
         return response is null ? NotFound() : Ok(response);
     }
 
+    [HttpDelete("{id}")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
+    [ProducesResponseType(typeof(ProblemDetails), 409)]
+    public async Task<IActionResult> DestroyOrder([FromRoute] Guid id)
+    {
+        try
+        {
+            await _mediator.Send(new DestroyOrderCommand(new OrderId(id)));
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            return Conflict(new ProblemDetails { Title = "Conflict", Status = 409, Detail = "Order is still referenced and cannot be deleted." });
+        }
+        return NoContent();
+    }
+
     [HttpPost("{id}/add_line")]
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
@@ -73,6 +90,23 @@ public sealed class OrdersController : ControllerBase
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "confirm", id);
         var cmd = new ConfirmCommand(
             new OrderId(id)
+        );
+        await _mediator.Send(cmd);
+        return NoContent();
+    }
+
+    [HttpPost("{id}/update")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
+    public async Task<IActionResult> UpdateOrder([FromRoute] Guid id, [FromBody] UpdateRequest request)
+    {
+        _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "update", id);
+        var cmd = new UpdateCommand(
+            new OrderId(id),
+            request.CustomerId,
+            request.Status,
+            DateTime.Parse(request.PlacedAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)
         );
         await _mediator.Send(cmd);
         return NoContent();
