@@ -92,7 +92,6 @@ export type DddKeywordNames =
     | "env"
     | "event"
     | "eventLog"
-    | "eventSourced"
     | "events"
     | "every"
     | "expect"
@@ -150,7 +149,7 @@ export type DddKeywordNames =
     | "page"
     | "parent"
     | "permissions"
-    | "persistenceStrategy"
+    | "persistedAs"
     | "phoenixLiveView"
     | "platform"
     | "port"
@@ -188,7 +187,6 @@ export type DddKeywordNames =
     | "sqlite"
     | "stamp"
     | "state"
-    | "stateBased"
     | "static"
     | "storage"
     | "string"
@@ -400,12 +398,6 @@ export function isPageProp(item: unknown): item is PageProp {
     return reflection.isInstance(item, PageProp);
 }
 
-export type PersistenceStrategy = 'eventSourced' | 'stateBased';
-
-export function isPersistenceStrategy(item: unknown): item is PersistenceStrategy {
-    return item === 'stateBased' || item === 'eventSourced';
-}
-
 export type Platform = 'dotnet' | 'hono' | 'phoenixLiveView' | 'react' | 'static' | string;
 
 export function isPlatform(item: unknown): item is Platform {
@@ -488,6 +480,12 @@ export function isTraceId(item: unknown): item is TraceId {
     return (typeof item === 'string' && (/[A-Za-z][A-Za-z0-9]*(-[A-Za-z0-9]+)*-[0-9]+/.test(item) || /[_a-zA-Z][\w_]*/.test(item)));
 }
 
+export type TruthKind = 'eventLog' | 'state';
+
+export function isTruthKind(item: unknown): item is TruthKind {
+    return item === 'eventLog' || item === 'state';
+}
+
 export type UiMember = Component | MenuBlock | Page | UiApiParam | UiHelperImport;
 
 export const UiMember = 'UiMember';
@@ -516,7 +514,7 @@ export interface Aggregate extends AstNode {
     idKind?: IdKind;
     members: Array<AggregateMember>;
     name: string;
-    persistenceStrategy?: PersistenceStrategy;
+    persistedAs?: TruthKind;
     withClause?: WithClause;
 }
 
@@ -2525,7 +2523,7 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'idKind' },
                         { name: 'members', defaultValue: [] },
                         { name: 'name' },
-                        { name: 'persistenceStrategy' },
+                        { name: 'persistedAs' },
                         { name: 'withClause' }
                     ]
                 };

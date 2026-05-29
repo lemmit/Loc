@@ -30,9 +30,10 @@ import type {
   WorkflowIR,
 } from "../types/loom-ir.js";
 
-/** The dataSource kind an aggregate's persistence strategy reads from. */
+/** The dataSource kind an aggregate's truth kind reads from.  Identity:
+ *  `persistedAs(…)` values are the `kind` names (default `state`). */
 export function dataSourceKindForAggregate(agg: EnrichedAggregateIR): DataSourceKind {
-  return agg.persistenceStrategy === "eventSourced" ? "eventLog" : "state";
+  return agg.persistedAs ?? "state";
 }
 
 /** Find the dataSource binding for an aggregate within its bounded

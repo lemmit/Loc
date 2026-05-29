@@ -60,7 +60,7 @@ describe("ash StyleAdapter — phoenixLiveView (real)", () => {
   });
 
   it("answers capability fields directly", () => {
-    expect(ashStyleAdapter.supportedStrategies).toEqual(["stateBased"]);
+    expect(ashStyleAdapter.supportedStrategies).toEqual(["state"]);
     expect(ashStyleAdapter.supportedLayouts).toEqual(["byFeature"]);
   });
 

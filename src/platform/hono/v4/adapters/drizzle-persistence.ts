@@ -58,11 +58,11 @@ const persistenceDevDeps = (): Lines => [
 
 export const drizzlePersistenceAdapter: PersistenceAdapter = {
   name: "drizzle",
-  supportedStrategies: ["stateBased"],
+  supportedStrategies: ["state"],
 
   supports(storageType, kind, persistenceStrategy) {
     return (
-      persistenceStrategy === "stateBased" &&
+      persistenceStrategy === "state" &&
       ["postgres", "mysql", "sqlite"].includes(storageType) &&
       ["state", "snapshot", "replica"].includes(kind)
     );

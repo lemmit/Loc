@@ -23,14 +23,14 @@ describe("stubAdapter", () => {
       },
       {
         name: "dapper",
-        supportedStrategies: ["stateBased"],
+        supportedStrategies: ["state"],
         supports: (type) => type === "postgres",
       },
     );
     expect(stub.name).toBe("dapper");
-    expect(stub.supportedStrategies).toEqual(["stateBased"]);
-    expect(stub.supports("postgres", "state", "stateBased")).toBe(true);
-    expect(stub.supports("redis", "state", "stateBased")).toBe(false);
+    expect(stub.supportedStrategies).toEqual(["state"]);
+    expect(stub.supports("postgres", "state", "state")).toBe(true);
+    expect(stub.supports("redis", "state", "state")).toBe(false);
     // realImplementations() is only invoked on a throwing `emit*` call.
     expect(listed).toBe(0);
   });
@@ -43,7 +43,7 @@ describe("stubAdapter", () => {
       () => ["efcore", "marten"],
       {
         name: "dapper",
-        supportedStrategies: ["stateBased"],
+        supportedStrategies: ["state"],
         supports: () => true,
       },
     );
@@ -63,7 +63,7 @@ describe("stubAdapter", () => {
       "dapper",
       "dotnet",
       () => ["marten", "efcore"], // intentionally unsorted
-      { name: "dapper", supportedStrategies: ["stateBased"], supports: () => false },
+      { name: "dapper", supportedStrategies: ["state"], supports: () => false },
     );
     try {
       stub.emitProjectDeps({} as never);
@@ -82,7 +82,7 @@ describe("stubAdapter", () => {
   it("falls back to 'No implementations…' when the sibling list is empty", () => {
     const stub = stubAdapter<StyleAdapter>("style", "fancy", "phoenixLiveView", () => [], {
       name: "fancy",
-      supportedStrategies: ["stateBased"],
+      supportedStrategies: ["state"],
       supportedLayouts: ["byFeature"],
     });
     try {

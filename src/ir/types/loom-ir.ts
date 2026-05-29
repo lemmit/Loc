@@ -325,16 +325,21 @@ export interface AggregateIR {
    * debug-string emitters (TS `toString()`/`util.inspect.custom`,
    * C# `ToString()` override, Elixir `defimpl Inspect`). */
   inspectDerived?: DerivedIR;
-  /** Persistence strategy declared on the aggregate.  Drives the
-   * `dataSource` kind required by the enclosing context: `stateBased`
-   * → `kind: state`; `eventSourced` → `kind: eventLog`.  Omitted in
-   * the IR when not declared in source (default is `stateBased` at
-   * resolution time, but the IR preserves source fidelity for the
-   * AST → IR → printer round-trip). */
-  persistenceStrategy?: PersistenceStrategy;
+  /** Primary truth kind declared on the aggregate's header via the
+   * `persistedAs(…)` modifier (D-DOCUMENT-AXIS; replaces the former
+   * body `persistenceStrategy:` clause).  Values align to the
+   * `dataSource` `kind` set — `state` → `kind: state`, `eventLog` →
+   * `kind: eventLog` — so `resolve-datasource.ts` is an identity.
+   * Omitted in the IR when not declared in source (default `state`);
+   * the IR preserves source fidelity for the AST → IR → printer
+   * round-trip. */
+  persistedAs?: PersistenceStrategy;
 }
 
-export type PersistenceStrategy = "stateBased" | "eventSourced";
+/** The aggregate's primary truth kind.  Named to match the
+ *  `dataSource` `kind` vocabulary (`state` / `eventLog`); surfaced in
+ *  source as `persistedAs(state | eventLog)`. */
+export type PersistenceStrategy = "state" | "eventLog";
 
 /** A single stamping rule attached to an aggregate.  Backends
  * dispatch on `event` and emit assignments for the matching

@@ -847,7 +847,7 @@ function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): voi
           severity: "error",
           message:
             `Deployable '${dep.name}' hosts aggregate '${ctxName}.${agg.name}' ` +
-            `(persistenceStrategy: ${agg.persistenceStrategy ?? "stateBased"}, ` +
+            `(persistedAs: ${agg.persistedAs ?? "state"}, ` +
             `needs dataSource kind: ${kind}) but lists no matching dataSource. ` +
             `Declare ` +
             `\`dataSource ${lowerFirst(ctxName)}${kind === "state" ? "State" : "EventLog"} ` +
@@ -885,7 +885,7 @@ function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): voi
         message:
           `Deployable '${dep.name}' lists dataSource '${ds.name}' (kind: ${ds.kind}) for ` +
           `context '${ds.contextName}', but ${reason}.  This binding routes no data — ` +
-          `remove it, or add an aggregate whose persistenceStrategy needs kind: ${ds.kind}.`,
+          `remove it, or add an aggregate whose persistedAs needs kind: ${ds.kind}.`,
         source: `${sys.name}/${dep.name}`,
       });
     }
@@ -906,13 +906,13 @@ function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): voi
 function coverageGapReason(kind: string, ctx: BoundedContextIR): string | undefined {
   const aggs = ctx.aggregates;
   if (aggs.length === 0) return "the context declares no aggregates";
-  const hasState = aggs.some((a) => (a.persistenceStrategy ?? "stateBased") === "stateBased");
-  const hasES = aggs.some((a) => a.persistenceStrategy === "eventSourced");
+  const hasState = aggs.some((a) => (a.persistedAs ?? "state") === "state");
+  const hasES = aggs.some((a) => a.persistedAs === "eventLog");
   if (kind === "state" && !hasState) {
-    return "every aggregate is eventSourced (none need kind: state persistence)";
+    return "every aggregate is persistedAs(eventLog) (none need kind: state persistence)";
   }
   if ((kind === "eventLog" || kind === "snapshot") && !hasES) {
-    return "no aggregate is eventSourced (kind: " + kind + " has no event stream to back)";
+    return "no aggregate is persistedAs(eventLog) (kind: " + kind + " has no event stream to back)";
   }
   // cache / replica only require at least one aggregate, already
   // checked above.

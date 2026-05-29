@@ -64,7 +64,7 @@ describe("cqrs StyleAdapter — dotnet (real)", () => {
   });
 
   it("answers capability fields directly", () => {
-    expect(cqrsStyleAdapter.supportedStrategies).toEqual(["stateBased", "eventSourced"]);
+    expect(cqrsStyleAdapter.supportedStrategies).toEqual(["state", "eventLog"]);
     expect(cqrsStyleAdapter.supportedLayouts).toEqual(["byLayer", "byFeature"]);
   });
 

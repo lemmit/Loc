@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Aggregate, Model } from "../../../src/language/generated/ast.js";
 
-describe("aggregate persistenceStrategy", () => {
+describe("aggregate persistedAs (truth kind, D-DOCUMENT-AXIS)", () => {
   async function parse(src: string) {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
@@ -21,33 +21,44 @@ describe("aggregate persistenceStrategy", () => {
     return agg as Aggregate;
   }
 
-  it("parses stateBased", async () => {
+  it("parses persistedAs(state) on the header", async () => {
     const { model, errors } = await parse(`
       context T {
-        aggregate Order {
-          persistenceStrategy: stateBased
+        aggregate Order persistedAs(state) {
           name: string
         }
       }
     `);
     expect(errors).toEqual([]);
-    expect(firstAgg(model).persistenceStrategy).toBe("stateBased");
+    expect(firstAgg(model).persistedAs).toBe("state");
   });
 
-  it("parses eventSourced", async () => {
+  it("parses persistedAs(eventLog) on the header", async () => {
     const { model, errors } = await parse(`
       context T {
-        aggregate Order {
-          persistenceStrategy: eventSourced
+        aggregate Order persistedAs(eventLog) {
           name: string
         }
       }
     `);
     expect(errors).toEqual([]);
-    expect(firstAgg(model).persistenceStrategy).toBe("eventSourced");
+    expect(firstAgg(model).persistedAs).toBe("eventLog");
   });
 
-  it("omits persistenceStrategy when not declared", async () => {
+  it("coexists with ids and a with-clause in header order (ids, persistedAs, with)", async () => {
+    const { model, errors } = await parse(`
+      context T {
+        aggregate Order ids guid persistedAs(eventLog) {
+          name: string
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+    expect(firstAgg(model).persistedAs).toBe("eventLog");
+    expect(firstAgg(model).idKind).toBe("guid");
+  });
+
+  it("omits persistedAs when not declared (defaults to state at resolution)", async () => {
     const { model, errors } = await parse(`
       context T {
         aggregate Order {
@@ -56,14 +67,25 @@ describe("aggregate persistenceStrategy", () => {
       }
     `);
     expect(errors).toEqual([]);
-    expect(firstAgg(model).persistenceStrategy).toBeUndefined();
+    expect(firstAgg(model).persistedAs).toBeUndefined();
   });
 
-  it("rejects an unknown strategy value", async () => {
+  it("rejects an unknown truth-kind value", async () => {
+    const { errors } = await parse(`
+      context T {
+        aggregate Order persistedAs(nonsense) {
+          name: string
+        }
+      }
+    `);
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it("rejects the removed body `persistenceStrategy:` clause (hard cutover)", async () => {
     const { errors } = await parse(`
       context T {
         aggregate Order {
-          persistenceStrategy: nonsense
+          persistenceStrategy: eventSourced
           name: string
         }
       }

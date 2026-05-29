@@ -41,7 +41,7 @@ const realSiblings = (): readonly string[] => ["ash"];
 
 export const ashStyleAdapter: StyleAdapter = {
   name: "ash",
-  supportedStrategies: ["stateBased"],
+  supportedStrategies: ["state"],
   supportedLayouts: ["byFeature"],
 
   emitEndpoint(_op: OperationIR, _ctx: EmitCtx): Lines {

@@ -81,9 +81,9 @@ const dotnetPlatform: PlatformSurface = {
           () => Object.keys(menu.persistence),
           {
             name: "dapper",
-            supportedStrategies: ["stateBased"],
+            supportedStrategies: ["state"],
             supports: (type, kind, strategy) =>
-              strategy === "stateBased" &&
+              strategy === "state" &&
               ["postgres", "mysql", "sqlite"].includes(type) &&
               ["state", "snapshot", "replica"].includes(kind),
           },
@@ -95,7 +95,7 @@ const dotnetPlatform: PlatformSurface = {
           () => Object.keys(menu.persistence),
           {
             name: "marten",
-            supportedStrategies: ["stateBased", "eventSourced"],
+            supportedStrategies: ["state", "eventLog"],
             supports: (type) => type === "postgres",
           },
         ),
@@ -109,7 +109,7 @@ const dotnetPlatform: PlatformSurface = {
           () => Object.keys(menu.styles),
           {
             name: "layered",
-            supportedStrategies: ["stateBased"],
+            supportedStrategies: ["state"],
             supportedLayouts: ["byLayer"],
           },
         ),
@@ -129,7 +129,7 @@ const dotnetPlatform: PlatformSurface = {
   },
   adapterDefaults(): PlatformAdapterDefaults {
     return {
-      persistence: { stateBased: "efcore", eventSourced: "marten" },
+      persistence: { state: "efcore", eventLog: "marten" },
       style: "cqrs",
       layout: "byLayer",
     };

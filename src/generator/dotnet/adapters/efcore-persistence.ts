@@ -40,11 +40,11 @@ const splitLines = (s: string): Lines => s.split("\n");
 
 export const efcorePersistenceAdapter: PersistenceAdapter = {
   name: "efcore",
-  supportedStrategies: ["stateBased"],
+  supportedStrategies: ["state"],
 
   supports(storageType, kind, persistenceStrategy) {
     return (
-      persistenceStrategy === "stateBased" &&
+      persistenceStrategy === "state" &&
       ["postgres", "mysql", "sqlite", "inMemory"].includes(storageType) &&
       ["state", "snapshot", "replica"].includes(kind)
     );

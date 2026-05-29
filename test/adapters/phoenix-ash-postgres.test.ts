@@ -60,15 +60,13 @@ describe("ashPostgres PersistenceAdapter (real)", () => {
   });
 
   it("answers capability fields directly", () => {
-    expect(ashPostgresPersistenceAdapter.supportedStrategies).toEqual(["stateBased"]);
+    expect(ashPostgresPersistenceAdapter.supportedStrategies).toEqual(["state"]);
     // Ash with the postgres datalayer is postgres-only.
-    expect(ashPostgresPersistenceAdapter.supports("postgres", "state", "stateBased")).toBe(true);
-    expect(ashPostgresPersistenceAdapter.supports("postgres", "snapshot", "stateBased")).toBe(true);
-    expect(ashPostgresPersistenceAdapter.supports("mysql", "state", "stateBased")).toBe(false);
-    expect(ashPostgresPersistenceAdapter.supports("postgres", "eventLog", "stateBased")).toBe(
-      false,
-    );
-    expect(ashPostgresPersistenceAdapter.supports("postgres", "state", "eventSourced")).toBe(false);
+    expect(ashPostgresPersistenceAdapter.supports("postgres", "state", "state")).toBe(true);
+    expect(ashPostgresPersistenceAdapter.supports("postgres", "snapshot", "state")).toBe(true);
+    expect(ashPostgresPersistenceAdapter.supports("mysql", "state", "state")).toBe(false);
+    expect(ashPostgresPersistenceAdapter.supports("postgres", "eventLog", "state")).toBe(false);
+    expect(ashPostgresPersistenceAdapter.supports("postgres", "state", "eventLog")).toBe(false);
   });
 
   it("emitProjectDeps returns the Ash family mix.exs lines", () => {

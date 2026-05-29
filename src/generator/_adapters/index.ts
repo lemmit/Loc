@@ -40,7 +40,7 @@ export interface PlatformAdapters {
 /** Defaults a platform falls back to when the source doesn't pin one
  *  via `persistence:` / `style:` / `layout:`. */
 export interface PlatformAdapterDefaults {
-  persistence: { stateBased: string; eventSourced: string };
+  persistence: { state: string; eventLog: string };
   style: string;
   layout: string;
 }
