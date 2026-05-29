@@ -31,15 +31,15 @@
 >    `persistenceStrategy:` value. *(The log is a different storing
 >    concern from axis 2 — it is always JSON-event rows; axis 2 governs
 >    only the derived read model. Grammar reconciliation in §2.3.)*
-> 2. **`storeAs: normalised | document`** (saving, new): **how the
+> 2. **`storeAs(normalised | document)`** (saving, new): **how the
 >    materialised read model / snapshot is laid out**. The axis that is
 >    genuinely new here.
 >
-> The combination explicitly required is **`eventSourced` + `storeAs:
-> document`** (Marten's sweet spot: an append-only event stream with
-> the aggregate snapshot/projection persisted as a single JSON
-> document). Consequently **Option 3 is dropped** and **Option 4 is
-> reframed** as the `storeAs:` axis (not a third body-structure value).
+> The combination explicitly required is **`eventSourced` +
+> `storeAs(document)`** (Marten's sweet spot: an append-only event
+> stream with the aggregate snapshot/projection persisted as a single
+> JSON document). Consequently **Option 3 is dropped** and **Option 4
+> is reframed** as the `storeAs` axis (not a third body-structure value).
 > See §2.3 and §7.
 
 ---
@@ -94,16 +94,16 @@ The decisive realisation from the design conversation: **document-vs-relational 
   These two are inseparable — that *is* what event-sourcing is — so it surfaces as one **bare marker** on the aggregate. Crucially, facet 2 (the log) is a *different* storing concern from Axis 2 below: the log is always a stream of JSON events; Axis 2 governs only the **derived read model / snapshot**.
   > **Naming reconciliation.** Today this is spelled `persistenceStrategy: eventSourced` (`ddd.langium:612`, `:619`, threaded to `loom-ir.ts:327`). Given facet 2 the word "persistence" isn't *wrong*, but it names only the storing half and hides the body-discipline half (facet 1); the bare `eventSourced` marker names the modelling decision as a whole. This proposal uses the bare form and recommends dropping the `persistenceStrategy:` prefix, tracked under D-DOCUMENT-AXIS.
 
-- **Axis 2 — saving** (`storeAs: normalised | document`): *how the materialised state/snapshot is physically laid out.* New, per-aggregate, default `normalised` (full backward compatibility). The **only** genuine storage axis.
+- **Axis 2 — saving** (`storeAs(normalised | document)`): *how the materialised state/snapshot is physically laid out.* New, per-aggregate, default `normalised` (full backward compatibility). The **only** genuine storage axis.
 
 Because they are different in kind, every combination is meaningful:
 
-| | **`storeAs: normalised`** (default) | **`storeAs: document`** (new) |
+| | **`storeAs(normalised)`** (default) | **`storeAs(document)`** (new) |
 |---|---|---|
 | **`stateBased`** | EF Core normalised tables; VOs inline JSONB (today). | Whole current-state tree → one JSON document (Marten doc store / EF root `.ToJson()`). |
 | **`eventSourced`** | Event log + projections to tables. | **The required combination.** Append-only event stream (JSON-event rows) + aggregate snapshot/projection persisted as **one JSON document**; rehydrate from snapshot, replay the tail. |
 
-Note what `eventSourced` *does* and *does not* imply for saving: being event-sourced means there **is** an event log (events are the record of what happened — intrinsic to the body being event-emitting), but it says nothing about the *shape* of the read model. The event log is always serialised JSON-event rows; **`storeAs:` governs only the snapshot/projection.** D-STORAGE-SPLIT's `kind` set already carries both `eventLog` and `snapshot`, so the ES + document case wires as an `eventLog` binding plus a document-shaped `snapshot` binding; no new `kind` is required.
+Note what `eventSourced` *does* and *does not* imply for saving: being event-sourced means there **is** an event log (events are the record of what happened — intrinsic to the body being event-emitting), but it says nothing about the *shape* of the read model. The event log is always serialised JSON-event rows; **`storeAs` governs only the snapshot/projection.** D-STORAGE-SPLIT's `kind` set already carries both `eventLog` and `snapshot`, so the ES + document case wires as an `eventLog` binding plus a document-shaped `snapshot` binding; no new `kind` is required.
 
 ### 2.2 Candidate invariants (to ratify under D-DOCUMENT-AXIS)
 
@@ -161,7 +161,7 @@ aggregate Order {
 
 ### Option 3 — Per-containment storage hint (`as document` / `as table`) — **DROPPED**
 
-> **Decision (this revision): dropped.** Option 3 tunes the embedding of a *normalised* aggregate per containment edge — a relational-world refinement. Once the chosen direction is whole-aggregate `storeAs: document` (Option 4, §2.3), the per-edge knob answers a question we've opted out of. Its only residual value (embedding one sub-tree in an otherwise-relational row) is already largely served by value objects, which embed as JSONB today. Recorded for completeness; not pursued.
+> **Decision (this revision): dropped.** Option 3 tunes the embedding of a *normalised* aggregate per containment edge — a relational-world refinement. Once the chosen direction is whole-aggregate `storeAs(document)` (Option 4, §2.3), the per-edge knob answers a question we've opted out of. Its only residual value (embedding one sub-tree in an otherwise-relational row) is already largely served by value objects, which embed as JSONB today. Recorded for completeness; not pursued.
 
 Keep `entity`/`valueobject` as the only nested kinds, but let the **containment edge** choose its physical mapping. This makes today's *implicit* asymmetry explicit and overridable.
 
@@ -177,30 +177,39 @@ aggregate Order {
 - **IR:** `ContainmentIR` (`loom-ir.ts:139`) gains `embedding: "document" | "table"`; `schemaFromModule` branches on it instead of unconditionally calling `tableForPart`.
 - **Trade-offs:** Most faithful to EF Core's "same type, choose mapping per use." No new declaration kind. But the choice lives at the use site, so the *same* `entity` could be embedded in one aggregate and tabled in another — flexible, but harder to reason about wire/migration stability. Composes well with Option 1.
 
-### Option 4 — Aggregate-level `storeAs: document` axis *(chosen — addresses need B, Marten-style, whole-aggregate)*
+### Option 4 — Aggregate-level `storeAs(document)` axis *(chosen — addresses need B, Marten-style, whole-aggregate)*
 
-Treat the entire aggregate tree as one document, selected by a **new `storeAs` axis** that is orthogonal to — and a different *kind* of concern from — the body-structure marker (see §2.3). This is what makes `eventSourced` + `storeAs: document` expressible.
+Treat the entire aggregate tree as one document, selected by a **new `storeAs` axis** that is orthogonal to — and a different *kind* of concern from — the body-structure marker (see §2.3). This is what makes `eventSourced` + `storeAs(document)` expressible.
 
 ```ddd
 aggregate ShoppingCart
   eventSourced                          // axis 1 (body structure): emits events, rebuilt via appliers
-  storeAs: document                     // axis 2 (saving): snapshot/projection = one JSON doc
+  storeAs(document)                     // axis 2 (saving): snapshot/projection = one JSON doc
 {
   id     guid
   items  CartItem[]                     // whole tree → one JSONB snapshot, Marten-style
 }
 ```
 
-A `stateBased` aggregate with `storeAs: document` is equally valid (whole current state as one document, no event log).
+A `stateBased` aggregate with `storeAs(document)` is equally valid (whole current state as one document, no event log).
 
-- **Grammar:** add the `storeAs` clause on `Aggregate` (`ddd.langium:610–614`), e.g. `('storeAs' ':' storeAs=StoreShape ','?)?` with `StoreShape returns string: 'normalised' | 'document'`. Separately, reconcile the body-structure marker per §2.3 (bare `eventSourced` / `stateBased` rather than `persistenceStrategy: …`).
+- **Grammar:** add a header `storeAs` modifier on `Aggregate` (`ddd.langium:610–614`), e.g. `('storeAs' '(' storeAs=StoreShape ')')?` placed with `ids` / `withClause` before `{`, with `StoreShape returns string: 'normalised' | 'document'`. Separately, reconcile the body-structure marker and its placement per §2.3 + §4 syntax note (bare header `eventSourced` rather than body `persistenceStrategy: …`).
 - **IR:** `AggregateIR` (`loom-ir.ts:327`) gains `storeAs?: "normalised" | "document"` alongside the existing body-structure field; `resolve-datasource.ts` already maps `eventSourced → eventLog` and would additionally request a document-shaped `snapshot` binding when `storeAs === "document"`.
 - **Per-backend:** the natural **Marten** target. The `PersistenceAdapter` contract gates on strategy today (`efcore-persistence.ts:43` declares `supportedStrategies: ["stateBased"]`); a `martenPersistenceAdapter` would declare `supportedStrategies: ["stateBased", "eventSourced"]` **and** advertise the `document` shape, while the EF adapter advertises `normalised` (plus root `.ToJson()` for `stateBased` + `document`). The adapter contract may need a `supportedShapes` companion to `supportedStrategies` so the orchestrator can pick the right adapter from the (strategy × storeAs) pair.
 - **Trade-offs:** Whole-aggregate granularity (no per-field control) — matches how Marten/Mongo actually work, and is exactly what dropping Option 3 commits to. Keeps the aggregate API unchanged (invariant §2.2#4). Pairs with Option 5 for the storage binding.
-- **Syntax — two acceptable forms; not parens.** The aggregate header has three established member shapes: `key: value` enum toggles (`inheritanceStrategy: shareTable`, `urlStyle: literal`), bare markers (`abstract`, `ids guid`, the shipped boolean `audited`, the proposed bare `eventSourced`), and `name(mode)` capability/macro forms (`audited(actions)`, `with audit(...)`).
-  - **`storeAs: document`** — the explicit colon-toggle form, self-documenting and parallel to `inheritanceStrategy:`. The default is `storeAs: normalised` (rarely written).
-  - **`asDocument`** — an equivalent **bare-flag** shorthand. Because the axis is *binary with a default*, it is idiomatically a boolean flag here (cf. shipped `audited`, `abstract`), and stacks cleanly with the bare `eventSourced` marker: `aggregate Cart eventSourced asDocument { … }`. Normalised is simply the flag's absence — the default never appears in source (which also sidesteps the `normalised`/`normalized` spelling question). If a third shape ever appears it grows a parenthesised mode (`asDocument(…)`), exactly as `audited` → `audited(actions)`.
-  - Either is fine; both are recorded pending a final pick. The **paren-on-`storeAs`** form (`storeAs(document)`) is *rejected* — it reads as a capability-with-mode and collides visually with macro calls.
+- **Syntax — paren modifier in the header.** `storeAs(document)`, placed on the aggregate *header* line (before `{`), next to `ids` / `with` / `extends`.
+
+  **Placement.** The corpus is inconsistent about where aggregate config lives, and this proposal picks the header to fix it: today `ids` and `with X(...)` are on the header (`ddd.langium:611`) and the inheritance proposal's strategy is on the header (`abstract aggregate Party storage: shared {`), but `persistenceStrategy:` is the lone exception — it sits *inside* the braces as a leading pseudo-member (`ddd.langium:612`; storage proposal `aggregate Sales.Order { persistenceStrategy: eventSourced`). That body placement is a wart (it was grouped with the `event { publish: }` markers it governs). **All aggregate-level config belongs on the header.**
+
+  **Shape.** Two header shapes, by argument-arity:
+  - **Argument-less markers → bare:** `abstract`, `eventSourced`, shipped boolean `audited`. (`stateBased` is the default — absence of `eventSourced`.)
+  - **Value-bearing strategies → `name(value)`:** `storeAs(document)`, `inheritanceStrategy(shareTable)`. This matches the existing modifier-application family (`audited(actions)`, `with audit(...)`) and reads as "selector(choice)". `storeAs(normalised)` is the default and is rarely written; a bare `asDocument` flag remains a possible shorthand but the paren form is chosen for parallelism with `inheritanceStrategy(...)`.
+
+  **Binding block keeps colon.** Inside a `dataSource { kind: snapshot, use: pg, storeAs: document }` every entry is `key: value`, so `storeAs:` stays a colon entry *there* — a paren would clash with its siblings. So `storeAs` is a paren *modifier* on the aggregate header but a colon *entry* in the binding block; each context is internally consistent.
+
+  **Two frictions (both touch settled artefacts) — tracked under D-DOCUMENT-AXIS:**
+  1. **D-RENAME is PINNED with a colon** (`inheritanceStrategy: shareTable | ownTable`). Adopting `inheritanceStrategy(shareTable)` *amends its syntax* (and should be settled together with the `shareTable`→`shared` value question, §8 Q6).
+  2. **`persistenceStrategy:` is shipped** (colon, in body). Moving the body-structure marker to a bare header `eventSourced` is a breaking grammar change needing a back-compat/migration path (accept both, warn on the old form).
 
 #### 4a. Interaction with inheritance (`inheritanceStrategy`, D-RENAME / D-ES-TPH)
 
@@ -211,19 +220,19 @@ A `stateBased` aggregate with `storeAs: document` is equally valid (whole curren
 
 Both questions are meaningful in both media, so they compose as a 2×2:
 
-| | `storeAs: normalised` | `storeAs: document` |
+| | `storeAs(normalised)` | `storeAs(document)` |
 |---|---|---|
 | `shareTable` | **TPH** — one table + discriminator | one document collection + `_type` discriminator (Mongo single-collection / Marten hierarchy) |
 | `ownTable` | **TPC** — table per concrete | document collection per concrete |
 
 Two consequences:
 
-1. **The pinned value names bake in "table".** `shareTable`/`ownTable` read wrong in the `storeAs: document` column ("shareTable… but it's a JSON collection?"). The *pre-D-RENAME* proposal text used the medium-neutral `shared`/`own`, which survives a non-table medium. **`storeAs: document` is new evidence that the layout axis is not table-specific** — so this proposal flags **revisiting D-RENAME toward `inheritanceStrategy: shared | own`** as an open decision (see §8 Q6). Until decided, the proposal phrases the axis medium-neutrally.
+1. **The pinned value names bake in "table".** `shareTable`/`ownTable` read wrong in the `storeAs(document)` column ("shareTable… but it's a JSON collection?"). The *pre-D-RENAME* proposal text used the medium-neutral `shared`/`own`, which survives a non-table medium. **`storeAs(document)` is new evidence that the layout axis is not table-specific** — so this proposal flags **revisiting D-RENAME toward `inheritanceStrategy: shared | own`** as an open decision (see §8 Q6). Until decided, the proposal phrases the axis medium-neutrally.
 2. **D-ES-TPH generalises across the medium.** Its rule — *an `eventSourced` concrete subtype of a shared base is forced to `ownTable`* — is about **partitioning, not tables**: an event-sourced concrete needs its own stream, so it cannot live in a shared partition whether that partition is a discriminated table or a discriminated document collection. The constraint holds unchanged in the `document` column (forced own collection/stream).
 
 ### Option 5 — Storage-layer wiring for the `storeAs` axis *(infra half of Option 4)*
 
-Because the `storeAs` axis (§2.3) governs *layout* and the existing `kind` set already has `eventLog` and `snapshot`, the ES + document case needs **no new `kind`** — it binds the stream and a document-shaped snapshot. The binding echoes the same `storeAs:` vocabulary as the aggregate, so there is one word for the concept at both layers:
+Because the `storeAs` axis (§2.3) governs *layout* and the existing `kind` set already has `eventLog` and `snapshot`, the ES + document case needs **no new `kind`** — it binds the stream and a document-shaped snapshot. The binding reuses the same `storeAs` keyword as the aggregate (paren modifier on the header; colon entry inside the binding block — see §4), so the concept reads the same at both layers:
 
 ```ddd
 storage pg { type: postgres }                                   // Marten on Postgres
@@ -235,8 +244,8 @@ dataSource cartSnapshot { for: Shopping, kind: snapshot, use: pg, storeAs: docum
 For a `stateBased` + `document` aggregate the document shape rides the `state` binding instead (`kind: state, storeAs: document`).
 
 - **Grammar:** add an optional `('storeAs' ':' storeAs=('normalised'|'document'))?` to the `dataSource` rule's per-`kind` config (the `state`/`snapshot` kinds). Defaults to `normalised`.
-- **Open alternative:** a real document DB target (`StorageType += mongo`) would let `storeAs: document` resolve to a true document store rather than Postgres-JSONB. Deferred — Marten's own bet is JSONB-on-Postgres (see §8 Q4).
-- **Trade-offs:** Pure infrastructure, no new domain surface beyond Option 4's `storeAs:`. Per-context granularity per D-GRANULARITY (the aggregate-level `storeAs:` from Option 4 is what supplies per-aggregate intent; the validator pairs the two). On its own it is just plumbing — it realises what Option 4 declares.
+- **Open alternative:** a real document DB target (`StorageType += mongo`) would let `storeAs(document)` resolve to a true document store rather than Postgres-JSONB. Deferred — Marten's own bet is JSONB-on-Postgres (see §8 Q4).
+- **Trade-offs:** Pure infrastructure, no new domain surface beyond Option 4's `storeAs(…)`. Per-context granularity per D-GRANULARITY (the aggregate-level `storeAs(…)` from Option 4 is what supplies per-aggregate intent; the validator pairs the two). On its own it is just plumbing — it realises what Option 4 declares.
 
 ### Option 6 (rejected) — `document` as a top-level aggregate peer
 
@@ -253,7 +262,7 @@ A first-class `document Order { … }` declaration *alongside* `aggregate`, with
 | 1 `json` field | doc property | `[Column(TypeName="jsonb")]` `JsonDocument` | embedded sub-field | `JSONB` |
 | 2 `document` type | embedded sub-doc | `.OwnsOne/.OwnsMany(...).ToJson()` | embedded array/object | `JSONB` |
 | 3 `as document/table` *(dropped)* | per-edge embed/ref | `.ToJson()` vs child-table owned | embed vs `$ref` | `JSONB` col vs child table |
-| 4 `storeAs: document` | **native doc/event store** | root `.ToJson()` | one document per aggregate | doc table `(id, data jsonb, version)` |
+| 4 `storeAs(document)` | **native doc/event store** | root `.ToJson()` | one document per aggregate | doc table `(id, data jsonb, version)` |
 | 4 + ES (`eventSourced`+`document`) | **stream + inline projection doc** | events table + `.ToJson()` projection | event coll. + snapshot doc | `mt_events`-style log + snapshot `jsonb` |
 | 5 `storeAs: document` binding | `IDocumentStore` session | `DbContext` w/ JSON config | collection | schema/table placement |
 
@@ -274,11 +283,13 @@ valueobject Money { amount decimal, currency string }   // → inline JSONB colu
 entity CartLine   { sku string, qty int, price Money }  // entity part (containment edge below)
 
 // ── an event-sourced, document-stored aggregate ───────────────────────
+// All aggregate-level config is on the HEADER line: bare markers for
+// argument-less ones (eventSourced), name(value) for value-bearing ones.
 aggregate ShoppingCart
-  ids guid                       // idKind                                   (existing)
-  eventSourced                   // axis 1: body discipline + event log      (bare marker; today: persistenceStrategy: eventSourced)
-  storeAs: document              // axis 2: snapshot/projection = one JSON doc  (this proposal; bare form: `asDocument`)
-  with audit, softDelete         // stdlib macros                            (existing WithClause)
+  ids guid                       // idKind                                   (existing, header)
+  eventSourced                   // axis 1: body discipline + event log      (bare marker; today: persistenceStrategy: eventSourced, body)
+  storeAs(document)              // axis 2: snapshot/projection = one JSON doc  (this proposal; paren modifier)
+  with audit, softDelete         // stdlib macros                            (existing WithClause, header)
 {
   total     Money                // value object → embedded in the snapshot doc
   metadata  json                 // open-shape blob                          (Option 1, this proposal)
@@ -289,8 +300,8 @@ aggregate ShoppingCart
 
 // ── an inheritance hierarchy showing the layout axes ──────────────────
 abstract aggregate Party              // abstract base                       (aggregate-inheritance, proposed)
-  inheritanceStrategy: shareTable     // TPH: one `parties` table + discriminator   (D-RENAME)
-  audited                             // boolean capability                  (shipped)
+  inheritanceStrategy(shareTable)     // TPH: one `parties` table + discriminator   (D-RENAME, syntax amended to paren)
+  audited                             // boolean capability                  (shipped, header)
 {
   name  string
   email string
@@ -302,7 +313,7 @@ aggregate Customer extends Party stateBased {   // shares the `parties` table (s
 
 aggregate Auditor extends Party
   eventSourced                        // D-ES-TPH: an ES concrete of a shareTable base …
-  inheritanceStrategy: ownTable       // … is FORCED to ownTable — own stream/table, not the shared one
+  inheritanceStrategy(ownTable)       // … is FORCED to ownTable — own stream/table, not the shared one
 {
   clearanceLevel int
 }
@@ -313,9 +324,9 @@ aggregate Auditor extends Party
 | Config | Axis / concern | Status |
 |---|---|---|
 | `ids guid` | id kind | existing grammar |
-| `eventSourced` / `stateBased` | **body structure** (apply-always, no direct mutation) + event-log storing | bare marker *(today `persistenceStrategy:`, §2.3 reconcile)* |
-| `storeAs: document` | **saving** — read-model/snapshot shape | this proposal *(bare `asDocument` = shorthand, §4 syntax note)* |
-| `inheritanceStrategy: shareTable\|ownTable` | inheritance **partitioning** | D-RENAME (pinned) |
+| `eventSourced` / `stateBased` | **body structure** (apply-always, no direct mutation) + event-log storing | bare header marker *(today `persistenceStrategy:` in body, §2.3/§4 reconcile)* |
+| `storeAs(document)` | **saving** — read-model/snapshot shape | this proposal *(paren header modifier, §4 syntax note)* |
+| `inheritanceStrategy(shareTable\|ownTable)` | inheritance **partitioning** | D-RENAME (pinned; syntax amended to paren, §4) |
 | `extends` / `abstract` | inheritance | aggregate-inheritance (proposed) |
 | `with audit, softDelete` | macros | existing |
 | `audited` | capability | shipped |
@@ -323,7 +334,7 @@ aggregate Auditor extends Party
 | `valueobject` / `entity` + `contains` | internal hierarchy | existing |
 | `dataSource … storeAs: document` | infra wiring of the snapshot | Option 5 (this proposal) |
 
-The two genuinely-orthogonal *new* axes — `eventSourced` (body + log) and `storeAs: document` (snapshot shape) — sit on `ShoppingCart`; the inheritance layout axis and the `eventSourced`-forces-`ownTable` constraint (D-ES-TPH) show on the `Party` hierarchy.
+The two genuinely-orthogonal *new* axes — `eventSourced` (body + log) and `storeAs(document)` (snapshot shape) — sit on `ShoppingCart`; the inheritance layout axis and the `eventSourced`-forces-`ownTable` constraint (D-ES-TPH) show on the `Party` hierarchy.
 
 ---
 
@@ -337,7 +348,7 @@ If Options 2 + 3 both land, three nested-structure kinds coexist. The teaching r
 | Typed, may hold collections, always embedded as one tree | `document` (Opt 2) | one JSONB column |
 | Has identity / is queried independently / referenced | `entity` + `contains` | child table (or `as document`, Opt 3) |
 | Shape unknown / externally defined | `json` field (Opt 1) | opaque JSONB |
-| Whole aggregate stored as a document | `storeAs: document` (Opt 4) | doc table (snapshot for ES) |
+| Whole aggregate stored as a document | `storeAs(document)` (Opt 4) | doc table (snapshot for ES) |
 
 A validator nudge (`loom.json-field-known-shape`) can suggest promoting a `json` field to a `document`/`valueobject` once its shape is known, keeping Option 1 from becoming an escape hatch.
 
@@ -347,7 +358,7 @@ A validator nudge (`loom.json-field-known-shape`) can suggest promoting a `json`
 
 | Phase / file | Opt 1 | Opt 2 | Opt 3 | Opt 4 | Opt 5 |
 |---|---|---|---|---|---|
-| Grammar `ddd.langium` | +`json` primitive | +`Document` decl, +`NamedDecl` | ~~+`as`~~ dropped | +`storeAs:` axis | +`storeAs:` on binding |
+| Grammar `ddd.langium` | +`json` primitive | +`Document` decl, +`NamedDecl` | ~~+`as`~~ dropped | +`storeAs(…)` header modifier | +`storeAs:` on binding |
 | `type-system.ts` | resolve `json` | resolve `Document` | — | — | — |
 | `loom-ir.ts` `TypeIR`/`AggregateIR`/`DataSourceIR` | +`json` | +`document` | — | +`storeAs?` | +`storeAs?` |
 | `lower/` | leaf | wireShape like VO | — | thread axis | — |
@@ -365,26 +376,26 @@ Phases follow the one-directional pipeline in `CLAUDE.md`; nothing here crosses 
 
 **Document is *both* a small field type and a per-aggregate `storeAs` axis — and is *not* an aggregate peer.** The driving requirement is **`eventSourced` + `document`**, which is only expressible once storage shape is its own axis (§2.3). Concretely, adopt:
 
-1. **Options 4 + 5 — the core, as a `storeAs` axis.** Add per-aggregate `storeAs: normalised | document` (Option 4) orthogonal to the existing `persistenceStrategy`, wired through `storeAs: document` on the `snapshot` (ES) or `state` (state-based) `dataSource` binding (Option 5). Served by a new `martenPersistenceAdapter` advertising `supportedStrategies: ["stateBased","eventSourced"]` + the `document` shape, plugged into the existing `PersistenceAdapter` seam (`efcore-persistence.ts:41`). The headline combination — append-only event stream + document snapshot/projection — is the deliverable.
+1. **Options 4 + 5 — the core, as a `storeAs` axis.** Add per-aggregate `storeAs(normalised | document)` (Option 4) orthogonal to the existing `persistenceStrategy`, wired through `storeAs: document` on the `snapshot` (ES) or `state` (state-based) `dataSource` binding (Option 5). Served by a new `martenPersistenceAdapter` advertising `supportedStrategies: ["stateBased","eventSourced"]` + the `document` shape, plugged into the existing `PersistenceAdapter` seam (`efcore-persistence.ts:41`). The headline combination — append-only event stream + document snapshot/projection — is the deliverable.
 2. **Option 1 (`json` primitive) — ship alongside or first.** Smallest, fully orthogonal (covers need A, which Option 4 does *not* touch), and mostly already plumbed (`json` column kind + `JSONB` renderer exist). A prerequisite-free win that is independent of the document-store work.
-3. **Drop Option 3.** Decided: once whole-aggregate `storeAs: document` is the model, the per-edge embedding knob refines a relational layout we've opted out of; its residual case is already served by value objects.
+3. **Drop Option 3.** Decided: once whole-aggregate `storeAs(document)` is the model, the per-edge embedding knob refines a relational layout we've opted out of; its residual case is already served by value objects.
 4. **Defer Option 2.** Revisit a dedicated `document` *type* only if a "typed-collection-that-is-never-a-table" sub-structure proves to need its own name independent of the aggregate-level axis.
-5. **Reject Option 6.** "This aggregate is a document" is expressed by `storeAs: document`, not by a parallel declaration kind.
+5. **Reject Option 6.** "This aggregate is a document" is expressed by `storeAs(document)`, not by a parallel declaration kind.
 
 This keeps the domain model honest (the aggregate API is unchanged regardless of storage shape — invariant §2.2#4), makes the required ES + document combination first-class, and still gives an immediate escape hatch for genuinely open data via `json`.
 
-> **Naming note.** This axis was provisionally called `representation:`; it is named **`storeAs:`** here — `layout:`/`style:` collide with the deployable platform-config knobs, `shape:` collides with the internal `wireShape`/loadedness vocabulary, and `persistAs:` crowds the `persistence*` family. `storeAs:` reads as intent, echoes EF Core's "store as JSON" (`.ToJson()`), and is reused unchanged at the `dataSource` binding so there is one word at both layers. Since the axis is binary-with-default, the bare-flag spelling **`asDocument`** (normalised = absence) is an equivalent accepted form — see the §4 syntax note; final pick pending.
+> **Naming note.** This axis was provisionally called `representation:`; it is named **`storeAs`** here — `layout`/`style` collide with the deployable platform-config knobs, `shape` collides with the internal `wireShape`/loadedness vocabulary, and `persistAs` crowds the `persistence*` family. `storeAs` reads as intent and echoes EF Core's "store as JSON" (`.ToJson()`). It surfaces as a **paren header modifier** `storeAs(document)` on the aggregate (per the §4 syntax decision) and as a **colon entry** `storeAs: document` inside the `dataSource` binding block — same keyword, context-appropriate shape. A bare-flag spelling **`asDocument`** (normalised = absence) was considered as a binary-with-default shorthand but the paren form was chosen for parallelism with `inheritanceStrategy(…)`.
 
 ---
 
 ## 8. Open questions
 
 1. Does `json` need an optional *shape hint* (`json<SomeType>`) for the common case where the blob *is* a known DTO from an `extern` boundary, without full structural validation?
-2. **(Resolved — see §2.3.)** Is storage shape orthogonal to `eventSourced`? **Yes.** `eventSourced` bundles a *body-discipline* contract (apply-always, no direct mutation — validated) and a *storing-as-a-log* facet; `storeAs: normalised|document` governs only the **derived read model / snapshot**. The log facet of `eventSourced` and the `storeAs` facet are different storing concerns, so the required combination `eventSourced` + `storeAs: document` is well-formed. *Follow-on:* the `persistenceStrategy:` keyword names only the storing half and hides the body-discipline half; reconcile to a bare marker (§2.3).
-3. For ES + document, what is the snapshot/projection cadence — every event (inline projection, Marten's default), every N events, or on-demand? Does this belong on the aggregate (`storeAs: document(every: …)`), on the `snapshot` `dataSource` (`every:` already exists in D-STORAGE-SPLIT's per-kind config), or both? Leaning: reuse the `snapshot` binding's `every:`.
-4. Does a real document DB (`StorageType += mongo`) ever justify itself, or is Postgres-JSONB-everywhere (Marten's own bet) sufficient for Loom's target users? If JSONB-on-Postgres suffices, `storeAs: document` never needs a non-Postgres engine.
+2. **(Resolved — see §2.3.)** Is storage shape orthogonal to `eventSourced`? **Yes.** `eventSourced` bundles a *body-discipline* contract (apply-always, no direct mutation — validated) and a *storing-as-a-log* facet; `storeAs(normalised | document)` governs only the **derived read model / snapshot**. The log facet of `eventSourced` and the `storeAs` facet are different storing concerns, so the required combination `eventSourced` + `storeAs(document)` is well-formed. *Follow-on:* the `persistenceStrategy:` keyword names only the storing half and hides the body-discipline half; reconcile to a bare marker (§2.3).
+3. For ES + document, what is the snapshot/projection cadence — every event (inline projection, Marten's default), every N events, or on-demand? Does this belong on the aggregate (a cadence arg, e.g. `storeAs(document, every: …)`), on the `snapshot` `dataSource` (`every:` already exists in D-STORAGE-SPLIT's per-kind config), or both? Leaning: reuse the `snapshot` binding's `every:`.
+4. Does a real document DB (`StorageType += mongo`) ever justify itself, or is Postgres-JSONB-everywhere (Marten's own bet) sufficient for Loom's target users? If JSONB-on-Postgres suffices, `storeAs(document)` never needs a non-Postgres engine.
 5. For `eventSourced` aggregates, can the shape legitimately be `normalised` (projections to tables) and `document` (projection to one JSON doc) *per projection*, or is it one shape per aggregate? v1: one per aggregate (per D-GRANULARITY spirit); per-projection deferred.
-6. **Should pinned D-RENAME be revisited?** `storeAs` (§4a) shows the inheritance layout axis is not table-specific, yet D-RENAME pinned the medium-baked names `inheritanceStrategy: shareTable | ownTable`. Options: **(a)** keep `shareTable`/`ownTable`, treat "table" as vestigial under `storeAs: document`, add a validator note; **(b)** revisit D-RENAME toward the medium-neutral `inheritanceStrategy: shared | own` (the pre-rename spelling), which reads correctly across both media. Touches a PINNED decision — maintainer call. Leaning (b).
+6. **Should pinned D-RENAME be revisited?** `storeAs` (§4a) shows the inheritance layout axis is not table-specific, yet D-RENAME pinned the medium-baked names `inheritanceStrategy: shareTable | ownTable`. Options: **(a)** keep `shareTable`/`ownTable`, treat "table" as vestigial under `storeAs(document)`, add a validator note; **(b)** revisit D-RENAME toward the medium-neutral `inheritanceStrategy: shared | own` (the pre-rename spelling), which reads correctly across both media. Touches a PINNED decision — maintainer call. Leaning (b).
 
 ---
 
