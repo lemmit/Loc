@@ -70,11 +70,16 @@ export function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
  * on a hardcoded "schemas to check" list that goes stale.
  */
 export function schemaNames(spec: OpenApiSpec): Set<string> {
-  // Skip schemas that one backend's framework / idiom emits but that are
-  // NOT part of the cross-backend *behavioural* contract.  Behavioural
-  // equivalence (idiomatic per backend) compares what a client observes —
-  // operations, field shapes, types, required-ness, enum value-sets — not
-  // how each framework names its envelopes or wraps its lists.
+  // TEMPORARY DROP-IN TOLERANCE — tracked by:
+  //   • #706 — shared RFC 7807 `ProblemDetails` error body (Hono still emits
+  //     an `ErrorResponse` envelope; Phoenix emits no error body).  Once both
+  //     emit `ProblemDetails`, drop `ProblemDetails` + `ErrorResponse` from
+  //     this set so the shared error body is COMPARED, not filtered.
+  //   • #705 — .NET named list-response wrapper (`<Agg>ListResponse`).  Once
+  //     .NET emits the wrapper, drop `isListWrapperSchema` below so the
+  //     wrapper is part of the compared schema set.
+  // Under full drop-in only the genuinely-per-backend schemas stay filtered:
+  // .NET-only validation envelopes and the TS-only provenance lineage.
   const IDIOMATIC_SCHEMAS = new Set([
     // Swashbuckle (.NET) error envelopes.
     "ProblemDetails",
@@ -83,7 +88,8 @@ export function schemaNames(spec: OpenApiSpec): Set<string> {
     // Error *bodies* are idiomatic per backend — Hono names an
     // `ErrorResponse` envelope, .NET returns `ProblemDetails`, Phoenix
     // declares no error body.  Only the error *status codes* are
-    // behavioural, so the envelope schema itself is excluded.
+    // behavioural, so the envelope schema itself is excluded.  (#706 makes
+    // these a single shared `ProblemDetails` body and removes the tolerance.)
     "ErrorResponse",
     // Co-located provenance lineage is a TS/Hono-only wire extension
     // (only the TS backend persists lineage) — consistent with the
@@ -109,6 +115,11 @@ export function schemaNames(spec: OpenApiSpec): Set<string> {
  * on its own.  Excluding the wrapper keeps it from reading as a one-sided
  * `onlySchemas` divergence between a named-wrapper backend and an
  * inline-array backend.
+ *
+ * TEMPORARY DROP-IN TOLERANCE (#705): once .NET emits its own named
+ * `<Agg>ListResponse` wrapper, this filter — and the wrapper resolution in
+ * `schemaRefName` — should be removed so the wrapper name is compared
+ * exactly across backends.
  */
 function isListWrapperSchema(schema: OpenApiSchema | undefined): boolean {
   return schema?.type === "array" && Boolean(schema.items?.$ref);
@@ -249,7 +260,9 @@ function schemaRefName(
     // Resolve a named list-wrapper component to its inline equivalent so
     // `$ref:ProjectListResponse` (Hono/Phoenix) compares equal to an
     // inline `array<ProjectResponse>` (.NET) — behavioural parity over
-    // representational naming.
+    // representational naming.  TEMPORARY DROP-IN TOLERANCE (#705): drop
+    // this resolution once .NET emits the named wrapper so the ref name is
+    // compared exactly.
     const target = spec.components?.schemas?.[name];
     if (target?.type === "array" && target.items?.$ref) {
       const im = target.items.$ref.match(/^#\/components\/schemas\/(.+)$/);

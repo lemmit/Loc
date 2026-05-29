@@ -120,6 +120,24 @@ TS/Hono-only wire extension (only the TS backend persists lineage).
 Without the filter, every provenanced field on the showcase would read
 as a Hono-only divergence.
 
+### Temporary drop-in tolerances (tracked)
+
+Two relaxations in `schemaNames` / `schemaRefName` are **interim** — they
+let the gate stay green while the generators are brought up to the full
+drop-in surface. Each is annotated in `test/_helpers/openapi-normalize.ts`
+with the tracking issue and removed once the generator work lands:
+
+- **#705 — named list-response wrapper.** Hono/Phoenix emit a named
+  `<Agg>ListResponse` component; .NET inlines `array<element>`. Until .NET
+  emits the wrapper, `isListWrapperSchema` filters it from `schemaNames`
+  and `schemaRefName` resolves the named wrapper down to `array<element>`.
+- **#706 — shared RFC 7807 `ProblemDetails` error body.** .NET is 7807-
+  native; Hono emits an `ErrorResponse` envelope and Phoenix emits no
+  error body. Until both emit `ProblemDetails`, the error-body schema is
+  filtered. (Note: the `.NET`-only `ValidationProblemDetails` /
+  `HttpValidationProblemDetails` validation envelopes stay filtered even
+  after #706 — they have no cross-backend counterpart.)
+
 ---
 
 ## Report-only vs strict mode

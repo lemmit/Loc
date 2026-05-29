@@ -17,6 +17,8 @@ describe("openapi-normalize — behavioural equivalence", () => {
   // A backend (Hono/Phoenix) that names its list response as a component
   // `{type: array, items: $ref}` must compare equal to one (.NET) that
   // inlines `array<element>` at the operation.
+  // TEMPORARY DROP-IN TOLERANCE (#705): once .NET emits the named wrapper
+  // these assertions flip to "exact name comparison; inline-array drifts".
   describe("list-wrapper resolution", () => {
     const named: OpenApiSpec = {
       paths: {
@@ -85,6 +87,10 @@ describe("openapi-normalize — behavioural equivalence", () => {
     });
   });
 
+  // TEMPORARY DROP-IN TOLERANCE (#706): once Hono + Phoenix emit the shared
+  // RFC 7807 `ProblemDetails` body, this flips to "ProblemDetails IS part of
+  // the compared schema set" and only ValidationProblemDetails / the TS-only
+  // ProvenanceLineage stay filtered.
   describe("idiomatic schema filtering", () => {
     const spec: OpenApiSpec = {
       components: {
