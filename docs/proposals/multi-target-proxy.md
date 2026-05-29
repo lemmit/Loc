@@ -1,8 +1,11 @@
 # Multi-target frontends — same-origin proxy story
 
-> **Status:** design proposal for review. No code yet. Sibling of
-> `backend-packages.md` (gateway platforms reuse the out-of-tree
-> package story).
+> **Status:** unadopted proposal. Sibling of
+> `../plans/backend-packages.md` (gateway platforms reuse the
+> out-of-tree package story). The design questions at the
+> bottom — especially the *scope* one (do we really want to
+> express every cross-cutting concern in the DSL, or pick a
+> minimal vocabulary plus an escape hatch?) — are still open.
 
 ## The problem
 
@@ -71,6 +74,9 @@ there":
   has a resolved list of modules it owns. The cross-backend
   collision check (two proxied backends both claiming module
   `Billing`) falls out for free.
+- **`->` precedent** — `link "Docs" -> "https://…"` view-link
+  grammar (`ddd.langium:492`). Available for URL rewrites without
+  introducing new arrow syntax.
 
 What's missing:
 
@@ -85,36 +91,37 @@ What's missing:
 - No first-class platform for "this deployable is a pure
   gateway" — Caddy/nginx/Ocelot don't fit `serves` / `mountsUi`.
 
-## The design — `proxy:` plus gateway platforms
+## The design — `proxy { … }` block plus gateway platforms
 
 Two ideas, both small, that compose.
 
-### Idea 1 — `proxy:` is a list of deployables
+### Idea 1 — `proxy { defaults, routes }` is a single block on the deployable
 
-`proxy: [billingApi, inventoryApi]` says: *"this deployable
-re-serves the listed deployables' apis at `/api/<module>/*` on
-its own origin."* No family/worker knob — the host platform
-decides the implementation. Power-user override (e.g. `proxy: {
-targets: [...], worker: ocelot }`) is a future extension, not
-v1.
+`proxy { routes: [billingApi, inventoryApi] }` says: *"this
+deployable re-serves the listed deployables' apis at
+`/api/<module>/*` on its own origin."* No family/worker knob —
+the host platform decides the implementation. Defaults that
+apply across routes live in `proxy.defaults { ... }`; per-route
+overrides live in trailing `{ ... }` blocks on each route entry.
+One subtree, no sibling slots.
 
-| Host platform | Realization of `proxy:` |
+| Host platform | Realization of `proxy { … }` |
 |---|---|
 | `dotnet` | **YARP** (`Yarp.ReverseProxy`) — routes loaded from `appsettings`, registered via `MapReverseProxy()`. |
 | `hono` | `app.all('/api/billing/*', c => fetch(...))` — single handler per target. |
 | `phoenixLiveView` | `ReverseProxyPlug` block on the Endpoint. |
 | `react` | **Illegal.** React is pure static; validator error directing the user to a gateway or a mounted host. |
 
-`proxy:` on a backend that already `serves:` something layers
-cleanly: the deployable serves its own modules in-process and
-proxies the rest.
+`proxy { … }` on a backend that already `serves:` something
+layers cleanly: the deployable serves its own modules in-process
+and proxies the rest.
 
 ### Idea 2 — Gateway platforms (`caddy`, `nginx`, `traefik`, `ocelot`)
 
 These join `Platform` as **restricted-kind** platforms. A gateway
 platform:
 
-- **only** legalises `proxy:` (and `port:`),
+- **only** legalises `proxy { … }` (and `port:`),
 - forbids `contexts:`, `serves:`, `ui:`, `dataSources:`,
 - emits a config file native to its family (`Caddyfile`,
   `nginx.conf`, traefik labels, `ocelot.json`) + a compose
@@ -144,7 +151,8 @@ same way.
 ```
 
 The hosting backend `serves:` its own modules, mounts the SPA via
-`ui:`, and `proxy:`-fans-out the rest. In-process; no sidecar.
+`ui:`, and `proxy { … }`-fans-out the rest. In-process; no
+sidecar.
 
 #### Shape B — Standalone gateway in front of N services
 
@@ -165,7 +173,7 @@ origin.
 #### Shape C — Pure static react, single backend (or CORS)
 
 The simplest case: `platform: react` deployable bound to one
-backend via `ui: WebApp { Sales: salesApi }`. No `proxy:`
+backend via `ui: WebApp { Sales: salesApi }`. No `proxy { … }`
 anywhere — there's nothing to fan out. If the SPA needs to talk
 to >1 backend without a gateway or mounted host, the user opens
 CORS on each backend explicitly. Validator gives a hint when
@@ -176,8 +184,8 @@ backend, or set CORS explicitly on each backend."*
 ## Grammar surface
 
 Minimal diff to `src/language/ddd.langium`. `targets:` is
-removed; `proxy:` is added; the `Platform` enum gains the
-gateway families.
+removed; `proxy:` becomes a sub-block; the `Platform` enum
+gains the gateway families.
 
 ```diff
   Deployable:
@@ -185,18 +193,42 @@ gateway families.
           ('platform' ':' platform=Platform ','?)
           ...
 -         ('targets' ':' targets=[Deployable:LooseName] ','?)?
-+         ('proxy' ':' '[' proxy+=[Deployable:LooseName]
-+                          (',' proxy+=[Deployable:LooseName])* ','? ']' ','?)?
++         (proxy=ProxyBlock)?
           ...
       '}';
+
++ ProxyBlock:
++     'proxy' '{'
++         ('defaults' '{' defaults=ProxyPolicy '}')?
++         ('routes' ':' '[' routes+=ProxyRoute
++                          (',' routes+=ProxyRoute)* ','? ']')?
++         (raw+=ProxyRawBlock)*               // see "Escape hatches" below
++     '}';
++
++ ProxyRoute:
++     target=[Deployable:LooseName]
++     ('{' policy=ProxyPolicy '}')?;
++
++ ProxyPolicy:
++     // slots from the vocabulary table; all optional
++     ('timeout'    ':' timeout=Duration  ','?)?
++     ('retry'      ':' retry=RetrySpec   ','?)?
++     ('auth'       ':' auth=AuthMode     ','?)?
++     ('rateLimit'  ':' rateLimit=Rate    ','?)?
++     ('path'       ':' rewriteFrom=STRING '->' rewriteTo=STRING ','?)?
++     ('websocket'  ':' websocket=Bool    ','?)?
++     ('headers'    '{' headers=HeadersBlock '}')?
++     (raw+=ProxyRawBlock)*;                  // route-scoped escape hatch
 
   Platform returns string:
       'hono' | 'dotnet' | 'react' | 'phoenixLiveView'
 +   | 'caddy' | 'nginx' | 'traefik' | 'ocelot';
 ```
 
-Singular sugar (`proxy: api`) is added as a grammar alternation
-once the list form lands; not shown in the diff.
+The `headers { add NAME: "v", remove NAME, forward NAME }`
+sub-block reuses the verb-prefixed declaration pattern of
+`permissions { decls+= … }` — verbs front each row, no
+JS-flavoured dotted keys.
 
 `Platform` joining the gateway families is what makes the out-of-
 tree package story carry over from `backend-packages.md`. A shop
@@ -211,12 +243,20 @@ In `src/language/validators/deployable.ts` and
 
 | Code | Rule |
 |---|---|
-| `loom.proxy-on-static` | `proxy:` set on `platform: react` (or any platform with `kind === 'static'` in the surface — to be defined). |
-| `loom.proxy-module-collision` | Two entries in `proxy:` claim the same module name. |
-| `loom.proxy-not-backend-or-static` | An entry in `proxy:` is itself a gateway (gateways proxying gateways is allowed but suspicious — start as a warning). |
-| `loom.ui-binding-not-proxied` | A `UiComposeBinding.source` isn't the host itself, not in `proxy:`, and the host isn't a gateway exposing it. (Probably: derive instead of require — see open question.) |
+| `loom.proxy-on-static` | `proxy { … }` set on `platform: react` (or any platform with `kind === 'static'` in the surface — to be defined). |
+| `loom.proxy-module-collision` | Two entries in `proxy.routes` claim the same module name. |
+| `loom.proxy-not-backend-or-static` | An entry in `proxy.routes` is itself a gateway (gateways proxying gateways is allowed but suspicious — start as a warning). |
+| `loom.ui-binding-not-proxied` | A `UiComposeBinding.source` isn't the host itself, not in `proxy.routes`, and the host isn't a gateway exposing it. (Probably: derive instead of require — see open question.) |
 | `loom.gateway-no-domain-slots` | `platform: caddy/nginx/…` deployable has `contexts:`, `serves:`, `ui:`, or `dataSources:`. |
 | `loom.spa-fanout-no-gateway` | Warning. `platform: react` deployable's `ui:` binds >1 distinct source deployable and no gateway fronts it. |
+| `loom.proxy-policy-on-static` | Policy block on a route whose host is static. |
+| `loom.proxy-path-rewrite-shadow` | A `path: "/x" -> "/y"` rewrite whose source overlaps another route's prefix in the same `proxy.routes` list. |
+| `loom.proxy-auth-unknown` | `auth:` value isn't in the existing `AuthMode` enum. |
+| `loom.proxy-rate-limit-unit` | `rateLimit:` window isn't `s`/`min`/`h`. |
+| `loom.proxy-header-forward-conflict` | Header listed in both `add` and `forward` for the same route. |
+| `loom.proxy-raw-unknown-family` | A `raw <family> { … }` block names a family that's not registered as a `PlatformSurface`. |
+| `loom.proxy-raw-dead` | Warning. A `raw <family> { … }` block is present but no deployable in the system uses that family. |
+| `loom.proxy-slot-unsupported` | A policy slot is used that the resolved gateway's `PlatformSurface.proxySlots` doesn't include. |
 
 The "kind" distinction between **application platform** (today's
 hono/dotnet/phoenix/react) and **gateway platform** (new) is best
@@ -232,21 +272,40 @@ One enrichment field per non-static deployable, added in phase ⑥
 // On EnrichedDeployableIR
 readonly proxyRoutes?: {
   readonly mode: 'mounted-in-host' | 'gateway';
-  readonly routes: readonly {
-    readonly prefix:  string;               // "/api/billing" or "/"
-    readonly target:  string;               // compose service name
-    readonly port:    number;
-    readonly module?: string;               // present for api routes
-  }[];
+  readonly routes: readonly ProxyRouteIR[];
+  readonly rawByFamily?: ReadonlyMap<string, readonly string[]>;
+};
+
+type ProxyRouteIR = {
+  prefix:    string;          // "/api/billing" or "/"
+  target:    string;          // compose service name
+  port:      number;
+  module?:   string;          // present for api routes
+  policy:    ProxyPolicyIR;   // empty {} when bare-ref
+  rawByFamily?: ReadonlyMap<string, readonly string[]>;
+};
+
+type ProxyPolicyIR = {
+  timeoutMs?:  number;
+  retries?:    { count: number; backoff?: 'fixed' | 'exponential' };
+  auth?:       AuthMode;
+  rateLimit?:  { count: number; window: 's' | 'min' | 'h' };
+  pathRewrite?:{ from: string; to: string };
+  headers?: {
+    add?:     readonly { name: string; value: string }[];
+    remove?:  readonly string[];
+    forward?: readonly string[];
+  };
+  websocket?: boolean;
 };
 ```
 
 Derivation rules:
 
 - `mode = 'gateway'` when host `PlatformSurface.kind === 'gateway'`;
-  otherwise `'mounted-in-host'` (and only present when `proxy:` is
-  non-empty).
-- For each `target ∈ proxy[]`:
+  otherwise `'mounted-in-host'` (and only present when
+  `proxy.routes` is non-empty).
+- For each `target ∈ proxy.routes`:
   - If the target is a backend, for each
     `module ∈ target.moduleNames` emit
     `{ prefix: '/api/' + kebab(module), target, port, module }`.
@@ -255,51 +314,57 @@ Derivation rules:
     port }`. This is how a gateway proxies the static SPA itself.
 - The host's *own* modules don't get a proxy route — they're
   served in-process (for `mounted-in-host` mode only).
+- `proxy.defaults` is merged into each route's `policy` (route
+  values win on conflict), so backends never have to walk a
+  default chain.
 - Order of `routes` is significant: api prefixes before the root
   catch-all. Enrichment guarantees the sort.
 
 The compose builder reads `proxyRoutes` and either:
 
 - **`mounted-in-host`** → delegates to the host's
-  `PlatformSurface.emitProxyMounts(routes)`.
+  `PlatformSurface.emitProxyMounts(routes, raw)`.
 - **`gateway`** → calls the gateway's
-  `PlatformSurface.emitProject({ routes, listenPort })`.
+  `PlatformSurface.emitProject({ routes, raw, listenPort })`.
 
 ## `PlatformSurface` contract diff
 
-Two additions to `src/platform/surface.ts`:
+Three additions to `src/platform/surface.ts`:
 
 ```ts
 export interface PlatformSurface {
   // ...existing...
 
-  /**
-   * Discriminator. Existing surfaces are 'application'; gateway
-   * platforms are 'gateway'. Drives validator rules — gateways
-   * can't `serves:` / `ui:` / `contexts:`.
-   */
+  /** Discriminator. Existing surfaces are 'application'. */
   readonly kind: 'application' | 'gateway';
 
   /**
+   * Vocabulary the surface claims to translate. Validator uses
+   * this to give "your gateway doesn't support `rateLimit`"-
+   * style diagnostics before code-gen runs.
+   */
+  readonly proxySlots: ReadonlySet<
+    'timeout' | 'retry' | 'auth' | 'rateLimit'
+    | 'path' | 'headers' | 'websocket'
+  >;
+
+  /**
    * Optional. Called once per application host whose deployable
-   * has a non-empty `proxy:`. The host emits same-origin
+   * has a non-empty `proxy.routes`. The host emits same-origin
    * reverse-proxy routes for every listed target using its
-   * platform-native idiom. No-op for gateways (they use
-   * emitProject).
+   * platform-native idiom.
    */
   readonly emitProxyMounts?: (
-    routes: readonly ProxyRoute[],
-    ctx: HostEmitCtx,
+    routes: readonly ProxyRouteIR[],
+    raw:    ReadonlyMap<string, readonly string[]>,
+    ctx:    HostEmitCtx,
   ) => void;
 }
 ```
 
 Gateway surfaces implement the existing `emitProject` /
 `composeService` interface — they don't need a separate
-`ProxySurface` type. `emitProject` for a gateway takes the
-routes (lifted from `proxyRoutes` via the orchestrator) and
-emits a single config file + asset directory. `composeService`
-returns a compose entry referencing the family's stock image.
+`ProxySurface` type.
 
 Registration mirrors `backend-packages.md`. In-tree gateways
 land in `src/platform/<family>.ts`, register in
@@ -314,73 +379,66 @@ land in `src/platform/<family>.ts`, register in
 ## Proxy policy DSL
 
 The route map is **free** — derived in enrichment from
-`proxy: [...]` + each target's `moduleNames` + `port`. The DSL
+`proxy.routes` + each target's `moduleNames` + `port`. The DSL
 only has to express what Loom can't infer: **per-route policy**
 (timeouts, auth, retries, header handling) and a small set of
 cross-cutting concerns that every reverse proxy needs to express
 the same way across families.
 
-### Surface shape — bare-ref or ref + block
-
-Each `proxy:` entry is either a bare deployable reference (use
-gateway defaults) or a deployable + policy block (override for
-this route).
+### Surface shape — one block, defaults inside, routes inside
 
 ```ddd
 deployable gateway {
   platform: caddy,
   port:     80,
 
-  // Gateway-level defaults — applied to every proxied route
-  // unless the route overrides.  See open question #2 on the
-  // syntactic shape of "defaults".
-  proxyDefaults {
-    timeout: 5s
-    auth:    public
+  proxy {
+    defaults {
+      timeout: 5s
+      auth:    public
+    }
+
+    routes: [
+      billingApi,                            // inherits defaults
+
+      inventoryApi {
+        timeout: 30s                         // long-poll endpoint
+        auth:    jwt
+      },
+
+      legacyApi {
+        path:    "/api/legacy" -> "/v1"      // URL rewrite
+        headers {
+          add     X-Source:   "gateway"
+          remove  X-Internal-Trace
+          forward X-Request-Id
+          forward Authorization
+        }
+        rateLimit: 100/min
+      },
+
+      webApp,                                // root catch-all, no policy
+    ]
   }
-
-  proxy: [
-    billingApi,                            // inherits defaults
-
-    inventoryApi {
-      timeout: 30s                         // long-poll endpoint
-      auth:    jwt
-    },
-
-    legacyApi {
-      path:    "/api/legacy" -> "/v1"      // URL rewrite
-      headers {
-        add     X-Source:   "gateway"
-        remove  X-Internal-Trace
-        forward X-Request-Id
-        forward Authorization
-      }
-      rateLimit: 100/min
-    },
-
-    webApp,                                // root catch-all, no policy
-  ],
 }
 ```
 
-Two syntactic decisions worth flagging up front:
+Two syntactic decisions worth flagging:
 
 - **`->` for rewrites** matches the existing `link "Docs" ->
-  "https://…"` view-link grammar (`ddd.langium:492`). It is
-  unambiguously not the lambda/match `=>`.
+  "https://…"` view-link grammar. Not the lambda/match `=>`.
 - **`headers { add X: "v", remove Y, forward Z }`** is a verb-
   prefixed nested block, the same shape as `permissions {
-  decls+= ... }`. Avoids the JS-flavoured `headers.add:` form
-  and keeps add/remove/forward in one place where you can read
-  the policy at a glance.
+  decls+= ... }`. Keeps add/remove/forward in one place and
+  avoids the JS-flavoured `headers.add:` form.
 
 ### Vocabulary
 
 Small, fixed, platform-neutral. Each slot translates cleanly to
 all four gateway families (Caddy / nginx / YARP / Ocelot) and to
 the in-process backends (hono / dotnet / phoenix). Anything that
-doesn't translate cleanly stays out — escape hatches are a
-post-v1 concern.
+doesn't translate cleanly stays out of the typed vocabulary and
+moves to the escape hatch (see below).
 
 | Slot | Syntax | Meaning |
 |---|---|---|
@@ -391,14 +449,6 @@ post-v1 concern.
 | `path` | `path: "/api/legacy" -> "/v1"` | URL rewrite. Quoted strings; ASCII arrow. |
 | `headers { … }` | nested block; `add NAME: "value"`, `remove NAME`, `forward NAME` | Explicit header policy. |
 | `websocket` | `websocket: true` | Allow WS/SSE upgrade. Default auto-detects from `event` / `live` in the proxied modules. |
-
-Deliberately **out of scope** for v1: TLS cert paths,
-connection-pool tuning, family-specific directives (Caddy
-`@matcher` blocks, nginx `proxy_buffer_size`, YARP transforms
-beyond path/headers). Escape hatch (`raw: { ... }` typed by
-gateway family) lands later if asked — the tradeoff is the
-explicit win: `platform: caddy` ↔ `platform: ocelot` ↔
-in-process YARP is a no-op at the DSL level.
 
 ### Per-platform translation — one slot end to end
 
@@ -432,64 +482,136 @@ in-process YARP is a no-op at the DSL level.
 - **Hono** (in-process, `acmeHost/src/proxy/inventory.ts`):
   ```ts
   app.all('/api/inventory/*', async c => {
-    const ctrl = AbortSignal.timeout(30_000);
+    const signal   = AbortSignal.timeout(30_000);
     const upstream = new URL(c.req.path, 'http://inventoryApi:3002');
-    return fetch(upstream, { method: c.req.method, body: c.req.raw.body, signal: ctrl });
+    return fetch(upstream, { method: c.req.method, body: c.req.raw.body, signal });
   });
   ```
 - **Phoenix** (`acmeHost/lib/.../endpoint.ex`):
   ```elixir
   plug ReverseProxyPlug,
-    upstream: "http://inventoryApi:3002",
-    response_mode: :stream,
+    upstream:       "http://inventoryApi:3002",
+    response_mode:  :stream,
     client_options: [recv_timeout: 30_000]
   ```
 
-The IR carries `timeoutMs: 30_000`; each surface's
-`emitProxyMounts` / `emitProject` knows how to spell it.
+The IR carries `timeoutMs: 30_000`; each surface knows how to
+spell it.
 
-### IR shape
+### Escape hatches
 
-Extends the `proxyRoutes` enrichment from the IR shape section
-above:
+The typed vocabulary above intentionally captures the 80%
+case. The other 20% — Caddy `@matcher` blocks, nginx
+`proxy_buffer_size` tuning, YARP custom `Transforms` beyond
+path/headers, OAuth token introspection, mTLS to upstreams — is
+**family-specific** by definition. The DSL needs a way to express
+it without either (a) inflating the typed vocabulary with slots
+that only one family supports or (b) forcing the user to drop
+out of Loom entirely.
 
-```ts
-type ProxyRouteIR = {
-  prefix:    string;          // derived from target.modules
-  target:    string;          // compose service name
-  port:      number;
-  module?:   string;          // present for api routes
-  policy: ProxyPolicyIR;      // empty {} when bare-ref
-};
+Proposed: **`raw <family> { … }` blocks**, available both at the
+proxy-block level and per-route. Each block is gated on the
+target family — only emitted when the resolved
+`PlatformSurface.family` matches.
 
-type ProxyPolicyIR = {
-  timeoutMs?:  number;
-  retries?:    { count: number; backoff?: 'fixed' | 'exponential' };
-  auth?:       AuthMode;
-  rateLimit?:  { count: number; window: 's' | 'min' | 'h' };
-  pathRewrite?:{ from: string; to: string };
-  headers?:    {
-    add?:     readonly { name: string; value: string }[];
-    remove?:  readonly string[];
-    forward?: readonly string[];
-  };
-  websocket?: boolean;
-};
+```ddd
+proxy {
+  defaults { timeout: 5s }
+
+  // Proxy-level raw — emits once into the gateway config, regardless of routes.
+  raw caddy {
+    """
+    @internal header X-Internal "true"
+    handle @internal { respond "internal-only" 403 }
+    """
+  }
+
+  routes: [
+    billingApi,
+
+    inventoryApi {
+      timeout:   30s
+      websocket: true
+
+      // Route-level raw — emits inside the inventory route only.
+      raw nginx {
+        """
+        proxy_buffer_size       128k;
+        proxy_buffers           4 256k;
+        proxy_busy_buffers_size 256k;
+        """
+      }
+      raw yarp {
+        """
+        "Transforms": [
+          { "RequestHeaderRemove": "X-Forwarded-For" }
+        ]
+        """
+      }
+    },
+  ]
+}
 ```
 
-Enrichment merges gateway-level defaults into each route's
-`policy` (route values win on conflict), so backends never have
-to walk a default chain — they just consume the resolved policy.
+Design notes on the escape hatch:
 
-### Validator additions (policy-specific)
+- **String content is opaque to Loom** — the validator parses
+  the *block* (family name, syntax) but the *contents* go through
+  as-is. We deliberately do not attempt to lint Caddyfile /
+  nginx.conf / YARP-JSON; that's the gateway family's job at boot.
+- **Source stays portable** — multiple `raw <family> { … }`
+  siblings can coexist for one route. Swap `platform: caddy` →
+  `platform: nginx` and you keep whichever `raw nginx { … }`
+  you already wrote; the `raw caddy { … }` becomes a noop. The
+  validator warns (`loom.proxy-raw-dead`) about raws no
+  deployable uses, so dead config is visible.
+- **Insertion points are family-defined** — each gateway
+  surface declares two splice points: `proxyLevelRawSplice`
+  (top-of-config) and `routeRawSplice(routeId)` (inside a
+  specific route). The IR holds the strings; the surface
+  decides where they land. For Caddy that's "inside the
+  `:port { … }` site block" and "inside the matching `handle`
+  block"; for YARP it's "inside the top-level `Routes` map" and
+  "inside the route's JSON object".
+- **The capability is per-family** — a gateway surface that
+  doesn't support raw blocks (e.g. an experimental in-tree
+  family during bootstrap) sets `proxyRaw: null` on its
+  surface; using `raw <family> { … }` against it errors with
+  `loom.proxy-raw-unsupported`. Out-of-tree gateways inherit
+  this knob.
+- **Per-route raw + typed slot on the same route** is fine —
+  enrichment emits the typed slot's translation *first*, then
+  the raw block, so raw overrides win (the same semantics as
+  hand-edited config files). Validator warns when a raw clearly
+  reproduces a typed slot ("you wrote `raw caddy { read_timeout
+  30s }` but the route already has `timeout: 30s`").
 
-| Code | Rule |
-|---|---|
-| `loom.proxy-policy-on-static` | `proxy:` policy block where the host's `PlatformSurface.kind === 'static'`. |
-| `loom.proxy-path-rewrite-shadow` | A `path: "/x" -> "/y"` rewrite whose source overlaps another route's prefix in the same `proxy:` list. |
-| `loom.proxy-auth-unknown` | `auth:` value isn't in the existing `AuthMode` enum. |
-| `loom.proxy-rate-limit-unit` | `rateLimit:` window isn't `s`/`min`/`h`. |
-| `loom.proxy-header-forward-conflict` | Header listed in both `add` and `forward` for the same route. |
+The minimal v1 commits to:
+
+1. **`raw <family> { """ ... """ }`** with triple-quoted
+   strings (already in Loom's terminal set — used for `text`
+   docstring slots elsewhere; check).
+2. **Proxy-level + route-level** scopes. No nested raws inside
+   raws.
+3. **Validator parses the family name and the block boundaries**
+   only. Contents are byte-spliced.
+4. **One gateway surface in v1 with a fully-defined raw splice
+   contract** — probably Caddy, where the directive boundaries
+   are unambiguous.
+
+What v1 deliberately does **not** ship:
+
+- **Conditional raws** (`raw caddy when production { … }`).
+  Environment-conditional config is a separate axis; deferred.
+- **Raw blocks on in-process backends** (`raw hono { … }`).
+  In-process proxies are TypeScript / C# / Elixir; the right
+  escape hatch there is "write a regular handler in your project
+  and skip `proxy { … }` for that route." Open question whether
+  to surface this guidance in a diagnostic.
+- **Raw at `defaults` level.** Raises ordering and override-
+  resolution problems we don't want to commit to before seeing
+  real use cases. Per-route + proxy-level covers the empirical
+  cases.
 
 ---
 
@@ -532,8 +654,10 @@ system Storefront {
 
   deployable gateway {
     platform: caddy,
-    proxy:    [webApp, billingApi, inventoryApi],
-    port: 80,
+    port:     80,
+    proxy {
+      routes: [webApp, billingApi, inventoryApi]
+    }
   }
 }
 ```
@@ -581,12 +705,14 @@ system Acme {
   deployable acmeHost {
     platform: dotnet,                         // mountsUi: true, kind: application
     contexts: [Sales],                        // serves Sales in-proc
-    proxy:    [marketingApi],                 // proxies Marketing
+    port:     5000,
+    proxy {
+      routes: [marketingApi]
+    },
     ui:       WebApp {
       Sales:     acmeHost,                    // ← host serves itself
       Marketing: marketingApi,
     },
-    port: 5000,
   }
 }
 ```
@@ -626,8 +752,10 @@ instead of Caddy. Just a platform swap — no other DSL change.
 ```ddd
   deployable gateway {
     platform: ocelot,
-    proxy:    [webApp, billingApi, inventoryApi],
-    port: 80,
+    port:     80,
+    proxy {
+      routes: [webApp, billingApi, inventoryApi]
+    }
   }
 ```
 
@@ -675,10 +803,10 @@ They publish `@acme/proxy-nginx-hardened-v1` carrying:
 {
   "name": "@acme/proxy-nginx-hardened",
   "loom": {
-    "kind": "gateway",
-    "family": "nginx-hardened",
+    "kind":        "gateway",
+    "family":      "nginx-hardened",
     "loomVersion": "1.0",
-    "core": "^0.x"
+    "core":        "^0.x"
   }
 }
 ```
@@ -688,8 +816,10 @@ Users pin it the same way they'd pin a backend version:
 ```ddd
   deployable gateway {
     platform: nginx-hardened@v1,
-    proxy:    [webApp, billingApi, inventoryApi],
-    port: 80,
+    port:     80,
+    proxy {
+      routes: [webApp, billingApi, inventoryApi]
+    }
   }
 ```
 
@@ -718,12 +848,13 @@ on each backend explicitly:
     platform: react,
     ui:       WebApp { Sales: salesApi, Marketing: marketingApi },
     port: 3000,
-    // No proxy. SPA bundle gets per-backend base URLs at build.
+    // No proxy block. SPA bundle gets per-backend base URLs at build.
   }
 ```
 
-The `cors:` slot itself is out of scope for this plan but is the
-natural companion — left here to show the explicit opt-in shape.
+The `cors:` slot itself is out of scope for this proposal but is
+the natural companion — left here to show the explicit opt-in
+shape.
 
 ### Example 6 — Policy in anger: long-poll, legacy URL, header forwarding
 
@@ -738,32 +869,33 @@ deployable acmeHost {
   contexts: [Sales],
   port:     5000,
 
-  // Defaults for every proxied route on this host.
-  proxyDefaults {
-    timeout: 5s
-    auth:    jwt                              // SPA's session → forwarded
-  }
+  proxy {
+    defaults {
+      timeout: 5s
+      auth:    jwt                            // SPA's session → forwarded
+    }
 
-  proxy: [
-    billingApi,                               // 5s timeout, jwt auth
+    routes: [
+      billingApi,                             // 5s timeout, jwt auth
 
-    inventoryApi {
-      timeout:   30s                          // long-poll endpoint
-      websocket: true                         // stock-level SSE stream
-    },
+      inventoryApi {
+        timeout:   30s                        // long-poll endpoint
+        websocket: true                       // stock-level SSE stream
+      },
 
-    legacyReportingApi {
-      path: "/api/reports" -> "/v1/legacy"    // upstream still on v1
-      headers {
-        add     X-Tenant:    "acme"
-        remove  X-Internal-Trace
-        forward Authorization
-        forward X-Request-Id
-      }
-      retry:     3
-      rateLimit: 60/min                       // legacy is fragile
-    },
-  ],
+      legacyReportingApi {
+        path: "/api/reports" -> "/v1/legacy"  // upstream still on v1
+        headers {
+          add     X-Tenant:    "acme"
+          remove  X-Internal-Trace
+          forward Authorization
+          forward X-Request-Id
+        }
+        retry:     3
+        rateLimit: 60/min                     // legacy is fragile
+      },
+    ]
+  },
 
   ui: WebApp {
     Sales:     acmeHost,
@@ -797,13 +929,13 @@ Generated `acmeHost/appsettings.Production.json` (YARP, abridged):
         "Match":   { "Path": "/api/reports/{**catch-all}" },
         "Timeout": "00:00:05",
         "AuthorizationPolicy": "jwt",
-        "RateLimiterPolicy": "per-min-60",
+        "RateLimiterPolicy":   "per-min-60",
         "Transforms": [
-          { "PathPattern": "/v1/legacy/{**catch-all}" },
-          { "RequestHeader":     "X-Tenant",          "Set":    "acme" },
-          { "RequestHeader":     "X-Internal-Trace",  "Remove": true   },
-          { "RequestHeader":     "Authorization",     "Append": "{Headers.Authorization}" },
-          { "RequestHeader":     "X-Request-Id",      "Append": "{Headers.X-Request-Id}" }
+          { "PathPattern":   "/v1/legacy/{**catch-all}" },
+          { "RequestHeader": "X-Tenant",         "Set":    "acme" },
+          { "RequestHeader": "X-Internal-Trace", "Remove": true   },
+          { "RequestHeader": "Authorization",    "Append": "{Headers.Authorization}" },
+          { "RequestHeader": "X-Request-Id",     "Append": "{Headers.X-Request-Id}" }
         ]
       }
     }
@@ -845,58 +977,115 @@ Same .ddd, `platform: caddy` swap → `Caddyfile`:
 Same source, two very different deployment targets. The policy
 intent is preserved; the spelling isn't.
 
+### Example 7 — Escape hatch for nginx-specific buffer tuning
+
+The SPA is fine on every platform, but one upstream returns
+multi-megabyte JSON payloads and the team is committed to nginx.
+They reach for the escape hatch on that one route.
+
+```ddd
+deployable gateway {
+  platform: nginx,
+  port:     80,
+  proxy {
+    routes: [
+      webApp,
+      billingApi,
+      reportingApi {
+        timeout: 60s
+        raw nginx {
+          """
+          proxy_buffer_size       128k;
+          proxy_buffers           4 256k;
+          proxy_busy_buffers_size 256k;
+          """
+        }
+      },
+    ]
+  }
+}
+```
+
+The `raw nginx { … }` body is spliced verbatim into the
+generated `location /api/reporting/ { … }` block, after the
+`proxy_read_timeout 60s` line that the typed `timeout: 60s`
+slot emitted.
+
+If the team later switches to `platform: caddy`, the source still
+parses and the gateway still builds — the `raw nginx { … }`
+becomes a dead block (validator warns:
+`loom.proxy-raw-dead nginx`) until they either delete it or
+add a sibling `raw caddy { … }`.
+
 ---
 
 ## Open questions
 
-1. **Derive `proxy:` from `UiComposeBinding`, or keep both?**
-   Deriving eliminates redundancy: if `ui: WebApp { Sales:
-   salesApi, Billing: billingApi }` already lists every backend
-   the SPA reaches, the host's `proxy:` is exactly
-   `[salesApi, billingApi] − {self}`. Probably: derive when
-   omitted, allow explicit, error on conflict. Decide before
-   grammar lands.
-2. **Gateway proxying a frontend deployable** (Example 1's
-   `proxy: [webApp, ...]`). Routing the root `/` catch-all to a
-   react bundle is sensible, but it asks the gateway to know
+The biggest question is **whether to ship this vocabulary at
+all** — and if so, how much of it. The DSL framing makes some
+choices look obvious that aren't:
+
+1. **Are we sure we want to express *all* of `timeout` / `retry`
+   / `rateLimit` / `auth` / `path` / `headers` / `websocket` in
+   the typed vocabulary?** Each one widens the conformance
+   surface across four gateway families plus three in-process
+   backends. A defensible minimal cut is **`timeout` +
+   `headers` + `websocket` typed, everything else via the
+   escape hatch** for v1. That's the question we explicitly
+   want to revisit before code lands.
+2. **Derive `proxy.routes` from `UiComposeBinding`, or keep
+   both?** Deriving eliminates redundancy: if `ui: WebApp {
+   Sales: salesApi, Billing: billingApi }` already lists every
+   backend the SPA reaches, the host's `proxy.routes` is
+   exactly `[salesApi, billingApi] − {self}`. Probably:
+   derive when omitted, allow explicit, error on conflict.
+3. **Gateway proxying a frontend deployable** (Example 1's
+   `routes: [webApp, ...]`). Routing the root `/` catch-all to
+   a react bundle is sensible, but it asks the gateway to know
    "frontend = catch-all root, backend = `/api/<module>/*`."
    Worth a validator rule: at most one frontend per gateway
-   `proxy:` list, and it always wins the catch-all slot.
-3. **HTTPS at the gateway.** Caddy's killer feature is automatic
-   TLS, but generated docker-compose shouldn't depend on ACME at
-   dev-time. Default: HTTP-only in compose; TLS via a future
-   deployable-level slot (out of scope here).
-4. **WebSockets / SSE passthrough.** All gateway families
-   support it with different config. Probably emit pass-through
-   only when an `event` stream / `live` page is present in any
-   proxied module — the route table already knows.
-5. **Two-stage SPA boot (config endpoint).** Today the react
+   `proxy.routes` list, and it always wins the catch-all slot.
+4. **HTTPS at the gateway.** Caddy's killer feature is automatic
+   TLS, but generated docker-compose shouldn't depend on ACME
+   at dev-time. Default: HTTP-only in compose; TLS via a future
+   deployable-level slot.
+5. **WebSockets / SSE passthrough auto-detection.** All gateway
+   families support it with different config. Probably emit
+   pass-through only when an `event` stream / `live` page is
+   present in any proxied module — the route table already
+   knows.
+6. **Two-stage SPA boot (config endpoint).** Today the react
    bundle bakes its API base URL at build time. With a gateway,
    the answer is always "/api/..." same-origin, so this gets
    simpler. Worth documenting as a side benefit.
-6. **Auth reuse vs. distinct route-level `auth:`.** Reusing the
-   existing `AuthMode` enum on route policy is the obviously
-   right surface — same vocabulary the rest of the DSL already
-   uses. But the *semantics* on a proxied route are stronger:
-   "the gateway/host terminates auth and forwards a verified
+7. **Auth reuse vs. distinct route-level `auth:`.** Reusing the
+   existing `AuthMode` enum is the obviously right surface, but
+   the semantics on a proxied route are stronger: "the
+   gateway/host terminates auth and forwards a verified
    principal", not "pass through and let the upstream decide."
-   Decide and document this explicitly before code lands —
-   the implementation work behind "terminates and forwards" is
+   Decide and document this explicitly before code lands; the
+   implementation work behind "terminates and forwards" is
    meaningfully larger (JWT verification key sources, principal
    propagation header conventions) than behind "passes through".
-7. **`proxyDefaults { ... }` block vs. lifting defaults onto the
-   top-level slots.** Reusing top-level `auth:` / `timeout:` as
-   defaults is more concise but conflates "policy for code I
-   run" with "policy for code I forward to" — they're genuinely
-   different things on a deployable that does both (Example 6).
-   Examples in this plan use the explicit `proxyDefaults { ... }`
-   block; mild preference for keeping it that way for clarity.
-   Either way, the merge into per-route policy happens once in
-   enrichment, so backends never see the distinction.
 8. **`retry: 3` vs. `retry: exponential(3)`.** Bare integer is
    the 90% case; the function form is what you reach for when
-   you actually care. Both can land in v1, or just the integer.
-   Defer until the first user asks.
+   you actually care. Defer the function form until the first
+   user asks.
+9. **Triple-quoted strings for `raw` blocks** — confirm the
+   terminal is available (Loom already uses it for `text`
+   docstring slots, but the `raw` body has different escape
+   needs).
+10. **Raw blocks on in-process backends** (`raw hono { … }`).
+    In-process proxies are TS/C#/Elixir — the right escape
+    hatch there is "write a regular handler in your project
+    and skip the typed route." Surface that guidance as a
+    diagnostic, or just leave it to docs?
+11. **`platform: react` + `proxy.routes` for SPA-served APIs**
+    is impossible (no server), but does `platform: react`
+    benefit from a `proxy.headers` block on its own static
+    serving (CSP, COEP/COOP)? Probably yes — but that's a
+    different feature than this proposal addresses. Worth a
+    cross-ref.
 
 ## Sequencing
 
@@ -908,8 +1097,9 @@ If this lands, the suggested slice order keeps each step small:
    `examples/acme.ddd`) migrate to UI-binding only. This is a
    pure cleanup — no new feature, just removes the redundant
    slot. Should be its own PR.
-1. **Add `proxy:` (list) on application-platform deployables.**
-   No gateway platforms yet. Validator: `proxy:` illegal on
+1. **Add `proxy { routes: [...] }` block on application-platform
+   deployables.** No `defaults`, no policy, no `raw` yet — just
+   the block and the route list. Validator: `proxy` illegal on
    `react`. Enrichment derives `proxyRoutes` with
    `mode: 'mounted-in-host'`.
 2. **`emitProxyMounts` on the hono surface** (smallest hop —
@@ -920,11 +1110,24 @@ If this lands, the suggested slice order keeps each step small:
 5. **Add `kind: "gateway"` to `PlatformSurface`**, register
    `caddy` as the first gateway platform. Switch one example to
    Shape B.
-6. **Second gateway family — `nginx`** — to prove the kind is
-   pluggable. Then `traefik`, then `ocelot`.
-7. **Wire the out-of-tree `kind: "gateway"` resolver** in
+6. **Add `proxy.defaults { … }` + the minimal typed vocabulary**
+   (`timeout`, `headers`, `websocket`). Defer `retry` /
+   `rateLimit` / `auth` / `path` until the open-question
+   review.
+7. **Add `raw <family> { … }` blocks** (proxy-level + route-
+   level) — Caddy first since its splice points are
+   unambiguous. Validator: `loom.proxy-raw-unknown-family`,
+   `loom.proxy-raw-dead`.
+8. **Second gateway family — `nginx`** — to prove the kind is
+   pluggable. Then `traefik`, then `ocelot`. Each one
+   declares `proxySlots` honestly; raw splice contract is
+   per-family.
+9. **Wire the out-of-tree `kind: "gateway"` resolver** in
    `fs-discovery.ts` once we have two in-tree families to
    pattern off.
+10. **Revisit the open-question list** before adding the
+    deferred typed slots (`retry`, `rateLimit`, `auth`, `path`).
+    Some of them may stay escape-hatch-only.
 
 Each step keeps `npm test` green and only one CI matrix cell
 (`LOOM_E2E`, `LOOM_DOTNET_BUILD`, etc.) changes scope at a time.
