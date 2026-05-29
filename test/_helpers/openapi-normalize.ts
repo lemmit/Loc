@@ -70,19 +70,48 @@ export function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
  * on a hardcoded "schemas to check" list that goes stale.
  */
 export function schemaNames(spec: OpenApiSpec): Set<string> {
-  // Skip framework-only schemas: Swashbuckle and OpenApiSpex emit a small
-  // pool of envelope / error types that the application never authors.
-  // Their presence in one backend's spec but not another's would otherwise
-  // surface as parity noise.
-  const FRAMEWORK_SCHEMAS = new Set([
-    // Swashbuckle (.NET) error envelopes
+  // Skip schemas that one backend's framework / idiom emits but that are
+  // NOT part of the cross-backend *behavioural* contract.  Behavioural
+  // equivalence (idiomatic per backend) compares what a client observes —
+  // operations, field shapes, types, required-ness, enum value-sets — not
+  // how each framework names its envelopes or wraps its lists.
+  const IDIOMATIC_SCHEMAS = new Set([
+    // Swashbuckle (.NET) error envelopes.
     "ProblemDetails",
     "ValidationProblemDetails",
     "HttpValidationProblemDetails",
+    // Error *bodies* are idiomatic per backend — Hono names an
+    // `ErrorResponse` envelope, .NET returns `ProblemDetails`, Phoenix
+    // declares no error body.  Only the error *status codes* are
+    // behavioural, so the envelope schema itself is excluded.
+    "ErrorResponse",
+    // Co-located provenance lineage is a TS/Hono-only wire extension
+    // (only the TS backend persists lineage) — consistent with the
+    // per-field `_provenance` exclusion in `fieldSet` / `requiredSet`.
+    "ProvenanceLineage",
   ]);
+  const schemas = spec.components?.schemas ?? {};
   return new Set(
-    Object.keys(spec.components?.schemas ?? {}).filter((n) => !FRAMEWORK_SCHEMAS.has(n)),
+    Object.keys(schemas).filter(
+      (n) => !IDIOMATIC_SCHEMAS.has(n) && !isListWrapperSchema(schemas[n]),
+    ),
   );
+}
+
+/**
+ * True for a "list wrapper" component — a named schema that is just
+ * `{ type: array, items: { $ref } }`.  Hono/zod-openapi and Phoenix emit
+ * the list response as a named component (`ProjectListResponse`); .NET
+ * inlines `array<ProjectResponse>` at the operation.  Both express the
+ * same behaviour, so the wrapper *name* is representational, not an
+ * independent schema: `responseBodySchemas` resolves it to
+ * `array<element>` and the element schema (`ProjectResponse`) is compared
+ * on its own.  Excluding the wrapper keeps it from reading as a one-sided
+ * `onlySchemas` divergence between a named-wrapper backend and an
+ * inline-array backend.
+ */
+function isListWrapperSchema(schema: OpenApiSchema | undefined): boolean {
+  return schema?.type === "array" && Boolean(schema.items?.$ref);
 }
 
 /**
@@ -93,6 +122,25 @@ export function schemaNames(spec: OpenApiSpec): Set<string> {
 export function requiredSet(spec: OpenApiSpec, schemaName: string): Set<string> {
   const schema = spec.components?.schemas?.[schemaName] as { required?: string[] } | undefined;
   return new Set((schema?.required ?? []).filter((k) => !k.endsWith("_provenance")));
+}
+
+/**
+ * Enum value-set per named component schema.  All three backends model a
+ * DSL enum (`Visibility`, `BuildState`) as a named string schema carrying
+ * an `enum: [...]` constraint.  The *value set* is behavioural — a client
+ * sees which values are accepted — so it is compared even though each
+ * backend may name / case the component differently.  Returns a sorted
+ * value list per enum-bearing schema; non-enum schemas are absent.
+ */
+export function enumValueSets(spec: OpenApiSpec): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const [name, schema] of Object.entries(spec.components?.schemas ?? {})) {
+    const en = (schema as { enum?: unknown[] }).enum;
+    if (Array.isArray(en) && en.length > 0) {
+      out.set(name, en.map((v) => String(v)).sort());
+    }
+  }
+  return out;
 }
 
 /** Build a `Set<"METHOD path">` from an OpenAPI spec's `paths`. */
@@ -190,12 +238,24 @@ export function normalisePath(p: string): string {
  */
 function schemaRefName(
   schema: { $ref?: string; type?: string; items?: { $ref?: string } } | undefined,
+  spec: OpenApiSpec,
 ): string | null {
   if (!schema) return null;
   // Direct ref: response body schema points at a named component.
   if (schema.$ref) {
     const m = schema.$ref.match(/^#\/components\/schemas\/(.+)$/);
-    return m ? (m[1] ?? null) : null;
+    if (!m) return null;
+    const name = m[1]!;
+    // Resolve a named list-wrapper component to its inline equivalent so
+    // `$ref:ProjectListResponse` (Hono/Phoenix) compares equal to an
+    // inline `array<ProjectResponse>` (.NET) — behavioural parity over
+    // representational naming.
+    const target = spec.components?.schemas?.[name];
+    if (target?.type === "array" && target.items?.$ref) {
+      const im = target.items.$ref.match(/^#\/components\/schemas\/(.+)$/);
+      if (im) return `array<${im[1]}>`;
+    }
+    return name;
   }
   // Array wrapper: `{ type: array, items: { $ref: ... } }`.  Annotated
   // with the array marker so the diff distinguishes single-item from
@@ -234,7 +294,7 @@ export function requestBodySchemas(spec: OpenApiSpec): Map<string, string> {
         };
       };
       const schema = op.requestBody?.content?.["application/json"]?.schema;
-      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema) ?? "");
+      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema, spec) ?? "");
     }
   }
   return out;
@@ -289,7 +349,7 @@ export function responseBodySchemas(spec: OpenApiSpec): Map<string, string> {
       };
       const ok = op.responses?.["200"] ?? op.responses?.["201"];
       const schema = ok?.content?.["application/json"]?.schema;
-      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema) ?? "");
+      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema, spec) ?? "");
     }
   }
   return out;
@@ -395,11 +455,15 @@ export interface ParityDiff {
    * `cardMismatches` (which catches array-vs-object drift) by also
    * catching same-cardinality, different-payload drift. */
   responseBodyDiffs: string[];
-  /** Per-op `operationId` drift on the intersection — the stable
-   * identifier client-codegen tools use to name generated functions.
-   * Drift here breaks consumers that key on the id (NSwag,
-   * openapi-generator, Heyapi). */
+  /** Per-op `operationId` drift on the intersection.  Compared
+   * case-insensitively (lower + strip separators), so a backend's
+   * idiomatic casing (camelCase Hono, snake_case Phoenix) never trips
+   * the gate — only a genuinely different token sequence does. */
   operationIdDiffs: string[];
+  /** Per-enum value-set drift on the intersection of enum-bearing
+   * component schemas — a backend accepting a different allowed-value
+   * set for the same enum (`Visibility`, `BuildState`). */
+  enumValueDiffs: string[];
 }
 
 /**
@@ -519,6 +583,12 @@ export function diffSpecs(
   // entirely.  Client-codegen tools (NSwag, openapi-generator)
   // generate function names from this; drift here forces consumers
   // to keep a per-backend rename table.
+  // Case-insensitive, separator-stripped operationId comparison.  Each
+  // backend renders the same canonical token sequence in its own idiom
+  // (camelCase Hono, snake_case Phoenix — from the shared `openapi-ids`
+  // helper), so only a genuinely different token sequence, or a missing
+  // id, counts as drift.
+  const normOpId = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const refOpIds = operationIds(ref.spec);
   const otherOpIds = operationIds(other.spec);
   const operationIdDiffs: string[] = [];
@@ -526,8 +596,20 @@ export function diffSpecs(
     if (!otherOpIds.has(op)) continue;
     const r = refOpIds.get(op) ?? "";
     const o = otherOpIds.get(op) ?? "";
-    if (r !== o) {
+    if (normOpId(r) !== normOpId(o)) {
       operationIdDiffs.push(`${op}: ${ref.name}=${r || "(none)"}, ${other.name}=${o || "(none)"}`);
+    }
+  }
+
+  // Per-enum value-set drift on the intersection of enum-bearing schemas.
+  const refEnums = enumValueSets(ref.spec);
+  const otherEnums = enumValueSets(other.spec);
+  const enumValueDiffs: string[] = [];
+  for (const [name, refVals] of refEnums) {
+    const otherVals = otherEnums.get(name);
+    if (!otherVals) continue;
+    if (refVals.join(",") !== otherVals.join(",")) {
+      enumValueDiffs.push(`${name}: ${ref.name}=[${refVals}] ${other.name}=[${otherVals}]`);
     }
   }
 
@@ -545,6 +627,7 @@ export function diffSpecs(
     requestBodyDiffs,
     responseBodyDiffs,
     operationIdDiffs,
+    enumValueDiffs,
   };
 }
 
@@ -561,6 +644,7 @@ export function isCleanDiff(diff: ParityDiff): boolean {
     diff.paramTypeDiffs.length === 0 &&
     diff.requestBodyDiffs.length === 0 &&
     diff.responseBodyDiffs.length === 0 &&
-    diff.operationIdDiffs.length === 0
+    diff.operationIdDiffs.length === 0 &&
+    diff.enumValueDiffs.length === 0
   );
 }

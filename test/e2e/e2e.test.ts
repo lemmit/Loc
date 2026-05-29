@@ -342,6 +342,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         if (diff.responseBodyDiffs.length)
           console.warn("  response-body schemas:", diff.responseBodyDiffs);
         if (diff.operationIdDiffs.length) console.warn("  operationIds:", diff.operationIdDiffs);
+        if (diff.enumValueDiffs.length) console.warn("  enum value-sets:", diff.enumValueDiffs);
       }
 
       if (STRICT_PARITY) {
@@ -357,6 +358,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         expect(diff.requestBodyDiffs, `request-body schema drift (${pair})`).toEqual([]);
         expect(diff.responseBodyDiffs, `response-body schema drift (${pair})`).toEqual([]);
         expect(diff.operationIdDiffs, `operationId drift (${pair})`).toEqual([]);
+        expect(diff.enumValueDiffs, `enum value-set drift (${pair})`).toEqual([]);
       }
     }
 
