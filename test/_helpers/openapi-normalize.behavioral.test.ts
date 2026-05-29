@@ -143,8 +143,8 @@ describe("openapi-normalize — behavioural equivalence", () => {
       const both = op({ "400": "application/problem+json", "404": "application/problem+json" });
       const missing = op({ "400": "application/problem+json" });
       expect(
-        diffSpecs({ name: "hono", spec: both }, { name: "dotnet", spec: missing }).errorResponseDiffs
-          .length,
+        diffSpecs({ name: "hono", spec: both }, { name: "dotnet", spec: missing })
+          .errorResponseDiffs.length,
       ).toBe(1);
       expect(
         diffSpecs({ name: "hono", spec: both }, { name: "dotnet", spec: both }).errorResponseDiffs,
