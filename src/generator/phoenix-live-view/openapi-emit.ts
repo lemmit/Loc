@@ -221,7 +221,7 @@ function renderApiSpec(
     pathEntries.push(`      "/workflows/${slug}" => %OpenApiSpex.PathItem{
         post: %OpenApiSpex.Operation{
           summary: "Run ${wf.name} workflow",
-          operationId: "run_${slug}",
+          operationId: "${snakeId(opWorkflow(wf.name))}",
           tags: ["workflows"],
           requestBody: %OpenApiSpex.RequestBody{
             required: true,
@@ -246,7 +246,7 @@ function renderApiSpec(
     pathEntries.push(`      "/views/${slug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "Query ${view.name} view",
-          operationId: "query_${slug}",
+          operationId: "${snakeId(opView(view.name))}",
           tags: ["views"],
           responses: %{
             200 => %OpenApiSpex.Response{
@@ -290,7 +290,7 @@ function renderApiSpec(
       `      "/${aggSlug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "List ${agg.name}",
-          operationId: "list_${snake(agg.name)}",
+          operationId: "${snakeId(opList(agg.name))}",
           tags: ["${aggSlug}"],
           responses: %{
             200 => %OpenApiSpex.Response{
@@ -301,7 +301,7 @@ function renderApiSpec(
         },
         post: %OpenApiSpex.Operation{
           summary: "Create ${agg.name}",
-          operationId: "create_${snake(agg.name)}",
+          operationId: "${snakeId(opCreate(agg.name))}",
           tags: ["${aggSlug}"],
           requestBody: %OpenApiSpex.RequestBody{
             required: true,
@@ -320,7 +320,7 @@ function renderApiSpec(
       `      "/${aggSlug}/{id}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "Get ${agg.name} by id",
-          operationId: "get_${snake(agg.name)}_by_id",
+          operationId: "${snakeId(opGetById(agg.name))}",
           tags: ["${aggSlug}"],
           parameters: [
             %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
@@ -344,7 +344,7 @@ function renderApiSpec(
         `      "/${aggSlug}/{id}/${opSnake}" => %OpenApiSpex.PathItem{
         post: %OpenApiSpex.Operation{
           summary: "${op.name} on ${agg.name}",
-          operationId: "${opSnake}_${snake(agg.name)}",
+          operationId: "${snakeId(opOperation(agg.name, op.name))}",
           tags: ["${aggSlug}"],
           parameters: [
             %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
@@ -377,7 +377,7 @@ function renderApiSpec(
           `      "/${aggSlug}/${findSnake}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "${find.name} on ${agg.name}",
-          operationId: "${findSnake}_${snake(agg.name)}",
+          operationId: "${snakeId(opFind(agg.name, find.name))}",
           tags: ["${aggSlug}"],
           responses: %{
             200 => %OpenApiSpex.Response{
