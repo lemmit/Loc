@@ -65,9 +65,7 @@ describe("ashPostgres PersistenceAdapter (real)", () => {
     expect(ashPostgresPersistenceAdapter.supports("postgres", "state", "state")).toBe(true);
     expect(ashPostgresPersistenceAdapter.supports("postgres", "snapshot", "state")).toBe(true);
     expect(ashPostgresPersistenceAdapter.supports("mysql", "state", "state")).toBe(false);
-    expect(ashPostgresPersistenceAdapter.supports("postgres", "eventLog", "state")).toBe(
-      false,
-    );
+    expect(ashPostgresPersistenceAdapter.supports("postgres", "eventLog", "state")).toBe(false);
     expect(ashPostgresPersistenceAdapter.supports("postgres", "state", "eventLog")).toBe(false);
   });
 
