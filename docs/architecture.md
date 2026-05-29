@@ -100,7 +100,7 @@ to different stores.
 ```ddd
 dataSource ordersState {
   for: Orders, kind: state, use: primarySql
-  // optional: schema, tablePrefix, isolationLevel, ttl, every, retain, …
+  // optional: schema, tablePrefix, isolationLevel, ttl, every, retain, normalised, …
 }
 dataSource ordersCache {
   for: Orders, kind: cache, use: hotCache, ttl: 60
@@ -121,6 +121,7 @@ storage types via an enforced compatibility matrix:
 Defaults applied at emit time:
 
 - `schema:` omitted → defaults to `snake(contextName)` on relational stores; non-relational stores have no schema concept.
+- `normalised:` omitted → defaults to `true` (relational tables).  `normalised: false` marks the `state` / `snapshot` data as one JSON document (D-DOCUMENT-AXIS); the document persistence *emission* is a later slice, so today the knob is parsed and carried but does not yet change generated output.
 
 Backend deployables list which dataSources they wire up (see
 "Backend deployables" below).  The validators enforce that every

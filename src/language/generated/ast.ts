@@ -140,6 +140,7 @@ export type DddKeywordNames =
     | "money"
     | "mui"
     | "mysql"
+    | "normalised"
     | "now"
     | "null"
     | "ogImage"
@@ -242,6 +243,12 @@ export const BaseType = 'BaseType';
 
 export function isBaseType(item: unknown): item is BaseType {
     return reflection.isInstance(item, BaseType);
+}
+
+export type BoolFlag = 'false' | 'true';
+
+export function isBoolFlag(item: unknown): item is BoolFlag {
+    return item === 'true' || item === 'false';
 }
 
 export type ComponentDecl = StateBlock;
@@ -514,6 +521,7 @@ export interface Aggregate extends AstNode {
     idKind?: IdKind;
     members: Array<AggregateMember>;
     name: string;
+    normalised?: BoolFlag;
     persistedAs?: TruthKind;
     withClause?: WithClause;
 }
@@ -718,6 +726,7 @@ export interface DataSource extends AstNode {
     keyPrefix?: string;
     kind?: DataSourceKind;
     name: LooseName;
+    normalised?: BoolFlag;
     readonly: boolean;
     retain?: number;
     schema?: string;
@@ -2523,6 +2532,7 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'idKind' },
                         { name: 'members', defaultValue: [] },
                         { name: 'name' },
+                        { name: 'normalised' },
                         { name: 'persistedAs' },
                         { name: 'withClause' }
                     ]
@@ -2667,6 +2677,7 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'keyPrefix' },
                         { name: 'kind' },
                         { name: 'name' },
+                        { name: 'normalised' },
                         { name: 'readonly', defaultValue: false },
                         { name: 'retain' },
                         { name: 'schema' },

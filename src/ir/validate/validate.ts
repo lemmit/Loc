@@ -971,6 +971,12 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
   },
   { property: "readonly", description: "no replica-aware persister is implemented yet" },
   { property: "keyPrefix", description: "no Redis-backed cache adapter is implemented yet" },
+  {
+    property: "normalised",
+    description:
+      "document persistence (normalised: false → one JSON document) has no emitter yet " +
+      "(Marten / EF .ToJson() is a later slice)",
+  },
 ];
 
 function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]): void {

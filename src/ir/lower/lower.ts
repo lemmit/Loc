@@ -544,6 +544,7 @@ function lowerSystem(sys: System): SystemIR {
             }
           : {}),
         ...(d.readonly ? { readonly: true } : {}),
+        ...(d.normalised == null ? {} : { normalised: d.normalised === "true" }),
       }),
     );
   // Named `layout <Name> { … }` SystemMembers (Phase 8).  Each slot's
@@ -1315,6 +1316,7 @@ function lowerAggregate(
     contextStamps: stamps.length > 0 ? stamps : undefined,
     implementsCapabilities: implementsCaps.length > 0 ? implementsCaps : undefined,
     persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,
+    normalised: agg.normalised == null ? undefined : agg.normalised === "true",
   };
 }
 
