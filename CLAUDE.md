@@ -189,6 +189,15 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader run).
 - `cleanup-artifacts.yml` — scheduled tidy of test artefacts.
 
+### Local enforcement (checked-in Claude Code hooks)
+
+`.claude/settings.json` wires two project hooks so the CI Biome gate can't be forgotten:
+
+- **SessionStart** (`.claude/hooks/session-start.sh`) — runs `npm install` (the `prepare` lifecycle: `langium:generate` + `build`) on a fresh remote container so Biome, the build, and the tests are ready. Idempotent; skips when `node_modules/.bin/biome` and `src/language/generated/` already exist; remote-only (`$CLAUDE_CODE_REMOTE`).
+- **Stop** (`.claude/hooks/biome-gate.sh`) — when a turn finishes with work in the tree, runs `npm run lint` (`biome ci .`, the exact `test.yml` step). On failure it **blocks** and feeds the Biome output back so it's fixed before finishing; it releases (with a loud warning) after one fix cycle to avoid a stop loop, and never blocks when Biome isn't installed.
+
+`.claude/` stays gitignored except these two paths (see `.gitignore`), so the hooks ship with the repo while worktrees and `settings.local.json` stay local.
+
 ## Further reading
 
 `docs/README.md` is the canonical doc index — start there. The most useful entries when working on the toolchain:
