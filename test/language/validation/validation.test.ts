@@ -2634,6 +2634,132 @@ describe("Loom IR validation (post-lowering)", async () => {
   });
 
   // -------------------------------------------------------------------
+  // Honest-note pass: knobs accepted by the AST validator but not yet
+  // consumed by any emitter.  Today: ttl / every / retain /
+  // isolationLevel / readonly / keyPrefix.  These warn at IR-validate
+  // time so authors don't believe a no-op value has effect.
+  // -------------------------------------------------------------------
+
+  it("warns when 'ttl' is set on a kind: cache dataSource", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C { aggregate A { x: int } } }
+        storage pg { type: postgres }
+        storage r  { type: redis }
+        dataSource cState { for: C, kind: state, use: pg }
+        dataSource cCache { for: C, kind: cache, use: r, ttl: 60 }
+        deployable api {
+          platform: hono, contexts: [C],
+          dataSources: [cState, cCache], port: 3000
+        }
+      }
+    `);
+    const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
+    expect(
+      warnings.some(
+        (d) =>
+          /dataSource 'cCache' sets 'ttl'/.test(d.message) &&
+          /no Redis-backed cache adapter is implemented yet/.test(d.message),
+      ),
+      JSON.stringify(warnings),
+    ).toBe(true);
+  });
+
+  it("warns when 'every' and 'retain' are set on a kind: eventLog dataSource", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C {
+          aggregate A { persistenceStrategy: eventSourced  x: int }
+        } }
+        storage pg { type: postgres }
+        dataSource cLog { for: C, kind: eventLog, use: pg, every: 100, retain: 5 }
+        deployable api {
+          platform: hono, contexts: [C],
+          dataSources: [cLog], port: 3000
+        }
+      }
+    `);
+    const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
+    expect(
+      warnings.some((d) => /dataSource 'cLog' sets 'every'/.test(d.message)),
+      JSON.stringify(warnings),
+    ).toBe(true);
+    expect(
+      warnings.some((d) => /dataSource 'cLog' sets 'retain'/.test(d.message)),
+      JSON.stringify(warnings),
+    ).toBe(true);
+  });
+
+  it("warns when 'isolationLevel' is set on a kind: state dataSource", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C { aggregate A { x: int } } }
+        storage pg { type: postgres }
+        dataSource cState {
+          for: C, kind: state, use: pg,
+          isolationLevel: serializable
+        }
+        deployable api {
+          platform: hono, contexts: [C],
+          dataSources: [cState], port: 3000
+        }
+      }
+    `);
+    const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
+    expect(
+      warnings.some(
+        (d) =>
+          /dataSource 'cState' sets 'isolationLevel'/.test(d.message) &&
+          /transaction isolation is not yet plumbed/.test(d.message),
+      ),
+      JSON.stringify(warnings),
+    ).toBe(true);
+  });
+
+  it("warns when 'keyPrefix' is set on a kind: cache dataSource", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C { aggregate A { x: int } } }
+        storage pg { type: postgres }
+        storage r  { type: redis }
+        dataSource cState { for: C, kind: state, use: pg }
+        dataSource cCache { for: C, kind: cache, use: r, keyPrefix: "x:" }
+        deployable api {
+          platform: hono, contexts: [C],
+          dataSources: [cState, cCache], port: 3000
+        }
+      }
+    `);
+    const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
+    expect(
+      warnings.some((d) => /dataSource 'cCache' sets 'keyPrefix'/.test(d.message)),
+      JSON.stringify(warnings),
+    ).toBe(true);
+  });
+
+  it("does NOT warn when only 'schema' / 'tablePrefix' are set (both are wired)", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C { aggregate A { x: int } } }
+        storage pg { type: postgres }
+        dataSource cState {
+          for: C, kind: state, use: pg,
+          schema: "custom", tablePrefix: "p_"
+        }
+        deployable api {
+          platform: hono, contexts: [C],
+          dataSources: [cState], port: 3000
+        }
+      }
+    `);
+    const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
+    expect(
+      warnings.filter((d) => /sets '/.test(d.message)),
+      JSON.stringify(warnings),
+    ).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------
   // DSL extensions: matches / check / private invariant.
   // -------------------------------------------------------------------
   describe("DSL extensions", () => {
