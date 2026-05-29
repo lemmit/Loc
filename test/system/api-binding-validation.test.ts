@@ -39,15 +39,15 @@ describe("api binding validator", () => {
       expect(errors.some((e) => /Duplicate api 'Foo'/.test(e))).toBe(true);
     });
 
-    it("flags api referencing an undeclared module", async () => {
+    it("flags api referencing an undeclared subdomain", async () => {
       const { errors } = await parse(`
         system S {
-          api Foo from MissingModule
+          api Foo from MissingSubdomain
           deployable api { platform: hono, port: 3000 }
         }
       `);
       expect(
-        errors.some((e) => /api 'Foo' references undeclared module 'MissingModule'/.test(e)),
+        errors.some((e) => /api 'Foo' references undeclared subdomain 'MissingSubdomain'/.test(e)),
       ).toBe(true);
     });
 

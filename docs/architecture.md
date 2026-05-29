@@ -11,13 +11,14 @@ independently.  Deployables are the explicit composition root.
 
 ```ddd
 context     →   domain primitives (aggregates / workflows / views)
-module      →   group of contexts                               [domain]
+subdomain   →   group of contexts                                  [domain]
 
-api         →   contract derived from a module                  [contract]
-storage     →   typed storage instance                          [infra]
-ui          →   declares api dependencies, renders pages        [consumer]
+api         →   contract derived from a subdomain                  [contract]
+storage     →   typed physical store                               [infra]
+dataSource  →   (context, kind) → storage routing                  [infra]
+ui          →   declares api dependencies, renders pages           [consumer]
 
-deployable  →   composes platform + modules + api + UI + storage [composition]
+deployable  →   composes platform + contexts + api + UI + dataSources [composition]
 ```
 
 Read any single declaration and you see its full picture; no
@@ -26,12 +27,12 @@ implicit cross-references between layers.
 
 ## Domain layer
 
-`module` and `context` define pure domain — aggregates,
+`subdomain` and `context` define pure domain — aggregates,
 repositories, workflows, views.  Persistence-agnostic; same
 domain runs against Postgres in prod, in-memory in tests.
 
 ```ddd
-module Sales {
+subdomain Sales {
   context Orders {
     aggregate Customer { name: string; email: string }
     repository Customers for Customer {
@@ -46,8 +47,8 @@ module Sales {
 
 ## API contracts
 
-`api X from M` declares a contract derived from a module's
-domain.  The api auto-exposes:
+`api X from <Subdomain>` declares a contract derived from a
+subdomain's domain.  The api auto-exposes:
 
 | Domain entity | Api operations |
 |---|---|
@@ -163,7 +164,7 @@ The `<param>.<aggregate>.<op>` body refs (e.g. `Sales.Customer.all`)
 are validated at parse-validate time:
 
 - `Sales` resolves to a declared UI api parameter.
-- `Customer` resolves to an aggregate in the api's source module.
+- `Customer` resolves to an aggregate in the api's source subdomain.
 - `all` is a known operation (CRUD or repository find).
 
 The walker auto-injects React Query hooks at page top following
@@ -307,7 +308,7 @@ system Acme {
     }
   }
 
-  api SalesApi from Orders
+  api SalesApi from Sales
   storage primarySql { type: postgres }
   dataSource ordersState { for: Orders, kind: state, use: primarySql }
 
@@ -344,7 +345,7 @@ What the reader gets from any single declaration:
 |---|---|
 | `subdomain Sales { ... }` | a logical grouping; the domain lives in its `context` children |
 | `context Orders { aggregate Customer { ... } }` | the domain — pure, persistence-agnostic |
-| `api SalesApi from Orders` | the contract — derived from a bounded context |
+| `api SalesApi from Sales` | the contract — derived from a subdomain |
 | `storage primarySql { type: postgres }` | a typed physical store |
 | `dataSource ordersState { for: Orders, kind: state, use: primarySql }` | which context's data of which kind lands where |
 | `ui WebApp { api Sales: SalesApi, ... }` | the UI takes Sales of contract SalesApi |
@@ -354,7 +355,7 @@ What the reader gets from any single declaration:
 
 ## Scaffold expands to walker stdlib (Slice C2 / D1)
 
-The `scaffold modules: M` directive (page-metamodel §10) keeps
+The `scaffold subdomains: [M]` directive (page-metamodel §10) keeps
 working — but as **compile-time sugar**.  Synthesised pages now
 lower to explicit walker-stdlib bodies via
 `src/ir/walker-primitive-expander.ts`, called at the end of
@@ -398,7 +399,7 @@ shape end-to-end.
 
 | Misalignment | Error |
 |---|---|
-| `api X from MissingModule` | "api 'X' references undeclared module 'MissingModule'" |
+| `api X from MissingSub` | "api 'X' references undeclared subdomain 'MissingSub'" |
 | Two `api X` declarations | "Duplicate api 'X'" |
 | `api X: NoSuchApi` in UI | "ui '<U>' references undeclared api 'NoSuchApi'" |
 | Body ref `Sales.NoAggregate.all` | "Aggregate 'NoAggregate' not found in api 'SalesApi'" |

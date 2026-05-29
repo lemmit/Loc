@@ -396,7 +396,7 @@ export function checkApiBodyRefs(p: Page, ui: Ui, accept: ValidationAcceptor): v
     if (!aggregate) {
       accept(
         "error",
-        `Aggregate '${aggregateName}' not found in api '${apiNode.name}' (module '${moduleName}').`,
+        `Aggregate '${aggregateName}' not found in api '${apiNode.name}' (subdomain '${moduleName}').`,
         { node: aggSuffix, property: "member" },
       );
       continue;

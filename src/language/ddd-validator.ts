@@ -181,7 +181,7 @@ export class DddValidator {
           if (!api.source?.ref) {
             accept(
               "error",
-              `api '${api.name}' references undeclared module '${api.source?.$refText ?? "<missing>"}'.  Declare a 'module ${api.source?.$refText ?? "<Name>"} { … }' at system scope first.`,
+              `api '${api.name}' references undeclared subdomain '${api.source?.$refText ?? "<missing>"}'.  Declare a 'subdomain ${api.source?.$refText ?? "<Name>"} { … }' at system scope first.`,
               { node: api, property: "source" },
             );
           }
