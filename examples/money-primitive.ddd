@@ -30,7 +30,7 @@
 
 context Billing {
 
-  aggregate Invoice {
+  aggregate Invoice with crudish {
     subtotal: money
     taxRate: decimal
 
