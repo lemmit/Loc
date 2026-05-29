@@ -354,12 +354,13 @@ delivered; backend client emission deferred — see note.)*
   real backend output (shared `DRIZZLE_CONNECTION_SETUP` const; the server entry
   no longer hardcodes its own copy) — the prerequisite flagged for Phase 4.
 
-**Phase 4 — Workflow-level resource consumption (future, separate design).**
-The surface by which workflows/operations *use* a resource — the caller of the
-deferred Phase-2 clients — is its own design effort and gates backend client
-emission. Once defined, it plugs into the already-threaded `NeedIR` (needs would
-then be derived from actual consumption, not just aggregate persistence) and the
-registry's per-kind interfaces.
+**Phase 4 — Workflow-level resource consumption.** Designed in
+[`workflow-resource-consumption.md`](./workflow-resource-consumption.md): a
+`resource` becomes a capability-typed handle callable from a workflow through a
+closed per-kind verb vocabulary (`files.put(…)`, `jobs.enqueue(…)`,
+`rates.get(…)`). This is the caller of the Phase-2.4 clients; it activates the
+`need ⊆ sourceType` check (needs derive from verbs used) and the per-resource
+interface selection.
 
 ---
 
