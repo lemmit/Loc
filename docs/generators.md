@@ -551,8 +551,8 @@ Owns its own Postgres database (`needsDb: true`).
 
 ### File map
 
-For a fullstack `phoenixApp` with `modules: Sales`, `serves: SalesApi`,
-`ui: SalesAdmin`:
+For a fullstack `phoenixApp` with `contexts: [Sales]` + matching
+`dataSources: [salesState]`, `serves: SalesApi`, `ui: SalesAdmin`:
 
 ```
 phoenix_app/
@@ -637,7 +637,7 @@ for the full mapping table.
 ## System orchestration
 
 `generate system` (in `src/system/index.ts`) runs each deployable
-through its respective backend, scoped to its module subset, and
+through its respective backend, scoped to its hosted contexts, and
 writes everything to a flat tree:
 
 ```
@@ -685,7 +685,7 @@ appear in the init script.
 Schema changes flow through a platform-neutral **MigrationsIR**
 ([`src/ir/types/migrations-ir.ts`](../src/ir/types/migrations-ir.ts))
 built by diffing the current source against a checked-in snapshot at
-`.loom/snapshots/<module>.snapshot.json`.  The builder
+`.loom/snapshots/<Subdomain>.snapshot.json`.  The builder
 ([`src/system/migrations-builder.ts`](../src/system/migrations-builder.ts))
 computes one `MigrationsIR` per `(subdomain, storage)` pair owned by a
 deployable (`migrationsOwner` enrichment in
@@ -705,7 +705,7 @@ Phoenix stays in Ecto DSL because its output is Elixir.  Hono and
 .NET share `src/system/sql-pg.ts` for bit-identical Postgres DDL.
 
 Initial regen of an output tree emits one "Initial" migration per
-module per backend.  Subsequent regens diff against the snapshot and
+subdomain per backend.  Subsequent regens diff against the snapshot and
 emit one new dated file per backend covering just the delta — adding
 a property produces a single `ALTER TABLE … ADD COLUMN …` per
 backend, with the snapshot's `lastVersion` bumped so the next run's
