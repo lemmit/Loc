@@ -354,6 +354,41 @@ describe("schemaFromModule — document shape", () => {
   });
 });
 
+describe("schemaFromModule — embedded shape", () => {
+  const EMBEDDED_SOURCE = `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Cart ids guid shape(embedded) {
+        customer: Customer id
+        total: int
+        contains lines: CartLine[]
+        entity CartLine { quantity: int }
+      }
+      aggregate Customer ids guid { name: string }
+      repository Carts for Cart { }
+      repository Customers for Customer { }
+    }
+  }
+  deployable api { platform: hono, contexts: [Orders], port: 3000 }
+}
+`;
+
+  it("keeps the queryable root + one JSONB column per containment, no part table", async () => {
+    const loom = await buildLoomModel(EMBEDDED_SOURCE);
+    const snap = schemaFromModule(loom.systems[0]!.subdomains[0]!);
+    // Cart embeds → one `carts` table, no `cart_lines` part table.
+    expect(snap.tables.map((t) => t.name)).toEqual(["carts", "customers"]);
+    const carts = snap.tables.find((t) => t.name === "carts")!;
+    // Root stays columns; the containment folds into a JSONB `lines` column.
+    expect(carts.columns.map((c) => c.name)).toEqual(["id", "customer", "total", "lines"]);
+    expect(carts.columns.find((c) => c.name === "lines")!.type).toEqual({ kind: "json" });
+    expect(carts.columns.find((c) => c.name === "total")!.type).toEqual({ kind: "int" });
+    // The `Customer id` reference stays a queryable FK column (unlike document).
+    expect(carts.foreignKeys.map((fk) => fk.column)).toEqual(["customer"]);
+  });
+});
+
 describe("buildMigrations — per-projection binding override", () => {
   it("honours a `dataSource shape: document` even when the aggregate header is shape(relational)", async () => {
     const loom = await buildLoomModel(`

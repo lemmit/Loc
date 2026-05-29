@@ -21,7 +21,8 @@ import type {
   SchemaSnapshot,
   TableShape,
 } from "../ir/types/migrations-ir.js";
-import { isDocumentShaped, resolveDataSourceConfig } from "../ir/util/resolve-datasource.js";
+import { effectiveSavingShape, resolveDataSourceConfig } from "../ir/util/resolve-datasource.js";
+import type { SavingShape } from "../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../util/naming.js";
 import type { SnapshotStore } from "./snapshot.js";
 
@@ -46,21 +47,26 @@ export const BASE_TIMESTAMP = "20260101000000";
 
 export function schemaFromModule(
   module: EnrichedSubdomainIR,
-  /** Per-aggregate document predicate (D-DOCUMENT-AXIS).  A `shape(document)`
-   *  aggregate collapses to a single `(id, data jsonb, version)` table —
-   *  its parts fold into `data` and its reference collections become id
-   *  arrays inside `data`, so neither part tables nor join tables are
-   *  emitted.  Defaults to the aggregate-header value; `buildMigrations`
-   *  passes a binding-aware predicate so a per-projection `dataSource
-   *  shape:` override is honoured (the schema stays consistent with the
-   *  EF/Drizzle/Ash emitters, which resolve the same way via
-   *  `isDocumentShaped`). */
-  isDocument: (agg: EnrichedAggregateIR) => boolean = (agg) => isDocumentShaped(agg),
+  /** Per-aggregate saving shape (D-DOCUMENT-AXIS).  Selects the table
+   *  shape: `relational` (table-per-entity + join tables), `embedded`
+   *  (queryable root row + one JSONB column per containment, no part
+   *  tables), or `document` (the whole aggregate as one `(id, data,
+   *  version)` blob).  Defaults to the aggregate-header value;
+   *  `buildMigrations` passes a binding-aware resolver so a
+   *  per-projection `dataSource shape:` override is honoured (the schema
+   *  stays consistent with the EF/Drizzle/Ash emitters, which resolve
+   *  the same way via `effectiveSavingShape`). */
+  shapeOf: (agg: EnrichedAggregateIR) => SavingShape = (agg) => effectiveSavingShape(agg),
 ): SchemaSnapshot {
   const tables: TableShape[] = [];
   for (const agg of collectAggregates(module)) {
-    if (isDocument(agg)) {
+    const shape = shapeOf(agg);
+    if (shape === "document") {
       tables.push(documentTableForAggregate(agg, module.name));
+      continue;
+    }
+    if (shape === "embedded") {
+      tables.push(embeddedTableForAggregate(agg, module.name));
       continue;
     }
     tables.push(tableForAggregate(agg, module.name));
@@ -78,6 +84,48 @@ export function schemaFromModule(
   }
   tables.sort((a, b) => a.name.localeCompare(b.name));
   return { schemaVersion: 1, tables };
+}
+
+/** Embedded-children aggregate (`shape(embedded)`): the root stays a
+ *  normal queryable row — `id` plus its scalar / `X id` columns, exactly
+ *  like the relational root — but each containment folds into a single
+ *  JSONB column (the contained parts serialised inline) and reference
+ *  collections fold into a JSONB id-array column.  No part tables, no
+ *  join tables.  This is the shape EF owned-types `.ToJson()`, Drizzle
+ *  jsonb columns, and Ash embedded resources all map to natively — one
+ *  physical layout shared across every backend. */
+function embeddedTableForAggregate(agg: AggregateIR, ownerModule: string): TableShape {
+  const tableName = plural(snake(agg.name));
+  const columns: ColumnShape[] = [
+    { name: "id", type: idColumnType(agg.idValueType), nullable: false },
+  ];
+  const foreignKeys: FKShape[] = [];
+  const indexes: IndexShape[] = [];
+  for (const f of agg.fields) {
+    if (isReferenceCollection(f.type)) {
+      columns.push({ name: snake(f.name), type: { kind: "json" }, nullable: !!f.optional });
+      continue;
+    }
+    const mapped = mapField(f);
+    columns.push(mapped.column);
+    if (mapped.fkRefTable) {
+      foreignKeys.push({
+        column: mapped.column.name,
+        refTable: mapped.fkRefTable,
+        onDelete: "restrict",
+      });
+      indexes.push({
+        name: `${tableName}_${mapped.column.name}_idx`,
+        table: tableName,
+        columns: [mapped.column.name],
+        unique: false,
+      });
+    }
+  }
+  for (const c of agg.contains) {
+    columns.push({ name: snake(c.name), type: { kind: "json" }, nullable: false });
+  }
+  return { name: tableName, ownerModule, columns, primaryKey: ["id"], foreignKeys, indexes };
 }
 
 /** Document-shaped aggregate (`shape(document)`): the whole aggregate
@@ -202,17 +250,17 @@ export function buildMigrations(sys: EnrichedSystemIR, snapshots: SnapshotStore)
   const out: MigrationsIR[] = [];
   for (const m of sys.subdomains) {
     if (!m.migrationsOwner) continue;
-    // Binding-aware document predicate: resolve each aggregate's effective
-    // saving shape via its (context, kind) dataSource binding so a
-    // per-projection `shape:` override matches what the backend
-    // emitters produce.  Falls back to the aggregate header when the
-    // aggregate's owning context can't be located within the module.
-    const isDocument = (agg: EnrichedAggregateIR): boolean => {
+    // Binding-aware saving-shape resolver: resolve each aggregate's
+    // effective shape via its (context, kind) dataSource binding so a
+    // per-projection `shape:` override matches what the backend emitters
+    // produce.  Falls back to the aggregate header when the aggregate's
+    // owning context can't be located within the module.
+    const shapeOf = (agg: EnrichedAggregateIR): SavingShape => {
       const ctx = m.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
-      if (!ctx) return isDocumentShaped(agg);
-      return isDocumentShaped(agg, resolveDataSourceConfig(agg, ctx, sys));
+      if (!ctx) return effectiveSavingShape(agg);
+      return effectiveSavingShape(agg, resolveDataSourceConfig(agg, ctx, sys));
     };
-    const next = schemaFromModule(m, isDocument);
+    const next = schemaFromModule(m, shapeOf);
     const baseline = snapshots.read(m.name);
     const steps = diffSchema(baseline, next);
     const storageName = findPrimaryStorageBinding(sys, m, m.migrationsOwner) ?? "";
