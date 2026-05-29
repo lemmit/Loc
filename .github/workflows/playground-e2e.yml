@@ -11,9 +11,15 @@ name: Playground e2e
 # CI runners have internet access so the network-gated steps don't
 # self-skip the way they do in local sandboxes.
 #
-# Triggers: every PR to main + every direct push to main.  Branch-
-# protection (configured separately in repo settings) decides whether
-# this is a required check.
+# Triggers: every direct push to main (i.e. after merge) + a daily
+# scheduled run + manual dispatch.  The per-PR trigger was removed
+# because these specs are network-gated (esm.sh / jsdelivr / npm) and
+# flaky enough that gating every PR on them cost more than it caught.
+# Branch-protection (configured separately in repo settings) decides
+# whether the post-merge run is a required check.
+#
+# To re-enable per-PR gating, add back a `pull_request:` block with the
+# same `paths:` filter as `push:` below.
 
 on:
   push:
@@ -29,19 +35,10 @@ on:
       - 'package-lock.json'
       - 'langium-config.json'
       - '.github/workflows/playground-e2e.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'web/**'
-      - 'src/**'
-      - 'designs/**'
-      - 'vite/**'
-      - 'api/**'
-      - 'docker/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'langium-config.json'
-      - '.github/workflows/playground-e2e.yml'
+  # Daily run at 06:00 UTC so the network-gated suite still gets
+  # exercised against main even on days with no merges.
+  schedule:
+    - cron: '0 6 * * *'
   workflow_dispatch:
 
 # Cancel in-flight runs of the same branch when a new commit lands.
