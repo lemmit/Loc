@@ -107,6 +107,13 @@ No new language features.
 
 ### 0.1 Decisions to pin before any grammar edit
 
+> **Status: all RATIFIED.** Every tag below is now PINNED in
+> [`../decisions.md`](../decisions.md) (D1–D4 + D14–D15 cover the
+> type-system grammar surface; the rest of the type-system D-table,
+> D5–D37, keeps its recommended answers in `implementation-plan.md` and
+> is taken per-phase). Grammar work on the dependent proposals is
+> unblocked.
+
 - D-RENAME — header paren modifier `inheritanceUsing(sharedTable |
   ownTable)` (was `inheritanceStrategy: shareTable | ownTable`).
   Amended by D-DOCUMENT-AXIS §4 — **PINNED** in `decisions.md`.
@@ -152,6 +159,11 @@ No new language features.
   `emitCompliancePolicy`, `emitTenancyFilter`, `emitI18nAdapter`.
 
 ### 0.4 Cross-cutting design specs (`docs/architecture/*.md`)
+
+> **Status: WRITTEN.** All six specs live under
+> [`../architecture/`](../architecture/) (index at
+> `architecture/README.md`). They are design intent; each notes its
+> current-vs-target implementation state inline.
 
 - `request-context.md` (D-CTX-SHAPE) — single ambient `RequestContext`
   shape consumed by execution-context, multi-tenancy, authorization,

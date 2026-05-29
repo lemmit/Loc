@@ -398,21 +398,194 @@ survive the alignment pass.
 
 ---
 
-## Other D-tags — referenced but not yet pinned here
+## D-RENAME — aggregate-inheritance layout modifier
 
-The following tags are introduced in
-`proposals/global-implementation-plan.md` §0.1 and
-`proposals/implementation-plan.md`. They are recorded here as OPEN
-with pointers to their proposal-recommended answers. Promote to
-PINNED here when ratified.
+**Status:** PINNED.
 
-| Tag | Concern | Recommended answer (source) |
+**Decision.** Inheritance table layout is a **header paren modifier**
+`inheritanceUsing(sharedTable | ownTable)` (was the body clause
+`inheritanceStrategy: shareTable | ownTable`). Amended by
+D-DOCUMENT-AXIS §4 — all aggregate config moves to the header as paren
+modifiers; nothing in the body. Values stay **table-baked**, spelled
+`sharedTable | ownTable` (refines the earlier `shareTable`, reads as
+"shared table"); the medium-neutral `shared | own` spelling is
+rejected (the choice is specifically about table layout, and naming it
+so keeps it honest when document/JSON saving enters via `normalised`).
+
+**Validator rules implied.**
+
+- `inheritanceUsing(…)` is only valid on an aggregate that participates
+  in inheritance (`abstract` base or `extends` subtype).
+- `sharedTable` = TPH (single table + discriminator column);
+  `ownTable` = TPC/TPT (table per concrete). The exact TPC-vs-TPT
+  choice is a backend detail, not surfaced in the modifier.
+
+**Affects.** `aggregate-inheritance.md` (its `storage: shared|own`
+clause is this modifier); `document-and-json-hierarchies.md` §4a (same
+header line). Interacts with D-ES-TPH below.
+
+---
+
+## D-ES-TPH — event-sourced concrete subtype of a TPH abstract
+
+**Status:** PINNED.
+
+**Decision.** A `persistedAs(eventLog)` concrete subtype of a
+`sharedTable` (TPH) abstract base is **forced to
+`inheritanceUsing(ownTable)`** — an event-sourced stream cannot share a
+state table with its siblings. Generalises across `normalised` per
+D-DOCUMENT-AXIS: a `normalised(false)` (document) concrete of a
+`sharedTable` base is likewise forced to `ownTable`. The validator
+raises an error (not a silent coercion) so the author writes the
+forced modifier explicitly.
+
+**Affects.** `aggregate-inheritance.md`; the persistence adapter's
+table-layout resolution.
+
+---
+
+## D1–D4, D14–D15 — type-system grammar names + ML syntax
+
+**Status:** PINNED (the six grammar-shaping tags). The remaining
+type-system decisions D5–D37 keep their **recommended** answers in
+[`proposals/implementation-plan.md`](./proposals/implementation-plan.md)
+and may be taken per-phase without separate ratification (per that
+doc's workflow note); only D1–D4 + D14–D15 are pinned here because they
+fix the grammar surface before P3.
+
+| Tag | Question | **Pinned answer** |
 |---|---|---|
-| D-RENAME | Aggregate-inheritance layout key naming + syntax | **Amended by D-DOCUMENT-AXIS §4:** header paren modifier `inheritanceUsing(sharedTable \| ownTable)` (was `inheritanceStrategy: …`). Values kept **table-baked**, spelled `sharedTable \| ownTable` (refines pinned `shareTable` → `sharedTable`, reads as "shared table"); medium-neutral `shared\|own` rejected. (`aggregate-inheritance.md` + `document-and-json-hierarchies.md` §4a) |
-| D-ES-TPH | ES concrete subtype of TPH abstract | Force `inheritanceUsing(ownTable)` for a `persistedAs(eventLog)` concrete of a `sharedTable` base; generalises across `normalised` per D-DOCUMENT-AXIS (`aggregate-inheritance.md`) |
-| D1–D4, D14–D15 | Type-system carrier name / discriminator / postfix vs prefix ML syntax | Per `implementation-plan.md` D-table; locked before P3 |
-| D-POLICY-STYLE | Authorization grammar shape | `policy { data { … } operations { … } fields { … } }` reachability over function-style (`authorization.md`) |
-| D-LIFECYCLE-VERB | Lifecycle URL style default | `urlStyle: literal \| resource` (`lifecycle-operations.md`) |
-| D-I18N-KEY | i18n key stability | Option B — positional hash + named render (`i18n.md`) |
-| D-CTX-SHAPE | Ambient `RequestContext` field set | Per `execution-context.md`; see proposed `docs/architecture/request-context.md` |
-| D-ENVELOPE | Wire envelope rule | entity \| `Paged<T>` \| ProblemDetails \| event-frame (per global plan §0.4) |
+| D1 | Carrier bound name | **`carrier`** (over `value`/`data`) |
+| D2 | Union discriminator field name | **`kind`** (over `type`/`_type`) |
+| D3 | Union identity | **Variant-name-tagged** (not structural) |
+| D4 | Aggregate-in-carrier semantics | **Handle-in-process, wire-at-boundary** |
+| D14 | Parameterised-payload use-site syntax | **Postfix ML** (`customer page`); consistent with `Customer id`; **no angle brackets anywhere** |
+| D15 | Anonymous `or` precedence vs postfix constructors | **Postfix binds tighter than `or`** (`string or int option` parses as `string or (int option)`; parens for the other reading) |
+
+**Rationale.** D14's postfix ML choice is the load-bearing one — it
+keeps `customer page`, `customer id`, `customer option` all reading as
+"a page/id/option *of* customer", with zero generics syntax (`<>`) in
+the language. D1/D2 pick the least-surprising names; D3/D4 were already
+pinned in the implementation plan and are restated here for one
+authoritative location.
+
+**Affects.** `payload-transport-layer.md` (P3/P4 grammar);
+`exception-less.md` (D15 governs `or` precedence); `ddd.langium`
+`TypeRef` + payload rules.
+
+---
+
+## D-POLICY-STYLE — authorization grammar shape
+
+**Status:** PINNED.
+
+**Decision.** Authorization is expressed in dedicated **`policy { }`
+blocks** with three sub-sections — `data { reachable when … }`
+(row-set reachability filter, paramless), `operations { <op> when … }`
+(point gates, params from the operation), and `fields { mask … }`
+(field masking) — **over** the function-style policy DSL alternative.
+Reuses `function`, `currentUser`, and `permissions {}` as building
+blocks inside the block.
+
+**Rationale.** The block form keeps authorization as visibly-separate
+*infrastructure* (one place to read "what governs this aggregate"),
+makes the reachability-vs-gate distinction structural (different
+sub-sections, different binding scopes), and reads as declarative
+configuration rather than scattered guard functions. `currentUser`
+member accesses (`.permissions`, `.dataKey`, `.id`) resolve against the
+shape pinned in
+[`architecture/request-context.md`](./architecture/request-context.md).
+
+**Affects.** `authorization.md` (its central grammar);
+`policies-supplementary-note.md` stays superseded background;
+`ddd.langium` gains the `policy` rule (Phase 3.2).
+
+---
+
+## D-LIFECYCLE-VERB — lifecycle URL style default
+
+**Status:** PINNED.
+
+**Decision.** The api surface carries `urlStyle: literal | resource`,
+**default `literal`**. `literal` uses the operation/create/destroy name
+verbatim as the URL slug (`operation cancel()` → `POST
+/orders/:id/cancel`); `resource` pluralises it via `src/util/naming.ts`
+(`operation cancellation()` → `POST /orders/:id/cancellations`). Loom
+rejects the Restful Objects two-tree URL idiom outright (`POST
+/services/Customers/actions/createNewCustomer/invoke`) in favour of
+conventional REST that hand-written clients already understand.
+
+**Affects.** `lifecycle-operations.md`; the per-backend route emitters
+(slug derivation reads `urlStyle`).
+
+---
+
+## D-I18N-KEY — i18n key stability
+
+**Status:** PINNED.
+
+**Decision.** **Option B as default, Option C as escape hatch.**
+
+- **Inline user-visible literals** are keyed by a content hash —
+  `page.<page>.<role>.<sha-6>` (6-char base64 of `sha512(source)`).
+  Placeholders are **normalised to positional for hashing** (`"Order
+  {0}"`) but **rendered named** at use (`{orderNumber}`). Effect: a
+  placeholder *rename* leaves the hash stable; `ddd i18n sync` rewrites
+  the placeholder name in the catalog without re-keying (Option B).
+- **Named `text { }` entries** get true stable keys
+  (`text.<Namespace>.<name>`) with author-chosen placeholder names —
+  the escape hatch (Option C) for strings that must survive *content*
+  edits, not just renames.
+
+Option A (live with churn) is rejected; positional-only hashing without
+named render is rejected (leaks DSL/source structure to the client).
+The unnamed-placeholder fallback warns (`loom.unnamed-placeholder`).
+
+**Affects.** `i18n.md`, `i18n-strings.md`; the `ddd i18n sync`
+three-way merge; the generated catalog key shape.
+
+---
+
+## D-CTX-SHAPE — the ambient `RequestContext` field set
+
+**Status:** PINNED. Full shape in
+[`architecture/request-context.md`](./architecture/request-context.md).
+
+**Decision.** One ambient `RequestContext` value, read by every
+governance feature. Two tiers: **request-stable** (`correlationId`,
+`currentUser`, `locale`, `startedAt`) set once at the boundary;
+**frame-local** (`scopeId`, `parentId`) re-derived per execution-context
+scope frame. `currentUser` (`id`, `tenantId`, `permissions`, `dataKey`)
+**is** the `currentUser` magic identifier from `authorization.md` and
+the source of `user.tenantId` for multi-tenancy. No feature opens its
+own parallel ambient channel (`ICurrentUserAccessor`, `getLocale()`, a
+logging MDC, …) — they all read slices of this one value.
+
+**Affects.** `execution-context.md` (defines the frame tier),
+`multi-tenancy-design-note.md` (`tenantId`), `authorization.md`
+(`currentUser`/`dataKey`), `sensitivity-and-compliance.md`
+(declassification clearance), `i18n.md` (`locale`),
+`audit-and-logging.md` (actor + correlation), `observability.md`
+(correlation). PlatformSurface lifecycle hooks receive its accessor.
+
+---
+
+## D-ENVELOPE — the wire envelope rule
+
+**Status:** PINNED. Full rules in
+[`architecture/wire-envelope.md`](./architecture/wire-envelope.md).
+
+**Decision.** Every HTTP response is exactly one of four shapes — **bare
+value** (single entity/payload/primitive), **`Paged<T>`** (lists),
+**ProblemDetails** (RFC 7807, all errors), **event-frame** (`{ kind,
+occurredAt, correlationId, data }`). The HTTP **status code is the
+success/error discriminator**; the success path is **never** wrapped in
+a `{ kind: "ok", value }` envelope (D16) — the payload `kind`
+discriminator (D2/D3) lives inside tagged-union bodies, not at the
+envelope level. A uniform `{ ok, value | error }` envelope is rejected
+(forces every client to unwrap; duplicates the status line).
+
+**Affects.** `payload-transport-layer.md`, `exception-less.md` (D16,
+D17, D18), `pagination-design-note.md` (`Paged<T>`/`unpaged`),
+`workflow-and-applier.md` (event-frame); every backend's DTO/route
+emitter; the `conformance-parity.yml` OpenAPI gate.

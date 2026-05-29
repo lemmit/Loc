@@ -55,9 +55,11 @@ These cover a single language feature each.  Each one is self-contained.
 
 ## Subdirectories
 
+- [`architecture/`](architecture/) — cross-cutting design specs shared by several proposals (`RequestContext`, wire envelope, modifier propagation, diagnostic catalog, CLI surface, fixture re-baseline).  Pin shapes that multiple features consume; back the `D-*` decisions in [`decisions.md`](decisions.md).
 - [`plans/`](plans/) — implementation plans, roadmaps, and design notes for in-flight or future work.  Not authoritative for what ships today; treat as historical context.
 - [`audits/`](audits/) — empirical audits of shipped state (pack equivalence, stack version pins).  Snapshot-in-time documents.
 - `proposals/` — formal proposals not yet adopted.  Aspirational; do not treat as describing the shipped system.  **Not deployed** to the published docs site; browse on [GitHub](https://github.com/lemmit/Loc/tree/main/docs/proposals).
+- [`decisions.md`](decisions.md) — pinned cross-proposal decisions (the `D-*` tags).  The binding answer when a proposal cites a tag.
 
 ## See also
 
