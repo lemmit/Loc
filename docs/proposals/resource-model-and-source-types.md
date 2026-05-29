@@ -340,12 +340,25 @@ unused.
 - **Registry home is split** (see §3.4): the platform-neutral descriptor lives in
   `src/ir/source-types.ts`; vendor realization stays in the platform adapters
   keyed by sourceType name; the semantic kind↔type check moves into IR validation.
-
-## 9. Open questions
-
-1. **Config typing** — keep `config` fully generic (string map) or validate known
-   keys per sourceType from the registry (no grammar impact either way).
-2. **Need granularity** — per `(context, kind)` (matches current binding
-   granularity) vs finer per-aggregate needs.
-3. **Custom sourceType plugins** — scope and trust model for user-contributed
-   registry entries.
+- **Config typing — generic syntax, registry-validated keys.** `config` stays a
+  free-form key→value map at the grammar (no per-vendor clause keywords). The
+  registry declares each sourceType's allowed/required config keys and their
+  types; IR validation checks them: unknown keys warn (forward-compatible),
+  missing-required / wrong-type error. The config schema lives in the same neutral
+  descriptor.
+- **Need granularity — per `(context, kind)`.** Matches the existing binding
+  granularity pinned by D-GRANULARITY. A context's need for a kind carries the
+  union of capabilities implied by that context's aggregates. Per-aggregate
+  refinement is deferred to the same future override mechanism that owns
+  per-aggregate bindings.
+- **Custom sourceType plugins — seam now, loader later.** A sourceType is
+  platform-owned code, never `.ddd`-authored, so plugins ride the existing
+  out-of-tree package rail (`packages/` + `loom` manifest key, discovered by
+  `src/platform/fs-discovery.ts`) and are trusted like an out-of-tree backend
+  (full code trust). Because `ir/` cannot import `platform/`,
+  `src/ir/source-types.ts` exposes a **registration API** and the platform loader
+  pushes both the neutral descriptor and the vendor realization into it at boot
+  (the inversion `bootMacros()` already uses for macros). A plugin contributes a
+  descriptor entry plus a realization adapter under one manifest entry
+  (`kind: "sourceType"`). This RFC fixes the seam; the loader implementation lands
+  in Phase 3.
