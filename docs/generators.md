@@ -683,11 +683,17 @@ appear in the init script.
 ### Migrations
 
 Schema changes flow through a platform-neutral **MigrationsIR**
-([`src/ir/migrations-ir.ts`](../src/ir/migrations-ir.ts)) built by
-diffing the current source against a checked-in snapshot at
-`.loom/snapshots/<module>.snapshot.json`.  See
-[`docs/migrations-design.md`](migrations-design.md) for the full
-pipeline; the per-backend artefacts are:
+([`src/ir/types/migrations-ir.ts`](../src/ir/types/migrations-ir.ts))
+built by diffing the current source against a checked-in snapshot at
+`.loom/snapshots/<module>.snapshot.json`.  The builder
+([`src/system/migrations-builder.ts`](../src/system/migrations-builder.ts))
+computes one `MigrationsIR` per `(subdomain, storage)` pair owned by a
+deployable (`migrationsOwner` enrichment in
+`src/ir/enrich/enrichments.ts`).  Backends only translate steps to
+their syntax via the per-platform emitters listed below — they never
+recompute the schema themselves.  Shared SQL rendering for the two
+Postgres-backed emitters lives in
+[`src/system/sql-pg.ts`](../src/system/sql-pg.ts).
 
 | Backend | Emits | Applied by |
 | --- | --- | --- |

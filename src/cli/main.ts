@@ -278,11 +278,12 @@ async function runGenerate(
 
   let files: Map<string, string>;
   if (target === "system") {
-    // Diff each module's current schema against the snapshot the LAST
-    // regen wrote into `.loom/snapshots/` (under `outDir`).  Fresh
-    // output dirs ⇒ `fsSnapshotStore.read` returns null ⇒ initial
+    // Diff each subdomain's current schema against the snapshot the
+    // LAST regen wrote into `.loom/snapshots/` (under `outDir`).
+    // Fresh output dirs ⇒ `fsSnapshotStore.read` returns null ⇒ initial
     // migration; existing snapshots ⇒ delta migration when the source
-    // moves.  See `docs/migrations-design.md`.
+    // moves.  See `src/system/migrations-builder.ts` for the diff
+    // builder + `docs/generators.md` § Migrations for the pipeline.
     files = generateSystemsFromLoom(loom, {
       emitTrace: options.emitTrace,
       snapshots: fsSnapshotStore(outDir),
