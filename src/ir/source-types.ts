@@ -198,6 +198,15 @@ export function interfacesFor(sourceType: string, kind: DataSourceKind): Readonl
   return descriptor.supports[SURFACE_KIND_MAP[kind].infraKind]?.interfaces ?? new Set();
 }
 
+/** The capabilities a `sourceType` offers for `kind` (empty when
+ *  unsupported) — the set a need's required capabilities must be a
+ *  subset of (RFC §5). */
+export function capabilitiesFor(sourceType: string, kind: DataSourceKind): ReadonlySet<string> {
+  const descriptor = REGISTRY.get(sourceType);
+  if (!descriptor) return new Set();
+  return descriptor.supports[SURFACE_KIND_MAP[kind].infraKind]?.capabilities ?? new Set();
+}
+
 /** The config-key schema a sourceType understands (empty when none). */
 export function configSchemaFor(sourceType: string): readonly ConfigKeySchema[] {
   return REGISTRY.get(sourceType)?.configKeys ?? [];

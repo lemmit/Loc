@@ -638,6 +638,9 @@ export type EnrichedSubdomainIR = Omit<SubdomainIR, "contexts"> & {
 
 export type EnrichedSystemIR = Omit<SystemIR, "subdomains"> & {
   subdomains: EnrichedSubdomainIR[];
+  /** Derived logical needs, one per `(context, required kind)` — the
+   *  implicit "need" layer (RFC §3.3).  Populated by `enrichLoomModel`. */
+  needs: NeedIR[];
 };
 
 // ---------------------------------------------------------------------------
@@ -1239,6 +1242,22 @@ export interface DataSourceIR {
 }
 
 export type DataSourceKind = "state" | "eventLog" | "snapshot" | "cache" | "replica";
+
+/** A derived, implicit logical *need*: what a bounded context requires
+ *  of its data layer, independent of the technology that satisfies it
+ *  (RFC §3.3).  Needs are not authored — they are derived during
+ *  enrichment from how the context's aggregates persist, and threaded
+ *  onto `EnrichedSystemIR.needs`.  A `resource` binding satisfies a need
+ *  when its `sourceType` supports the need's `kind` and offers all the
+ *  need's `capabilities` (validated in IR; RFC §5). */
+export interface NeedIR {
+  /** The bounded context that has the need. */
+  contextName: string;
+  /** The required (surface) kind — the `(context, kind)` routing key. */
+  kind: DataSourceKind;
+  /** Capabilities the context requires within that kind. */
+  capabilities: readonly string[];
+}
 
 // `static` is the page-metamodel's UI-only deployable kind: builds a
 // Vite bundle and serves it via a small static-asset host (nginx in

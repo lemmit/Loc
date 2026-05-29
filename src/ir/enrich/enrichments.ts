@@ -20,6 +20,7 @@ import type {
   FieldIR,
   FindIR,
   LoomModel,
+  NeedIR,
   RawLoomModel,
   RepositoryIR,
   SubdomainIR,
@@ -129,6 +130,9 @@ function enrichSystem(
   // for emitting schema migrations.  Runs last because it consults
   // the (now enriched) deployable list.  See `assignMigrationsOwner`.
   const subdomainsWithOwner = subdomains.map((m) => assignMigrationsOwner(m, deployables));
+  // Derive the implicit logical needs (RFC §3.3): one per (context,
+  // required kind), read off how each context's aggregates persist.
+  const needs = deriveNeeds(subdomainsWithOwner);
   // Scaffold expansion now runs at the AST
   // level via `src/language/ddd-scaffold-ast-expander.ts` (a
   // `DocumentState.IndexedContent` hook on the shared
@@ -139,7 +143,40 @@ function enrichSystem(
   // any caller that constructs a `LoomModel` outside the standard
   // `parseHelper` / `DocumentBuilder` pipeline (it just returns
   // the existing pages unchanged).
-  return { ...sys, subdomains: subdomainsWithOwner, deployables };
+  return { ...sys, subdomains: subdomainsWithOwner, deployables, needs };
+}
+
+// ---------------------------------------------------------------------------
+// Need derivation — the implicit "need" layer (RFC §3.3).
+//
+// A context's aggregates determine which data kinds it requires:
+//   - `state`    when at least one aggregate is persistedAs(state) (the
+//                default) — it needs a primary state store;
+//   - `eventLog` when at least one aggregate is persistedAs(eventLog) —
+//                it needs an event stream.
+// (snapshot / cache / replica are optional secondary stores, never
+// *required* by an aggregate, so they are not needs.)  Capabilities are
+// the base set each kind implies; a `resource`'s sourceType must offer
+// them (checked in IR validation).  Mirrors `coverageGapReason` in
+// `src/ir/validate/validate.ts`.
+// ---------------------------------------------------------------------------
+
+function deriveNeeds(subdomains: EnrichedSubdomainIR[]): NeedIR[] {
+  const needs: NeedIR[] = [];
+  for (const sub of subdomains) {
+    for (const ctx of sub.contexts) {
+      if (ctx.aggregates.length === 0) continue;
+      const hasState = ctx.aggregates.some((a) => (a.persistedAs ?? "state") === "state");
+      const hasEventLog = ctx.aggregates.some((a) => a.persistedAs === "eventLog");
+      if (hasState) {
+        needs.push({ contextName: ctx.name, kind: "state", capabilities: ["state", "crud", "query"] });
+      }
+      if (hasEventLog) {
+        needs.push({ contextName: ctx.name, kind: "eventLog", capabilities: ["append", "read"] });
+      }
+    }
+  }
+  return needs;
 }
 
 // ---------------------------------------------------------------------------

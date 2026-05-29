@@ -1,6 +1,7 @@
 import { platformOwnsBackend } from "../../language/validators/data/platform-rules.js";
 import { allPlatforms, platformFor } from "../../platform/registry.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
+import { capabilitiesFor, supportsSurfaceKind } from "../source-types.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -8,6 +9,7 @@ import type {
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedLoomModel,
+  EnrichedSystemIR,
   ExprIR,
   SubdomainIR,
   SystemIR,
@@ -54,6 +56,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
     validateDataSourceCoverage(sys, diags);
+    validateNeedCapabilities(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuth(sys, diags);
@@ -903,6 +906,46 @@ function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): voi
  *    - cache    → needs at least one aggregate of any strategy
  *    - replica  → needs at least one aggregate of any strategy
  */
+// ---------------------------------------------------------------------------
+// Need ⊆ sourceType capability check (RFC §5.3).  For each derived need
+// bound to a resource, the resource's sourceType must offer every
+// capability the need requires.  This is the IR-level invariant the
+// implicit need layer enables; the AST validator already owns the
+// coarser "kind supported by sourceType" check (with editor squiggles),
+// so this only reports a *capability* gap on a kind the sourceType DOES
+// support — avoiding a duplicate diagnostic for a plain kind/type
+// mismatch.  In Phase 1 every supported kind offers all its
+// capabilities, so this is silent for valid models; it becomes load-
+// bearing once kinds carry capabilities a sourceType may partially
+// support.
+// ---------------------------------------------------------------------------
+
+function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagnostic[]): void {
+  const storageType = new Map(sys.storages.map((s) => [s.name, s.type] as const));
+  for (const need of sys.needs) {
+    const resource = sys.dataSources.find(
+      (d) => d.contextName === need.contextName && d.kind === need.kind,
+    );
+    if (!resource) continue; // coverage gaps are reported elsewhere
+    const sourceType = storageType.get(resource.storageName);
+    if (!sourceType) continue; // unresolved `use:` reported elsewhere
+    // Defer to the AST validator for the kind/type mismatch itself.
+    if (!supportsSurfaceKind(sourceType, need.kind)) continue;
+    const offered = capabilitiesFor(sourceType, need.kind);
+    const missing = need.capabilities.filter((c) => !offered.has(c));
+    if (missing.length > 0) {
+      diags.push({
+        severity: "error",
+        message:
+          `resource '${resource.name}' (sourceType '${sourceType}') does not offer ` +
+          `${missing.map((c) => `'${c}'`).join(", ")} required by context ` +
+          `'${need.contextName}' for kind '${need.kind}'.`,
+        source: `${sys.name}/${resource.name}`,
+      });
+    }
+  }
+}
+
 function coverageGapReason(kind: string, ctx: BoundedContextIR): string | undefined {
   const aggs = ctx.aggregates;
   if (aggs.length === 0) return "the context declares no aggregates";
