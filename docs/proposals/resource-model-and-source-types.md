@@ -154,6 +154,29 @@ enumerations, per-adapter `supports()` predicates, hardcoded vendor pins,
 relational-type sets) into one data-driven table that every backend and validator
 reads.
 
+**Registry home.** The registry splits by altitude, respecting the
+one-directional layering (`language → ir → generator → system`):
+
+- **Platform-neutral descriptor** (`src/ir/source-types.ts`) — the single source
+  of truth for `sourceType → supported kinds → { capabilities, interfaces }` and
+  the canonical kind/capability sets. Read by IR lowering/enrich (need
+  derivation), IR validation (capability/kind matching), and system composition.
+  Because `language/` cannot import from `ir/`, the semantic kind↔type
+  compatibility check moves from the AST validator into IR validation
+  (`src/ir/validate/validate.ts`), where kind-coverage checks already live; the
+  AST validator keeps only structural checks. This consolidates the duplicated
+  relational-type sets.
+- **Vendor realization** stays distributed across the platform adapters, keyed by
+  sourceType name — compose image pins, client-library versions, migration
+  dialect, connection-setup code are inherently platform-specific and belong where
+  the layering already places them. Each adapter's `supports()` becomes a thin
+  lookup against the neutral descriptor instead of an inline table.
+
+The grammar's `type:` / `kind:` literal lists stay hand-maintained (the parser is
+generated at build time and cannot read the TS registry), so adding a sourceType
+touches two places — the grammar literal and the registry entry. This adds no soft
+keywords.
+
 ### 3.5 `kind`, `capability`, `interface`
 
 - **`kind`** is the semantic role and the primary contract between a need and a
@@ -275,8 +298,10 @@ unused.
 
 **Phase 1 — Resource model + sourceType registry (foundation).**
 - Introduce the `resource` declaration as the data-layer binding; retain the
-  `dataSources:` deployable clause referencing it. Provide a one-step codemod for
-  `.ddd` sources, examples, and fixtures.
+  `dataSources:` deployable clause referencing it. **Hard cutover** — the prior
+  binding keyword is removed (no transitional alias); all `.ddd` sources,
+  examples, and fixtures migrate in one step via codemod, since all Loom sources
+  live in this repository.
 - Stand up the platform-internal `sourceType` registry and back the existing
   per-adapter `supports()` checks and validator compatibility matrix with it;
   consolidate the duplicated relational-type sets.
@@ -307,15 +332,20 @@ unused.
 
 ---
 
-## 8. Open questions
+## 8. Resolved decisions
 
-1. **Codemod vs alias** for the binding-declaration rename — one-step hard cutover
-   (preferred, consistent with prior hard cutovers) or a transitional alias.
-2. **Registry home** — colocated with the platform adapters (where `supports()`
-   already lives) vs a dedicated `src/ir/source-types.ts`.
-3. **Config typing** — keep `config` fully generic (string map) or validate known
+- **Rename = hard cutover.** The prior binding-declaration keyword is removed with
+  no transitional alias; all sources migrate in one codemod step (all Loom code
+  lives in this repository).
+- **Registry home is split** (see §3.4): the platform-neutral descriptor lives in
+  `src/ir/source-types.ts`; vendor realization stays in the platform adapters
+  keyed by sourceType name; the semantic kind↔type check moves into IR validation.
+
+## 9. Open questions
+
+1. **Config typing** — keep `config` fully generic (string map) or validate known
    keys per sourceType from the registry (no grammar impact either way).
-4. **Need granularity** — per `(context, kind)` (matches current binding
+2. **Need granularity** — per `(context, kind)` (matches current binding
    granularity) vs finer per-aggregate needs.
-5. **Custom sourceType plugins** — scope and trust model for user-contributed
+3. **Custom sourceType plugins** — scope and trust model for user-contributed
    registry entries.
