@@ -65,6 +65,12 @@ Status reflects `origin/main` as of the last refresh of
 |---|---|---|
 | [`storage-and-platform-config.md`](./storage-and-platform-config.md) | PARTIAL | Top-level `storage <name> { type }` and deployable role-keyed slots shipped. Remaining: per-aggregate `persistenceStrategy:`, logical bindings (now `dataSource` per [D-STORAGE-SPLIT](../decisions.md#d-storage-split--split-the-overloaded-storage-keyword)), per-deployable `style:` / `layout:` / `persistence:`, `STORAGE_CAPABILITIES` matrix, adapter contracts. Granularity is per-context, not per-aggregate ([D-GRANULARITY](../decisions.md#d-granularity--storage-bindings-are-per-context-not-per-aggregate)); per-aggregate `for:` deferred to v2 override. |
 
+### Deployment & infrastructure
+
+| Doc | Status | Core addition |
+|---|---|---|
+| [`kubernetes-helm.md`](./kubernetes-helm.md) | PROPOSED | Emit a Helm chart (+ the raw k8s manifests it renders to) alongside `docker-compose.yml`, as a new `src/system/` artifact sibling. **Emitter-only** (no grammar/IR change in v1); database assumed **external/managed** (connection `Secret`, no in-cluster postgres); tuning lives in `values.yaml`. Reverses the stated non-goal in `docs/tools.md:324` / `docs/generators.md:764`. Defers infra-in-DSL (`replicas`/`resources`/`ingress` clauses) and a per-platform `workloadShape` surface method to follow-ups. |
+
 ### Documents & JSON hierarchies
 
 | Doc | Status | Core addition |
