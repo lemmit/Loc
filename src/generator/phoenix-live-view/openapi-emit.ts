@@ -22,6 +22,12 @@ import {
   wireTypeInfo,
 } from "../../ir/types/wire-types.js";
 import {
+  errorStatuses,
+  type OpErrorKind,
+  PROBLEM_JSON,
+  problemTitle,
+} from "../../ir/util/openapi-errors.js";
+import {
   camelId,
   opCreate,
   opFind,
@@ -129,6 +135,10 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     }
   }
 
+  // Shared RFC 7807 error body — referenced by every operation's declared
+  // 4xx/5xx responses (see errorResponseEntries).
+  files.set(`${schemaDir}/problem_details.ex`, renderProblemDetailsSchema(webModule));
+
   // Enum schemas — a named string schema carrying the allowed value-set,
   // referenced by `$ref` from any enum-typed property.  De-duplicated by
   // name (a root-level enum is folded into every context's enum list by
@@ -226,6 +236,23 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
 // Spec module renderer
 // ---------------------------------------------------------------------------
 
+/** RFC 7807 error response-map entries (with a leading comma) for an
+ *  operation kind, from the shared matrix.  Each declared 4xx/5xx response
+ *  carries the `ProblemDetails` schema MODULE under `application/problem+json`
+ *  — matching Hono/.NET so the conformance gate's error-response dimension
+ *  compares equal. */
+function errorResponseEntries(kind: OpErrorKind, schemasModule: string): string {
+  return errorStatuses(kind)
+    .map(
+      (s) => `,
+            ${s} => %OpenApiSpex.Response{
+              description: "${problemTitle(s)}",
+              content: %{"${PROBLEM_JSON}" => %OpenApiSpex.MediaType{schema: ${schemasModule}.ProblemDetails}}
+            }`,
+    )
+    .join("");
+}
+
 function renderApiSpec(
   _appModule: string,
   webModule: string,
@@ -266,7 +293,7 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "Success",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :object}}}
-            }
+            }${errorResponseEntries("workflow", schemasModule)}
           }
         }
       }`);
@@ -347,7 +374,7 @@ function renderApiSpec(
             201 => %OpenApiSpex.Response{
               description: "Created",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${createRespMod}}}
-            }
+            }${errorResponseEntries("create", schemasModule)}
           }
         }
       }`,
@@ -363,8 +390,7 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${respMod}}}
-            },
-            404 => %OpenApiSpex.Response{description: "Not found"}
+            }${errorResponseEntries("getById", schemasModule)}
           }
         }
       }`,
@@ -390,7 +416,7 @@ function renderApiSpec(
             }
           },
           responses: %{
-            204 => %OpenApiSpex.Response{description: "No Content"}
+            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("operation", schemasModule)}
           }
         }
       }`,
@@ -407,6 +433,12 @@ function renderApiSpec(
         const findSnake = snake(find.name);
         const isArrayReturn = find.returnType.kind === "array";
         const findRespMod = isArrayReturn ? listRespMod : respMod;
+        const findKind: OpErrorKind =
+          find.returnType.kind === "optional"
+            ? "findOptional"
+            : isArrayReturn
+              ? "findList"
+              : "findSingle";
         pathEntries.push(
           `      "/${aggSlug}/${findSnake}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
@@ -417,7 +449,7 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${findRespMod}}}
-            }
+            }${errorResponseEntries(findKind, schemasModule)}
           }
         }
       }`,
@@ -598,6 +630,31 @@ defmodule ${moduleName} do
 ${propsBlock}
     },
     required: ${requiredBlock}
+  })
+end
+`;
+}
+
+/** RFC 7807 ProblemDetails schema module — the shared error body.  All
+ *  fields optional (matching .NET's framework schema + the Hono zod schema),
+ *  so the cross-backend field/required sets compare equal. */
+function renderProblemDetailsSchema(webModule: string): string {
+  return `# Auto-generated.
+defmodule ${webModule}.Api.Schemas.ProblemDetails do
+  @moduledoc "RFC 7807 problem details — the shared cross-backend error body."
+
+  require OpenApiSpex
+
+  OpenApiSpex.schema(%{
+    title: "ProblemDetails",
+    type: :object,
+    properties: %{
+      type: %OpenApiSpex.Schema{type: :string},
+      title: %OpenApiSpex.Schema{type: :string},
+      status: %OpenApiSpex.Schema{type: :integer},
+      detail: %OpenApiSpex.Schema{type: :string},
+      instance: %OpenApiSpex.Schema{type: :string}
+    }
   })
 end
 `;

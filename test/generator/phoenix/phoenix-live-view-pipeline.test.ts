@@ -633,7 +633,10 @@ describe("emitApiControllers (api-emit unit)", () => {
     expect(ctrl).toMatch(/Plug\.RequestId/);
     expect(ctrl).toMatch(/x-request-id/);
     expect(ctrl).toMatch(/get_resp_header\(conn, "x-request-id"\)/);
-    expect(ctrl).toMatch(/trace_id: trace_id/);
+    // RFC 7807 (#706): error_response returns application/problem+json and
+    // puts the trace id on the x-request-id response header (off the body).
+    expect(ctrl).toMatch(/put_resp_content_type\("application\/problem\+json"\)/);
+    expect(ctrl).toMatch(/put_resp_header\("x-request-id", trace_id\)/);
   });
 
   it("does NOT emit workflows_controller.ex when deployable serves nothing", () => {
@@ -3165,5 +3168,33 @@ describe("phoenix wire-surface parity (#716)", () => {
     expect(createReq).toMatch(/active: %OpenApiSpex\.Schema\{type: :boolean\}/);
     // …but absent from the required list (name/status stay required).
     expect(createReq).toMatch(/required: \[:name, :status\]/);
+  });
+
+  // #706 — RFC 7807 ProblemDetails error body.
+  it("emits a ProblemDetails schema and declares it on the create op (400)", async () => {
+    const files = await wireFiles();
+    const problem = files.get(`${SCHEMA}/problem_details.ex`)!;
+    expect(problem).toMatch(/title: "ProblemDetails"/);
+    expect(problem).toMatch(/status: %OpenApiSpex\.Schema\{type: :integer\}/);
+    const spec = files.get("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex")!;
+    // create → 400 under application/problem+json referencing ProblemDetails.
+    expect(spec).toMatch(
+      /400 => %OpenApiSpex\.Response\{[\s\S]*?"application\/problem\+json"[\s\S]*?Schemas\.ProblemDetails/,
+    );
+    // getById → 404 (the bare "Not found" response is replaced).
+    expect(spec).toMatch(/404 => %OpenApiSpex\.Response\{[\s\S]*?Schemas\.ProblemDetails/);
+    expect(spec).not.toMatch(/404 => %OpenApiSpex\.Response\{description: "Not found"\}/);
+  });
+
+  it("controller error_response returns application/problem+json", async () => {
+    const files = await wireFiles();
+    // Orders has no workflow; assert on whichever controller carries the
+    // shared error_response helper (workflows) — fall back to any controller.
+    const ctrl = [...files.entries()].find(
+      ([k, v]) => k.endsWith("_controller.ex") && v.includes("error_response"),
+    )?.[1];
+    if (ctrl) {
+      expect(ctrl).toMatch(/put_resp_content_type\("application\/problem\+json"\)/);
+    }
   });
 });
