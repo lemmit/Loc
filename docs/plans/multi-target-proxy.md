@@ -311,6 +311,188 @@ land in `src/platform/<family>.ts`, register in
 
 ---
 
+## Proxy policy DSL
+
+The route map is **free** — derived in enrichment from
+`proxy: [...]` + each target's `moduleNames` + `port`. The DSL
+only has to express what Loom can't infer: **per-route policy**
+(timeouts, auth, retries, header handling) and a small set of
+cross-cutting concerns that every reverse proxy needs to express
+the same way across families.
+
+### Surface shape — bare-ref or ref + block
+
+Each `proxy:` entry is either a bare deployable reference (use
+gateway defaults) or a deployable + policy block (override for
+this route).
+
+```ddd
+deployable gateway {
+  platform: caddy,
+  port:     80,
+
+  // Gateway-level defaults — applied to every proxied route
+  // unless the route overrides.  See open question #2 on the
+  // syntactic shape of "defaults".
+  proxyDefaults {
+    timeout: 5s
+    auth:    public
+  }
+
+  proxy: [
+    billingApi,                            // inherits defaults
+
+    inventoryApi {
+      timeout: 30s                         // long-poll endpoint
+      auth:    jwt
+    },
+
+    legacyApi {
+      path:    "/api/legacy" -> "/v1"      // URL rewrite
+      headers {
+        add     X-Source:   "gateway"
+        remove  X-Internal-Trace
+        forward X-Request-Id
+        forward Authorization
+      }
+      rateLimit: 100/min
+    },
+
+    webApp,                                // root catch-all, no policy
+  ],
+}
+```
+
+Two syntactic decisions worth flagging up front:
+
+- **`->` for rewrites** matches the existing `link "Docs" ->
+  "https://…"` view-link grammar (`ddd.langium:492`). It is
+  unambiguously not the lambda/match `=>`.
+- **`headers { add X: "v", remove Y, forward Z }`** is a verb-
+  prefixed nested block, the same shape as `permissions {
+  decls+= ... }`. Avoids the JS-flavoured `headers.add:` form
+  and keeps add/remove/forward in one place where you can read
+  the policy at a glance.
+
+### Vocabulary
+
+Small, fixed, platform-neutral. Each slot translates cleanly to
+all four gateway families (Caddy / nginx / YARP / Ocelot) and to
+the in-process backends (hono / dotnet / phoenix). Anything that
+doesn't translate cleanly stays out — escape hatches are a
+post-v1 concern.
+
+| Slot | Syntax | Meaning |
+|---|---|---|
+| `timeout` | `timeout: 5s` | Upstream request timeout. Per route. |
+| `retry` | `retry: 3` *or* `retry: exponential(3)` | Retry count, optionally with a named backoff. |
+| `auth` | `auth: <AuthMode>` | Reuses existing `AuthMode` enum (`public`/`jwt`/`basic`/…). Gateway terminates auth before forwarding; verified principal flows on. |
+| `rateLimit` | `rateLimit: 100/min` | Throughput cap. Units: `s`/`min`/`h`. |
+| `path` | `path: "/api/legacy" -> "/v1"` | URL rewrite. Quoted strings; ASCII arrow. |
+| `headers { … }` | nested block; `add NAME: "value"`, `remove NAME`, `forward NAME` | Explicit header policy. |
+| `websocket` | `websocket: true` | Allow WS/SSE upgrade. Default auto-detects from `event` / `live` in the proxied modules. |
+
+Deliberately **out of scope** for v1: TLS cert paths,
+connection-pool tuning, family-specific directives (Caddy
+`@matcher` blocks, nginx `proxy_buffer_size`, YARP transforms
+beyond path/headers). Escape hatch (`raw: { ... }` typed by
+gateway family) lands later if asked — the tradeoff is the
+explicit win: `platform: caddy` ↔ `platform: ocelot` ↔
+in-process YARP is a no-op at the DSL level.
+
+### Per-platform translation — one slot end to end
+
+`timeout: 30s` on the `inventoryApi` route compiles to:
+
+- **Caddy** (`gateway/Caddyfile`):
+  ```caddy
+  handle /api/inventory/* {
+    reverse_proxy inventoryApi:3002 {
+      transport http { read_timeout 30s }
+    }
+  }
+  ```
+- **YARP** (`acmeHost/appsettings.json`):
+  ```jsonc
+  "Routes": {
+    "inventory": {
+      "ClusterId": "inventoryApi",
+      "Match":   { "Path": "/api/inventory/{**catch-all}" },
+      "Timeout": "00:00:30"
+    }
+  }
+  ```
+- **nginx** (`gateway/nginx.conf`):
+  ```nginx
+  location /api/inventory/ {
+    proxy_pass         http://inventoryApi:3002/;
+    proxy_read_timeout 30s;
+  }
+  ```
+- **Hono** (in-process, `acmeHost/src/proxy/inventory.ts`):
+  ```ts
+  app.all('/api/inventory/*', async c => {
+    const ctrl = AbortSignal.timeout(30_000);
+    const upstream = new URL(c.req.path, 'http://inventoryApi:3002');
+    return fetch(upstream, { method: c.req.method, body: c.req.raw.body, signal: ctrl });
+  });
+  ```
+- **Phoenix** (`acmeHost/lib/.../endpoint.ex`):
+  ```elixir
+  plug ReverseProxyPlug,
+    upstream: "http://inventoryApi:3002",
+    response_mode: :stream,
+    client_options: [recv_timeout: 30_000]
+  ```
+
+The IR carries `timeoutMs: 30_000`; each surface's
+`emitProxyMounts` / `emitProject` knows how to spell it.
+
+### IR shape
+
+Extends the `proxyRoutes` enrichment from the IR shape section
+above:
+
+```ts
+type ProxyRouteIR = {
+  prefix:    string;          // derived from target.modules
+  target:    string;          // compose service name
+  port:      number;
+  module?:   string;          // present for api routes
+  policy: ProxyPolicyIR;      // empty {} when bare-ref
+};
+
+type ProxyPolicyIR = {
+  timeoutMs?:  number;
+  retries?:    { count: number; backoff?: 'fixed' | 'exponential' };
+  auth?:       AuthMode;
+  rateLimit?:  { count: number; window: 's' | 'min' | 'h' };
+  pathRewrite?:{ from: string; to: string };
+  headers?:    {
+    add?:     readonly { name: string; value: string }[];
+    remove?:  readonly string[];
+    forward?: readonly string[];
+  };
+  websocket?: boolean;
+};
+```
+
+Enrichment merges gateway-level defaults into each route's
+`policy` (route values win on conflict), so backends never have
+to walk a default chain — they just consume the resolved policy.
+
+### Validator additions (policy-specific)
+
+| Code | Rule |
+|---|---|
+| `loom.proxy-policy-on-static` | `proxy:` policy block where the host's `PlatformSurface.kind === 'static'`. |
+| `loom.proxy-path-rewrite-shadow` | A `path: "/x" -> "/y"` rewrite whose source overlaps another route's prefix in the same `proxy:` list. |
+| `loom.proxy-auth-unknown` | `auth:` value isn't in the existing `AuthMode` enum. |
+| `loom.proxy-rate-limit-unit` | `rateLimit:` window isn't `s`/`min`/`h`. |
+| `loom.proxy-header-forward-conflict` | Header listed in both `add` and `forward` for the same route. |
+
+---
+
 ## Examples
 
 These are the deliverable — what users actually write.
@@ -543,6 +725,126 @@ on each backend explicitly:
 The `cors:` slot itself is out of scope for this plan but is the
 natural companion — left here to show the explicit opt-in shape.
 
+### Example 6 — Policy in anger: long-poll, legacy URL, header forwarding
+
+A `dotnet` host mounting the SPA, serving Sales in-process, and
+proxying three sibling services — each with non-default policy.
+Demonstrates per-route overrides, gateway-level defaults, the
+URL rewrite arrow, and the `headers { … }` verb block.
+
+```ddd
+deployable acmeHost {
+  platform: dotnet,
+  contexts: [Sales],
+  port:     5000,
+
+  // Defaults for every proxied route on this host.
+  proxyDefaults {
+    timeout: 5s
+    auth:    jwt                              // SPA's session → forwarded
+  }
+
+  proxy: [
+    billingApi,                               // 5s timeout, jwt auth
+
+    inventoryApi {
+      timeout:   30s                          // long-poll endpoint
+      websocket: true                         // stock-level SSE stream
+    },
+
+    legacyReportingApi {
+      path: "/api/reports" -> "/v1/legacy"    // upstream still on v1
+      headers {
+        add     X-Tenant:    "acme"
+        remove  X-Internal-Trace
+        forward Authorization
+        forward X-Request-Id
+      }
+      retry:     3
+      rateLimit: 60/min                       // legacy is fragile
+    },
+  ],
+
+  ui: WebApp {
+    Sales:     acmeHost,
+    Billing:   billingApi,
+    Inventory: inventoryApi,
+    Reporting: legacyReportingApi,
+  },
+}
+```
+
+Generated `acmeHost/appsettings.Production.json` (YARP, abridged):
+
+```jsonc
+{
+  "ReverseProxy": {
+    "Routes": {
+      "billing": {
+        "ClusterId": "billingApi",
+        "Match":   { "Path": "/api/billing/{**catch-all}" },
+        "Timeout": "00:00:05",
+        "AuthorizationPolicy": "jwt"
+      },
+      "inventory": {
+        "ClusterId": "inventoryApi",
+        "Match":   { "Path": "/api/inventory/{**catch-all}" },
+        "Timeout": "00:00:30",
+        "AuthorizationPolicy": "jwt"
+      },
+      "reporting": {
+        "ClusterId": "legacyReportingApi",
+        "Match":   { "Path": "/api/reports/{**catch-all}" },
+        "Timeout": "00:00:05",
+        "AuthorizationPolicy": "jwt",
+        "RateLimiterPolicy": "per-min-60",
+        "Transforms": [
+          { "PathPattern": "/v1/legacy/{**catch-all}" },
+          { "RequestHeader":     "X-Tenant",          "Set":    "acme" },
+          { "RequestHeader":     "X-Internal-Trace",  "Remove": true   },
+          { "RequestHeader":     "Authorization",     "Append": "{Headers.Authorization}" },
+          { "RequestHeader":     "X-Request-Id",      "Append": "{Headers.X-Request-Id}" }
+        ]
+      }
+    }
+  }
+}
+```
+
+Same .ddd, `platform: caddy` swap → `Caddyfile`:
+
+```caddy
+:5000 {
+  jwt { ... }                                  # gateway-level auth
+
+  handle /api/billing/* {
+    reverse_proxy billingApi:3001 {
+      transport http { read_timeout 5s }
+    }
+  }
+
+  handle /api/inventory/* {
+    reverse_proxy inventoryApi:3002 {
+      transport http { read_timeout 30s }
+    }
+  }
+
+  handle /api/reports/* {
+    rate_limit { events 60, window 1m }
+    request_header X-Tenant         "acme"
+    request_header -X-Internal-Trace
+    uri replace /api/reports /v1/legacy
+    reverse_proxy legacyReportingApi:3003 {
+      transport http { read_timeout 5s }
+      lb_try_duration 3s
+    }
+  }
+}
+```
+
+Same source, two very different deployment targets. The policy
+intent is preserved; the spelling isn't.
+
 ---
 
 ## Open questions
@@ -572,6 +874,29 @@ natural companion — left here to show the explicit opt-in shape.
    bundle bakes its API base URL at build time. With a gateway,
    the answer is always "/api/..." same-origin, so this gets
    simpler. Worth documenting as a side benefit.
+6. **Auth reuse vs. distinct route-level `auth:`.** Reusing the
+   existing `AuthMode` enum on route policy is the obviously
+   right surface — same vocabulary the rest of the DSL already
+   uses. But the *semantics* on a proxied route are stronger:
+   "the gateway/host terminates auth and forwards a verified
+   principal", not "pass through and let the upstream decide."
+   Decide and document this explicitly before code lands —
+   the implementation work behind "terminates and forwards" is
+   meaningfully larger (JWT verification key sources, principal
+   propagation header conventions) than behind "passes through".
+7. **`proxyDefaults { ... }` block vs. lifting defaults onto the
+   top-level slots.** Reusing top-level `auth:` / `timeout:` as
+   defaults is more concise but conflates "policy for code I
+   run" with "policy for code I forward to" — they're genuinely
+   different things on a deployable that does both (Example 6).
+   Examples in this plan use the explicit `proxyDefaults { ... }`
+   block; mild preference for keeping it that way for clarity.
+   Either way, the merge into per-route policy happens once in
+   enrichment, so backends never see the distinction.
+8. **`retry: 3` vs. `retry: exponential(3)`.** Bare integer is
+   the 90% case; the function form is what you reach for when
+   you actually care. Both can land in v1, or just the integer.
+   Defer until the first user asks.
 
 ## Sequencing
 
