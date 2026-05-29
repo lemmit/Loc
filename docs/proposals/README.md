@@ -67,7 +67,7 @@ Status reflects `origin/main` as of the last refresh of
 
 | Doc | Status | Core addition |
 |---|---|---|
-| [`document-and-json-hierarchies.md`](./document-and-json-hierarchies.md) | PROPOSED | Options survey for persisting hierarchies as JSON documents (Marten / EF Core `.ToJson()` / Mongo-embedding analogues) instead of normalised tables. Separates open-shape `json` field (need A) from document-mapped typed hierarchy (need B). Six options from `json` primitive → `document` type → `as document/table` containment hint → `persistenceStrategy: documentBased` + `dataSource kind: document` (Marten target via the `PersistenceAdapter` seam); rejects "document as aggregate peer". Requests decision tag **D-DOCUMENT-AXIS**. |
+| [`document-and-json-hierarchies.md`](./document-and-json-hierarchies.md) | PROPOSED | Persisting hierarchies as JSON documents (Marten / EF Core `.ToJson()` / Mongo-embedding analogues) instead of normalised tables. Separates open-shape `json` field (need A) from document-mapped typed hierarchy (need B). **Chosen direction:** persistence is two orthogonal per-aggregate axes — `persistenceStrategy: stateBased\|eventSourced` × new `representation: normalised\|document` — so the required **`eventSourced` + `document`** (stream + document snapshot, Marten's sweet spot) is expressible. Wired via `shape: document` on the `snapshot`/`state` `dataSource` + a Marten `PersistenceAdapter`. Plus a `json` primitive for open-shape data. Drops the per-containment hint; rejects "document as aggregate peer". Requests decision tag **D-DOCUMENT-AXIS**. |
 
 ### Type-system family — state, transport, exception-less, criterion
 

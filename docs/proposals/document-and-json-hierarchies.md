@@ -18,6 +18,17 @@
 > proposal: settle whether "document" is a domain-modelling axis, a
 > storage axis, or both. §7 records the recommended answer; it is
 > **OPEN** until ratified.
+>
+> **Direction taken in this revision** (from the design conversation,
+> not yet a pinned D-tag): persistence is modelled as **two orthogonal
+> per-aggregate axes** — a *state model* (`stateBased | eventSourced`,
+> the existing `persistenceStrategy`) and a *representation*
+> (`normalised | document`, new). The combination explicitly required
+> is **`eventSourced` + `document`** (Marten's sweet spot: an
+> append-only event stream with the aggregate snapshot/projection
+> persisted as a single JSON document). Consequently **Option 3 is
+> dropped** and **Option 4 is reframed** as a representation axis (not
+> a third `persistenceStrategy` enum value). See §2.3 and §7.
 
 ---
 
@@ -60,6 +71,20 @@ There are **two** distinct features hiding under "documents," and the proposal k
 
 Conflating them is the trap: (A) wants *less* typing, (B) wants the *same* typing with a different physical layout.
 
+### 2.3 Persistence is two orthogonal axes
+
+The decisive realisation from the design conversation: **document-vs-relational is not a third persistence strategy — it is a second, orthogonal axis.** Cramming it into the `stateBased | eventSourced` enum (the original Option 4) forces a false choice and makes the one combination we actually need inexpressible.
+
+| | **`normalised`** (today's default) | **`document`** (new) |
+|---|---|---|
+| **`stateBased`** | EF Core normalised tables; VOs inline JSONB (today). | Whole current-state tree → one JSON document (Marten doc store / EF root `.ToJson()`). |
+| **`eventSourced`** | Event log in tables; projections to tables. | **The required combination.** Append-only event stream (JSON-event rows) + aggregate snapshot/projection persisted as **one JSON document**; rehydrate from snapshot, replay the tail. |
+
+- **Axis 1 — state model** (`persistenceStrategy: stateBased | eventSourced`): *what is the source of truth.* Existing, unchanged, per-aggregate (`ddd.langium:619`, `loom-ir.ts:327`). A domain-modelling decision.
+- **Axis 2 — representation** (`representation: normalised | document`): *how the materialised state/snapshot is physically laid out.* New, per-aggregate. Default `normalised` (full backward compatibility).
+
+For `eventSourced`, the representation axis governs the **snapshot/projection only** — the event log is always serialised JSON-event rows regardless. D-STORAGE-SPLIT's `kind` set already carries both `eventLog` and `snapshot`, so the ES + document case wires as an `eventLog` binding plus a document-shaped `snapshot` binding; no new `kind` is required.
+
 ### 2.2 Candidate invariants (to ratify under D-DOCUMENT-AXIS)
 
 1. **A document boundary is a single value.** Whatever is mapped as a document is written and read as one unit and concurrency-checked as one unit (matches Marten / Mongo embedding). No partial-row updates inside a document tree.
@@ -71,7 +96,7 @@ Conflating them is the trap: (A) wants *less* typing, (B) wants the *same* typin
 
 ## 3. The Option Space
 
-Five options, arranged from smallest to largest surface. They are **not mutually exclusive** — the recommendation in §7 combines two of them.
+Six options, arranged from smallest to largest surface (one dropped, one rejected). They are **not mutually exclusive** — the recommendation in §7 combines Options 1 + 4 + 5.
 
 ### Option 1 — `json` primitive field type *(addresses need A only)*
 
@@ -114,7 +139,9 @@ aggregate Order {
 - **IR:** `TypeIR` gains `{ kind: "document"; name }`; lowering produces a `wireShape` for it exactly like a value object, but `mapTypeToColumn` keeps it `json` *including its arrays* (today arrays-of-entity become tables).
 - **Trade-offs:** Clean answer to "is document a field type?" — **yes, this option says document is a typed field type.** Distinguishes "embedded forever" from "entity part that becomes a table." Cost: a third nested-structure keyword next to `valueobject`/`entity`; modellers must learn when to use which. See §5 for the disambiguation.
 
-### Option 3 — Per-containment storage hint (`as document` / `as table`) *(addresses need B at the use site)*
+### Option 3 — Per-containment storage hint (`as document` / `as table`) — **DROPPED**
+
+> **Decision (this revision): dropped.** Option 3 tunes the embedding of a *normalised* aggregate per containment edge — a relational-world refinement. Once the chosen direction is whole-aggregate `representation: document` (Option 4, §2.3), the per-edge knob answers a question we've opted out of. Its only residual value (embedding one sub-tree in an otherwise-relational row) is already largely served by value objects, which embed as JSONB today. Recorded for completeness; not pursued.
 
 Keep `entity`/`valueobject` as the only nested kinds, but let the **containment edge** choose its physical mapping. This makes today's *implicit* asymmetry explicit and overridable.
 
@@ -130,33 +157,43 @@ aggregate Order {
 - **IR:** `ContainmentIR` (`loom-ir.ts:139`) gains `embedding: "document" | "table"`; `schemaFromModule` branches on it instead of unconditionally calling `tableForPart`.
 - **Trade-offs:** Most faithful to EF Core's "same type, choose mapping per use." No new declaration kind. But the choice lives at the use site, so the *same* `entity` could be embedded in one aggregate and tabled in another — flexible, but harder to reason about wire/migration stability. Composes well with Option 1.
 
-### Option 4 — Aggregate-level document persistence strategy (`persistenceStrategy: documentBased`) *(addresses need B, Marten-style, whole-aggregate)*
+### Option 4 — Aggregate-level `representation: document` axis *(chosen — addresses need B, Marten-style, whole-aggregate)*
 
-Treat the entire aggregate tree as one document, selected by extending the existing `PersistenceStrategy` enum.
+Treat the entire aggregate tree as one document, selected by a **new `representation` axis orthogonal to `persistenceStrategy`** (see §2.3) — *not* a third `persistenceStrategy` enum value. This is what makes `eventSourced` + `document` expressible.
 
 ```ddd
-aggregate ShoppingCart persistenceStrategy: documentBased {
+aggregate ShoppingCart
+  persistenceStrategy: eventSourced     // axis 1: truth = event stream
+  representation: document              // axis 2: snapshot/projection = one JSON doc
+{
   id     guid
-  items  CartItem[]          // whole tree → one JSONB document, Marten-style
+  items  CartItem[]                     // whole tree → one JSONB snapshot, Marten-style
 }
 ```
 
-- **Grammar:** `PersistenceStrategy: 'stateBased' | 'eventSourced' | 'documentBased'` (`ddd.langium:619`).
-- **IR:** already threaded — `persistenceStrategy` rides on `AggregateIR` (`loom-ir.ts:327`) and through `resolve-datasource.ts`. A `documentBased` aggregate maps to `dataSource kind`… (needs a `document` kind, see Option 5).
-- **Per-backend:** This is the natural **Marten** target. The `PersistenceAdapter` contract already gates on strategy (`efcore-persistence.ts:43` declares `supportedStrategies: ["stateBased"]`); a `martenPersistenceAdapter` would declare `supportedStrategies: ["documentBased", "eventSourced"]`. EF Core can serve it too via root-level `.ToJson()`.
-- **Trade-offs:** Honours invariant "persistence strategy is a domain decision declared on the aggregate." Whole-aggregate granularity (no per-field control) — matches how Marten/Mongo actually work. Pairs with Option 5 for the storage binding.
+A `stateBased` aggregate with `representation: document` is equally valid (whole current state as one document, no event log).
 
-### Option 5 — Document as a `dataSource kind` *(storage-layer wiring for Option 4)*
+- **Grammar:** keep `PersistenceStrategy` unchanged; add a sibling clause on `Aggregate` (`ddd.langium:610–614`), e.g. `('representation' ':' representation=Representation ','?)?` with `Representation returns string: 'normalised' | 'document'`.
+- **IR:** `AggregateIR` (`loom-ir.ts:327`) gains `representation?: "normalised" | "document"` alongside the existing `persistenceStrategy`; `resolve-datasource.ts` already maps `eventSourced → eventLog` and would additionally request a document-shaped `snapshot` binding when `representation === "document"`.
+- **Per-backend:** the natural **Marten** target. The `PersistenceAdapter` contract gates on strategy today (`efcore-persistence.ts:43` declares `supportedStrategies: ["stateBased"]`); a `martenPersistenceAdapter` would declare `supportedStrategies: ["stateBased", "eventSourced"]` **and** advertise document representation, while the EF adapter advertises `normalised` (plus root `.ToJson()` for `stateBased` + `document`). The adapter contract may need a `supportedRepresentations` companion to `supportedStrategies` so the orchestrator can pick the right adapter from the (strategy × representation) pair.
+- **Trade-offs:** Whole-aggregate granularity (no per-field control) — matches how Marten/Mongo actually work, and is exactly what dropping Option 3 commits to. Keeps the aggregate API unchanged (invariant §2.2#4). Pairs with Option 5 for the storage binding.
 
-Under **D-STORAGE-SPLIT**, extend the `kind` set with `document`:
+### Option 5 — Storage-layer wiring for the representation axis *(infra half of Option 4)*
+
+Because the representation axis (§2.3) governs *layout* and the existing `kind` set already has `eventLog` and `snapshot`, the ES + document case needs **no new `kind`** — it binds the stream and a document-shaped snapshot:
 
 ```ddd
-storage pg { type: postgres }
-dataSource cartStore { for: Shopping, kind: document, use: pg }   // Marten-style doc store on pg
+storage pg { type: postgres }                                   // Marten on Postgres
+
+dataSource cartEvents   { for: Shopping, kind: eventLog, use: pg }                 // append-only stream
+dataSource cartSnapshot { for: Shopping, kind: snapshot, use: pg, shape: document } // inline projection as one JSON doc
 ```
 
-- This is the binding half of Option 4: it says *where* document-based aggregates in a context live and which engine serves them (Postgres+Marten, or a real document DB if `StorageType` gains `mongo`/`documentdb`).
-- **Trade-offs:** Pure infrastructure, no domain surface. Per-context granularity per D-GRANULARITY; per-aggregate override deferred to v2. On its own it does nothing — it is the plumbing Option 4 needs.
+For a `stateBased` + `document` aggregate the document shape rides the `state` binding instead (`kind: state, shape: document`).
+
+- **Grammar:** add an optional `('shape' ':' shape=('normalised'|'document'))?` to the `dataSource` rule's per-`kind` config (the `state`/`snapshot` kinds). Defaults to `normalised`.
+- **Open alternative:** a real document DB target (`StorageType += mongo`) would let `shape: document` resolve to a true document store rather than Postgres-JSONB. Deferred — Marten's own bet is JSONB-on-Postgres (see §8 Q4).
+- **Trade-offs:** Pure infrastructure, no new domain surface beyond Option 4's `representation:`. Per-context granularity per D-GRANULARITY (the aggregate-level `representation:` from Option 4 is what supplies per-aggregate intent; the validator pairs the two). On its own it is just plumbing — it realises what Option 4 declares.
 
 ### Option 6 (rejected) — `document` as a top-level aggregate peer
 
@@ -172,9 +209,10 @@ A first-class `document Order { … }` declaration *alongside* `aggregate`, with
 |---|---|---|---|---|
 | 1 `json` field | doc property | `[Column(TypeName="jsonb")]` `JsonDocument` | embedded sub-field | `JSONB` |
 | 2 `document` type | embedded sub-doc | `.OwnsOne/.OwnsMany(...).ToJson()` | embedded array/object | `JSONB` |
-| 3 `as document/table` | per-edge embed/ref | `.ToJson()` vs child-table owned | embed vs `$ref` | `JSONB` col vs child table |
-| 4 `documentBased` agg | **native doc/event store** | root `.ToJson()` | one document per aggregate | doc table `(id, data jsonb, version)` |
-| 5 `kind: document` | `IDocumentStore` session | `DbContext` w/ JSON config | collection | schema/table placement |
+| 3 `as document/table` *(dropped)* | per-edge embed/ref | `.ToJson()` vs child-table owned | embed vs `$ref` | `JSONB` col vs child table |
+| 4 `representation: document` | **native doc/event store** | root `.ToJson()` | one document per aggregate | doc table `(id, data jsonb, version)` |
+| 4 + ES (`eventSourced`+`document`) | **stream + inline projection doc** | events table + `.ToJson()` projection | event coll. + snapshot doc | `mt_events`-style log + snapshot `jsonb` |
+| 5 `shape: document` binding | `IDocumentStore` session | `DbContext` w/ JSON config | collection | schema/table placement |
 
 ---
 
@@ -188,7 +226,7 @@ If Options 2 + 3 both land, three nested-structure kinds coexist. The teaching r
 | Typed, may hold collections, always embedded as one tree | `document` (Opt 2) | one JSONB column |
 | Has identity / is queried independently / referenced | `entity` + `contains` | child table (or `as document`, Opt 3) |
 | Shape unknown / externally defined | `json` field (Opt 1) | opaque JSONB |
-| Whole aggregate stored as a document | `persistenceStrategy: documentBased` (Opt 4) | doc table |
+| Whole aggregate stored as a document | `representation: document` (Opt 4) | doc table (snapshot for ES) |
 
 A validator nudge (`loom.json-field-known-shape`) can suggest promoting a `json` field to a `document`/`valueobject` once its shape is known, keeping Option 1 from becoming an escape hatch.
 
@@ -198,15 +236,15 @@ A validator nudge (`loom.json-field-known-shape`) can suggest promoting a `json`
 
 | Phase / file | Opt 1 | Opt 2 | Opt 3 | Opt 4 | Opt 5 |
 |---|---|---|---|---|---|
-| Grammar `ddd.langium` | +`json` primitive | +`Document` decl, +`NamedDecl` | +`as` on `Containment` | +`documentBased` | (none) |
+| Grammar `ddd.langium` | +`json` primitive | +`Document` decl, +`NamedDecl` | ~~+`as`~~ dropped | +`representation:` axis | +`shape:` on binding |
 | `type-system.ts` | resolve `json` | resolve `Document` | — | — | — |
-| `loom-ir.ts` `TypeIR`/`ContainmentIR`/`AggregateIR` | +`json` | +`document` | +`embedding` | already present | `DataSourceIR.kind` |
-| `lower/` | leaf | wireShape like VO | carry hint | already | — |
-| `enrich/enrichments.ts` | leaf in wireShape | wireShape, no assoc | branch table-vs-assoc | migrationsOwner | — |
-| `migrations-builder.ts` / `sql-pg.ts` | already `json`→JSONB | keep arrays JSON | branch `tableForPart` | doc table shape | placement |
-| backends (TS/.NET/Phoenix/React) | unknown/JsonElement/:map | DTO from wireShape | repo read/write path | **new Marten adapter** opt-in | session wiring |
-| validators | known-shape nudge | embed-acyclic (§2.2#2) | no-id-in-document | strategy×storage compat | kind compat |
-| docs | `language.md` | `language.md` | `language.md` | `migrations-design.md` | `architecture.md` |
+| `loom-ir.ts` `TypeIR`/`AggregateIR`/`DataSourceIR` | +`json` | +`document` | — | +`representation?` | +`shape?` |
+| `lower/` | leaf | wireShape like VO | — | thread axis | — |
+| `enrich/enrichments.ts` | leaf in wireShape | wireShape, no assoc | — | migrationsOwner / snapshot owner | — |
+| `migrations-builder.ts` / `sql-pg.ts` | already `json`→JSONB | keep arrays JSON | — | doc/snapshot table shape | placement |
+| backends (TS/.NET/Phoenix/React) | unknown/JsonElement/:map | DTO from wireShape | — | **new Marten adapter** + `supportedRepresentations` | session wiring |
+| validators | known-shape nudge | embed-acyclic (§2.2#2) | — | strategy×representation×storage compat | shape×kind compat |
+| docs | `language.md` | `language.md` | — | `migrations-design.md` | `architecture.md` |
 
 Phases follow the one-directional pipeline in `CLAUDE.md`; nothing here crosses a layer boundary.
 
@@ -214,23 +252,25 @@ Phases follow the one-directional pipeline in `CLAUDE.md`; nothing here crosses 
 
 ## 7. Recommendation (D-DOCUMENT-AXIS — OPEN)
 
-**Document is *both* a small field type and a storage axis — and is *not* an aggregate peer.** Concretely, adopt in this order:
+**Document is *both* a small field type and a per-aggregate representation axis — and is *not* an aggregate peer.** The driving requirement is **`eventSourced` + `document`**, which is only expressible once representation is its own axis (§2.3). Concretely, adopt:
 
-1. **Option 1 (`json` primitive) first.** Smallest, orthogonal, mostly already plumbed (`json` column kind + `JSONB` renderer exist). Ships need (A) on its own and is a prerequisite-free win.
-2. **Option 3 (`as document` / `as table` containment hint) next.** Makes today's implicit VO-inline / entity-table asymmetry explicit and chooseable, which is the most-requested capability and the most EF-Core-faithful. Prefer Option 3 over Option 2 because it adds *no* new declaration kind — it reuses `entity`, avoiding the three-way `valueobject`/`document`/`entity` teaching cost in §5. Revisit Option 2 only if a "typed-collection-that-is-never-a-table" type proves to need its own name.
-3. **Options 4 + 5 together, later, as the Marten story.** A `documentBased` strategy bound through a `dataSource kind: document`, served by a new `martenPersistenceAdapter` plugged into the existing `PersistenceAdapter` seam. This is the largest piece and should wait until a concrete Marten/Postgres-document target is committed.
-4. **Reject Option 6.** "This aggregate is a document" is expressed by 4 + 5, not by a parallel declaration kind.
+1. **Options 4 + 5 — the core, as a representation axis.** Add per-aggregate `representation: normalised | document` (Option 4) orthogonal to the existing `persistenceStrategy`, wired through a `shape: document` on the `snapshot` (ES) or `state` (state-based) `dataSource` binding (Option 5). Served by a new `martenPersistenceAdapter` advertising `supportedStrategies: ["stateBased","eventSourced"]` + document representation, plugged into the existing `PersistenceAdapter` seam (`efcore-persistence.ts:41`). The headline combination — append-only event stream + document snapshot/projection — is the deliverable.
+2. **Option 1 (`json` primitive) — ship alongside or first.** Smallest, fully orthogonal (covers need A, which Option 4 does *not* touch), and mostly already plumbed (`json` column kind + `JSONB` renderer exist). A prerequisite-free win that is independent of the document-store work.
+3. **Drop Option 3.** Decided: once whole-aggregate `representation: document` is the model, the per-edge embedding knob refines a relational layout we've opted out of; its residual case is already served by value objects.
+4. **Defer Option 2.** Revisit a dedicated `document` *type* only if a "typed-collection-that-is-never-a-table" sub-structure proves to need its own name independent of the aggregate-level axis.
+5. **Reject Option 6.** "This aggregate is a document" is expressed by `representation: document`, not by a parallel declaration kind.
 
-This keeps the domain model honest (the aggregate API is unchanged regardless of mapping), gives an immediate escape hatch for genuinely open data, and reserves the heavyweight document-store work for when a document backend actually lands.
+This keeps the domain model honest (the aggregate API is unchanged regardless of representation — invariant §2.2#4), makes the required ES + document combination first-class, and still gives an immediate escape hatch for genuinely open data via `json`.
 
 ---
 
 ## 8. Open questions
 
 1. Does `json` need an optional *shape hint* (`json<SomeType>`) for the common case where the blob *is* a known DTO from an `extern` boundary, without full structural validation?
-2. For Option 3, should `as document` be **forbidden** when the contained `entity` carries find-specs / is referenced elsewhere (it can't be queried independently once embedded)? Likely yes — a validator rule.
-3. For Option 4, is `documentBased` *orthogonal* to `eventSourced` (Marten supports event-sourced aggregates with document snapshots), i.e. should the enum become two axes (`stateBased|eventSourced` × `normalised|document`) rather than three mutually-exclusive values?
-4. Does a real document DB (`StorageType += mongo`) ever justify itself, or is Postgres-JSONB-everywhere (Marten's own bet) sufficient for Loom's target users?
+2. **(Resolved — see §2.3.)** Is representation orthogonal to `eventSourced`? **Yes** — it is a second axis (`stateBased|eventSourced` × `normalised|document`), not a third enum value. The required combination is `eventSourced` + `document`. This is the central decision of this revision.
+3. For ES + document, what is the snapshot/projection cadence — every event (inline projection, Marten's default), every N events, or on-demand? Does this belong on the aggregate (`representation: document(every: …)`), on the `snapshot` `dataSource` (`every:` already exists in D-STORAGE-SPLIT's per-kind config), or both? Leaning: reuse the `snapshot` binding's `every:`.
+4. Does a real document DB (`StorageType += mongo`) ever justify itself, or is Postgres-JSONB-everywhere (Marten's own bet) sufficient for Loom's target users? If JSONB-on-Postgres suffices, `shape: document` never needs a non-Postgres engine.
+5. For `eventSourced` aggregates, can representation legitimately be `normalised` (projections to tables) and `document` (projection to one JSON doc) *per projection*, or is it one representation per aggregate? v1: one per aggregate (per D-GRANULARITY spirit); per-projection deferred.
 
 ---
 
