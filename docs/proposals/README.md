@@ -46,6 +46,7 @@ Status reflects `origin/main` as of the last refresh of
 | [`global-implementation-plan.md`](./global-implementation-plan.md) | REFERENCE | Topological ordering across the whole corpus; audits against `origin/main`; pins decisions; lists coordinated single-PR moments (M1/M2/M3, etc.). Start here for "what's next". |
 | [`implementation-plan.md`](./implementation-plan.md) | REFERENCE | Stacked delivery plan for the type-system family (aggregate-inheritance + payload-transport + exception-less + criterion). Phase-by-phase, dependency-explicit. Consumed by Phase 2 of the global plan. |
 | [`type-system-overview.md`](./type-system-overview.md) | REFERENCE | 10-minute orientation across the type-system family. Read first if you're picking up any of P/A/Crit. |
+| [`production-readiness.md`](./production-readiness.md) | REFERENCE | Roadmap naming the scaffold→system gap (bounded reads, deny-by-default, async messaging/outbox, caching, search projections, account management, i18n, k8s emit, ops surface, inter-service calls). Cross-references the per-feature proposals and flags which still need one. |
 | [`storage-and-platform-config-plan.md`](./storage-and-platform-config-plan.md) | REFERENCE | 14-phase, 17–19 PR build order for the storage proposal. Consumed by Phase 1A. |
 | [`storage-and-platform-config-micro-plan.md`](./storage-and-platform-config-micro-plan.md) | REFERENCE | Foundation-first sub-plan (skeleton-only delivery, ~22 days serialised, F1 broken into 6 small PRs). Consumed by Phase 1A. |
 
