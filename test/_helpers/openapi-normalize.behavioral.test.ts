@@ -6,6 +6,7 @@ import {
   errorResponses,
   isCleanDiff,
   type OpenApiSpec,
+  propertyTypes,
   responseBodySchemas,
   schemaNames,
 } from "./openapi-normalize.js";
@@ -151,6 +152,66 @@ describe("openapi-normalize — behavioural equivalence", () => {
       ).toBe(1);
       expect(
         diffSpecs({ name: "hono", spec: both }, { name: "dotnet", spec: both }).errorResponseDiffs,
+      ).toEqual([]);
+    });
+  });
+
+  // Per-property type drift — closes the same-name-different-type blind spot.
+  describe("property types", () => {
+    const withProp = (name: string, prop: Record<string, unknown>): OpenApiSpec => ({
+      components: {
+        schemas: { ProductResponse: { type: "object", properties: { [name]: prop } } },
+      },
+    });
+
+    it("normalises a scalar property to its JSON type", () => {
+      expect(
+        propertyTypes(withProp("qty", { type: "integer" }), "ProductResponse").get("qty"),
+      ).toBe("integer");
+    });
+
+    it("folds nullable union (oneOf with null) to the underlying type", () => {
+      const zod = withProp("name", { oneOf: [{ type: "string" }, { type: "null" }] });
+      const swashbuckle = withProp("name", { type: "string", nullable: true });
+      // Both read as `string` — nullable representation is folded out.
+      expect(propertyTypes(zod, "ProductResponse").get("name")).toBe("string");
+      expect(propertyTypes(swashbuckle, "ProductResponse").get("name")).toBe("string");
+      expect(
+        diffSpecs({ name: "hono", spec: zod }, { name: "dotnet", spec: swashbuckle })
+          .propertyTypeDiffs,
+      ).toEqual([]);
+    });
+
+    it("renders arrays + $refs structurally", () => {
+      expect(
+        propertyTypes(
+          withProp("tags", { type: "array", items: { type: "string" } }),
+          "ProductResponse",
+        ).get("tags"),
+      ).toBe("array<string>");
+      expect(
+        propertyTypes(
+          withProp("price", { $ref: "#/components/schemas/Money" }),
+          "ProductResponse",
+        ).get("price"),
+      ).toBe("ref:Money");
+    });
+
+    it("flags string-vs-integer drift on a shared property", () => {
+      const a = withProp("qty", { type: "string" });
+      const b = withProp("qty", { type: "integer" });
+      const diff = diffSpecs({ name: "hono", spec: a }, { name: "dotnet", spec: b });
+      expect(diff.propertyTypeDiffs).toEqual(["ProductResponse.qty: hono=string, dotnet=integer"]);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("ignores a property missing on one side (caught by fieldDiffs instead)", () => {
+      const a = withProp("qty", { type: "integer" });
+      const b: OpenApiSpec = {
+        components: { schemas: { ProductResponse: { type: "object", properties: {} } } },
+      };
+      expect(
+        diffSpecs({ name: "hono", spec: a }, { name: "dotnet", spec: b }).propertyTypeDiffs,
       ).toEqual([]);
     });
   });

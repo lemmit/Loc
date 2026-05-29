@@ -62,6 +62,72 @@ export function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
 }
 
 /**
+ * Normalised *type* signature for one property schema — the structural kind,
+ * dialect-folded so the three backends' equivalent shapes read identically:
+ *
+ *   - nullable union (`oneOf`/`anyOf` with a `null` member — zod-openapi) or
+ *     OAS-3.1 `type: ["string","null"]` → the underlying non-null type
+ *     (optionality is already covered by `requiredSet`, so it's folded out);
+ *   - `$ref` → `ref:<ComponentName>` (so a property pointing at a different
+ *     nested schema across backends is caught);
+ *   - `array` → `array<element-signature>`;
+ *   - otherwise the JSON `type` (`string` / `integer` / `number` / …).
+ *
+ * `format` is deliberately NOT part of the signature: it's the most
+ * dialect-divergent facet (Swashbuckle emits `int32`/`date-time` where the
+ * others omit it) and path-parameter formats are already compared by
+ * `pathParamSignatures`.  This dimension targets the structural-kind blind
+ * spot — e.g. a field that is `string` on one backend and `integer` on
+ * another — which nothing else catches.
+ */
+function propTypeSig(schema: unknown): string {
+  if (!schema || typeof schema !== "object") return "unknown";
+  const s = schema as {
+    type?: string | string[];
+    $ref?: string;
+    items?: unknown;
+    oneOf?: unknown[];
+    anyOf?: unknown[];
+  };
+  // Fold nullable unions down to the single non-null member.
+  const union = s.oneOf ?? s.anyOf;
+  if (Array.isArray(union)) {
+    const nonNull = union.filter((m) => {
+      const t = (m as { type?: string | string[] }).type;
+      return !(t === "null" || (Array.isArray(t) && t.every((x) => x === "null")));
+    });
+    if (nonNull.length === 1) return propTypeSig(nonNull[0]);
+    return nonNull.map(propTypeSig).sort().join("|");
+  }
+  if (s.$ref) {
+    const m = s.$ref.match(/^#\/components\/schemas\/(.+)$/);
+    return m ? `ref:${m[1]}` : "ref";
+  }
+  let t = s.type;
+  if (Array.isArray(t)) t = t.find((x) => x !== "null");
+  if (t === "array") return `array<${propTypeSig(s.items)}>`;
+  return t ?? "object";
+}
+
+/**
+ * Per-property normalised type signature for a named component schema —
+ * `Map<propertyName, signature>` (see `propTypeSig`).  Drives the
+ * `propertyTypeDiffs` dimension, which catches same-name-different-type
+ * drift inside request/response bodies that the name/required/cardinality
+ * dimensions miss.
+ */
+export function propertyTypes(spec: OpenApiSpec, schemaName: string): Map<string, string> {
+  const schema = spec.components?.schemas?.[schemaName];
+  const props = (schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {};
+  const out = new Map<string, string>();
+  for (const [k, v] of Object.entries(props)) {
+    if (k.endsWith("_provenance")) continue;
+    out.set(k, propTypeSig(v));
+  }
+  return out;
+}
+
+/**
  * All named component schemas in a spec, minus framework-emitted noise
  * (e.g. Swashbuckle's `ProblemDetails`, OpenApiSpex's internal types) that
  * isn't part of the cross-backend contract.  Used by the parity diff to
@@ -443,6 +509,11 @@ export interface ParityDiff {
   fieldDiffs: string[];
   /** Per-schema `required: [...]` drift on the intersection. */
   requiredDiffs: string[];
+  /** Per-property *type* drift on the intersection of shared schemas ×
+   * shared properties — a field that is e.g. `string` on one backend and
+   * `integer` on another (folded over nullable/format dialect noise; see
+   * `propTypeSig`).  Closes the same-name-different-type blind spot. */
+  propertyTypeDiffs: string[];
   /** Per-op path-parameter type drift on the intersection (e.g. one
    * backend declares `{type: string}`, another `{type: string, format:
    * uuid}`). */
@@ -516,6 +587,7 @@ export function diffSpecs(
 
   const fieldDiffs: string[] = [];
   const requiredDiffs: string[] = [];
+  const propertyTypeDiffs: string[] = [];
   for (const schema of sharedSchemas) {
     const refFields = fieldSet(ref.spec, schema);
     const otherFields = fieldSet(other.spec, schema);
@@ -523,6 +595,20 @@ export function diffSpecs(
     const onlyB = [...otherFields].filter((f) => !refFields.has(f)).sort();
     if (onlyA.length || onlyB.length) {
       fieldDiffs.push(`${schema}: only-${ref.name}=[${onlyA}] only-${other.name}=[${onlyB}]`);
+    }
+    // Per-property type drift on the field intersection (a field present on
+    // both sides whose normalised type differs — `string` vs `integer`).
+    // A field missing on one side surfaces in `fieldDiffs`, not here.
+    const refTypes = propertyTypes(ref.spec, schema);
+    const otherTypes = propertyTypes(other.spec, schema);
+    for (const [prop, refSig] of refTypes) {
+      const otherSig = otherTypes.get(prop);
+      if (otherSig === undefined) continue;
+      if (refSig !== otherSig) {
+        propertyTypeDiffs.push(
+          `${schema}.${prop}: ${ref.name}=${refSig}, ${other.name}=${otherSig}`,
+        );
+      }
     }
     // Intersection-based required diff: if a field doesn't exist on a
     // side, its required status on the other side is moot — surfaces in
@@ -646,6 +732,7 @@ export function diffSpecs(
     onlySchemasOther,
     fieldDiffs,
     requiredDiffs,
+    propertyTypeDiffs,
     paramTypeDiffs,
     requestBodyDiffs,
     responseBodyDiffs,
@@ -665,6 +752,7 @@ export function isCleanDiff(diff: ParityDiff): boolean {
     diff.onlySchemasOther.length === 0 &&
     diff.fieldDiffs.length === 0 &&
     diff.requiredDiffs.length === 0 &&
+    diff.propertyTypeDiffs.length === 0 &&
     diff.paramTypeDiffs.length === 0 &&
     diff.requestBodyDiffs.length === 0 &&
     diff.responseBodyDiffs.length === 0 &&
