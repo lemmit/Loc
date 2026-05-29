@@ -199,24 +199,24 @@ A `stateBased` aggregate with `storeAs(document)` is equally valid (whole curren
 - **Trade-offs:** Whole-aggregate granularity (no per-field control) — matches how Marten/Mongo actually work, and is exactly what dropping Option 3 commits to. Keeps the aggregate API unchanged (invariant §2.2#4). Pairs with Option 5 for the storage binding.
 - **Syntax — paren modifier in the header.** `storeAs(document)`, placed on the aggregate *header* line (before `{`), next to `ids` / `with` / `extends`.
 
-  **Placement.** The corpus is inconsistent about where aggregate config lives, and this proposal picks the header to fix it: today `ids` and `with X(...)` are on the header (`ddd.langium:611`) and the inheritance proposal's strategy is on the header (`abstract aggregate Party storage: shared {`), but `persistenceStrategy:` is the lone exception — it sits *inside* the braces as a leading pseudo-member (`ddd.langium:612`; storage proposal `aggregate Sales.Order { persistenceStrategy: eventSourced`). That body placement is a wart (it was grouped with the `event { publish: }` markers it governs). **All aggregate-level config belongs on the header.**
+  **Placement.** The corpus is inconsistent about where aggregate config lives, and this proposal picks the header to fix it: today `ids` and `with X(...)` are on the header (`ddd.langium:611`) and the inheritance proposal's strategy is on the header (`abstract aggregate Party storage: shared {`), but `persistenceStrategy:` is the lone exception — it sits *inside* the braces (`ddd.langium:612`; storage proposal `aggregate Sales.Order { persistenceStrategy: eventSourced`), grouped with the `event { publish: }` markers it governs. That is simply misplaced: the body holds the aggregate's *members*, not its configuration. **All aggregate-level config belongs on the header — there are no config entries in the body** — so `persistenceStrategy:` moves to the header too (as the bare `eventSourced` marker).
 
   **Shape.** Two header shapes, by argument-arity:
   - **Argument-less markers → bare:** `abstract`, `eventSourced`, shipped boolean `audited`. (`stateBased` is the default — absence of `eventSourced`.)
-  - **Value-bearing strategies → `name(value)`:** `storeAs(document)`, `inheritanceStrategy(shareTable)`. This matches the existing modifier-application family (`audited(actions)`, `with audit(...)`) and reads as "selector(choice)". `storeAs(normalised)` is the default and is rarely written; a bare `asDocument` flag remains a possible shorthand but the paren form is chosen for parallelism with `inheritanceStrategy(...)`.
+  - **Value-bearing strategies → `name(value)`:** `storeAs(document)`, `inheritanceUsing(shareTable)`. This matches the existing modifier-application family (`audited(actions)`, `with audit(...)`) and reads as "selector(choice)". `storeAs(normalised)` is the default and is rarely written; a bare `asDocument` flag remains a possible shorthand but the paren form is chosen for parallelism with `inheritanceUsing(...)`.
 
   **Binding block keeps colon.** Inside a `dataSource { kind: snapshot, use: pg, storeAs: document }` every entry is `key: value`, so `storeAs:` stays a colon entry *there* — a paren would clash with its siblings. So `storeAs` is a paren *modifier* on the aggregate header but a colon *entry* in the binding block; each context is internally consistent.
 
   **Two frictions (both touch settled artefacts) — tracked under D-DOCUMENT-AXIS:**
-  1. **D-RENAME is PINNED with a colon** (`inheritanceStrategy: shareTable | ownTable`). Adopting `inheritanceStrategy(shareTable)` *amends its syntax* (and should be settled together with the `shareTable`→`shared` value question, §8 Q6).
+  1. **D-RENAME is PINNED as `inheritanceStrategy: shareTable | ownTable`.** This proposal amends it on three counts, all to be settled together (§8 Q6): **key** `inheritanceStrategy` → **`inheritanceUsing`** (reads as a phrase — "inheritance using shareTable"); **syntax** colon → paren; and (open) **values** `shareTable`/`ownTable` → `shared`/`own`.
   2. **`persistenceStrategy:` is shipped** (colon, in body). Moving the body-structure marker to a bare header `eventSourced` is a breaking grammar change needing a back-compat/migration path (accept both, warn on the old form).
 
-#### 4a. Interaction with inheritance (`inheritanceStrategy`, D-RENAME / D-ES-TPH)
+#### 4a. Interaction with inheritance (`inheritanceUsing`, was `inheritanceStrategy` / D-RENAME; D-ES-TPH)
 
-`storeAs` and the pinned inheritance toggle `inheritanceStrategy: shareTable | ownTable` (D-RENAME) are **near-orthogonal — they answer different questions**:
+`storeAs` and the inheritance toggle (pinned as `inheritanceStrategy: shareTable | ownTable` by D-RENAME; renamed by this proposal to `inheritanceUsing(…)`) are **near-orthogonal — they answer different questions**:
 
 - `storeAs` chooses the **medium**: relational tables vs one JSON document.
-- `inheritanceStrategy` chooses the **partitioning** across a hierarchy: shared vs per-concrete.
+- `inheritanceUsing` chooses the **partitioning** across a hierarchy: shared vs per-concrete.
 
 Both questions are meaningful in both media, so they compose as a 2×2:
 
@@ -227,7 +227,7 @@ Both questions are meaningful in both media, so they compose as a 2×2:
 
 Two consequences:
 
-1. **The pinned value names bake in "table".** `shareTable`/`ownTable` read wrong in the `storeAs(document)` column ("shareTable… but it's a JSON collection?"). The *pre-D-RENAME* proposal text used the medium-neutral `shared`/`own`, which survives a non-table medium. **`storeAs(document)` is new evidence that the layout axis is not table-specific** — so this proposal flags **revisiting D-RENAME toward `inheritanceStrategy: shared | own`** as an open decision (see §8 Q6). Until decided, the proposal phrases the axis medium-neutrally.
+1. **The pinned value names bake in "table".** `shareTable`/`ownTable` read wrong in the `storeAs(document)` column ("shareTable… but it's a JSON collection?"). The *pre-D-RENAME* proposal text used the medium-neutral `shared`/`own`, which survives a non-table medium. **`storeAs(document)` is new evidence that the layout axis is not table-specific** — so this proposal flags **revisiting D-RENAME toward `inheritanceUsing(shared | own)`** as an open decision (see §8 Q6). Until decided, the proposal phrases the axis medium-neutrally.
 2. **D-ES-TPH generalises across the medium.** Its rule — *an `eventSourced` concrete subtype of a shared base is forced to `ownTable`* — is about **partitioning, not tables**: an event-sourced concrete needs its own stream, so it cannot live in a shared partition whether that partition is a discriminated table or a discriminated document collection. The constraint holds unchanged in the `document` column (forced own collection/stream).
 
 ### Option 5 — Storage-layer wiring for the `storeAs` axis *(infra half of Option 4)*
@@ -300,7 +300,7 @@ aggregate ShoppingCart
 
 // ── an inheritance hierarchy showing the layout axes ──────────────────
 abstract aggregate Party              // abstract base                       (aggregate-inheritance, proposed)
-  inheritanceStrategy(shareTable)     // TPH: one `parties` table + discriminator   (D-RENAME, syntax amended to paren)
+  inheritanceUsing(shareTable)     // TPH: one `parties` table + discriminator   (D-RENAME: renamed from inheritanceStrategy, colon→paren)
   audited                             // boolean capability                  (shipped, header)
 {
   name  string
@@ -313,7 +313,7 @@ aggregate Customer extends Party stateBased {   // shares the `parties` table (s
 
 aggregate Auditor extends Party
   eventSourced                        // D-ES-TPH: an ES concrete of a shareTable base …
-  inheritanceStrategy(ownTable)       // … is FORCED to ownTable — own stream/table, not the shared one
+  inheritanceUsing(ownTable)       // … is FORCED to ownTable — own stream/table, not the shared one
 {
   clearanceLevel int
 }
@@ -326,7 +326,7 @@ aggregate Auditor extends Party
 | `ids guid` | id kind | existing grammar |
 | `eventSourced` / `stateBased` | **body structure** (apply-always, no direct mutation) + event-log storing | bare header marker *(today `persistenceStrategy:` in body, §2.3/§4 reconcile)* |
 | `storeAs(document)` | **saving** — read-model/snapshot shape | this proposal *(paren header modifier, §4 syntax note)* |
-| `inheritanceStrategy(shareTable\|ownTable)` | inheritance **partitioning** | D-RENAME (pinned; syntax amended to paren, §4) |
+| `inheritanceUsing(shareTable\|ownTable)` | inheritance **partitioning** | D-RENAME (pinned; renamed from `inheritanceStrategy`, colon→paren, §4) |
 | `extends` / `abstract` | inheritance | aggregate-inheritance (proposed) |
 | `with audit, softDelete` | macros | existing |
 | `audited` | capability | shipped |
@@ -384,7 +384,7 @@ Phases follow the one-directional pipeline in `CLAUDE.md`; nothing here crosses 
 
 This keeps the domain model honest (the aggregate API is unchanged regardless of storage shape — invariant §2.2#4), makes the required ES + document combination first-class, and still gives an immediate escape hatch for genuinely open data via `json`.
 
-> **Naming note.** This axis was provisionally called `representation:`; it is named **`storeAs`** here — `layout`/`style` collide with the deployable platform-config knobs, `shape` collides with the internal `wireShape`/loadedness vocabulary, and `persistAs` crowds the `persistence*` family. `storeAs` reads as intent and echoes EF Core's "store as JSON" (`.ToJson()`). It surfaces as a **paren header modifier** `storeAs(document)` on the aggregate (per the §4 syntax decision) and as a **colon entry** `storeAs: document` inside the `dataSource` binding block — same keyword, context-appropriate shape. A bare-flag spelling **`asDocument`** (normalised = absence) was considered as a binary-with-default shorthand but the paren form was chosen for parallelism with `inheritanceStrategy(…)`.
+> **Naming note.** This axis was provisionally called `representation:`; it is named **`storeAs`** here — `layout`/`style` collide with the deployable platform-config knobs, `shape` collides with the internal `wireShape`/loadedness vocabulary, and `persistAs` crowds the `persistence*` family. `storeAs` reads as intent and echoes EF Core's "store as JSON" (`.ToJson()`). It surfaces as a **paren header modifier** `storeAs(document)` on the aggregate (per the §4 syntax decision) and as a **colon entry** `storeAs: document` inside the `dataSource` binding block — same keyword, context-appropriate shape. A bare-flag spelling **`asDocument`** (normalised = absence) was considered as a binary-with-default shorthand but the paren form was chosen for parallelism with `inheritanceUsing(…)`.
 
 ---
 
@@ -395,7 +395,7 @@ This keeps the domain model honest (the aggregate API is unchanged regardless of
 3. For ES + document, what is the snapshot/projection cadence — every event (inline projection, Marten's default), every N events, or on-demand? Does this belong on the aggregate (a cadence arg, e.g. `storeAs(document, every: …)`), on the `snapshot` `dataSource` (`every:` already exists in D-STORAGE-SPLIT's per-kind config), or both? Leaning: reuse the `snapshot` binding's `every:`.
 4. Does a real document DB (`StorageType += mongo`) ever justify itself, or is Postgres-JSONB-everywhere (Marten's own bet) sufficient for Loom's target users? If JSONB-on-Postgres suffices, `storeAs(document)` never needs a non-Postgres engine.
 5. For `eventSourced` aggregates, can the shape legitimately be `normalised` (projections to tables) and `document` (projection to one JSON doc) *per projection*, or is it one shape per aggregate? v1: one per aggregate (per D-GRANULARITY spirit); per-projection deferred.
-6. **Should pinned D-RENAME be revisited?** `storeAs` (§4a) shows the inheritance layout axis is not table-specific, yet D-RENAME pinned the medium-baked names `inheritanceStrategy: shareTable | ownTable`. Options: **(a)** keep `shareTable`/`ownTable`, treat "table" as vestigial under `storeAs(document)`, add a validator note; **(b)** revisit D-RENAME toward the medium-neutral `inheritanceStrategy: shared | own` (the pre-rename spelling), which reads correctly across both media. Touches a PINNED decision — maintainer call. Leaning (b).
+6. **Should pinned D-RENAME be revisited (key + syntax + values)?** This proposal amends D-RENAME three ways: **key** `inheritanceStrategy` → `inheritanceUsing` (reads as "inheritance using shareTable"); **syntax** colon → paren (header modifier, §4); **values** — `storeAs(document)` (§4a) shows the layout axis is not table-specific, yet D-RENAME pinned the medium-baked `shareTable`/`ownTable`. For values: **(a)** keep `shareTable`/`ownTable`, treat "table" as vestigial under `storeAs(document)`, add a validator note; **(b)** go medium-neutral `inheritanceUsing(shared | own)`, which reads correctly across both media. Touches a PINNED decision — maintainer call. Leaning: adopt the key+syntax rename, and (b) for values.
 
 ---
 
