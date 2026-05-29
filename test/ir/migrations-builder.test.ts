@@ -300,7 +300,7 @@ function withModifiedTable(
 }
 
 // ---------------------------------------------------------------------------
-// Document shape (D-DOCUMENT-AXIS, normalised(false)) — a document
+// Document shape (D-DOCUMENT-AXIS, shape(document)) — a document
 // aggregate collapses to one `(id, data jsonb, version)` table; its parts
 // fold into `data` (no part table) and reference collections become id
 // arrays in `data` (no join table).
@@ -310,7 +310,7 @@ const DOC_SOURCE = `
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Cart ids guid normalised(false) {
+      aggregate Cart ids guid shape(document) {
         customer: Customer id
         total: int
         contains lines: CartLine[]
@@ -331,7 +331,7 @@ describe("schemaFromModule — document shape", () => {
     return loom.systems[0]!.subdomains[0]!;
   }
 
-  it("collapses a normalised(false) aggregate to (id, data, version) with no part table", async () => {
+  it("collapses a shape(document) aggregate to (id, data, version) with no part table", async () => {
     const module = await loadDoc();
     const snap = schemaFromModule(module);
     // Cart is a document → one `carts` table, no `cart_lines` part table.
@@ -355,17 +355,17 @@ describe("schemaFromModule — document shape", () => {
 });
 
 describe("buildMigrations — per-projection binding override", () => {
-  it("honours a `dataSource normalised: false` even when the aggregate header is normalised(true)", async () => {
+  it("honours a `dataSource shape: document` even when the aggregate header is shape(relational)", async () => {
     const loom = await buildLoomModel(`
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Cart ids guid normalised(true) { total: int }
+      aggregate Cart ids guid shape(relational) { total: int }
       repository Carts for Cart { }
     }
   }
   storage pg { type: postgres }
-  dataSource cartsState { for: Orders, kind: state, use: pg, normalised: false }
+  dataSource cartsState { for: Orders, kind: state, use: pg, shape: document }
   deployable api { platform: dotnet, contexts: [Orders], dataSources: [cartsState], port: 5000 }
 }
 `);
@@ -373,7 +373,7 @@ system Shop {
     const migs = buildMigrations(sys, memorySnapshotStore());
     const sales = migs.find((mi) => mi.module === "Sales")!;
     const carts = sales.next.tables.find((t) => t.name === "carts")!;
-    // Binding override wins → document shape despite normalised(true) header.
+    // Binding override wins → document shape despite shape(relational) header.
     expect(carts.columns.map((c) => c.name)).toEqual(["id", "data", "version"]);
   });
 });

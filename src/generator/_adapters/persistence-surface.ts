@@ -21,15 +21,17 @@ import type {
   DataSourceIR,
   DataSourceKind,
   PersistenceStrategy,
+  SavingShape,
   StorageIR,
   StorageKind,
 } from "../../ir/types/loom-ir.js";
 import type { EmitCtx, Lines } from "./types.js";
 
-/** Saving shape of an aggregate's materialised read model / snapshot
- *  (D-DOCUMENT-AXIS, the `normalised` axis).  `normalised` = relational
- *  tables (the default); `document` = one JSON document. */
-export type SavingShape = "normalised" | "document";
+// `SavingShape` (the `shape(relational | embedded | document)` axis) is
+// defined canonically in the IR layer; re-exported here so adapter
+// authors import it from the persistence surface alongside
+// `PersistenceAdapter`.
+export type { SavingShape };
 
 export interface PersistenceAdapter {
   /** Registry key — what `persistence: <name>` in source resolves
@@ -38,11 +40,10 @@ export interface PersistenceAdapter {
   /** Aggregate persistence strategies this library can host. */
   readonly supportedStrategies: readonly PersistenceStrategy[];
   /** Saving shapes this adapter can emit (D-DOCUMENT-AXIS).  Omitted ⇒
-   *  `["normalised"]` (relational only).  An adapter advertising
-   *  `"document"` can emit a `normalised(false)` binding as a single
-   *  JSON document; the orchestrator routes the binding to that
-   *  adapter's document branch and the validator's "no document emitter
-   *  yet" warning stands down. */
+   *  `["relational"]` only.  An adapter advertising `"embedded"` /
+   *  `"document"` can host a `shape(embedded)` / `shape(document)`
+   *  aggregate; the validator rejects a `shape(…)` the target backend
+   *  doesn't list (e.g. `document` on an Ash target). */
   readonly supportedShapes?: readonly SavingShape[];
   /** Per-binding capability check.  The validator calls this for
    *  every `dataSource X { for:, kind:, use: }` to reject obviously

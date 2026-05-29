@@ -234,7 +234,7 @@ export function generateTypeScriptForContexts(
         `domain/${lowerFirst(agg.name)}.ts`,
         renderAggregate(agg, ctx, emitProvenance, emitTrace),
       );
-      // Document-shaped (`normalised(false)`) aggregates persist as one
+      // Document-shaped (`shape(document)`) aggregates persist as one
       // jsonb column — route to the document repository (JSON round-trip
       // via `_create`) instead of the normalised table-tree hydrate.
       const isDocument = isDocumentShaped(agg, resolveDataSource?.(agg));

@@ -25,7 +25,7 @@ context Shopping {
     invariant name.length > 0
   }
 
-  aggregate Cart normalised(false) {
+  aggregate Cart shape(document) {
     customerId: Customer id
     status: CartStatus
     contains items: CartItem[]

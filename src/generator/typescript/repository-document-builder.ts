@@ -16,7 +16,7 @@ import { collectEnums, collectValueObjects } from "./repository-imports-builder.
 import { toWireMethod } from "./repository-wire-builder.js";
 
 // ---------------------------------------------------------------------------
-// Document-shaped (`normalised(false)`) repository for the Hono/Drizzle
+// Document-shaped (`shape(document)`) repository for the Hono/Drizzle
 // backend — the TS counterpart of the .NET document emit.
 //
 // A document aggregate persists as ONE jsonb column (`(id, data,

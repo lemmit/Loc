@@ -41,11 +41,10 @@ const splitLines = (s: string): Lines => s.split("\n");
 export const efcorePersistenceAdapter: PersistenceAdapter = {
   name: "efcore",
   supportedStrategies: ["state"],
-  // D-DOCUMENT-AXIS Slice D: efcore emits both relational tables and the
-  // single-JSON-document shape (`normalised(false)`) via the
-  // persistence-record pattern (`(id, data jsonb, version)`), so it
-  // advertises both saving shapes.
-  supportedShapes: ["normalised", "document"],
+  // D-DOCUMENT-AXIS: EF can emit all three saving shapes — relational
+  // tables, `embedded` (owned-types `.ToJson()`), and the opaque
+  // `document` blob (`(id, data jsonb, version)` persistence record).
+  supportedShapes: ["relational", "embedded", "document"],
 
   supports(storageType, kind, persistenceStrategy) {
     return (

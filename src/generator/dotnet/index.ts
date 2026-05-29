@@ -404,7 +404,7 @@ function emitAggregate(
   const aggFolder = plural(agg.name);
   const repo = findRepoFor(ctx, agg.name);
   // dataSource resolution drives BOTH the table-mapping knobs (schema /
-  // tablePrefix) and the saving SHAPE.  `isDoc` (normalised(false))
+  // tablePrefix) and the saving SHAPE.  `isDoc` (shape(document))
   // switches this aggregate onto the document-persistence path: a
   // single JSONB column + STJ round-trip, no normalised entity table,
   // no join tables.  In the legacy single-context entry there's no
@@ -584,7 +584,7 @@ function findRepoFor(ctx: BoundedContextIR, name: string): RepositoryIR | undefi
   return ctx.repositories.find((r) => r.aggregateName === name);
 }
 
-/** Names of document-shaped (`normalised(false)`) aggregates across the
+/** Names of document-shaped (`shape(document)`) aggregates across the
  *  given contexts, resolved the same way `emitAggregate` does (binding
  *  wins, aggregate header is the default).  `sys` is absent in the
  *  legacy single-context entry, so resolution falls back to the

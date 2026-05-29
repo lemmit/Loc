@@ -351,7 +351,7 @@ function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Document-shaped (`normalised(false)`) repository implementation.
+// Document-shaped (`shape(document)`) repository implementation.
 //
 // Backed by the `<Agg>Document` persistence record (one JSONB column)
 // rather than the normalised entity table.  `GetById` / `FindManyByIds`

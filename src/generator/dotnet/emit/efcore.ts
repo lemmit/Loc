@@ -31,7 +31,7 @@ function contextAssociations(ctx: EnrichedBoundedContextIR): AssociationIR[] {
 export function renderDbContext(
   ctx: EnrichedBoundedContextIR,
   ns: string,
-  /** Names of document-shaped (`normalised(false)`) aggregates in this
+  /** Names of document-shaped (`shape(document)`) aggregates in this
    *  context.  Each contributes a `DbSet<<Agg>Document>` + the document
    *  configuration instead of the normalised entity DbSet/config, and
    *  its reference-collection join tables are skipped (they fold into

@@ -1801,7 +1801,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "elements": [
               {
                 "$type": "Keyword",
-                "value": "normalised"
+                "value": "shape"
               },
               {
                 "$type": "Keyword",
@@ -1809,7 +1809,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
               },
               {
                 "$type": "Assignment",
-                "feature": "normalised",
+                "feature": "shape",
                 "operator": "=",
                 "terminal": {
                   "$type": "RuleCall",
@@ -5127,7 +5127,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "elements": [
               {
                 "$type": "Keyword",
-                "value": "normalised"
+                "value": "shape"
               },
               {
                 "$type": "Keyword",
@@ -5135,7 +5135,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
               },
               {
                 "$type": "Assignment",
-                "feature": "normalised",
+                "feature": "shape",
                 "operator": "=",
                 "terminal": {
                   "$type": "RuleCall",
@@ -5253,18 +5253,22 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
     },
     {
       "$type": "ParserRule",
-      "name": "BoolFlag",
+      "name": "SavingShape",
       "dataType": "string",
       "definition": {
         "$type": "Alternatives",
         "elements": [
           {
             "$type": "Keyword",
-            "value": "true"
+            "value": "relational"
           },
           {
             "$type": "Keyword",
-            "value": "false"
+            "value": "embedded"
+          },
+          {
+            "$type": "Keyword",
+            "value": "document"
           }
         ]
       },

@@ -86,7 +86,7 @@ export function renderSchema(
   for (const agg of ctx.aggregates) {
     const schema = schemaFor(agg);
     const prefix = prefixFor(agg);
-    // Document-shaped (`normalised(false)`): the whole aggregate read
+    // Document-shaped (`shape(document)`): the whole aggregate read
     // model lives in one jsonb column.  No part tables, no join tables
     // — contained parts fold into `data`, references ride as id values.
     if (isDocumentShaped(agg, lookup?.(agg))) {

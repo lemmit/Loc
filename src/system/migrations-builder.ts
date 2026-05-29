@@ -46,16 +46,16 @@ export const BASE_TIMESTAMP = "20260101000000";
 
 export function schemaFromModule(
   module: EnrichedSubdomainIR,
-  /** Per-aggregate document predicate (D-DOCUMENT-AXIS).  A document
-   *  aggregate (`normalised(false)`) collapses to a single
-   *  `(id, data jsonb, version)` table — its parts fold into `data` and
-   *  its reference collections become id arrays inside `data`, so neither
-   *  part tables nor join tables are emitted.  Defaults to the
-   *  aggregate-header value; `buildMigrations` passes a binding-aware
-   *  predicate so a per-projection `dataSource normalised:` override is
-   *  honoured (the schema stays consistent with the EF/Drizzle/Ash
-   *  emitters, which resolve the same way via `isDocumentShaped`). */
-  isDocument: (agg: EnrichedAggregateIR) => boolean = (agg) => agg.normalised === false,
+  /** Per-aggregate document predicate (D-DOCUMENT-AXIS).  A `shape(document)`
+   *  aggregate collapses to a single `(id, data jsonb, version)` table —
+   *  its parts fold into `data` and its reference collections become id
+   *  arrays inside `data`, so neither part tables nor join tables are
+   *  emitted.  Defaults to the aggregate-header value; `buildMigrations`
+   *  passes a binding-aware predicate so a per-projection `dataSource
+   *  shape:` override is honoured (the schema stays consistent with the
+   *  EF/Drizzle/Ash emitters, which resolve the same way via
+   *  `isDocumentShaped`). */
+  isDocument: (agg: EnrichedAggregateIR) => boolean = (agg) => isDocumentShaped(agg),
 ): SchemaSnapshot {
   const tables: TableShape[] = [];
   for (const agg of collectAggregates(module)) {
@@ -80,7 +80,7 @@ export function schemaFromModule(
   return { schemaVersion: 1, tables };
 }
 
-/** Document-shaped aggregate (`normalised(false)`): the whole aggregate
+/** Document-shaped aggregate (`shape(document)`): the whole aggregate
  *  tree is one JSON document, so the table is the canonical document
  *  triple — `id` (PK), `data` (the serialised tree, JSONB), and `version`
  *  (the single-value optimistic-concurrency token; invariant §2.2#1 —
@@ -204,12 +204,12 @@ export function buildMigrations(sys: EnrichedSystemIR, snapshots: SnapshotStore)
     if (!m.migrationsOwner) continue;
     // Binding-aware document predicate: resolve each aggregate's effective
     // saving shape via its (context, kind) dataSource binding so a
-    // per-projection `normalised:` override matches what the backend
+    // per-projection `shape:` override matches what the backend
     // emitters produce.  Falls back to the aggregate header when the
     // aggregate's owning context can't be located within the module.
     const isDocument = (agg: EnrichedAggregateIR): boolean => {
       const ctx = m.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
-      if (!ctx) return agg.normalised === false;
+      if (!ctx) return isDocumentShaped(agg);
       return isDocumentShaped(agg, resolveDataSourceConfig(agg, ctx, sys));
     };
     const next = schemaFromModule(m, isDocument);
