@@ -9,7 +9,11 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
-import { isDocumentShaped, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
+import {
+  effectiveSavingShape,
+  isDocumentShaped,
+  resolveDataSourceConfig,
+} from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural } from "../../util/naming.js";
 import type { EmitCtx } from "../_adapters/index.js";
@@ -411,7 +415,9 @@ function emitAggregate(
   // emitCtx/sys, so resolution falls back to the aggregate header's
   // `normalised(…)` (the default).
   const ds = emitCtx ? resolveDataSourceConfig(agg, ctx, emitCtx.sys) : undefined;
-  const isDoc = isDocumentShaped(agg, ds);
+  const shape = effectiveSavingShape(agg, ds);
+  const isDoc = shape === "document";
+  const isEmbedded = shape === "embedded";
 
   for (const part of agg.parts) {
     out.set(
@@ -463,30 +469,33 @@ function emitAggregate(
     );
     out.set(`Domain/${aggFolder}/${agg.name}Snapshots.cs`, renderSnapshots(agg, ns));
   } else {
-    // dataSource-driven EF Core configuration: when the system declares
-    // a matching `dataSource X { for: <ctx>, kind: state|eventLog, ... }`
-    // binding, its `schema` (defaulted to `snake(ctx.name)` when DSL
-    // omits it) / `tablePrefix` flow into the per-aggregate ToTable args.
-    // Falls back to the existing default-shape output when no binding
-    // exists (byte-identical with pre-dataSource emit).
+    // Relational (default) AND embedded both use the normal entity +
+    // repository + DbSet<Agg>; they differ only in the EF configuration:
+    // `embedded` folds each containment into a JSONB column via owned-
+    // types `.ToJson(...)` (no child table), so its `OwnsMany/OwnsOne`
+    // calls carry `.ToJson()` and the join tables are skipped.
+    // dataSource-driven schema / tablePrefix knobs flow through both.
     out.set(
       `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
       renderConfiguration(agg, ns, ctx, {
         schema: ds?.schema,
         tablePrefix: ds?.tablePrefix,
+        embedded: isEmbedded,
       }),
     );
     // One file per reference-collection association: the join entity
     // class + its EF Core configuration (composite PK, ordinal, FK
-    // converters).  Skipped silently when the aggregate has no
-    // `Id<T>[]` fields.
-    for (const assoc of agg.associations) {
-      const cls = joinEntityName(assoc);
-      out.set(`Infrastructure/Persistence/JoinTables/${cls}.cs`, renderJoinEntity(assoc, ns));
-      out.set(
-        `Infrastructure/Persistence/Configurations/${cls}Configuration.cs`,
-        renderJoinEntityConfiguration(assoc, ns),
-      );
+    // converters).  Skipped for embedded (reference collections fold
+    // into a JSONB column) and when the aggregate has no `Id<T>[]` fields.
+    if (!isEmbedded) {
+      for (const assoc of agg.associations) {
+        const cls = joinEntityName(assoc);
+        out.set(`Infrastructure/Persistence/JoinTables/${cls}.cs`, renderJoinEntity(assoc, ns));
+        out.set(
+          `Infrastructure/Persistence/Configurations/${cls}Configuration.cs`,
+          renderJoinEntityConfiguration(assoc, ns),
+        );
+      }
     }
   }
   // CQRS emission — adapter-dispatched when an EmitCtx is available

@@ -111,7 +111,7 @@ export function renderConfiguration(
    *  snake-case plural ("tenant_a_orders").  Absent today on systems
    *  that don't declare any dataSource bindings — output stays
    *  byte-identical when both fields are undefined. */
-  options: { schema?: string; tablePrefix?: string } = {},
+  options: { schema?: string; tablePrefix?: string; embedded?: boolean } = {},
 ): string {
   const fieldConfigs = agg.fields.flatMap((f) => fieldConfigLines(f, "        ", "b"));
   const containmentLines = agg.contains.flatMap((c) => containmentConfigLines(c, agg, options));
@@ -253,13 +253,36 @@ function fieldConfigLines(f: FieldIR, indent: string, builder: string): string[]
 function containmentConfigLines(
   c: ContainmentIR,
   agg: AggregateIR,
-  options: { schema?: string; tablePrefix?: string } = {},
+  options: { schema?: string; tablePrefix?: string; embedded?: boolean } = {},
 ): string[] {
+  const part = agg.parts.find((p) => p.name === c.partName);
+  const partFields = part?.fields ?? [];
+  // Embedded (`shape(embedded)`) fold: the containment serialises into a
+  // single JSONB column on the root via EF owned-types `.ToJson(...)` —
+  // no child table.  The nested owned entities need no key/FK/table;
+  // `HasConversion` on their id/enum/VO fields still applies inside JSON.
+  if (options.embedded) {
+    const jsonCol = snake(c.name);
+    const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, "            ", "o"));
+    if (!c.collection) {
+      return [
+        `        b.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)}, o => {`,
+        `            o.ToJson("${jsonCol}");`,
+        ...partFieldLines,
+        "        });",
+      ];
+    }
+    return [
+      `        b.Ignore(x => x.${upperFirst(c.name)});`,
+      `        b.OwnsMany<${c.partName}>("_${c.name}", o => {`,
+      `            o.ToJson("${jsonCol}");`,
+      ...partFieldLines,
+      "        });",
+    ];
+  }
   if (!c.collection) {
     return [`        b.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)});`];
   }
-  const part = agg.parts.find((p) => p.name === c.partName);
-  const partFields = part?.fields ?? [];
   const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, "            ", "o"));
   return [
     "        // Ignore the public read-accessor and tell EF to map the",

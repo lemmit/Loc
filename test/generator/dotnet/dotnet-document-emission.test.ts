@@ -137,4 +137,39 @@ describe(".NET document-persistence emission (normalised(false))", () => {
     const customer = files.get("Domain/Customers/Customer.cs")!;
     expect(customer).not.toContain("ToSnapshot");
   });
+
+  // shape(embedded): queryable root row + contained parts folded into a
+  // JSONB column via EF owned-types `.ToJson()`.  Unlike `document`, the
+  // entity/repository/DbSet are the NORMAL relational ones — only the EF
+  // configuration changes, so finds stay real SQL.
+  it("embedded: folds the containment into a JSONB column via OwnsMany().ToJson()", () => {
+    const cfg = files.get("Infrastructure/Persistence/Configurations/WishlistConfiguration.cs")!;
+    expect(cfg).toContain("IEntityTypeConfiguration<Wishlist>");
+    // Root scalar / `X id` columns stay (queryable + indexed).
+    expect(cfg).toContain("b.Property(x => x.CustomerId).HasConversion");
+    expect(cfg).toContain("b.HasIndex(x => x.CustomerId);");
+    // Containment folds to one JSONB column — no child table.
+    expect(cfg).toContain('b.OwnsMany<WishItem>("_items", o => {');
+    expect(cfg).toContain('o.ToJson("items");');
+    expect(cfg).not.toContain("o.ToTable(");
+    expect(cfg).not.toContain('o.WithOwner().HasForeignKey("ParentId")');
+  });
+
+  it("embedded: uses the normal entity + DbSet<T> + relational repository (real SQL finds)", () => {
+    const keys = [...files.keys()];
+    // No document POCO / snapshot for an embedded aggregate.
+    expect(keys).not.toContain("Infrastructure/Persistence/Documents/WishlistDocument.cs");
+    expect(keys).not.toContain("Domain/Wishlists/WishlistSnapshots.cs");
+    const dbctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
+    expect(dbctx).toContain("public DbSet<Wishlist> Wishlists => Set<Wishlist>();");
+    const repo = files.get("Infrastructure/Repositories/WishlistRepository.cs")!;
+    // Find is a real indexed SQL WHERE on the root column, not in-memory.
+    expect(repo).toContain(
+      "_db.Wishlists.Where(x => x.CustomerId == customerId).ToListAsync(ct)",
+    );
+    expect(repo).not.toContain("FromSnapshot");
+    // Entity carries no snapshot machinery.
+    const wishlist = files.get("Domain/Wishlists/Wishlist.cs")!;
+    expect(wishlist).not.toContain("ToSnapshot");
+  });
 });

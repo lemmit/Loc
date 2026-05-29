@@ -1,14 +1,15 @@
-// Document-persistence example — exercises `normalised(false)`.
+// Saving-shape example — exercises all three `shape(…)` strategies in
+// one context, so the build gates compile each:
+//   - Customer  → shape(relational) (default): table-per-entity.
+//   - Cart      → shape(document): the whole aggregate as one opaque
+//                 JSONB blob (`id, data, version`), Marten-style.
+//   - Wishlist  → shape(embedded): queryable root row + the contained
+//                 WishItem parts folded into a JSONB column (EF owned
+//                 `.ToJson()` / Drizzle jsonb / Ash embedded).
 //
-// The Cart aggregate (root + contained CartItem parts + a Money value
-// object + an enum + a cross-aggregate Customer reference) persists as
-// a SINGLE JSONB document: one `carts` row of `(id, data, version)`,
-// the whole tree serialised into `data`.  Customer stays normalised
-// (table-per-entity), so one .ddd drives both saving shapes.
-//
-// This is the .NET document-emit (System.Text.Json round-trip) gate
-// for `dotnet build /warnaserror` — see
-// test/e2e/generated-dotnet-build.test.ts.
+// Build gates: `dotnet build /warnaserror`
+// (test/e2e/generated-dotnet-build.test.ts) and `tsc + tsup`
+// (test/e2e/generated-build.test.ts).
 context Shopping {
 
   enum CartStatus { Open, CheckedOut }
@@ -68,4 +69,27 @@ context Shopping {
   }
 
   repository Customers for Customer { }
+
+  // shape(embedded): the root (customerId, label) stays queryable
+  // columns; the contained WishItem parts fold into a JSONB column.
+  aggregate Wishlist shape(embedded) {
+    customerId: Customer id
+    label: string
+    contains items: WishItem[]
+
+    invariant label.length > 0
+
+    operation addItem(sku: string) {
+      items += WishItem { sku: sku }
+    }
+
+    entity WishItem {
+      sku: string
+      invariant sku.length > 0
+    }
+  }
+
+  repository Wishlists for Wishlist {
+    find byCustomer(customerId: Customer id): Wishlist[]
+  }
 }
