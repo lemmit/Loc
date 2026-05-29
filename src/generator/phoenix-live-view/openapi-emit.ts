@@ -205,16 +205,18 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     );
   }
 
-  // View response schemas (list-response wrapper) + a named row element
-  // schema for full-form views (`<View>Row`).
+  // View response schemas: full-form views get a named element row
+  // (`<View>Row`) + the `<View>Response` wrapper.  Shorthand views reuse the
+  // source aggregate's `<Agg>ListResponse` (emitted with the aggregate
+  // above) — matching Hono/.NET — so they emit no per-view schema.
   for (const { ctx, view } of allViews) {
     if (view.output) {
       files.set(`${schemaDir}/${snake(view.name)}_row.ex`, renderViewRowSchema(view, webModule));
+      files.set(
+        `${schemaDir}/${snake(view.name)}_response.ex`,
+        renderViewResponseSchema(view, ctx, webModule),
+      );
     }
-    files.set(
-      `${schemaDir}/${snake(view.name)}_response.ex`,
-      renderViewResponseSchema(view, ctx, webModule),
-    );
   }
 
   // --- OpenAPI controller ---------------------------------------------------
@@ -302,7 +304,11 @@ function renderApiSpec(
   // View paths: GET /views/<slug>
   for (const { view } of allViews) {
     const slug = snake(view.name);
-    const respMod = `${schemasModule}.${upperFirst(view.name)}Response`;
+    // Shorthand views reuse the aggregate's `<Agg>ListResponse`; full-form
+    // views project to their own `<View>Response`.  Matches Hono/.NET.
+    const respMod = view.output
+      ? `${schemasModule}.${upperFirst(view.name)}Response`
+      : `${schemasModule}.${view.aggregateName}ListResponse`;
     pathEntries.push(`      "/views/${slug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "Query ${view.name} view",

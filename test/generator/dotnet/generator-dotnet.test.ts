@@ -1210,6 +1210,19 @@ describe(".NET generator", () => {
     expect(plain).not.toMatch(/IsolationLevel/);
   });
 
+  it("emits a ListResponseWrapperFilter mapping <Agg>Response → <Agg>ListResponse (#705)", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    const filter = files.get("Api/ListResponseWrapperFilter.cs")!;
+    expect(filter).toMatch(/class ListResponseWrapperFilter : IDocumentFilter/);
+    // Every aggregate gets an element→wrapper pair so the inline list
+    // response is promoted to the named component the other backends emit.
+    expect(filter).toMatch(/\("OrderResponse", "OrderListResponse"\)/);
+    // Registered as a Swashbuckle document filter.
+    const program = files.get("Program.cs")!;
+    expect(program).toMatch(/c\.DocumentFilter<ListResponseWrapperFilter>\(\)/);
+  });
+
   it("DomainExceptionFilter catches unhandled exceptions as sanitized 500", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);

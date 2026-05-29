@@ -70,13 +70,10 @@ export function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
  * on a hardcoded "schemas to check" list that goes stale.
  */
 export function schemaNames(spec: OpenApiSpec): Set<string> {
-  // The shared RFC 7807 `ProblemDetails` error body is COMPARED across
-  // backends (#706) — all three publish it, so it stays in the set.  Only
-  // the genuinely-per-backend schemas are filtered:
-  //   • #705 — .NET inlines its list response (`array<…>`) instead of a
-  //     named `<Agg>ListResponse` wrapper, so list-wrapper components are
-  //     resolved structurally (see `isListWrapperSchema`) rather than
-  //     compared by name.
+  // The shared RFC 7807 `ProblemDetails` error body (#706) and the named
+  // list-response wrappers (`<Agg>ListResponse`, full-form-view
+  // `<View>Response`) (#705) are COMPARED across backends — all three
+  // publish them.  Only the genuinely-per-backend schemas are filtered:
   const IDIOMATIC_SCHEMAS = new Set([
     // Swashbuckle (.NET) model-state validation envelopes — auto-emitted
     // for `[ApiController]` 400s; no cross-backend counterpart.  (The
@@ -89,32 +86,7 @@ export function schemaNames(spec: OpenApiSpec): Set<string> {
     "ProvenanceLineage",
   ]);
   const schemas = spec.components?.schemas ?? {};
-  return new Set(
-    Object.keys(schemas).filter(
-      (n) => !IDIOMATIC_SCHEMAS.has(n) && !isListWrapperSchema(schemas[n]),
-    ),
-  );
-}
-
-/**
- * True for a "list wrapper" component — a named schema that is just
- * `{ type: array, items: { $ref } }`.  Hono/zod-openapi and Phoenix emit
- * the list response as a named component (`ProjectListResponse`); .NET
- * inlines `array<ProjectResponse>` at the operation.  Both express the
- * same behaviour, so the wrapper *name* is representational, not an
- * independent schema: `responseBodySchemas` resolves it to
- * `array<element>` and the element schema (`ProjectResponse`) is compared
- * on its own.  Excluding the wrapper keeps it from reading as a one-sided
- * `onlySchemas` divergence between a named-wrapper backend and an
- * inline-array backend.
- *
- * TEMPORARY DROP-IN TOLERANCE (#705): once .NET emits its own named
- * `<Agg>ListResponse` wrapper, this filter — and the wrapper resolution in
- * `schemaRefName` — should be removed so the wrapper name is compared
- * exactly across backends.
- */
-function isListWrapperSchema(schema: OpenApiSchema | undefined): boolean {
-  return schema?.type === "array" && Boolean(schema.items?.$ref);
+  return new Set(Object.keys(schemas).filter((n) => !IDIOMATIC_SCHEMAS.has(n)));
 }
 
 /**
@@ -241,26 +213,15 @@ export function normalisePath(p: string): string {
  */
 function schemaRefName(
   schema: { $ref?: string; type?: string; items?: { $ref?: string } } | undefined,
-  spec: OpenApiSpec,
 ): string | null {
   if (!schema) return null;
   // Direct ref: response body schema points at a named component.
   if (schema.$ref) {
     const m = schema.$ref.match(/^#\/components\/schemas\/(.+)$/);
     if (!m) return null;
-    const name = m[1]!;
-    // Resolve a named list-wrapper component to its inline equivalent so
-    // `$ref:ProjectListResponse` (Hono/Phoenix) compares equal to an
-    // inline `array<ProjectResponse>` (.NET) — behavioural parity over
-    // representational naming.  TEMPORARY DROP-IN TOLERANCE (#705): drop
-    // this resolution once .NET emits the named wrapper so the ref name is
-    // compared exactly.
-    const target = spec.components?.schemas?.[name];
-    if (target?.type === "array" && target.items?.$ref) {
-      const im = target.items.$ref.match(/^#\/components\/schemas\/(.+)$/);
-      if (im) return `array<${im[1]}>`;
-    }
-    return name;
+    // The named component (incl. list wrappers like `ProjectListResponse`)
+    // is compared by name — all three backends now emit the wrapper (#705).
+    return m[1]!;
   }
   // Array wrapper: `{ type: array, items: { $ref: ... } }`.  Annotated
   // with the array marker so the diff distinguishes single-item from
@@ -299,7 +260,7 @@ export function requestBodySchemas(spec: OpenApiSpec): Map<string, string> {
         };
       };
       const schema = op.requestBody?.content?.["application/json"]?.schema;
-      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema, spec) ?? "");
+      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema) ?? "");
     }
   }
   return out;
@@ -354,7 +315,7 @@ export function responseBodySchemas(spec: OpenApiSpec): Map<string, string> {
       };
       const ok = op.responses?.["200"] ?? op.responses?.["201"];
       const schema = ok?.content?.["application/json"]?.schema;
-      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema, spec) ?? "");
+      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema) ?? "");
     }
   }
   return out;
@@ -388,7 +349,7 @@ export function errorResponses(spec: OpenApiSpec): Map<string, string> {
       for (const [code, resp] of Object.entries(op.responses ?? {})) {
         if (!/^[45]\d\d$/.test(code)) continue;
         const schema = resp.content?.[PROBLEM_JSON]?.schema;
-        parts.push(`${code}:${schemaRefName(schema, spec) ?? "(none)"}`);
+        parts.push(`${code}:${schemaRefName(schema) ?? "(none)"}`);
       }
       out.set(`${method} ${normalisePath(p)}`, parts.sort().join(","));
     }

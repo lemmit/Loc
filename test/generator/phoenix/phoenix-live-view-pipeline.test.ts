@@ -1267,9 +1267,10 @@ describe("cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
     // placeOrder workflow → POST /workflows/place_order
     expect(spec).toMatch(/"\/workflows\/place_order"/);
     expect(spec).toMatch(/PlaceOrderRequest/);
-    // ActiveOrders view → GET /views/active_orders
+    // ActiveOrders is a shorthand view → GET /views/active_orders reusing
+    // the aggregate's OrderListResponse (matching Hono/.NET), #705.
     expect(spec).toMatch(/"\/views\/active_orders"/);
-    expect(spec).toMatch(/ActiveOrdersResponse/);
+    expect(spec).toMatch(/active_orders"[\s\S]*?OrderListResponse/);
   });
 
   it("Aggregate CRUD endpoints surface in the paths object", async () => {
@@ -3151,14 +3152,16 @@ describe("phoenix wire-surface parity (#716)", () => {
     expect(ctrl).toMatch(/json\(%\{id: record\.id\}\)/);
   });
 
-  it("view response is a bare array whose items reference the element module", async () => {
+  it("shorthand view reuses the aggregate's <Agg>ListResponse (no per-view schema) (#705)", async () => {
     const files = await wireFiles();
-    const viewResp = files.get(`${SCHEMA}/active_orders_response.ex`)!;
-    expect(viewResp).toMatch(/type: :array/);
-    // Shorthand view → element is the aggregate response module (not an
-    // inline object), making it a structural list-wrapper.
-    expect(viewResp).toMatch(/items: PhoenixAppWeb\.Api\.Schemas\.OrderResponse/);
-    expect(viewResp).not.toMatch(/items: %OpenApiSpex\.Schema\{\s*type: :object/);
+    // Shorthand views project to the source aggregate's list response —
+    // matching Hono/.NET — so no `<View>Response` schema is emitted…
+    expect(files.has(`${SCHEMA}/active_orders_response.ex`)).toBe(false);
+    // …and the view path references `OrderListResponse`.
+    const spec = files.get("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex")!;
+    expect(spec).toMatch(
+      /"\/views\/active_orders"[\s\S]*?schema: PhoenixAppWeb\.Api\.Schemas\.OrderListResponse/,
+    );
   });
 
   it("does not mark a request bool field required", async () => {
