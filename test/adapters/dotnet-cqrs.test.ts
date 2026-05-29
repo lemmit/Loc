@@ -37,7 +37,7 @@ system Sys {
     }
   }
   storage primary { type: postgres }
-  dataSource ordersState { for: Orders, kind: state, use: primary }
+  resource ordersState { for: Orders, kind: state, use: primary }
   deployable api {
     platform: dotnet
     contexts: [Orders]

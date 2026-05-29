@@ -27,7 +27,7 @@ function nodeNames(ast: Model, type: string): string[] {
 
 export const subdomainNames = (ast: Model): string[] => nodeNames(ast, "Subdomain");
 export const boundedContextNames = (ast: Model): string[] => nodeNames(ast, "BoundedContext");
-export const dataSourceNames = (ast: Model): string[] => nodeNames(ast, "DataSource");
+export const dataSourceNames = (ast: Model): string[] => nodeNames(ast, "Resource");
 export const apiNames = (ast: Model): string[] => nodeNames(ast, "Api");
 export const uiNames = (ast: Model): string[] => nodeNames(ast, "Ui");
 export const deployableNames = (ast: Model): string[] => nodeNames(ast, "Deployable");

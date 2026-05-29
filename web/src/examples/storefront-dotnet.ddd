@@ -162,7 +162,7 @@ system StorefrontDotnet {
   }
 
   storage primary { type: postgres }
-  dataSource storefrontState { for: Storefront, kind: state, use: primary }
+  resource storefrontState { for: Storefront, kind: state, use: primary }
 
   // Single fullstack .NET deployable — backend on /api/*, SPA
   // (shadcn pack for variety) served from wwwroot/ at /.

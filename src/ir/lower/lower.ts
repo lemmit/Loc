@@ -10,7 +10,6 @@ import type {
   Component,
   ConnectionSource,
   Containment,
-  DataSource,
   Deployable,
   DerivedProp,
   EntityPart,
@@ -29,6 +28,7 @@ import type {
   Property,
   Repository,
   Requirement,
+  Resource,
   Solution,
   StateField,
   Statement,
@@ -525,7 +525,7 @@ function lowerSystem(sys: System): SystemIR {
       }),
     );
   const dataSources = sys.members
-    .filter((m): m is DataSource => m.$type === "DataSource")
+    .filter((m): m is Resource => m.$type === "Resource")
     .map(
       (d): DataSourceIR => ({
         name: d.name,

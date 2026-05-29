@@ -296,7 +296,7 @@ export function checkDeployableDataSources(d: Deployable, accept: ValidationAcce
     if (!contextNames.has(ctxName)) {
       accept(
         "error",
-        `Deployable '${d.name}' lists dataSource '${ds.name}' whose 'for: ${ctxName}' is not in 'contexts:'.  Add ${ctxName} to 'contexts:' or remove the dataSource.`,
+        `Deployable '${d.name}' lists resource '${ds.name}' whose 'for: ${ctxName}' is not in 'contexts:'.  Add ${ctxName} to 'contexts:' or remove the resource.`,
         { node: d, property: "dataSourceRefs" },
       );
       continue;

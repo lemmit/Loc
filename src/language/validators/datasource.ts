@@ -7,7 +7,7 @@
 // scope provider; no IR-level lookup is needed.
 
 import type { ValidationAcceptor } from "langium";
-import type { DataSource, Storage } from "../generated/ast.js";
+import type { Resource, Storage } from "../generated/ast.js";
 
 // Compatibility matrix.  Aligned with the runtime adapters that exist
 // today: relational stores back `state` / `snapshot` / `replica`;
@@ -27,7 +27,7 @@ const KIND_STORAGE: Record<string, Set<string>> = {
 /** Validate one DataSource declaration in place.  Emits diagnostics
  *  against the dataSource node itself; mismatch on a referenced
  *  storage points at the `use:` property so the squiggle is local. */
-export function checkDataSource(ds: DataSource, accept: ValidationAcceptor): void {
+export function checkDataSource(ds: Resource, accept: ValidationAcceptor): void {
   const kind = ds.kind;
   const storage = ds.use?.ref as Storage | undefined;
 
@@ -41,7 +41,7 @@ export function checkDataSource(ds: DataSource, accept: ValidationAcceptor): voi
       const sorted = [...allowed].sort();
       accept(
         "error",
-        `dataSource '${ds.name}' kind '${kind}' is incompatible with storage '${storage.name}' of type '${storage.type}'.  ` +
+        `resource '${ds.name}' kind '${kind}' is incompatible with storage '${storage.name}' of type '${storage.type}'.  ` +
           `kind '${kind}' requires a storage of type ${formatList(sorted)}.`,
         { node: ds, property: "use" },
       );
@@ -52,28 +52,28 @@ export function checkDataSource(ds: DataSource, accept: ValidationAcceptor): voi
   if (ds.ttl != null && kind && kind !== "cache") {
     accept(
       "error",
-      `dataSource '${ds.name}': 'ttl' is only meaningful on kind: cache.  Got kind: ${kind}.`,
+      `resource '${ds.name}': 'ttl' is only meaningful on kind: cache.  Got kind: ${kind}.`,
       { node: ds, property: "ttl" },
     );
   }
   if (ds.every != null && kind && kind !== "eventLog" && kind !== "snapshot") {
     accept(
       "error",
-      `dataSource '${ds.name}': 'every' is a snapshot-policy knob; valid on kind: eventLog or kind: snapshot.  Got kind: ${kind}.`,
+      `resource '${ds.name}': 'every' is a snapshot-policy knob; valid on kind: eventLog or kind: snapshot.  Got kind: ${kind}.`,
       { node: ds, property: "every" },
     );
   }
   if (ds.retain != null && kind && kind !== "eventLog" && kind !== "snapshot") {
     accept(
       "error",
-      `dataSource '${ds.name}': 'retain' is a snapshot-policy knob; valid on kind: eventLog or kind: snapshot.  Got kind: ${kind}.`,
+      `resource '${ds.name}': 'retain' is a snapshot-policy knob; valid on kind: eventLog or kind: snapshot.  Got kind: ${kind}.`,
       { node: ds, property: "retain" },
     );
   }
   if (ds.isolationLevel && kind === "cache") {
     accept(
       "error",
-      `dataSource '${ds.name}': 'isolationLevel' is not meaningful on kind: cache (no transactional semantics).`,
+      `resource '${ds.name}': 'isolationLevel' is not meaningful on kind: cache (no transactional semantics).`,
       { node: ds, property: "isolationLevel" },
     );
   }
@@ -85,28 +85,28 @@ export function checkDataSource(ds: DataSource, accept: ValidationAcceptor): voi
     if (ds.schema != null && !RELATIONAL.has(storage.type)) {
       accept(
         "error",
-        `dataSource '${ds.name}': 'schema' is only meaningful on a relational storage (postgres / mysql / sqlite / inMemory).  Got '${storage.type}'.`,
+        `resource '${ds.name}': 'schema' is only meaningful on a relational storage (postgres / mysql / sqlite / inMemory).  Got '${storage.type}'.`,
         { node: ds, property: "schema" },
       );
     }
     if (ds.tablePrefix != null && !RELATIONAL.has(storage.type)) {
       accept(
         "error",
-        `dataSource '${ds.name}': 'tablePrefix' is only meaningful on a relational storage (postgres / mysql / sqlite / inMemory).  Got '${storage.type}'.`,
+        `resource '${ds.name}': 'tablePrefix' is only meaningful on a relational storage (postgres / mysql / sqlite / inMemory).  Got '${storage.type}'.`,
         { node: ds, property: "tablePrefix" },
       );
     }
     if (ds.keyPrefix != null && !CACHE_STORES.has(storage.type)) {
       accept(
         "error",
-        `dataSource '${ds.name}': 'keyPrefix' is only meaningful on a key-value storage (redis / inMemory).  Got '${storage.type}'.`,
+        `resource '${ds.name}': 'keyPrefix' is only meaningful on a key-value storage (redis / inMemory).  Got '${storage.type}'.`,
         { node: ds, property: "keyPrefix" },
       );
     }
     if (ds.isolationLevel && !RELATIONAL.has(storage.type)) {
       accept(
         "error",
-        `dataSource '${ds.name}': 'isolationLevel' is only meaningful on a relational storage (postgres / mysql / sqlite / inMemory).  Got '${storage.type}'.`,
+        `resource '${ds.name}': 'isolationLevel' is only meaningful on a relational storage (postgres / mysql / sqlite / inMemory).  Got '${storage.type}'.`,
         { node: ds, property: "isolationLevel" },
       );
     }

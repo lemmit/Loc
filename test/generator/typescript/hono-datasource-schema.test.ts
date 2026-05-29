@@ -2,7 +2,7 @@
 // table factory routing.
 //
 // Mirrors test/generator/dotnet/dotnet-datasource-schema.test.ts on
-// the Hono backend: `dataSource X { for: <ctx>, kind: state, use:
+// the Hono backend: `resource X { for: <ctx>, kind: state, use:
 // <pg>, schema: "sales" }` declares `const salesSchema =
 // pgSchema("sales");` at the top of `db/schema.ts` and routes
 // the aggregate's table through `salesSchema.table("orders", { … })`.
@@ -53,11 +53,11 @@ function schemaFile(files: Map<string, string>): string {
   return files.get(path!)!;
 }
 
-describe("dataSource → Drizzle pgSchema (Hono)", () => {
+describe("resource → Drizzle pgSchema (Hono)", () => {
   it("defaults schema to snake(context.name) when DSL omits `schema:`", async () => {
     const files = await generate(
       baseSystem(
-        `dataSource ordersState { for: Orders, kind: state, use: primary }`,
+        `resource ordersState { for: Orders, kind: state, use: primary }`,
         "ordersState",
       ),
     );
@@ -71,7 +71,7 @@ describe("dataSource → Drizzle pgSchema (Hono)", () => {
   it("declares pgSchema and routes tables through <schema>.table when `schema:` is set", async () => {
     const files = await generate(
       baseSystem(
-        `dataSource ordersState { for: Orders, kind: state, use: primary, schema: "sales" }`,
+        `resource ordersState { for: Orders, kind: state, use: primary, schema: "sales" }`,
         "ordersState",
       ),
     );
@@ -88,7 +88,7 @@ describe("dataSource → Drizzle pgSchema (Hono)", () => {
   it("prepends `tablePrefix` to the local table name (schema still defaults to ctx)", async () => {
     const files = await generate(
       baseSystem(
-        `dataSource ordersState { for: Orders, kind: state, use: primary, tablePrefix: "sales_" }`,
+        `resource ordersState { for: Orders, kind: state, use: primary, tablePrefix: "sales_" }`,
         "ordersState",
       ),
     );
@@ -103,7 +103,7 @@ describe("dataSource → Drizzle pgSchema (Hono)", () => {
   it("combines explicit schema + tablePrefix when both are set", async () => {
     const files = await generate(
       baseSystem(
-        `dataSource ordersState { for: Orders, kind: state, use: primary, schema: "legacy", tablePrefix: "sales_" }`,
+        `resource ordersState { for: Orders, kind: state, use: primary, schema: "legacy", tablePrefix: "sales_" }`,
         "ordersState",
       ),
     );

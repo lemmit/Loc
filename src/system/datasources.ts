@@ -39,10 +39,10 @@ export function renderDataSourcesMd(sys: SystemIR): string {
   for (const st of sys.storages) storageByName.set(st.name, st);
 
   const out: string[] = [];
-  out.push(`# ${sys.name} — dataSource routing`);
+  out.push(`# ${sys.name} — resource routing`);
   out.push("");
   out.push(
-    "Derived view of how `dataSource` declarations route domain contexts to physical storage.",
+    "Derived view of how `resource` declarations route domain contexts to physical storage.",
   );
   out.push(
     "Authoritative source is the `.ddd` model; the validators (`src/ir/validate/validate.ts` +",
@@ -68,7 +68,7 @@ export function renderDataSourcesMd(sys: SystemIR): string {
       if (rows.length === 0) {
         out.push("_No dataSource bindings._");
       } else {
-        out.push("| Context | Kind | DataSource | Storage | Storage type | Schema | TablePrefix |");
+        out.push("| Context | Kind | Resource | Storage | Storage type | Schema | TablePrefix |");
         out.push("| --- | --- | --- | --- | --- | --- | --- |");
         for (const r of rows) {
           out.push(

@@ -1420,13 +1420,13 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
     },
     {
       "$type": "ParserRule",
-      "name": "DataSource",
+      "name": "Resource",
       "definition": {
         "$type": "Group",
         "elements": [
           {
             "$type": "Keyword",
-            "value": "dataSource"
+            "value": "resource"
           },
           {
             "$type": "Assignment",
@@ -6977,7 +6977,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 },
                 {
                   "$type": "Keyword",
-                  "value": "dataSource"
+                  "value": "resource"
                 },
                 {
                   "$type": "Keyword",
@@ -7858,7 +7858,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "dataSource"
+            "value": "resource"
           },
           {
             "$type": "Keyword",
@@ -10947,7 +10947,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "dataSource"
+            "value": "resource"
           },
           {
             "$type": "Keyword",

@@ -202,7 +202,7 @@ system Storybook {
   }
 
   storage primary { type: postgres }
-  dataSource storybookState { for: Storybook, kind: state, use: primary }
+  resource storybookState { for: Storybook, kind: state, use: primary }
 
   deployable api {
     platform: hono

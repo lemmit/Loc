@@ -75,7 +75,7 @@ system InventorySystem {
   }
 
   storage primary { type: postgres }
-  dataSource inventoryState { for: Inventory, kind: state, use: primary }
+  resource inventoryState { for: Inventory, kind: state, use: primary }
 
   deployable api {
     platform: hono, contexts: [Inventory],

@@ -34,7 +34,7 @@ System:
     '}';
 
 SystemMember:
-    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | DataSource | Layout;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | Resource | Layout;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -120,7 +120,7 @@ Deployable:
         // (context, kind) uniqueness; (c) every aggregate's required
         // kind (state / eventLog / cache / snapshot / replica) has a
         // matching dataSource for its hosting context.
-        ('dataSources' ':' '[' dataSourceRefs+=[DataSource:LooseName] (',' dataSourceRefs+=[DataSource:LooseName])* ','? ']' ','?)?
+        ('dataSources' ':' '[' dataSourceRefs+=[Resource:LooseName] (',' dataSourceRefs+=[Resource:LooseName])* ','? ']' ','?)?
         ('targets' ':' targets=[Deployable:LooseName] ','?)?
         // Slice 11.26 — explicit api composition.  Backend deployables
         // declare which contracts they serve via `serves:`.  Frontend
@@ -162,13 +162,14 @@ UiParamBinding:
     name=LooseName ':' source=[Deployable:LooseName];
 
 // D-STORAGE-SPLIT: the per-(context, kind) binding from a context's
-// aggregates to a physical `storage`.  All `for:` / `kind:` / `use:`
-// are required by the validator; declared as optional in the grammar
-// so missing-field diagnostics are friendlier than a hard parse
+// aggregates to a physical `storage` — the RFC's `resource` (the
+// configured realization of a logical need).  All `for:` / `kind:` /
+// `use:` are required by the validator; declared as optional in the
+// grammar so missing-field diagnostics are friendlier than a hard parse
 // error.  Per-kind config keys (schema, every, retain, …) are
 // validated against the resolved storage's `type`.
-DataSource:
-    'dataSource' name=LooseName '{'
+Resource:
+    'resource' name=LooseName '{'
         ('for'  ':' context=[BoundedContext:ID] ','?)?
         ('kind' ':' kind=DataSourceKind ','?)?
         ('use'  ':' use=[Storage:LooseName] ','?)?
@@ -838,7 +839,7 @@ Property:
         // (banking.ddd: `entity AccountTransaction { kind: string }`) still parse.
         | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
         | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-        | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources')
+        | 'eventLog' | 'snapshot' | 'replica' | 'resource' | 'dataSources')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -928,7 +929,7 @@ LooseName returns string:
     // (storage roles), `for` predates this PR as a hard keyword.
     | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
     | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-    | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources';
+    | 'eventLog' | 'snapshot' | 'replica' | 'resource' | 'dataSources';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1286,7 +1287,7 @@ NameRefIdent returns string:
        // `kind` (`Field { kind + ":", bind: v }` in walker tests).
        | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
        | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-       | 'eventLog' | 'snapshot' | 'replica' | 'dataSource' | 'dataSources';
+       | 'eventLog' | 'snapshot' | 'replica' | 'resource' | 'dataSources';
 
 // ---------------------------------------------------------------------------
 // Terminals

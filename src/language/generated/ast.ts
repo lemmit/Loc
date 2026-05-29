@@ -73,7 +73,6 @@ export type DddKeywordNames =
     | "context"
     | "contexts"
     | "covers"
-    | "dataSource"
     | "dataSources"
     | "datetime"
     | "decimal"
@@ -169,6 +168,7 @@ export type DddKeywordNames =
     | "required"
     | "requirement"
     | "requires"
+    | "resource"
     | "retain"
     | "route"
     | "schema"
@@ -342,10 +342,10 @@ export function isLiteralExpr(item: unknown): item is LiteralExpr {
     return reflection.isInstance(item, LiteralExpr);
 }
 
-export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'connection' | 'contains' | 'contexts' | 'dataSource' | 'dataSources' | 'description' | 'design' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'framework' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'readonly' | 'replica' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'use' | 'views' | 'workflows' | string;
+export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'description' | 'design' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'framework' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'readonly' | 'replica' | 'resource' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'use' | 'views' | 'workflows' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'dataSource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'resource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'id' | 'modules' | 'permissions' | 'ui' | 'views' | 'workflows' | string;
@@ -384,10 +384,10 @@ export function isNamedDecl(item: unknown): item is NamedDecl {
     return reflection.isInstance(item, NamedDecl);
 }
 
-export type NameRefIdent = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'connection' | 'contains' | 'contexts' | 'dataSource' | 'dataSources' | 'description' | 'design' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'filter' | 'framework' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'readonly' | 'replica' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'use' | 'views' | 'workflows' | string;
+export type NameRefIdent = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'description' | 'design' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'filter' | 'framework' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'readonly' | 'replica' | 'resource' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'use' | 'views' | 'workflows' | string;
 
 export function isNameRefIdent(item: unknown): item is NameRefIdent {
-    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'dataSource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'resource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type PageProp = BodyProp | CanonicalProp | DescriptionProp | LayoutProp | OgImageProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
@@ -450,7 +450,7 @@ export function isStorageType(item: unknown): item is StorageType {
     return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery';
 }
 
-export type SystemMember = Api | BoundedContext | DataSource | Deployable | Layout | Storage | Subdomain | TestE2E | ThemeBlock | Ui | UserBlock;
+export type SystemMember = Api | BoundedContext | Deployable | Layout | Resource | Storage | Subdomain | TestE2E | ThemeBlock | Ui | UserBlock;
 
 export const SystemMember = 'SystemMember';
 
@@ -709,29 +709,6 @@ export function isContainment(item: unknown): item is Containment {
     return reflection.isInstance(item, Containment);
 }
 
-export interface DataSource extends AstNode {
-    readonly $container: System;
-    readonly $type: 'DataSource';
-    context?: Reference<BoundedContext>;
-    every?: number;
-    isolationLevel?: IsolationLevel;
-    keyPrefix?: string;
-    kind?: DataSourceKind;
-    name: LooseName;
-    readonly: boolean;
-    retain?: number;
-    schema?: string;
-    tablePrefix?: string;
-    ttl?: number;
-    use?: Reference<Storage>;
-}
-
-export const DataSource = 'DataSource';
-
-export function isDataSource(item: unknown): item is DataSource {
-    return reflection.isInstance(item, DataSource);
-}
-
 export interface DecLit extends AstNode {
     readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'DecLit';
@@ -749,7 +726,7 @@ export interface Deployable extends AstNode {
     readonly $type: 'Deployable';
     auth?: AuthMode;
     contextRefs: Array<Reference<BoundedContext>>;
-    dataSourceRefs: Array<Reference<DataSource>>;
+    dataSourceRefs: Array<Reference<Resource>>;
     design?: DesignPack;
     favicon?: string;
     name: LooseName;
@@ -1585,7 +1562,7 @@ export interface Property extends AstNode {
     readonly $type: 'Property';
     access?: FieldAccess;
     check?: Expression;
-    name: 'canonical' | 'connection' | 'dataSource' | 'dataSources' | 'description' | 'env' | 'eventLog' | 'every' | 'favicon' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'managed' | 'money' | 'ogImage' | 'readonly' | 'replica' | 'retain' | 'schema' | 'secret' | 'service' | 'snapshot' | 'tablePrefix' | 'token' | 'ttl' | 'use' | string;
+    name: 'canonical' | 'connection' | 'dataSources' | 'description' | 'env' | 'eventLog' | 'every' | 'favicon' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'managed' | 'money' | 'ogImage' | 'readonly' | 'replica' | 'resource' | 'retain' | 'schema' | 'secret' | 'service' | 'snapshot' | 'tablePrefix' | 'token' | 'ttl' | 'use' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;
@@ -1660,6 +1637,29 @@ export const RequiresStmt = 'RequiresStmt';
 
 export function isRequiresStmt(item: unknown): item is RequiresStmt {
     return reflection.isInstance(item, RequiresStmt);
+}
+
+export interface Resource extends AstNode {
+    readonly $container: System;
+    readonly $type: 'Resource';
+    context?: Reference<BoundedContext>;
+    every?: number;
+    isolationLevel?: IsolationLevel;
+    keyPrefix?: string;
+    kind?: DataSourceKind;
+    name: LooseName;
+    readonly: boolean;
+    retain?: number;
+    schema?: string;
+    tablePrefix?: string;
+    ttl?: number;
+    use?: Reference<Storage>;
+}
+
+export const Resource = 'Resource';
+
+export function isResource(item: unknown): item is Resource {
+    return reflection.isInstance(item, Resource);
 }
 
 export interface RouteProp extends AstNode {
@@ -2158,7 +2158,6 @@ export type DddAstType = {
     ConnectionSource: ConnectionSource
     Containment: Containment
     ContextMember: ContextMember
-    DataSource: DataSource
     DecLit: DecLit
     Deployable: Deployable
     DerivedProp: DerivedProp
@@ -2240,6 +2239,7 @@ export type DddAstType = {
     RequirementProp: RequirementProp
     RequiresProp: RequiresProp
     RequiresStmt: RequiresStmt
+    Resource: Resource
     RouteProp: RouteProp
     SecretConnectionSource: SecretConnectionSource
     SensitivityClause: SensitivityClause
@@ -2287,7 +2287,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, ConnectionSource, Containment, ContextMember, DataSource, DecLit, Deployable, DerivedProp, DescriptionProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, RouteProp, SecretConnectionSource, SensitivityClause, ServiceConnectionSource, SlotType, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
+        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, ConnectionSource, Containment, ContextMember, DecLit, Deployable, DerivedProp, DescriptionProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, RouteProp, SecretConnectionSource, SensitivityClause, ServiceConnectionSource, SlotType, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2356,15 +2356,6 @@ export class DddAstReflection extends AbstractAstReflection {
             case Containment: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype);
             }
-            case DataSource:
-            case Layout:
-            case Storage:
-            case TestE2E:
-            case ThemeBlock:
-            case Ui:
-            case UserBlock: {
-                return this.isSubtype(SystemMember, supertype);
-            }
             case DerivedProp:
             case FunctionDecl:
             case Invariant:
@@ -2403,6 +2394,15 @@ export class DddAstReflection extends AbstractAstReflection {
             case PrimitiveType:
             case SlotType: {
                 return this.isSubtype(BaseType, supertype);
+            }
+            case Layout:
+            case Resource:
+            case Storage:
+            case TestE2E:
+            case ThemeBlock:
+            case Ui:
+            case UserBlock: {
+                return this.isSubtype(SystemMember, supertype);
             }
             case LayoutMainSlot:
             case LayoutNamedSlot: {
@@ -2457,15 +2457,12 @@ export class DddAstReflection extends AbstractAstReflection {
             case 'Containment:partType': {
                 return EntityPart;
             }
-            case 'DataSource:context':
-            case 'Deployable:contextRefs': {
+            case 'Deployable:contextRefs':
+            case 'Resource:context': {
                 return BoundedContext;
             }
-            case 'DataSource:use': {
-                return Storage;
-            }
             case 'Deployable:dataSourceRefs': {
-                return DataSource;
+                return Resource;
             }
             case 'Deployable:serves':
             case 'UiApiParam:apiRef': {
@@ -2494,6 +2491,9 @@ export class DddAstReflection extends AbstractAstReflection {
             case 'Solution:requirement':
             case 'TestCase:requirement': {
                 return Requirement;
+            }
+            case 'Resource:use': {
+                return Storage;
             }
             case 'Solution:entitles':
             case 'TestCase:covers': {
@@ -2654,25 +2654,6 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'name' },
                         { name: 'optional', defaultValue: false },
                         { name: 'partType' }
-                    ]
-                };
-            }
-            case DataSource: {
-                return {
-                    name: DataSource,
-                    properties: [
-                        { name: 'context' },
-                        { name: 'every' },
-                        { name: 'isolationLevel' },
-                        { name: 'keyPrefix' },
-                        { name: 'kind' },
-                        { name: 'name' },
-                        { name: 'readonly', defaultValue: false },
-                        { name: 'retain' },
-                        { name: 'schema' },
-                        { name: 'tablePrefix' },
-                        { name: 'ttl' },
-                        { name: 'use' }
                     ]
                 };
             }
@@ -3295,6 +3276,25 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: RequiresStmt,
                     properties: [
                         { name: 'expr' }
+                    ]
+                };
+            }
+            case Resource: {
+                return {
+                    name: Resource,
+                    properties: [
+                        { name: 'context' },
+                        { name: 'every' },
+                        { name: 'isolationLevel' },
+                        { name: 'keyPrefix' },
+                        { name: 'kind' },
+                        { name: 'name' },
+                        { name: 'readonly', defaultValue: false },
+                        { name: 'retain' },
+                        { name: 'schema' },
+                        { name: 'tablePrefix' },
+                        { name: 'ttl' },
+                        { name: 'use' }
                     ]
                 };
             }

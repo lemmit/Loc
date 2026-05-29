@@ -883,7 +883,7 @@ function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): voi
       diags.push({
         severity: "warning",
         message:
-          `Deployable '${dep.name}' lists dataSource '${ds.name}' (kind: ${ds.kind}) for ` +
+          `Deployable '${dep.name}' lists resource '${ds.name}' (kind: ${ds.kind}) for ` +
           `context '${ds.contextName}', but ${reason}.  This binding routes no data — ` +
           `remove it, or add an aggregate whose persistedAs needs kind: ${ds.kind}.`,
         source: `${sys.name}/${dep.name}`,
@@ -981,7 +981,7 @@ function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]):
       diags.push({
         severity: "warning",
         message:
-          `dataSource '${ds.name}' sets '${knob.property}', but ${knob.description}.  ` +
+          `resource '${ds.name}' sets '${knob.property}', but ${knob.description}.  ` +
           `The value is accepted by validation and persisted in the IR but no current ` +
           `emitter consumes it — this is a no-op at runtime.`,
         source: `${sys.name}/${ds.name}`,

@@ -161,7 +161,7 @@ system StorefrontPhoenix {
   }
 
   storage primary { type: postgres }
-  dataSource storefrontState { for: Storefront, kind: state, use: primary }
+  resource storefrontState { for: Storefront, kind: state, use: primary }
 
   deployable phoenixApp {
     platform: phoenixLiveView

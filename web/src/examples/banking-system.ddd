@@ -182,7 +182,7 @@ system BankingSystem {
   }
 
   storage primary { type: postgres }
-  dataSource bankingState { for: Banking, kind: state, use: primary }
+  resource bankingState { for: Banking, kind: state, use: primary }
 
   deployable api {
     platform: hono, contexts: [Banking],
