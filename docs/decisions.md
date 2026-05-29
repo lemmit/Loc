@@ -208,10 +208,13 @@ numbered **Open sub-questions** below remain OPEN.
 
 **Implementation:** surface + IR landed — `json` primitive (#703),
 `persistedAs(eventLog | state)` (#711), `normalised(true | false)`
-surface (#713). The document-persistence **emission** (Marten / EF
-`.ToJson()` / document table shape) is not yet built; until then
-`normalised(false)` is carried in the IR but inert (an `UNWIRED_KNOBS`
-warning says so). See `document-and-json-hierarchies.md` §9.
+surface (#713). The document-persistence **emission** (Slice D) is
+**in progress**: a document *mode* in the **existing** per-backend
+adapters (EF Core `.ToJson()` / Drizzle `jsonb` / Ash embedded) +
+document table shape — **no new Marten backend** (see the Marten note
+below). Until it lands `normalised(false)` is carried in the IR but
+inert (an `UNWIRED_KNOBS` warning says so). See
+`document-and-json-hierarchies.md` §9.
 
 **Problem.** Loom models internal hierarchies but the
 relational-vs-document storage choice is implicit and unselectable
@@ -250,8 +253,18 @@ sits anomalously inside the aggregate body. Full analysis in
   `as document/table` hint.
 - ES + document needs **no new `kind`**: a `kind: eventLog` binding +
   a `kind: snapshot` (or `state`) binding carrying `normalised: false`.
-  Marten is the reference backend via a `martenPersistenceAdapter` on
-  the existing `PersistenceAdapter` seam.
+- **No dedicated Marten backend.** "Store as a document" is *the
+  aggregate read model in one JSONB column*, which every backend's ORM
+  already supports — so the `document` shape is a **mode added to the
+  existing adapters** (EF Core `.ToJson()`, Drizzle `jsonb`, Ash
+  embedded/`:map`), advertised via a new **`supportedShapes`** companion
+  to `supportedStrategies` on the existing `PersistenceAdapter` seam. A
+  separate `martenPersistenceAdapter` was considered and rejected: its
+  document half *is* EF `.ToJson()`, and its event-store half (stream +
+  document-snapshot rehydration) needs appliers
+  (`workflow-and-applier.md`) regardless of backend. So Slice D's
+  achievable target is **`persistedAs(state)` + `normalised(false)`**;
+  the `eventLog` + document case is deferred behind appliers.
 
 **Validator rules implied.**
 
