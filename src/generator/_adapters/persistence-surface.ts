@@ -26,12 +26,24 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import type { EmitCtx, Lines } from "./types.js";
 
+/** Saving shape of an aggregate's materialised read model / snapshot
+ *  (D-DOCUMENT-AXIS, the `normalised` axis).  `normalised` = relational
+ *  tables (the default); `document` = one JSON document. */
+export type SavingShape = "normalised" | "document";
+
 export interface PersistenceAdapter {
   /** Registry key — what `persistence: <name>` in source resolves
    *  this adapter against.  Always lowercase / kebab-case. */
   readonly name: string;
   /** Aggregate persistence strategies this library can host. */
   readonly supportedStrategies: readonly PersistenceStrategy[];
+  /** Saving shapes this adapter can emit (D-DOCUMENT-AXIS).  Omitted ⇒
+   *  `["normalised"]` (relational only).  An adapter advertising
+   *  `"document"` can emit a `normalised(false)` binding as a single
+   *  JSON document; the orchestrator routes the binding to that
+   *  adapter's document branch and the validator's "no document emitter
+   *  yet" warning stands down. */
+  readonly supportedShapes?: readonly SavingShape[];
   /** Per-binding capability check.  The validator calls this for
    *  every `dataSource X { for:, kind:, use: }` to reject obviously
    *  wrong combinations (e.g. routing an `eventLog` to redis through

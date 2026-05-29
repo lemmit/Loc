@@ -74,6 +74,13 @@ export interface ResolvedDataSource {
    *  verbatim, or `snake(context.name)` when DSL omitted it. */
   schema: string;
   tablePrefix?: string;
+  /** Saving shape of this binding (D-DOCUMENT-AXIS, the `normalised:`
+   *  knob).  `false` ⇒ the projection is one JSON document; omitted ⇒
+   *  the aggregate header's `normalised(…)` supplies the default (see
+   *  {@link isDocumentShaped}).  Carried verbatim from the binding here;
+   *  the header fallback is applied by `isDocumentShaped`, not folded in
+   *  here, so callers can tell "binding said true" from "binding silent". */
+  normalised?: boolean;
 }
 
 /** Resolve the aggregate's dataSource and fold in implicit defaults.
@@ -94,7 +101,27 @@ export function resolveDataSourceConfig(
     kind: ds.kind,
     schema: ds.schema ?? snake(ctx.name),
     tablePrefix: ds.tablePrefix,
+    normalised: ds.normalised,
   };
+}
+
+/** Effective saving shape for an aggregate's primary read model.
+ *
+ *  Per-projection resolution (D-DOCUMENT-AXIS §8 Q4): the binding's
+ *  `normalised:` governs *that* projection; the aggregate header's
+ *  `normalised(…)` is the default; absent everywhere ⇒ `true`
+ *  (relational).  Returns `true` when the effective shape is one JSON
+ *  document — i.e. `normalised(false)`.
+ *
+ *  Pure; `resolved` may be `undefined` (no binding declared) — the
+ *  header still decides, so an aggregate can be `normalised(false)`
+ *  without an explicit dataSource. */
+export function isDocumentShaped(
+  agg: EnrichedAggregateIR,
+  resolved?: Pick<ResolvedDataSource, "normalised">,
+): boolean {
+  const effective = resolved?.normalised ?? agg.normalised ?? true;
+  return effective === false;
 }
 
 /** Resolve the effective transaction isolation level for a workflow.

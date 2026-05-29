@@ -5,6 +5,7 @@ import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import {
   dataSourceKindForAggregate,
+  isDocumentShaped,
   resolveDataSourceConfig,
   resolveDataSourceForAggregate,
   resolveWorkflowIsolation,
@@ -255,5 +256,82 @@ system Sys {
     const wf = ctx.workflows[0]!;
     // The state binding has no level; eventLog binding is ignored.
     expect(resolveWorkflowIsolation(wf, ctx, sys)).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isDocumentShaped — per-projection saving-shape resolution
+// (D-DOCUMENT-AXIS §8 Q4).  Binding `normalised:` wins; aggregate header
+// `normalised(…)` is the default; absent everywhere ⇒ relational (false).
+// ---------------------------------------------------------------------------
+
+describe("isDocumentShaped", () => {
+  async function build(src: string) {
+    const loom = enrichLoomModel(lowerModel(await parseValid(src)));
+    const sys = loom.systems[0]!;
+    const ctx = sys.subdomains[0]!.contexts[0]!;
+    return { sys, ctx };
+  }
+  const agg = (ctx: { aggregates: { name: string }[] }, name: string) =>
+    ctx.aggregates.find((a) => a.name === name)! as never;
+
+  it("defaults to relational when nothing declares a shape", async () => {
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C { aggregate A { x: int } } }
+  storage pg { type: postgres }
+  dataSource cState { for: C, kind: state, use: pg }
+  deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 5000 }
+}`);
+    const a = agg(ctx, "A");
+    expect(isDocumentShaped(a, resolveDataSourceConfig(a, ctx, sys))).toBe(false);
+  });
+
+  it("honours the aggregate header `normalised(false)` with no binding override", async () => {
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C { aggregate A normalised(false) { x: int } } }
+  storage pg { type: postgres }
+  dataSource cState { for: C, kind: state, use: pg }
+  deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 5000 }
+}`);
+    const a = agg(ctx, "A");
+    expect(isDocumentShaped(a, resolveDataSourceConfig(a, ctx, sys))).toBe(true);
+  });
+
+  it("honours the aggregate header even with no dataSource binding at all", async () => {
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C { aggregate A normalised(false) { x: int } } }
+  storage pg { type: postgres }
+  deployable api { platform: dotnet, contexts: [C], port: 5000 }
+}`);
+    const a = agg(ctx, "A");
+    // resolveDataSourceConfig returns undefined (no binding) — header decides.
+    expect(isDocumentShaped(a, resolveDataSourceConfig(a, ctx, sys))).toBe(true);
+  });
+
+  it("lets the per-projection binding `normalised: false` override a normalised(true) header", async () => {
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C { aggregate A normalised(true) { x: int } } }
+  storage pg { type: postgres }
+  dataSource cState { for: C, kind: state, use: pg, normalised: false }
+  deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 5000 }
+}`);
+    const a = agg(ctx, "A");
+    expect(isDocumentShaped(a, resolveDataSourceConfig(a, ctx, sys))).toBe(true);
+  });
+
+  it("lets the binding `normalised: true` override a normalised(false) header", async () => {
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C { aggregate A normalised(false) { x: int } } }
+  storage pg { type: postgres }
+  dataSource cState { for: C, kind: state, use: pg, normalised: true }
+  deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 5000 }
+}`);
+    const a = agg(ctx, "A");
+    expect(isDocumentShaped(a, resolveDataSourceConfig(a, ctx, sys))).toBe(false);
   });
 });
