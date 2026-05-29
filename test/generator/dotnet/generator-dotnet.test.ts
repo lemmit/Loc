@@ -263,6 +263,19 @@ describe(".NET generator", () => {
     expect(repoIface).toMatch(/List<Order>[\s\S]*?All\(/);
   });
 
+  it("marks a required find query param [BindRequired] (so Swashbuckle emits required:true)", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    const controller = files.get("Api/OrdersController.cs")!;
+    // byCustomer(customerId) — a required filter. Without [BindRequired] a
+    // non-nullable string query param reads as optional, diverging from
+    // Hono/Phoenix (which mark it required). Attribute is fully-qualified
+    // to avoid an unused `using` under /warnaserror.
+    expect(controller).toMatch(
+      /\[FromQuery\] \[Microsoft\.AspNetCore\.Mvc\.ModelBinding\.BindRequired\] \w+ customerId/,
+    );
+  });
+
   it("translates `where` filter to a LINQ predicate", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
