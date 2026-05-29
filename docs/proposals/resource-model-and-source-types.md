@@ -1,264 +1,321 @@
-# Proposal: Resource Model & Source Types (response to the data-source RFC)
+# RFC: Resource Model & Source Types
 
-**Status:** Draft. Response to an external RFC ("Resource Model for Data Sources").
-**Scope:** Decide whether and how Loom should conform to the RFC's three-noun model
-(`dataSource` / `sourceType` / `resource`) plus its `kind` / `capability` / `interface`
-dimensions. Proposes a phased adoption that renames the shipped `dataSource` →
-`resource`, formalizes a data-driven `sourceType` registry, and sequences the new
-semantic kinds (`queue`, `objectStore`, `api`) and the abstract need-node as a
-follow-up.
-
-> **Relationship to prior decisions.** This builds directly on
-> **D-STORAGE-SPLIT** ([`docs/decisions.md`](../decisions.md)) and the
-> [`storage-and-platform-config*.md`](./storage-and-platform-config.md) proposal
-> trio. The RFC is, in effect, a "v2" of that same data-layer axis: where
-> D-STORAGE-SPLIT separated the *physical instance* (`storage`) from the *logical
-> binding* (`dataSource`), the RFC separates the *logical need* from the
-> *binding*, and promotes the *technology enum* into a *registry*.
+**Status:** Draft / Proposed.
+**Scope:** Define Loom's data-layer model as a clean separation of *logical need*,
+*configured binding*, and *built-in technology descriptor*, with explicit
+semantic `kind`, refining `capability`, and context-selected `interface`. The
+model generalizes the current data layer so that relational stores, event logs,
+caches, **object stores, queues, and external APIs** are all first-class, and
+prepares the toolchain to add new technologies without grammar changes.
 
 ---
 
-## 1. The RFC in brief
+## 1. Summary
 
-The RFC defines a stricter data-layer vocabulary, motivated by the observation
-that broad low-code "data source" buckets (NocoBase, ToolJet) are semantically
-weak. It proposes:
+Loom's data layer is modeled as four layers plus three cross-cutting dimensions:
 
-- **`dataSource`** — a *logical application need*. Describes *what* the app
-  requires (a relational store, an object store, a queue…), not *which*
-  technology provides it. Carries `kind` + `requires: [capability…]`.
-- **`sourceType`** — a *built-in, platform-defined* descriptor of a technology
-  family (`postgres`, `awsS3`, `rabbitmq`, `redis`, `restApi`…). Not
-  user-authored. Declares, *per kind*, the supported `capabilities` and valid
-  `interfaces`.
-- **`resource`** — the *configured binding* of a `dataSource` to a `sourceType`,
-  choosing one `kind`, deriving/selecting one `interface`, and holding
-  connection config. Closest precedent is Retool's `resource`.
-- **`kind`** — the *semantic role*: `database | queue | eventLog | cache |
-  objectStore | api`.
-- **`capability`** — a finer-grained behavior within a kind (`crud`, `query`,
-  `transactions`, `publish`, `ack`, `append`, `replay`, `blob`, `signedUrl`,
-  `ttl`…).
-- **`interface`** — the *access mode* selected per context: `sql | rest |
-  graphql | webSocket | amqp | sdk`.
+```
+storage     physical instance — a server / managed service / endpoint
+  ↑ use:
+resource    the configured binding of a need to a sourceType + storage; holds config
+  ↑ (implicit)
+need        what the application requires (kind + capabilities), derived from usage
 
-Core rules (RFC §10): a resource is valid iff `resource.kind == dataSource.kind`,
-the kind is supported by the sourceType, `dataSource.requires ⊆
-sourceType.supports[kind].capabilities`, and the consuming operation selects an
-interface from `sourceType.supports[kind].interfaces`.
+sourceType  built-in, platform-defined descriptor of a technology family;
+            for each kind it declares the capabilities and interfaces it offers
 
----
+kind        semantic role:    database | eventLog | cache | objectStore | queue | api
+capability  refines a kind:    crud, query, transactions, append, replay, ack, blob, signedUrl, …
+interface   access mode:        sql | rest | graphql | webSocket | amqp | sdk
+```
 
-## 2. Mapping the RFC onto Loom today
+- **`storage`** and **`resource`** are user-authored (`.ddd`).
+- **`sourceType`** is **platform-internal** — a registry in the toolchain, never
+  written by users.
+- **`need`** is **implicit** — derived from how aggregates and contexts use data
+  and threaded through the IR as a first-class node, not written by users.
+- **`kind`**, **`capability`**, and **`interface`** are properties owned by the
+  registry and the IR; only `kind` appears at the user surface (on `resource`),
+  reusing the existing clause key.
 
-| RFC noun | Loom today | Match quality |
-|---|---|---|
-| `resource` (need→tech binding + config) | **`dataSource`** — `ddd.langium:170`, `DataSourceIR` `loom-ir.ts:1216`. `{ for: Ctx, kind, use: storage, schema, ttl… }` | **Strong.** Our `dataSource` *is* the RFC's `resource`. |
-| `sourceType` (built-in tech descriptor; per-kind capabilities + interfaces) | **`StorageType`** enum (`ddd.langium:307`, `StorageKind` `loom-ir.ts:871`) + **`PersistenceAdapter.supports(storageType, kind, strategy)`** (`persistence-surface.ts:29`) + hardcoded vendor pins across generators | **Partial / scattered.** The knowledge exists, but as a closed enum + adapter code, not a first-class registry. |
-| `dataSource` (logical need: kind + requires) | **Nothing standalone.** Implied by aggregate `persistedAs(…)` (`loom-ir.ts:336`) and the `(context, kind)` pair. | **Absent.** |
-| `kind` (semantic role) | **`DataSourceKind`** = `state \| eventLog \| snapshot \| cache \| replica` (`loom-ir.ts:1241`) | **Different axis** (see §4). |
-| `capability` | **`implementsCapabilities: string[]`** on aggregates (`loom-ir.ts:315`) — but that is *domain* capabilities, not *storage* capabilities | **Name collision; no real counterpart.** |
-| `interface` (sql/rest/amqp/sdk) | *(none — implicitly fixed by the backend platform)* | **Absent.** |
-
-### 2.1 `storage` vs the RFC
-
-Loom's `storage { type: postgres, instance, connection }` (`ddd.langium:300`) is
-the *physical instance* layer. The RFC has no separate first-class physical node
-("§4.5 connection is implicit for now" — folded into `resource`). So under any
-conformance, Loom's `storage` stays as-is; the `type:` enum is what gets
-promoted into `sourceType`.
+This keeps the user surface small while making the architecture explicit and
+extensible.
 
 ---
 
-## 3. The naming inversion (the crux)
+## 2. Motivation
 
-The single most important risk: **RFC `dataSource` is nearly the *opposite* of
-Loom `dataSource`.**
+A single broad "data source" bucket is convenient but semantically weak: a
+relational database is not an object store, an object store is not a queue, and an
+external API is none of those. Conflating them blocks precise validation and
+makes adding a new technology a generator fork rather than a registry entry.
 
-- RFC `dataSource` = the *abstract need* (no technology).
-- Loom `dataSource` = the *concrete binding* (technology + config) = **RFC
-  `resource`**.
+Concretely, Loom needs to model — now —
 
-So conforming is **not a rename in place** — it is a re-layering:
+- **object stores** (e.g. S3-class blob storage with `blob` / `list` /
+  `signedUrl` semantics),
+- **queues** (e.g. RabbitMQ-class messaging with `enqueue` / `dequeue` / `ack`),
+- **external APIs** (REST/GraphQL endpoints consumed as integration points),
 
-1. Loom `dataSource` → **`resource`** (clean; matches Retool and the RFC).
-2. The freed-up word `dataSource` becomes available for the *need* node (a new,
-   different meaning).
+alongside the existing relational stores, event logs, and caches — and to do so
+without re-deriving name resolution or forking a backend per vendor.
 
-During any transition, both specs use the word `dataSource` for different things.
-Mitigation: keep `dataSource` as a **deprecated soft-keyword alias for `resource`**
-through Phase 1, and only re-introduce `dataSource`-as-need in the phase that adds
-the need node — never let both meanings be live simultaneously.
-
----
-
-## 4. Axis mismatches to reconcile
-
-### 4.1 `kind` taxonomies are not the same dimension
-
-| Loom `DataSourceKind` | RFC `kind` |
-|---|---|
-| `state`, `snapshot`, `replica` | *(all sub-roles of)* `database` |
-| `eventLog` | `eventLog` |
-| `cache` | `cache` |
-| *(none)* | `queue`, `objectStore`, `api` |
-
-Ours is **DDD-persistence-shaped** (how an aggregate's truth is stored); the
-RFC's is **infrastructure-shaped** (what kind of system this is). `state` /
-`snapshot` / `replica` are really *capabilities or sub-roles within* the RFC's
-`database` kind. Adopting RFC `kind` wholesale would reclassify our shipped enum —
-a breaking change with no current payoff, since we don't yet emit queues or
-object stores.
-
-**Resolution path:** treat RFC `kind` as the *outer* axis (`database`, `queue`,
-`objectStore`, …) and keep our `state/eventLog/snapshot/cache/replica` as the
-*persistence sub-role* under `database`/`eventLog`/`cache`. This is additive, not
-a reclassification, and only matters once non-database kinds land.
-
-### 4.2 `capability` collides with an existing concept
-
-We already have `implementsCapabilities` on aggregates (`loom-ir.ts:315`,
-declared via `implements "…"`) meaning *domain* capabilities (audit, soft-delete,
-etc.). The RFC's `capability` is a *storage* capability (`crud`, `transactions`,
-`signedUrl`). These must not share a type or keyword. Proposed: name the storage
-concept `sourceCapability` (registry-side) to avoid overloading.
+The model below achieves that by separating **what the app needs** from **what a
+technology offers** and binding the two through a **resource**, with the
+technology knowledge living in a **platform-internal registry**.
 
 ---
 
-## 5. Where "sourceType" knowledge lives today
+## 3. Model
 
-The RFC's `sourceType` registry (per-kind capabilities + interfaces + vendor
-realization) maps onto code that is currently **scattered and closed**:
+### 3.1 `storage` — physical instance
 
-| Concern | Location |
-|---|---|
-| Closed type enum (no extensibility seam) | `loom-ir.ts:871` (`StorageKind`), `ddd.langium:307` |
-| Per-tech capability predicate (the natural registry home) | `persistence-surface.ts:29` — `PersistenceAdapter.supports(storageType, kind, strategy)` |
-| Docker image pin | `system/index.ts:315` (`postgres:16-alpine`) |
-| .NET provider | `efcore-persistence.ts:68,87` (`Npgsql…`, `UseNpgsql()`) |
-| Hono/TS provider | `drizzle-persistence.ts:51,107` (`pg`, `pg.Pool()`) |
-| Phoenix provider | `ash-postgres-persistence.ts:82,109` (`ash_postgres`, PG extensions) |
-| Postgres-only SQL renderer | `sql-pg.ts:19` |
-| Relational-type set (duplicated) | `system/datasources.ts:8`, `validators/datasource.ts` |
+A `storage` declares a physical store, managed service, or endpoint. Unchanged
+shape; the `type:` value names the **sourceType** that realizes it, and
+vendor-specific parameters flow through `connection:` and a generic `config` map.
 
-A `sourceType` registry would consolidate the duplicated relational-type sets and
-the `supports()` matrix into one data-driven table. The RFC's `interface`
-dimension has **no counterpart** today — the backend platform implicitly fixes
-it. It only earns its keep once non-database kinds exist.
+```ddd
+storage primarySql { type: postgres, connection: service(db) }
+storage fileStore  { type: awsS3,    connection: env("S3_URL"),  config: { region: "eu-central-1", bucket: "app-files" } }
+storage jobBus     { type: rabbitmq, connection: env("MQ_URL"),  config: { vhost: "/" } }
+storage payments   { type: restApi,  connection: env("PAY_URL") }
+```
 
----
+`type:` is a value-position enumeration; new technologies are added as new
+literals (see §4) — no new keywords.
 
-## 6. Options
+### 3.2 `resource` — configured binding
 
-### Option A — Cosmetic conformance (rename only)
-Rename `dataSource` → `resource` (keep `dataSource` as a deprecated alias). Name
-the `sourceType` registry as a mechanical extraction of the existing enum +
-`supports()` knowledge. **No** need-node, capability, or interface.
-*Aligns vocabulary; lowest risk; no new expressive power.*
+A `resource` binds a bounded context's data of a given `kind` to a `storage`,
+carrying the per-binding configuration. It is the configured realization of a
+logical need.
 
-### Option B — Full RFC adoption
-All three nouns + `kind` / `capability` / `interface`. Reconcile the kind
-taxonomy (§4.1), add `queue` / `objectStore` / `api` kinds with real adapters,
-add the `interface` selection axis and the abstract `dataSource` need-node with
-`requires ⊆ supports` validation. *Maximum expressiveness; ~the
-65-implementer-day class of change from the existing storage plan; reclassifies
-the shipped enum.*
+```ddd
+resource ordersDb    { for: Orders, kind: database,    use: primarySql, schema: "orders" }
+resource ordersFiles { for: Orders, kind: objectStore, use: fileStore }
+resource orderJobs   { for: Orders, kind: queue,       use: jobBus }
+resource payApi      { for: Orders, kind: api,         use: payments }
+```
 
-### Option C — Registry + capabilities now, need-node + new kinds later **(recommended)**
-A strict prefix of B:
-1. Rename `dataSource` → `resource` (+ deprecated alias).
-2. Formalize a **data-driven `sourceType` registry** on top of the existing
-   `PersistenceAdapter.supports()` seam, carrying per-kind `sourceCapabilities`
-   and `interfaces` as descriptor data; collapse the duplicated
-   `RELATIONAL_STORAGE_TYPES` / validator tables into it.
-3. Keep our `kind` axis; make the kind↔sourceType↔capability matrix data-driven.
-4. **Defer** the standalone `dataSource` need-node, the `queue`/`objectStore`/`api`
-   kinds, and the user-facing `interface` selection to Phase 2.
+`resource` reuses every clause key the data-layer binding already understands
+(`for`, `kind`, `use`, `schema`, `tablePrefix`, `keyPrefix`, `ttl`, `every`,
+`retain`, `isolationLevel`, `readonly`). New per-kind parameters (bucket prefix,
+queue routing, etc.) are expressed through the generic `config` map rather than
+new typed keys, so no new clause keywords are introduced.
 
----
+A deployable lists the resources it wires under its existing `dataSources:`
+binding clause (the clause name is retained for compatibility; it references
+`resource` declarations).
 
-## 7. What C defers relative to B
+### 3.3 `need` — logical requirement (implicit, threaded)
 
-C is **forward-compatible** with B — it is the foundation B builds on, sequenced
-rather than skipped. Until Phase 2 (B), the following are *not* available:
+A *need* is what the application requires of a data layer: a `kind` plus the
+`capabilities` implied by how the domain uses it. Needs are **not authored** —
+they are derived during lowering/enrichment from aggregate persistence and
+context usage, and represented as a first-class IR node (`NeedIR`) that each
+`resource` satisfies. Threading the need explicitly through the IR gives:
 
-1. **The abstract need layer.** No `dataSource { kind, requires }` decoupled from
-   tech; no language-level `requires ⊆ supports` capability matching. Validation
-   stays the coarse kind↔type compat matrix.
-2. **New semantic kinds** — `queue`, `objectStore`, `api`. So **S3 / RabbitMQ /
-   external REST services cannot be modeled yet**. This is the main thing the
-   "more things soon" goal wants, and it is the explicit Phase-2 payload.
-3. **The `interface` dimension as a selectable axis** (e.g. `rest` vs `sdk` for
-   S3, `amqp` for a queue). Under C, `interfaces` exist only as registry
-   descriptor data; access mode stays implicitly fixed by the backend.
-4. **Model-level portability** via the need↔resource split — swapping the
-   realizing technology still happens at the `resource` / deployable-override
-   level, not against a stable need contract.
+- a single place to validate `need.capabilities ⊆ sourceType.supports[kind].capabilities`,
+- a stable contract a `resource` is checked against (rather than ad-hoc matrices),
+- a seam for future explicit `requires:` authoring without re-plumbing — but no
+  user-facing syntax, and therefore no new keywords, ship in this RFC.
 
-**What C does *not* cost** (no rework for B): the vocabulary alignment, the
-consolidated registry, and the migration path are all a strict prefix of B.
+### 3.4 `sourceType` — built-in technology descriptor
 
----
+A `sourceType` is platform-internal knowledge about a technology family. It lives
+in a toolchain registry, not in `.ddd`. For each `kind` it supports, it declares
+the `capabilities` it offers and the `interfaces` through which that kind is
+reached, plus the vendor realization (compose image, client library, migration
+dialect, connection wiring).
 
-## 8. Recommended plan (Phase 1 = Option C)
+```ts
+// platform-internal registry (illustrative)
+sourceType postgres
+  supports:
+    database: { capabilities: [crud, query, transactions, state, snapshot, replica], interfaces: [sql] }
+    eventLog: { capabilities: [append, read, replay],                                interfaces: [sql] }
+    cache:    { capabilities: [get, set, ttl],                                       interfaces: [sql] }
 
-**Goal:** vocabulary aligned with the RFC, vendor knowledge consolidated, no loss
-of shipped behavior, paved road to B. Mirrors the F1 micro-plan discipline:
-`test/fixtures/**` stays byte-identical where features are unused.
+sourceType awsS3
+  supports:
+    objectStore: { capabilities: [blob, list, signedUrl, versioning], interfaces: [rest, sdk] }
 
-1. **Grammar** (`ddd.langium`): add `resource` rule (clone of `DataSource`);
-   admit `dataSource` as a deprecated alias (validator warning). Add `resource`,
-   `sourceType`, `sourceCapability`, `interface`, `requires` as **soft keywords**
-   (we already do this for `kind`/`schema`/`every` — `ddd.langium:456,929,1287`)
-   so user field names don't break. `npm run langium:generate`.
-2. **IR** (`loom-ir.ts`): rename `DataSourceIR` → `ResourceIR` (keep a type alias
-   for one cycle); add a `SourceTypeIR` registry type
-   (`{ name, supports: Record<kind, { capabilities, interfaces }> }`).
-3. **Registry**: introduce `src/ir/source-types.ts` (or `src/platform/`) as the
-   single data-driven table; back `PersistenceAdapter.supports()` with it; fold in
-   `RELATIONAL_STORAGE_TYPES` from `system/datasources.ts:8` and
-   `validators/datasource.ts`.
-4. **Lowering** (`lower.ts:517-548`): emit `ResourceIR`; keep `persistedAs`
-   identity mapping (`resolve-datasource.ts:34`) unchanged.
-5. **Validation** (`validators/datasource.ts`): drive the kind↔type compat checks
-   from the registry instead of inline tables; emit the `dataSource`-deprecation
-   warning.
-6. **Printer / tooling**: `print-structural.ts`, VS Code TextMate grammar, Monaco
-   playground tokens, web builder round-trip.
-7. **Sources**: migrate `.ddd` examples + `test/fixtures/**` (codemod
-   `dataSource`→`resource`); keep one fixture exercising the alias.
+sourceType rabbitmq
+  supports:
+    queue: { capabilities: [enqueue, dequeue, ack, publish, consume], interfaces: [amqp] }
 
-**Phase 2 (Option B, separate proposal/PR sequence):** abstract `dataSource`
-need-node, RFC kind taxonomy as the outer axis, `queue`/`objectStore`/`api` kinds
-with adapters, user-facing `interface` selection, and `requires ⊆ supports`
-matching. Gated on a concrete new backend (S3 or RabbitMQ) to create real
-pressure.
+sourceType restApi
+  supports:
+    api: { capabilities: [request], interfaces: [rest] }
+```
+
+The registry consolidates knowledge that is otherwise scattered (type
+enumerations, per-adapter `supports()` predicates, hardcoded vendor pins,
+relational-type sets) into one data-driven table that every backend and validator
+reads.
+
+### 3.5 `kind`, `capability`, `interface`
+
+- **`kind`** is the semantic role and the primary contract between a need and a
+  provider: `database | eventLog | cache | objectStore | queue | api`. It is the
+  one dimension surfaced to users (on `resource`).
+- **`capability`** refines a kind. The persistence roles Loom already
+  distinguishes — `state`, `snapshot`, `replica` — are capabilities under
+  `database`; `eventLog` and `cache` are kinds in their own right with their own
+  capabilities (`append`/`read`/`replay`, `get`/`set`/`ttl`). New kinds bring new
+  capabilities (`blob`/`list`/`signedUrl` for `objectStore`,
+  `enqueue`/`dequeue`/`ack` for `queue`). Capabilities live in the registry and
+  the derived need; they are not authored.
+- **`interface`** is the access mode used in a given context (`sql`, `rest`,
+  `amqp`, `sdk`, …). A `sourceType` exposes interfaces **per kind**, not as one
+  flat set, so the same technology used in different roles exposes different valid
+  interfaces. Interface is selected by the consuming operation from
+  `sourceType.supports[kind].interfaces`; it is not authored.
 
 ---
 
-## 9. Migration surface (any option)
+## 4. Extensibility without grammar churn
 
-- **Soft-keyword churn:** `resource`, `sourceType`, `sourceCapability`,
-  `interface`, `requires` added as soft keywords.
-- **`persistedAs` identity mapping** (`resolve-datasource.ts:34`) is unchanged.
-- **Blast radius:** `ddd.langium` + regenerate · `loom-ir.ts` · `lower.ts:517-548`
-  · `validators/datasource.ts` + `deployable.ts` · `system/datasources.ts` /
-  `system/index.ts` · `print-structural.ts` · **every `.ddd` example +
-  `test/fixtures/**` byte snapshot** · VS Code TextMate grammar · Monaco
-  playground tokens · web builder round-trip.
+Adding a technology or a role must not expand the keyword surface:
+
+- **New technology** → a new `sourceType` registry entry **plus** a new literal in
+  the value-position `type:` enumeration. Value-position literals are not global
+  identifiers, so no soft keyword is introduced.
+- **New role** → a new literal in the value-position `kind:` enumeration, plus the
+  registry entries that support it.
+- **New capability / interface** → registry data only; no grammar.
+- **Vendor-specific parameters** → the generic `config` map on `storage` /
+  `resource`; no new typed clause keys.
+- **`sourceType`, `capability`, `interface`, `need`, `requires`** → never appear
+  in `.ddd`; they are internal/registry/IR concepts. No keywords, no soft
+  keywords.
+
+The only user-surface change is the declaration keyword `resource` (replacing the
+binding declaration) and the optional `config` map; the existing binding clause
+keys are reused as-is.
 
 ---
 
-## 10. Open questions
+## 5. Matching & invariants
 
-1. **Alias lifetime.** One release cycle for `dataSource`-as-`resource`, or hard
-   cutover with a codemod (consistent with D-DOCUMENT-AXIS's hard-cutover
-   precedent)?
-2. **Registry home.** `src/ir/source-types.ts` vs `src/platform/` — the latter is
-   closer to where adapters already declare `supports()`.
-3. **Custom source types.** RFC §11 forbids user-authored `sourceType` semantics
-   "unless the platform explicitly supports custom sourceType plugins." Do we want
-   that seam to align with the out-of-tree backend story (`packages/`,
-   `fs-discovery.ts`)?
-4. **Kind reconciliation timing.** Introduce the outer `database`/`queue`/… axis
-   in Phase 1 (descriptor-only, unused) or hold it entirely for Phase 2?
+For a `resource` binding a need to a `sourceType`:
+
+1. `resource.kind` is supported by `resource`'s `sourceType` (via `use:` →
+   `storage.type`).
+2. `need.kind == resource.kind` for the served context.
+3. `need.capabilities ⊆ sourceType.supports[kind].capabilities`.
+4. the consuming operation selects an `interface` from
+   `sourceType.supports[kind].interfaces`.
+
+Invariants:
+
+- A `need` declares exactly one primary `kind`.
+- A `sourceType` may support multiple kinds; it must declare interfaces **per
+  kind**, not only globally.
+- A `resource` binds exactly one context's need to exactly one `storage`/
+  `sourceType` and chooses exactly one active `kind`.
+- A `resource` may omit an explicit interface when it is derivable from kind +
+  operation.
+- Per `(context, kind)` bindings are unique within a deployable.
+- Users cannot author `sourceType` semantics; the registry is platform-owned
+  (custom-sourceType plugins are an explicit future seam, §7).
+
+---
+
+## 6. Examples
+
+### 6.1 Relational database
+
+```ddd
+storage primarySql { type: postgres }
+resource ordersDb  { for: Orders, kind: database, use: primarySql, schema: "orders" }
+```
+Reached through `sql`; `state` / `snapshot` / `replica` are capabilities chosen by
+the aggregate's persistence and derived into the need.
+
+### 6.2 Postgres-backed event log
+
+```ddd
+resource ordersEvents { for: Orders, kind: eventLog, use: primarySql, every: 100, retain: 5 }
+```
+`append` / `read` / `replay` over `sql`.
+
+### 6.3 Object store (S3)
+
+```ddd
+storage fileStore   { type: awsS3, config: { region: "eu-central-1", bucket: "app-files" } }
+resource ordersFiles { for: Orders, kind: objectStore, use: fileStore }
+```
+`blob` / `list` / `signedUrl`; browser flows prefer `rest`, backend batch flows
+prefer `sdk`.
+
+### 6.4 Queue (RabbitMQ)
+
+```ddd
+storage jobBus    { type: rabbitmq, config: { vhost: "/" } }
+resource orderJobs { for: Orders, kind: queue, use: jobBus }
+```
+`enqueue` / `dequeue` / `ack` over `amqp`.
+
+### 6.5 External API
+
+```ddd
+storage payments { type: restApi, connection: env("PAY_URL") }
+resource payApi   { for: Orders, kind: api, use: payments }
+```
+`request` over `rest`.
+
+---
+
+## 7. Phased delivery
+
+The target is the full model above; it is delivered in phases, each independently
+mergeable and CI-green, with `test/fixtures/**` byte-identical where features are
+unused.
+
+**Phase 1 — Resource model + sourceType registry (foundation).**
+- Introduce the `resource` declaration as the data-layer binding; retain the
+  `dataSources:` deployable clause referencing it. Provide a one-step codemod for
+  `.ddd` sources, examples, and fixtures.
+- Stand up the platform-internal `sourceType` registry and back the existing
+  per-adapter `supports()` checks and validator compatibility matrix with it;
+  consolidate the duplicated relational-type sets.
+- Reframe `kind` as the infrastructure role and `state`/`snapshot`/`replica` as
+  `database` capabilities in the registry/IR (existing `kind: eventLog|cache`
+  remain valid kinds).
+- Thread the derived `NeedIR` through lowering/enrichment; wire the
+  `need.capabilities ⊆ sourceType.capabilities` check.
+- No behavior change in emitters for relational/eventLog/cache.
+
+**Phase 2 — New kinds: object store, queue, external API.**
+- Add `awsS3`, `rabbitmq`, `restApi` (and siblings) to the `type:` enumeration and
+  the registry; add `objectStore`, `queue`, `api` to the `kind:` enumeration; add
+  their capabilities/interfaces to the registry.
+- Add the generic `config` map on `storage`/`resource` for vendor parameters.
+- Compose integration: emit the corresponding services / connection wiring; at
+  least one backend gains object-store, queue, and external-API client surfaces.
+- Validation for the new kind↔sourceType↔capability combinations, driven by the
+  registry.
+
+**Phase 3 — Interface selection & capability authoring (optional surface).**
+- Surface `interface` selection where an operation can choose among multiple valid
+  interfaces (e.g. S3 `rest` vs `sdk`).
+- Consider explicit `requires:` authoring on top of the already-threaded need (a
+  future, additive surface).
+- Custom-sourceType plugins via the out-of-tree backend story (registry entries
+  contributed by `packages/` discovered at load time).
+
+---
+
+## 8. Open questions
+
+1. **Codemod vs alias** for the binding-declaration rename — one-step hard cutover
+   (preferred, consistent with prior hard cutovers) or a transitional alias.
+2. **Registry home** — colocated with the platform adapters (where `supports()`
+   already lives) vs a dedicated `src/ir/source-types.ts`.
+3. **Config typing** — keep `config` fully generic (string map) or validate known
+   keys per sourceType from the registry (no grammar impact either way).
+4. **Need granularity** — per `(context, kind)` (matches current binding
+   granularity) vs finer per-aggregate needs.
+5. **Custom sourceType plugins** — scope and trust model for user-contributed
+   registry entries.
