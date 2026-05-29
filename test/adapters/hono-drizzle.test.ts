@@ -11,11 +11,11 @@ import type { EmitCtx } from "../../src/generator/_adapters/index.js";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { EnrichedBoundedContextIR } from "../../src/ir/types/loom-ir.js";
-import { resolvePersistence } from "../../src/platform/resolve-adapters.js";
 import {
   drizzlePersistenceAdapter,
   emitDrizzleSchema,
 } from "../../src/platform/hono/v4/adapters/drizzle-persistence.js";
+import { resolvePersistence } from "../../src/platform/resolve-adapters.js";
 import { parseValid } from "../_helpers/parse.js";
 
 const SRC = `
