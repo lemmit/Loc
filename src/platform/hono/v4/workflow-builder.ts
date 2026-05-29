@@ -8,6 +8,7 @@ import type {
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
+import { camelId, opWorkflow } from "../../../ir/util/openapi-ids.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -215,7 +216,7 @@ function emitWorkflowRoute(
   out.push(`    method: "post",`);
   out.push(`    path: "/${snake(wf.name)}",`);
   out.push(`    tags: ["workflows"],`);
-  out.push(`    operationId: "${lowerFirst(wf.name)}Workflow",`);
+  out.push(`    operationId: "${camelId(opWorkflow(wf.name))}",`);
   out.push(`    request: {`);
   out.push(`      body: { content: { "application/json": { schema: ${reqName} } } },`);
   out.push(`    },`);

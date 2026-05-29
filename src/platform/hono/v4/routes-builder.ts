@@ -38,6 +38,14 @@ import type {
   SingleFieldPattern,
 } from "../../../ir/validate/invariant-classify.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import {
+  camelId,
+  opCreate,
+  opFind,
+  opGetById,
+  opList,
+  opOperation,
+} from "../../../ir/util/openapi-ids.js";
 
 // ---------------------------------------------------------------------------
 // Hono routes file with OpenAPI annotations.
@@ -251,7 +259,7 @@ export function buildRoutesFile(
   lines.push(`      method: "post",`);
   lines.push(`      path: "/",`);
   lines.push(`      tags: ["${snake(plural(agg.name))}"],`);
-  lines.push(`      operationId: "create${agg.name}",`);
+  lines.push(`      operationId: "${camelId(opCreate(agg.name))}",`);
   lines.push(`      request: {`);
   lines.push(
     `        body: { content: { "application/json": { schema: Create${agg.name}Request } } },`,
@@ -299,8 +307,8 @@ export function buildRoutesFile(
   lines.push(`      method: "get",`);
   lines.push(`      path: "/{id}",`);
   lines.push(`      tags: ["${snake(plural(agg.name))}"],`);
-  lines.push(`      operationId: "get${agg.name}ById",`);
-  lines.push(`      request: { params: z.object({ id: z.string() }) },`);
+  lines.push(`      operationId: "${camelId(opGetById(agg.name))}",`);
+  lines.push(`      request: { params: z.object({ id: z.string().uuid() }) },`);
   lines.push(`      responses: {`);
   lines.push(
     `        200: { description: "OK", content: { "application/json": { schema: ${agg.name}Response } } },`,
@@ -454,9 +462,9 @@ function emitOperationRoute(
   out.push(`    method: "post",`);
   out.push(`    path: "/{id}/${opSnake}",`);
   out.push(`    tags: ["${aggSlug}"],`);
-  out.push(`    operationId: "${lowerFirst(op.name)}${agg.name}",`);
+  out.push(`    operationId: "${camelId(opOperation(agg.name, op.name))}",`);
   out.push(`    request: {`);
-  out.push(`      params: z.object({ id: z.string() }),`);
+  out.push(`      params: z.object({ id: z.string().uuid() }),`);
   out.push(
     `      body: { content: { "application/json": { schema: ${upperFirst(op.name)}Request } } },`,
   );
@@ -552,7 +560,7 @@ function emitOperationRoute(
       out.push(`      const after = repoTx.toWire(aggregate);`);
       out.push(`      await tx.insert(schema.auditRecords).values({`);
       out.push(`        auditId: randomUUID(),`);
-      out.push(`        operationId: "${lowerFirst(op.name)}${agg.name}",`);
+      out.push(`        operationId: "${camelId(opOperation(agg.name, op.name))}",`);
       out.push(`        action: "${op.name}",`);
       out.push(`        targetType: "${agg.name}",`);
       out.push(`        targetId: id,`);
@@ -603,7 +611,7 @@ function emitFindRoute(
   out.push(`    method: "get",`);
   out.push(`    path: "${path}",`);
   out.push(`    tags: ["${aggSlug}"],`);
-  out.push(`    operationId: "${lowerFirst(find.name)}${agg.name}",`);
+  out.push(`    operationId: "${camelId(opFind(agg.name, find.name))}",`);
   if (find.params.length > 0) {
     out.push(`    request: { query: ${upperFirst(find.name)}Query },`);
   }
