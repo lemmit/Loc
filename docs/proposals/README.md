@@ -188,7 +188,8 @@ Phase 5 — Deferred tail
 
 | Tag | What | Phase |
 |---|---|---|
-| D-RENAME | `inheritanceStrategy: shareTable \| ownTable` rename | 0.1 |
+| D-RENAME | `inheritanceUsing(sharedTable \| ownTable)` (amended by D-DOCUMENT-AXIS) | 0.1 |
+| D-DOCUMENT-AXIS | `persistedAs(…)` + `normalised(…)` header axes; `json` field | 0.1 |
 | D-STORAGE-SPLIT | Split overloaded `storage` keyword | 0.1 |
 | D-POLICY-STYLE | `policy {}` over function-style | 0.1 |
 | D-LIFECYCLE-VERB | `urlStyle:` default | 0.1 |
@@ -226,9 +227,10 @@ parallel.
 - **aggregate-inheritance.md ↔ storage.** Original
   `storage: shared | own` for inheritance table layout collides
   lexically with the storage proposal's `storage` keyword. Pinned
-  rename: `inheritanceStrategy: shareTable | ownTable`, inside the
-  `aggregate { … }` block (D-RENAME). ES concrete subtype of a TPH
-  abstract is forced to `inheritanceStrategy: ownTable`.
+  rename (D-RENAME, amended by D-DOCUMENT-AXIS §4): the header paren
+  modifier `inheritanceUsing(sharedTable | ownTable)`. A
+  `persistedAs(eventLog)` concrete subtype of a `sharedTable` abstract
+  is forced to `inheritanceUsing(ownTable)` (D-ES-TPH).
 
 - **Storage foundation positioning.** The storage micro-plan's
   foundation phases are positioned to land **before** the type-system
