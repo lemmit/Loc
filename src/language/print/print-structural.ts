@@ -477,8 +477,9 @@ function printAggregate(node: Aggregate): string {
   // `persistedAs(…)` is a header modifier (between `ids` and `with`),
   // not a body member — matches the grammar order.
   const persistedAs = node.persistedAs ? ` persistedAs(${node.persistedAs})` : "";
+  const normalised = node.normalised ? ` normalised(${node.normalised})` : "";
   return block(
-    `aggregate ${node.name}${ids}${persistedAs}${printWithClause(node.withClause)}`,
+    `aggregate ${node.name}${ids}${persistedAs}${normalised}${printWithClause(node.withClause)}`,
     node.members.map(printStructural),
   );
 }

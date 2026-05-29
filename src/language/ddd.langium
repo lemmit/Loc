@@ -180,6 +180,7 @@ DataSource:
         ('retain'         ':' retain=INT ','?)?
         ('isolationLevel' ':' isolationLevel=IsolationLevel ','?)?
         ('readonly'       ':' readonly?='true' ','?)?
+        ('normalised'     ':' normalised=BoolFlag ','?)?
     '}';
 
 DataSourceKind returns string:
@@ -608,7 +609,7 @@ ValueObjectMember:
     Property | DerivedProp | Invariant | FunctionDecl;
 
 Aggregate:
-    'aggregate' name=ID ('ids' idKind=IdKind)? ('persistedAs' '(' persistedAs=TruthKind ')')? withClause=WithClause? '{'
+    'aggregate' name=ID ('ids' idKind=IdKind)? ('persistedAs' '(' persistedAs=TruthKind ')')? ('normalised' '(' normalised=BoolFlag ')')? withClause=WithClause? '{'
         members+=AggregateMember*
     '}';
 
@@ -621,6 +622,14 @@ IdKind returns string:
 // is an identity.  Default (absent) is `state`.
 TruthKind returns string:
     'eventLog' | 'state';
+
+// D-DOCUMENT-AXIS: saving shape of the materialised read model /
+// snapshot — `normalised(false)` stores the aggregate as one JSON
+// document instead of normalised tables.  Header paren modifier on
+// the aggregate; colon entry on the `dataSource` binding.  Default
+// (absent) is `true`.
+BoolFlag returns string:
+    'true' | 'false';
 
 // ---- macro `with` clause ----------------------------------------
 //

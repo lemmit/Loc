@@ -334,6 +334,14 @@ export interface AggregateIR {
    * the IR preserves source fidelity for the AST → IR → printer
    * round-trip. */
   persistedAs?: PersistenceStrategy;
+  /** Saving shape of the materialised read model / snapshot
+   * (D-DOCUMENT-AXIS, `normalised(true | false)` header modifier).
+   * `false` → store the aggregate as one JSON document instead of
+   * normalised tables.  Omitted when not declared (default `true`).
+   * Carried through the IR; the document persistence *emission* is a
+   * later slice (Marten / EF `.ToJson()`), so today this only records
+   * intent. */
+  normalised?: boolean;
 }
 
 /** The aggregate's primary truth kind.  Named to match the
@@ -1236,6 +1244,12 @@ export interface DataSourceIR {
   retain?: number;
   isolationLevel?: "readUncommitted" | "readCommitted" | "repeatableRead" | "serializable";
   readonly?: boolean;
+  /** Saving shape of the materialised read model this binding routes
+   *  (D-DOCUMENT-AXIS, `normalised:` knob).  `false` → the `state` /
+   *  `snapshot` data is laid out as one JSON document.  Omitted →
+   *  default `true`.  Carried through the IR; emission is a later
+   *  slice. */
+  normalised?: boolean;
 }
 
 export type DataSourceKind = "state" | "eventLog" | "snapshot" | "cache" | "replica";
