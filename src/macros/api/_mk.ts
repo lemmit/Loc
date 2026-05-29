@@ -32,6 +32,8 @@ import type {
   BoolLit,
   CallArg,
   CallSuffix,
+  Create,
+  Destroy,
   FilterDecl,
   IdType,
   ImplementsDecl,
@@ -104,6 +106,14 @@ export function mkParameter(shape: AstLiteral<Parameter>): Parameter {
 
 export function mkOperation(shape: AstLiteral<Operation>): Operation {
   return mkAst<Operation>(shape);
+}
+
+export function mkCreate(shape: AstLiteral<Create>): Create {
+  return mkAst<Create>(shape);
+}
+
+export function mkDestroy(shape: AstLiteral<Destroy>): Destroy {
+  return mkAst<Destroy>(shape);
 }
 
 export function mkNameRef(shape: AstLiteral<NameRef>): NameRef {

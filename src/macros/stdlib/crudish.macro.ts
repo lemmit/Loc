@@ -1,6 +1,9 @@
+import type { AggregateMember } from "../../language/generated/ast.js";
 import {
   assignStmt,
+  create,
   defineMacro,
+  destroy,
   memberAccess,
   mkIdType,
   mkNamedType,
@@ -10,55 +13,60 @@ import {
   operation,
   param,
   primType,
+  writableCreateFields,
   writableUpdateFields,
 } from "../api/index.js";
 
-/** Adds standardised CRUD-style operations to an aggregate, built
- * from the host's user-declared fields.  This is the macro the
+/** Adds standardised CRUD-style lifecycle actions to an aggregate,
+ * built from the host's user-declared fields.  This is the macro the
  * design discussion centred on as the "hard case": it has to
- * inspect the host's structure (field list) to generate operation
+ * inspect the host's structure (field list) to generate action
  * parameters and bodies, not just splice fixed declarations.
  *
- * Phase 3 v1 emits a single `update` operation that takes one
- * parameter per writable user field and assigns each to the
- * matching aggregate field.  `create` and `delete` are deferred
- * until input-type synthesis lands (the natural shape is
- * `create(input: ${target.name}Input)`, which requires the
- * generator to emit an `Input` value object alongside the aggregate;
- * see the `needsCrudInput` flag).
+ * Emits three actions:
+ *   - `update(<writable fields>)` — a mutate operation assigning each
+ *     writable update field (see `writableUpdateFields`).
+ *   - canonical `create(<writable create fields>)` — the unnamed
+ *     factory that lowers to `POST /collection`.  Uses
+ *     `writableCreateFields` (which keeps `immutable` fields — settable
+ *     once, at creation — unlike the update surface).
+ *   - canonical `destroy { }` — the unnamed hard-delete terminator
+ *     (`DELETE /collection/{id}`); empty body, the backend wires the
+ *     actual removal.
  *
- * "Writable update fields" means: declared Properties on the
- * aggregate that are eligible to appear on a generic `update`
- * operation.  Two filters AND together (see
- * `writableUpdateFields` in `src/macro-api/factories.ts`):
+ * The two `writable*Fields` helpers AND together two filters (see
+ * `src/macros/api/factories.ts`):
  *   1. Excludes fields contributed by another macro (origin-tag
  *      check) — catches `createdAt` from `auditable`, `isDeleted`
  *      from `softDeletable`, etc., regardless of access modifier.
- *   2. Excludes fields whose `access` modifier puts them outside
- *      the update payload (`immutable`, `managed`, `token`,
- *      `internal`).  `secret` stays — write-only fields belong IN
- *      update inputs.  This catches user-declared modifiers like
- *      `field slug: string immutable` without involving any macro.
+ *   2. Excludes fields whose `access` modifier puts them outside the
+ *      payload (`managed`, `token`, `internal`; update additionally
+ *      drops `immutable`).  `secret` stays on both — write-only fields
+ *      belong IN create/update inputs.
  *
- * Composition note: combining `crudish` with `softDeletable` would
- * conflict on `delete()` once that lands.  The v2 plan is to add
- * an `updateOnly` arg (default false); when softDeletable is also
- * used, the user opts out of the hard delete via
- * `with crudish(updateOnly: true), softDeletable`.  v1 has no
- * `delete` so there's nothing to collide yet. */
+ * Composition with `softDeletable`: both want to own deletion.  Pass
+ * `updateOnly: true` to suppress the canonical `create`/`destroy` and
+ * emit only `update`, so `with crudish(updateOnly: true), softDeletable`
+ * leaves the soft-delete macro's terminator uncontested. */
 export default defineMacro({
   name: "crudish",
   target: "aggregate",
   apiVersion: 1,
+  params: {
+    /** When true, emit only the `update` operation — no canonical
+     * `create`/`destroy`.  For composing with a macro that owns the
+     * create/delete lifecycle (e.g. `softDeletable`). */
+    updateOnly: { kind: "bool", default: false },
+  },
   description:
-    "Adds an update(input...) operation that assigns each user-declared field. " +
-    "Field-list iteration on the host validates that the macro mechanism " +
-    "supports compile-time AST inspection of the target declaration.",
-  expand({ target }) {
-    const fields = writableUpdateFields(target);
+    "Adds update(...) plus a canonical create(...) and destroy {} built from the " +
+    "host's user-declared fields.  Field-list iteration on the host validates that " +
+    "the macro mechanism supports compile-time AST inspection of the target.",
+  expand({ target, args }) {
+    const updateFields = writableUpdateFields(target);
     // Per-field positional parameters; once input-type synthesis
     // lands this collapses to a single `input: <Name>Input` param.
-    const params = fields.map((f) => param(f.name, cloneType(f.type)));
+    const updateParams = updateFields.map((f) => param(f.name, cloneType(f.type)));
     // Per-field assignment statements: `<field> := <field>`.  The
     // bare lvalue resolves to the aggregate's field; the RHS is a
     // bare name reference resolving to the parameter of the same
@@ -66,13 +74,22 @@ export default defineMacro({
     // shadowed, which is the right semantics here — without the
     // shadow, both sides would refer to the field).  When input-
     // type synthesis lands, the RHS becomes `input.<field>`.
-    const body = fields.map((f) =>
-      // To disambiguate from the field of the same name, route
-      // through memberAccess: `this.<field> := <param>`.  Loom
-      // accepts `this` as a magic identifier (see render-expr.ts).
-      assignStmt(f.name, nameRef(f.name)),
-    );
-    return [operation("update", params, body)];
+    const assignBody = (fields: readonly { name: string }[]) =>
+      fields.map((f) => assignStmt(f.name, nameRef(f.name)));
+    const members: AggregateMember[] = [
+      operation("update", updateParams, assignBody(updateFields)),
+    ];
+    if (!args.updateOnly) {
+      // Canonical create: the create surface keeps `immutable` fields
+      // (settable at creation), so it uses writableCreateFields — a
+      // superset of the update params for any aggregate with immutables.
+      const createFields = writableCreateFields(target);
+      const createParams = createFields.map((f) => param(f.name, cloneType(f.type)));
+      members.push(create(createParams, assignBody(createFields)));
+      // Canonical hard delete — no params, empty body.
+      members.push(destroy());
+    }
+    return members;
   },
 });
 
