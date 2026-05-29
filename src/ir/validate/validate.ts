@@ -856,7 +856,66 @@ function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): voi
         });
       }
     }
+
+    // Inverse direction: a dataSource listed on a deployable but
+    // covering nothing in the hosted contexts is dead config.  An
+    // `eventLog` binding against a context that has only stateBased
+    // aggregates routes no data; a `state` binding when every
+    // aggregate is eventSourced is similarly inert.  This catches
+    // edits-in-progress (renamed a strategy and forgot to drop the
+    // old binding) and copy-paste from another deployable.  Warning
+    // (not error) because the user may be staging a binding for an
+    // aggregate they're about to add — but we still want it on the
+    // Problems panel.
+    const hostedContexts = new Set(dep.contextNames);
+    for (const dsName of dep.dataSourceNames ?? []) {
+      const ds = dsByName.get(dsName);
+      if (!ds) continue;
+      if (!hostedContexts.has(ds.contextName)) continue;
+      // The 'for: <ctx> not in contexts:' error is already raised by
+      // the AST validator (checkDeployableDataSources); skip here so
+      // the user gets one diagnostic per mistake, not two.
+      const ctx = ctxByName.get(ds.contextName);
+      if (!ctx) continue;
+      const reason = coverageGapReason(ds.kind, ctx);
+      if (!reason) continue;
+      diags.push({
+        severity: "warning",
+        message:
+          `Deployable '${dep.name}' lists dataSource '${ds.name}' (kind: ${ds.kind}) for ` +
+          `context '${ds.contextName}', but ${reason}.  This binding routes no data — ` +
+          `remove it, or add an aggregate whose persistenceStrategy needs kind: ${ds.kind}.`,
+        source: `${sys.name}/${dep.name}`,
+      });
+    }
   }
+}
+
+/** Returns a human-readable reason a dataSource of `kind` covers
+ *  nothing in `ctx`, or undefined when the binding is exercised by
+ *  at least one aggregate.  Encodes the dataSource-kind → aggregate-
+ *  predicate matrix:
+ *    - state    → needs at least one stateBased aggregate
+ *    - eventLog → needs at least one eventSourced aggregate
+ *    - snapshot → needs at least one eventSourced aggregate
+ *      (snapshot policy applies to ES streams)
+ *    - cache    → needs at least one aggregate of any strategy
+ *    - replica  → needs at least one aggregate of any strategy
+ */
+function coverageGapReason(kind: string, ctx: BoundedContextIR): string | undefined {
+  const aggs = ctx.aggregates;
+  if (aggs.length === 0) return "the context declares no aggregates";
+  const hasState = aggs.some((a) => (a.persistenceStrategy ?? "stateBased") === "stateBased");
+  const hasES = aggs.some((a) => a.persistenceStrategy === "eventSourced");
+  if (kind === "state" && !hasState) {
+    return "every aggregate is eventSourced (none need kind: state persistence)";
+  }
+  if ((kind === "eventLog" || kind === "snapshot") && !hasES) {
+    return "no aggregate is eventSourced (kind: " + kind + " has no event stream to back)";
+  }
+  // cache / replica only require at least one aggregate, already
+  // checked above.
+  return undefined;
 }
 
 function validateE2ETest(

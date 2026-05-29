@@ -2511,6 +2511,129 @@ describe("Loom IR validation (post-lowering)", async () => {
   });
 
   // -------------------------------------------------------------------
+  // Inverse of the coverage rule: a dataSource listed on a deployable
+  // that doesn't match any aggregate in the hosted contexts is dead
+  // config.  Emitted as a warning (not error) because it may stage a
+  // binding for an aggregate the user is about to add.
+  // -------------------------------------------------------------------
+
+  it("warns on kind: eventLog binding when the context has only stateBased aggregates", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C { aggregate A { x: int } } }
+        storage pg { type: postgres }
+        dataSource cState { for: C, kind: state, use: pg }
+        dataSource cLog   { for: C, kind: eventLog, use: pg }
+        deployable api {
+          platform: hono, contexts: [C],
+          dataSources: [cState, cLog], port: 3000
+        }
+      }
+    `);
+    const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
+    expect(
+      warnings.some(
+        (d) =>
+          /lists dataSource 'cLog' \(kind: eventLog\)/.test(d.message) &&
+          /no aggregate is eventSourced/.test(d.message),
+      ),
+      JSON.stringify(warnings),
+    ).toBe(true);
+  });
+
+  it("warns on kind: state binding when every aggregate is eventSourced", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C {
+          aggregate A { persistenceStrategy: eventSourced  x: int }
+        } }
+        storage pg { type: postgres }
+        dataSource cState { for: C, kind: state, use: pg }
+        dataSource cLog   { for: C, kind: eventLog, use: pg }
+        deployable api {
+          platform: hono, contexts: [C],
+          dataSources: [cState, cLog], port: 3000
+        }
+      }
+    `);
+    const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
+    expect(
+      warnings.some(
+        (d) =>
+          /lists dataSource 'cState' \(kind: state\)/.test(d.message) &&
+          /every aggregate is eventSourced/.test(d.message),
+      ),
+      JSON.stringify(warnings),
+    ).toBe(true);
+  });
+
+  it("warns on kind: snapshot binding when no aggregate is eventSourced", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C { aggregate A { x: int } } }
+        storage pg { type: postgres }
+        dataSource cState { for: C, kind: state, use: pg }
+        dataSource cSnap  { for: C, kind: snapshot, use: pg }
+        deployable api {
+          platform: hono, contexts: [C],
+          dataSources: [cState, cSnap], port: 3000
+        }
+      }
+    `);
+    const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
+    expect(
+      warnings.some(
+        (d) =>
+          /lists dataSource 'cSnap' \(kind: snapshot\)/.test(d.message) &&
+          /no aggregate is eventSourced/.test(d.message),
+      ),
+      JSON.stringify(warnings),
+    ).toBe(true);
+  });
+
+  it("does NOT warn on kind: cache or kind: replica when an aggregate exists", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C { aggregate A { x: int } } }
+        storage pg { type: postgres }
+        storage r  { type: redis }
+        dataSource cState   { for: C, kind: state, use: pg }
+        dataSource cCache   { for: C, kind: cache, use: r }
+        dataSource cReplica { for: C, kind: replica, use: pg }
+        deployable api {
+          platform: hono, contexts: [C],
+          dataSources: [cState, cCache, cReplica], port: 3000
+        }
+      }
+    `);
+    const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
+    expect(
+      warnings.filter((d) => /lists dataSource/.test(d.message)),
+      JSON.stringify(warnings),
+    ).toEqual([]);
+  });
+
+  it("does NOT warn when every listed dataSource matches a hosted aggregate", async () => {
+    const loom = await loomFrom(`
+      system S {
+        subdomain M { context C {
+          aggregate A { x: int }
+          aggregate B { persistenceStrategy: eventSourced  y: int }
+        } }
+        storage pg { type: postgres }
+        dataSource cState { for: C, kind: state, use: pg }
+        dataSource cLog   { for: C, kind: eventLog, use: pg }
+        deployable api {
+          platform: hono, contexts: [C],
+          dataSources: [cState, cLog], port: 3000
+        }
+      }
+    `);
+    const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
+    expect(warnings, JSON.stringify(warnings)).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------
   // DSL extensions: matches / check / private invariant.
   // -------------------------------------------------------------------
   describe("DSL extensions", () => {
