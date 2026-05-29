@@ -21,6 +21,7 @@ export {
 } from "./helpers.js";
 export {
   applyGeneratedTree,
+  readGeneratedTree,
   GENERATED_PREFIX,
   type GeneratedFile,
   type RegenerateResult,

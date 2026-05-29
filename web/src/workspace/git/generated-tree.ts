@@ -61,6 +61,21 @@ export interface RegenerateResult {
   deleted: VfsPath[];
 }
 
+/** Read the current generated tree back from the workspace as
+ *  project-relative `GeneratedFile`s (the `/workspace/generated/`
+ *  prefix stripped).  This is the merge *result* — generator output
+ *  with any hand edits applied — so feeding it to the bundler makes the
+ *  preview reflect edits to generated code ("scaffold then own"). */
+export async function readGeneratedTree(store: GitStore): Promise<GeneratedFile[]> {
+  const out: GeneratedFile[] = [];
+  for (const abs of await store.list(GENERATED_PREFIX)) {
+    const content = await store.readFile(abs);
+    if (content == null) continue;
+    out.push({ path: abs.slice(GENERATED_PREFIX.length), content });
+  }
+  return out;
+}
+
 function conflictMarkers(ours: string, theirs: string): string {
   // Standard git-style markers; the editor renders them as plain text
   // until a richer conflict UX lands.

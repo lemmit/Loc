@@ -23,7 +23,7 @@ import {
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { useWorkspaceSources } from "./workspace/use-workspace-sources";
-import { applyGeneratedTree } from "./workspace/git";
+import { applyGeneratedTree, readGeneratedTree } from "./workspace/git";
 import {
   buildShareUrl,
   readHash,
@@ -787,30 +787,49 @@ export default function App(): JSX.Element {
   // keeps the in-memory preview behaviour so typing doesn't spawn commits
   // or churn the workspace tree.  Best-effort: a failure here never
   // breaks the generate itself.
-  async function persistGeneratedTree(result: GenerateResult | null): Promise<void> {
+  // Version the generated tree and return the merged result as the file
+  // set to bundle — so the preview reflects hand edits to generated code
+  // ("scaffold then own").  Returns null (→ caller bundles the in-memory
+  // output) when there's no store, nothing generated, or the merged read
+  // came back empty.  Best-effort: a failure never breaks generate.
+  async function persistGeneratedTree(
+    result: GenerateResult | null,
+  ): Promise<VirtualFile[] | null> {
     const store = workspace.store;
-    if (!store || !result?.ok || result.files.length === 0) return;
+    if (!store || !result?.ok || result.files.length === 0) return null;
     try {
       await applyGeneratedTree(store, result.files);
+      const merged = await readGeneratedTree(store);
+      if (merged.length === 0) return null;
+      return merged.map((f) => ({
+        path: f.path,
+        content: f.content,
+        size: f.content.length,
+      }));
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn("failed to version generated output:", err);
+      return null;
     }
   }
 
   async function runGenerate(persist = false): Promise<void> {
     const result = await runGenerateStep();
+    let bundleGen: GenerateResult | null = result;
+    if (persist && result?.ok) {
+      const merged = await persistGeneratedTree(result);
+      if (merged) bundleGen = { ...result, files: merged };
+    }
     if (
       liveModeRef.current &&
-      result?.ok &&
-      result.files.length > 0
+      bundleGen?.ok &&
+      bundleGen.files.length > 0
     ) {
-      const bundleRes = await runBundleStep(result);
+      const bundleRes = await runBundleStep(bundleGen);
       if (bundleRes?.hono.ok) {
         await runBootStep(bundleRes.hono);
       }
     }
-    if (persist) await persistGeneratedTree(result);
   }
   runGenerateRef.current = () => runGenerate();
 
@@ -844,8 +863,12 @@ export default function App(): JSX.Element {
   async function runFull(): Promise<void> {
     const gen = await runGenerateStep();
     if (!gen?.ok || gen.files.length === 0) return;
-    void persistGeneratedTree(gen); // intentional run → version the output
-    const bundleRes = await runBundleStep(gen);
+    // Intentional run → version the output and bundle the merged tree
+    // (reflects hand edits to generated code).
+    let bundleGen: GenerateOk = gen;
+    const merged = await persistGeneratedTree(gen);
+    if (merged) bundleGen = { ...gen, files: merged };
+    const bundleRes = await runBundleStep(bundleGen);
     if (!bundleRes?.hono.ok) return;
     const booted = await runBootStep(bundleRes.hono);
     if (!booted) return;

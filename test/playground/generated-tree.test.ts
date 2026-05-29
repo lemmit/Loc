@@ -5,6 +5,7 @@ import {
   GENERATED_PREFIX,
   GitStore,
   openGitFs,
+  readGeneratedTree,
   type GeneratedFile,
 } from "../../web/src/workspace/git/index.js";
 
@@ -119,6 +120,18 @@ describe("applyGeneratedTree", () => {
     expect(await read(store, "a.ts")).toBe("v3");
     expect(res.conflicted).toEqual([]);
     expect(res.written).toContain("/workspace/generated/a.ts");
+  });
+
+  it("readGeneratedTree returns the merged tree (incl. hand edits) as relative files", async () => {
+    await applyGeneratedTree(store, [gen("a.ts", "gen-a"), gen("b.ts", "gen-b")]);
+    // hand-edit one generated file
+    await store.writeFile(GENERATED_PREFIX + "a.ts", "hand-edited-a");
+    const tree = await readGeneratedTree(store);
+    const byPath = Object.fromEntries(tree.map((f) => [f.path, f.content]));
+    expect(byPath["a.ts"]).toBe("hand-edited-a"); // edit reflected
+    expect(byPath["b.ts"]).toBe("gen-b");
+    // paths are project-relative (no /workspace/generated/ prefix)
+    expect(tree.every((f) => !f.path.startsWith("/"))).toBe(true);
   });
 
   it("does not commit when commit:false", async () => {
