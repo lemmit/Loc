@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   diffSpecs,
   enumValueSets,
+  errorResponses,
   isCleanDiff,
   type OpenApiSpec,
   responseBodySchemas,
@@ -87,27 +88,67 @@ describe("openapi-normalize — behavioural equivalence", () => {
     });
   });
 
-  // TEMPORARY DROP-IN TOLERANCE (#706): once Hono + Phoenix emit the shared
-  // RFC 7807 `ProblemDetails` body, this flips to "ProblemDetails IS part of
-  // the compared schema set" and only ValidationProblemDetails / the TS-only
-  // ProvenanceLineage stay filtered.
-  describe("idiomatic schema filtering", () => {
+  // The shared RFC 7807 `ProblemDetails` body is compared (#706); only the
+  // .NET-only validation envelopes and the TS-only provenance lineage stay
+  // filtered.
+  describe("schema filtering", () => {
     const spec: OpenApiSpec = {
       components: {
         schemas: {
           ProjectResponse: { type: "object", properties: { id: {} } },
-          ErrorResponse: { type: "object", properties: { error: {} } },
-          ProvenanceLineage: { type: "object", properties: { snapshotId: {} } },
           ProblemDetails: { type: "object", properties: {} },
+          ValidationProblemDetails: { type: "object", properties: {} },
+          ProvenanceLineage: { type: "object", properties: { snapshotId: {} } },
         },
       },
     };
-    it("drops ErrorResponse / ProvenanceLineage / ProblemDetails", () => {
+    it("keeps ProblemDetails + ProjectResponse, drops ValidationProblemDetails / ProvenanceLineage", () => {
       const names = schemaNames(spec);
-      expect(names.has("ErrorResponse")).toBe(false);
-      expect(names.has("ProvenanceLineage")).toBe(false);
-      expect(names.has("ProblemDetails")).toBe(false);
+      expect(names.has("ProblemDetails")).toBe(true);
       expect(names.has("ProjectResponse")).toBe(true);
+      expect(names.has("ValidationProblemDetails")).toBe(false);
+      expect(names.has("ProvenanceLineage")).toBe(false);
+    });
+  });
+
+  // RFC 7807 error responses (#706): each operation declares the same
+  // 4xx/5xx set, each carrying ProblemDetails under application/problem+json.
+  describe("error responses", () => {
+    const op = (errors: Record<string, string>): OpenApiSpec => {
+      const responses: Record<string, unknown> = {
+        "201": { content: { "application/json": { schema: { $ref: "#/components/schemas/X" } } } },
+      };
+      for (const [code, ct] of Object.entries(errors)) {
+        responses[code] = {
+          content: { [ct]: { schema: { $ref: "#/components/schemas/ProblemDetails" } } },
+        };
+      }
+      return { paths: { "/projects": { post: { responses } } } };
+    };
+
+    it("extracts the sorted 4xx set under application/problem+json", () => {
+      const m = errorResponses(op({ "400": "application/problem+json" }));
+      expect(m.get("POST /projects")).toBe("400:ProblemDetails");
+    });
+
+    it("an error served as application/json (not problem+json) reads as (none) and drifts", () => {
+      const good = op({ "400": "application/problem+json" });
+      const wrongCt = op({ "400": "application/json" });
+      const diff = diffSpecs({ name: "hono", spec: good }, { name: "phoenix", spec: wrongCt });
+      expect(diff.errorResponseDiffs.length).toBe(1);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("a missing error status drifts; identical sets are clean", () => {
+      const both = op({ "400": "application/problem+json", "404": "application/problem+json" });
+      const missing = op({ "400": "application/problem+json" });
+      expect(
+        diffSpecs({ name: "hono", spec: both }, { name: "dotnet", spec: missing }).errorResponseDiffs
+          .length,
+      ).toBe(1);
+      expect(
+        diffSpecs({ name: "hono", spec: both }, { name: "dotnet", spec: both }).errorResponseDiffs,
+      ).toEqual([]);
     });
   });
 
