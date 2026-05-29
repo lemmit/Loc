@@ -25,27 +25,27 @@ public sealed class OrdersController : ControllerBase
     public OrdersController(IMediator mediator, ILogger<OrdersController> log) { _mediator = mediator; _log = log; }
 
     [HttpPost]
-    public async Task<ActionResult<CreateOrderResponse>> Create([FromBody] CreateOrderRequest request)
+    public async Task<ActionResult<CreateOrderResponse>> CreateOrder([FromBody] CreateOrderRequest request)
     {
         var cmd = new CreateOrderCommand(
             request.CustomerId,
-            Enum.Parse<OrderStatus>(request.Status),
+            request.Status,
             DateTime.Parse(request.PlacedAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)
         );
         var id = await _mediator.Send(cmd);
         _log.LogInformation("{Event} aggregate={Aggregate} id={Id}", "aggregate_created", "Order", id.Value);
-        return CreatedAtAction(nameof(GetById), new { id = id.Value }, new CreateOrderResponse(id.Value));
+        return CreatedAtAction(nameof(GetOrderById), new { id = id.Value }, new CreateOrderResponse(id.Value));
     }
 
     [HttpGet("{id}")]
-    public async Task<ActionResult<OrderResponse>> GetById([FromRoute] Guid id)
+    public async Task<ActionResult<OrderResponse>> GetOrderById([FromRoute] Guid id)
     {
         var response = await _mediator.Send(new GetOrderByIdQuery(new OrderId(id)));
         return response is null ? NotFound() : Ok(response);
     }
 
     [HttpPost("{id}/add_line")]
-    public async Task<IActionResult> AddLine([FromRoute] Guid id, [FromBody] AddLineRequest request)
+    public async Task<IActionResult> AddLineOrder([FromRoute] Guid id, [FromBody] AddLineRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "addLine", id);
         var cmd = new AddLineCommand(
@@ -58,7 +58,7 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpPost("{id}/confirm")]
-    public async Task<IActionResult> Confirm([FromRoute] Guid id, [FromBody] ConfirmRequest request)
+    public async Task<IActionResult> ConfirmOrder([FromRoute] Guid id, [FromBody] ConfirmRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "confirm", id);
         var cmd = new ConfirmCommand(
@@ -69,14 +69,14 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<OrderResponse>>> All()
+    public async Task<ActionResult<IReadOnlyList<OrderResponse>>> AllOrder()
     {
         var result = await _mediator.Send(new AllQuery());
         return Ok(result);
     }
 
     [HttpGet("by_customer")]
-    public async Task<ActionResult<IReadOnlyList<OrderResponse>>> ByCustomer([FromQuery] string customerId)
+    public async Task<ActionResult<IReadOnlyList<OrderResponse>>> ByCustomerOrder([FromQuery] string customerId)
     {
         var result = await _mediator.Send(new ByCustomerQuery(customerId));
         return Ok(result);

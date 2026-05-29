@@ -250,8 +250,9 @@ describe(".NET generator", () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
     const controller = files.get("Api/OrdersController.cs")!;
-    // [HttpGet] (root) — followed by an All(...) action.
-    expect(controller).toMatch(/\[HttpGet\][\s\S]*?All\(/);
+    // [HttpGet] (root) — followed by an AllOrder(...) action (the action
+    // method name is the PascalCase of the shared operationId `allOrder`).
+    expect(controller).toMatch(/\[HttpGet\][\s\S]*?AllOrder\(/);
     const repoIface = files.get("Domain/Orders/IOrderRepository.cs")!;
     expect(repoIface).toMatch(/List<Order>[\s\S]*?All\(/);
   });
@@ -792,8 +793,10 @@ describe(".NET generator", () => {
     const ctrl = files.get("Api/SalesWorkflowsController.cs")!;
     expect(ctrl).toMatch(/\[Route\("workflows"\)\]/);
     expect(ctrl).toMatch(/\[HttpPost\("place_order"\)\]/);
+    // Action method name = PascalCase of the shared operationId
+    // `placeOrderWorkflow` (Request/Command DTO names keep `PlaceOrder…`).
     expect(ctrl).toMatch(
-      /public async Task<IActionResult> PlaceOrder\(\[FromBody\] PlaceOrderRequest request\)/,
+      /public async Task<IActionResult> PlaceOrderWorkflow\(\[FromBody\] PlaceOrderRequest request\)/,
     );
     expect(ctrl).toMatch(/new PlaceOrderCommand\(\s*new CustomerId\(request\.CustomerId\)/);
   });
@@ -918,21 +921,23 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
 
-    // Wire-typed Row record (Order id → Guid, enum → string, int → int).
+    // Wire-typed Row record (Order id → Guid, enum → enum TYPE, int → int).
+    // The enum crosses the wire as `OrderStatus` (string-on-wire via the
+    // global JsonStringEnumConverter) so Swashbuckle names the enum schema.
     const row = files.get("Application/Views/OrderSummaryRow.cs")!;
     expect(row).toMatch(
-      /public sealed record OrderSummaryRow\(Guid OrderId, string Status, int LineCount\);/,
+      /public sealed record OrderSummaryRow\(Guid OrderId, OrderStatus Status, int LineCount\);/,
     );
 
     // Query returns IReadOnlyList<OrderSummaryRow>, not <Agg>Response.
     const query = files.get("Application/Views/OrderSummaryQuery.cs")!;
     expect(query).toMatch(/IQuery<IReadOnlyList<OrderSummaryRow>>/);
 
-    // Handler projects through projectToResponse (Id.Value, enum.ToString,
-    // collection .Count via the bind renderer).
+    // Handler projects through projectToResponse (Id.Value, enum passed
+    // through as the enum type, collection .Count via the bind renderer).
     const handler = files.get("Application/Views/OrderSummaryHandler.cs")!;
     expect(handler).toMatch(
-      /domain\.Select\(d => new OrderSummaryRow\(d\.Id\.Value, d\.Status\.ToString\(\), d\.Lines\.Count\)\)\.ToList\(\)/,
+      /domain\.Select\(d => new OrderSummaryRow\(d\.Id\.Value, d\.Status, d\.Lines\.Count\)\)\.ToList\(\)/,
     );
   });
 
@@ -975,7 +980,7 @@ describe(".NET generator", () => {
     );
     // Projection rewrites the Id-follow refs to dictionary lookups.
     expect(handler).toMatch(
-      /new CustomerOrdersRow\(d\.Id\.Value, customerById\[d\.CustomerId\]\.Name, customerById\[d\.CustomerId\]\.Email, d\.Status\.ToString\(\)\)/,
+      /new CustomerOrdersRow\(d\.Id\.Value, customerById\[d\.CustomerId\]\.Name, customerById\[d\.CustomerId\]\.Email, d\.Status\)/,
     );
 
     // Repo interface + impl gained FindManyByIdsAsync.

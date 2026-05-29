@@ -74,7 +74,12 @@ export function wireType(
       s = csIdValueClrType("guid");
       break;
     case "enum":
-      s = "string";
+      // Enum crosses the wire as the enum TYPE (not `string`): paired with
+      // a global `JsonStringEnumConverter` (registered in Program.cs) the
+      // JSON bytes stay the member name (`"Public"`), but Swashbuckle now
+      // emits a named string-enum schema — matching Hono/Phoenix, which
+      // both publish a named enum component.
+      s = info.base;
       break;
     case "valueObject":
       s = `${info.base}${dir === "request" ? "Request" : "Response"}`;
@@ -122,7 +127,9 @@ export function wireToCommandArgument(
     case "id":
       return `new ${info.idTarget}Id(${expr})`;
     case "enum":
-      return `Enum.Parse<${info.base}>(${expr})`;
+      // The request DTO field is already the enum type (deserialized from
+      // the wire member name by JsonStringEnumConverter) — pass it through.
+      return expr;
     case "valueObject": {
       const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return expr;
@@ -167,7 +174,9 @@ export function projectToResponse(
     case "id":
       return `${domainExpr}.Value`;
     case "enum":
-      return `${domainExpr}.ToString()`;
+      // Response DTO field is the enum type; emit the enum value directly
+      // (JsonStringEnumConverter serialises it to the wire member name).
+      return domainExpr;
     case "valueObject": {
       const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return domainExpr;
@@ -221,7 +230,8 @@ export function domainToRequestExpr(
     case "id":
       return `${domainExpr}.Value`;
     case "enum":
-      return `${domainExpr}.ToString()`;
+      // Request DTO field is the enum type — emit the value directly.
+      return domainExpr;
     case "valueObject": {
       const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return domainExpr;

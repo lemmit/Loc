@@ -1,6 +1,7 @@
 // Auto-generated.
 using System;
 using System.Collections.Generic;
+using Api.Domain.Enums;
 
 namespace Api.Application.Products.Responses;
 

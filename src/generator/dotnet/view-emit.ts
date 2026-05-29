@@ -7,6 +7,7 @@ import type {
   ViewIR,
 } from "../../ir/types/loom-ir.js";
 import { viewUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
 import { renderCsExpr } from "./render-expr.js";
@@ -298,7 +299,7 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
     const responseType = `IReadOnlyList<${recordName}>`;
     blocks.push(
       `    [HttpGet("${snake(view.name)}")]\n` +
-        `    public async Task<ActionResult<${responseType}>> ${upperFirst(view.name)}()\n` +
+        `    public async Task<ActionResult<${responseType}>> ${upperFirst(camelId(opView(view.name)))}()\n` +
         `    {\n` +
         `        var result = await _mediator.Send(new ${upperFirst(view.name)}Query());\n` +
         `        return Ok(result);\n` +

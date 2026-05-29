@@ -1,6 +1,7 @@
 // Auto-generated.
 using System;
 using System.Collections.Generic;
+using CatalogApi.Domain.Enums;
 
 namespace CatalogApi.Application.Customers.Responses;
 
