@@ -197,7 +197,10 @@ A `stateBased` aggregate with `storeAs: document` is equally valid (whole curren
 - **IR:** `AggregateIR` (`loom-ir.ts:327`) gains `storeAs?: "normalised" | "document"` alongside the existing body-structure field; `resolve-datasource.ts` already maps `eventSourced → eventLog` and would additionally request a document-shaped `snapshot` binding when `storeAs === "document"`.
 - **Per-backend:** the natural **Marten** target. The `PersistenceAdapter` contract gates on strategy today (`efcore-persistence.ts:43` declares `supportedStrategies: ["stateBased"]`); a `martenPersistenceAdapter` would declare `supportedStrategies: ["stateBased", "eventSourced"]` **and** advertise the `document` shape, while the EF adapter advertises `normalised` (plus root `.ToJson()` for `stateBased` + `document`). The adapter contract may need a `supportedShapes` companion to `supportedStrategies` so the orchestrator can pick the right adapter from the (strategy × storeAs) pair.
 - **Trade-offs:** Whole-aggregate granularity (no per-field control) — matches how Marten/Mongo actually work, and is exactly what dropping Option 3 commits to. Keeps the aggregate API unchanged (invariant §2.2#4). Pairs with Option 5 for the storage binding.
-- **Syntax — colon, not parens.** `storeAs: document` (not `storeAs(document)`). The aggregate header has three established member shapes: `key: value` enum toggles (`inheritanceStrategy: shareTable`, `urlStyle: literal`), bare markers (`abstract`, `ids guid`, the proposed bare `eventSourced`), and `name(mode)` capability/macro forms (`audited(actions)`, `with audit(...)`). `storeAs` picks one of an enum exactly like `inheritanceStrategy:`, so it joins the colon family; the paren form reads as a capability-with-mode and collides visually with macro calls.
+- **Syntax — two acceptable forms; not parens.** The aggregate header has three established member shapes: `key: value` enum toggles (`inheritanceStrategy: shareTable`, `urlStyle: literal`), bare markers (`abstract`, `ids guid`, the shipped boolean `audited`, the proposed bare `eventSourced`), and `name(mode)` capability/macro forms (`audited(actions)`, `with audit(...)`).
+  - **`storeAs: document`** — the explicit colon-toggle form, self-documenting and parallel to `inheritanceStrategy:`. The default is `storeAs: normalised` (rarely written).
+  - **`asDocument`** — an equivalent **bare-flag** shorthand. Because the axis is *binary with a default*, it is idiomatically a boolean flag here (cf. shipped `audited`, `abstract`), and stacks cleanly with the bare `eventSourced` marker: `aggregate Cart eventSourced asDocument { … }`. Normalised is simply the flag's absence — the default never appears in source (which also sidesteps the `normalised`/`normalized` spelling question). If a third shape ever appears it grows a parenthesised mode (`asDocument(…)`), exactly as `audited` → `audited(actions)`.
+  - Either is fine; both are recorded pending a final pick. The **paren-on-`storeAs`** form (`storeAs(document)`) is *rejected* — it reads as a capability-with-mode and collides visually with macro calls.
 
 #### 4a. Interaction with inheritance (`inheritanceStrategy`, D-RENAME / D-ES-TPH)
 
@@ -254,6 +257,74 @@ A first-class `document Order { … }` declaration *alongside* `aggregate`, with
 | 4 + ES (`eventSourced`+`document`) | **stream + inline projection doc** | events table + `.ToJson()` projection | event coll. + snapshot doc | `mt_events`-style log + snapshot `jsonb` |
 | 5 `storeAs: document` binding | `IDocumentStore` session | `DbContext` w/ JSON config | collection | schema/table placement |
 
+### 4b. Worked example — an aggregate exercising every config
+
+Two aggregates that, between them, exercise every config discussed in this proposal and its neighbours. Inline comments tag each config with its concern and status (existing / this proposal / pinned decision / neighbouring proposal).
+
+```ddd
+// ── infrastructure (D-STORAGE-SPLIT) ──────────────────────────────────
+storage pg { type: postgres }                        // physical instance — Marten on Postgres
+
+dataSource cartEvents   { for: Shopping, kind: eventLog, use: pg }                    // append-only stream
+dataSource cartSnapshot { for: Shopping, kind: snapshot, use: pg, storeAs: document } // projection → one JSON doc
+dataSource crmState     { for: Crm,      kind: state,    use: pg }                    // normalised (default)
+
+// ── nested structures (existing) ──────────────────────────────────────
+valueobject Money { amount decimal, currency string }   // → inline JSONB column (today)
+entity CartLine   { sku string, qty int, price Money }  // entity part (containment edge below)
+
+// ── an event-sourced, document-stored aggregate ───────────────────────
+aggregate ShoppingCart
+  ids guid                       // idKind                                   (existing)
+  eventSourced                   // axis 1: body discipline + event log      (bare marker; today: persistenceStrategy: eventSourced)
+  storeAs: document              // axis 2: snapshot/projection = one JSON doc  (this proposal; bare form: `asDocument`)
+  with audit, softDelete         // stdlib macros                            (existing WithClause)
+{
+  total     Money                // value object → embedded in the snapshot doc
+  metadata  json                 // open-shape blob                          (Option 1, this proposal)
+  contains  lines: CartLine[]    // containment → embedded in the doc (whole tree, not a child table)
+
+  operation addItem(sku string, qty int)   // emits event; rebuilt via `apply` (the eventSourced discipline)
+}
+
+// ── an inheritance hierarchy showing the layout axes ──────────────────
+abstract aggregate Party              // abstract base                       (aggregate-inheritance, proposed)
+  inheritanceStrategy: shareTable     // TPH: one `parties` table + discriminator   (D-RENAME)
+  audited                             // boolean capability                  (shipped)
+{
+  name  string
+  email string
+}
+
+aggregate Customer extends Party stateBased {   // shares the `parties` table (shareTable + normalised = TPH)
+  creditLimit Money
+}
+
+aggregate Auditor extends Party
+  eventSourced                        // D-ES-TPH: an ES concrete of a shareTable base …
+  inheritanceStrategy: ownTable       // … is FORCED to ownTable — own stream/table, not the shared one
+{
+  clearanceLevel int
+}
+// NB: because `Auditor` is `ownTable`, polymorphic `Party id` refs become invalid
+//     (FK target ambiguous) — the inheritance proposal's validator rule.
+```
+
+| Config | Axis / concern | Status |
+|---|---|---|
+| `ids guid` | id kind | existing grammar |
+| `eventSourced` / `stateBased` | **body structure** (apply-always, no direct mutation) + event-log storing | bare marker *(today `persistenceStrategy:`, §2.3 reconcile)* |
+| `storeAs: document` | **saving** — read-model/snapshot shape | this proposal *(bare `asDocument` = shorthand, §4 syntax note)* |
+| `inheritanceStrategy: shareTable\|ownTable` | inheritance **partitioning** | D-RENAME (pinned) |
+| `extends` / `abstract` | inheritance | aggregate-inheritance (proposed) |
+| `with audit, softDelete` | macros | existing |
+| `audited` | capability | shipped |
+| `json` field | open-shape data | Option 1 (this proposal) |
+| `valueobject` / `entity` + `contains` | internal hierarchy | existing |
+| `dataSource … storeAs: document` | infra wiring of the snapshot | Option 5 (this proposal) |
+
+The two genuinely-orthogonal *new* axes — `eventSourced` (body + log) and `storeAs: document` (snapshot shape) — sit on `ShoppingCart`; the inheritance layout axis and the `eventSourced`-forces-`ownTable` constraint (D-ES-TPH) show on the `Party` hierarchy.
+
 ---
 
 ## 5. Disambiguation: when modellers pick which nested kind
@@ -302,7 +373,7 @@ Phases follow the one-directional pipeline in `CLAUDE.md`; nothing here crosses 
 
 This keeps the domain model honest (the aggregate API is unchanged regardless of storage shape — invariant §2.2#4), makes the required ES + document combination first-class, and still gives an immediate escape hatch for genuinely open data via `json`.
 
-> **Naming note.** This axis was provisionally called `representation:`; it is renamed **`storeAs:`** here — `layout:`/`style:` collide with the deployable platform-config knobs, `shape:` collides with the internal `wireShape`/loadedness vocabulary, and `persistAs:` crowds the `persistence*` family. `storeAs:` reads as intent, echoes EF Core's "store as JSON" (`.ToJson()`), and is reused unchanged at the `dataSource` binding so there is one word at both layers.
+> **Naming note.** This axis was provisionally called `representation:`; it is named **`storeAs:`** here — `layout:`/`style:` collide with the deployable platform-config knobs, `shape:` collides with the internal `wireShape`/loadedness vocabulary, and `persistAs:` crowds the `persistence*` family. `storeAs:` reads as intent, echoes EF Core's "store as JSON" (`.ToJson()`), and is reused unchanged at the `dataSource` binding so there is one word at both layers. Since the axis is binary-with-default, the bare-flag spelling **`asDocument`** (normalised = absence) is an equivalent accepted form — see the §4 syntax note; final pick pending.
 
 ---
 
