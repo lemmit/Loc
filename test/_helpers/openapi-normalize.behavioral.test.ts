@@ -9,15 +9,15 @@ import {
   schemaNames,
 } from "./openapi-normalize.js";
 
-// Coverage for the structural drop-in dimensions: the wire surface is
-// byte-identical across backends, so the gate compares names exactly and
-// only genuinely-shared components count.  Each block isolates one rule.
+// Coverage for the behavioural-equivalence dimensions added when the
+// parity gate moved from structural 1:1 to "idiomatic per backend,
+// behaviourally equal".  Each block isolates one relaxation / addition.
 
-describe("openapi-normalize — structural drop-in surface", () => {
-  // Under drop-in replacement every backend emits the SAME named list
-  // wrapper (`ProjectListResponse`); the gate compares the component name
-  // exactly, and a backend that inlines `array<element>` instead drifts.
-  describe("named list wrappers", () => {
+describe("openapi-normalize — behavioural equivalence", () => {
+  // A backend (Hono/Phoenix) that names its list response as a component
+  // `{type: array, items: $ref}` must compare equal to one (.NET) that
+  // inlines `array<element>` at the operation.
+  describe("list-wrapper resolution", () => {
     const named: OpenApiSpec = {
       paths: {
         "/projects": {
@@ -66,25 +66,18 @@ describe("openapi-normalize — structural drop-in surface", () => {
       components: { schemas: { ProjectResponse: { type: "object", properties: { id: {} } } } },
     };
 
-    it("a named wrapper $ref reports the component name; an inline array reports array<element>", () => {
-      expect(responseBodySchemas(named).get("GET /projects")).toBe("ProjectListResponse");
+    it("resolves a named array-wrapper $ref to array<element>", () => {
+      expect(responseBodySchemas(named).get("GET /projects")).toBe("array<ProjectResponse>");
       expect(responseBodySchemas(inlined).get("GET /projects")).toBe("array<ProjectResponse>");
     });
 
-    it("the list-wrapper component is part of the compared schema set", () => {
-      expect(schemaNames(named).has("ProjectListResponse")).toBe(true);
+    it("excludes the list-wrapper component from schemaNames", () => {
+      expect(schemaNames(named).has("ProjectListResponse")).toBe(false);
       expect(schemaNames(named).has("ProjectResponse")).toBe(true);
     });
 
-    it("named-wrapper vs inline-array is a DROP-IN BREAK (response-body + schema drift)", () => {
+    it("named-wrapper and inline-array specs are a clean diff", () => {
       const diff = diffSpecs({ name: "hono", spec: named }, { name: "dotnet", spec: inlined });
-      expect(diff.responseBodyDiffs.length).toBe(1);
-      expect(diff.onlySchemasRef).toEqual(["ProjectListResponse"]);
-      expect(isCleanDiff(diff)).toBe(false);
-    });
-
-    it("two backends that BOTH name the wrapper are clean", () => {
-      const diff = diffSpecs({ name: "hono", spec: named }, { name: "phoenix", spec: named });
       expect(diff.responseBodyDiffs).toEqual([]);
       expect(diff.onlySchemasRef).toEqual([]);
       expect(diff.onlySchemasOther).toEqual([]);
@@ -92,27 +85,23 @@ describe("openapi-normalize — structural drop-in surface", () => {
     });
   });
 
-  describe("non-contract schema filtering", () => {
+  describe("idiomatic schema filtering", () => {
     const spec: OpenApiSpec = {
       components: {
         schemas: {
           ProjectResponse: { type: "object", properties: { id: {} } },
+          ErrorResponse: { type: "object", properties: { error: {} } },
           ProvenanceLineage: { type: "object", properties: { snapshotId: {} } },
-          ValidationProblemDetails: { type: "object", properties: {} },
+          ProblemDetails: { type: "object", properties: {} },
         },
       },
     };
-    it("drops the TS-only ProvenanceLineage and .NET-only validation envelope, keeps the rest", () => {
+    it("drops ErrorResponse / ProvenanceLineage / ProblemDetails", () => {
       const names = schemaNames(spec);
+      expect(names.has("ErrorResponse")).toBe(false);
       expect(names.has("ProvenanceLineage")).toBe(false);
-      expect(names.has("ValidationProblemDetails")).toBe(false);
+      expect(names.has("ProblemDetails")).toBe(false);
       expect(names.has("ProjectResponse")).toBe(true);
-    });
-    it("the shared RFC 7807 ProblemDetails body IS part of the compared set", () => {
-      const withProblem: OpenApiSpec = {
-        components: { schemas: { ProblemDetails: { type: "object", properties: {} } } },
-      };
-      expect(schemaNames(withProblem).has("ProblemDetails")).toBe(true);
     });
   });
 
