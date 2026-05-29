@@ -83,9 +83,9 @@ const honoPlatform: PlatformSurface = {
           () => Object.keys(menu.persistence),
           {
             name: "prisma",
-            supportedStrategies: ["stateBased"],
+            supportedStrategies: ["state"],
             supports: (type, kind, strategy) =>
-              strategy === "stateBased" &&
+              strategy === "state" &&
               ["postgres", "mysql", "sqlite"].includes(type) &&
               ["state", "snapshot", "replica"].includes(kind),
           },
@@ -95,7 +95,7 @@ const honoPlatform: PlatformSurface = {
         layered: layeredStyleAdapter,
         cqrs: stubAdapter<StyleAdapter>("style", "cqrs", "hono", () => Object.keys(menu.styles), {
           name: "cqrs",
-          supportedStrategies: ["stateBased"],
+          supportedStrategies: ["state"],
           supportedLayouts: ["byLayer", "byFeature"],
         }),
       },
@@ -114,7 +114,7 @@ const honoPlatform: PlatformSurface = {
   },
   adapterDefaults(): PlatformAdapterDefaults {
     return {
-      persistence: { stateBased: "drizzle", eventSourced: "drizzle" },
+      persistence: { state: "drizzle", eventLog: "drizzle" },
       style: "layered",
       layout: "byLayer",
     };

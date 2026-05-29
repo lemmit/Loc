@@ -53,7 +53,7 @@ describe("layered StyleAdapter — hono (real)", () => {
   });
 
   it("answers capability fields directly", () => {
-    expect(layeredStyleAdapter.supportedStrategies).toEqual(["stateBased"]);
+    expect(layeredStyleAdapter.supportedStrategies).toEqual(["state"]);
     expect(layeredStyleAdapter.supportedLayouts).toEqual(["byLayer"]);
   });
 

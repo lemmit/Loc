@@ -53,7 +53,7 @@ export function defaultsFor(platform: Platform): PlatformAdapterDefaults | undef
 export function resolvePersistence(
   platform: Platform,
   name: string | null | undefined,
-  strategy: "stateBased" | "eventSourced" = "stateBased",
+  strategy: "state" | "eventLog" = "state",
 ): PersistenceAdapter {
   const surface = platformFor(platform);
   const adapters = surface.adapters?.();

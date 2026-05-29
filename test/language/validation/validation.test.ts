@@ -1136,7 +1136,7 @@ describe("validation", () => {
       const { errors } = await parse(`
         system S {
           subdomain M { context C {
-            aggregate A { persistenceStrategy: eventSourced  x: int }
+            aggregate A persistedAs(eventLog) { x: int }
           } }
           storage pg { type: postgres }
           dataSource cLog { for: C, kind: eventLog, use: pg, every: 100, retain: 5 }
@@ -2447,7 +2447,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context C {
-          aggregate Invoice { persistenceStrategy: eventSourced  amount: int }
+          aggregate Invoice persistedAs(eventLog) { amount: int }
         } }
         storage pg { type: postgres }
         dataSource cState { for: C, kind: state, use: pg }
@@ -2535,7 +2535,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       warnings.some(
         (d) =>
           /lists dataSource 'cLog' \(kind: eventLog\)/.test(d.message) &&
-          /no aggregate is eventSourced/.test(d.message),
+          /no aggregate is persistedAs\(eventLog\)/.test(d.message),
       ),
       JSON.stringify(warnings),
     ).toBe(true);
@@ -2545,7 +2545,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context C {
-          aggregate A { persistenceStrategy: eventSourced  x: int }
+          aggregate A persistedAs(eventLog) { x: int }
         } }
         storage pg { type: postgres }
         dataSource cState { for: C, kind: state, use: pg }
@@ -2561,7 +2561,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       warnings.some(
         (d) =>
           /lists dataSource 'cState' \(kind: state\)/.test(d.message) &&
-          /every aggregate is eventSourced/.test(d.message),
+          /every aggregate is persistedAs\(eventLog\)/.test(d.message),
       ),
       JSON.stringify(warnings),
     ).toBe(true);
@@ -2585,7 +2585,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       warnings.some(
         (d) =>
           /lists dataSource 'cSnap' \(kind: snapshot\)/.test(d.message) &&
-          /no aggregate is eventSourced/.test(d.message),
+          /no aggregate is persistedAs\(eventLog\)/.test(d.message),
       ),
       JSON.stringify(warnings),
     ).toBe(true);
@@ -2618,7 +2618,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       system S {
         subdomain M { context C {
           aggregate A { x: int }
-          aggregate B { persistenceStrategy: eventSourced  y: int }
+          aggregate B persistedAs(eventLog) { y: int }
         } }
         storage pg { type: postgres }
         dataSource cState { for: C, kind: state, use: pg }
@@ -2669,7 +2669,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context C {
-          aggregate A { persistenceStrategy: eventSourced  x: int }
+          aggregate A persistedAs(eventLog) { x: int }
         } }
         storage pg { type: postgres }
         dataSource cLog { for: C, kind: eventLog, use: pg, every: 100, retain: 5 }

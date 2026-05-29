@@ -59,11 +59,11 @@ const splitLines = (s: string): Lines => s.split("\n");
 
 export const ashPostgresPersistenceAdapter: PersistenceAdapter = {
   name: "ashPostgres",
-  supportedStrategies: ["stateBased"],
+  supportedStrategies: ["state"],
 
   supports(storageType, kind, persistenceStrategy) {
     return (
-      persistenceStrategy === "stateBased" &&
+      persistenceStrategy === "state" &&
       storageType === "postgres" &&
       ["state", "snapshot", "replica"].includes(kind)
     );

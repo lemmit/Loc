@@ -18,8 +18,7 @@ system Sys {
       aggregate Order {
         name: string
       }
-      aggregate Invoice {
-        persistenceStrategy: eventSourced
+      aggregate Invoice persistedAs(eventLog) {
         amount: int
       }
     }
@@ -241,7 +240,7 @@ system Sys {
 system Sys {
   subdomain M { context C {
     aggregate A { x: int }
-    aggregate B { persistenceStrategy: eventSourced  y: int }
+    aggregate B persistedAs(eventLog) { y: int }
     workflow doIt() transactional { }
   } }
   storage pg { type: postgres }

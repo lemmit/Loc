@@ -111,9 +111,9 @@ storage types via an enforced compatibility matrix:
 
 | Kind | Compatible storage types | Aggregate predicate |
 |---|---|---|
-| `state` | postgres, mysql, sqlite, inMemory | at least one `stateBased` aggregate |
-| `eventLog` | postgres, mysql, sqlite, inMemory, kafka | at least one `eventSourced` aggregate |
-| `snapshot` | postgres, mysql, sqlite, inMemory | at least one `eventSourced` aggregate (snapshot policy) |
+| `state` | postgres, mysql, sqlite, inMemory | at least one `persistedAs(state)` aggregate (the default) |
+| `eventLog` | postgres, mysql, sqlite, inMemory, kafka | at least one `persistedAs(eventLog)` aggregate |
+| `snapshot` | postgres, mysql, sqlite, inMemory | at least one `persistedAs(eventLog)` aggregate (snapshot policy) |
 | `cache` | redis, inMemory | any aggregate |
 | `replica` | postgres, mysql, sqlite | any aggregate |
 
@@ -214,8 +214,9 @@ persistence — see "DataSource bindings" above.
 
 Validators enforce:
 
-- Every hosted `(context, aggregate.persistenceStrategy→kind)`
-  pair must have a matching dataSource listed (no under-binding).
+- Every hosted `(context, aggregate.persistedAs)` pair (the
+  `persistedAs(…)` value *is* the dataSource kind) must have a matching
+  dataSource listed (no under-binding).
 - Every listed dataSource must cover at least one aggregate in the
   hosted contexts (no dead binding — warning, not error).
 - Every dataSource's `for: <ctx>` must be in this deployable's
@@ -408,7 +409,7 @@ shape end-to-end.
 | Missing UI param binding | "Deployable 'D' is missing a binding for ui parameter 'X: Y'" |
 | Duplicate storage names | "Duplicate storage 'X'" |
 | Duplicate dataSource names | "Duplicate dataSource 'X'" |
-| Backend hosts an aggregate with no matching dataSource | "Deployable 'X' hosts aggregate 'C.A' (persistenceStrategy: stateBased, needs dataSource kind: state) but lists no matching dataSource." |
+| Backend hosts an aggregate with no matching dataSource | "Deployable 'X' hosts aggregate 'C.A' (persistedAs: state, needs dataSource kind: state) but lists no matching dataSource." |
 | dataSource kind ↔ storage type mismatch | "dataSource 'X' kind 'cache' is incompatible with storage 'pg' of type 'postgres'.  kind 'cache' requires a storage of type inMemory or redis." |
 | dataSource listed but covers no aggregate (warning) | "Deployable 'X' lists dataSource 'Y' (kind: eventLog) for context 'C', but no aggregate is eventSourced — this binding routes no data." |
 | Knob incompatible with kind | "dataSource 'X': 'ttl' is only meaningful on kind: cache.  Got kind: state." |

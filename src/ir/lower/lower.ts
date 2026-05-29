@@ -1314,7 +1314,7 @@ function lowerAggregate(
     contextFilters: filters.length > 0 ? filters : undefined,
     contextStamps: stamps.length > 0 ? stamps : undefined,
     implementsCapabilities: implementsCaps.length > 0 ? implementsCaps : undefined,
-    persistenceStrategy: agg.persistenceStrategy as "stateBased" | "eventSourced" | undefined,
+    persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,
   };
 }
 

@@ -61,11 +61,11 @@ describe("efcore PersistenceAdapter (real)", () => {
   });
 
   it("answers capability fields directly (no stub-throw)", () => {
-    expect(efcorePersistenceAdapter.supportedStrategies).toEqual(["stateBased"]);
-    expect(efcorePersistenceAdapter.supports("postgres", "state", "stateBased")).toBe(true);
-    expect(efcorePersistenceAdapter.supports("redis", "state", "stateBased")).toBe(false);
-    expect(efcorePersistenceAdapter.supports("postgres", "eventLog", "stateBased")).toBe(false);
-    expect(efcorePersistenceAdapter.supports("postgres", "state", "eventSourced")).toBe(false);
+    expect(efcorePersistenceAdapter.supportedStrategies).toEqual(["state"]);
+    expect(efcorePersistenceAdapter.supports("postgres", "state", "state")).toBe(true);
+    expect(efcorePersistenceAdapter.supports("redis", "state", "state")).toBe(false);
+    expect(efcorePersistenceAdapter.supports("postgres", "eventLog", "state")).toBe(false);
+    expect(efcorePersistenceAdapter.supports("postgres", "state", "eventLog")).toBe(false);
   });
 
   it("emitProjectDeps returns the EF Core PackageReferences", () => {

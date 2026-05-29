@@ -65,7 +65,7 @@ const phoenixLiveViewPlatform: PlatformSurface = {
   },
   adapterDefaults(): PlatformAdapterDefaults {
     return {
-      persistence: { stateBased: "ashPostgres", eventSourced: "ashPostgres" },
+      persistence: { state: "ashPostgres", eventLog: "ashPostgres" },
       style: "ash",
       layout: "byFeature",
     };
