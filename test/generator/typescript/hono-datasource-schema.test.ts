@@ -3,15 +3,16 @@
 //
 // Mirrors test/generator/dotnet/dotnet-datasource-schema.test.ts on
 // the Hono backend: `dataSource X { for: <ctx>, kind: state, use:
-// <pg>, schema: "sales" }` declares `const sales =
+// <pg>, schema: "sales" }` declares `const salesSchema =
 // pgSchema("sales");` at the top of `db/schema.ts` and routes
-// the aggregate's table through `sales.table("orders", { … })`.
+// the aggregate's table through `salesSchema.table("orders", { … })`.
 //
 // `schema` is the Postgres-schema namespace (i.e. `SET search_path TO
-// <name>`) — useful for sub-domain separation, mapping into a legacy
-// database that already lives in a non-`public` schema, isolating a
-// read-side replica, etc.  Compile-time per-aggregate routing only;
-// runtime tenant resolution is a separate feature outside this slice.
+// <name>`).  Default when DSL omits `schema:`: `snake(context.name)`
+// — every bounded context lands in its own Postgres schema out of the
+// box.  Explicit `schema: "..."` overrides for legacy-database
+// mapping.  Compile-time per-aggregate routing only; runtime tenant
+// resolution is a separate feature outside this slice.
 
 import { describe, expect, it } from "vitest";
 import { generateSystems } from "../../../src/system/index.js";
@@ -53,7 +54,7 @@ function schemaFile(files: Map<string, string>): string {
 }
 
 describe("dataSource → Drizzle pgSchema (Hono)", () => {
-  it("emits the legacy plain pgTable shape when no schema / tablePrefix is set", async () => {
+  it("defaults schema to snake(context.name) when DSL omits `schema:`", async () => {
     const files = await generate(
       baseSystem(
         `dataSource ordersState { for: Orders, kind: state, use: primary }`,
@@ -61,10 +62,10 @@ describe("dataSource → Drizzle pgSchema (Hono)", () => {
       ),
     );
     const s = schemaFile(files);
-    expect(s).toContain(`export const orders = pgTable("orders", {`);
-    expect(s).toContain(`export const lines = pgTable("lines", {`);
-    // No pgSchema declaration.
-    expect(s).not.toMatch(/pgSchema\("/);
+    // Implicit default — context Orders → schema "orders".
+    expect(s).toContain(`export const ordersSchema = pgSchema("orders");`);
+    expect(s).toContain(`export const orders = ordersSchema.table("orders", {`);
+    expect(s).toContain(`export const lines = ordersSchema.table("lines", {`);
   });
 
   it("declares pgSchema and routes tables through <schema>.table when `schema:` is set", async () => {
@@ -75,16 +76,16 @@ describe("dataSource → Drizzle pgSchema (Hono)", () => {
       ),
     );
     const s = schemaFile(files);
-    expect(s).toContain(`export const sales = pgSchema("sales");`);
-    expect(s).toContain(`export const orders = sales.table("orders", {`);
+    expect(s).toContain(`export const salesSchema = pgSchema("sales");`);
+    expect(s).toContain(`export const orders = salesSchema.table("orders", {`);
     // Containment part inherits the same schema.
-    expect(s).toContain(`export const lines = sales.table("lines", {`);
+    expect(s).toContain(`export const lines = salesSchema.table("lines", {`);
     // No plain pgTable for the aggregate (audit / provenance tables
     // don't fire in this fixture).
     expect(s).not.toContain(`export const orders = pgTable`);
   });
 
-  it("prepends `tablePrefix` to the local table name (no schema)", async () => {
+  it("prepends `tablePrefix` to the local table name (schema still defaults to ctx)", async () => {
     const files = await generate(
       baseSystem(
         `dataSource ordersState { for: Orders, kind: state, use: primary, tablePrefix: "sales_" }`,
@@ -92,12 +93,14 @@ describe("dataSource → Drizzle pgSchema (Hono)", () => {
       ),
     );
     const s = schemaFile(files);
-    expect(s).toContain(`export const orders = pgTable("sales_orders", {`);
-    expect(s).toContain(`export const lines = pgTable("sales_lines", {`);
-    expect(s).not.toMatch(/pgSchema\("/);
+    // tablePrefix prepends to the local table name; schema still
+    // defaults to the context name.
+    expect(s).toContain(`export const ordersSchema = pgSchema("orders");`);
+    expect(s).toContain(`export const orders = ordersSchema.table("sales_orders", {`);
+    expect(s).toContain(`export const lines = ordersSchema.table("sales_lines", {`);
   });
 
-  it("combines schema + tablePrefix when both are set", async () => {
+  it("combines explicit schema + tablePrefix when both are set", async () => {
     const files = await generate(
       baseSystem(
         `dataSource ordersState { for: Orders, kind: state, use: primary, schema: "legacy", tablePrefix: "sales_" }`,
@@ -105,8 +108,8 @@ describe("dataSource → Drizzle pgSchema (Hono)", () => {
       ),
     );
     const s = schemaFile(files);
-    expect(s).toContain(`export const legacy = pgSchema("legacy");`);
-    expect(s).toContain(`export const orders = legacy.table("sales_orders", {`);
-    expect(s).toContain(`export const lines = legacy.table("sales_lines", {`);
+    expect(s).toContain(`export const legacySchema = pgSchema("legacy");`);
+    expect(s).toContain(`export const orders = legacySchema.table("sales_orders", {`);
+    expect(s).toContain(`export const lines = legacySchema.table("sales_lines", {`);
   });
 });

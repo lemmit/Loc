@@ -54,5 +54,12 @@ system OrderingSystem {
     }
   }
 
-  deployable api { platform: hono, contexts: [Ordering], port: 3000 }
+  storage primary { type: postgres }
+  dataSource orderingState { for: Ordering, kind: state, use: primary }
+  deployable api {
+    platform: hono
+    contexts: [Ordering]
+    dataSources: [orderingState]
+    port: 3000
+  }
 }

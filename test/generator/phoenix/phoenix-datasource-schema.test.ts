@@ -55,22 +55,22 @@ function resourceFor(files: Map<string, string>, basename: string): string {
 }
 
 describe("dataSource → AshPostgres postgres do block (Phoenix)", () => {
-  it("emits the default postgres block when the dataSource has no schema / tablePrefix", async () => {
+  it("defaults schema to snake(context.name) when DSL omits `schema:`", async () => {
     const files = await generate(
       baseSystem(`dataSource ordersState { for: Orders, kind: state, use: primary }`),
     );
     const r = resourceFor(files, "order.ex");
     expect(r).toContain(`table "orders"`);
     expect(r).toContain(`repo`);
-    // No schema line.
-    expect(r).not.toMatch(/^\s*schema\s+"/m);
-    // Containment part picks up the same shape.
+    // Implicit default — context Orders → schema "orders".
+    expect(r).toContain(`schema "orders"`);
+    // Containment part inherits the same default.
     const line = resourceFor(files, "line.ex");
     expect(line).toContain(`table "lines"`);
-    expect(line).not.toMatch(/^\s*schema\s+"/m);
+    expect(line).toContain(`schema "orders"`);
   });
 
-  it("threads `schema:` into the postgres block", async () => {
+  it("threads explicit `schema:` into the postgres block", async () => {
     const files = await generate(
       baseSystem(
         `dataSource ordersState { for: Orders, kind: state, use: primary, schema: "sales" }`,
@@ -85,7 +85,7 @@ describe("dataSource → AshPostgres postgres do block (Phoenix)", () => {
     expect(line).toContain(`schema "sales"`);
   });
 
-  it("prepends `tablePrefix` to the local table name (no schema)", async () => {
+  it("prepends `tablePrefix` and keeps the default ctx schema", async () => {
     const files = await generate(
       baseSystem(
         `dataSource ordersState { for: Orders, kind: state, use: primary, tablePrefix: "sales_" }`,
@@ -93,9 +93,10 @@ describe("dataSource → AshPostgres postgres do block (Phoenix)", () => {
     );
     const r = resourceFor(files, "order.ex");
     expect(r).toContain(`table "sales_orders"`);
-    expect(r).not.toMatch(/^\s*schema\s+"/m);
+    expect(r).toContain(`schema "orders"`);
     const line = resourceFor(files, "line.ex");
     expect(line).toContain(`table "sales_lines"`);
+    expect(line).toContain(`schema "orders"`);
   });
 
   it("combines schema + tablePrefix when both are set", async () => {

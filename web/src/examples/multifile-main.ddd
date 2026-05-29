@@ -25,9 +25,13 @@ system MultiFileStore {
     }
   }
 
+  storage primary { type: postgres }
+  dataSource productsState { for: Products, kind: state, use: primary }
+
   deployable api {
     platform: hono
-    contexts: [Catalog]
+    contexts: [Products]
+    dataSources: [productsState]
     port: 8080
   }
 }

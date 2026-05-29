@@ -160,9 +160,13 @@ system StorefrontPhoenix {
   ui WebApp with scaffold(subdomains: [Storefront]) {
   }
 
+  storage primary { type: postgres }
+  dataSource storefrontState { for: Storefront, kind: state, use: primary }
+
   deployable phoenixApp {
     platform: phoenixLiveView
     contexts: [Storefront]
+    dataSources: [storefrontState]
     serves: StorefrontApi
     ui: WebApp
     port: 4000

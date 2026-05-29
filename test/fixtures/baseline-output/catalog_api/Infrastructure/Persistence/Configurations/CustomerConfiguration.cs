@@ -12,7 +12,7 @@ public sealed class CustomerConfiguration : IEntityTypeConfiguration<Customer>
 {
     public void Configure(EntityTypeBuilder<Customer> b)
     {
-        b.ToTable("customers");
+        b.ToTable("customers", "customers");
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).HasConversion(v => v.Value, v => new CustomerId(v));
         b.HasIndex(x => x.Email);
