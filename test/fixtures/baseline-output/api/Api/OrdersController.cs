@@ -122,7 +122,7 @@ public sealed class OrdersController : ControllerBase
 
     [HttpGet("by_customer")]
     [ProducesResponseType(typeof(IReadOnlyList<OrderResponse>), 200)]
-    public async Task<ActionResult<IReadOnlyList<OrderResponse>>> ByCustomerOrder([FromQuery] string customerId)
+    public async Task<ActionResult<IReadOnlyList<OrderResponse>>> ByCustomerOrder([FromQuery] [Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] string customerId)
     {
         var result = await _mediator.Send(new ByCustomerQuery(customerId));
         return Ok(result);

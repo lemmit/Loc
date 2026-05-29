@@ -1098,12 +1098,10 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
   },
   { property: "readonly", description: "no replica-aware persister is implemented yet" },
   { property: "keyPrefix", description: "no Redis-backed cache adapter is implemented yet" },
-  {
-    property: "normalised",
-    description:
-      "document persistence (normalised: false → one JSON document) has no emitter yet " +
-      "(Marten / EF .ToJson() is a later slice)",
-  },
+  // Note: the `shape:` knob (D-DOCUMENT-AXIS) is NOT listed here — it is
+  // consumed by the backend emitters (relational / embedded / document),
+  // and an unsupported shape for a given backend is rejected by the
+  // per-backend `supportedShapes` capability check, not warned as inert.
 ];
 
 function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]): void {

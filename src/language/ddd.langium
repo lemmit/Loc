@@ -181,7 +181,7 @@ Resource:
         ('retain'         ':' retain=INT ','?)?
         ('isolationLevel' ':' isolationLevel=IsolationLevel ','?)?
         ('readonly'       ':' readonly?='true' ','?)?
-        ('normalised'     ':' normalised=BoolFlag ','?)?
+        ('shape'          ':' shape=SavingShape ','?)?
         ('config' ':' '{' (config+=ConfigEntry (',' config+=ConfigEntry)* ','?)? '}' ','?)?
     '}';
 
@@ -628,7 +628,7 @@ ValueObjectMember:
     Property | DerivedProp | Invariant | FunctionDecl;
 
 Aggregate:
-    'aggregate' name=ID ('ids' idKind=IdKind)? ('persistedAs' '(' persistedAs=TruthKind ')')? ('normalised' '(' normalised=BoolFlag ')')? withClause=WithClause? '{'
+    'aggregate' name=ID ('ids' idKind=IdKind)? ('persistedAs' '(' persistedAs=TruthKind ')')? ('shape' '(' shape=SavingShape ')')? withClause=WithClause? '{'
         members+=AggregateMember*
     '}';
 
@@ -643,12 +643,15 @@ TruthKind returns string:
     'eventLog' | 'state';
 
 // D-DOCUMENT-AXIS: saving shape of the materialised read model /
-// snapshot — `normalised(false)` stores the aggregate as one JSON
-// document instead of normalised tables.  Header paren modifier on
-// the aggregate; colon entry on the `dataSource` binding.  Default
-// (absent) is `true`.
-BoolFlag returns string:
-    'true' | 'false';
+// snapshot — how the aggregate's hierarchy is physically laid out.
+// Header paren modifier on the aggregate (`shape(document)`); colon
+// entry on the `dataSource` binding (`shape: document`).  Three points
+// on the relational↔document spectrum (default absent = `relational`):
+//   - `relational` — table-per-entity (root columns + child tables + join tables)
+//   - `embedded`   — queryable root row + contained parts folded into JSONB columns
+//   - `document`   — the whole aggregate serialised as one opaque JSONB blob (Marten-style)
+SavingShape returns string:
+    'relational' | 'embedded' | 'document';
 
 // ---- macro `with` clause ----------------------------------------
 //

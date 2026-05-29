@@ -340,11 +340,19 @@ delivered; backend client emission deferred — see note.)*
   would build on.
 
 **Phase 3 — Interface selection & custom-sourceType plugins.**
-- Surface `interface` selection where an operation can choose among multiple valid
-  interfaces (e.g. S3 `rest` vs `sdk`).
-- Custom-sourceType plugins via the out-of-tree backend story (registry entries
-  contributed by `packages/` discovered at load time).
+- ✓ `interface` selection — `defaultInterfaceFor` resolves a per-resource default
+  (native/operational preference order) onto `EnrichedSystemIR.resourceInterfaces`.
+  The per-operation override hook awaits the consumption surface (Phase 4).
+- ✓ Custom-sourceType plugins — a `packages/*` package declaring
+  `loom: { kind: "sourceType", sourceType: {…} }` registers a declarative
+  descriptor at boot (`bootSourceTypePlugins` → `registerSourceType`); the neutral
+  descriptor ships as JSON, no plugin code is executed to register it.
 - (`requires:` authoring is deferred — the need layer stays implicit.)
+
+**Follow-ups completed alongside Phase 3:**
+- ✓ The drizzle `PersistenceAdapter.emitConnectionSetup` seam is now wired into
+  real backend output (shared `DRIZZLE_CONNECTION_SETUP` const; the server entry
+  no longer hardcodes its own copy) — the prerequisite flagged for Phase 4.
 
 **Phase 4 — Workflow-level resource consumption (future, separate design).**
 The surface by which workflows/operations *use* a resource — the caller of the

@@ -2277,7 +2277,10 @@ describe("OpenAPI spec — per-op + per-find paths", () => {
         {
           name: "Project",
           idValueType: "guid",
-          fields: [{ name: "name", type: { kind: "primitive", name: "string" }, optional: false }],
+          fields: [
+            { name: "name", type: { kind: "primitive", name: "string" }, optional: false },
+            { name: "budget", type: { kind: "primitive", name: "decimal" }, optional: false },
+          ],
           contains: [],
           derived: [],
           invariants: [],
@@ -2305,6 +2308,12 @@ describe("OpenAPI spec — per-op + per-find paths", () => {
             {
               name: "name",
               type: { kind: "primitive", name: "string" },
+              optional: false,
+              source: "property",
+            },
+            {
+              name: "budget",
+              type: { kind: "primitive", name: "decimal" },
               optional: false,
               source: "property",
             },
@@ -2370,8 +2379,20 @@ describe("OpenAPI spec — per-op + per-find paths", () => {
     // Per-find path
     expect(spec).toMatch(/"\/projects\/by_name"/);
     expect(spec).toMatch(/operationId: "byNameProject"/);
+    // The find's filter crosses as a required query parameter (Hono/.NET
+    // declare it too — without this the parity gate diffs `phoenix=[]`).
+    expect(spec).toMatch(
+      /%OpenApiSpex\.Parameter\{name: :name, in: :query, required: true, schema: %OpenApiSpex\.Schema\{type: :string\}\}/,
+    );
     // Auto-`all` find must NOT have its own path entry.
     expect(spec).not.toMatch(/"\/projects\/all"/);
+    // A `decimal` field crosses as number/format:double — matching .NET's
+    // Swashbuckle mapping for System.Decimal. Phoenix previously emitted
+    // format:float (a both-declared-different drift the parity gate flagged,
+    // and lossier). double is the least-lossy JSON-number hint.
+    const respSchema = files.get("lib/phoenix_app_web/api/schemas/project_response.ex")!;
+    expect(respSchema).toMatch(/budget: %OpenApiSpex\.Schema\{type: :number, format: :double\}/);
+    expect(respSchema).not.toMatch(/format: :float/);
   });
 });
 

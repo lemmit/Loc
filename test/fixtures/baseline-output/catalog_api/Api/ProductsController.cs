@@ -90,7 +90,7 @@ public sealed class ProductsController : ControllerBase
     [HttpGet("by_sku")]
     [ProducesResponseType(typeof(ProductResponse), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
-    public async Task<ActionResult<ProductResponse?>> BySkuProduct([FromQuery] string sku)
+    public async Task<ActionResult<ProductResponse?>> BySkuProduct([FromQuery] [Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] string sku)
     {
         var result = await _mediator.Send(new BySkuQuery(sku));
         return result is null ? NotFound() : Ok(result);

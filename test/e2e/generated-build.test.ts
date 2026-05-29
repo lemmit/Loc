@@ -34,6 +34,9 @@ describe.skipIf(!ENABLED)(
       // destroy, so this cell is what compiles the Hono DELETE route +
       // repo `delete()` paths.
       "examples/lifecycle.ddd",
+      // Document-persistence path (`normalised(false)`): jsonb column +
+      // JSON round-trip through `_create` (toDoc / fromDoc).
+      "examples/document.ddd",
     ])("%s — `ddd generate ts` output type-checks + tsup-bundles", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
       try {

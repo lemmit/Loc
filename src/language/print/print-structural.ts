@@ -300,6 +300,7 @@ function printDataSource(node: import("../generated/ast.js").Resource): string {
   if (typeof node.retain === "number") items.push(`retain: ${node.retain}`);
   if (node.isolationLevel) items.push(`isolationLevel: ${node.isolationLevel}`);
   if (node.readonly) items.push(`readonly: true`);
+  if (node.shape) items.push(`shape: ${node.shape}`);
   const cfg = printConfigItem(node.config);
   if (cfg) items.push(cfg);
   return block(`resource ${node.name}`, items);
@@ -500,9 +501,9 @@ function printAggregate(node: Aggregate): string {
   // `persistedAs(…)` is a header modifier (between `ids` and `with`),
   // not a body member — matches the grammar order.
   const persistedAs = node.persistedAs ? ` persistedAs(${node.persistedAs})` : "";
-  const normalised = node.normalised ? ` normalised(${node.normalised})` : "";
+  const shape = node.shape ? ` shape(${node.shape})` : "";
   return block(
-    `aggregate ${node.name}${ids}${persistedAs}${normalised}${printWithClause(node.withClause)}`,
+    `aggregate ${node.name}${ids}${persistedAs}${shape}${printWithClause(node.withClause)}`,
     node.members.map(printStructural),
   );
 }

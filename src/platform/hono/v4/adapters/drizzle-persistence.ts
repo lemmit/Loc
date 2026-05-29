@@ -51,6 +51,34 @@ const persistenceDeps = (): Lines => [
   `"pg": "${BACKEND_PINS.dependencies["pg"]}",`,
 ];
 
+/** The server-entry connection block (DATABASE_URL guard → pg pool →
+ *  pool-error logging → drizzle db).  Single source consumed both by
+ *  `emitConnectionSetup` and the server-entry renderer (`emit.ts`), so
+ *  the persistence adapter owns the connection code rather than it being
+ *  hardcoded inline. */
+export const DRIZZLE_CONNECTION_SETUP: Lines = [
+  `if (!process.env.DATABASE_URL) {`,
+  `  throw new Error(`,
+  `    "DATABASE_URL is required.  Set it in the environment " +`,
+  `      "(e.g. postgres://user:pass@host:5432/db).",`,
+  `  );`,
+  `}`,
+  ``,
+  `const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });`,
+  `// Surface pool-level connection errors on the structured stream — a`,
+  `// dropped backend connection (DB restart, network blip) emits 'error'`,
+  `// on the pool, not per-query.  Without this hook the failure surfaces`,
+  `// only as the NEXT request's 503 from /ready or a 500 from an`,
+  `// aggregate route; logging here gives ops the heads-up + the cause.`,
+  `pool.on("error", (err) => {`,
+  `  baseLogger.warn({`,
+  `    event: "db_disconnected",`,
+  `    reason: err instanceof Error ? err.message : String(err),`,
+  `  });`,
+  `});`,
+  `const db = drizzle(pool, { schema });`,
+];
+
 const persistenceDevDeps = (): Lines => [
   `"drizzle-kit": "${BACKEND_PINS.devDependencies["drizzle-kit"]}",`,
   `"@types/pg": "${BACKEND_PINS.devDependencies["@types/pg"]}",`,
@@ -81,31 +109,11 @@ export const drizzlePersistenceAdapter: PersistenceAdapter = {
 
   emitConnectionSetup(_physicalStores: readonly StorageIR[], _ctx: EmitCtx): Lines {
     // index.ts bootstrap lines that spin up the drizzle pool +
-    // surface pool-error logging.  Mirrors what `renderProjectIndexTs`
-    // splices today.  The DATABASE_URL guard moves with this block
-    // so the same "fail-fast on missing env" check holds.
-    return [
-      `if (!process.env.DATABASE_URL) {`,
-      `  throw new Error(`,
-      `    "DATABASE_URL is required.  Set it in the environment " +`,
-      `      "(e.g. postgres://user:pass@host:5432/db).",`,
-      `  );`,
-      `}`,
-      ``,
-      `const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });`,
-      `// Surface pool-level connection errors on the structured stream — a`,
-      `// dropped backend connection (DB restart, network blip) emits 'error'`,
-      `// on the pool, not per-query.  Without this hook the failure surfaces`,
-      `// only as the NEXT request's 503 from /ready or a 500 from an`,
-      `// aggregate route; logging here gives ops the heads-up + the cause.`,
-      `pool.on("error", (err) => {`,
-      `  baseLogger.warn({`,
-      `    event: "db_disconnected",`,
-      `    reason: err instanceof Error ? err.message : String(err),`,
-      `  });`,
-      `});`,
-      `const db = drizzle(pool, { schema });`,
-    ];
+    // surface pool-error logging.  The server entry (`renderProjectIndexTs`)
+    // splices exactly these lines — this adapter method is the single
+    // source.  The DATABASE_URL guard moves with this block so the same
+    // "fail-fast on missing env" check holds.
+    return DRIZZLE_CONNECTION_SETUP;
   },
 
   emitRepository(agg: AggregateIR, _logical: DataSourceIR, ctx: EmitCtx): Lines {

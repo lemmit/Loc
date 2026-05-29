@@ -6,6 +6,9 @@ import {
   errorResponses,
   isCleanDiff,
   type OpenApiSpec,
+  propertyFormats,
+  propertyTypes,
+  queryParamSignatures,
   responseBodySchemas,
   schemaNames,
 } from "./openapi-normalize.js";
@@ -151,6 +154,150 @@ describe("openapi-normalize — behavioural equivalence", () => {
       ).toBe(1);
       expect(
         diffSpecs({ name: "hono", spec: both }, { name: "dotnet", spec: both }).errorResponseDiffs,
+      ).toEqual([]);
+    });
+  });
+
+  // Per-property type drift — closes the same-name-different-type blind spot.
+  describe("property types", () => {
+    const withProp = (name: string, prop: Record<string, unknown>): OpenApiSpec => ({
+      components: {
+        schemas: { ProductResponse: { type: "object", properties: { [name]: prop } } },
+      },
+    });
+
+    it("normalises a scalar property to its JSON type", () => {
+      expect(
+        propertyTypes(withProp("qty", { type: "integer" }), "ProductResponse").get("qty"),
+      ).toBe("integer");
+    });
+
+    it("folds nullable union (oneOf with null) to the underlying type", () => {
+      const zod = withProp("name", { oneOf: [{ type: "string" }, { type: "null" }] });
+      const swashbuckle = withProp("name", { type: "string", nullable: true });
+      // Both read as `string` — nullable representation is folded out.
+      expect(propertyTypes(zod, "ProductResponse").get("name")).toBe("string");
+      expect(propertyTypes(swashbuckle, "ProductResponse").get("name")).toBe("string");
+      expect(
+        diffSpecs({ name: "hono", spec: zod }, { name: "dotnet", spec: swashbuckle })
+          .propertyTypeDiffs,
+      ).toEqual([]);
+    });
+
+    it("renders arrays + $refs structurally", () => {
+      expect(
+        propertyTypes(
+          withProp("tags", { type: "array", items: { type: "string" } }),
+          "ProductResponse",
+        ).get("tags"),
+      ).toBe("array<string>");
+      expect(
+        propertyTypes(
+          withProp("price", { $ref: "#/components/schemas/Money" }),
+          "ProductResponse",
+        ).get("price"),
+      ).toBe("ref:Money");
+    });
+
+    it("flags string-vs-integer drift on a shared property", () => {
+      const a = withProp("qty", { type: "string" });
+      const b = withProp("qty", { type: "integer" });
+      const diff = diffSpecs({ name: "hono", spec: a }, { name: "dotnet", spec: b });
+      expect(diff.propertyTypeDiffs).toEqual(["ProductResponse.qty: hono=string, dotnet=integer"]);
+      expect(isCleanDiff(diff)).toBe(false);
+    });
+
+    it("ignores a property missing on one side (caught by fieldDiffs instead)", () => {
+      const a = withProp("qty", { type: "integer" });
+      const b: OpenApiSpec = {
+        components: { schemas: { ProductResponse: { type: "object", properties: {} } } },
+      };
+      expect(
+        diffSpecs({ name: "hono", spec: a }, { name: "dotnet", spec: b }).propertyTypeDiffs,
+      ).toEqual([]);
+    });
+  });
+
+  // Per-property format drift — conservative: only flags when BOTH sides
+  // declare a format and they differ.
+  describe("property formats", () => {
+    const withProp = (prop: Record<string, unknown>): OpenApiSpec => ({
+      components: { schemas: { ProductResponse: { type: "object", properties: { at: prop } } } },
+    });
+
+    it("extracts a declared format, folding through a nullable union", () => {
+      expect(
+        propertyFormats(withProp({ type: "string", format: "date-time" }), "ProductResponse").get(
+          "at",
+        ),
+      ).toBe("date-time");
+      const nullable = withProp({
+        oneOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+      });
+      expect(propertyFormats(nullable, "ProductResponse").get("at")).toBe("date-time");
+    });
+
+    it("flags format drift only when both sides declare one", () => {
+      const a = withProp({ type: "string", format: "date-time" });
+      const b = withProp({ type: "string", format: "date" });
+      const drift = diffSpecs({ name: "hono", spec: a }, { name: "dotnet", spec: b });
+      expect(drift.propertyFormatDiffs).toEqual([
+        "ProductResponse.at: hono=date-time, dotnet=date",
+      ]);
+      expect(isCleanDiff(drift)).toBe(false);
+    });
+
+    it("does NOT flag one-sided format (dialect asymmetry)", () => {
+      const declared = withProp({ type: "string", format: "uuid" });
+      const bare = withProp({ type: "string" });
+      expect(
+        diffSpecs({ name: "hono", spec: declared }, { name: "phoenix", spec: bare })
+          .propertyFormatDiffs,
+      ).toEqual([]);
+    });
+  });
+
+  // Per-op query-parameter drift (the parameterized finds' filters).
+  describe("query parameters", () => {
+    const find = (
+      params: Array<{ name: string; type?: string; required?: boolean }>,
+    ): OpenApiSpec => ({
+      paths: {
+        "/products/by_name": {
+          get: {
+            parameters: params.map((p) => ({
+              in: "query",
+              name: p.name,
+              required: p.required ?? false,
+              schema: { type: p.type ?? "string" },
+            })),
+            responses: { "200": {} },
+          },
+        },
+      },
+    });
+
+    it("captures name:type:req|opt, sorted by name", () => {
+      const sig = queryParamSignatures(find([{ name: "name", required: true }]));
+      expect(sig.get("GET /products/by_name")).toBe("name:string:req");
+    });
+
+    it("flags a query param present on one backend, missing on the other", () => {
+      const a = find([{ name: "name", required: true }]);
+      const b = find([]);
+      const drift = diffSpecs({ name: "hono", spec: a }, { name: "dotnet", spec: b });
+      expect(drift.queryParamDiffs.length).toBe(1);
+      expect(isCleanDiff(drift)).toBe(false);
+    });
+
+    it("flags type / required drift on a shared query param; identical is clean", () => {
+      const a = find([{ name: "name", type: "string", required: true }]);
+      const b = find([{ name: "name", type: "integer", required: true }]);
+      expect(
+        diffSpecs({ name: "hono", spec: a }, { name: "dotnet", spec: b }).queryParamDiffs.length,
+      ).toBe(1);
+      expect(
+        diffSpecs({ name: "hono", spec: a }, { name: "dotnet", spec: a }).queryParamDiffs,
       ).toEqual([]);
     });
   });

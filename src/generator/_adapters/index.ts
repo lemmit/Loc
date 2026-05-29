@@ -18,6 +18,7 @@ export {
 export type {
   PersistenceAdapter,
   PersistenceCapabilities,
+  SavingShape,
 } from "./persistence-surface.js";
 export type {
   ResourceAdapter,

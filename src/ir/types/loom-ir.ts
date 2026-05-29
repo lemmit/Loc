@@ -380,14 +380,29 @@ export interface AggregateIR {
    * round-trip. */
   persistedAs?: PersistenceStrategy;
   /** Saving shape of the materialised read model / snapshot
-   * (D-DOCUMENT-AXIS, `normalised(true | false)` header modifier).
-   * `false` → store the aggregate as one JSON document instead of
-   * normalised tables.  Omitted when not declared (default `true`).
-   * Carried through the IR; the document persistence *emission* is a
-   * later slice (Marten / EF `.ToJson()`), so today this only records
-   * intent. */
-  normalised?: boolean;
+   * (D-DOCUMENT-AXIS, `shape(relational | embedded | document)` header
+   * modifier).  One of three points on the relational↔document
+   * spectrum (see {@link SavingShape}).  Omitted when not declared
+   * (default `relational`); a per-projection `dataSource shape:` knob
+   * can override it (see {@link effectiveSavingShape}). */
+  savingShape?: SavingShape;
 }
+
+/** How an aggregate's hierarchy is physically laid out — the saving-shape
+ *  axis of D-DOCUMENT-AXIS (orthogonal to {@link PersistenceStrategy},
+ *  the truth-kind axis).  Three points on the relational↔document
+ *  spectrum:
+ *    - `relational` — table-per-entity: root columns + child tables +
+ *      join tables.  The default.  Queryable everywhere.
+ *    - `embedded` — queryable root row (its scalar / `X id` fields stay
+ *      columns) with contained parts folded into JSONB columns; no child
+ *      tables.  EF owned-types `.ToJson()`, Drizzle jsonb column, Ash
+ *      embedded resources.
+ *    - `document` — the whole aggregate (root included) serialised as one
+ *      opaque JSONB blob (`id, data, version`); schema-flexible,
+ *      load-by-id (Marten-style).  Not every backend supports it (see
+ *      `PersistenceAdapter.supportedShapes`). */
+export type SavingShape = "relational" | "embedded" | "document";
 
 /** The aggregate's primary truth kind.  Named to match the
  *  `dataSource` `kind` vocabulary (`state` / `eventLog`); surfaced in
@@ -1322,11 +1337,10 @@ export interface DataSourceIR {
   isolationLevel?: "readUncommitted" | "readCommitted" | "repeatableRead" | "serializable";
   readonly?: boolean;
   /** Saving shape of the materialised read model this binding routes
-   *  (D-DOCUMENT-AXIS, `normalised:` knob).  `false` → the `state` /
-   *  `snapshot` data is laid out as one JSON document.  Omitted →
-   *  default `true`.  Carried through the IR; emission is a later
-   *  slice. */
-  normalised?: boolean;
+   *  (D-DOCUMENT-AXIS, `shape:` knob).  Per-projection override of the
+   *  aggregate header's `shape(…)` (see {@link SavingShape} /
+   *  {@link effectiveSavingShape}).  Omitted → the header decides. */
+  shape?: SavingShape;
   /** Generic vendor-parameter map for the binding (RFC §3.2). */
   config?: readonly ConfigEntryIR[];
 }

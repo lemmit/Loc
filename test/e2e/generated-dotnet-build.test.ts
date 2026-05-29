@@ -42,6 +42,10 @@ describe.skipIf(!ENABLED)(
       // destroy, so this cell is what compiles the .NET [HttpDelete] +
       // Destroy<Agg>Command + repo DeleteAsync paths.
       "examples/lifecycle.ddd",
+      // Document-persistence path (`normalised(false)`): exercises the
+      // STJ round-trip emit — `<Agg>Document` record, snapshot DTOs,
+      // `ToSnapshot()`/`FromSnapshot(...)`, jsonb column.
+      "examples/document.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {
