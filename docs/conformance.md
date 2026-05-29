@@ -2,9 +2,28 @@
 
 The conformance harness is the cross-backend gate that catches generator
 drift between Hono / .NET / Phoenix. One DSL source describes one
-contract; all three backends should emit OpenAPI specs that agree on
-that contract. This doc describes the nine dimensions the harness
-diffs, how to read a divergence report, and how to extend it.
+contract; all three backends emit OpenAPI specs whose **wire surface is
+structurally identical** — same operations, operationIds, component
+schema names, field names, required sets, enum value-sets, response
+cardinality, and path-param types.
+
+The guarantee is **drop-in replacement**: a client generated from one
+backend's spec (NSwag, openapi-generator, Heyapi, …) must bind unmodified
+against any other backend. That makes the published contract a
+*structural* equality, not a looser behavioral equivalence — an
+operationId casing difference or a renamed list-response schema is a real
+break, even if the two specs "describe the same behavior."
+
+What stays idiomatic per backend is the **internal generated code**, never
+the spec a client consumes: Swashbuckle vs `@hono/zod-openapi` vs
+OpenApiSpex as the emitter, C# PascalCase controller-method names, the
+framework plumbing. Error bodies follow API best practice — RFC 7807
+`application/problem+json` — produced through each backend's idiomatic
+mechanism (.NET `AddProblemDetails`, a Hono problem responder, Phoenix's
+equivalent) but converging on the same 7807 wire shape.
+
+This doc describes the dimensions the harness diffs, how to read a
+divergence report, and how to extend it.
 
 For the runner workflow (CLI, docker, env vars) see
 [`tools.md`](tools.md#cross-platform-openapi-parity-check). For the

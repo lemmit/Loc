@@ -455,10 +455,11 @@ export interface ParityDiff {
    * `cardMismatches` (which catches array-vs-object drift) by also
    * catching same-cardinality, different-payload drift. */
   responseBodyDiffs: string[];
-  /** Per-op `operationId` drift on the intersection.  Compared
-   * case-insensitively (lower + strip separators), so a backend's
-   * idiomatic casing (camelCase Hono, snake_case Phoenix) never trips
-   * the gate — only a genuinely different token sequence does. */
+  /** Per-op `operationId` drift on the intersection.  Compared EXACTLY:
+   * the drop-in-replacement guarantee requires byte-identical
+   * operationIds across backends (all three render the same canonical
+   * camelCase token from the shared `openapi-ids` helper), since
+   * client-codegen tools turn them into function names. */
   operationIdDiffs: string[];
   /** Per-enum value-set drift on the intersection of enum-bearing
    * component schemas — a backend accepting a different allowed-value
@@ -578,17 +579,14 @@ export function diffSpecs(
     }
   }
 
-  // Per-op operationId drift.  Same op on both sides, but each
-  // declares a different `operationId` — or one side omits it
-  // entirely.  Client-codegen tools (NSwag, openapi-generator)
-  // generate function names from this; drift here forces consumers
-  // to keep a per-backend rename table.
-  // Case-insensitive, separator-stripped operationId comparison.  Each
-  // backend renders the same canonical token sequence in its own idiom
-  // (camelCase Hono, snake_case Phoenix — from the shared `openapi-ids`
-  // helper), so only a genuinely different token sequence, or a missing
-  // id, counts as drift.
-  const normOpId = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  // Per-op operationId drift.  Loom's cross-backend guarantee is drop-in
+  // replacement: a client generated from one backend's spec must bind
+  // unmodified against another.  operationId is the stable handle
+  // client-codegen tools (NSwag, openapi-generator, Heyapi) turn into
+  // function names, so it must be BYTE-IDENTICAL across backends — all
+  // three render the same canonical camelCase token from the shared
+  // `openapi-ids` helper.  Exact comparison (no case folding): a casing
+  // or token difference is a real drop-in break.
   const refOpIds = operationIds(ref.spec);
   const otherOpIds = operationIds(other.spec);
   const operationIdDiffs: string[] = [];
@@ -596,7 +594,7 @@ export function diffSpecs(
     if (!otherOpIds.has(op)) continue;
     const r = refOpIds.get(op) ?? "";
     const o = otherOpIds.get(op) ?? "";
-    if (normOpId(r) !== normOpId(o)) {
+    if (r !== o) {
       operationIdDiffs.push(`${op}: ${ref.name}=${r || "(none)"}, ${other.name}=${o || "(none)"}`);
     }
   }

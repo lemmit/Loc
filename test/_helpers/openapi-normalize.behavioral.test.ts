@@ -128,21 +128,31 @@ describe("openapi-normalize — behavioural equivalence", () => {
     });
   });
 
-  describe("operationId case-insensitive normalisation", () => {
+  // Drop-in replacement requires byte-identical operationIds across
+  // backends — they become client-codegen function names.  The gate is
+  // EXACT: identical ids are clean; any casing or token difference drifts.
+  describe("operationId exact comparison", () => {
     const op = (id: string): OpenApiSpec => ({
       paths: { "/projects": { post: { operationId: id, responses: { "201": {} } } } },
     });
-    it("camelCase and snake_case of the same token sequence are clean", () => {
+    it("identical camelCase ids are clean", () => {
+      const diff = diffSpecs(
+        { name: "hono", spec: op("createProject") },
+        { name: "phoenix", spec: op("createProject") },
+      );
+      expect(diff.operationIdDiffs).toEqual([]);
+    });
+    it("a casing difference (snake_case vs camelCase) drifts", () => {
       const diff = diffSpecs(
         { name: "hono", spec: op("createProject") },
         { name: "phoenix", spec: op("create_project") },
       );
-      expect(diff.operationIdDiffs).toEqual([]);
+      expect(diff.operationIdDiffs.length).toBe(1);
     });
-    it("a different token sequence still drifts", () => {
+    it("a different token sequence drifts", () => {
       const diff = diffSpecs(
         { name: "hono", spec: op("allProject") },
-        { name: "phoenix", spec: op("list_project") },
+        { name: "phoenix", spec: op("listProject") },
       );
       expect(diff.operationIdDiffs.length).toBe(1);
     });
