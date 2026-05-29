@@ -525,11 +525,13 @@ end
 /** Wire-primitive → OpenApiSpex %Schema{} literal.  Money crosses as
  *  `{type: string, format: decimal}` for cross-backend wire parity
  *  (see `.loom/wire-spec.json`).  Datetime is `:'date-time'`, guid is
- *  `:uuid`, decimal is `:float`. */
+ *  `:uuid`, decimal is `:double` — matching .NET's Swashbuckle mapping for
+ *  `System.Decimal` (double is the least-lossy JSON-number hint; `:float`
+ *  diverged from .NET and threw away precision). */
 const OPENAPI_PRIMITIVE: Record<WirePrimitive, string> = {
   int: "%OpenApiSpex.Schema{type: :integer}",
   long: "%OpenApiSpex.Schema{type: :integer}",
-  decimal: "%OpenApiSpex.Schema{type: :number, format: :float}",
+  decimal: "%OpenApiSpex.Schema{type: :number, format: :double}",
   money: "%OpenApiSpex.Schema{type: :string, format: :decimal}",
   string: "%OpenApiSpex.Schema{type: :string}",
   bool: "%OpenApiSpex.Schema{type: :boolean}",
