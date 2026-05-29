@@ -16,7 +16,13 @@ vscode/syntaxes/
 vscode/*.vsix
 docs/_site/
 
-# Claude Code worktree isolation — sub-agents spawned with
+# Claude Code: keep the directory local by default — sub-agents spawned with
 # `isolation: "worktree"` create transient working copies under
-# .claude/worktrees/.  Never check these in.
-.claude/
+# .claude/worktrees/, and personal overrides live in settings.local.json.
+# But the *shared* hook config (the Biome Stop-gate) must be checked in so it
+# applies to every agent/session, so re-include those specific paths.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.claude/settings.local.json
+.claude/worktrees/
