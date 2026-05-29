@@ -1,5 +1,6 @@
 import { platformFor } from "../../platform/registry.js";
 import { snake } from "../../util/naming.js";
+import { defaultInterfaceFor } from "../source-types.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -19,6 +20,7 @@ import type {
   ExprIR,
   FieldIR,
   FindIR,
+  LoomInterface,
   LoomModel,
   NeedIR,
   RawLoomModel,
@@ -133,6 +135,10 @@ function enrichSystem(
   // Derive the implicit logical needs (RFC §3.3): one per (context,
   // required kind), read off how each context's aggregates persist.
   const needs = deriveNeeds(subdomainsWithOwner);
+  // Resolve each resource's default access interface (RFC §3.5) from
+  // its sourceType + kind.  Per-operation overrides land with the
+  // consumption surface (Phase 4).
+  const resourceInterfaces = deriveResourceInterfaces(sys);
   // Scaffold expansion now runs at the AST
   // level via `src/language/ddd-scaffold-ast-expander.ts` (a
   // `DocumentState.IndexedContent` hook on the shared
@@ -143,7 +149,21 @@ function enrichSystem(
   // any caller that constructs a `LoomModel` outside the standard
   // `parseHelper` / `DocumentBuilder` pipeline (it just returns
   // the existing pages unchanged).
-  return { ...sys, subdomains: subdomainsWithOwner, deployables, needs };
+  return { ...sys, subdomains: subdomainsWithOwner, deployables, needs, resourceInterfaces };
+}
+
+// Resolve the default access interface for every resource from its
+// sourceType (via the storage it `use:`s) and kind.  RFC §3.5.
+function deriveResourceInterfaces(sys: SystemIR): Record<string, LoomInterface> {
+  const storeType = new Map(sys.storages.map((s) => [s.name, s.type] as const));
+  const out: Record<string, LoomInterface> = {};
+  for (const r of sys.dataSources) {
+    const sourceType = storeType.get(r.storageName);
+    if (!sourceType) continue;
+    const iface = defaultInterfaceFor(sourceType, r.kind);
+    if (iface) out[r.name] = iface;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
