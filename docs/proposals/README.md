@@ -56,6 +56,8 @@ Status reflects `origin/main` as of the last refresh of
 | [`bounded-context-model.md`](./bounded-context-model.md) | PROPOSED | **Reframes the structural model.** Promotes the bounded context to the central organising unit; adds a subdomain layer; clarifies BC vs module vs deployable. **Supersedes the per-aggregate-storage granularity of the three `storage-and-platform-config*.md` docs** (the grammar work mostly survives — the *granularity* is what changes; persistence binds at BC level, not per-aggregate). |
 | [`src-ir-phase-reveal.md`](./src-ir-phase-reveal.md) | SHIPPED | Restructured `src/ir/` into `types/` / `lower/` / `enrich/` / `validate/`; moved `migrations-builder.ts` to `src/system/`. |
 | [`test-layout-and-macro-consolidation.md`](./test-layout-and-macro-consolidation.md) | SHIPPED | Test tree mirrors `src/` phases; macros consolidated under `src/macros/`. |
+| [`platform-directory-layout.md`](./platform-directory-layout.md) | PROPOSED | Framework-version axis for backend code (`hono@v4`→`v5`, `net8`→`net10`, Ash 3→4). **Option A (reverse the hono hoist) is rejected per [D-BACKEND-PKG](../decisions.md#d-backend-pkg--per-version-backend-packages-are-canonical).** The surviving direction is per-`<family>/v<N>/` homes that stage toward the packaging-split's per-version packages; adapters move to the backend surface per [D-ADAPTER-HOME](../decisions.md#d-adapter-home--persistencestylelayout-adapters-live-on-the-backend-surface). |
+| [`per-package-output-tree.md`](./per-package-output-tree.md) | PROPOSED (deferred) | Per-layer **output** packages (`-domain`/`-dal`/`-api`/`-contracts`/`-ui`) — the "Loom as ORM" enabler. Output-side twin of the packaging split; expressible as a `LayoutAdapter` extension. Right direction, deferred on one-time fixture/CI cost + the playground-workspace prerequisite — not on value. |
 
 ### Storage & platform config
 
@@ -246,3 +248,19 @@ parallel.
   actions; workflow-and-applier reframes context-level orchestration
   and adds appliers. Read the lifecycle doc first; the workflow doc
   builds on its `OperationIR.kind` tagging.
+
+- **platform-directory-layout / per-package-output-tree ↔
+  packaging-split.** Backend layout is governed by
+  [`docs/plans/packaging-split.md`](../plans/packaging-split.md)
+  (per-version installable backend packages), pinned canonical by
+  [D-BACKEND-PKG](../decisions.md#d-backend-pkg--per-version-backend-packages-are-canonical).
+  This **rejects** `platform-directory-layout.md`'s Option A (reversing
+  the `src/platform/hono/v4/` hoist) — that hoist is the package-staging
+  shape, guarded by the live `package → shared` invariant
+  (`test/platform/backend-packages-layering.test.ts`). Adapters move
+  onto the backend surface and the central `adapter-registry.ts`
+  dissolves per
+  [D-ADAPTER-HOME](../decisions.md#d-adapter-home--persistencestylelayout-adapters-live-on-the-backend-surface);
+  the F5d/F6d orchestrator rewire already decentralised the emit half.
+  `per-package-output-tree.md` is the output-side twin — deferred, not
+  rejected.
