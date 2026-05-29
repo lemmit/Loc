@@ -34,7 +34,13 @@ export type PrimitiveName =
   | "string"
   | "bool"
   | "datetime"
-  | "guid";
+  | "guid"
+  /** Opaque JSON blob — interior is not modelled by Loom.  Maps to
+   *  JSONB / jsonb / `Map` per backend; a leaf in `wireShape` (never
+   *  expanded or structurally diffed).  See
+   *  `docs/proposals/document-and-json-hierarchies.md` (Option 1,
+   *  D-DOCUMENT-AXIS). */
+  | "json";
 
 /** Canonical ordering for UI surfaces that enumerate primitives —
  *  playground type picker, docs tables, completion provider, future
@@ -53,6 +59,7 @@ export const PRIMITIVES: readonly PrimitiveName[] = [
   "bool",
   "datetime",
   "guid",
+  "json",
 ] as const;
 
 /** Information-flow sensitivity tags carried by a value's type.  See

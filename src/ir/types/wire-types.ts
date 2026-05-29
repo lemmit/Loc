@@ -63,7 +63,8 @@ export type WirePrimitive =
   | "money"
   | "bool"
   | "datetime"
-  | "guid";
+  | "guid"
+  | "json";
 
 /** Category of the leaf type referenced.  `primitive`/`id` carry their
  *  full info on `WireTypeInfo` (`primitive`, `idTarget`, `idValueType`);

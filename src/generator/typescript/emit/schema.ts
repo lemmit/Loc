@@ -394,6 +394,8 @@ function drizzleColumnLinesForName(
           return [`${fieldName}: timestamp("${colName}", { withTimezone: true })${not},`];
         case "guid":
           return [`${fieldName}: uuid("${colName}")${not},`];
+        case "json":
+          return [`${fieldName}: jsonb("${colName}")${not},`];
       }
     /* eslint-disable-next-line no-fallthrough */
     case "id":

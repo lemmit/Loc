@@ -938,7 +938,7 @@ BaseType:
     PrimitiveType | SlotType | IdType | NamedType;
 
 PrimitiveType:
-    name=('int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid');
+    name=('int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid' | 'json');
 
 // Element-shaped param type for component slot injection — see
 // `docs/page-metamodel.md`.  Valid only on a `component`'s parameter

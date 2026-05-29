@@ -1,6 +1,6 @@
 # Proposal: Documents and JSON-Based Hierarchies
 
-**Status:** Decisions sealed. Core direction **PINNED** as [D-DOCUMENT-AXIS](../decisions.md) (D-RENAME amended alongside). Sub-questions 3–5 (snapshot cadence, per-projection shape, real document DB) remain OPEN. Implementation not yet started.
+**Status:** Decisions sealed. Core direction **PINNED** as [D-DOCUMENT-AXIS](../decisions.md) (D-RENAME amended alongside). Sub-questions 3–5 (snapshot cadence, per-projection shape, real document DB) remain OPEN. **Implementation: Slice A (`json` primitive) landed** — grammar, IR, all four backends, migrations, wire-spec, docs, and `test/generator/json-primitive-emission.test.ts`. Slices B–D (`persistedAs`/`normalised`/Marten) not started.
 **Scope:** Survey how Loom should let a modeller persist a hierarchy as a *document* (a single JSON tree) instead of a normalised set of tables, and whether "document" deserves to be a declaration kind next to `aggregate`/`entity`, a field type, a persistence strategy, or some combination. Compares against Marten, EF Core, and MongoDB-style modelling. Ends with a recommendation.
 
 > **Pinned decisions affecting this proposal** (see [`docs/decisions.md`](../decisions.md)):
