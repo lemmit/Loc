@@ -63,6 +63,12 @@ Status reflects `origin/main` as of the last refresh of
 |---|---|---|
 | [`storage-and-platform-config.md`](./storage-and-platform-config.md) | PARTIAL | Top-level `storage <name> { type }` and deployable role-keyed slots shipped. Remaining: per-aggregate `persistenceStrategy:`, logical bindings (now `dataSource` per [D-STORAGE-SPLIT](../decisions.md#d-storage-split--split-the-overloaded-storage-keyword)), per-deployable `style:` / `layout:` / `persistence:`, `STORAGE_CAPABILITIES` matrix, adapter contracts. Granularity is per-context, not per-aggregate ([D-GRANULARITY](../decisions.md#d-granularity--storage-bindings-are-per-context-not-per-aggregate)); per-aggregate `for:` deferred to v2 override. |
 
+### Documents & JSON hierarchies
+
+| Doc | Status | Core addition |
+|---|---|---|
+| [`document-and-json-hierarchies.md`](./document-and-json-hierarchies.md) | PROPOSED | Options survey for persisting hierarchies as JSON documents (Marten / EF Core `.ToJson()` / Mongo-embedding analogues) instead of normalised tables. Separates open-shape `json` field (need A) from document-mapped typed hierarchy (need B). Six options from `json` primitive → `document` type → `as document/table` containment hint → `persistenceStrategy: documentBased` + `dataSource kind: document` (Marten target via the `PersistenceAdapter` seam); rejects "document as aggregate peer". Requests decision tag **D-DOCUMENT-AXIS**. |
+
 ### Type-system family — state, transport, exception-less, criterion
 
 > **Start here**: [`type-system-overview.md`](./type-system-overview.md).
