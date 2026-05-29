@@ -8,7 +8,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js";
-import { isDocumentShaped } from "../../../ir/util/resolve-datasource.js";
+import { effectiveSavingShape } from "../../../ir/util/resolve-datasource.js";
 import { lines as joinLines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 
@@ -86,13 +86,18 @@ export function renderSchema(
   for (const agg of ctx.aggregates) {
     const schema = schemaFor(agg);
     const prefix = prefixFor(agg);
-    // Document-shaped (`shape(document)`): the whole aggregate read
-    // model lives in one jsonb column.  No part tables, no join tables
-    // — contained parts fold into `data`, references ride as id values.
-    if (isDocumentShaped(agg, lookup?.(agg))) {
+    const shape = effectiveSavingShape(agg, lookup?.(agg));
+    // Document (`shape(document)`): the whole aggregate is one opaque
+    // jsonb blob (`id, data, version`).  No part/join tables.
+    if (shape === "document") {
       tables.push(emitDocumentTable(agg.name, { schema, prefix }));
       continue;
     }
+    // NOTE: `shape(embedded)` on the TS/Drizzle backend currently emits
+    // RELATIONALLY (root + part tables) — the embedded repository (root
+    // columns + parts read from a jsonb column) is a follow-up.  It
+    // compiles correctly as relational; the shared embedded migration
+    // shape (jsonb-per-containment) is only consumed by .NET so far.
     const indexed = indexedColumnsFor(agg, ctx);
     tables.push(emitTable(agg.name, agg.fields, undefined, ctx, indexed, { schema, prefix }));
     for (const part of agg.parts) {

@@ -7,6 +7,7 @@ import type {
   EntityPartIR,
   FieldIR,
   IdValueType,
+  SavingShape,
   SubdomainIR,
   SystemIR,
   TypeIR,
@@ -22,7 +23,6 @@ import type {
   TableShape,
 } from "../ir/types/migrations-ir.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../ir/util/resolve-datasource.js";
-import type { SavingShape } from "../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../util/naming.js";
 import type { SnapshotStore } from "./snapshot.js";
 
