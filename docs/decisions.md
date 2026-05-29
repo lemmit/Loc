@@ -284,12 +284,22 @@ sits anomalously inside the aggregate body. Full analysis in
    no inference, no lint.**
 2. **`json` shape-hint** — **RESOLVED: plain `json` for v1**; `json<T>`
    out of scope.
-3. **Snapshot cadence for `eventLog` + document** — OPEN; reuse the
-   `snapshot` `dataSource`'s `every:` (recommended) vs a header arg.
-4. **Per-projection vs per-aggregate `normalised`** — OPEN; one shape
-   per aggregate in v1, per-projection deferred (recommended).
-5. **Real document DB** — OPEN; Postgres-JSONB only in v1 (Marten's
-   bet), `StorageType += mongo` deferred (recommended).
+3. **Snapshot cadence for `eventLog` + document** — **RESOLVED: reuse
+   the `snapshot` `dataSource`'s `every:` knob** (already in
+   D-STORAGE-SPLIT). Cadence is binding/infra config; no aggregate-header
+   arg.
+4. **Per-projection vs per-aggregate `normalised`** — **RESOLVED:
+   per-projection.** The shape is settable per read-model: the
+   per-binding `dataSource normalised:` knob (on the `state` / `snapshot`
+   / `replica` binding) governs that projection's shape; the
+   aggregate-header `normalised(…)` is the default. This stays within
+   D-GRANULARITY (per `(context, kind)` binding, not per-aggregate). Richer
+   *named* projections (multiple read models of one ES aggregate, each a
+   different shape) depend on future read-model modelling and are out of
+   v1 scope.
+5. **Real document DB** — **RESOLVED: Postgres-JSONB only in v1**
+   (Marten's own bet); `normalised(false)` resolves to JSONB / Marten
+   docs on Postgres. `StorageType += mongo` deferred.
 
 **Affects.**
 

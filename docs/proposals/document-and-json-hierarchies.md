@@ -1,6 +1,6 @@
 # Proposal: Documents and JSON-Based Hierarchies
 
-**Status:** Decisions sealed. Core direction **PINNED** as [D-DOCUMENT-AXIS](../decisions.md) (D-RENAME amended alongside). Sub-questions §8.3–8.5 (snapshot cadence, per-projection shape, real document DB) remain OPEN. **Implementation: surface + IR complete** — Slices A (`json`, #703), B (`persistedAs(eventLog\|state)`, #711), and C (`normalised(true\|false)` surface, #713) are **merged**. Slice D — the document-persistence *emission* (Marten / EF `.ToJson()` / document table shape) — is **not started**. Full breakdown in §9.
+**Status:** Decisions sealed — **all §8 sub-questions resolved** (cadence reuses the snapshot `dataSource`'s `every:`; `normalised` is per-projection via the per-binding knob; Postgres-JSONB only; no `json<T>`). Core direction **PINNED** as [D-DOCUMENT-AXIS](../decisions.md) (D-RENAME amended alongside). **Implementation: surface + IR complete** — Slices A (`json`, #703), B (`persistedAs(eventLog\|state)`, #711), and C (`normalised(true\|false)` surface, #713) are **merged**. Slice D — the document-persistence *emission* (Marten / EF `.ToJson()` / document table shape) — is **not started**. Full breakdown in §9.
 **Scope:** Survey how Loom should let a modeller persist a hierarchy as a *document* (a single JSON tree) instead of a normalised set of tables, and whether "document" deserves to be a declaration kind next to `aggregate`/`entity`, a field type, a persistence strategy, or some combination. Compares against Marten, EF Core, and MongoDB-style modelling. Ends with a recommendation.
 
 > **Pinned decisions affecting this proposal** (see [`docs/decisions.md`](../decisions.md)):
@@ -400,11 +400,11 @@ This keeps the domain model honest (the aggregate API is unchanged regardless of
 
 ## 8. Open questions
 
-1. Does `json` need an optional *shape hint* (`json<SomeType>`) for the common case where the blob *is* a known DTO from an `extern` boundary, without full structural validation?
+1. **(Resolved.)** Does `json` need a shape hint (`json<SomeType>`)? **No** — plain `json` only for v1; if the shape is known, use a `valueobject`. `json<T>` is out of scope.
 2. **(Resolved — see §2.3.)** Is the saving shape orthogonal to the truth kind? **Yes.** `persistedAs(eventLog)` bundles a *body-discipline* contract (apply-always, no direct mutation — validated) and a *storing-as-a-log* facet; `normalised(true | false)` governs only the **derived read model / snapshot**. The log facet and the `normalised` facet are different storing concerns, so the required combination `persistedAs(eventLog)` + `normalised(false)` is well-formed. *Follow-on:* the shipped `persistenceStrategy:` keyword names only the storing half and hides the body-discipline half; renamed to header `persistedAs(…)` (§2.3).
-3. For event-log + document, what is the snapshot/projection cadence — every event (inline projection, Marten's default), every N events, or on-demand? Does this belong on the aggregate (a cadence arg, e.g. `normalised(false, every: …)`), on the `snapshot` `dataSource` (`every:` already exists in D-STORAGE-SPLIT's per-kind config), or both? Leaning: reuse the `snapshot` binding's `every:`.
-4. Does a real document DB (`StorageType += mongo`) ever justify itself, or is Postgres-JSONB-everywhere (Marten's own bet) sufficient for Loom's target users? If JSONB-on-Postgres suffices, `normalised(false)` never needs a non-Postgres engine.
-5. For `eventSourced` aggregates, can the shape legitimately be `normalised` (projections to tables) and `document` (projection to one JSON doc) *per projection*, or is it one shape per aggregate? v1: one per aggregate (per D-GRANULARITY spirit); per-projection deferred.
+3. **(Resolved.)** Snapshot/projection cadence for event-log + document: **reuse the `snapshot` `dataSource`'s `every:` knob** (already in D-STORAGE-SPLIT) — cadence is binding/infra config, not an aggregate-header arg.
+4. **(Resolved.)** Can the shape vary per projection? **Yes — per-projection.** The per-binding `dataSource normalised:` knob (on the `state`/`snapshot`/`replica` binding) sets that projection's shape; the aggregate-header `normalised(…)` is the default. Stays within D-GRANULARITY (per `(context, kind)`); richer *named* read models are future scope.
+5. **(Resolved.)** Real document DB? **Postgres-JSONB only in v1** (Marten's bet); `normalised(false)` resolves to JSONB / Marten docs on Postgres. `StorageType += mongo` deferred.
 6. **(Resolved — D-RENAME amended.)** D-RENAME becomes `inheritanceUsing(sharedTable | ownTable)`: **key** `inheritanceStrategy` → `inheritanceUsing`; **syntax** colon → paren header modifier; **values** kept table-baked, respelled `shareTable` → `sharedTable`. Medium-neutral `shared`/`own` rejected.
 
 ---
@@ -446,8 +446,11 @@ parses, validates, prints, and threads through the IR end-to-end; a
   B rename.
 - **Option 2 — dedicated `document` value-type** (deferred), and
   **Option 3 — per-containment `as document/table`** (dropped).
-- **Open sub-questions** §8.3–8.5 (snapshot cadence, per-projection vs
-  per-aggregate shape, real document DB) — unratified; needed for D.
+- **Open sub-questions** — all resolved (§8); they shape Slice D:
+  cadence reuses the `snapshot` binding's `every:`; `normalised` is
+  **per-projection** (per-binding `dataSource normalised:`, aggregate
+  header is the default); **Postgres-JSONB only** (no `mongo`); no
+  `json<T>`.
 
 ---
 
