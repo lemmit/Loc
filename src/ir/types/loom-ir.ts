@@ -141,6 +141,12 @@ export interface FieldIR {
    * to phrase conflict messages and by the wire-spec diff to explain
    * the field's role.  Same nullability as `access`. */
   accessSource?: "declared" | "default";
+  /** Lowered default-value expression from `field: T = <expr>`.  Present
+   *  only on aggregate / entity-part / value-object fields that declared a
+   *  default (events / views never lower one).  Fully-resolved like any
+   *  other `ExprIR`; consumed when synthesising a create for an aggregate
+   *  with no explicit one. */
+  default?: ExprIR;
 }
 
 export interface ContainmentIR {

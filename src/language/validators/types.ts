@@ -312,6 +312,28 @@ export function checkPropertyCheck(p: Property, env: Env, accept: ValidationAcce
   }
 }
 
+/** Type-check a field default (`field: T = <expr>`) against the field's
+ * declared type.  Mirrors `checkDerived` — literal promotion (e.g. an int
+ * literal defaulting a `money` / `decimal` field) is allowed. */
+export function checkPropertyDefault(p: Property, env: Env, accept: ValidationAcceptor): void {
+  if (!p.default) return;
+  const declared = resolveTypeRef(p.type);
+  const actual = typeOf(p.default, env);
+  if (
+    declared.kind !== "unknown" &&
+    actual.kind !== "unknown" &&
+    !isAssignable(actual, declared) &&
+    !canPromoteLiteralTo(p.default, declared)
+  ) {
+    accept(
+      "error",
+      `Default for '${p.name}' has type '${typeToString(actual)}' but the field is declared '${typeToString(declared)}'.`,
+      { node: p, property: "default" },
+    );
+  }
+  warnSensitivityDrop(actual, declared, accept, { node: p, property: "default" });
+}
+
 export function checkInvariant(inv: Invariant, env: Env, accept: ValidationAcceptor): void {
   const t = typeOf(inv.expr, env);
   if (t.kind !== "primitive" || t.name !== "bool") {

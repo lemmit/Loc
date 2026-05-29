@@ -1271,7 +1271,7 @@ function lowerValueObject(vo: ValueObject, env: Env): ValueObjectIR {
   const props = vo.members.filter(isProperty) as Property[];
   return {
     name: vo.name,
-    fields: props.map((p) => lowerField(p)),
+    fields: props.map((p) => lowerField(p, inner)),
     derived: vo.members.filter(isDerivedProp).map((d) => lowerDerived(d, inner)),
     invariants: [
       ...vo.members.filter(isInvariant).map((i) => lowerInvariant(i, inner)),
@@ -1334,7 +1334,7 @@ function lowerAggregate(
   return {
     name: agg.name,
     idValueType,
-    fields: props.map(lowerField),
+    fields: props.map((p) => lowerField(p, inner)),
     contains: containments,
     derived,
     invariants,
@@ -1524,7 +1524,7 @@ function lowerEntityPart(part: EntityPart, agg: Aggregate, outer: Env): EntityPa
     name: part.name,
     parentName: agg.name,
     parentIdValueType: (agg.idKind ?? "guid") as IdValueType,
-    fields: props.map(lowerField),
+    fields: props.map((p) => lowerField(p, inner)),
     contains: part.members.filter(isContainment).map(lowerContainment),
     derived: part.members.filter(isDerivedProp).map((d) => lowerDerived(d, inner)),
     invariants: [
@@ -1728,10 +1728,16 @@ function idFollowPath(e: ExprIR): string[] | undefined {
 // Member lowerings
 // ---------------------------------------------------------------------------
 
-function lowerField(p: Property): FieldIR {
+function lowerField(p: Property, env?: Env): FieldIR {
   const sensitivity = fieldSensitivity(p);
   const baseType = lowerType(p.type);
   const declared = p.access as FieldIR["access"];
+  // Default value — lowered in the declaring scope so enum values / money
+  // literals resolve in the field's type context.  Only the constructible
+  // declarations (aggregate / entity-part / value object) pass an `env`;
+  // events / views never do, so a stray default there is dropped here (and
+  // flagged by the validator).
+  const defaultExpr = p.default && env ? lowerExprInContext(p.default, baseType, env) : undefined;
   return {
     name: p.name,
     // The field's `TypeIR` carries the same tag set as the field's
@@ -1746,6 +1752,7 @@ function lowerField(p: Property): FieldIR {
     // (input-shaping, view exposure) rather than a type property.
     // Enrichment fills in the default / inferred-from-type cases.
     ...(declared ? { access: declared, accessSource: "declared" as const } : {}),
+    ...(defaultExpr ? { default: defaultExpr } : {}),
   };
 }
 

@@ -30,7 +30,13 @@ import {
 } from "../generated/ast.js";
 import { envForAggregate, envForPart, envForValueObject } from "./_shared.js";
 import { checkCreate, checkDestroy, checkOperation } from "./statements.js";
-import { checkDerived, checkFunction, checkInvariant, checkPropertyCheck } from "./types.js";
+import {
+  checkDerived,
+  checkFunction,
+  checkInvariant,
+  checkPropertyCheck,
+  checkPropertyDefault,
+} from "./types.js";
 
 /** `slot` is a UI-only element-shaped param marker — meaningful only
  *  on a `component`'s parameter list (where the caller supplies JSX
@@ -146,6 +152,7 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
     if (isContainment(m)) checkContainment(m, agg, accept);
     if (isInvariant(m)) checkInvariant(m, envForAggregate(agg), accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForAggregate(agg), accept);
+    if (isProperty(m) && m.default) checkPropertyDefault(m, envForAggregate(agg), accept);
     if (isDerivedProp(m)) {
       checkDerived(m, envForAggregate(agg), accept);
       // Reserved-name derived fields — `display` (user-facing label) and
@@ -274,6 +281,7 @@ export function checkEntityPart(
     if (isContainment(m)) checkContainment(m, agg, accept);
     if (isInvariant(m)) checkInvariant(m, envForPart(agg, part), accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForPart(agg, part), accept);
+    if (isProperty(m) && m.default) checkPropertyDefault(m, envForPart(agg, part), accept);
     if (isDerivedProp(m)) checkDerived(m, envForPart(agg, part), accept);
     if (isFunctionDecl(m)) checkFunction(m, agg, part, accept);
   }
