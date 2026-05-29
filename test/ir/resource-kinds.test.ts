@@ -46,10 +46,14 @@ describe("new infrastructure kinds", () => {
 
   it("rejects a kind on an incompatible sourceType (objectStore on postgres)", async () => {
     const { errors } = await parseString(
-      valid.replace("resource salesFiles { for: Sales, kind: objectStore, use: files }",
-        "resource salesFiles { for: Sales, kind: objectStore, use: pg }"),
+      valid.replace(
+        "resource salesFiles { for: Sales, kind: objectStore, use: files }",
+        "resource salesFiles { for: Sales, kind: objectStore, use: pg }",
+      ),
     );
-    expect(errors.some((e) => /kind 'objectStore' is incompatible with storage 'pg'/.test(e))).toBe(true);
+    expect(errors.some((e) => /kind 'objectStore' is incompatible with storage 'pg'/.test(e))).toBe(
+      true,
+    );
   });
 
   it("lowers the config map into typed IR entries", async () => {
@@ -71,7 +75,10 @@ describe("config-map validation", () => {
 
   it("errors when a required config key is missing (awsS3 needs bucket)", async () => {
     const diags = await irDiagnostics(
-      valid.replace(`config: { region: "eu-central-1", bucket: "app-files" }`, `config: { region: "eu-central-1" }`),
+      valid.replace(
+        `config: { region: "eu-central-1", bucket: "app-files" }`,
+        `config: { region: "eu-central-1" }`,
+      ),
     );
     expect(
       diags.some((d) => d.severity === "error" && /required config key 'bucket'/.test(d.message)),
@@ -83,7 +90,9 @@ describe("config-map validation", () => {
       valid.replace(`config: { vhost: "/" }`, `config: { vhost: "/", bogus: "x" }`),
     );
     expect(
-      diags.some((d) => d.severity === "warning" && /config key 'bogus' is not recognised/.test(d.message)),
+      diags.some(
+        (d) => d.severity === "warning" && /config key 'bogus' is not recognised/.test(d.message),
+      ),
     ).toBe(true);
   });
 
@@ -92,7 +101,9 @@ describe("config-map validation", () => {
       valid.replace(`config: { baseUrl: "https://pay.example.com" }`, `config: { baseUrl: 8080 }`),
     );
     expect(
-      diags.some((d) => d.severity === "error" && /config key 'baseUrl' expects string/.test(d.message)),
+      diags.some(
+        (d) => d.severity === "error" && /config key 'baseUrl' expects string/.test(d.message),
+      ),
     ).toBe(true);
   });
 });

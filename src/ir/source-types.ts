@@ -68,7 +68,10 @@ export interface SourceTypeDescriptor {
  *  the refining capability (if any) it implies.  Keeping the surface
  *  keyword fine-grained while the registry reasons in infra kinds is
  *  the Phase-1 decision (RFC §3.5; plan "keep fine-grained kinds"). */
-export const SURFACE_KIND_MAP: Record<DataSourceKind, { infraKind: InfraKind; capability?: string }> = {
+export const SURFACE_KIND_MAP: Record<
+  DataSourceKind,
+  { infraKind: InfraKind; capability?: string }
+> = {
   state: { infraKind: "database", capability: "state" },
   snapshot: { infraKind: "database", capability: "snapshot" },
   replica: { infraKind: "database", capability: "replica" },
@@ -148,11 +151,15 @@ function seedBuiltins(): void {
   });
   registerSourceType({
     name: "redis",
-    supports: { cache: { capabilities: set("get", "set", "ttl"), interfaces: set<LoomInterface>() } },
+    supports: {
+      cache: { capabilities: set("get", "set", "ttl"), interfaces: set<LoomInterface>() },
+    },
   });
   registerSourceType({
     name: "kafka",
-    supports: { eventLog: { capabilities: set("append", "read", "replay"), interfaces: set<LoomInterface>() } },
+    supports: {
+      eventLog: { capabilities: set("append", "read", "replay"), interfaces: set<LoomInterface>() },
+    },
   });
   // Phase 2 kinds: object store, queue, external API.
   registerSourceType({
@@ -230,7 +237,10 @@ export function isCacheStore(sourceType: string): boolean {
 
 /** The valid interfaces for `kind` on `sourceType` (empty when
  *  unsupported). */
-export function interfacesFor(sourceType: string, kind: DataSourceKind): ReadonlySet<LoomInterface> {
+export function interfacesFor(
+  sourceType: string,
+  kind: DataSourceKind,
+): ReadonlySet<LoomInterface> {
   const descriptor = REGISTRY.get(sourceType);
   if (!descriptor) return new Set();
   return descriptor.supports[SURFACE_KIND_MAP[kind].infraKind]?.interfaces ?? new Set();

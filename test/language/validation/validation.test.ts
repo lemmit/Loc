@@ -1025,9 +1025,7 @@ describe("validation", () => {
       `);
       expect(
         errors.some((e) =>
-          /resource 'cState' kind 'state' is incompatible with storage 'r' of type 'redis'/.test(
-            e,
-          ),
+          /resource 'cState' kind 'state' is incompatible with storage 'r' of type 'redis'/.test(e),
         ),
         errors.join("\n"),
       ).toBe(true);

@@ -169,7 +169,11 @@ function deriveNeeds(subdomains: EnrichedSubdomainIR[]): NeedIR[] {
       const hasState = ctx.aggregates.some((a) => (a.persistedAs ?? "state") === "state");
       const hasEventLog = ctx.aggregates.some((a) => a.persistedAs === "eventLog");
       if (hasState) {
-        needs.push({ contextName: ctx.name, kind: "state", capabilities: ["state", "crud", "query"] });
+        needs.push({
+          contextName: ctx.name,
+          kind: "state",
+          capabilities: ["state", "crud", "query"],
+        });
       }
       if (hasEventLog) {
         needs.push({ contextName: ctx.name, kind: "eventLog", capabilities: ["append", "read"] });

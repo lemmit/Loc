@@ -5,7 +5,6 @@
 // Step 1.5 replaces), so the swap-in is provably behaviour-preserving.
 
 import { describe, expect, it } from "vitest";
-import type { DataSourceKind } from "../../src/ir/types/loom-ir.js";
 import {
   configSchemaFor,
   interfacesFor,
@@ -17,6 +16,7 @@ import {
   sourceTypesForSurfaceKind,
   supportsSurfaceKind,
 } from "../../src/ir/source-types.js";
+import type { DataSourceKind } from "../../src/ir/types/loom-ir.js";
 
 // The legacy matrix, transcribed verbatim from the pre-registry
 // `validators/datasource.ts` for the equivalence assertions below.
@@ -94,16 +94,24 @@ describe("sourceType registry — descriptors & lookups", () => {
     expect(supportsSurfaceKind("awsS3", "queue")).toBe(false);
     expect(supportsSurfaceKind("postgres", "objectStore")).toBe(false);
     expect([...interfacesFor("awsS3", "objectStore")].sort()).toEqual(["rest", "sdk"]);
-    expect(sourceTypeFor("awsS3")?.configKeys?.some((k) => k.name === "bucket" && k.required)).toBe(true);
+    expect(sourceTypeFor("awsS3")?.configKeys?.some((k) => k.name === "bucket" && k.required)).toBe(
+      true,
+    );
   });
 
   it("registerSourceType adds a descriptor that resolves through the lookups", () => {
     registerSourceType({
       name: "__test_objstore",
-      supports: { objectStore: { capabilities: new Set(["blob"]), interfaces: new Set(["rest", "sdk"]) } },
+      supports: {
+        objectStore: { capabilities: new Set(["blob"]), interfaces: new Set(["rest", "sdk"]) },
+      },
       configKeys: [{ name: "bucket", type: "string", required: true }],
     });
-    expect(sourceTypeFor("__test_objstore")?.supports.objectStore?.capabilities.has("blob")).toBe(true);
-    expect(configSchemaFor("__test_objstore")).toEqual([{ name: "bucket", type: "string", required: true }]);
+    expect(sourceTypeFor("__test_objstore")?.supports.objectStore?.capabilities.has("blob")).toBe(
+      true,
+    );
+    expect(configSchemaFor("__test_objstore")).toEqual([
+      { name: "bucket", type: "string", required: true },
+    ]);
   });
 });

@@ -56,10 +56,7 @@ function schemaFile(files: Map<string, string>): string {
 describe("resource → Drizzle pgSchema (Hono)", () => {
   it("defaults schema to snake(context.name) when DSL omits `schema:`", async () => {
     const files = await generate(
-      baseSystem(
-        `resource ordersState { for: Orders, kind: state, use: primary }`,
-        "ordersState",
-      ),
+      baseSystem(`resource ordersState { for: Orders, kind: state, use: primary }`, "ordersState"),
     );
     const s = schemaFile(files);
     // Implicit default — context Orders → schema "orders".
