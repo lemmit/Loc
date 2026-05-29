@@ -206,6 +206,13 @@ the F1 micro-plan PRs; reopens after F1.
 **Status:** PINNED (core axes, syntax, validation contract); the
 numbered **Open sub-questions** below remain OPEN.
 
+**Implementation:** surface + IR landed — `json` primitive (#703),
+`persistedAs(eventLog | state)` (#711), `normalised(true | false)`
+surface (#713). The document-persistence **emission** (Marten / EF
+`.ToJson()` / document table shape) is not yet built; until then
+`normalised(false)` is carried in the IR but inert (an `UNWIRED_KNOBS`
+warning says so). See `document-and-json-hierarchies.md` §9.
+
 **Problem.** Loom models internal hierarchies but the
 relational-vs-document storage choice is implicit and unselectable
 (value objects → inline JSONB; entity parts → child tables); there is

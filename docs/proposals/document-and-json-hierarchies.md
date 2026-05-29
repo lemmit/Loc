@@ -1,6 +1,6 @@
 # Proposal: Documents and JSON-Based Hierarchies
 
-**Status:** Decisions sealed. Core direction **PINNED** as [D-DOCUMENT-AXIS](../decisions.md) (D-RENAME amended alongside). Sub-questions 3–5 (snapshot cadence, per-projection shape, real document DB) remain OPEN. **Implementation:** Slice A (`json` primitive, #703) and Slice B (`persistedAs(eventLog\|state)` rename, #711) **landed**. Slice C (`normalised(true\|false)` surface — aggregate header modifier + `dataSource` knob, threaded through IR/printer, parsed & validated; document persistence *emission* deferred) in progress. Slice D (document persistence emission + Marten adapter) not started.
+**Status:** Decisions sealed. Core direction **PINNED** as [D-DOCUMENT-AXIS](../decisions.md) (D-RENAME amended alongside). Sub-questions §8.3–8.5 (snapshot cadence, per-projection shape, real document DB) remain OPEN. **Implementation: surface + IR complete** — Slices A (`json`, #703), B (`persistedAs(eventLog\|state)`, #711), and C (`normalised(true\|false)` surface, #713) are **merged**. Slice D — the document-persistence *emission* (Marten / EF `.ToJson()` / document table shape) — is **not started**. Full breakdown in §9.
 **Scope:** Survey how Loom should let a modeller persist a hierarchy as a *document* (a single JSON tree) instead of a normalised set of tables, and whether "document" deserves to be a declaration kind next to `aggregate`/`entity`, a field type, a persistence strategy, or some combination. Compares against Marten, EF Core, and MongoDB-style modelling. Ends with a recommendation.
 
 > **Pinned decisions affecting this proposal** (see [`docs/decisions.md`](../decisions.md)):
@@ -409,7 +409,49 @@ This keeps the domain model honest (the aggregate API is unchanged regardless of
 
 ---
 
-## 9. Sources
+## 9. Implementation status
+
+Delivered in slices off `main` (each its own squash-merged PR). The
+**surface and IR are complete**; the document-persistence **emission**
+is not yet built.
+
+### Done
+
+| Slice | Scope | Where | PR |
+|---|---|---|---|
+| **A — `json` primitive** | Opaque JSON field type. Per-backend leaf mapping: TS `unknown` / Zod `z.unknown()`, .NET `System.Text.Json.JsonElement`, Phoenix Ash `:map`, Postgres `JSONB` (Drizzle `jsonb`), OpenAPI freeform `object` (wire-spec leaf). Grammar + `PrimitiveName`/`WirePrimitive` + migrations. | `ddd.langium`, `loom-ir.ts`, all 4 generators, `migrations-builder.ts`, `wire-spec.ts`; `test/generator/json-primitive-emission.test.ts` | #703 |
+| **B — `persistedAs(eventLog\|state)`** | Hard-cutover rename of the shipped body `persistenceStrategy: stateBased\|eventSourced` → header paren modifier. Values aligned to the `dataSource` `kind` set, so `resolve-datasource` is now an identity. Adapters / default-menus / `resolve-adapters` updated. **No body-discipline validator** (deferred — owned by the applier feature). | `ddd.langium`, `loom-ir.ts`, `lower.ts`, `resolve-datasource.ts`, `validate.ts`, `print-structural.ts`, all persistence/style adapters; parsing/IR/validation/adapter tests | #711 |
+| **C — `normalised(true\|false)`** | Saving-shape **surface**: aggregate header modifier + `dataSource` `normalised:` knob, threaded through IR + printer, parsed/validated. Added to `UNWIRED_KNOBS` so a `dataSource normalised:` warns "accepted, persisted in IR, but no emitter consumes it yet". | `ddd.langium`, `loom-ir.ts`, `lower.ts`, `print-structural.ts`, `validate.ts`; `test/language/parsing/aggregate-normalised.test.ts` | #713 |
+
+Net: an aggregate header like
+`aggregate ShoppingCart persistedAs(eventLog) normalised(false) { … }`
+parses, validates, prints, and threads through the IR end-to-end; a
+`json` field works across every backend.
+
+### Missing (not yet built)
+
+- **Slice D — document persistence emission.** The piece that actually
+  *consumes* `normalised(false)` / `persistedAs(eventLog)`:
+  - a **Marten** `PersistenceAdapter` (.NET event-sourced + document
+    store) on the existing `PersistenceAdapter` seam;
+  - EF Core `.ToJson()` mapping for `persistedAs(state)` + `normalised(false)`;
+  - the document table shape `(id, data jsonb, version)` in
+    `migrations-builder` / `sql-pg`;
+  - snapshot/projection rehydration for the `eventLog` + document case.
+  Until D lands, `normalised(false)` is **carried but inert** (the
+  `UNWIRED_KNOBS` warning says so).
+- **Event-sourcing body-discipline validator** (emit/apply, no direct
+  `:=` mutation). Owned by `workflow-and-applier.md` (appliers aren't in
+  the grammar yet); gated on `persistedAs(eventLog)`. Not part of the
+  B rename.
+- **Option 2 — dedicated `document` value-type** (deferred), and
+  **Option 3 — per-containment `as document/table`** (dropped).
+- **Open sub-questions** §8.3–8.5 (snapshot cadence, per-projection vs
+  per-aggregate shape, real document DB) — unratified; needed for D.
+
+---
+
+## 10. Sources
 
 - Marten — [Introduction](https://martendb.io/introduction), [as Event Store](https://martendb.io/events/), [JasperFx/marten](https://github.com/JasperFx/marten)
 - EF Core — [Owned Entity Types](https://learn.microsoft.com/en-us/ef/core/modeling/owned-entities), [EF7 JSON Columns](https://devblogs.microsoft.com/dotnet/announcing-ef7-release-candidate-2/), [EF Core 8 what's new](https://learn.microsoft.com/en-us/ef/core/what-is-new/ef-core-8.0/whatsnew)
