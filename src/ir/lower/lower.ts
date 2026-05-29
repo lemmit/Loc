@@ -520,6 +520,7 @@ function lowerSystem(sys: System): SystemIR {
       (a): ApiIR => ({
         name: a.name,
         sourceModule: a.source?.$refText ?? "",
+        urlStyle: a.urlStyle === "resource" ? "resource" : "literal",
       }),
     );
   const storages = sys.members

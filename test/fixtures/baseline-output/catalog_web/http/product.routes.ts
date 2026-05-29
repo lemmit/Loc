@@ -28,7 +28,7 @@ export const ProductResponse = z.object({
   display: z.string(),
 }).openapi("ProductResponse");
 export const ProductListResponse = z.array(ProductResponse).openapi("ProductListResponse");
-const ErrorResponse = z.object({ error: z.string() }).openapi("ErrorResponse");
+const ProblemDetails = z.object({ type: z.string().nullish(), title: z.string().nullish(), status: z.number().int().nullish(), detail: z.string().nullish(), instance: z.string().nullish() }).openapi("ProblemDetails");
 
 export function productRoutes(repo: ProductRepository): OpenAPIHono {
   const app = new OpenAPIHono();
@@ -47,6 +47,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
           description: "Created",
           content: { "application/json": { schema: CreateProductResponse } },
         },
+        400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {
@@ -67,13 +68,13 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       request: { params: z.object({ id: z.string().uuid() }) },
       responses: {
         200: { description: "OK", content: { "application/json": { schema: ProductResponse } } },
-        404: { description: "Not found", content: { "application/json": { schema: ErrorResponse } } },
+        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {
       const { id } = c.req.valid("param");
       const found = await repo.findById(Ids.ProductId(id));
-      if (!found) return c.json({ error: "not_found" }, 404);
+      if (!found) throw new AggregateNotFoundError("not_found");
       return c.json(repo.toWire(found) as z.infer<typeof ProductResponse>, 200);
     },
   );
@@ -103,37 +104,38 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       request: { query: BySkuQuery },
       responses: {
         200: { description: "OK", content: { "application/json": { schema: ProductResponse } } },
-        404: { description: "Not found", content: { "application/json": { schema: ErrorResponse } } },
+        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {
       const params = c.req.valid("query");
       const result = await repo.bySku(params.sku);
-      if (result == null) return c.json({ error: "not_found" }, 404);
+      if (result == null) throw new AggregateNotFoundError("not_found");
       return c.json(repo.toWire(result) as z.infer<typeof ProductResponse>, 200);
     },
   );
 
   app.onError((err, c) => {
     const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
+    const problem = (status: 400 | 403 | 404 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
     if (err instanceof ForbiddenError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "forbidden", aggregate: "Product", message: err.message, status: 403 });
-      return c.json({ error: err.message, trace_id }, 403);
+      return problem(403, "Forbidden", err.message);
     }
     if (err instanceof DomainError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "domain_error", aggregate: "Product", message: err.message, status: 400 });
-      return c.json({ error: err.message, trace_id }, 400);
+      return problem(400, "Bad Request", err.message);
     }
     if (err instanceof AggregateNotFoundError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "not_found", aggregate: "Product", status: 404 });
-      return c.json({ error: err.message, trace_id }, 404);
+      return problem(404, "Not Found", err.message);
     }
     if (err instanceof ExternHandlerError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "extern_handler_threw", aggregate: err.aggName, op: err.opName, error: err.message });
-      return c.json({ error: err.message, trace_id }, 500);
+      return problem(500, "Internal Server Error", err.message);
     }
     (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "internal_error", error: err instanceof Error ? err.message : String(err), status: 500 });
-    return c.json({ error: "internal", trace_id }, 500);
+    return problem(500, "Internal Server Error", "internal");
   });
 
   return app;

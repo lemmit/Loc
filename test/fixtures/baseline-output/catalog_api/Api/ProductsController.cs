@@ -24,6 +24,8 @@ public sealed class ProductsController : ControllerBase
     public ProductsController(IMediator mediator, ILogger<ProductsController> log) { _mediator = mediator; _log = log; }
 
     [HttpPost]
+    [ProducesResponseType(typeof(CreateProductResponse), 201)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<ActionResult<CreateProductResponse>> CreateProduct([FromBody] CreateProductRequest request)
     {
         var cmd = new CreateProductCommand(
@@ -36,6 +38,8 @@ public sealed class ProductsController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [ProducesResponseType(typeof(ProductResponse), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<ActionResult<ProductResponse>> GetProductById([FromRoute] Guid id)
     {
         var response = await _mediator.Send(new GetProductByIdQuery(new ProductId(id)));
@@ -43,6 +47,7 @@ public sealed class ProductsController : ControllerBase
     }
 
     [HttpGet]
+    [ProducesResponseType(typeof(IReadOnlyList<ProductResponse>), 200)]
     public async Task<ActionResult<IReadOnlyList<ProductResponse>>> AllProduct()
     {
         var result = await _mediator.Send(new AllQuery());
@@ -50,6 +55,8 @@ public sealed class ProductsController : ControllerBase
     }
 
     [HttpGet("by_sku")]
+    [ProducesResponseType(typeof(ProductResponse), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<ActionResult<ProductResponse?>> BySkuProduct([FromQuery] string sku)
     {
         var result = await _mediator.Send(new BySkuQuery(sku));

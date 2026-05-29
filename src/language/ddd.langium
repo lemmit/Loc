@@ -283,7 +283,8 @@ UiHelperImport:
 // Peer to module / ui / deployable.  Pure declarative — what's
 // available; consumers (ui, deployable) reference it by name.
 Api:
-    'api' name=ID 'from' source=[Subdomain:ID];
+    'api' name=ID 'from' source=[Subdomain:ID]
+        ('{' ('urlStyle' ':' urlStyle=('literal' | 'resource'))? '}')?;
 
 // ---- storage declaration (system-level) ------------------------
 //
@@ -979,7 +980,11 @@ LooseName returns string:
     // (storage roles), `for` predates this PR as a hard keyword.
     | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
     | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-    | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources';
+    | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources'
+    // Api-body keyword (lifecycle Phase 2 / D-URLSTYLE) admitted as soft
+    // so user code can still name a field `urlStyle`.  (`resource` is
+    // already soft-admitted just above.)
+    | 'urlStyle';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1354,7 +1359,8 @@ NameRefIdent returns string:
        // `kind` (`Field { kind + ":", bind: v }` in walker tests).
        | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
        | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-       | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources';
+       | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources'
+       | 'urlStyle';
 
 // ---------------------------------------------------------------------------
 // Terminals

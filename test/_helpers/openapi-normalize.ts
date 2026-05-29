@@ -70,27 +70,19 @@ export function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
  * on a hardcoded "schemas to check" list that goes stale.
  */
 export function schemaNames(spec: OpenApiSpec): Set<string> {
-  // TEMPORARY DROP-IN TOLERANCE — tracked by:
-  //   • #706 — shared RFC 7807 `ProblemDetails` error body (Hono still emits
-  //     an `ErrorResponse` envelope; Phoenix emits no error body).  Once both
-  //     emit `ProblemDetails`, drop `ProblemDetails` + `ErrorResponse` from
-  //     this set so the shared error body is COMPARED, not filtered.
-  //   • #705 — .NET named list-response wrapper (`<Agg>ListResponse`).  Once
-  //     .NET emits the wrapper, drop `isListWrapperSchema` below so the
-  //     wrapper is part of the compared schema set.
-  // Under full drop-in only the genuinely-per-backend schemas stay filtered:
-  // .NET-only validation envelopes and the TS-only provenance lineage.
+  // The shared RFC 7807 `ProblemDetails` error body is COMPARED across
+  // backends (#706) — all three publish it, so it stays in the set.  Only
+  // the genuinely-per-backend schemas are filtered:
+  //   • #705 — .NET inlines its list response (`array<…>`) instead of a
+  //     named `<Agg>ListResponse` wrapper, so list-wrapper components are
+  //     resolved structurally (see `isListWrapperSchema`) rather than
+  //     compared by name.
   const IDIOMATIC_SCHEMAS = new Set([
-    // Swashbuckle (.NET) error envelopes.
-    "ProblemDetails",
+    // Swashbuckle (.NET) model-state validation envelopes — auto-emitted
+    // for `[ApiController]` 400s; no cross-backend counterpart.  (The
+    // shared `ProblemDetails` body is NOT filtered — it's compared.)
     "ValidationProblemDetails",
     "HttpValidationProblemDetails",
-    // Error *bodies* are idiomatic per backend — Hono names an
-    // `ErrorResponse` envelope, .NET returns `ProblemDetails`, Phoenix
-    // declares no error body.  Only the error *status codes* are
-    // behavioural, so the envelope schema itself is excluded.  (#706 makes
-    // these a single shared `ProblemDetails` body and removes the tolerance.)
-    "ErrorResponse",
     // Co-located provenance lineage is a TS/Hono-only wire extension
     // (only the TS backend persists lineage) — consistent with the
     // per-field `_provenance` exclusion in `fieldSet` / `requiredSet`.
@@ -369,6 +361,42 @@ export function responseBodySchemas(spec: OpenApiSpec): Map<string, string> {
 }
 
 /**
+ * Per-operation RFC 7807 error-response signature.  For each operation,
+ * the ascending set of declared 4xx/5xx responses paired with the
+ * component schema each carries under `application/problem+json` — e.g.
+ * `400:ProblemDetails,404:ProblemDetails`.  Every backend declares the
+ * SAME set (driven by `src/ir/util/openapi-errors.ts`), so drift here —
+ * a missing status, a divergent body schema, or an error served as plain
+ * `application/json` instead of `application/problem+json` (which reads as
+ * `(none)`) — is a real cross-backend error-contract break.
+ */
+export function errorResponses(spec: OpenApiSpec): Map<string, string> {
+  const PROBLEM_JSON = "application/problem+json";
+  const out = new Map<string, string>();
+  for (const [p, item] of Object.entries(spec.paths ?? {})) {
+    if (isInfraPath(p)) continue;
+    for (const [m, raw] of Object.entries(item)) {
+      const method = m.toUpperCase();
+      if (!HTTP_METHODS.includes(method)) continue;
+      const op = raw as {
+        responses?: Record<
+          string,
+          { content?: Record<string, { schema?: { $ref?: string; type?: string } }> }
+        >;
+      };
+      const parts: string[] = [];
+      for (const [code, resp] of Object.entries(op.responses ?? {})) {
+        if (!/^[45]\d\d$/.test(code)) continue;
+        const schema = resp.content?.[PROBLEM_JSON]?.schema;
+        parts.push(`${code}:${schemaRefName(schema, spec) ?? "(none)"}`);
+      }
+      out.set(`${method} ${normalisePath(p)}`, parts.sort().join(","));
+    }
+  }
+  return out;
+}
+
+/**
  * Per-operation path-parameter type signature.  Captures what
  * `normalisePath` deliberately discards (the actual parameter type +
  * format) so the parity diff can catch drift like:
@@ -478,6 +506,12 @@ export interface ParityDiff {
    * component schemas — a backend accepting a different allowed-value
    * set for the same enum (`Visibility`, `BuildState`). */
   enumValueDiffs: string[];
+  /** Per-op RFC 7807 error-response drift on the intersection — a
+   * backend declaring a different set of 4xx/5xx responses, a different
+   * body schema, or serving the error as `application/json` instead of
+   * `application/problem+json`.  The error contract is part of drop-in
+   * replacement: a client's error handling binds to these. */
+  errorResponseDiffs: string[];
 }
 
 /**
@@ -624,6 +658,23 @@ export function diffSpecs(
     }
   }
 
+  // Per-op RFC 7807 error-response drift on the op intersection.  Each
+  // backend declares the SAME status set per operation (from the shared
+  // `openapi-errors` matrix), each carrying `ProblemDetails` under
+  // `application/problem+json`.  Drift = a missing/extra status, a
+  // divergent body schema, or a wrong content-type.
+  const refErrors = errorResponses(ref.spec);
+  const otherErrors = errorResponses(other.spec);
+  const errorResponseDiffs: string[] = [];
+  for (const op of refErrors.keys()) {
+    if (!otherErrors.has(op)) continue;
+    const r = refErrors.get(op) ?? "";
+    const o = otherErrors.get(op) ?? "";
+    if (r !== o) {
+      errorResponseDiffs.push(`${op}: ${ref.name}=[${r}], ${other.name}=[${o}]`);
+    }
+  }
+
   return {
     refName: ref.name,
     otherName: other.name,
@@ -639,6 +690,7 @@ export function diffSpecs(
     responseBodyDiffs,
     operationIdDiffs,
     enumValueDiffs,
+    errorResponseDiffs,
   };
 }
 
@@ -656,6 +708,7 @@ export function isCleanDiff(diff: ParityDiff): boolean {
     diff.requestBodyDiffs.length === 0 &&
     diff.responseBodyDiffs.length === 0 &&
     diff.operationIdDiffs.length === 0 &&
-    diff.enumValueDiffs.length === 0
+    diff.enumValueDiffs.length === 0 &&
+    diff.errorResponseDiffs.length === 0
   );
 }

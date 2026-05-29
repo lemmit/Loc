@@ -220,6 +220,12 @@ export interface OperationIR {
    * `"destroy"`).  Drives the bare-collection-URL route slug derived in
    * Phase 2 (`urlStyle` enrichment).  Only meaningful on create/destroy. */
   canonical?: boolean;
+  /** HTTP path segment for this action, derived in enrichment from the
+   * surfacing api's `urlStyle` (D-URLSTYLE).  `undefined` ⇒ a canonical
+   * action ⇒ the bare collection / canonical-id URL.  Otherwise the
+   * action `name` (`urlStyle: literal`) or its plural (`resource`).
+   * Consumed by Phase-3 route emitters; no backend reads it yet. */
+  routeSlug?: string;
   visibility: "public" | "private";
   params: ParamIR[];
   statements: StmtIR[];
@@ -1070,6 +1076,11 @@ export interface ApiIR {
   name: string;
   /** Source module the api derives its surface from. */
   sourceModule: string;
+  /** URL slug style for lifecycle actions surfaced by this api.
+   *  `"literal"` (default) emits the action name verbatim; `"resource"`
+   *  pluralises it.  Drives `OperationIR.routeSlug` derivation in
+   *  enrichment (D-URLSTYLE / lifecycle-operations.md Phase 2). */
+  urlStyle: "literal" | "resource";
 }
 
 /** UI api parameter — local handle + which api it expects. */
