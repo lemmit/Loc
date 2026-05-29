@@ -21,7 +21,6 @@ import {
   type WirePrimitive,
   wireTypeInfo,
 } from "../../ir/types/wire-types.js";
-import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   camelId,
   opCreate,
@@ -32,6 +31,7 @@ import {
   opView,
   opWorkflow,
 } from "../../ir/util/openapi-ids.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { ApiRoute } from "./api-emit.js";
 
 // ---------------------------------------------------------------------------

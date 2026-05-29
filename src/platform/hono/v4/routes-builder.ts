@@ -32,12 +32,6 @@ import {
   type WirePrimitive,
   wireTypeInfo,
 } from "../../../ir/types/wire-types.js";
-import { opHasProvSite } from "../../../ir/util/prov-id.js";
-import type {
-  ClassifyContext,
-  SingleFieldPattern,
-} from "../../../ir/validate/invariant-classify.js";
-import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import {
   camelId,
   opCreate,
@@ -46,6 +40,12 @@ import {
   opList,
   opOperation,
 } from "../../../ir/util/openapi-ids.js";
+import { opHasProvSite } from "../../../ir/util/prov-id.js";
+import type {
+  ClassifyContext,
+  SingleFieldPattern,
+} from "../../../ir/validate/invariant-classify.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Hono routes file with OpenAPI annotations.

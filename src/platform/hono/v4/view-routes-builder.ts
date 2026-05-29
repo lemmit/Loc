@@ -7,8 +7,8 @@ import type {
   ViewIR,
 } from "../../../ir/types/loom-ir.js";
 import { viewUsesCurrentUser } from "../../../ir/types/loom-ir.js";
-import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { camelId, opView } from "../../../ir/util/openapi-ids.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Hono view routes emission.

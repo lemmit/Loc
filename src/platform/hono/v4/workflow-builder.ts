@@ -7,8 +7,8 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
-import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { camelId, opWorkflow } from "../../../ir/util/openapi-ids.js";
+import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
