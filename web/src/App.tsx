@@ -183,7 +183,7 @@ export default function App(): JSX.Element {
   // yet), so the VFS / generate / write call sites get the exact
   // same path string they did before.  Phase 2b2 adds the Files
   // panel that flips the active path.
-  const sources = useWorkspaceSources(workspace.vfs);
+  const sources = useWorkspaceSources(workspace.store);
   const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
   const [buildClientReady, setBuildClientReady] = useState(false);
@@ -340,8 +340,32 @@ export default function App(): JSX.Element {
     lspClientRef.current = new LoomLspClient();
   }
 
-  const workspaceForSeedRef = useRef(workspace);
-  workspaceForSeedRef.current = workspace;
+  // Resident `VfsEntry[]` projection of `/workspace`, kept fresh from
+  // the async git store.  The build-worker seed callback is sync (it
+  // fires on worker spawn/respawn over `postMessage`), so it reads this
+  // precomputed snapshot rather than awaiting git — the RPC boundary
+  // collapses the async store into a sync payload.  This is a derived
+  // projection, not a second source of truth.
+  const seedEntriesRef = useRef<VfsEntry[]>([]);
+  useEffect(() => {
+    const store = workspace.store;
+    if (!store) {
+      seedEntriesRef.current = [];
+      return;
+    }
+    let cancelled = false;
+    const refresh = (): void => {
+      void store.snapshotEntries("/workspace").then((entries) => {
+        if (!cancelled) seedEntriesRef.current = entries;
+      });
+    };
+    refresh();
+    const unsubscribe = store.subscribe("/workspace", refresh);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [workspace.store]);
 
   // Push every workspace `.ddd` source into the LSP worker as a Monaco
   // model. Without this, only the currently-edited file reaches the LSP via
@@ -360,21 +384,10 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     const build = new LoomBuildClient({
-      seedWorkspace: () => {
-        const vfs = workspaceForSeedRef.current.vfs;
-        if (!vfs) return [];
-        // Snapshot the workspace as tagged entries so directory
-        // entries (created via `mkdir`, empty by design) survive
-        // the worker respawn — the previous `list().flatMap(read)`
-        // shape silently dropped them by filtering out
-        // `read() === undefined`.
-        const out = [];
-        for (const [path, entry] of vfs.snapshot()) {
-          if (!path.startsWith("/workspace/")) continue;
-          out.push(entry);
-        }
-        return out;
-      },
+      // Sync seed: replay the resident `/workspace` projection into the
+      // freshly-spawned worker.  Tagged entries preserve empty dir
+      // entries (created via `mkdir`) across a respawn.
+      seedWorkspace: () => seedEntriesRef.current,
     });
     // The runtime engine encapsulates the bundle + runtime workers
     // behind the RuntimeEngine seam.  `onLost` maps 1:1 to the old
@@ -462,21 +475,27 @@ export default function App(): JSX.Element {
   // both the IDB-backed workspace VFS and the build client are ready.
   useEffect(() => {
     if (!workspace.loaded || !buildClientReady) return;
-    const vfs = workspace.vfs;
+    const store = workspace.store;
     const client = buildClientRef.current;
-    if (!vfs || !client) return;
-    const designPaths = vfs.list("/workspace/design/");
-    if (designPaths.length === 0) return;
-    // Use tagged VfsEntry shape — `list` is files-only so every
-    // path here is a file, but the wire protocol expects the
-    // discriminated union.
-    const entries: VfsEntry[] = [];
-    for (const path of designPaths) {
-      const content = vfs.read(path);
-      if (content != null) entries.push({ kind: "file", path, content });
-    }
-    void client.vfsWrite(entries);
-  }, [workspace.loaded, workspace.vfs, buildClientReady]);
+    if (!store || !client) return;
+    let cancelled = false;
+    void (async () => {
+      const designPaths = await store.list("/workspace/design/");
+      if (designPaths.length === 0 || cancelled) return;
+      // Use tagged VfsEntry shape — `list` is files-only so every
+      // path here is a file, but the wire protocol expects the
+      // discriminated union.
+      const entries: VfsEntry[] = [];
+      for (const path of designPaths) {
+        const content = await store.readFile(path);
+        if (content != null) entries.push({ kind: "file", path, content });
+      }
+      if (!cancelled && entries.length > 0) await client.vfsWrite(entries);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace.loaded, workspace.store, buildClientReady]);
 
   // Sync `sourceRef` whenever the active file's initial content
   // changes — happens both on example switch AND on multi-file tab

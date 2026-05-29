@@ -16,11 +16,16 @@
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Vfs } from "../vfs/types.js";
+import type { GitStore } from "./git/index.js";
 import {
   WorkspaceSourcesController,
   type WorkspaceSourcesSnapshot,
 } from "./workspace-sources.js";
+
+function reportWorkspaceError(err: unknown): void {
+  // eslint-disable-next-line no-console
+  console.error("workspace operation failed:", err);
+}
 
 export interface WorkspaceSourcesState extends WorkspaceSourcesSnapshot {}
 
@@ -50,11 +55,11 @@ export interface WorkspaceSourcesApi extends WorkspaceSourcesState {
   controller: WorkspaceSourcesController;
 }
 
-export function useWorkspaceSources(vfs: Vfs | null): WorkspaceSourcesApi {
-  // Construct a fresh controller whenever the VFS identity changes
-  // (typically: null → IdbVfs at boot).  The cleanup tears down its
-  // VFS subscription so we don't leak when the parent unmounts.
-  const controller = useMemo(() => new WorkspaceSourcesController(vfs), [vfs]);
+export function useWorkspaceSources(store: GitStore | null): WorkspaceSourcesApi {
+  // Construct a fresh controller whenever the store identity changes
+  // (typically: null → GitStore at boot).  The cleanup tears down its
+  // store subscription so we don't leak when the parent unmounts.
+  const controller = useMemo(() => new WorkspaceSourcesController(store), [store]);
   useEffect(() => () => controller.dispose(), [controller]);
 
   const [snapshot, setSnapshot] = useState<WorkspaceSourcesSnapshot>(() =>
@@ -66,21 +71,36 @@ export function useWorkspaceSources(vfs: Vfs | null): WorkspaceSourcesApi {
     return controller.subscribe(setSnapshot);
   }, [controller]);
 
+  // The controller's mutators are async (they await the git store);
+  // the hook exposes fire-and-forget void wrappers so existing call
+  // sites (autosave, example seed) stay synchronous.  Errors surface
+  // via the console rather than an unhandled rejection.
   const setActivePath = useCallback(
     (path: string) => controller.setActivePath(path),
     [controller],
   );
   const write = useCallback(
-    (path: string, content: string) => controller.write(path, content),
+    (path: string, content: string) => {
+      void controller.write(path, content).catch(reportWorkspaceError);
+    },
     [controller],
   );
-  const del = useCallback((path: string) => controller.delete(path), [controller]);
+  const del = useCallback(
+    (path: string) => {
+      void controller.delete(path).catch(reportWorkspaceError);
+    },
+    [controller],
+  );
   const createEmptyFolder = useCallback(
-    (folder: string) => controller.createEmptyFolder(folder),
+    (folder: string) => {
+      void controller.createEmptyFolder(folder).catch(reportWorkspaceError);
+    },
     [controller],
   );
   const deleteEmptyFolder = useCallback(
-    (folder: string) => controller.deleteEmptyFolder(folder),
+    (folder: string) => {
+      void controller.deleteEmptyFolder(folder).catch(reportWorkspaceError);
+    },
     [controller],
   );
 
