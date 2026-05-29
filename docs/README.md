@@ -30,7 +30,6 @@ These cover a single language feature each.  Each one is self-contained.
 | [`observability.md`](observability.md) | The catalog envelope, per-backend log emission, the catalog extension surface. |
 | [`traceability.md`](traceability.md) | `requirement` / `solution` / `testCase` artefacts and the generated coverage report. |
 | [`conformance.md`](conformance.md) | The cross-generator OpenAPI parity harness — the nine dimensions, strict vs report-only mode. |
-| [`migrations-design.md`](migrations-design.md) | The migrations IR, snapshot diffing, per-backend emission. |
 
 ## Platforms, packs, stacks
 
