@@ -1,11 +1,8 @@
+import { isRelational } from "../ir/source-types.js";
 import type { DataSourceIR, DeployableIR, StorageIR, SystemIR } from "../ir/types/loom-ir.js";
 import { platformOwnsBackend } from "../language/validators/data/platform-rules.js";
 import { lines } from "../util/code-builder.js";
 import { snake } from "../util/naming.js";
-
-// Storage types that support per-context schema namespacing — same
-// set the Phase A emit-side defaulting uses (`resolveDataSourceConfig`).
-const RELATIONAL_STORAGE_TYPES = new Set(["postgres", "mysql", "sqlite", "inMemory"]);
 
 // ---------------------------------------------------------------------------
 // `.loom/datasources.md` — a derived markdown view of how `dataSource`
@@ -163,7 +160,7 @@ function collectRows(
  *  and render as `n/a`. */
 function effectiveSchema(ds: DataSourceIR, st: StorageIR | undefined): string {
   if (ds.schema != null) return ds.schema;
-  if (st && RELATIONAL_STORAGE_TYPES.has(st.type)) return `${snake(ds.contextName)} _(default)_`;
+  if (st && isRelational(st.type)) return `${snake(ds.contextName)} _(default)_`;
   return "n/a";
 }
 
