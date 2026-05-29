@@ -17,6 +17,7 @@ public sealed class OrdersWorkflowsController : ControllerBase
     public OrdersWorkflowsController(IMediator mediator) => _mediator = mediator;
 
     [HttpPost("place_order")]
+    [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<IActionResult> PlaceOrderWorkflow([FromBody] PlaceOrderRequest request)
     {

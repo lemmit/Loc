@@ -113,6 +113,10 @@ export function renderController(
       : [];
     return [
       `    [HttpPost("{id}/${snake(op.name)}")]`,
+      // Declare the success response explicitly — once any
+      // [ProducesResponseType] is present, Swashbuckle stops inferring the
+      // 2xx body from the action signature, so it must be spelled out.
+      "    [ProducesResponseType(204)]",
       ...producesProblem("operation"),
       `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}Request request)`,
       "    {",
@@ -149,8 +153,13 @@ export function renderController(
       f.returnShape === "optional"
         ? "        return result is null ? NotFound() : Ok(result);"
         : "        return Ok(result);";
+    // Non-nullable success type for [ProducesResponseType] (typeof can't
+    // carry a `?` nullable annotation).
+    const successType =
+      f.returnShape === "list" ? `IReadOnlyList<${agg.name}Response>` : `${agg.name}Response`;
     return [
       `    [HttpGet${f.isRoot ? "" : `("${snake(f.name)}")`}]`,
+      `    [ProducesResponseType(typeof(${successType}), 200)]`,
       ...producesProblem(
         f.returnShape === "optional"
           ? "findOptional"
@@ -200,6 +209,7 @@ export function renderController(
       `    public ${className}(IMediator mediator, ILogger<${className}> log) { _mediator = mediator; _log = log; }`,
       "",
       "    [HttpPost]",
+      `    [ProducesResponseType(typeof(Create${agg.name}Response), 201)]`,
       ...producesProblem("create"),
       `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
       "    {",
@@ -219,6 +229,7 @@ export function renderController(
       "    }",
       "",
       '    [HttpGet("{id}")]',
+      `    [ProducesResponseType(typeof(${agg.name}Response), 200)]`,
       ...producesProblem("getById"),
       `    public async Task<ActionResult<${agg.name}Response>> ${actionName(opGetById(agg.name))}([FromRoute] ${shape.idClrType} id)`,
       "    {",

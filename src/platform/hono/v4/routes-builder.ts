@@ -331,7 +331,7 @@ export function buildRoutesFile(
   lines.push(`    async (c) => {`);
   lines.push(`      const { id } = c.req.valid("param");`);
   lines.push(`      const found = await repo.findById(Ids.${agg.name}Id(id));`);
-  lines.push(`      if (!found) return c.json({ error: "not_found" }, 404);`);
+  lines.push(`      if (!found) throw new AggregateNotFoundError("not_found");`);
   if (emitTrace) {
     // toWire isn't trivial — bind once so it's not run twice between
     // Object.keys and c.json.
@@ -673,7 +673,7 @@ function emitFindRoute(
       `    return c.json(result.map((r) => repo.toWire(r)) as z.infer<typeof ${agg.name}Response>[], 200);`,
     );
   } else if (find.returnType.kind === "optional") {
-    out.push(`    if (result == null) return c.json({ error: "not_found" }, 404);`);
+    out.push(`    if (result == null) throw new AggregateNotFoundError("not_found");`);
     if (emitTrace) {
       out.push(`    const wire = repo.toWire(result);`);
       out.push(
