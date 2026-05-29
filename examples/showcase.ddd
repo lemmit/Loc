@@ -429,10 +429,10 @@ system DevPlatform {
     }
 
     // ----- DataSources: per-(context, kind) bindings to physical storages -----
-    dataSource catalogState  { for: Catalog, kind: state, use: primarySql }
-    dataSource catalogCache  { for: Catalog, kind: cache, use: hotCache }
-    dataSource buildsState   { for: Builds,  kind: state, use: primarySql }
-    dataSource peopleState   { for: People,  kind: state, use: primarySql }
+    resource catalogState  { for: Catalog, kind: state, use: primarySql }
+    resource catalogCache  { for: Catalog, kind: cache, use: hotCache }
+    resource buildsState   { for: Builds,  kind: state, use: primarySql }
+    resource peopleState   { for: People,  kind: state, use: primarySql }
 
     // ----- Backend deployables (same contexts for OpenAPI parity) -----
     deployable dotnetApi {

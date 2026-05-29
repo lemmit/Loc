@@ -81,7 +81,7 @@ describe("examples/acme.ddd — explicit architecture migration", () => {
     const api = sys.deployables.find((d) => d.name === "api")!;
     expect(api).toBeDefined();
     expect(api.serves.sort()).toEqual(["CatalogApi", "CustomerMgmtApi", "SalesApi"]);
-    // Every state-kind dataSource the api lists points at primarySql.
+    // Every state-kind resource the api lists points at primarySql.
     const dataSources = api.dataSourceNames
       .map((n) => sys.dataSources.find((d) => d.name === n))
       .filter((d): d is NonNullable<typeof d> => d != null);

@@ -336,9 +336,54 @@ function renderDockerCompose(sys: SystemIR): string {
     lines.push(...renderDeployableService(d, sys).map((l) => `  ${l}`));
     lines.push("");
   }
+  // Storage sidecar services for the infrastructure kinds that need a
+  // running dev container (object stores, queues).  Gated to the new
+  // technologies so postgres-only / pre-Phase-2 models render byte-
+  // identically; restApi and the relational/cache/search types emit no
+  // sidecar here.
+  const sidecars = renderStorageSidecars(sys);
+  for (const svc of sidecars.services) {
+    lines.push(...svc.map((l) => `  ${l}`));
+    lines.push("");
+  }
   lines.push("volumes:");
   lines.push("  pgdata: {}");
+  for (const v of sidecars.volumes) lines.push(`  ${v}: {}`);
   return lines.join("\n") + "\n";
+}
+
+/** Dev-compose sidecar services derived from `sys.storages`.  One per
+ *  object-store / queue storage, named by its slug; returns the service
+ *  blocks (each a string[] of lines) and any named volumes they need. */
+function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: string[] } {
+  const services: string[][] = [];
+  const volumes: string[] = [];
+  for (const s of sys.storages) {
+    const slug = serviceSlug(s.name);
+    if (s.type === "awsS3") {
+      const volume = `${slug}-data`;
+      volumes.push(volume);
+      services.push([
+        `${slug}:`,
+        `  image: minio/minio:latest`,
+        `  command: server /data --console-address ":9001"`,
+        `  environment:`,
+        `    MINIO_ROOT_USER: minioadmin`,
+        `    MINIO_ROOT_PASSWORD: minioadmin`,
+        `  volumes:`,
+        `    - ${volume}:/data`,
+      ]);
+    } else if (s.type === "rabbitmq") {
+      services.push([
+        `${slug}:`,
+        `  image: rabbitmq:3-management`,
+        `  environment:`,
+        `    RABBITMQ_DEFAULT_USER: guest`,
+        `    RABBITMQ_DEFAULT_PASS: guest`,
+      ]);
+    }
+  }
+  return { services, volumes };
 }
 
 /** Postgres `docker-entrypoint-initdb.d` script: one DATABASE per

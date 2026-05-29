@@ -33,7 +33,7 @@ system Roster {
   api RosterApi from Roster
   ui RosterAdmin with scaffold(subdomains: [Roster]) { }
   storage primary { type: postgres }
-  dataSource rosterState { for: Roster, kind: state, use: primary }
+  resource rosterState { for: Roster, kind: state, use: primary }
   deployable phoenixApp {
     platform: phoenixLiveView
     contexts: [Roster]

@@ -60,7 +60,7 @@ system ActionShowcase {
   }
 
   storage primary { type: postgres }
-  dataSource salesState { for: Sales, kind: state, use: primary }
+  resource salesState { for: Sales, kind: state, use: primary }
 
   deployable api {
     platform: hono

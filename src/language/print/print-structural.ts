@@ -137,8 +137,8 @@ export function printStructural(node: AstNode): string {
       return printApi(node as Api);
     case "Storage":
       return printStorage(node as Storage);
-    case "DataSource":
-      return printDataSource(node as import("../generated/ast.js").DataSource);
+    case "Resource":
+      return printDataSource(node as import("../generated/ast.js").Resource);
     case "Layout":
       return printLayout(node as Layout);
     case "BoundedContext":
@@ -263,10 +263,31 @@ function printStorage(node: Storage): string {
   const items: string[] = [`type: ${node.type}`];
   if (node.instance) items.push(`instance: ${node.instance}`);
   if (node.connection) items.push(`connection: ${printConnectionSource(node.connection)}`);
+  const cfg = printConfigItem(node.config);
+  if (cfg) items.push(cfg);
   return block(`storage ${node.name}`, items);
 }
 
-function printDataSource(node: import("../generated/ast.js").DataSource): string {
+function printConfigItem(
+  config: readonly import("../generated/ast.js").ConfigEntry[],
+): string | undefined {
+  if (!config.length) return undefined;
+  const pairs = config.map((e) => `${e.key}: ${printConfigValue(e.value)}`).join(", ");
+  return `config: { ${pairs} }`;
+}
+
+function printConfigValue(v: import("../generated/ast.js").ConfigValue): string {
+  switch (v.$type) {
+    case "StringConfigValue":
+      return JSON.stringify(v.value);
+    case "IntConfigValue":
+      return String(v.value);
+    case "BoolConfigValue":
+      return v.value;
+  }
+}
+
+function printDataSource(node: import("../generated/ast.js").Resource): string {
   const items: string[] = [];
   if (node.context) items.push(`for: ${node.context.$refText}`);
   if (node.kind) items.push(`kind: ${node.kind}`);
@@ -279,7 +300,9 @@ function printDataSource(node: import("../generated/ast.js").DataSource): string
   if (typeof node.retain === "number") items.push(`retain: ${node.retain}`);
   if (node.isolationLevel) items.push(`isolationLevel: ${node.isolationLevel}`);
   if (node.readonly) items.push(`readonly: true`);
-  return block(`dataSource ${node.name}`, items);
+  const cfg = printConfigItem(node.config);
+  if (cfg) items.push(cfg);
+  return block(`resource ${node.name}`, items);
 }
 
 function printConnectionSource(node: import("../generated/ast.js").ConnectionSource): string {

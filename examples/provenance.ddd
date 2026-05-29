@@ -55,7 +55,7 @@ system OrderingSystem {
   }
 
   storage primary { type: postgres }
-  dataSource orderingState { for: Ordering, kind: state, use: primary }
+  resource orderingState { for: Ordering, kind: state, use: primary }
   deployable api {
     platform: hono
     contexts: [Ordering]

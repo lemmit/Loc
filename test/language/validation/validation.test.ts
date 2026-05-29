@@ -996,18 +996,18 @@ describe("validation", () => {
   // and per-knob compatibility.  See
   // src/language/validators/datasource.ts.
   // -------------------------------------------------------------------
-  describe("dataSource configuration", () => {
+  describe("resource configuration", () => {
     it("rejects kind: cache backed by a relational storage", async () => {
       const { errors } = await parse(`
         system S {
           subdomain M { context C { aggregate A { x: int } } }
           storage pg { type: postgres }
-          dataSource cCache { for: C, kind: cache, use: pg }
+          resource cCache { for: C, kind: cache, use: pg }
         }
       `);
       expect(
         errors.some((e) =>
-          /dataSource 'cCache' kind 'cache' is incompatible with storage 'pg' of type 'postgres'/.test(
+          /resource 'cCache' kind 'cache' is incompatible with storage 'pg' of type 'postgres'/.test(
             e,
           ),
         ),
@@ -1020,14 +1020,12 @@ describe("validation", () => {
         system S {
           subdomain M { context C { aggregate A { x: int } } }
           storage r { type: redis }
-          dataSource cState { for: C, kind: state, use: r }
+          resource cState { for: C, kind: state, use: r }
         }
       `);
       expect(
         errors.some((e) =>
-          /dataSource 'cState' kind 'state' is incompatible with storage 'r' of type 'redis'/.test(
-            e,
-          ),
+          /resource 'cState' kind 'state' is incompatible with storage 'r' of type 'redis'/.test(e),
         ),
         errors.join("\n"),
       ).toBe(true);
@@ -1039,8 +1037,8 @@ describe("validation", () => {
           subdomain M { context C { aggregate A { x: int } } }
           storage pg { type: postgres }
           storage r { type: redis }
-          dataSource cState { for: C, kind: state, use: pg }
-          dataSource cCache { for: C, kind: cache, use: r, ttl: 60 }
+          resource cState { for: C, kind: state, use: pg }
+          resource cCache { for: C, kind: cache, use: r, ttl: 60 }
         }
       `);
       expect(errors.filter((e) => /dataSource/.test(e))).toEqual([]);
@@ -1051,11 +1049,11 @@ describe("validation", () => {
         system S {
           subdomain M { context C { aggregate A { x: int } } }
           storage pg { type: postgres }
-          dataSource cState { for: C, kind: state, use: pg, ttl: 60 }
+          resource cState { for: C, kind: state, use: pg, ttl: 60 }
         }
       `);
       expect(
-        errors.some((e) => /dataSource 'cState': 'ttl' is only meaningful on kind: cache/.test(e)),
+        errors.some((e) => /resource 'cState': 'ttl' is only meaningful on kind: cache/.test(e)),
         errors.join("\n"),
       ).toBe(true);
     });
@@ -1065,7 +1063,7 @@ describe("validation", () => {
         system S {
           subdomain M { context C { aggregate A { x: int } } }
           storage pg { type: postgres }
-          dataSource cState { for: C, kind: state, use: pg, every: 100, retain: 5 }
+          resource cState { for: C, kind: state, use: pg, every: 100, retain: 5 }
         }
       `);
       expect(
@@ -1083,12 +1081,12 @@ describe("validation", () => {
         system S {
           subdomain M { context C { aggregate A { x: int } } }
           storage pg { type: postgres }
-          dataSource cState { for: C, kind: state, use: pg, keyPrefix: "x:" }
+          resource cState { for: C, kind: state, use: pg, keyPrefix: "x:" }
         }
       `);
       expect(
         errors.some((e) =>
-          /dataSource 'cState': 'keyPrefix' is only meaningful on a key-value storage/.test(e),
+          /resource 'cState': 'keyPrefix' is only meaningful on a key-value storage/.test(e),
         ),
         errors.join("\n"),
       ).toBe(true);
@@ -1099,7 +1097,7 @@ describe("validation", () => {
         system S {
           subdomain M { context C { aggregate A { x: int } } }
           storage r { type: redis }
-          dataSource cCache {
+          resource cCache {
             for: C, kind: cache, use: r,
             schema: "x", tablePrefix: "p_"
           }
@@ -1120,7 +1118,7 @@ describe("validation", () => {
         system S {
           subdomain M { context C { aggregate A { x: int } } }
           storage r { type: redis }
-          dataSource cCache {
+          resource cCache {
             for: C, kind: cache, use: r,
             isolationLevel: serializable
           }
@@ -1139,23 +1137,23 @@ describe("validation", () => {
             aggregate A persistedAs(eventLog) { x: int }
           } }
           storage pg { type: postgres }
-          dataSource cLog { for: C, kind: eventLog, use: pg, every: 100, retain: 5 }
+          resource cLog { for: C, kind: eventLog, use: pg, every: 100, retain: 5 }
         }
       `);
       expect(errors.filter((e) => /dataSource/.test(e))).toEqual([]);
     });
 
-    it("rejects duplicate dataSource names within a system", async () => {
+    it("rejects duplicate resource names within a system", async () => {
       const { errors } = await parse(`
         system S {
           subdomain M { context C { aggregate A { x: int } } }
           storage pg { type: postgres }
-          dataSource cState { for: C, kind: state, use: pg }
-          dataSource cState { for: C, kind: state, use: pg }
+          resource cState { for: C, kind: state, use: pg }
+          resource cState { for: C, kind: state, use: pg }
         }
       `);
       expect(
-        errors.some((e) => /Duplicate dataSource 'cState'/.test(e)),
+        errors.some((e) => /Duplicate resource 'cState'/.test(e)),
         errors.join("\n"),
       ).toBe(true);
     });
@@ -1213,7 +1211,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       system S {
         subdomain M { context T { aggregate Order { customerId: string } } }
         storage pg { type: postgres }
-        dataSource tState { for: T, kind: state, use: pg }
+        resource tState { for: T, kind: state, use: pg }
         deployable api {
           platform: hono, contexts: [T], dataSources: [tState], port: 3000
         }
@@ -1565,7 +1563,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           }
         }
         storage pg { type: postgres }
-        dataSource tState { for: T, kind: state, use: pg }
+        resource tState { for: T, kind: state, use: pg }
         deployable api {
           platform: hono, contexts: [T], dataSources: [tState], port: 3000
         }
@@ -2089,7 +2087,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           }
         }
         storage pg { type: postgres }
-        dataSource tState { for: T, kind: state, use: pg }
+        resource tState { for: T, kind: state, use: pg }
         deployable api {
           platform: dotnet, contexts: [T], dataSources: [tState],
           port: 8080, auth: required
@@ -2419,8 +2417,8 @@ describe("Loom IR validation (post-lowering)", async () => {
   });
 
   // -------------------------------------------------------------------
-  // dataSource coverage — every backend deployable must declare a
-  // matching dataSource per (hosted-context, persistenceStrategy→kind)
+  // resource coverage — every backend deployable must declare a
+  // matching resource per (hosted-context, persistenceStrategy→kind)
   // pair.  See validateDataSourceCoverage in src/ir/validate/validate.ts.
   // -------------------------------------------------------------------
 
@@ -2450,7 +2448,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           aggregate Invoice persistedAs(eventLog) { amount: int }
         } }
         storage pg { type: postgres }
-        dataSource cState { for: C, kind: state, use: pg }
+        resource cState { for: C, kind: state, use: pg }
         deployable api {
           platform: hono, contexts: [C], dataSources: [cState], port: 3000
         }
@@ -2473,7 +2471,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
-        dataSource cState { for: C, kind: state, use: pg }
+        resource cState { for: C, kind: state, use: pg }
         deployable api {
           platform: hono, contexts: [C], dataSources: [cState], port: 3000
         }
@@ -2488,7 +2486,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
-        dataSource cState { for: C, kind: state, use: pg }
+        resource cState { for: C, kind: state, use: pg }
         deployable api {
           platform: hono, contexts: [C], dataSources: [cState], port: 3000
         }
@@ -2511,7 +2509,7 @@ describe("Loom IR validation (post-lowering)", async () => {
   });
 
   // -------------------------------------------------------------------
-  // Inverse of the coverage rule: a dataSource listed on a deployable
+  // Inverse of the coverage rule: a resource listed on a deployable
   // that doesn't match any aggregate in the hosted contexts is dead
   // config.  Emitted as a warning (not error) because it may stage a
   // binding for an aggregate the user is about to add.
@@ -2522,8 +2520,8 @@ describe("Loom IR validation (post-lowering)", async () => {
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
-        dataSource cState { for: C, kind: state, use: pg }
-        dataSource cLog   { for: C, kind: eventLog, use: pg }
+        resource cState { for: C, kind: state, use: pg }
+        resource cLog   { for: C, kind: eventLog, use: pg }
         deployable api {
           platform: hono, contexts: [C],
           dataSources: [cState, cLog], port: 3000
@@ -2534,7 +2532,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(
       warnings.some(
         (d) =>
-          /lists dataSource 'cLog' \(kind: eventLog\)/.test(d.message) &&
+          /lists resource 'cLog' \(kind: eventLog\)/.test(d.message) &&
           /no aggregate is persistedAs\(eventLog\)/.test(d.message),
       ),
       JSON.stringify(warnings),
@@ -2548,8 +2546,8 @@ describe("Loom IR validation (post-lowering)", async () => {
           aggregate A persistedAs(eventLog) { x: int }
         } }
         storage pg { type: postgres }
-        dataSource cState { for: C, kind: state, use: pg }
-        dataSource cLog   { for: C, kind: eventLog, use: pg }
+        resource cState { for: C, kind: state, use: pg }
+        resource cLog   { for: C, kind: eventLog, use: pg }
         deployable api {
           platform: hono, contexts: [C],
           dataSources: [cState, cLog], port: 3000
@@ -2560,7 +2558,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(
       warnings.some(
         (d) =>
-          /lists dataSource 'cState' \(kind: state\)/.test(d.message) &&
+          /lists resource 'cState' \(kind: state\)/.test(d.message) &&
           /every aggregate is persistedAs\(eventLog\)/.test(d.message),
       ),
       JSON.stringify(warnings),
@@ -2572,8 +2570,8 @@ describe("Loom IR validation (post-lowering)", async () => {
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
-        dataSource cState { for: C, kind: state, use: pg }
-        dataSource cSnap  { for: C, kind: snapshot, use: pg }
+        resource cState { for: C, kind: state, use: pg }
+        resource cSnap  { for: C, kind: snapshot, use: pg }
         deployable api {
           platform: hono, contexts: [C],
           dataSources: [cState, cSnap], port: 3000
@@ -2584,7 +2582,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(
       warnings.some(
         (d) =>
-          /lists dataSource 'cSnap' \(kind: snapshot\)/.test(d.message) &&
+          /lists resource 'cSnap' \(kind: snapshot\)/.test(d.message) &&
           /no aggregate is persistedAs\(eventLog\)/.test(d.message),
       ),
       JSON.stringify(warnings),
@@ -2597,9 +2595,9 @@ describe("Loom IR validation (post-lowering)", async () => {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
         storage r  { type: redis }
-        dataSource cState   { for: C, kind: state, use: pg }
-        dataSource cCache   { for: C, kind: cache, use: r }
-        dataSource cReplica { for: C, kind: replica, use: pg }
+        resource cState   { for: C, kind: state, use: pg }
+        resource cCache   { for: C, kind: cache, use: r }
+        resource cReplica { for: C, kind: replica, use: pg }
         deployable api {
           platform: hono, contexts: [C],
           dataSources: [cState, cCache, cReplica], port: 3000
@@ -2613,7 +2611,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     ).toEqual([]);
   });
 
-  it("does NOT warn when every listed dataSource matches a hosted aggregate", async () => {
+  it("does NOT warn when every listed resource matches a hosted aggregate", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context C {
@@ -2621,8 +2619,8 @@ describe("Loom IR validation (post-lowering)", async () => {
           aggregate B persistedAs(eventLog) { y: int }
         } }
         storage pg { type: postgres }
-        dataSource cState { for: C, kind: state, use: pg }
-        dataSource cLog   { for: C, kind: eventLog, use: pg }
+        resource cState { for: C, kind: state, use: pg }
+        resource cLog   { for: C, kind: eventLog, use: pg }
         deployable api {
           platform: hono, contexts: [C],
           dataSources: [cState, cLog], port: 3000
@@ -2646,8 +2644,8 @@ describe("Loom IR validation (post-lowering)", async () => {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
         storage r  { type: redis }
-        dataSource cState { for: C, kind: state, use: pg }
-        dataSource cCache { for: C, kind: cache, use: r, ttl: 60 }
+        resource cState { for: C, kind: state, use: pg }
+        resource cCache { for: C, kind: cache, use: r, ttl: 60 }
         deployable api {
           platform: hono, contexts: [C],
           dataSources: [cState, cCache], port: 3000
@@ -2658,7 +2656,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(
       warnings.some(
         (d) =>
-          /dataSource 'cCache' sets 'ttl'/.test(d.message) &&
+          /resource 'cCache' sets 'ttl'/.test(d.message) &&
           /no Redis-backed cache adapter is implemented yet/.test(d.message),
       ),
       JSON.stringify(warnings),
@@ -2672,7 +2670,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           aggregate A persistedAs(eventLog) { x: int }
         } }
         storage pg { type: postgres }
-        dataSource cLog { for: C, kind: eventLog, use: pg, every: 100, retain: 5 }
+        resource cLog { for: C, kind: eventLog, use: pg, every: 100, retain: 5 }
         deployable api {
           platform: hono, contexts: [C],
           dataSources: [cLog], port: 3000
@@ -2681,21 +2679,21 @@ describe("Loom IR validation (post-lowering)", async () => {
     `);
     const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
     expect(
-      warnings.some((d) => /dataSource 'cLog' sets 'every'/.test(d.message)),
+      warnings.some((d) => /resource 'cLog' sets 'every'/.test(d.message)),
       JSON.stringify(warnings),
     ).toBe(true);
     expect(
-      warnings.some((d) => /dataSource 'cLog' sets 'retain'/.test(d.message)),
+      warnings.some((d) => /resource 'cLog' sets 'retain'/.test(d.message)),
       JSON.stringify(warnings),
     ).toBe(true);
   });
 
-  it("does NOT warn when 'isolationLevel' is set on a kind: state dataSource (now wired through resolveWorkflowIsolation)", async () => {
+  it("does NOT warn when 'isolationLevel' is set on a kind: state resource (now wired through resolveWorkflowIsolation)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
-        dataSource cState {
+        resource cState {
           for: C, kind: state, use: pg,
           isolationLevel: serializable
         }
@@ -2718,8 +2716,8 @@ describe("Loom IR validation (post-lowering)", async () => {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
         storage r  { type: redis }
-        dataSource cState { for: C, kind: state, use: pg }
-        dataSource cCache { for: C, kind: cache, use: r, keyPrefix: "x:" }
+        resource cState { for: C, kind: state, use: pg }
+        resource cCache { for: C, kind: cache, use: r, keyPrefix: "x:" }
         deployable api {
           platform: hono, contexts: [C],
           dataSources: [cState, cCache], port: 3000
@@ -2728,7 +2726,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     `);
     const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
     expect(
-      warnings.some((d) => /dataSource 'cCache' sets 'keyPrefix'/.test(d.message)),
+      warnings.some((d) => /resource 'cCache' sets 'keyPrefix'/.test(d.message)),
       JSON.stringify(warnings),
     ).toBe(true);
   });
@@ -2738,7 +2736,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
-        dataSource cState {
+        resource cState {
           for: C, kind: state, use: pg,
           schema: "custom", tablePrefix: "p_"
         }

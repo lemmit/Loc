@@ -1,13 +1,17 @@
 import { platformOwnsBackend } from "../../language/validators/data/platform-rules.js";
 import { allPlatforms, platformFor } from "../../platform/registry.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
+import { capabilitiesFor, configSchemaFor, supportsSurfaceKind } from "../source-types.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  ConfigEntryIR,
+  ConfigValueIR,
   DataSourceIR,
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedLoomModel,
+  EnrichedSystemIR,
   ExprIR,
   SubdomainIR,
   SystemIR,
@@ -54,6 +58,8 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
     validateDataSourceCoverage(sys, diags);
+    validateNeedCapabilities(sys, diags);
+    validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuth(sys, diags);
@@ -883,7 +889,7 @@ function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): voi
       diags.push({
         severity: "warning",
         message:
-          `Deployable '${dep.name}' lists dataSource '${ds.name}' (kind: ${ds.kind}) for ` +
+          `Deployable '${dep.name}' lists resource '${ds.name}' (kind: ${ds.kind}) for ` +
           `context '${ds.contextName}', but ${reason}.  This binding routes no data — ` +
           `remove it, or add an aggregate whose persistedAs needs kind: ${ds.kind}.`,
         source: `${sys.name}/${dep.name}`,
@@ -903,6 +909,127 @@ function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): voi
  *    - cache    → needs at least one aggregate of any strategy
  *    - replica  → needs at least one aggregate of any strategy
  */
+// ---------------------------------------------------------------------------
+// Need ⊆ sourceType capability check (RFC §5.3).  For each derived need
+// bound to a resource, the resource's sourceType must offer every
+// capability the need requires.  This is the IR-level invariant the
+// implicit need layer enables; the AST validator already owns the
+// coarser "kind supported by sourceType" check (with editor squiggles),
+// so this only reports a *capability* gap on a kind the sourceType DOES
+// support — avoiding a duplicate diagnostic for a plain kind/type
+// mismatch.  In Phase 1 every supported kind offers all its
+// capabilities, so this is silent for valid models; it becomes load-
+// bearing once kinds carry capabilities a sourceType may partially
+// support.
+// ---------------------------------------------------------------------------
+
+function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagnostic[]): void {
+  const storageType = new Map(sys.storages.map((s) => [s.name, s.type] as const));
+  for (const need of sys.needs) {
+    const resource = sys.dataSources.find(
+      (d) => d.contextName === need.contextName && d.kind === need.kind,
+    );
+    if (!resource) continue; // coverage gaps are reported elsewhere
+    const sourceType = storageType.get(resource.storageName);
+    if (!sourceType) continue; // unresolved `use:` reported elsewhere
+    // Defer to the AST validator for the kind/type mismatch itself.
+    if (!supportsSurfaceKind(sourceType, need.kind)) continue;
+    const offered = capabilitiesFor(sourceType, need.kind);
+    const missing = need.capabilities.filter((c) => !offered.has(c));
+    if (missing.length > 0) {
+      diags.push({
+        severity: "error",
+        message:
+          `resource '${resource.name}' (sourceType '${sourceType}') does not offer ` +
+          `${missing.map((c) => `'${c}'`).join(", ")} required by context ` +
+          `'${need.contextName}' for kind '${need.kind}'.`,
+        source: `${sys.name}/${resource.name}`,
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Generic `config` map validation (RFC §8).  Keys are checked against
+// the sourceType's registry config schema: unknown keys warn (forward-
+// compatible), wrong-typed values error, and required keys missing from
+// a physical `storage` error.  Resource-level config is supplemental, so
+// the required-key check applies only to the storage declaration.
+// ---------------------------------------------------------------------------
+
+function validateResourceConfig(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const storageType = new Map(sys.storages.map((s) => [s.name, s.type] as const));
+  for (const s of sys.storages) {
+    checkConfigBlock(s.config, s.type, `storage '${s.name}'`, true, sys.name, diags);
+  }
+  for (const r of sys.dataSources) {
+    const sourceType = storageType.get(r.storageName);
+    if (!sourceType) continue;
+    checkConfigBlock(r.config, sourceType, `resource '${r.name}'`, false, sys.name, diags);
+  }
+}
+
+function checkConfigBlock(
+  config: readonly ConfigEntryIR[] | undefined,
+  sourceType: string,
+  label: string,
+  checkRequired: boolean,
+  sysName: string,
+  diags: LoomDiagnostic[],
+): void {
+  const schema = configSchemaFor(sourceType);
+  const byName = new Map(schema.map((k) => [k.name, k] as const));
+  const present = new Set<string>();
+  for (const entry of config ?? []) {
+    present.add(entry.key);
+    const spec = byName.get(entry.key);
+    if (!spec) {
+      diags.push({
+        severity: "warning",
+        message: `${label}: config key '${entry.key}' is not recognised by sourceType '${sourceType}' — it will be ignored.`,
+        source: `${sysName}/${label}`,
+      });
+      continue;
+    }
+    if (!configValueMatchesType(entry.value, spec)) {
+      const expected =
+        spec.type === "enum" && spec.values ? `one of ${spec.values.join(", ")}` : spec.type;
+      diags.push({
+        severity: "error",
+        message: `${label}: config key '${entry.key}' expects ${expected}.`,
+        source: `${sysName}/${label}`,
+      });
+    }
+  }
+  if (checkRequired) {
+    for (const spec of schema) {
+      if (spec.required && !present.has(spec.name)) {
+        diags.push({
+          severity: "error",
+          message: `${label}: required config key '${spec.name}' (sourceType '${sourceType}') is missing.`,
+          source: `${sysName}/${label}`,
+        });
+      }
+    }
+  }
+}
+
+function configValueMatchesType(
+  value: ConfigValueIR,
+  spec: { type: string; values?: readonly string[] },
+): boolean {
+  switch (spec.type) {
+    case "number":
+      return value.kind === "int";
+    case "boolean":
+      return value.kind === "bool";
+    case "enum":
+      return value.kind === "string" && (spec.values?.includes(value.value) ?? false);
+    default: // string | secret
+      return value.kind === "string";
+  }
+}
+
 function coverageGapReason(kind: string, ctx: BoundedContextIR): string | undefined {
   const aggs = ctx.aggregates;
   if (aggs.length === 0) return "the context declares no aggregates";
@@ -987,7 +1114,7 @@ function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]):
       diags.push({
         severity: "warning",
         message:
-          `dataSource '${ds.name}' sets '${knob.property}', but ${knob.description}.  ` +
+          `resource '${ds.name}' sets '${knob.property}', but ${knob.description}.  ` +
           `The value is accepted by validation and persisted in the IR but no current ` +
           `emitter consumes it — this is a no-op at runtime.`,
         source: `${sys.name}/${ds.name}`,

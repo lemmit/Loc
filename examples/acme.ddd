@@ -264,9 +264,9 @@ system Acme {
     api CustomerMgmtApi from CustomerMgmt
 
     storage primarySql { type: postgres }
-    dataSource productsState  { for: Products, kind: state, use: primarySql }
-    dataSource ordersState    { for: Orders, kind: state, use: primarySql }
-    dataSource customersState { for: Customers, kind: state, use: primarySql }
+    resource productsState  { for: Products, kind: state, use: primarySql }
+    resource ordersState    { for: Orders, kind: state, use: primarySql }
+    resource customersState { for: Customers, kind: state, use: primarySql }
 
     // Public API on .NET — hosts every bounded context behind one EF
     // DbContext, exposes the full HTTP surface for the platform.
