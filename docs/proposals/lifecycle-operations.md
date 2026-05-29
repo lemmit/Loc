@@ -1,6 +1,22 @@
 # Aggregate lifecycle operations — typed actions on aggregates
 
-> Status: design agreed in conversation, not yet implemented. Companion to [`loom-forms.md`](./loom-forms.md) (form generation depends on this proposal). Supersedes the implicit "API generators walk `aggregate.fields` to synthesise the create contract" behaviour in today's emitters.
+> Status: **Phase 1 shipped** (#722) — `create`/`destroy` keywords,
+> `OperationIR.kind`, the `creates`/`destroys`/`canonical*` IR, and the
+> name-conflict + `this.id`-in-create validators. Companion to
+> [`loom-forms.md`](./loom-forms.md) (form generation depends on this
+> proposal). Supersedes the implicit "API generators walk
+> `aggregate.fields` to synthesise the create contract" behaviour in
+> today's emitters.
+>
+> **Phase 2 (`urlStyle` + `routeSlug`) is superseded by
+> [`lifecycle-url-style.md`](./lifecycle-url-style.md) ([D-URLSTYLE](../decisions.md#d-urlstyle--lifecycle-url-style-on-the-api-body--per-action-routeslug)).**
+> The §"URL conventions" and §"Grammar / IR / generator integration
+> seams" text below assumes a fictional per-aggregate `api … for
+> <Aggregate> { urlStyle }` form; the real grammar is `api … from
+> <Subdomain>`, so `urlStyle` lives on an optional **api body** and
+> `routeSlug` is a per-action `OperationIR` field. Read
+> `lifecycle-url-style.md` for the shipped Phase-2 design; treat the
+> api-shape details below as historical.
 
 ## Problem statement
 
