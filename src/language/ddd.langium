@@ -627,13 +627,33 @@ ValueObject:
 ValueObjectMember:
     Property | DerivedProp | Invariant | FunctionDecl;
 
+// `abstract` base + `extends` subtype + `inheritanceUsing(…)` layout are
+// the aggregate-inheritance surface (aggregate-inheritance.md, I1).  An
+// `abstract` base can never be instantiated, has no repository, and emits
+// no table of its own; `extends <Base>` may only target an `abstract`
+// aggregate.  `inheritanceUsing(…)` is a header paren modifier (D-RENAME,
+// amended by D-DOCUMENT-AXIS §4 — all aggregate config on the header),
+// alongside `persistedAs(…)` / `shape(…)`.
 Aggregate:
-    'aggregate' name=ID ('ids' idKind=IdKind)? ('persistedAs' '(' persistedAs=TruthKind ')')? ('shape' '(' shape=SavingShape ')')? withClause=WithClause? '{'
+    (isAbstract?='abstract')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])? ('ids' idKind=IdKind)? ('persistedAs' '(' persistedAs=TruthKind ')')? ('shape' '(' shape=SavingShape ')')? ('inheritanceUsing' '(' inheritanceUsing=InheritanceLayout ')')? withClause=WithClause? '{'
         members+=AggregateMember*
     '}';
 
 IdKind returns string:
     'guid' | 'int' | 'long' | 'string';
+
+// D-RENAME (amended by D-DOCUMENT-AXIS §4): inheritance table layout — a
+// header paren modifier on aggregates participating in inheritance.
+//   - `sharedTable` — TPH: one table for the whole hierarchy + a `kind`
+//     discriminator column.  `Party id` refs target the single base table.
+//   - `ownTable`    — TPC: one table per concrete; no base table.  Bare
+//     `Party id` refs to such a base are forbidden (FK target ambiguous).
+// Only valid on an `abstract` base or an `extends` subtype.  A
+// `persistedAs(eventLog)` or `shape(document)` concrete of a `sharedTable`
+// base is forced to `ownTable` (D-ES-TPH) — a validator error, so the
+// author writes the forced modifier explicitly.
+InheritanceLayout returns string:
+    'sharedTable' | 'ownTable';
 
 // D-DOCUMENT-AXIS: the aggregate's primary truth kind, a header paren
 // modifier (replaces the former body `persistenceStrategy:` clause).

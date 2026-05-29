@@ -13,6 +13,7 @@ export {
   checkDeployableServes,
   checkDeployableUiCompose,
 } from "./deployable.js";
+export { checkInheritance } from "./inheritance.js";
 export { checkMacroExpansion } from "./macros.js";
 export { checkMatchExpressions, checkMatcherArity, checkMatchesCalls } from "./match.js";
 export {
