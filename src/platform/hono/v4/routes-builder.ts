@@ -472,7 +472,11 @@ function emitOperationRoute(
   emitTrace: boolean,
 ): string[] {
   const aggSlug = snake(plural(agg.name));
-  const opSnake = snake(op.name);
+  // Operation URL segment from the enriched routeSlug (D-URLSTYLE):
+  // op.name under urlStyle:literal, plural(name) under :resource.  The
+  // backend owns the snake-casing convention; identity uses (operationId,
+  // request DTOs, extern handler keys) stay keyed on op.name below.
+  const opSnake = snake(op.routeSlug ?? op.name);
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);

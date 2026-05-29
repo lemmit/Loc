@@ -42,7 +42,7 @@ function producesProblem(kind: OpErrorKind, indent = "    "): string[] {
 interface ControllerShape {
   idClrType: string;
   createCmdArgs: string[];
-  publicOps: Array<{ name: string; cmdArgs: string[]; paramNames: string[] }>;
+  publicOps: Array<{ name: string; routeSlug?: string; cmdArgs: string[]; paramNames: string[] }>;
   finds: Array<{
     name: string;
     isRoot: boolean;
@@ -112,7 +112,7 @@ export function renderController(
         ]
       : [];
     return [
-      `    [HttpPost("{id}/${snake(op.name)}")]`,
+      `    [HttpPost("{id}/${snake(op.routeSlug ?? op.name)}")]`,
       // Declare the success response explicitly — once any
       // [ProducesResponseType] is present, Swashbuckle stops inferring the
       // 2xx body from the action signature, so it must be spelled out.

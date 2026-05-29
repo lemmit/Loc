@@ -209,10 +209,14 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
           action: ":destroy",
         });
         for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+          // URL segment from routeSlug (D-URLSTYLE); the Phoenix action
+          // atom (and the matching controller `def`) stay the op verb so
+          // `post "/cancels" → :cancel → def cancel` under :resource.
           const opSnake = snake(op.name);
+          const opPath = snake(op.routeSlug ?? op.name);
           apiRoutes.push({
             method: "post",
-            path: `/${aggPlural}/:id/${opSnake}`,
+            path: `/${aggPlural}/:id/${opPath}`,
             controller: controllerLocal,
             action: `:${opSnake}`,
           });
@@ -491,9 +495,10 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
   const opActions: string[] = [];
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     const opSnake = snake(op.name);
+    const opPath = snake(op.routeSlug ?? op.name);
     const argReads = op.params.map((p) => `params[${JSON.stringify(snake(p.name))}]`).join(", ");
     const callArgs = argReads.length > 0 ? `id, ${argReads}` : "id";
-    opActions.push(`  @doc "POST /api/${aggPlural}/:id/${opSnake}"
+    opActions.push(`  @doc "POST /api/${aggPlural}/:id/${opPath}"
   def ${opSnake}(conn, %{"id" => id} = params) do
     _ = params
     ${contextModule}.${opSnake}_${aggSnake}!(${callArgs})
