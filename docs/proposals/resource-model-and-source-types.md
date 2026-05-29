@@ -319,23 +319,39 @@ unused.
   `need.capabilities ⊆ sourceType.capabilities` check.
 - No behavior change in emitters for relational/eventLog/cache.
 
-**Phase 2 — New kinds: object store, queue, external API.**
+**Phase 2 — New kinds: object store, queue, external API.** *(model + compose
+delivered; backend client emission deferred — see note.)*
 - Add `awsS3`, `rabbitmq`, `restApi` (and siblings) to the `type:` enumeration and
   the registry; add `objectStore`, `queue`, `api` to the `kind:` enumeration; add
-  their capabilities/interfaces to the registry.
-- Add the generic `config` map on `storage`/`resource` for vendor parameters.
-- Compose integration: emit the corresponding services / connection wiring; at
-  least one backend gains object-store, queue, and external-API client surfaces.
+  their capabilities/interfaces to the registry. ✓
+- Add the generic `config` map on `storage`/`resource` for vendor parameters,
+  validated against the registry schema. ✓
+- Compose integration: emit dev sidecars for the new-kind storages (minio for
+  `awsS3`, `rabbitmq`), gated so existing models stay byte-identical. ✓
 - Validation for the new kind↔sourceType↔capability combinations, driven by the
-  registry.
+  registry. ✓
+- **Deferred — backend client emission.** Emitting object-store / queue /
+  external-API *clients* into a backend depends on a way for domain logic to
+  *consume* a resource (e.g. put a blob, enqueue a job, call an API). That
+  consumption surface is a **workflow-level** concern, designed separately (see
+  Phase 4); emitting clients with no caller would be speculative scaffolding, so it
+  waits on that design. The persistence-adapter emit seam is also not yet wired
+  into real backend output (an in-progress refactor), which the consumption work
+  would build on.
 
-**Phase 3 — Interface selection & capability authoring (optional surface).**
+**Phase 3 — Interface selection & custom-sourceType plugins.**
 - Surface `interface` selection where an operation can choose among multiple valid
   interfaces (e.g. S3 `rest` vs `sdk`).
-- Consider explicit `requires:` authoring on top of the already-threaded need (a
-  future, additive surface).
 - Custom-sourceType plugins via the out-of-tree backend story (registry entries
   contributed by `packages/` discovered at load time).
+- (`requires:` authoring is deferred — the need layer stays implicit.)
+
+**Phase 4 — Workflow-level resource consumption (future, separate design).**
+The surface by which workflows/operations *use* a resource — the caller of the
+deferred Phase-2 clients — is its own design effort and gates backend client
+emission. Once defined, it plugs into the already-threaded `NeedIR` (needs would
+then be derived from actual consumption, not just aggregate persistence) and the
+registry's per-kind interfaces.
 
 ---
 
