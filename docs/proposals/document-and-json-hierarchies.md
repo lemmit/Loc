@@ -423,7 +423,9 @@ adapters, **no new Marten backend** (see below).
 | **A — `json` primitive** | Opaque JSON field type. Per-backend leaf mapping: TS `unknown` / Zod `z.unknown()`, .NET `System.Text.Json.JsonElement`, Phoenix Ash `:map`, Postgres `JSONB` (Drizzle `jsonb`), OpenAPI freeform `object` (wire-spec leaf). Grammar + `PrimitiveName`/`WirePrimitive` + migrations. | `ddd.langium`, `loom-ir.ts`, all 4 generators, `migrations-builder.ts`, `wire-spec.ts`; `test/generator/json-primitive-emission.test.ts` | #703 |
 | **B — `persistedAs(eventLog\|state)`** | Hard-cutover rename of the shipped body `persistenceStrategy: stateBased\|eventSourced` → header paren modifier. Values aligned to the `dataSource` `kind` set, so `resolve-datasource` is now an identity. Adapters / default-menus / `resolve-adapters` updated. **No body-discipline validator** (deferred — owned by the applier feature). | `ddd.langium`, `loom-ir.ts`, `lower.ts`, `resolve-datasource.ts`, `validate.ts`, `print-structural.ts`, all persistence/style adapters; parsing/IR/validation/adapter tests | #711 |
 | **C — `normalised(true\|false)`** | Saving-shape **surface**: aggregate header modifier + `dataSource` `normalised:` knob, threaded through IR + printer, parsed/validated. Added to `UNWIRED_KNOBS` so a `dataSource normalised:` warns "accepted, persisted in IR, but no emitter consumes it yet". | `ddd.langium`, `loom-ir.ts`, `lower.ts`, `print-structural.ts`, `validate.ts`; `test/language/parsing/aggregate-normalised.test.ts` | #713 |
-| **D.1 — backend-neutral document foundation** | `PersistenceAdapter.supportedShapes: SavingShape[]` (efcore advertises `["normalised","document"]`); `ResolvedDataSource.normalised` + `isDocumentShaped(agg, resolved)` per-projection resolver (binding wins, header is default); migrations `(id, data jsonb, version)` document table shape (parts fold into `data`, references ride as id arrays — no part/join tables), binding-aware in `buildMigrations`. Byte-identical for all non-document aggregates. | `_adapters/persistence-surface.ts`, `efcore-persistence.ts`, `ir/util/resolve-datasource.ts`, `system/migrations-builder.ts`; `resolve-datasource.test.ts` (+5), `migrations-builder.test.ts` (+3) | (branch) |
+| **D.1 — backend-neutral document foundation** | `PersistenceAdapter.supportedShapes: SavingShape[]` (efcore advertises `["normalised","document"]`); `ResolvedDataSource.normalised` + `isDocumentShaped(agg, resolved)` per-projection resolver (binding wins, header is default); migrations `(id, data jsonb, version)` document table shape (parts fold into `data`, references ride as id arrays — no part/join tables), binding-aware in `buildMigrations`. Byte-identical for all non-document aggregates. | `_adapters/persistence-surface.ts`, `efcore-persistence.ts`, `ir/util/resolve-datasource.ts`, `system/migrations-builder.ts`; `resolve-datasource.test.ts` (+5), `migrations-builder.test.ts` (+3) | #724 |
+| **D.2 — EF (.NET) document emission** | STJ + persistence-record, domain class untouched (incl. parts). `<Agg>Document` POCO `(Id, Data jsonb, Version)` + EF config; `<Agg>Snapshot`/`<Part>Snapshot` records mirror the entity's C# types (ID record-structs + VO records round-trip natively); `ToSnapshot()`/`FromSnapshot(...)` on the entity (reach private setters + `_<containment>` lists, `AssertInvariants` once over the full tree); document repository (de)serialises `Data`, bumps `Version`, finds eval client-side; DbContext routes to `DbSet<<Agg>Document>`, join tables skipped. **`dotnet-build /warnaserror` green.** | `dotnet/emit/document.ts`, `entity.ts`, `efcore.ts`, `repository.ts`, `dotnet/index.ts`; `examples/document.ddd`; `dotnet-document-emission.test.ts` (+7) | #724 |
+| **D.3-TS — Drizzle (Hono) document emission** | Schema emits `(id, data jsonb, version)` (part/join tables skipped); structural repository (`repository-document-builder.ts`) serialises getters → plain object (`<entity>ToDoc`) and rebuilds via the same `_create({...})` factory (`<entity>FromDoc`); finds eval in-memory (`renderTsExpr` with `this`→`x`); `toWire` reused unchanged. Routed on `isDocumentShaped`. **`tsc + tsup` gate green** (`examples/document.ddd` added). | `typescript/repository-document-builder.ts`, `typescript/emit/schema.ts`, `hono/v4/emit.ts`; `typescript-document-emission.test.ts` (+5) | #724 |
 
 Net: an aggregate header like
 `aggregate ShoppingCart persistedAs(eventLog) normalised(false) { … }`
@@ -442,9 +444,36 @@ emits the document table shape for `normalised(false)`.
   3. **DbContext routing** — document aggregates contribute `DbSet<<Agg>Document>` + the record config (not the normalised entity config); strictly gated on `isDocumentShaped` so normalised output stays byte-identical.
   4. **Serialization + hydration** — extend the entity's nested `State` + `_Create(State)` (currently fields-only) to carry contained parts for document aggregates, so STJ round-trips through `State` (its `init` props are STJ-friendly); emit STJ converters for each `<X>Id` wrapper type. Touches the central `entity.ts` — gate hard on document mode.
   5. **Repository document branch** — `GetByIdAsync`/`SaveAsync`/finds (de)serialize `Data` ↔ domain via `State`, bump `Version`; finds over a document collection eval client-side for v1.
-- **Slice D.3 — Drizzle (TS) + Ash (Phoenix) document emission** — same
-  table shape via `jsonb` column / Ash embedded; reuses D.1's resolver +
-  migrations shape.
+- **Slice D.3 — Drizzle (TS) + Ash (Phoenix) document emission.**
+  - **D.3-TS (Drizzle) — landed.** The Hono counterpart of D.2. Schema
+    emits `(id, data jsonb, version)` for document aggregates (part/join
+    tables skipped); the repository (`repository-document-builder.ts`)
+    is structural — serialises the aggregate's getters to a plain object
+    (`<entity>ToDoc`) and rebuilds through the same `_create({...})`
+    factory the normalised hydrate uses (`<entity>FromDoc`); finds eval
+    in-memory; `toWire` reused unchanged. Routed on `isDocumentShaped`,
+    byte-identical for normalised aggregates. `examples/document.ddd`
+    added to the `tsc + tsup` gate; +5 tests.
+  - **D.3-Phoenix (Ash) — decision pinned, not yet built.** Direction:
+    **Ash embedded resources** — contained parts become
+    `data_layer: :embedded` resources stored inline as jsonb
+    (`attribute :items, {:array, CartItem}`), root scalar fields stay
+    queryable columns. This is the idiomatic Ash shape and keeps all
+    downstream machinery (calculations, relationships, LiveView field
+    access, API, code interfaces) working — unlike a single opaque
+    `:map` blob, which would force a parallel Phoenix path.
+    **Architectural consequence (the open work):** the embedded shape is
+    *root columns + jsonb-per-containment*, which does **not** match the
+    single-`(id, data, version)` table that `buildMigrations`
+    (`src/system/migrations-builder.ts`) derives once and shares across
+    every backend. So D.3-Phoenix requires the document migration
+    derivation to become **backend-aware** (Phoenix: embedded shape;
+    .NET/Drizzle: single-`data`) — a revision to D.1's shared
+    `MigrationsIR`, not just an emitter change. Remaining D.3-Phoenix
+    work: (1) embedded-resource emission in `domain-emit.ts` gated on
+    `isDocumentShaped`; (2) backend-aware document migration shape; (3)
+    a system fixture on the `phoenix-build` (`mix compile
+    --warnings-as-errors`) gate.
 
   Slice D is scoped to **`persistedAs(state)` + `normalised(false)`** — the
   achievable target. The **`eventLog` + document** case (event stream +
