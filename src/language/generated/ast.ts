@@ -84,10 +84,12 @@ export type DddKeywordNames =
     | "description"
     | "design"
     | "destroy"
+    | "document"
     | "dotnet"
     | "e2e"
     | "elastic"
     | "else"
+    | "embedded"
     | "emit"
     | "entitles"
     | "entity"
@@ -143,7 +145,6 @@ export type DddKeywordNames =
     | "money"
     | "mui"
     | "mysql"
-    | "normalised"
     | "now"
     | "null"
     | "objectStore"
@@ -170,6 +171,7 @@ export type DddKeywordNames =
     | "readUncommitted"
     | "readonly"
     | "redis"
+    | "relational"
     | "repeatableRead"
     | "replica"
     | "repository"
@@ -189,6 +191,7 @@ export type DddKeywordNames =
     | "serves"
     | "service"
     | "shadcn"
+    | "shape"
     | "sidebar"
     | "slot"
     | "snapshot"
@@ -252,12 +255,6 @@ export const BaseType = 'BaseType';
 
 export function isBaseType(item: unknown): item is BaseType {
     return reflection.isInstance(item, BaseType);
-}
-
-export type BoolFlag = 'false' | 'true';
-
-export function isBoolFlag(item: unknown): item is BoolFlag {
-    return item === 'true' || item === 'false';
 }
 
 export type BoolLiteral = 'false' | 'true';
@@ -454,6 +451,12 @@ export function isRequirementPropKey(item: unknown): item is RequirementPropKey 
     return item === 'type' || item === 'title' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
+export type SavingShape = 'document' | 'embedded' | 'relational';
+
+export function isSavingShape(item: unknown): item is SavingShape {
+    return item === 'relational' || item === 'embedded' || item === 'document';
+}
+
 export type StampEvent = 'onCreate' | 'onUpdate';
 
 export function isStampEvent(item: unknown): item is StampEvent {
@@ -544,8 +547,8 @@ export interface Aggregate extends AstNode {
     idKind?: IdKind;
     members: Array<AggregateMember>;
     name: string;
-    normalised?: BoolFlag;
     persistedAs?: TruthKind;
+    shape?: SavingShape;
     withClause?: WithClause;
 }
 
@@ -1746,10 +1749,10 @@ export interface Resource extends AstNode {
     keyPrefix?: string;
     kind?: DataSourceKind;
     name: LooseName;
-    normalised?: BoolFlag;
     readonly: boolean;
     retain?: number;
     schema?: string;
+    shape?: SavingShape;
     tablePrefix?: string;
     ttl?: number;
     use?: Reference<Storage>;
@@ -2649,8 +2652,8 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'idKind' },
                         { name: 'members', defaultValue: [] },
                         { name: 'name' },
-                        { name: 'normalised' },
                         { name: 'persistedAs' },
+                        { name: 'shape' },
                         { name: 'withClause' }
                     ]
                 };
@@ -3463,10 +3466,10 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'keyPrefix' },
                         { name: 'kind' },
                         { name: 'name' },
-                        { name: 'normalised' },
                         { name: 'readonly', defaultValue: false },
                         { name: 'retain' },
                         { name: 'schema' },
+                        { name: 'shape' },
                         { name: 'tablePrefix' },
                         { name: 'ttl' },
                         { name: 'use' }

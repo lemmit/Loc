@@ -26,6 +26,7 @@ import type {
   DataSourceKind,
   EnrichedAggregateIR,
   IsolationLevel,
+  SavingShape,
   SystemIR,
   WorkflowIR,
 } from "../types/loom-ir.js";
@@ -74,6 +75,13 @@ export interface ResolvedDataSource {
    *  verbatim, or `snake(context.name)` when DSL omitted it. */
   schema: string;
   tablePrefix?: string;
+  /** Saving shape of this binding (D-DOCUMENT-AXIS, the `shape:` knob).
+   *  When set, overrides the aggregate header's `shape(…)` for this
+   *  projection (see {@link effectiveSavingShape}).  Carried verbatim
+   *  from the binding here; the header fallback is applied by
+   *  {@link effectiveSavingShape}, not folded in, so callers can tell
+   *  "binding said X" from "binding silent". */
+  shape?: SavingShape;
 }
 
 /** Resolve the aggregate's dataSource and fold in implicit defaults.
@@ -94,7 +102,35 @@ export function resolveDataSourceConfig(
     kind: ds.kind,
     schema: ds.schema ?? snake(ctx.name),
     tablePrefix: ds.tablePrefix,
+    shape: ds.shape,
   };
+}
+
+/** Effective saving shape for an aggregate's primary read model.
+ *
+ *  Per-projection resolution (D-DOCUMENT-AXIS §8 Q4): the binding's
+ *  `shape:` governs *that* projection; the aggregate header's `shape(…)`
+ *  is the default; absent everywhere ⇒ `relational`.
+ *
+ *  Pure; `resolved` may be `undefined` (no binding declared) — the
+ *  header still decides, so an aggregate can be `shape(document)`
+ *  without an explicit dataSource. */
+export function effectiveSavingShape(
+  agg: EnrichedAggregateIR,
+  resolved?: Pick<ResolvedDataSource, "shape">,
+): SavingShape {
+  return resolved?.shape ?? agg.savingShape ?? "relational";
+}
+
+/** Convenience predicate — true when the effective shape is the opaque
+ *  whole-aggregate JSON document (`shape(document)`, Marten-style).
+ *  Kept as a thin derivation over {@link effectiveSavingShape} so the
+ *  existing document-emit call sites read naturally. */
+export function isDocumentShaped(
+  agg: EnrichedAggregateIR,
+  resolved?: Pick<ResolvedDataSource, "shape">,
+): boolean {
+  return effectiveSavingShape(agg, resolved) === "document";
 }
 
 /** Resolve the effective transaction isolation level for a workflow.

@@ -1,9 +1,7 @@
-// Slice C — `normalised(true | false)` saving-shape modifier
+// `shape(relational | embedded | document)` saving-shape modifier
 // (D-DOCUMENT-AXIS).  Surface + IR coverage: the aggregate header
-// modifier and the `dataSource` `normalised:` knob parse, and both
-// thread through to `AggregateIR.normalised` / `DataSourceIR.normalised`.
-// The document persistence *emission* is a later slice; here we only
-// assert the flag is accepted and carried.
+// modifier and the `dataSource` `shape:` knob parse, and both thread
+// through to `AggregateIR.savingShape` / `DataSourceIR.shape`.
 
 import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
@@ -28,59 +26,60 @@ function firstAgg(model: Model): Aggregate {
   return ctx?.members.find((m) => m.$type === "Aggregate") as Aggregate;
 }
 
-describe("aggregate normalised(…) saving shape (D-DOCUMENT-AXIS)", () => {
-  it("parses normalised(false) on the header", async () => {
+describe("aggregate shape(…) saving shape (D-DOCUMENT-AXIS)", () => {
+  it("parses shape(document) on the header", async () => {
     const { model, errors } = await parse(`
-      context T { aggregate Cart normalised(false) { name: string } }
+      context T { aggregate Cart shape(document) { name: string } }
     `);
     expect(errors).toEqual([]);
-    expect(firstAgg(model).normalised).toBe("false");
+    expect(firstAgg(model).shape).toBe("document");
   });
 
-  it("parses normalised(true)", async () => {
-    const { model, errors } = await parse(`
-      context T { aggregate Cart normalised(true) { name: string } }
-    `);
-    expect(errors).toEqual([]);
-    expect(firstAgg(model).normalised).toBe("true");
+  it("parses shape(embedded) and shape(relational)", async () => {
+    const e = await parse(`context T { aggregate Cart shape(embedded) { name: string } }`);
+    expect(e.errors).toEqual([]);
+    expect(firstAgg(e.model).shape).toBe("embedded");
+    const r = await parse(`context T { aggregate Cart shape(relational) { name: string } }`);
+    expect(r.errors).toEqual([]);
+    expect(firstAgg(r.model).shape).toBe("relational");
   });
 
-  it("coexists with persistedAs in header order (persistedAs, then normalised)", async () => {
+  it("coexists with persistedAs in header order (persistedAs, then shape)", async () => {
     const { model, errors } = await parse(`
-      context T { aggregate Cart persistedAs(eventLog) normalised(false) { name: string } }
+      context T { aggregate Cart persistedAs(eventLog) shape(document) { name: string } }
     `);
     expect(errors).toEqual([]);
     expect(firstAgg(model).persistedAs).toBe("eventLog");
-    expect(firstAgg(model).normalised).toBe("false");
+    expect(firstAgg(model).shape).toBe("document");
   });
 
-  it("omits normalised when not declared (default true at resolution)", async () => {
+  it("omits shape when not declared (default relational at resolution)", async () => {
     const { model, errors } = await parse(`
       context T { aggregate Cart { name: string } }
     `);
     expect(errors).toEqual([]);
-    expect(firstAgg(model).normalised).toBeUndefined();
+    expect(firstAgg(model).shape).toBeUndefined();
   });
 
-  it("rejects a non-boolean value", async () => {
+  it("rejects an unknown shape value", async () => {
     const { errors } = await parse(`
-      context T { aggregate Cart normalised(maybe) { name: string } }
+      context T { aggregate Cart shape(blobby) { name: string } }
     `);
     expect(errors.length).toBeGreaterThan(0);
   });
 });
 
-describe("normalised threads to the IR (aggregate + dataSource)", () => {
+describe("shape threads to the IR (aggregate + dataSource)", () => {
   const SRC = `
 system Sys {
   subdomain Sales {
     context Shopping {
-      aggregate Cart persistedAs(eventLog) normalised(false) { name: string }
+      aggregate Cart persistedAs(eventLog) shape(document) { name: string }
     }
   }
   storage pg { type: postgres }
   resource cartEvents   { for: Shopping, kind: eventLog, use: pg }
-  resource cartSnapshot { for: Shopping, kind: snapshot, use: pg, normalised: false }
+  resource cartSnapshot { for: Shopping, kind: snapshot, use: pg, shape: embedded }
   deployable api {
     platform: dotnet
     contexts: [Shopping]
@@ -90,17 +89,17 @@ system Sys {
 }
 `;
 
-  it("AggregateIR.normalised === false for a normalised(false) aggregate", async () => {
+  it("AggregateIR.savingShape === document for a shape(document) aggregate", async () => {
     const loom = lowerModel(await parseValid(SRC));
     const ctx = loom.systems[0]!.subdomains[0]!.contexts.find((c) => c.name === "Shopping")!;
     const cart = ctx.aggregates.find((a) => a.name === "Cart")!;
-    expect(cart.normalised).toBe(false);
+    expect(cart.savingShape).toBe("document");
     expect(cart.persistedAs).toBe("eventLog");
   });
 
-  it("DataSourceIR.normalised === false for a `normalised: false` snapshot binding", async () => {
+  it("DataSourceIR.shape === embedded for a `shape: embedded` snapshot binding", async () => {
     const loom = lowerModel(await parseValid(SRC));
     const ds = loom.systems[0]!.dataSources.find((d) => d.name === "cartSnapshot")!;
-    expect(ds.normalised).toBe(false);
+    expect(ds.shape).toBe("embedded");
   });
 });

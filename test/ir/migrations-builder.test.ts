@@ -298,3 +298,117 @@ function withModifiedTable(
     tables: snap.tables.map((t) => (t.name === tableName ? fn(t) : t)),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Document shape (D-DOCUMENT-AXIS, shape(document)) — a document
+// aggregate collapses to one `(id, data jsonb, version)` table; its parts
+// fold into `data` (no part table) and reference collections become id
+// arrays in `data` (no join table).
+// ---------------------------------------------------------------------------
+
+const DOC_SOURCE = `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Cart ids guid shape(document) {
+        customer: Customer id
+        total: int
+        contains lines: CartLine[]
+        entity CartLine { quantity: int }
+      }
+      aggregate Customer ids guid { name: string }
+      repository Carts for Cart { }
+      repository Customers for Customer { }
+    }
+  }
+  deployable api { platform: hono, contexts: [Orders], port: 3000 }
+}
+`;
+
+describe("schemaFromModule — document shape", () => {
+  async function loadDoc() {
+    const loom = await buildLoomModel(DOC_SOURCE);
+    return loom.systems[0]!.subdomains[0]!;
+  }
+
+  it("collapses a shape(document) aggregate to (id, data, version) with no part table", async () => {
+    const module = await loadDoc();
+    const snap = schemaFromModule(module);
+    // Cart is a document → one `carts` table, no `cart_lines` part table.
+    // Customer stays relational.
+    expect(snap.tables.map((t) => t.name)).toEqual(["carts", "customers"]);
+    const carts = snap.tables.find((t) => t.name === "carts")!;
+    expect(carts.columns.map((c) => c.name)).toEqual(["id", "data", "version"]);
+    expect(carts.columns.find((c) => c.name === "data")!.type).toEqual({ kind: "json" });
+    expect(carts.columns.find((c) => c.name === "version")!.type).toEqual({ kind: "int" });
+    expect(carts.primaryKey).toEqual(["id"]);
+    // No FK to customers — the `Customer id` reference rides inside `data`.
+    expect(carts.foreignKeys).toEqual([]);
+    expect(carts.indexes).toEqual([]);
+  });
+
+  it("leaves relational siblings untouched", async () => {
+    const module = await loadDoc();
+    const customers = schemaFromModule(module).tables.find((t) => t.name === "customers")!;
+    expect(customers.columns.map((c) => c.name)).toEqual(["id", "name"]);
+  });
+});
+
+describe("schemaFromModule — embedded shape", () => {
+  const EMBEDDED_SOURCE = `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Cart ids guid shape(embedded) {
+        customer: Customer id
+        total: int
+        contains lines: CartLine[]
+        entity CartLine { quantity: int }
+      }
+      aggregate Customer ids guid { name: string }
+      repository Carts for Cart { }
+      repository Customers for Customer { }
+    }
+  }
+  deployable api { platform: hono, contexts: [Orders], port: 3000 }
+}
+`;
+
+  it("keeps the queryable root + one JSONB column per containment, no part table", async () => {
+    const loom = await buildLoomModel(EMBEDDED_SOURCE);
+    const snap = schemaFromModule(loom.systems[0]!.subdomains[0]!);
+    // Cart embeds → one `carts` table, no `cart_lines` part table.
+    expect(snap.tables.map((t) => t.name)).toEqual(["carts", "customers"]);
+    const carts = snap.tables.find((t) => t.name === "carts")!;
+    // Root stays columns; the containment folds into a JSONB `lines` column.
+    expect(carts.columns.map((c) => c.name)).toEqual(["id", "customer", "total", "lines"]);
+    expect(carts.columns.find((c) => c.name === "lines")!.type).toEqual({ kind: "json" });
+    expect(carts.columns.find((c) => c.name === "total")!.type).toEqual({ kind: "int" });
+    // The `Customer id` reference stays a queryable FK column (unlike document).
+    expect(carts.foreignKeys.map((fk) => fk.column)).toEqual(["customer"]);
+  });
+});
+
+describe("buildMigrations — per-projection binding override", () => {
+  it("honours a `resource shape: document` even when the aggregate header is shape(relational)", async () => {
+    const loom = await buildLoomModel(`
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Cart ids guid shape(relational) { total: int }
+      repository Carts for Cart { }
+    }
+  }
+  storage pg { type: postgres }
+  resource cartsState { for: Orders, kind: state, use: pg, shape: document }
+  deployable api { platform: dotnet, contexts: [Orders], dataSources: [cartsState], port: 5000 }
+}
+`);
+    const sys = loom.systems[0]!;
+    const migs = buildMigrations(sys, memorySnapshotStore());
+    const sales = migs.find((mi) => mi.module === "Sales")!;
+    const carts = sales.next.tables.find((t) => t.name === "carts")!;
+    // Binding override wins → document shape despite shape(relational) header.
+    expect(carts.columns.map((c) => c.name)).toEqual(["id", "data", "version"]);
+  });
+});

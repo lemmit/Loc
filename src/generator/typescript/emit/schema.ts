@@ -8,6 +8,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js";
+import { effectiveSavingShape } from "../../../ir/util/resolve-datasource.js";
 import { lines as joinLines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 
@@ -83,9 +84,21 @@ export function renderSchema(
   const prefixFor = (agg: AggregateIR): string | undefined => lookup?.(agg)?.tablePrefix;
   const tables: string[] = [];
   for (const agg of ctx.aggregates) {
-    const indexed = indexedColumnsFor(agg, ctx);
     const schema = schemaFor(agg);
     const prefix = prefixFor(agg);
+    const shape = effectiveSavingShape(agg, lookup?.(agg));
+    // Document (`shape(document)`): the whole aggregate is one opaque
+    // jsonb blob (`id, data, version`).  No part/join tables.
+    if (shape === "document") {
+      tables.push(emitDocumentTable(agg.name, { schema, prefix }));
+      continue;
+    }
+    // NOTE: `shape(embedded)` on the TS/Drizzle backend currently emits
+    // RELATIONALLY (root + part tables) — the embedded repository (root
+    // columns + parts read from a jsonb column) is a follow-up.  It
+    // compiles correctly as relational; the shared embedded migration
+    // shape (jsonb-per-containment) is only consumed by .NET so far.
+    const indexed = indexedColumnsFor(agg, ctx);
     tables.push(emitTable(agg.name, agg.fields, undefined, ctx, indexed, { schema, prefix }));
     for (const part of agg.parts) {
       tables.push(emitTable(part.name, part.fields, agg.name, ctx, new Set(), { schema, prefix }));
@@ -279,6 +292,25 @@ function collectColumnRefs(e: ExprIR, out: Set<string>): void {
     default:
       return;
   }
+}
+
+/** Document-shaped persistence table: one jsonb `data` column holding
+ *  the whole serialised aggregate read model + a `version` concurrency
+ *  counter.  Mirrors the .NET `<Agg>Document` record. */
+function emitDocumentTable(
+  name: string,
+  options: { schema?: string; prefix?: string } = {},
+): string {
+  const baseTable = snake(plural(name));
+  const tableName = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
+  const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
+  return [
+    `export const ${lowerFirst(plural(name))} = ${tableFactory}("${tableName}", {`,
+    `  id: text("id").primaryKey(),`,
+    `  data: jsonb("data").notNull(),`,
+    `  version: integer("version").notNull(),`,
+    `});`,
+  ].join("\n");
 }
 
 function emitTable(
