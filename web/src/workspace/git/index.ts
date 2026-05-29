@@ -19,3 +19,9 @@ export {
   diffForDisplay,
   GENERATED_BASE_REF,
 } from "./helpers.js";
+export {
+  applyGeneratedTree,
+  GENERATED_PREFIX,
+  type GeneratedFile,
+  type RegenerateResult,
+} from "./generated-tree.js";

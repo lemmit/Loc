@@ -361,6 +361,23 @@ export class GitStore {
     await git.writeRef({ fs: this.fsc, dir: this.dir, ref, value, force });
   }
 
+  /** Write a UTF-8 blob and return its oid.  Used to persist small
+   *  out-of-tree state (e.g. the generated-base snapshot) behind a ref
+   *  without materialising a working-tree file. */
+  async writeBlobText(text: string): Promise<string> {
+    return git.writeBlob({
+      fs: this.fsc,
+      dir: this.dir,
+      blob: new TextEncoder().encode(text),
+    });
+  }
+
+  /** Read a blob by oid as UTF-8 text.  Inverse of `writeBlobText`. */
+  async readBlobText(oid: string): Promise<string> {
+    const { blob } = await git.readBlob({ fs: this.fsc, dir: this.dir, oid });
+    return new TextDecoder().decode(blob);
+  }
+
   /** Create a branch at the current HEAD (without checking it out). */
   async branch(name: string): Promise<void> {
     await git.branch({ fs: this.fsc, dir: this.dir, ref: name });

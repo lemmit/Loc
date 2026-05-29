@@ -23,6 +23,7 @@ import {
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { useWorkspaceSources } from "./workspace/use-workspace-sources";
+import { applyGeneratedTree } from "./workspace/git";
 import {
   buildShareUrl,
   readHash,
@@ -780,7 +781,24 @@ export default function App(): JSX.Element {
   // / Boot buttons still call these.  Live-mode cascade is now driven
   // from inside `runGenerate` by passing the fresh result to the next
   // step explicitly (no ref ping-pong).
-  async function runGenerate(): Promise<void> {
+  // Version generated output into the git-backed workspace as a per-file
+  // 3-way merge ("scaffold then own").  Only the *intentional* generate
+  // paths (the Generate / Run buttons) persist — the 5s auto-generate
+  // keeps the in-memory preview behaviour so typing doesn't spawn commits
+  // or churn the workspace tree.  Best-effort: a failure here never
+  // breaks the generate itself.
+  async function persistGeneratedTree(result: GenerateResult | null): Promise<void> {
+    const store = workspace.store;
+    if (!store || !result?.ok || result.files.length === 0) return;
+    try {
+      await applyGeneratedTree(store, result.files);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("failed to version generated output:", err);
+    }
+  }
+
+  async function runGenerate(persist = false): Promise<void> {
     const result = await runGenerateStep();
     if (
       liveModeRef.current &&
@@ -792,8 +810,9 @@ export default function App(): JSX.Element {
         await runBootStep(bundleRes.hono);
       }
     }
+    if (persist) await persistGeneratedTree(result);
   }
-  runGenerateRef.current = runGenerate;
+  runGenerateRef.current = () => runGenerate();
 
   async function runBundle(): Promise<void> {
     if (!generateSuccess) return;
@@ -825,6 +844,7 @@ export default function App(): JSX.Element {
   async function runFull(): Promise<void> {
     const gen = await runGenerateStep();
     if (!gen?.ok || gen.files.length === 0) return;
+    void persistGeneratedTree(gen); // intentional run → version the output
     const bundleRes = await runBundleStep(gen);
     if (!bundleRes?.hono.ok) return;
     const booted = await runBootStep(bundleRes.hono);
@@ -1059,7 +1079,7 @@ export default function App(): JSX.Element {
     clearAppLog,
     copied,
     copyShareLink,
-    runGenerate: () => void runGenerate(),
+    runGenerate: () => void runGenerate(true),
     runBundle: () => void runBundle(),
     runBoot: () => void runBoot(),
     runResetData: () => void runResetData(),
