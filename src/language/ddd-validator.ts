@@ -186,6 +186,27 @@ export class DddValidator {
             );
           }
         }
+        // urlStyle conflict: a subdomain surfaced by two apis with
+        // different `urlStyle` makes its aggregates' route slugs
+        // ambiguous.  Enrichment takes the first-declared style; warn on
+        // the rest so the conflict is visible (D-URLSTYLE).
+        const urlStyleBySubdomain = new Map<string, "literal" | "resource">();
+        for (const api of apis) {
+          const sub = api.source?.$refText;
+          if (!sub) continue;
+          const style: "literal" | "resource" =
+            api.urlStyle === "resource" ? "resource" : "literal";
+          const prior = urlStyleBySubdomain.get(sub);
+          if (prior === undefined) {
+            urlStyleBySubdomain.set(sub, style);
+          } else if (prior !== style) {
+            accept(
+              "warning",
+              `api '${api.name}' sets urlStyle '${style}' on subdomain '${sub}', which another api already surfaces as '${prior}'.  The first-declared style ('${prior}') wins; route slugs use it.`,
+              { node: api, property: "urlStyle", code: "loom.subdomain-conflicting-urlstyle" },
+            );
+          }
+        }
 
         // Storage declaration checks.
         //   - Names unique within the system.

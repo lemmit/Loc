@@ -1,5 +1,5 @@
 import { platformFor } from "../../platform/registry.js";
-import { snake } from "../../util/naming.js";
+import { plural, snake } from "../../util/naming.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -20,6 +20,7 @@ import type {
   FieldIR,
   FindIR,
   LoomModel,
+  OperationIR,
   RawLoomModel,
   RepositoryIR,
   SubdomainIR,
@@ -116,10 +117,23 @@ function enrichSystem(
   rootValueObjects: EnrichedValueObjectIR[],
   rootEnums: EnumIR[],
 ): EnrichedSystemIR {
-  // First enrich each subdomain's contexts (auto-findAll, wire-shape).
+  // Resolve each subdomain's lifecycle URL style from the api(s) that
+  // surface it (`api X from <subdomain>`).  An aggregate belongs to one
+  // subdomain, so this uniquely determines its actions' route slugs.
+  // First-declared api wins if two surface the same subdomain with
+  // differing styles (the validator warns — see checkApiUrlStyle).
+  const urlStyleBySubdomain = new Map<string, "literal" | "resource">();
+  for (const a of sys.apis) {
+    if (!urlStyleBySubdomain.has(a.sourceModule))
+      urlStyleBySubdomain.set(a.sourceModule, a.urlStyle);
+  }
+  // First enrich each subdomain's contexts (auto-findAll, wire-shape,
+  // routeSlug).
   const subdomains: EnrichedSubdomainIR[] = sys.subdomains.map((m) => ({
     ...m,
-    contexts: m.contexts.map((c) => enrichContext(c, rootValueObjects, rootEnums)),
+    contexts: m.contexts.map((c) =>
+      enrichContext(c, rootValueObjects, rootEnums, urlStyleBySubdomain.get(m.name) ?? "literal"),
+    ),
   }));
   // Then propagate react deployables' context sets from their targets.
   // Done after subdomain enrichment so frontends see the same enriched
@@ -173,6 +187,7 @@ export function enrichContext(
   ctx: BoundedContextIR,
   rootValueObjects: EnrichedValueObjectIR[] = [],
   rootEnums: EnumIR[] = [],
+  urlStyle: "literal" | "resource" = "literal",
 ): EnrichedBoundedContextIR {
   // Fold the ambient root-level VOs / enums into the context's
   // effective set so every per-context emitter sees them as if they
@@ -186,12 +201,24 @@ export function enrichContext(
     ...rootValueObjects.filter((v) => !ownVoNames.has(v.name)),
   ];
   const enums = [...ctx.enums, ...rootEnums.filter((e) => !ownEnumNames.has(e.name))];
-  const aggregates = ctx.aggregates.map((a) => enrichAggregate(a, valueObjects));
+  const aggregates = ctx.aggregates.map((a) => enrichAggregate(a, valueObjects, urlStyle));
   const repositories = ensureFindAll(aggregates, ctx.repositories);
   return { ...ctx, valueObjects, enums, aggregates, repositories };
 }
 
-function enrichAggregate(agg: AggregateIR, contextVOs: ValueObjectIR[]): EnrichedAggregateIR {
+/** Derive an action's HTTP path segment from the surfacing api's
+ * urlStyle (D-URLSTYLE).  Canonical (unnamed) actions resolve to the
+ * bare collection / canonical-id URL, signalled by `undefined`. */
+function routeSlugFor(op: OperationIR, urlStyle: "literal" | "resource"): string | undefined {
+  if (op.canonical) return undefined;
+  return urlStyle === "resource" ? plural(op.name) : op.name;
+}
+
+function enrichAggregate(
+  agg: AggregateIR,
+  contextVOs: ValueObjectIR[],
+  urlStyle: "literal" | "resource" = "literal",
+): EnrichedAggregateIR {
   const parts = agg.parts.map(enrichPart);
   const fields = agg.fields.map(resolveFieldAccess);
   // Synthesize a `derived inspect: string = <structural>` when the user
@@ -211,9 +238,21 @@ function enrichAggregate(agg: AggregateIR, contextVOs: ValueObjectIR[]): Enriche
   // agg so the wire spec is idempotent (second enrichment finds the
   // synthesized inspect already in `derived` and doesn't double-add,
   // and `resolveFieldAccess` skips fields that already carry access).
+  // Stamp routeSlug on every lifecycle action.  New objects (don't
+  // mutate shared refs); canonicalCreate/Destroy are re-pointed at the
+  // freshly-stamped array entries.
+  const stamp = (o: OperationIR): OperationIR => ({ ...o, routeSlug: routeSlugFor(o, urlStyle) });
+  const operations = agg.operations.map(stamp);
+  const creates = agg.creates?.map(stamp);
+  const destroys = agg.destroys?.map(stamp);
   const resolved: AggregateIR = { ...agg, derived, fields };
   return {
     ...resolved,
+    operations,
+    creates,
+    destroys,
+    canonicalCreate: creates?.find((c) => c.canonical) ?? null,
+    canonicalDestroy: destroys?.find((d) => d.canonical) ?? null,
     parts,
     wireShape: wireFieldsForAggregate(resolved),
     associations: associationsForAggregate(resolved),

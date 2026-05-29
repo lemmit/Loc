@@ -1,11 +1,11 @@
 # Lifecycle URL style — Phase 2 design (`urlStyle` + `routeSlug`)
 
-> **Status:** PROPOSED — design for review. Reconciles
-> [`lifecycle-operations.md`](./lifecycle-operations.md) Phase 2 with the
-> **actual** `api` grammar, which differs from that proposal's
-> assumption. Requests decision **D-URLSTYLE**. Phase 1 (kind-tagged
-> `create`/`destroy`, the `creates`/`destroys`/`canonical*` IR) shipped
-> in #722; this is the next slice.
+> **Status:** PINNED ([D-URLSTYLE](../decisions.md#d-urlstyle--lifecycle-url-style-on-the-api-body--per-action-routeslug)).
+> Reconciles [`lifecycle-operations.md`](./lifecycle-operations.md) Phase 2
+> with the **actual** `api` grammar, which differs from that proposal's
+> assumption. Phase 1 (kind-tagged `create`/`destroy`, the
+> `creates`/`destroys`/`canonical*` IR) shipped in #722; this slice
+> implements the design below.
 
 ## Why this doc exists — the proposal is written against a grammar that doesn't exist
 

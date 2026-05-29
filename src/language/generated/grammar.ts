@@ -2335,6 +2335,52 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
               },
               "deprecatedSyntax": false
             }
+          },
+          {
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Keyword",
+                "value": "{"
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "urlStyle"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ":"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "urlStyle",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "Alternatives",
+                      "elements": [
+                        {
+                          "$type": "Keyword",
+                          "value": "literal"
+                        },
+                        {
+                          "$type": "Keyword",
+                          "value": "resource"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "cardinality": "?"
+              },
+              {
+                "$type": "Keyword",
+                "value": "}"
+              }
+            ],
+            "cardinality": "?"
           }
         ]
       },
@@ -8170,6 +8216,14 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "dataSources"
+          },
+          {
+            "$type": "Keyword",
+            "value": "urlStyle"
+          },
+          {
+            "$type": "Keyword",
+            "value": "resource"
           }
         ]
       },
@@ -11283,6 +11337,14 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "dataSources"
+          },
+          {
+            "$type": "Keyword",
+            "value": "urlStyle"
+          },
+          {
+            "$type": "Keyword",
+            "value": "resource"
           }
         ]
       },

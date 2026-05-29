@@ -172,6 +172,7 @@ export type DddKeywordNames =
     | "required"
     | "requirement"
     | "requires"
+    | "resource"
     | "retain"
     | "route"
     | "schema"
@@ -208,6 +209,7 @@ export type DddKeywordNames =
     | "ttl"
     | "type"
     | "ui"
+    | "urlStyle"
     | "use"
     | "user"
     | "valueobject"
@@ -351,10 +353,10 @@ export function isLiteralExpr(item: unknown): item is LiteralExpr {
     return reflection.isInstance(item, LiteralExpr);
 }
 
-export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'connection' | 'contains' | 'contexts' | 'dataSource' | 'dataSources' | 'description' | 'design' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'framework' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'readonly' | 'replica' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'use' | 'views' | 'workflows' | string;
+export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'connection' | 'contains' | 'contexts' | 'dataSource' | 'dataSources' | 'description' | 'design' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'framework' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'readonly' | 'replica' | 'resource' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'dataSource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'dataSource' || item === 'dataSources' || item === 'urlStyle' || item === 'resource' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'id' | 'modules' | 'permissions' | 'ui' | 'views' | 'workflows' | string;
@@ -393,10 +395,10 @@ export function isNamedDecl(item: unknown): item is NamedDecl {
     return reflection.isInstance(item, NamedDecl);
 }
 
-export type NameRefIdent = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'connection' | 'contains' | 'contexts' | 'create' | 'dataSource' | 'dataSources' | 'description' | 'design' | 'destroy' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'filter' | 'framework' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'readonly' | 'replica' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'use' | 'views' | 'workflows' | string;
+export type NameRefIdent = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'connection' | 'contains' | 'contexts' | 'create' | 'dataSource' | 'dataSources' | 'description' | 'design' | 'destroy' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'filter' | 'framework' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'readonly' | 'replica' | 'resource' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
 
 export function isNameRefIdent(item: unknown): item is NameRefIdent {
-    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'create' || item === 'destroy' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'dataSource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'create' || item === 'destroy' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'dataSource' || item === 'dataSources' || item === 'urlStyle' || item === 'resource' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type PageProp = BodyProp | CanonicalProp | DescriptionProp | LayoutProp | OgImageProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
@@ -539,6 +541,7 @@ export interface Api extends AstNode {
     readonly $type: 'Api';
     name: string;
     source: Reference<Subdomain>;
+    urlStyle?: 'literal' | 'resource';
 }
 
 export const Api = 'Api';
@@ -2577,7 +2580,8 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: Api,
                     properties: [
                         { name: 'name' },
-                        { name: 'source' }
+                        { name: 'source' },
+                        { name: 'urlStyle' }
                     ]
                 };
             }
