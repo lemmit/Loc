@@ -2690,7 +2690,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     ).toBe(true);
   });
 
-  it("warns when 'isolationLevel' is set on a kind: state dataSource", async () => {
+  it("does NOT warn when 'isolationLevel' is set on a kind: state dataSource (now wired through resolveWorkflowIsolation)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context C { aggregate A { x: int } } }
@@ -2707,13 +2707,9 @@ describe("Loom IR validation (post-lowering)", async () => {
     `);
     const warnings = validateLoomModel(loom).filter((d) => d.severity === "warning");
     expect(
-      warnings.some(
-        (d) =>
-          /dataSource 'cState' sets 'isolationLevel'/.test(d.message) &&
-          /transaction isolation is not yet plumbed/.test(d.message),
-      ),
+      warnings.filter((d) => /isolationLevel/.test(d.message)),
       JSON.stringify(warnings),
-    ).toBe(true);
+    ).toEqual([]);
   });
 
   it("warns when 'keyPrefix' is set on a kind: cache dataSource", async () => {

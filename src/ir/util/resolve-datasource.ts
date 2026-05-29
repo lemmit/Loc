@@ -25,7 +25,9 @@ import type {
   DataSourceIR,
   DataSourceKind,
   EnrichedAggregateIR,
+  IsolationLevel,
   SystemIR,
+  WorkflowIR,
 } from "../types/loom-ir.js";
 
 /** The dataSource kind an aggregate's persistence strategy reads from. */
@@ -92,4 +94,31 @@ export function resolveDataSourceConfig(
     schema: ds.schema ?? snake(ctx.name),
     tablePrefix: ds.tablePrefix,
   };
+}
+
+/** Resolve the effective transaction isolation level for a workflow.
+ *
+ *  The DSL has two surfaces that can set isolation:
+ *    1. `workflow.transactional(<level>)` — per-workflow override
+ *    2. `dataSource X { for: ctx, kind: state, isolationLevel: <level> }`
+ *       — per-context default for any transactional workflow in `ctx`
+ *
+ *  Resolution:
+ *    - Workflow-level wins outright.
+ *    - Otherwise, the state-kind dataSource for the workflow's context
+ *      provides the default.
+ *    - Otherwise, undefined — backend opens a transaction without an
+ *      explicit level (connection default applies).
+ *
+ *  Only meaningful when `wf.transactional` is true; a non-transactional
+ *  workflow never opens a transaction, so isolation is moot.  Callers
+ *  should gate on `wf.transactional` themselves. */
+export function resolveWorkflowIsolation(
+  wf: WorkflowIR,
+  ctx: BoundedContextIR,
+  sys: SystemIR,
+): IsolationLevel | undefined {
+  if (wf.isolation) return wf.isolation;
+  const ds = sys.dataSources.find((d) => d.contextName === ctx.name && d.kind === "state");
+  return ds?.isolationLevel;
 }

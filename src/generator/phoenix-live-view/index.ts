@@ -105,7 +105,7 @@ export function generatePhoenixLiveViewProject(
 
   // --- Workflow + view files -----------------------------------------------
   for (const ctx of contexts) {
-    emitWorkflows(appName, ctx, appModule, out);
+    emitWorkflows(appName, ctx, appModule, out, sys);
     emitViews(appName, ctx, appModule, out);
   }
 

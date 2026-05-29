@@ -7,6 +7,7 @@ import {
   dataSourceKindForAggregate,
   resolveDataSourceConfig,
   resolveDataSourceForAggregate,
+  resolveWorkflowIsolation,
 } from "../../src/ir/util/resolve-datasource.js";
 import { parseValid } from "../_helpers/parse.js";
 
@@ -161,5 +162,99 @@ system Sys {
     const cfg = resolveDataSourceConfig(agg, ctx, sys);
     // OrderHistory → order_history.
     expect(cfg?.schema).toBe("order_history");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveWorkflowIsolation — workflow.transactional(<level>) overrides the
+// state-kind dataSource's `isolationLevel:` default; otherwise the dataSource
+// value flows through; otherwise undefined.
+// ---------------------------------------------------------------------------
+
+describe("resolveWorkflowIsolation", () => {
+  async function build(src: string) {
+    const loom = enrichLoomModel(lowerModel(await parseValid(src)));
+    const sys = loom.systems[0]!;
+    const ctx = sys.subdomains[0]!.contexts[0]!;
+    return { sys, ctx };
+  }
+
+  it("returns the workflow's explicit level when set", async () => {
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C {
+    aggregate A { x: int }
+    workflow doIt() transactional(serializable) { }
+  } }
+  storage pg { type: postgres }
+  dataSource cState {
+    for: C, kind: state, use: pg, isolationLevel: readCommitted
+  }
+  deployable api {
+    platform: dotnet, contexts: [C], dataSources: [cState], port: 5000
+  }
+}`);
+    const wf = ctx.workflows[0]!;
+    expect(resolveWorkflowIsolation(wf, ctx, sys)).toBe("serializable");
+  });
+
+  it("falls back to the dataSource isolationLevel when workflow has none", async () => {
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C {
+    aggregate A { x: int }
+    workflow doIt() transactional { }
+  } }
+  storage pg { type: postgres }
+  dataSource cState {
+    for: C, kind: state, use: pg, isolationLevel: repeatableRead
+  }
+  deployable api {
+    platform: dotnet, contexts: [C], dataSources: [cState], port: 5000
+  }
+}`);
+    const wf = ctx.workflows[0]!;
+    expect(resolveWorkflowIsolation(wf, ctx, sys)).toBe("repeatableRead");
+  });
+
+  it("returns undefined when neither workflow nor dataSource sets a level", async () => {
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C {
+    aggregate A { x: int }
+    workflow doIt() transactional { }
+  } }
+  storage pg { type: postgres }
+  dataSource cState { for: C, kind: state, use: pg }
+  deployable api {
+    platform: dotnet, contexts: [C], dataSources: [cState], port: 5000
+  }
+}`);
+    const wf = ctx.workflows[0]!;
+    expect(resolveWorkflowIsolation(wf, ctx, sys)).toBeUndefined();
+  });
+
+  it("only consults the state-kind dataSource, not eventLog/cache/etc.", async () => {
+    // The state-kind dataSource has no isolationLevel; an eventLog
+    // dataSource for the same context does — and is correctly ignored.
+    const { sys, ctx } = await build(`
+system Sys {
+  subdomain M { context C {
+    aggregate A { x: int }
+    aggregate B { persistenceStrategy: eventSourced  y: int }
+    workflow doIt() transactional { }
+  } }
+  storage pg { type: postgres }
+  dataSource cState { for: C, kind: state, use: pg }
+  dataSource cLog {
+    for: C, kind: eventLog, use: pg, isolationLevel: serializable
+  }
+  deployable api {
+    platform: dotnet, contexts: [C], dataSources: [cState, cLog], port: 5000
+  }
+}`);
+    const wf = ctx.workflows[0]!;
+    // The state binding has no level; eventLog binding is ignored.
+    expect(resolveWorkflowIsolation(wf, ctx, sys)).toBeUndefined();
   });
 });

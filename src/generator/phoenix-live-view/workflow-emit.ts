@@ -1,4 +1,10 @@
-import type { BoundedContextIR, WorkflowIR, WorkflowStmtIR } from "../../ir/types/loom-ir.js";
+import type {
+  BoundedContextIR,
+  SystemIR,
+  WorkflowIR,
+  WorkflowStmtIR,
+} from "../../ir/types/loom-ir.js";
+import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
@@ -33,6 +39,7 @@ export function emitWorkflows(
   ctx: BoundedContextIR,
   appModule: string,
   out: Map<string, string>,
+  sys?: SystemIR,
 ): void {
   if (ctx.workflows.length === 0) return;
   const ctxSnake = snake(ctx.name);
@@ -40,7 +47,7 @@ export function emitWorkflows(
 
   for (const wf of ctx.workflows) {
     const path = `lib/${appName}/${ctxSnake}/workflows/${snake(wf.name)}.ex`;
-    const content = renderWorkflow(wf, ctx, contextModule, appModule);
+    const content = renderWorkflow(wf, ctx, contextModule, appModule, sys);
     out.set(path, content);
   }
 }
@@ -50,6 +57,7 @@ function renderWorkflow(
   ctx: BoundedContextIR,
   contextModule: string,
   appModule: string,
+  sys: SystemIR | undefined,
 ): string {
   const moduleName = `${contextModule}.Workflows.${upperFirst(wf.name)}`;
   const renderCtx: RenderCtx = { thisName: "record", contextModule };
@@ -60,10 +68,14 @@ function renderWorkflow(
 
   const bodyLines = renderWorkflowBody(wf, ctx, renderCtx, contextModule, appModule);
 
+  // Effective isolation: workflow's `transactional(<level>)` wins; else
+  // the state-kind dataSource for this context's `isolationLevel:`; else
+  // undefined (connection default applies at runtime).
+  const effectiveIsolation = sys ? resolveWorkflowIsolation(wf, ctx, sys) : wf.isolation;
   // Emit event broadcasts that are collected separately (stmt-level emits
   // are woven into the with-chain by renderWorkflowBody).
   const body = wf.transactional
-    ? renderTransactionalBody(bodyLines, appModule, wf, contextModule)
+    ? renderTransactionalBody(bodyLines, appModule, wf, contextModule, effectiveIsolation)
     : renderSequentialBody(bodyLines, wf);
 
   // Workflow narrative — `workflow_started` at the run/1 entry,
@@ -261,6 +273,7 @@ function renderTransactionalBody(
   _appModule: string,
   wf: WorkflowIR,
   contextModule: string,
+  effectiveIsolation: WorkflowIR["isolation"],
 ): string {
   // Separate preconditions (run before transaction) from the body
   const preconds = lines.filter((l) => l.kind === "precondition" || l.kind === "requires");
@@ -299,8 +312,8 @@ function renderTransactionalBody(
     emitLines.length > 0 ? "\n" + emitLines.map((l) => "    " + l.text.trimStart()).join("\n") : "";
 
   // isolation_level is an opts keyword in Ash 3.x (third positional arg).
-  const isolationOptLine = wf.isolation
-    ? `,\n      isolation_level: :${elixirIsolationLevel(wf.isolation)}`
+  const isolationOptLine = effectiveIsolation
+    ? `,\n      isolation_level: :${elixirIsolationLevel(effectiveIsolation)}`
     : "";
 
   // `workflow_completed` fires only on the {:ok, _} branch — failures
