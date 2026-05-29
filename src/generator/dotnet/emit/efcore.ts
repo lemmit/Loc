@@ -28,19 +28,38 @@ function contextAssociations(ctx: EnrichedBoundedContextIR): AssociationIR[] {
   return ctx.aggregates.flatMap((a) => a.associations);
 }
 
-export function renderDbContext(ctx: EnrichedBoundedContextIR, ns: string): string {
+export function renderDbContext(
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+  /** Names of document-shaped (`normalised(false)`) aggregates in this
+   *  context.  Each contributes a `DbSet<<Agg>Document>` + the document
+   *  configuration instead of the normalised entity DbSet/config, and
+   *  its reference-collection join tables are skipped (they fold into
+   *  the JSON document).  Empty / omitted ⇒ byte-identical with the
+   *  all-normalised output. */
+  documentAggs: ReadonlySet<string> = new Set(),
+): string {
+  const isDoc = (name: string) => documentAggs.has(name);
+  const anyDoc = ctx.aggregates.some((a) => isDoc(a.name));
   const aggUsings = ctx.aggregates.map((a) => `using ${ns}.Domain.${plural(a.name)};`);
-  const dbSets = ctx.aggregates.map(
-    (a) => `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
+  if (anyDoc) aggUsings.push(`using ${ns}.Infrastructure.Persistence.Documents;`);
+  const dbSets = ctx.aggregates.map((a) =>
+    isDoc(a.name)
+      ? `    public DbSet<${a.name}Document> ${plural(upperFirst(a.name))} => Set<${a.name}Document>();`
+      : `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
   );
-  const applyConfigs = ctx.aggregates.map(
-    (a) => `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
+  const applyConfigs = ctx.aggregates.map((a) =>
+    isDoc(a.name)
+      ? `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}DocumentConfiguration());`
+      : `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
   );
   // Join-entity DbSets + their ApplyConfiguration entries.  Each
   // reference-collection field on an aggregate produces one join
   // entity (the join table lives outside any single aggregate's
   // configuration so it can serve queries against either side).
-  const joinAssocs = contextAssociations(ctx);
+  // Document aggregates fold their reference collections into the JSON
+  // document — no join table, so drop their associations here.
+  const joinAssocs = contextAssociations(ctx).filter((a) => !isDoc(a.ownerAgg));
   const joinUsings =
     joinAssocs.length > 0 ? [`using ${ns}.Infrastructure.Persistence.JoinTables;`] : [];
   const joinDbSets = joinAssocs.map((a) => {

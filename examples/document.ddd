@@ -1,0 +1,71 @@
+// Document-persistence example — exercises `normalised(false)`.
+//
+// The Cart aggregate (root + contained CartItem parts + a Money value
+// object + an enum + a cross-aggregate Customer reference) persists as
+// a SINGLE JSONB document: one `carts` row of `(id, data, version)`,
+// the whole tree serialised into `data`.  Customer stays normalised
+// (table-per-entity), so one .ddd drives both saving shapes.
+//
+// This is the .NET document-emit (System.Text.Json round-trip) gate
+// for `dotnet build /warnaserror` — see
+// test/e2e/generated-dotnet-build.test.ts.
+context Shopping {
+
+  enum CartStatus { Open, CheckedOut }
+
+  valueobject Money {
+    amount: decimal
+    currency: string
+    invariant amount >= 0
+    invariant currency.length == 3
+  }
+
+  aggregate Customer {
+    name: string
+    invariant name.length > 0
+  }
+
+  aggregate Cart normalised(false) {
+    customerId: Customer id
+    status: CartStatus
+    contains items: CartItem[]
+
+    derived total: Money =
+      Money { amount: items.sum(i => i.lineTotal.amount), currency: "USD" }
+
+    invariant items.count >= 0
+
+    function isOpen(): bool = status == Open
+
+    operation addItem(sku: string, qty: int, price: Money) {
+      precondition isOpen()
+      precondition qty > 0
+      items += CartItem { sku: sku, quantity: qty, unitPrice: price }
+    }
+
+    operation checkOut() {
+      precondition isOpen()
+      precondition items.count > 0
+      status := CheckedOut
+    }
+
+    entity CartItem {
+      sku: string
+      quantity: int
+      unitPrice: Money
+
+      function lineTotalAmount(): decimal = unitPrice.amount * quantity
+
+      derived lineTotal: Money =
+        Money { amount: lineTotalAmount(), currency: unitPrice.currency }
+
+      invariant quantity > 0
+    }
+  }
+
+  repository Carts for Cart {
+    find byCustomer(customerId: Customer id): Cart[]
+  }
+
+  repository Customers for Customer { }
+}

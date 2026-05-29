@@ -350,6 +350,151 @@ function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Document-shaped (`normalised(false)`) repository implementation.
+//
+// Backed by the `<Agg>Document` persistence record (one JSONB column)
+// rather than the normalised entity table.  `GetById` / `FindManyByIds`
+// deserialise the `Data` column into the aggregate's snapshot DTO and
+// rehydrate via `<Agg>.FromSnapshot(...)`; `Save` serialises
+// `aggregate.ToSnapshot()` back, bumping the concurrency `Version`.
+//
+// Finds evaluate client-side (load all documents → rehydrate → apply
+// the LINQ-to-objects predicate) — the document column carries no
+// queryable per-field shape in v1.  Reference-collection diff-sync and
+// join tables don't apply: those references fold into the document.
+// ---------------------------------------------------------------------------
+export function renderDocumentRepositoryImpl(
+  agg: EnrichedAggregateIR,
+  repo: RepositoryIR | undefined,
+  ns: string,
+  findBodies: Array<{ name: string; filterClause: string; projectionClause: string }>,
+  options?: { extraUsings?: readonly string[] },
+): string {
+  const finds = repo?.finds ?? [];
+  const anyFindUsesUser = finds.some(findUsesCurrentUser);
+  const setName = plural(upperFirst(agg.name));
+  const snap = `${agg.name}Snapshot`;
+  const deser = `${agg.name}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snap}>(__d.Data, __json)!)`;
+  const findMethodLines = finds.flatMap((f) => {
+    const body = findBodies.find((b) => b.name === f.name);
+    const filter = body?.filterClause ?? "";
+    // De-async the EF terminal — finds run in-memory over the rehydrated
+    // documents, so the async EF operators become their LINQ-to-objects
+    // equivalents.
+    const projection = (body?.projectionClause ?? ".ToListAsync(ct)")
+      .replace(".ToListAsync(ct)", ".ToList()")
+      .replace(".FirstOrDefaultAsync(ct)", ".FirstOrDefault()")
+      .replace(".FirstAsync(ct)", ".First()");
+    const usesUser = findUsesCurrentUser(f);
+    const isArray = f.returnType.kind === "array";
+    const rowsExpr = isArray ? "result.Count" : "result == null ? 0 : 1";
+    return [
+      `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
+      "    {",
+      `        var __all = (await _db.${setName}.ToListAsync(ct)).Select(__d => ${deser});`,
+      `        var result = __all${filter}${projection};`,
+      `        ${renderDotnetLogCall("findExecuted", [
+        { name: "aggregate", valueExpr: `"${agg.name}"` },
+        { name: "find", valueExpr: `"${f.name}"` },
+        { name: "rows", valueExpr: rowsExpr },
+      ])}`,
+      "        return result;",
+      "    }",
+    ];
+  });
+  const extraUsings = (options?.extraUsings ?? []).map((n) => `using ${n};`);
+  return (
+    lines(
+      "// Auto-generated.",
+      "using System;",
+      "using System.Linq;",
+      "using System.Collections.Generic;",
+      "using System.Threading;",
+      "using System.Threading.Tasks;",
+      ...extraUsings,
+      "using Microsoft.EntityFrameworkCore;",
+      "using Microsoft.Extensions.Logging;",
+      `using ${ns}.Domain.${plural(agg.name)};`,
+      `using ${ns}.Domain.Common;`,
+      `using ${ns}.Domain.Ids;`,
+      `using ${ns}.Domain.ValueObjects;`,
+      `using ${ns}.Domain.Enums;`,
+      `using ${ns}.Infrastructure.Persistence;`,
+      `using ${ns}.Infrastructure.Persistence.Documents;`,
+      anyFindUsesUser ? `using ${ns}.Auth;` : null,
+      "",
+      `namespace ${ns}.Infrastructure.Repositories;`,
+      "",
+      `public sealed class ${agg.name}Repository : I${agg.name}Repository`,
+      "{",
+      "    private readonly AppDbContext _db;",
+      "    private readonly IDomainEventDispatcher _events;",
+      `    private readonly ILogger<${agg.name}Repository> _log;`,
+      "    private static readonly System.Text.Json.JsonSerializerOptions __json =",
+      "        new(System.Text.Json.JsonSerializerDefaults.Web);",
+      "",
+      `    public ${agg.name}Repository(AppDbContext db, IDomainEventDispatcher events, ILogger<${agg.name}Repository> log)`,
+      "    {",
+      "        _db = db;",
+      "        _events = events;",
+      "        _log = log;",
+      "    }",
+      "",
+      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken ct = default)`,
+      "    {",
+      `        var __doc = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == id.Value, ct);`,
+      `        ${renderDotnetLogCall("aggregateLoaded", [
+        { name: "aggregate", valueExpr: `"${agg.name}"` },
+        { name: "id", valueExpr: "id.Value" },
+        { name: "found", valueExpr: "__doc != null" },
+      ])}`,
+      "        if (__doc == null) return null;",
+      `        return ${agg.name}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snap}>(__doc.Data, __json)!);`,
+      "    }",
+      "",
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default)`,
+      "    {",
+      `        if (ids.Count == 0) return Array.Empty<${agg.name}>();`,
+      "        var __raw = ids.Select(i => i.Value).ToList();",
+      `        var __docs = await _db.${setName}.Where(x => __raw.Contains(x.Id)).ToListAsync(ct);`,
+      `        return __docs.Select(__d => ${deser}).ToList();`,
+      "    }",
+      "",
+      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken ct = default)`,
+      "    {",
+      "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
+      `        var __existing = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == aggregate.Id.Value, ct);`,
+      "        if (__existing == null)",
+      "        {",
+      `            _db.${setName}.Add(new ${agg.name}Document { Id = aggregate.Id.Value, Data = __data, Version = 1 });`,
+      "        }",
+      "        else",
+      "        {",
+      "            __existing.Data = __data;",
+      "            __existing.Version += 1;",
+      "        }",
+      "        await _db.SaveChangesAsync(ct);",
+      `        ${renderDotnetLogCall("repositorySave", [
+        { name: "aggregate", valueExpr: `"${agg.name}"` },
+        { name: "id", valueExpr: "aggregate.Id.Value" },
+      ])}`,
+      "        foreach (var ev in aggregate.PullEvents())",
+      "        {",
+      `            ${renderDotnetLogCall("eventDispatched", [
+        { name: "event_type", valueExpr: "ev.GetType().Name" },
+        { name: "aggregate", valueExpr: `"${agg.name}"` },
+        { name: "id", valueExpr: "aggregate.Id.Value" },
+      ])}`,
+      "            await _events.DispatchAsync(ev, ct);",
+      "        }",
+      "    }",
+      ...findMethodLines,
+      "}",
+    ) + "\n"
+  );
+}
+
 function renderParamsWithCt(params: ParamIR[], usesUser: boolean = false): string {
   const head = [
     ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
