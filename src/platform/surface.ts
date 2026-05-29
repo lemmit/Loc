@@ -1,3 +1,4 @@
+import type { PlatformAdapterDefaults, PlatformAdapters } from "../generator/_adapters/index.js";
 import type {
   ComponentIR,
   DeployableIR,
@@ -140,6 +141,21 @@ export interface PlatformSurface {
     sys: SystemIR;
     slug: string;
   }): ComposeServiceShape;
+
+  /** This backend's persistence / style / layout adapter menu +
+   *  defaults.  Frontend platforms (`react` / `static`) omit both —
+   *  they carry no domain code and version via the design-pack axis.
+   *
+   *  Exposed as a METHOD (not an eager field) on purpose: each surface
+   *  is loaded early via `registry.ts`, inside the tolerated
+   *  `registry → <surface> → generator → enrich → registry` import
+   *  cycle.  Building the menu lazily reads the adapter bindings at
+   *  call time — after every module finished initialising — avoiding
+   *  init-order TDZ.  See D-ADAPTER-HOME in `docs/decisions.md`. */
+  adapters?(): PlatformAdapters;
+  /** Default adapter per `persistence:` strategy / `style:` / `layout:`
+   *  when the source doesn't pin one.  Present iff `adapters()` is. */
+  adapterDefaults?(): PlatformAdapterDefaults;
 
   // ---------------------------------------------------------------------------
   // Reserved no-op lifecycle hooks for future cross-cutting concerns.

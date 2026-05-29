@@ -93,7 +93,7 @@ const realSiblings = (): readonly string[] => ["cqrs"];
 
 export const cqrsStyleAdapter: StyleAdapter = {
   name: "cqrs",
-  supportedStrategies: ["stateBased", "eventSourced"],
+  supportedStrategies: ["state", "eventLog"],
   supportedLayouts: ["byLayer", "byFeature"],
 
   emitEndpoint(_op: OperationIR, _ctx: EmitCtx): Lines {

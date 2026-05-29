@@ -55,18 +55,17 @@ function configFor(files: Map<string, string>): string {
 }
 
 describe("dataSource → EF Core ToTable (.NET)", () => {
-  it("emits a single-arg ToTable when the dataSource has no schema / tablePrefix", async () => {
+  it("defaults schema to snake(context.name) when DSL omits `schema:`", async () => {
     const files = await generate(
       baseSystem(`dataSource ordersState { for: Orders, kind: state, use: primary }`),
     );
     const cfg = configFor(files);
-    // No schema / prefix → byte-identical with pre-dataSource output.
-    expect(cfg).toContain(`b.ToTable("orders");`);
-    // Containment part picks up the same shape.
-    expect(cfg).toContain(`o.ToTable("lines");`);
+    // Implicit default — context Orders → schema "orders".
+    expect(cfg).toContain(`b.ToTable("orders", "orders");`);
+    expect(cfg).toContain(`o.ToTable("lines", "orders");`);
   });
 
-  it("threads `schema` into the second arg of ToTable", async () => {
+  it("threads explicit `schema:` into the second arg of ToTable", async () => {
     const files = await generate(
       baseSystem(
         `dataSource ordersState { for: Orders, kind: state, use: primary, schema: "sales" }`,
@@ -78,18 +77,19 @@ describe("dataSource → EF Core ToTable (.NET)", () => {
     expect(cfg).toContain(`o.ToTable("lines", "sales");`);
   });
 
-  it("prepends `tablePrefix` to the local table name", async () => {
+  it("prepends `tablePrefix` and keeps the default ctx schema", async () => {
     const files = await generate(
       baseSystem(
         `dataSource ordersState { for: Orders, kind: state, use: primary, tablePrefix: "sales_" }`,
       ),
     );
     const cfg = configFor(files);
-    expect(cfg).toContain(`b.ToTable("sales_orders");`);
-    expect(cfg).toContain(`o.ToTable("sales_lines");`);
+    // tablePrefix prepends; schema stays defaulted to ctx name.
+    expect(cfg).toContain(`b.ToTable("sales_orders", "orders");`);
+    expect(cfg).toContain(`o.ToTable("sales_lines", "orders");`);
   });
 
-  it("combines schema and tablePrefix when both are set", async () => {
+  it("combines explicit schema + tablePrefix when both are set", async () => {
     const files = await generate(
       baseSystem(
         `dataSource ordersState { for: Orders, kind: state, use: primary, schema: "legacy", tablePrefix: "sales_" }`,

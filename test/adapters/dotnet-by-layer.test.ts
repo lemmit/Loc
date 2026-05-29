@@ -12,7 +12,7 @@ import {
   byLayerLayoutAdapter,
   type DotnetArtifact,
 } from "../../src/generator/dotnet/adapters/by-layer-layout.js";
-import { resolveLayout } from "../../src/platform/adapter-registry.js";
+import { resolveLayout } from "../../src/platform/resolve-adapters.js";
 
 const ctx = {} as EmitCtx; // path routing ignores ctx today
 

@@ -608,16 +608,19 @@ ValueObjectMember:
     Property | DerivedProp | Invariant | FunctionDecl;
 
 Aggregate:
-    'aggregate' name=ID ('ids' idKind=IdKind)? withClause=WithClause? '{'
-        ('persistenceStrategy' ':' persistenceStrategy=PersistenceStrategy ','?)?
+    'aggregate' name=ID ('ids' idKind=IdKind)? ('persistedAs' '(' persistedAs=TruthKind ')')? withClause=WithClause? '{'
         members+=AggregateMember*
     '}';
 
 IdKind returns string:
     'guid' | 'int' | 'long' | 'string';
 
-PersistenceStrategy returns string:
-    'stateBased' | 'eventSourced';
+// D-DOCUMENT-AXIS: the aggregate's primary truth kind, a header paren
+// modifier (replaces the former body `persistenceStrategy:` clause).
+// Values align to the `dataSource` `kind` set so the IR→binding mapping
+// is an identity.  Default (absent) is `state`.
+TruthKind returns string:
+    'eventLog' | 'state';
 
 // ---- macro `with` clause ----------------------------------------
 //
@@ -938,7 +941,7 @@ BaseType:
     PrimitiveType | SlotType | IdType | NamedType;
 
 PrimitiveType:
-    name=('int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid');
+    name=('int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid' | 'json');
 
 // Element-shaped param type for component slot injection — see
 // `docs/page-metamodel.md`.  Valid only on a `component`'s parameter

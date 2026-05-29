@@ -28,7 +28,7 @@ event  repository  for  find  where
 derived  invariant  when  function  operation  private
 precondition  emit  let  expect  expectThrows  test  new
 true  false  null  this  id
-int  long  decimal  money  string  bool  datetime  guid
+int  long  decimal  money  string  bool  datetime  guid  json
 ```
 
 ---
@@ -45,13 +45,22 @@ context Sales {
     // declarations...
 }
 
-// System: groups modules and deployables.  `generate system` emits
+// System: groups subdomains and deployables.  `generate system` emits
 // every deployable as its own project plus a docker-compose.yml.
 system Acme {
-    module Catalog { context Products { … } }
-    module Sales   { context Orders   { … } }
-    deployable api { platform: dotnet, modules: Catalog, Sales, port: 8080 }
-    deployable web { platform: hono,   modules: Catalog,         port: 3000 }
+    subdomain Catalog { context Products { … } }
+    subdomain Sales   { context Orders   { … } }
+    storage primary { type: postgres }
+    dataSource productsState { for: Products, kind: state, use: primary }
+    dataSource ordersState   { for: Orders,   kind: state, use: primary }
+    deployable api {
+        platform: dotnet, contexts: [Products, Orders],
+        dataSources: [productsState, ordersState], port: 8080
+    }
+    deployable web {
+        platform: hono, contexts: [Products],
+        dataSources: [productsState], port: 3000
+    }
 }
 ```
 
@@ -71,8 +80,12 @@ import "./shared/money.ddd"
 import "./orders.ddd"
 
 system Shop {
-    module Sales { context Orders { … } }
-    deployable api { platform: hono, modules: Sales }
+    subdomain Sales { context Orders { … } }
+    storage primary { type: postgres }
+    dataSource ordersState { for: Orders, kind: state, use: primary }
+    deployable api {
+        platform: hono, contexts: [Orders], dataSources: [ordersState]
+    }
 }
 ```
 
@@ -130,32 +143,35 @@ preserved at [`plans/multi-file-source.md`](plans/multi-file-source.md).
 
 | Form | Purpose |
 | --- | --- |
-| `module Name { … }` | Groups one or more bounded contexts under a name.  A module is a logical unit; it doesn't directly produce code. |
-| `deployable name { platform: dotnet\|hono, modules: A, B, port: N, auth: required? }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  Selects which modules to ship.  Optional `auth: required` enables JWT-decode middleware on this deployable; see [`auth.md`](auth.md). |
-| `deployable name { platform: react, targets: <other-deployable>, port: N }` | A frontend deployable: a Vite-built React + RQ + Zod + Mantine SPA whose API base URL is wired to `targets`'s port.  Modules are inherited from the target. |
-| `context Name { … }` | Allowed directly inside a system; treated as if it were in an implicit `_default` module. |
+| `subdomain Name { … }` | Groups one or more bounded contexts under a name.  A subdomain is a logical unit; it doesn't directly produce code.  Was named `module` before the D-STORAGE-SPLIT rename. |
+| `deployable name { platform: dotnet\|hono\|phoenixLiveView, contexts: [A, B], dataSources: [X, Y], port: N, auth: required? }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  `contexts:` names which bounded contexts this deployable hosts; `dataSources:` lists the system-scope `dataSource` decls that route those contexts' persistence (every hosted aggregate must have a matching binding — see the `dataSource` row below).  Optional `auth: required` enables JWT-decode middleware on this deployable; see [`auth.md`](auth.md). |
+| `deployable name { platform: react, targets: <other-deployable>, port: N }` | A frontend deployable: a Vite-built React + RQ + Zod + Mantine SPA whose API base URL is wired to `targets`'s port.  Hosted contexts are inherited from the target. |
+| `context Name { … }` | Allowed directly inside a system; treated as if it were in an implicit `_default` subdomain. |
 | `test e2e "name" against <deployable> { … }` | End-to-end test that runs against the named deployable's HTTP API; lowers to a vitest file at the system output root. |
 | `user { id: string, role: string, … }` | System-wide JWT-claim shape decoded by the verifier hook.  At most one per system; required when any deployable opts in via `auth: required`.  The `currentUser` magic identifier in operation / workflow / view-bind expressions is typed against this shape.  See [`auth.md`](auth.md). |
 | `theme { primary: "#…", radius: "md", … }` | System-wide visual identity — design tokens consumed by every React (and Phoenix LiveView) deployable in this system.  At most one per system.  Colour properties (`primary`, `secondary`, `accent`, `success`, `warning`, `error`, `neutral`) accept CSS hex values (`#RGB` / `#RRGGBB` / `#RRGGBBAA`).  `radius` is one of `none / sm / md / lg / xl`.  `fontFamily` and `fontFamilyMono` are free-form strings.  `colorScheme` is `light / dark / auto`.  Unknown property names and invalid values are validator errors. |
-| `api Name from Module` | First-class API contract derived from `Module`'s domain (aggregates expose `all / byId / create / update / delete`, repositories expose their finds, workflows expose mutations, views expose queries).  Backend deployables `serves:` an api; UIs reference one via `api X: <ApiName>` parameters.  See [`architecture.md`](architecture.md). |
-| `storage Name { type: postgres\|redis\|kafka\|… }` | Typed storage instance reusable across deployables.  v0 fully supports `postgres`; other types parse but don't activate generator output.  See [`architecture.md`](architecture.md). |
+| `api Name from <Subdomain>` | First-class API contract derived from a subdomain's domain (aggregates expose `all / byId / create / update / delete`, repositories expose their finds, workflows expose mutations, views expose queries).  Backend deployables `serves:` an api; UIs reference one via `api X: <ApiName>` parameters.  See [`architecture.md`](architecture.md). |
+| `storage Name { type: postgres\|redis\|kafka\|… }` | Typed physical store reusable across deployables.  v0 fully supports `postgres`; other types parse but don't activate generator output.  See [`architecture.md`](architecture.md). |
+| `dataSource Name { for: <Ctx>, kind: <k>, use: <storage>, … }` | Logical binding from a bounded context's data of kind `state` / `eventLog` / `snapshot` / `cache` / `replica` to a physical `storage`.  Optional knobs: `schema`, `tablePrefix`, `keyPrefix`, `ttl`, `every`, `retain`, `isolationLevel`, `readonly`.  Every backend deployable (`dotnet`, `hono`, `phoenixLiveView`) hosting an aggregate must list a matching dataSource under its `dataSources:` field.  See [`architecture.md`](architecture.md) for the kind ↔ storage compatibility matrix. |
 | `ui Name { … }` | Block of pages, components, menu, and api parameters that a deployable binds via `ui:`.  See [`page-metamodel.md`](page-metamodel.md). |
 
-A module may appear in any number of deployables — its code is inlined
-into each.  For v1 there is no shared-library / npm-workspace shape;
-duplication is the trade-off for simplicity.
+A subdomain (and the bounded contexts it groups) may appear in any
+number of deployables — its code is inlined into each.  For v1 there
+is no shared-library / npm-workspace shape; duplication is the
+trade-off for simplicity.
 
-Cross-module type references (`X id`, value-object usage, enum values)
-work freely as long as both types are reachable from the same
-deployable's module set.  The Langium scope provider exports all
-named declarations — aggregates, entity parts, value objects, enums —
-across module boundaries within the same source file.
+Cross-context type references (`X id`, value-object usage, enum
+values) work freely as long as both types are reachable from the same
+deployable's hosted context set.  The Langium scope provider exports
+all named declarations — aggregates, entity parts, value objects,
+enums — across subdomain / context boundaries within the same source
+file.
 
-A module body may also include one or more
+A subdomain body may also include one or more
 `permissions { ... }` blocks declaring typed permission identifiers
 used in operation / workflow expression bodies.  The
 `permissions.<name>` magic identifier lowers to the runtime string
-`<lowercase-module>.<name>`; see [`auth.md`](auth.md).
+`<lowercase-subdomain>.<name>`; see [`auth.md`](auth.md).
 
 #### Deployable platforms
 
@@ -165,13 +181,16 @@ used in operation / workflow expression bodies.  The
 | `hono`   | Hono + Drizzle ORM + Zod with `@hono/zod-openapi`.  Default port 3000. |
 | `react`  | Vite + React Router + React Query + Zod + Mantine + Playwright page objects.  Default port 3001. |
 
-Backend deployables (`dotnet`, `hono`) declare `modules:`; the
-generator scopes the project to those modules' contexts.  React
-deployables declare `targets: <other-deployable>` instead — the
-frontend's API base URL is wired to the target's port and its module
-set is inherited from the target so pages exactly cover the API
-surface.  See [`generators.md`](generators.md) for what each
-platform emits per aggregate.
+Backend deployables (`dotnet`, `hono`, `phoenixLiveView`) declare
+`contexts: [...]` (which bounded contexts they host) and
+`dataSources: [...]` (the system-scope `dataSource` decls that route
+those contexts' persistence).  React deployables declare
+`targets: <other-deployable>` instead — the frontend's API base URL
+is wired to the target's port and its hosted contexts are inherited
+from the target so pages exactly cover the API surface.  See
+[`architecture.md`](architecture.md) for the storage/dataSource model
+and [`generators.md`](generators.md) for what each platform emits per
+aggregate.
 
 ### Inside a context
 
@@ -397,10 +416,18 @@ TypeRef       = BaseType ('[]')? ('?')?
 BaseType      = PrimitiveType | SlotType | IdType | NamedType
 IdType        = Identifier 'id'                // cross-aggregate FK
 NamedType     = Identifier                     // bare name
-PrimitiveType = 'int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid'
+PrimitiveType = 'int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid' | 'json'
 SlotType      = 'slot'                         // element-shaped param marker — UI-only
 MoneyLit      = 'money' '(' STRING ')'         // precise-decimal literal
 ```
+
+`json` is an **opaque JSON blob** — Loom does not model its interior.
+It maps to Postgres `JSONB` (Drizzle `jsonb`, EF `System.Text.Json.JsonElement`,
+Ash `:map`), TS `unknown`, Zod `z.unknown()`, and a freeform `object`
+in the OpenAPI/wire spec (a leaf — never expanded or structurally
+diffed).  Reach for a `valueobject` instead when the shape is known.
+See [`document-and-json-hierarchies.md`](proposals/document-and-json-hierarchies.md)
+(D-DOCUMENT-AXIS).
 
 A bare `Identifier` in type position must resolve to one of:
 

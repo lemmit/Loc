@@ -19,7 +19,7 @@ describe("adapter contract shape (type-level)", () => {
     // signature mismatch surfaces at `tsc`, not at runtime.
     const _: PersistenceAdapter = {
       name: "x",
-      supportedStrategies: ["stateBased"],
+      supportedStrategies: ["state"],
       supports: (_t, _k, _s) => true,
       emitProjectDeps: (_ctx: EmitCtx): Lines => [],
       emitConnectionSetup: (_stores, _ctx: EmitCtx): Lines => [],
@@ -33,7 +33,7 @@ describe("adapter contract shape (type-level)", () => {
   it("StyleAdapter exposes endpoint / handler / DI", () => {
     const _: StyleAdapter = {
       name: "x",
-      supportedStrategies: ["stateBased"],
+      supportedStrategies: ["state"],
       supportedLayouts: ["byLayer"] as readonly LayoutShape[],
       emitEndpoint: (_op, _ctx: EmitCtx): Lines => [],
       emitHandlerOrService: (_op, _ctx: EmitCtx) => [],

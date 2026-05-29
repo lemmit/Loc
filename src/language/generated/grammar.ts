@@ -5062,6 +5062,36 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "cardinality": "?"
           },
           {
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Keyword",
+                "value": "persistedAs"
+              },
+              {
+                "$type": "Keyword",
+                "value": "("
+              },
+              {
+                "$type": "Assignment",
+                "feature": "persistedAs",
+                "operator": "=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@74"
+                  },
+                  "arguments": []
+                }
+              },
+              {
+                "$type": "Keyword",
+                "value": ")"
+              }
+            ],
+            "cardinality": "?"
+          },
+          {
             "$type": "Assignment",
             "feature": "withClause",
             "operator": "=",
@@ -5077,37 +5107,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "{"
-          },
-          {
-            "$type": "Group",
-            "elements": [
-              {
-                "$type": "Keyword",
-                "value": "persistenceStrategy"
-              },
-              {
-                "$type": "Keyword",
-                "value": ":"
-              },
-              {
-                "$type": "Assignment",
-                "feature": "persistenceStrategy",
-                "operator": "=",
-                "terminal": {
-                  "$type": "RuleCall",
-                  "rule": {
-                    "$ref": "#/rules@74"
-                  },
-                  "arguments": []
-                }
-              },
-              {
-                "$type": "Keyword",
-                "value": ",",
-                "cardinality": "?"
-              }
-            ],
-            "cardinality": "?"
           },
           {
             "$type": "Assignment",
@@ -5169,18 +5168,18 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
     },
     {
       "$type": "ParserRule",
-      "name": "PersistenceStrategy",
+      "name": "TruthKind",
       "dataType": "string",
       "definition": {
         "$type": "Alternatives",
         "elements": [
           {
             "$type": "Keyword",
-            "value": "stateBased"
+            "value": "eventLog"
           },
           {
             "$type": "Keyword",
-            "value": "eventSourced"
+            "value": "state"
           }
         ]
       },
@@ -8005,6 +8004,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             {
               "$type": "Keyword",
               "value": "guid"
+            },
+            {
+              "$type": "Keyword",
+              "value": "json"
             }
           ]
         }

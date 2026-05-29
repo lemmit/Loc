@@ -337,6 +337,8 @@ export function renderTsType(t: TypeIR): string {
           return "boolean";
         case "datetime":
           return "Date";
+        case "json":
+          return "unknown";
       }
     /* eslint-disable-next-line no-fallthrough */
     case "id":

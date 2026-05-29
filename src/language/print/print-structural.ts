@@ -474,14 +474,13 @@ function printValueObject(node: ValueObject): string {
 
 function printAggregate(node: Aggregate): string {
   const ids = node.idKind ? ` ids ${node.idKind}` : "";
-  const head: string[] = [];
-  if (node.persistenceStrategy) {
-    head.push(`persistenceStrategy: ${node.persistenceStrategy}`);
-  }
-  return block(`aggregate ${node.name}${ids}${printWithClause(node.withClause)}`, [
-    ...head,
-    ...node.members.map(printStructural),
-  ]);
+  // `persistedAs(…)` is a header modifier (between `ids` and `with`),
+  // not a body member — matches the grammar order.
+  const persistedAs = node.persistedAs ? ` persistedAs(${node.persistedAs})` : "";
+  return block(
+    `aggregate ${node.name}${ids}${persistedAs}${printWithClause(node.withClause)}`,
+    node.members.map(printStructural),
+  );
 }
 
 function printWithClause(wc: import("../generated/ast.js").WithClause | undefined): string {

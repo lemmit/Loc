@@ -358,6 +358,8 @@ export function renderCsType(t: TypeIR): string {
           return "DateTime";
         case "guid":
           return "Guid";
+        case "json":
+          return "System.Text.Json.JsonElement";
       }
     /* eslint-disable-next-line no-fallthrough */
     case "id":

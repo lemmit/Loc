@@ -11,11 +11,11 @@ import type { EmitCtx } from "../../src/generator/_adapters/index.js";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { EnrichedBoundedContextIR } from "../../src/ir/types/loom-ir.js";
-import { resolvePersistence } from "../../src/platform/adapter-registry.js";
 import {
   drizzlePersistenceAdapter,
   emitDrizzleSchema,
 } from "../../src/platform/hono/v4/adapters/drizzle-persistence.js";
+import { resolvePersistence } from "../../src/platform/resolve-adapters.js";
 import { parseValid } from "../_helpers/parse.js";
 
 const SRC = `
@@ -58,12 +58,12 @@ describe("drizzle PersistenceAdapter (real)", () => {
   });
 
   it("answers capability fields directly (no stub-throw)", () => {
-    expect(drizzlePersistenceAdapter.supportedStrategies).toEqual(["stateBased"]);
-    expect(drizzlePersistenceAdapter.supports("postgres", "state", "stateBased")).toBe(true);
-    expect(drizzlePersistenceAdapter.supports("mysql", "state", "stateBased")).toBe(true);
-    expect(drizzlePersistenceAdapter.supports("redis", "state", "stateBased")).toBe(false);
-    expect(drizzlePersistenceAdapter.supports("postgres", "eventLog", "stateBased")).toBe(false);
-    expect(drizzlePersistenceAdapter.supports("postgres", "state", "eventSourced")).toBe(false);
+    expect(drizzlePersistenceAdapter.supportedStrategies).toEqual(["state"]);
+    expect(drizzlePersistenceAdapter.supports("postgres", "state", "state")).toBe(true);
+    expect(drizzlePersistenceAdapter.supports("mysql", "state", "state")).toBe(true);
+    expect(drizzlePersistenceAdapter.supports("redis", "state", "state")).toBe(false);
+    expect(drizzlePersistenceAdapter.supports("postgres", "eventLog", "state")).toBe(false);
+    expect(drizzlePersistenceAdapter.supports("postgres", "state", "eventLog")).toBe(false);
   });
 
   it("emitProjectDeps returns drizzle + pg deps + devDeps as JSON lines", () => {

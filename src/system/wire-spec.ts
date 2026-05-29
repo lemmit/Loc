@@ -47,6 +47,9 @@ type JsonSchemaProperty =
   | { type: "integer" }
   | { type: "boolean" }
   | { type: "array"; items: JsonSchemaProperty }
+  /** Opaque JSON blob (the `json` primitive) — freeform object, no
+   *  further constraints.  `additionalProperties` left default. */
+  | { type: "object" }
   | { $ref: string };
 
 export function buildWireSpec(sys: EnrichedSystemIR): WireSpecDoc {
@@ -125,6 +128,9 @@ export function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
           return { type: "string", format: "date-time" };
         case "guid":
           return { type: "string", format: "uuid" };
+        case "json":
+          // Opaque blob — freeform object at the JSON boundary.
+          return { type: "object" };
       }
     /* eslint-disable-next-line no-fallthrough */
     case "id":

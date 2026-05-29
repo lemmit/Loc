@@ -8,8 +8,8 @@ import { AdapterNotImplementedError, type EmitCtx } from "../../src/generator/_a
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { EnrichedBoundedContextIR } from "../../src/ir/types/loom-ir.js";
-import { resolveStyle } from "../../src/platform/adapter-registry.js";
 import { layeredStyleAdapter } from "../../src/platform/hono/v4/adapters/layered-style.js";
+import { resolveStyle } from "../../src/platform/resolve-adapters.js";
 import { parseValid } from "../_helpers/parse.js";
 
 const SRC = `
@@ -53,7 +53,7 @@ describe("layered StyleAdapter — hono (real)", () => {
   });
 
   it("answers capability fields directly", () => {
-    expect(layeredStyleAdapter.supportedStrategies).toEqual(["stateBased"]);
+    expect(layeredStyleAdapter.supportedStrategies).toEqual(["state"]);
     expect(layeredStyleAdapter.supportedLayouts).toEqual(["byLayer"]);
   });
 

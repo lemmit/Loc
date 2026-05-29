@@ -25,6 +25,15 @@
 > storage grammar, and most of §3.4–§3.7 (per-aggregate persistence
 > strategy, event publish markers, deployable platform config,
 > `persistence:` shorthand) survive intact and inform F1 grammar.
+>
+> - **D-DOCUMENT-AXIS** — the per-aggregate `persistenceStrategy:
+>   eventSourced | stateBased` clause (body) described in §3.4 is
+>   renamed to the **header** modifier `persistedAs(eventLog | state)`
+>   (values aligned to the `dataSource` `kind` set, so the
+>   strategy→kind mapping is an identity; hard cutover, no parallel
+>   acceptance). A second orthogonal header axis `normalised(true |
+>   false)` selects document vs relational saving. Read §3.4's
+>   `persistenceStrategy: eventSourced` as `persistedAs(eventLog)`.
 
 ---
 

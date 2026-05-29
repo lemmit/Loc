@@ -4,10 +4,12 @@ import {
   type EnrichedBoundedContextIR,
   exprUsesCurrentUser,
   operationUsesCurrentUser,
+  type SystemIR,
   type WorkflowIR,
   type WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
+import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   csIdValueClrType,
@@ -41,7 +43,7 @@ export function emitWorkflows(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
-  options?: { routePrefix?: string },
+  options?: { routePrefix?: string; sys?: SystemIR },
 ): void {
   if (ctx.workflows.length === 0) return;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
@@ -55,7 +57,7 @@ export function emitWorkflows(
     out.set(`Application/Workflows/${upperFirst(wf.name)}Command.cs`, renderCommand(wf, ns));
     out.set(
       `Application/Workflows/${upperFirst(wf.name)}Handler.cs`,
-      renderHandler(wf, usage, ns, ctx),
+      renderHandler(wf, usage, ns, ctx, options?.sys),
     );
   }
   out.set(`Api/${ctx.name}WorkflowsController.cs`, renderController(ctx, ns, options?.routePrefix));
@@ -165,16 +167,21 @@ function renderHandler(
   usage: WorkflowUsage,
   ns: string,
   ctx: EnrichedBoundedContextIR,
+  sys: SystemIR | undefined,
 ): string {
   const cmdName = `${upperFirst(wf.name)}Command`;
   const handlerName = `${upperFirst(wf.name)}Handler`;
   const usesUser = workflowUsesCurrentUser(wf);
+  // Effective isolation: workflow's `transactional(<level>)` wins; else
+  // the state-kind dataSource for this context's `isolationLevel:`; else
+  // undefined (connection default applies at runtime).
+  const effectiveIsolation = sys ? resolveWorkflowIsolation(wf, ctx, sys) : wf.isolation;
   // Workflow handler emits domain-logic statements via renderCsExpr and
   // (when transactional with an explicit isolation level) an
   // IsolationLevel.X enum literal.  Both surfaces may reach namespaces
   // outside the SDK's implicit-usings set — collect them per file.
   const usings = new Set<string>();
-  if (wf.transactional && wf.isolation) usings.add("System.Data");
+  if (wf.transactional && effectiveIsolation) usings.add("System.Data");
   // BeginTransactionAsync(IsolationLevel, CancellationToken) lives on
   // RelationalDatabaseFacadeExtensions, so transactional handlers need
   // the EntityFrameworkCore namespace for the 2-arg overload.
@@ -248,8 +255,8 @@ function renderHandler(
 
   let body: string;
   if (wf.transactional) {
-    const beginCall = wf.isolation
-      ? `_db.Database.BeginTransactionAsync(IsolationLevel.${csIsolationLevel(wf.isolation)}, ct)`
+    const beginCall = effectiveIsolation
+      ? `_db.Database.BeginTransactionAsync(IsolationLevel.${csIsolationLevel(effectiveIsolation)}, ct)`
       : `_db.Database.BeginTransactionAsync(ct)`;
     body =
       `        await using var tx = await ${beginCall};\n` +

@@ -23,8 +23,8 @@ import loomLandingSource from "./loom-landing.ddd?raw";
 import dotnetBackendSource from "./dotnet-backend.ddd?raw";
 import actionShowcaseSource from "./action-showcase.ddd?raw";
 import multifileMainSource from "./multifile-main.ddd?raw";
-import multifileSharedMoneySource from "./multifile-shared-money.ddd?raw";
-import multifileSharedCurrencySource from "./multifile-shared-currency.ddd?raw";
+import multifileSharedMoneySource from "./shared/money.ddd?raw";
+import multifileSharedCurrencySource from "./shared/currency.ddd?raw";
 import multifileLandingSource from "./multifile-landing.ddd?raw";
 import multifileMarketingLibSource from "./multifile-marketing-lib.ddd?raw";
 

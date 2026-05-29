@@ -50,6 +50,9 @@ const CS_WIRE_PRIMITIVE: Record<WirePrimitive, string> = {
   bool: "bool",
   datetime: "string",
   guid: "Guid",
+  // Opaque JSON blob — round-trips through System.Text.Json untouched
+  // (System.Text.Json serialises a JsonElement back verbatim).
+  json: "System.Text.Json.JsonElement",
 };
 
 /** C# DTO property type for a `TypeIR`.  `dir` selects the suffix for

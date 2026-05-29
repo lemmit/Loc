@@ -10,6 +10,7 @@ import type { ValidationAcceptor, ValidationChecks } from "langium";
 import type { DddServices } from "./ddd-module.js";
 import type {
   Api,
+  DataSource,
   DddAstType,
   Deployable,
   Model,
@@ -22,6 +23,7 @@ import {
   checkBinaryOperands,
   checkBuilderCallType,
   checkContext,
+  checkDataSource,
   checkDeployable,
   checkLayout,
   checkLegacyConstructorCalls,
@@ -179,7 +181,7 @@ export class DddValidator {
           if (!api.source?.ref) {
             accept(
               "error",
-              `api '${api.name}' references undeclared module '${api.source?.$refText ?? "<missing>"}'.  Declare a 'module ${api.source?.$refText ?? "<Name>"} { … }' at system scope first.`,
+              `api '${api.name}' references undeclared subdomain '${api.source?.$refText ?? "<missing>"}'.  Declare a 'subdomain ${api.source?.$refText ?? "<Name>"} { … }' at system scope first.`,
               { node: api, property: "source" },
             );
           }
@@ -203,6 +205,31 @@ export class DddValidator {
           } else {
             storageNamesSeen.set(s.name, s);
           }
+        }
+
+        // DataSource declaration checks.
+        //   - Names unique within the system.
+        //   - kind ↔ storage.type compatibility (e.g. kind: cache
+        //     requires redis or inMemory).
+        //   - per-kind config knobs (ttl, every/retain, isolation-
+        //     Level) match the declared kind.
+        //   - storage-shaped knobs (schema, tablePrefix, keyPrefix)
+        //     match the resolved storage's type.
+        // See `src/language/validators/datasource.ts`.
+        const dataSources = m.members.filter((sm) => sm.$type === "DataSource") as DataSource[];
+        const dataSourceNamesSeen = new Map<string, DataSource>();
+        for (const ds of dataSources) {
+          const prior = dataSourceNamesSeen.get(ds.name);
+          if (prior) {
+            accept(
+              "error",
+              `Duplicate dataSource '${ds.name}'; dataSource names must be unique within a system.`,
+              { node: ds, property: "name" },
+            );
+          } else {
+            dataSourceNamesSeen.set(ds.name, ds);
+          }
+          checkDataSource(ds, accept);
         }
 
         for (const sm of m.members) {

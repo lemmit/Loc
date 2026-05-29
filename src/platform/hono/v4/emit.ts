@@ -36,7 +36,7 @@ import {
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
 import { contextsHaveProvenancedField } from "../../../ir/util/prov-id.js";
-import { resolveDataSourceForAggregate } from "../../../ir/util/resolve-datasource.js";
+import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
@@ -186,7 +186,7 @@ export function generateTypeScriptForContexts(
     ? (agg: import("../../../ir/types/loom-ir.js").AggregateIR) => {
         const owningCtx = contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
         return owningCtx
-          ? resolveDataSourceForAggregate(
+          ? resolveDataSourceConfig(
               agg as import("../../../ir/types/loom-ir.js").EnrichedAggregateIR,
               owningCtx,
               system.sys,

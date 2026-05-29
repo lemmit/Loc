@@ -38,11 +38,12 @@ function isRefCollection(t: TypeIR): boolean {
 
 /** Per-aggregate dataSource lookup the orchestrator passes in.  When
  *  present, the resource's `postgres do … end` block picks up the
- *  binding's `schema` / `tablePrefix` config.  Returns `undefined` →
+ *  binding's `schema` (defaulted to `snake(context.name)` when DSL
+ *  omits it) / `tablePrefix` config.  Returns `undefined` →
  *  byte-identical with the pre-dataSource resource emit. */
 export type DataSourceLookup = (
   agg: AggregateIR,
-) => import("../../ir/types/loom-ir.js").DataSourceIR | undefined;
+) => import("../../ir/util/resolve-datasource.js").ResolvedDataSource | undefined;
 
 export function emitAggregateResources(
   ctx: EnrichedBoundedContextIR,

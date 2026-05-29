@@ -399,6 +399,8 @@ function primitiveColumnType(name: string): ColumnType {
       return { kind: "datetime" };
     case "guid":
       return { kind: "uuid" };
+    case "json":
+      return { kind: "json" };
     default:
       throw new Error(`migrations-builder: unknown primitive type '${name}'`);
   }

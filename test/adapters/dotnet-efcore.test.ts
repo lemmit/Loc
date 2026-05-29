@@ -16,7 +16,7 @@ import {
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { EnrichedBoundedContextIR } from "../../src/ir/types/loom-ir.js";
-import { resolvePersistence } from "../../src/platform/adapter-registry.js";
+import { resolvePersistence } from "../../src/platform/resolve-adapters.js";
 import { parseValid } from "../_helpers/parse.js";
 
 const SRC = `
@@ -61,11 +61,11 @@ describe("efcore PersistenceAdapter (real)", () => {
   });
 
   it("answers capability fields directly (no stub-throw)", () => {
-    expect(efcorePersistenceAdapter.supportedStrategies).toEqual(["stateBased"]);
-    expect(efcorePersistenceAdapter.supports("postgres", "state", "stateBased")).toBe(true);
-    expect(efcorePersistenceAdapter.supports("redis", "state", "stateBased")).toBe(false);
-    expect(efcorePersistenceAdapter.supports("postgres", "eventLog", "stateBased")).toBe(false);
-    expect(efcorePersistenceAdapter.supports("postgres", "state", "eventSourced")).toBe(false);
+    expect(efcorePersistenceAdapter.supportedStrategies).toEqual(["state"]);
+    expect(efcorePersistenceAdapter.supports("postgres", "state", "state")).toBe(true);
+    expect(efcorePersistenceAdapter.supports("redis", "state", "state")).toBe(false);
+    expect(efcorePersistenceAdapter.supports("postgres", "eventLog", "state")).toBe(false);
+    expect(efcorePersistenceAdapter.supports("postgres", "state", "eventLog")).toBe(false);
   });
 
   it("emitProjectDeps returns the EF Core PackageReferences", () => {

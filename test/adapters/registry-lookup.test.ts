@@ -11,7 +11,7 @@ import {
   resolveLayout,
   resolvePersistence,
   resolveStyle,
-} from "../../src/platform/adapter-registry.js";
+} from "../../src/platform/resolve-adapters.js";
 
 describe("adapter registry — lookup", () => {
   it("backends carry adapter menus; frontends don't", () => {
@@ -24,31 +24,31 @@ describe("adapter registry — lookup", () => {
 
   it("exposes the .NET defaults", () => {
     const d = defaultsFor("dotnet")!;
-    expect(d.persistence.stateBased).toBe("efcore");
-    expect(d.persistence.eventSourced).toBe("marten");
+    expect(d.persistence.state).toBe("efcore");
+    expect(d.persistence.eventLog).toBe("marten");
     expect(d.style).toBe("cqrs");
     expect(d.layout).toBe("byLayer");
   });
 
   it("exposes the hono defaults", () => {
     const d = defaultsFor("hono")!;
-    expect(d.persistence.stateBased).toBe("drizzle");
+    expect(d.persistence.state).toBe("drizzle");
     expect(d.style).toBe("layered");
     expect(d.layout).toBe("byLayer");
   });
 
   it("exposes the phoenixLiveView defaults", () => {
     const d = defaultsFor("phoenixLiveView")!;
-    expect(d.persistence.stateBased).toBe("ashPostgres");
+    expect(d.persistence.state).toBe("ashPostgres");
     expect(d.style).toBe("ash");
     expect(d.layout).toBe("byFeature");
   });
 
   it("resolves a bareword `platform: dotnet` to its defaults", () => {
-    expect(resolvePersistence("dotnet", null, "stateBased").name).toBe("efcore");
-    expect(resolvePersistence("dotnet", undefined, "stateBased").name).toBe("efcore");
-    expect(resolvePersistence("dotnet", "", "stateBased").name).toBe("efcore");
-    expect(resolvePersistence("dotnet", null, "eventSourced").name).toBe("marten");
+    expect(resolvePersistence("dotnet", null, "state").name).toBe("efcore");
+    expect(resolvePersistence("dotnet", undefined, "state").name).toBe("efcore");
+    expect(resolvePersistence("dotnet", "", "state").name).toBe("efcore");
+    expect(resolvePersistence("dotnet", null, "eventLog").name).toBe("marten");
     expect(resolveStyle("dotnet", null).name).toBe("cqrs");
     expect(resolveLayout("dotnet", null).name).toBe("byLayer");
   });
@@ -57,8 +57,8 @@ describe("adapter registry — lookup", () => {
     const dapper = resolvePersistence("dotnet", "dapper");
     expect(dapper.name).toBe("dapper");
     // Capability fields answer; emit throws (verified in stub-throws.test.ts).
-    expect(dapper.supports("postgres", "state", "stateBased")).toBe(true);
-    expect(dapper.supports("postgres", "eventLog", "eventSourced")).toBe(false);
+    expect(dapper.supports("postgres", "state", "state")).toBe(true);
+    expect(dapper.supports("postgres", "eventLog", "eventLog")).toBe(false);
   });
 
   it("rejects an unknown adapter name with the error listing siblings", () => {

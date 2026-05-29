@@ -12,7 +12,7 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
 {
     public void Configure(EntityTypeBuilder<Product> b)
     {
-        b.ToTable("products");
+        b.ToTable("products", "products");
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).HasConversion(v => v.Value, v => new ProductId(v));
         b.OwnsOne<Money>(x => x.Price);

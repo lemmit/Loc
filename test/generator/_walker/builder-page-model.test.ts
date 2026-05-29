@@ -41,10 +41,15 @@ function norm(v: unknown): unknown {
 function collectDddFiles(): string[] {
   const dirs = [path.join(repoRoot, "examples"), path.join(repoRoot, "web/src/examples")];
   const out: string[] = [];
-  for (const d of dirs) {
-    if (!fs.existsSync(d)) continue;
-    for (const f of fs.readdirSync(d)) if (f.endsWith(".ddd")) out.push(path.join(d, f));
-  }
+  const walk = (d: string): void => {
+    if (!fs.existsSync(d)) return;
+    for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, ent.name);
+      if (ent.isDirectory()) walk(p);
+      else if (ent.isFile() && ent.name.endsWith(".ddd")) out.push(p);
+    }
+  };
+  for (const d of dirs) walk(d);
   return out.sort();
 }
 
