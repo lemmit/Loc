@@ -1,8 +1,8 @@
 # Multi-target frontends — same-origin proxy story
 
 > **Status:** design proposal for review. No code yet. Sibling of
-> `backend-packages.md` (the proxy ends up being a third
-> `PlatformSurface` kind, so the package story carries over).
+> `backend-packages.md` (gateway platforms reuse the out-of-tree
+> package story).
 
 ## The problem
 
@@ -69,91 +69,115 @@ there":
   backend** is already a typed property of the host platform.
 - **`moduleNames` enrichment** — every backend deployable already
   has a resolved list of modules it owns. The cross-backend
-  collision check (two targeted backends both claiming module
+  collision check (two proxied backends both claiming module
   `Billing`) falls out for free.
 
 What's missing:
 
-- `targets:` is single-valued; should be a list. Or — cleaner —
-  **derive it from `UiComposeBinding.bindings.source[]`** and stop
-  asking the user to repeat themselves.
-- No IR field for "this UI calls these backends via these route
-  prefixes."
+- `targets:` (single ref) is the wrong shape — it conflates two
+  unrelated things (where the SPA's API client points + which
+  backend's modules we inherit) and only handles one target. It
+  goes away; `ui: WebApp { Foo: fooApi }` already names every
+  backend a UI binds to.
+- No IR field for "this deployable re-serves these other
+  deployables' apis at same-origin paths."
 - No `PlatformSurface` hook for emitting reverse-proxy config.
-- No proxy-family registry for the standalone case.
+- No first-class platform for "this deployable is a pure
+  gateway" — Caddy/nginx/Ocelot don't fit `serves` / `mountsUi`.
 
-## The design — two shapes, one IR
+## The design — `proxy:` plus gateway platforms
 
-The host platform decides which shape applies; the IR is the same.
+Two ideas, both small, that compose.
 
-### Shape A — UI mounted into a backend (`mountsUi: true`)
+### Idea 1 — `proxy:` is a list of deployables
 
-The hosting backend already terminates the browser's same-origin
-requests. It serves the SPA bundle from `/` (or wherever), serves
-its own contracts at `/api/<own-module>/*`, and gains
-reverse-proxy routes for the *other* targeted backends:
+`proxy: [billingApi, inventoryApi]` says: *"this deployable
+re-serves the listed deployables' apis at `/api/<module>/*` on
+its own origin."* No family/worker knob — the host platform
+decides the implementation. Power-user override (e.g. `proxy: {
+targets: [...], worker: ocelot }`) is a future extension, not
+v1.
 
-```
-                ┌────────────────────┐
-   browser ───▶ │ dotnetHost          │
-                │  /                  │ → static SPA
-                │  /api/sales/*       │ → handled in-proc
-                │  /api/billing/*     │ ──▶ billingApi (hono)
-                │  /api/inventory/*   │ ──▶ inventoryApi (phoenix)
-                └────────────────────┘
-```
-
-Each platform already has an idiomatic in-process proxy:
-
-| Host | In-process proxy |
+| Host platform | Realization of `proxy:` |
 |---|---|
-| `dotnet` | **YARP** (`Yarp.ReverseProxy`) — route map in `appsettings`/code, native ASP.NET middleware. |
-| `hono` | `app.all('/api/billing/*', c => fetch(...))` — single handler. |
-| `phoenixLiveView` | `ReverseProxyPlug` (or a thin Plug that pipes `Req`→`Finch`). |
-| `react` | n/a (no server). |
+| `dotnet` | **YARP** (`Yarp.ReverseProxy`) — routes loaded from `appsettings`, registered via `MapReverseProxy()`. |
+| `hono` | `app.all('/api/billing/*', c => fetch(...))` — single handler per target. |
+| `phoenixLiveView` | `ReverseProxyPlug` block on the Endpoint. |
+| `react` | **Illegal.** React is pure static; validator error directing the user to a gateway or a mounted host. |
 
-No `proxy:` knob to choose — the host's `PlatformSurface` knows
-its own idiom. Power users can override on the host's family slot
-later (`dotnet { proxy: ocelot }`) without changing the surface
-contract.
+`proxy:` on a backend that already `serves:` something layers
+cleanly: the deployable serves its own modules in-process and
+proxies the rest.
 
-### Shape B — UI is its own deployable (host platform `react`)
+### Idea 2 — Gateway platforms (`caddy`, `nginx`, `traefik`, `ocelot`)
 
-The react deployable is a separate compose service that serves the
-bundle. To stay same-origin, it grows a proxy responsibility — but
-the SPA-server itself doesn't speak proxy. So the deployable's
-compose service is **(static server + reverse proxy)**, realized
-by a chosen proxy family:
+These join `Platform` as **restricted-kind** platforms. A gateway
+platform:
+
+- **only** legalises `proxy:` (and `port:`),
+- forbids `contexts:`, `serves:`, `ui:`, `dataSources:`,
+- emits a config file native to its family (`Caddyfile`,
+  `nginx.conf`, traefik labels, `ocelot.json`) + a compose
+  service from a stock image (`caddy:2-alpine`,
+  `nginxinc/nginx-unprivileged`, …).
+
+Choosing a gateway is choosing a `platform:`, like everything
+else. No hidden sub-knob, no second registry, no surprise
+defaults.
+
+The .NET shop that wants Ocelot writes `platform: ocelot`. The
+team that wants Caddy writes `platform: caddy`. Both compose the
+same way.
+
+### Combining them — three shapes that fall out
+
+#### Shape A — Backend host mounts SPA + proxies siblings
 
 ```
-                ┌────────────────────┐
-   browser ───▶ │ webApp (react)      │
-                │  caddy (or chosen)  │
-                │   /              ──▶│ static SPA
-                │   /api/sales/*   ──▶│──▶ salesApi (hono)
-                │   /api/billing/* ──▶│──▶ billingApi (dotnet)
-                └────────────────────┘
+                ┌────────────────────────────┐
+   browser ───▶ │ acmeHost (dotnet)           │
+                │  /                          │ → static SPA
+                │  /api/sales/*               │ → handled in-proc
+                │  /api/billing/*             │ ──▶ billingApi (hono)
+                │  /api/inventory/*           │ ──▶ inventoryApi (phoenix)
+                └────────────────────────────┘
 ```
 
-This is where `proxy:` becomes a real choice:
+The hosting backend `serves:` its own modules, mounts the SPA via
+`ui:`, and `proxy:`-fans-out the rest. In-process; no sidecar.
 
-- `proxy: caddy` (default) — single-binary, terse config, can
-  also serve the static bundle.
-- `proxy: nginx` — incumbent.
-- `proxy: traefik` — label-driven, plays well with docker swarm.
-- `proxy: ocelot` — for .NET-shop developers running a separate
-  gateway tier.
-- `proxy: none` — opt back into raw CORS (rare, but supported).
+#### Shape B — Standalone gateway in front of N services
 
-Each `proxy: <family>` is a `PlatformSurface` of `kind: "proxy"`
-— same out-of-tree story as backends (`backend-packages.md`), so
-a shop can ship `packages/proxy-yarp-v1/` and target it by
-`proxy: yarp@v1`.
+```
+                ┌────────────────────────────┐
+   browser ───▶ │ gateway (caddy)             │
+                │  /             ──▶ webApp:3000    (static SPA)
+                │  /api/sales/*  ──▶ salesApi:3001
+                │  /api/billing/*──▶ billingApi:3002
+                └────────────────────────────┘
+```
+
+The gateway is a deployable in its own right with `platform:
+caddy` (or nginx/traefik/ocelot). The react deployable stays
+purely static. The SPA itself only ever sees the gateway's
+origin.
+
+#### Shape C — Pure static react, single backend (or CORS)
+
+The simplest case: `platform: react` deployable bound to one
+backend via `ui: WebApp { Sales: salesApi }`. No `proxy:`
+anywhere — there's nothing to fan out. If the SPA needs to talk
+to >1 backend without a gateway or mounted host, the user opens
+CORS on each backend explicitly. Validator gives a hint when
+this shape appears with multiple UI bindings: *"this SPA reaches
+multiple backends; consider a gateway deployable, mounting in a
+backend, or set CORS explicitly on each backend."*
 
 ## Grammar surface
 
-Minimal diff to `src/language/ddd.langium`. `targets:` becomes a
-list; `proxy:` is added; both are optional.
+Minimal diff to `src/language/ddd.langium`. `targets:` is
+removed; `proxy:` is added; the `Platform` enum gains the
+gateway families.
 
 ```diff
   Deployable:
@@ -161,116 +185,129 @@ list; `proxy:` is added; both are optional.
           ('platform' ':' platform=Platform ','?)
           ...
 -         ('targets' ':' targets=[Deployable:LooseName] ','?)?
-+         ('targets' ':' '[' targets+=[Deployable:LooseName]
-+                             (',' targets+=[Deployable:LooseName])* ','? ']' ','?)?
-+         ('proxy'   ':' proxy=ProxyFamily ','?)?
++         ('proxy' ':' '[' proxy+=[Deployable:LooseName]
++                          (',' proxy+=[Deployable:LooseName])* ','? ']' ','?)?
           ...
       '}';
 
-+ ProxyFamily returns string:
-+     'caddy' | 'nginx' | 'traefik' | 'ocelot' | 'none';
+  Platform returns string:
+      'hono' | 'dotnet' | 'react' | 'phoenixLiveView'
++   | 'caddy' | 'nginx' | 'traefik' | 'ocelot';
 ```
 
-Singular sugar (`targets: api`) stays via a grammar alternation —
-not shown in the diff, but trivial:
-`('targets' ':' (targets+=[Deployable] | '[' ... ']') ','?)?`.
+Singular sugar (`proxy: api`) is added as a grammar alternation
+once the list form lands; not shown in the diff.
 
-Validator additions (`src/language/validators/deployable.ts` +
-`src/ir/validate/validate.ts`):
+`Platform` joining the gateway families is what makes the out-of-
+tree package story carry over from `backend-packages.md`. A shop
+can ship `packages/proxy-yarp-v1/` carrying
+`loom: { kind: "gateway", family: "yarp", ... }` and target it by
+`platform: yarp@v1`, same shape as a backend.
 
-1. `proxy:` is only valid when host platform's `mountsUi` is true
-   **and** the host is `react` (i.e. shape B). On a mounted host
-   it's a hard error — the in-process idiom isn't pluggable here.
-2. Every `targets:` entry must be a backend deployable
-   (`platform` is non-frontend).
-3. `moduleNames` across `targets:` must be disjoint — two
-   backends can't both own `Billing`. Suggested diagnostic code:
-   `loom.proxy-module-collision`.
-4. Every `UiComposeBinding.bindings.source` must appear in
-   `targets:`. (Better: derive `targets:` from the bindings and
-   reject explicit `targets:` when both are present. Open
-   question — see below.)
+## Validator additions
+
+In `src/language/validators/deployable.ts` and
+`src/ir/validate/validate.ts`:
+
+| Code | Rule |
+|---|---|
+| `loom.proxy-on-static` | `proxy:` set on `platform: react` (or any platform with `kind === 'static'` in the surface — to be defined). |
+| `loom.proxy-module-collision` | Two entries in `proxy:` claim the same module name. |
+| `loom.proxy-not-backend-or-static` | An entry in `proxy:` is itself a gateway (gateways proxying gateways is allowed but suspicious — start as a warning). |
+| `loom.ui-binding-not-proxied` | A `UiComposeBinding.source` isn't the host itself, not in `proxy:`, and the host isn't a gateway exposing it. (Probably: derive instead of require — see open question.) |
+| `loom.gateway-no-domain-slots` | `platform: caddy/nginx/…` deployable has `contexts:`, `serves:`, `ui:`, or `dataSources:`. |
+| `loom.spa-fanout-no-gateway` | Warning. `platform: react` deployable's `ui:` binds >1 distinct source deployable and no gateway fronts it. |
+
+The "kind" distinction between **application platform** (today's
+hono/dotnet/phoenix/react) and **gateway platform** (new) is best
+expressed as a `PlatformSurface.kind` discriminator rather than a
+hard-coded set name in the validator — see the contract diff.
 
 ## IR shape
 
-One enrichment field per UI-hosting deployable, added in phase ⑥
+One enrichment field per non-static deployable, added in phase ⑥
 (`src/ir/enrich/enrichments.ts`):
 
 ```ts
-// On EnrichedDeployableIR — only when mountsUi
+// On EnrichedDeployableIR
 readonly proxyRoutes?: {
-  readonly mode: 'mounted-in-host' | 'standalone';
-  readonly family?: ProxyFamily;            // standalone only
+  readonly mode: 'mounted-in-host' | 'gateway';
   readonly routes: readonly {
-    readonly prefix:  string;               // e.g. "/api/billing"
-    readonly target:  string;               // service name in compose
+    readonly prefix:  string;               // "/api/billing" or "/"
+    readonly target:  string;               // compose service name
     readonly port:    number;
-    readonly module:  string;               // for traceability
+    readonly module?: string;               // present for api routes
   }[];
 };
 ```
 
-Derivation is mechanical:
+Derivation rules:
 
-- `mode` = `'mounted-in-host'` if the host's `PlatformSurface.mountsUi`
-  is true and the host is *not* `react`; `'standalone'` otherwise.
-- For each `target ∈ targets[]` that is *not* the host itself:
-  - for each `module ∈ target.moduleNames`:
-    - emit `{ prefix: '/api/' + kebab(module), target: target.serviceName, port: target.port, module }`.
+- `mode = 'gateway'` when host `PlatformSurface.kind === 'gateway'`;
+  otherwise `'mounted-in-host'` (and only present when `proxy:` is
+  non-empty).
+- For each `target ∈ proxy[]`:
+  - If the target is a backend, for each
+    `module ∈ target.moduleNames` emit
+    `{ prefix: '/api/' + kebab(module), target, port, module }`.
+  - If the target is a frontend (only legal on gateway hosts),
+    emit a single root catch-all route `{ prefix: '/', target,
+    port }`. This is how a gateway proxies the static SPA itself.
 - The host's *own* modules don't get a proxy route — they're
-  served in-process.
+  served in-process (for `mounted-in-host` mode only).
+- Order of `routes` is significant: api prefixes before the root
+  catch-all. Enrichment guarantees the sort.
 
-The compose builder
-(`src/system/compose.ts` — wherever the docker-compose YAML lives)
-reads `proxyRoutes` and either:
+The compose builder reads `proxyRoutes` and either:
 
-- **mounted-in-host:** delegates to the host's
-  `PlatformSurface.emitProxyMounts(routes)` — emits YARP routes
-  into `appsettings.json` for .NET, adds `app.all(...)` handlers
-  to the hono router, or a `ReverseProxyPlug` block to the Phoenix
-  endpoint.
-- **standalone:** picks the proxy family's `PlatformSurface` and
-  calls `emitProject({ routes, staticRoot })` — Caddy emits a
-  `Caddyfile`; nginx emits `nginx.conf`; etc.
+- **`mounted-in-host`** → delegates to the host's
+  `PlatformSurface.emitProxyMounts(routes)`.
+- **`gateway`** → calls the gateway's
+  `PlatformSurface.emitProject({ routes, listenPort })`.
 
 ## `PlatformSurface` contract diff
 
-Two small additions to `src/platform/surface.ts`:
+Two additions to `src/platform/surface.ts`:
 
 ```ts
 export interface PlatformSurface {
   // ...existing...
 
   /**
-   * Optional. Called once per mounted UI host whose deployable
-   * targets more than one backend. The host emits same-origin
-   * reverse-proxy routes for every target other than itself.
-   * Only called when `mountsUi && kind === 'backend'`.
+   * Discriminator. Existing surfaces are 'application'; gateway
+   * platforms are 'gateway'. Drives validator rules — gateways
+   * can't `serves:` / `ui:` / `contexts:`.
+   */
+  readonly kind: 'application' | 'gateway';
+
+  /**
+   * Optional. Called once per application host whose deployable
+   * has a non-empty `proxy:`. The host emits same-origin
+   * reverse-proxy routes for every listed target using its
+   * platform-native idiom. No-op for gateways (they use
+   * emitProject).
    */
   readonly emitProxyMounts?: (
     routes: readonly ProxyRoute[],
     ctx: HostEmitCtx,
   ) => void;
 }
-
-// And a new kind:
-export interface ProxySurface extends Omit<PlatformSurface, 'mountsUi'> {
-  readonly kind: 'proxy';
-  readonly family: 'caddy' | 'nginx' | 'traefik' | 'ocelot';
-  readonly emitProject: (input: {
-    routes: readonly ProxyRoute[];
-    staticRoot: string;             // path inside container
-    listenPort: number;
-  }) => Map<string, string>;
-  readonly composeService: (...) => DockerComposeService;
-}
 ```
 
-Registration mirrors `backend-packages.md`:
-`packages/proxy-<family>-v<N>/package.json` with
-`loom: { kind: "proxy", family, loomVersion, core }`.
-`src/platform/fs-discovery.ts` already iterates packages; teach it
-the `"proxy"` kind alongside `"backend"`.
+Gateway surfaces implement the existing `emitProject` /
+`composeService` interface — they don't need a separate
+`ProxySurface` type. `emitProject` for a gateway takes the
+routes (lifted from `proxyRoutes` via the orchestrator) and
+emits a single config file + asset directory. `composeService`
+returns a compose entry referencing the family's stock image.
+
+Registration mirrors `backend-packages.md`. In-tree gateways
+land in `src/platform/<family>.ts`, register in
+`src/platform/registry.ts`. Out-of-tree gateways land in
+`packages/proxy-<family>-v<N>/` with
+`loom: { kind: "gateway", family, loomVersion, core }`;
+`fs-discovery.ts` already iterates packages — teach it the
+`"gateway"` kind alongside `"backend"`.
 
 ---
 
@@ -278,11 +315,10 @@ the `"proxy"` kind alongside `"backend"`.
 
 These are the deliverable — what users actually write.
 
-### Example 1 — Standalone UI, two backends, default Caddy proxy
+### Example 1 — Standalone gateway, two backends, react SPA
 
-The bread-and-butter case. SPA hosted as its own compose service;
-talks to a Hono billing API and a Phoenix inventory API. The
-developer writes nothing about the proxy — Caddy is the default.
+The bread-and-butter case. SPA is purely static. A Caddy
+deployable fronts both the SPA and two backend APIs.
 
 ```ddd
 system Storefront {
@@ -298,20 +334,24 @@ system Storefront {
   }
 
   deployable billingApi {
-    platform: hono,    contexts: [Billing],   port: 3001
+    platform: hono,            contexts: [Billing],   port: 3001
   }
   deployable inventoryApi {
     platform: phoenixLiveView, contexts: [Inventory], port: 3002
   }
-
   deployable webApp {
     platform: react,
-    targets:  [billingApi, inventoryApi],     // ← plural
     ui:       WebApp {
       Billing:   billingApi,
       Inventory: inventoryApi,
     },
     port: 3000,
+  }
+
+  deployable gateway {
+    platform: caddy,
+    proxy:    [webApp, billingApi, inventoryApi],
+    port: 80,
   }
 }
 ```
@@ -320,23 +360,24 @@ What gets generated:
 
 - React bundle calls `/api/billing/*` and `/api/inventory/*`
   same-origin — no CORS, no per-service base URLs in the JS.
-- `webApp/Caddyfile`:
+- `gateway/Caddyfile`:
   ```caddy
-  :3000 {
+  :80 {
     handle /api/billing/*    { reverse_proxy billingApi:3001 }
     handle /api/inventory/*  { reverse_proxy inventoryApi:3002 }
-    handle { root * /srv ; file_server ; try_files {path} /index.html }
+    handle                   { reverse_proxy webApp:3000 }
   }
   ```
-- `docker-compose.yml`: `webApp` service now uses the
-  `caddy:2-alpine` image with the built SPA mounted at `/srv` and
-  the Caddyfile mounted at `/etc/caddy/Caddyfile`.
+- `docker-compose.yml`: `gateway` service uses `caddy:2-alpine`
+  with the Caddyfile mounted at `/etc/caddy/Caddyfile`. Public
+  port maps to `gateway`; the other services bind to the docker
+  network only.
 
-### Example 2 — .NET host mounts the SPA + YARP-proxies a sibling Hono API
+### Example 2 — Mounted shape: .NET host serves SPA + proxies a Hono sibling
 
-Mixed stack. The dotnet deployable serves Sales itself, mounts the
-SPA, and proxies `/api/marketing/*` to a Hono service. No proxy
-sidecar — YARP runs inside the .NET process.
+Mixed stack. The dotnet deployable serves Sales itself, mounts
+the SPA, and proxies `/api/marketing/*` to a Hono service. No
+gateway deployable — YARP runs inside the .NET process.
 
 ```ddd
 system Acme {
@@ -356,15 +397,14 @@ system Acme {
   }
 
   deployable acmeHost {
-    platform: dotnet,                         // mountsUi: true
+    platform: dotnet,                         // mountsUi: true, kind: application
     contexts: [Sales],                        // serves Sales in-proc
-    targets:  [marketingApi],                 // proxies Marketing
+    proxy:    [marketingApi],                 // proxies Marketing
     ui:       WebApp {
       Sales:     acmeHost,                    // ← host serves itself
       Marketing: marketingApi,
     },
     port: 5000,
-    // NB: no `proxy:` slot — illegal on a mounted host (validator).
   }
 }
 ```
@@ -391,27 +431,25 @@ What gets generated (`acmeHost/appsettings.Production.json`):
 }
 ```
 
-And in `Program.cs` the `acmeHost` project picks up
+And in `Program.cs`,
 `builder.Services.AddReverseProxy().LoadFromConfig(...)` plus
 `app.MapReverseProxy()` — emitted by the dotnet
 `PlatformSurface.emitProxyMounts` hook.
 
-### Example 3 — Standalone UI, .NET shop wants Ocelot
+### Example 3 — .NET shop wants Ocelot as the gateway
 
-Same shape as Example 1, but the team standardises on Ocelot for
-all gateways across the org. The override is a single line.
+Same shape as Example 1, but a .NET-shop team chooses Ocelot
+instead of Caddy. Just a platform swap — no other DSL change.
 
 ```ddd
-  deployable webApp {
-    platform: react,
-    targets:  [billingApi, inventoryApi],
-    ui:       WebApp { Billing: billingApi, Inventory: inventoryApi },
-    proxy:    ocelot,                         // ← override
-    port: 3000,
+  deployable gateway {
+    platform: ocelot,
+    proxy:    [webApp, billingApi, inventoryApi],
+    port: 80,
   }
 ```
 
-Generated `webApp/ocelot.json`:
+Generated `gateway/ocelot.json`:
 
 ```jsonc
 {
@@ -429,28 +467,33 @@ Generated `webApp/ocelot.json`:
       "DownstreamHostAndPorts":   [{ "Host": "inventoryApi", "Port": 3002 }],
       "UpstreamPathTemplate":     "/api/inventory/{everything}",
       "UpstreamHttpMethod":       [ "Get", "Post", "Put", "Delete" ]
+    },
+    {
+      "DownstreamPathTemplate":   "/{everything}",
+      "DownstreamScheme":         "http",
+      "DownstreamHostAndPorts":   [{ "Host": "webApp",     "Port": 3000 }],
+      "UpstreamPathTemplate":     "/{everything}",
+      "UpstreamHttpMethod":       [ "Get", "Post", "Put", "Delete" ]
     }
   ]
 }
 ```
 
-Plus a tiny `Program.cs` Ocelot host + an nginx-or-caddy sidecar
-fronting the static bundle (one Ocelot family has two flavours:
-`ocelot+caddy` for static, or `ocelot-static` which serves files
-itself via a small ASP.NET host — open question which we ship as
-default).
+Plus a generated ASP.NET host project for the Ocelot binary
+(small, just `UseOcelot()`); the gateway's `composeService`
+points compose at that built image.
 
-### Example 4 — Out-of-tree proxy package
+### Example 4 — Out-of-tree gateway package
 
-A shop ships its own hardened nginx config as a Loom proxy. They
-publish `@acme/proxy-nginx-hardened-v1` carrying:
+A shop ships its own hardened nginx config as a Loom gateway.
+They publish `@acme/proxy-nginx-hardened-v1` carrying:
 
 ```jsonc
 // packages/proxy-nginx-hardened-v1/package.json
 {
   "name": "@acme/proxy-nginx-hardened",
   "loom": {
-    "kind": "proxy",
+    "kind": "gateway",
     "family": "nginx-hardened",
     "loomVersion": "1.0",
     "core": "^0.x"
@@ -461,108 +504,100 @@ publish `@acme/proxy-nginx-hardened-v1` carrying:
 Users pin it the same way they'd pin a backend version:
 
 ```ddd
-  deployable webApp {
-    platform: react,
-    targets:  [billingApi, inventoryApi],
-    ui:       WebApp { Billing: billingApi, Inventory: inventoryApi },
-    proxy:    nginx-hardened@v1,
-    port: 3000,
+  deployable gateway {
+    platform: nginx-hardened@v1,
+    proxy:    [webApp, billingApi, inventoryApi],
+    port: 80,
   }
 ```
 
-No grammar change beyond the `family[@version]` parse already used
-by `parseBuiltinPlatformRef` — the proxy slot accepts the same
-shape as `platform:` does today.
+No grammar change beyond the `family[@version]` parse already
+used by `parseBuiltinPlatformRef` — `platform:` already accepts
+this shape today.
 
-### Example 5 — Opting out (`proxy: none`)
+### Example 5 — Pure static react, multiple backends, explicit CORS
 
-The "I know what I'm doing" escape hatch. Browser talks to each
-backend directly; each backend opens CORS. Generated code emits
-the per-backend base URLs into the bundle's runtime config and
-adds CORS middleware to each targeted backend.
+Sometimes you want the SPA to talk straight to every backend
+(small project, multi-tenant SaaS edge cache, etc.). No gateway,
+no mounted host. The validator warns; you opt in by setting CORS
+on each backend explicitly:
 
 ```ddd
+  deployable salesApi {
+    platform: hono, contexts: [Sales],
+    cors: { allowOrigin: "https://app.acme.test" }, port: 3001
+  }
+  deployable marketingApi {
+    platform: hono, contexts: [Marketing],
+    cors: { allowOrigin: "https://app.acme.test" }, port: 3002
+  }
+
   deployable webApp {
     platform: react,
-    targets:  [publicApi],                    // single public API only
-    ui:       WebApp { Public: publicApi },
-    proxy:    none,
+    ui:       WebApp { Sales: salesApi, Marketing: marketingApi },
     port: 3000,
+    // No proxy. SPA bundle gets per-backend base URLs at build.
   }
 ```
 
-Validator warns (not errors) when `proxy: none` is combined with
-more than one target: "consider `proxy: caddy` for same-origin
-fan-out; raw CORS to multiple backends is supported but rarely
-what you want."
+The `cors:` slot itself is out of scope for this plan but is the
+natural companion — left here to show the explicit opt-in shape.
 
 ---
 
-## Validator catalogue
-
-New diagnostic codes (`loom.*`), all in
-`src/language/validators/deployable.ts` or
-`src/ir/validate/validate.ts`:
-
-| Code | Rule |
-|---|---|
-| `loom.proxy-on-mounted-host` | `proxy:` set on a deployable whose host platform has `mountsUi: true` and is not `react`. |
-| `loom.proxy-module-collision` | Two entries in `targets:` claim the same module name. |
-| `loom.targets-not-backend` | An entry in `targets:` is itself a frontend. |
-| `loom.ui-binding-not-in-targets` | A `UiComposeBinding.source` isn't listed in `targets:`. |
-| `loom.proxy-none-multi-target` | Warning (not error). |
-
 ## Open questions
 
-1. **Derive `targets:` from `UiComposeBinding`, or keep both?**
-   Deriving eliminates redundancy and an entire class of
-   inconsistency bugs. Keeping both lets a deployable target a
-   backend that the UI doesn't (yet) bind — useful while
-   evolving. Probably: derive when omitted, allow explicit, error
-   on conflict. Decide before grammar lands.
-2. **Where does the Caddy default sit when the UI is mounted in
-   `react`-platform standalone?** I.e. does react-standalone
-   *always* mean "Caddy unless overridden", or do we keep a way
-   to say "plain static file server, no proxy at all" via
-   `targets: []`? The latter is just shape B with zero routes —
-   probably fine, but worth confirming.
-3. **Ocelot's static-file story.** Ocelot can host static files
-   via a thin ASP.NET wrapper, or be paired with Caddy. The
-   former is one container; the latter is two. Pick a default
-   for `proxy: ocelot` and document the trade.
-4. **YARP version pinning.** YARP versions itself like the rest
-   of the .NET ecosystem; if we pin YARP, the pin lives in the
-   backend package (`packages/backend-dotnet-vN/`), not in this
-   plan. Sanity-check this with `backend-packages.md`.
-5. **HTTPS at the proxy.** Caddy's killer feature is automatic
-   TLS, but we don't want generated docker-compose to depend on
-   ACME at dev-time. Default: HTTP only in compose; TLS is a
-   user opt-in via a deployable-level `tls:` slot (out of scope
-   for this plan).
-6. **WebSockets / SSE passthrough.** All four proxy families
-   support it but with different config. Should default-emit the
-   pass-through bits even when nothing in the IR declares a WS
-   endpoint, or only when an `event` stream / `live` page is
-   present? Probably the latter — emit only when needed, since
-   the route table already knows.
+1. **Derive `proxy:` from `UiComposeBinding`, or keep both?**
+   Deriving eliminates redundancy: if `ui: WebApp { Sales:
+   salesApi, Billing: billingApi }` already lists every backend
+   the SPA reaches, the host's `proxy:` is exactly
+   `[salesApi, billingApi] − {self}`. Probably: derive when
+   omitted, allow explicit, error on conflict. Decide before
+   grammar lands.
+2. **Gateway proxying a frontend deployable** (Example 1's
+   `proxy: [webApp, ...]`). Routing the root `/` catch-all to a
+   react bundle is sensible, but it asks the gateway to know
+   "frontend = catch-all root, backend = `/api/<module>/*`."
+   Worth a validator rule: at most one frontend per gateway
+   `proxy:` list, and it always wins the catch-all slot.
+3. **HTTPS at the gateway.** Caddy's killer feature is automatic
+   TLS, but generated docker-compose shouldn't depend on ACME at
+   dev-time. Default: HTTP-only in compose; TLS via a future
+   deployable-level slot (out of scope here).
+4. **WebSockets / SSE passthrough.** All gateway families
+   support it with different config. Probably emit pass-through
+   only when an `event` stream / `live` page is present in any
+   proxied module — the route table already knows.
+5. **Two-stage SPA boot (config endpoint).** Today the react
+   bundle bakes its API base URL at build time. With a gateway,
+   the answer is always "/api/..." same-origin, so this gets
+   simpler. Worth documenting as a side benefit.
 
 ## Sequencing
 
 If this lands, the suggested slice order keeps each step small:
 
-1. Grammar: `targets:` → list (with singular sugar); no `proxy:`
-   yet. Update existing examples to the singular-list sugar form.
-2. Enrichment: derive `proxyRoutes` for the mounted-host shape
-   only; reject `targets:` length > 1 on `platform: react`.
-3. `emitProxyMounts` on the hono surface (smallest hop —
+0. **Delete `targets:` from grammar and IR.** Inheritance of
+   `moduleNames` moves to be derived from `UiComposeBinding`
+   sources. Existing examples (`web/src/examples/storefront-*`,
+   `examples/acme.ddd`) migrate to UI-binding only. This is a
+   pure cleanup — no new feature, just removes the redundant
+   slot. Should be its own PR.
+1. **Add `proxy:` (list) on application-platform deployables.**
+   No gateway platforms yet. Validator: `proxy:` illegal on
+   `react`. Enrichment derives `proxyRoutes` with
+   `mode: 'mounted-in-host'`.
+2. **`emitProxyMounts` on the hono surface** (smallest hop —
    `app.all + fetch`). Ship one e2e under `LOOM_E2E=1`.
-4. `emitProxyMounts` on the dotnet surface (YARP).
-5. `emitProxyMounts` on the phoenix surface (`ReverseProxyPlug`).
-6. Add `proxy:` grammar slot + `caddy` `ProxySurface`; enable
-   shape B for `platform: react`. Switch one example over.
-7. Second proxy family — `nginx` — to prove the kind is
+3. **`emitProxyMounts` on the dotnet surface** (YARP).
+4. **`emitProxyMounts` on the phoenix surface**
+   (`ReverseProxyPlug`).
+5. **Add `kind: "gateway"` to `PlatformSurface`**, register
+   `caddy` as the first gateway platform. Switch one example to
+   Shape B.
+6. **Second gateway family — `nginx`** — to prove the kind is
    pluggable. Then `traefik`, then `ocelot`.
-8. Wire the out-of-tree `kind: "proxy"` resolver in
+7. **Wire the out-of-tree `kind: "gateway"` resolver** in
    `fs-discovery.ts` once we have two in-tree families to
    pattern off.
 
