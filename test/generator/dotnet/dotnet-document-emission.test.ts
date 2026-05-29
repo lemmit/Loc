@@ -164,9 +164,7 @@ describe(".NET document-persistence emission (normalised(false))", () => {
     expect(dbctx).toContain("public DbSet<Wishlist> Wishlists => Set<Wishlist>();");
     const repo = files.get("Infrastructure/Repositories/WishlistRepository.cs")!;
     // Find is a real indexed SQL WHERE on the root column, not in-memory.
-    expect(repo).toContain(
-      "_db.Wishlists.Where(x => x.CustomerId == customerId).ToListAsync(ct)",
-    );
+    expect(repo).toContain("_db.Wishlists.Where(x => x.CustomerId == customerId).ToListAsync(ct)");
     expect(repo).not.toContain("FromSnapshot");
     // Entity carries no snapshot machinery.
     const wishlist = files.get("Domain/Wishlists/Wishlist.cs")!;
