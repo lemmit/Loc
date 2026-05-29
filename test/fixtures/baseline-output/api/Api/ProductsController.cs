@@ -24,7 +24,7 @@ public sealed class ProductsController : ControllerBase
     public ProductsController(IMediator mediator, ILogger<ProductsController> log) { _mediator = mediator; _log = log; }
 
     [HttpPost]
-    public async Task<ActionResult<CreateProductResponse>> Create([FromBody] CreateProductRequest request)
+    public async Task<ActionResult<CreateProductResponse>> CreateProduct([FromBody] CreateProductRequest request)
     {
         var cmd = new CreateProductCommand(
             request.Sku,
@@ -32,25 +32,25 @@ public sealed class ProductsController : ControllerBase
         );
         var id = await _mediator.Send(cmd);
         _log.LogInformation("{Event} aggregate={Aggregate} id={Id}", "aggregate_created", "Product", id.Value);
-        return CreatedAtAction(nameof(GetById), new { id = id.Value }, new CreateProductResponse(id.Value));
+        return CreatedAtAction(nameof(GetProductById), new { id = id.Value }, new CreateProductResponse(id.Value));
     }
 
     [HttpGet("{id}")]
-    public async Task<ActionResult<ProductResponse>> GetById([FromRoute] Guid id)
+    public async Task<ActionResult<ProductResponse>> GetProductById([FromRoute] Guid id)
     {
         var response = await _mediator.Send(new GetProductByIdQuery(new ProductId(id)));
         return response is null ? NotFound() : Ok(response);
     }
 
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<ProductResponse>>> All()
+    public async Task<ActionResult<IReadOnlyList<ProductResponse>>> AllProduct()
     {
         var result = await _mediator.Send(new AllQuery());
         return Ok(result);
     }
 
     [HttpGet("by_sku")]
-    public async Task<ActionResult<ProductResponse?>> BySku([FromQuery] string sku)
+    public async Task<ActionResult<ProductResponse?>> BySkuProduct([FromQuery] string sku)
     {
         var result = await _mediator.Send(new BySkuQuery(sku));
         return result is null ? NotFound() : Ok(result);

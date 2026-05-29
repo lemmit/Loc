@@ -61,7 +61,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
       path: "/{id}",
       tags: ["customers"],
       operationId: "getCustomerById",
-      request: { params: z.object({ id: z.string() }) },
+      request: { params: z.object({ id: z.string().uuid() }) },
       responses: {
         200: { description: "OK", content: { "application/json": { schema: CustomerResponse } } },
         404: { description: "Not found", content: { "application/json": { schema: ErrorResponse } } },

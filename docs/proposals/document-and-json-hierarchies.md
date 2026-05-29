@@ -1,6 +1,6 @@
 # Proposal: Documents and JSON-Based Hierarchies
 
-**Status:** Decisions sealed. Core direction **PINNED** as [D-DOCUMENT-AXIS](../decisions.md) (D-RENAME amended alongside). Sub-questions 3–5 (snapshot cadence, per-projection shape, real document DB) remain OPEN. **Implementation: Slice A (`json` primitive) landed** — grammar, IR, all four backends, migrations, wire-spec, docs, and `test/generator/json-primitive-emission.test.ts`. Slices B–D (`persistedAs`/`normalised`/Marten) not started.
+**Status:** Decisions sealed — **all §8 sub-questions resolved** (cadence reuses the snapshot `dataSource`'s `every:`; `normalised` is per-projection via the per-binding knob; Postgres-JSONB only; no `json<T>`). Core direction **PINNED** as [D-DOCUMENT-AXIS](../decisions.md) (D-RENAME amended alongside). **Implementation: surface + IR complete** — Slices A (`json`, #703), B (`persistedAs(eventLog\|state)`, #711), and C (`normalised(true\|false)` surface, #713) are **merged**. Slice D — the document-persistence *emission* (Marten / EF `.ToJson()` / document table shape) — is **not started**. Full breakdown in §9.
 **Scope:** Survey how Loom should let a modeller persist a hierarchy as a *document* (a single JSON tree) instead of a normalised set of tables, and whether "document" deserves to be a declaration kind next to `aggregate`/`entity`, a field type, a persistence strategy, or some combination. Compares against Marten, EF Core, and MongoDB-style modelling. Ends with a recommendation.
 
 > **Pinned decisions affecting this proposal** (see [`docs/decisions.md`](../decisions.md)):
@@ -400,16 +400,61 @@ This keeps the domain model honest (the aggregate API is unchanged regardless of
 
 ## 8. Open questions
 
-1. Does `json` need an optional *shape hint* (`json<SomeType>`) for the common case where the blob *is* a known DTO from an `extern` boundary, without full structural validation?
+1. **(Resolved.)** Does `json` need a shape hint (`json<SomeType>`)? **No** — plain `json` only for v1; if the shape is known, use a `valueobject`. `json<T>` is out of scope.
 2. **(Resolved — see §2.3.)** Is the saving shape orthogonal to the truth kind? **Yes.** `persistedAs(eventLog)` bundles a *body-discipline* contract (apply-always, no direct mutation — validated) and a *storing-as-a-log* facet; `normalised(true | false)` governs only the **derived read model / snapshot**. The log facet and the `normalised` facet are different storing concerns, so the required combination `persistedAs(eventLog)` + `normalised(false)` is well-formed. *Follow-on:* the shipped `persistenceStrategy:` keyword names only the storing half and hides the body-discipline half; renamed to header `persistedAs(…)` (§2.3).
-3. For event-log + document, what is the snapshot/projection cadence — every event (inline projection, Marten's default), every N events, or on-demand? Does this belong on the aggregate (a cadence arg, e.g. `normalised(false, every: …)`), on the `snapshot` `dataSource` (`every:` already exists in D-STORAGE-SPLIT's per-kind config), or both? Leaning: reuse the `snapshot` binding's `every:`.
-4. Does a real document DB (`StorageType += mongo`) ever justify itself, or is Postgres-JSONB-everywhere (Marten's own bet) sufficient for Loom's target users? If JSONB-on-Postgres suffices, `normalised(false)` never needs a non-Postgres engine.
-5. For `eventSourced` aggregates, can the shape legitimately be `normalised` (projections to tables) and `document` (projection to one JSON doc) *per projection*, or is it one shape per aggregate? v1: one per aggregate (per D-GRANULARITY spirit); per-projection deferred.
+3. **(Resolved.)** Snapshot/projection cadence for event-log + document: **reuse the `snapshot` `dataSource`'s `every:` knob** (already in D-STORAGE-SPLIT) — cadence is binding/infra config, not an aggregate-header arg.
+4. **(Resolved.)** Can the shape vary per projection? **Yes — per-projection.** The per-binding `dataSource normalised:` knob (on the `state`/`snapshot`/`replica` binding) sets that projection's shape; the aggregate-header `normalised(…)` is the default. Stays within D-GRANULARITY (per `(context, kind)`); richer *named* read models are future scope.
+5. **(Resolved.)** Real document DB? **Postgres-JSONB only in v1** (Marten's bet); `normalised(false)` resolves to JSONB / Marten docs on Postgres. `StorageType += mongo` deferred.
 6. **(Resolved — D-RENAME amended.)** D-RENAME becomes `inheritanceUsing(sharedTable | ownTable)`: **key** `inheritanceStrategy` → `inheritanceUsing`; **syntax** colon → paren header modifier; **values** kept table-baked, respelled `shareTable` → `sharedTable`. Medium-neutral `shared`/`own` rejected.
 
 ---
 
-## 9. Sources
+## 9. Implementation status
+
+Delivered in slices off `main` (each its own squash-merged PR). The
+**surface and IR are complete**; the document-persistence **emission**
+is not yet built.
+
+### Done
+
+| Slice | Scope | Where | PR |
+|---|---|---|---|
+| **A — `json` primitive** | Opaque JSON field type. Per-backend leaf mapping: TS `unknown` / Zod `z.unknown()`, .NET `System.Text.Json.JsonElement`, Phoenix Ash `:map`, Postgres `JSONB` (Drizzle `jsonb`), OpenAPI freeform `object` (wire-spec leaf). Grammar + `PrimitiveName`/`WirePrimitive` + migrations. | `ddd.langium`, `loom-ir.ts`, all 4 generators, `migrations-builder.ts`, `wire-spec.ts`; `test/generator/json-primitive-emission.test.ts` | #703 |
+| **B — `persistedAs(eventLog\|state)`** | Hard-cutover rename of the shipped body `persistenceStrategy: stateBased\|eventSourced` → header paren modifier. Values aligned to the `dataSource` `kind` set, so `resolve-datasource` is now an identity. Adapters / default-menus / `resolve-adapters` updated. **No body-discipline validator** (deferred — owned by the applier feature). | `ddd.langium`, `loom-ir.ts`, `lower.ts`, `resolve-datasource.ts`, `validate.ts`, `print-structural.ts`, all persistence/style adapters; parsing/IR/validation/adapter tests | #711 |
+| **C — `normalised(true\|false)`** | Saving-shape **surface**: aggregate header modifier + `dataSource` `normalised:` knob, threaded through IR + printer, parsed/validated. Added to `UNWIRED_KNOBS` so a `dataSource normalised:` warns "accepted, persisted in IR, but no emitter consumes it yet". | `ddd.langium`, `loom-ir.ts`, `lower.ts`, `print-structural.ts`, `validate.ts`; `test/language/parsing/aggregate-normalised.test.ts` | #713 |
+
+Net: an aggregate header like
+`aggregate ShoppingCart persistedAs(eventLog) normalised(false) { … }`
+parses, validates, prints, and threads through the IR end-to-end; a
+`json` field works across every backend.
+
+### Missing (not yet built)
+
+- **Slice D — document persistence emission.** The piece that actually
+  *consumes* `normalised(false)` / `persistedAs(eventLog)`:
+  - a **Marten** `PersistenceAdapter` (.NET event-sourced + document
+    store) on the existing `PersistenceAdapter` seam;
+  - EF Core `.ToJson()` mapping for `persistedAs(state)` + `normalised(false)`;
+  - the document table shape `(id, data jsonb, version)` in
+    `migrations-builder` / `sql-pg`;
+  - snapshot/projection rehydration for the `eventLog` + document case.
+  Until D lands, `normalised(false)` is **carried but inert** (the
+  `UNWIRED_KNOBS` warning says so).
+- **Event-sourcing body-discipline validator** (emit/apply, no direct
+  `:=` mutation). Owned by `workflow-and-applier.md` (appliers aren't in
+  the grammar yet); gated on `persistedAs(eventLog)`. Not part of the
+  B rename.
+- **Option 2 — dedicated `document` value-type** (deferred), and
+  **Option 3 — per-containment `as document/table`** (dropped).
+- **Open sub-questions** — all resolved (§8); they shape Slice D:
+  cadence reuses the `snapshot` binding's `every:`; `normalised` is
+  **per-projection** (per-binding `dataSource normalised:`, aggregate
+  header is the default); **Postgres-JSONB only** (no `mongo`); no
+  `json<T>`.
+
+---
+
+## 10. Sources
 
 - Marten — [Introduction](https://martendb.io/introduction), [as Event Store](https://martendb.io/events/), [JasperFx/marten](https://github.com/JasperFx/marten)
 - EF Core — [Owned Entity Types](https://learn.microsoft.com/en-us/ef/core/modeling/owned-entities), [EF7 JSON Columns](https://devblogs.microsoft.com/dotnet/announcing-ef7-release-candidate-2/), [EF Core 8 what's new](https://learn.microsoft.com/en-us/ef/core/what-is-new/ef-core-8.0/whatsnew)

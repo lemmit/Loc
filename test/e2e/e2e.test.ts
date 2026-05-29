@@ -342,10 +342,11 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         if (diff.responseBodyDiffs.length)
           console.warn("  response-body schemas:", diff.responseBodyDiffs);
         if (diff.operationIdDiffs.length) console.warn("  operationIds:", diff.operationIdDiffs);
+        if (diff.enumValueDiffs.length) console.warn("  enum value-sets:", diff.enumValueDiffs);
       }
 
+      const pair = `${refName} ↔ ${otherName}`;
       if (STRICT_PARITY) {
-        const pair = `${refName} ↔ ${otherName}`;
         expect(diff.onlyRef, `ops only on ${refName} (${pair})`).toEqual([]);
         expect(diff.onlyOther, `ops only on ${otherName} (${pair})`).toEqual([]);
         expect(diff.cardMismatches, `cardinality drift (${pair})`).toEqual([]);
@@ -357,6 +358,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         expect(diff.requestBodyDiffs, `request-body schema drift (${pair})`).toEqual([]);
         expect(diff.responseBodyDiffs, `response-body schema drift (${pair})`).toEqual([]);
         expect(diff.operationIdDiffs, `operationId drift (${pair})`).toEqual([]);
+        expect(diff.enumValueDiffs, `enum value-set drift (${pair})`).toEqual([]);
       }
     }
 

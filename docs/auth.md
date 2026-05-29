@@ -11,9 +11,9 @@ Shipped over four slices:
 
 - **Slice 1A** — `user { ... }` + `currentUser` magic identifier +
   per-deployable `auth: required` middleware + verifier hook.
-- **Slice 1B** — per-module `permissions { ... }` block +
+- **Slice 1B** — per-subdomain `permissions { ... }` block +
   `permissions.<name>` magic identifier resolving to a stable
-  `<module>.<name>` runtime string + the `.contains(x)` collection
+  `<subdomain>.<name>` runtime string + the `.contains(x)` collection
   op for ergonomic claim membership checks.
 - **Slice 1C** — `currentUser` admissible inside repository find /
   view `where` filters; the renderer threads the resolved user
@@ -43,7 +43,7 @@ system Acme {
     tenantId: string
   }
 
-  module Sales {
+  subdomain Sales {
     permissions {
       ordersConfirm,
       ordersCancel,
@@ -78,9 +78,13 @@ system Acme {
 
   // Per-deployable opt-in.  Without `auth: required` the deployable
   // stays open (existing behaviour).
+  storage primary { type: postgres }
+  dataSource ordersState { for: Orders, kind: state, use: primary }
+
   deployable api {
     platform: dotnet
-    modules: Sales
+    contexts: [Orders]
+    dataSources: [ordersState]
     port: 8080
     auth: required
   }
@@ -89,18 +93,18 @@ system Acme {
 
 ### Permissions surface
 
-`permissions { ... }` lives at module scope; each declared name
+`permissions { ... }` lives at subdomain scope; each declared name
 becomes a typed identifier (`permissions.<name>`) usable in any
-expression body that resolves through the enclosing module.  The
+expression body that resolves through the enclosing subdomain.  The
 identifier lowers to a plain string literal of the form
-`<lowercase-module>.<name>` — `permissions.ordersCancel` inside
-`module Sales` becomes `"sales.ordersCancel"` everywhere it
+`<lowercase-subdomain>.<name>` — `permissions.ordersCancel` inside
+`subdomain Sales` becomes `"sales.ordersCancel"` everywhere it
 appears.  Backends never see a separate `Permission` type; the
 runtime is `string[].includes(string)` either side of the wire.
 
-Multiple `permissions { ... }` blocks in the same module merge
-their declarations.  Cross-module references aren't supported in
-slice 1B — referencing a permission declared in another module
+Multiple `permissions { ... }` blocks in the same subdomain merge
+their declarations.  Cross-subdomain references aren't supported in
+slice 1B — referencing a permission declared in another subdomain
 shows up as the same "no permission named 'X'" diagnostic as a
 typo.
 
@@ -296,8 +300,8 @@ to widen or tighten the list.
 | `auth: required` on a deployable but no `user { ... }` block | Validation error: "deployable 'X' has 'auth: required' but system 'Y' declares no 'user { ... }' block." |
 | Two user fields with the same name | Validation error: "user block declares field 'X' more than once." |
 | `currentUser` in an invariant / derived / function body | Validation error: "currentUser is only available in per-request handlers." |
-| Two permissions with the same name in one module | Validation error: "module 'M': permission 'X' is declared more than once." |
-| `permissions.X` referencing an undeclared name (or used outside any module) | Validation error: "permissions.X: no permission named 'X' is declared in this module's 'permissions { ... }' block." |
+| Two permissions with the same name in one subdomain | Validation error: "subdomain 'S': permission 'X' is declared more than once." |
+| `permissions.X` referencing an undeclared name (or used outside any subdomain) | Validation error: "permissions.X: no permission named 'X' is declared in this subdomain's 'permissions { ... }' block." |
 | Workflow body calls a currentUser-bound repository find | Validation error: "references a currentUser-bound find, which workflows don't yet pass the user into."  Use `getById` or move the call to the route layer. |
 
 Missing `IUserVerifier` registration surfaces at runtime startup,

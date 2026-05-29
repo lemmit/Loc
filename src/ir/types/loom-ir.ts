@@ -202,8 +202,24 @@ export interface FunctionIR {
   body: ExprIR;
 }
 
+/** Lifecycle kind of an aggregate action (lifecycle-operations.md).
+ * `mutate` is today's `operation` keyword; `create` / `destroy` are the
+ * factory / terminator keywords.  The kind tag — not the body syntax —
+ * carries the lifecycle asymmetry; bodies are identical across kinds. */
+export type OperationKind = "create" | "mutate" | "destroy";
+
 export interface OperationIR {
   name: string;
+  /** Lifecycle kind discriminator.  Absent ⇒ `"mutate"` (the legacy
+   * `operation` keyword and every pre-lifecycle IR literal).
+   * `agg.operations` only ever holds `"mutate"` actions; `"create"` /
+   * `"destroy"` actions live in `agg.creates` / `agg.destroys`. */
+  kind?: OperationKind;
+  /** True for an unnamed canonical `create(...)` / `destroy { }`.  The
+   * synthesised `name` is then the keyword itself (`"create"` /
+   * `"destroy"`).  Drives the bare-collection-URL route slug derived in
+   * Phase 2 (`urlStyle` enrichment).  Only meaningful on create/destroy. */
+  canonical?: boolean;
   visibility: "public" | "private";
   params: ParamIR[];
   statements: StmtIR[];
@@ -272,7 +288,24 @@ export interface AggregateIR {
   derived: DerivedIR[];
   invariants: InvariantIR[];
   functions: FunctionIR[];
+  /** Mutate-kind actions only (the legacy `operation` keyword).
+   * `create` / `destroy` actions are intentionally NOT here — they live
+   * in `creates` / `destroys` so the ~50 existing operation consumers
+   * (route emitters, OpenAPI, page-objects, …) keep seeing only
+   * mutate-style endpoints until per-kind emission lands (Phase 3). */
   operations: OperationIR[];
+  /** `kind: "create"` lifecycle factory actions.  Populated by lowering;
+   * empty array when the aggregate declares none.  Not yet consumed by
+   * backends (Phase 3). */
+  creates?: OperationIR[];
+  /** `kind: "destroy"` lifecycle terminator actions.  Populated by
+   * lowering; empty array when none. */
+  destroys?: OperationIR[];
+  /** The single unnamed canonical `create`, if declared, else null.
+   * Convenience accessor over `creates`. */
+  canonicalCreate?: OperationIR | null;
+  /** The single unnamed canonical `destroy`, if declared, else null. */
+  canonicalDestroy?: OperationIR | null;
   parts: EntityPartIR[];
   tests: TestIR[];
   /** Canonical JSON-on-the-wire field list.  Populated by
@@ -334,6 +367,14 @@ export interface AggregateIR {
    * the IR preserves source fidelity for the AST → IR → printer
    * round-trip. */
   persistedAs?: PersistenceStrategy;
+  /** Saving shape of the materialised read model / snapshot
+   * (D-DOCUMENT-AXIS, `normalised(true | false)` header modifier).
+   * `false` → store the aggregate as one JSON document instead of
+   * normalised tables.  Omitted when not declared (default `true`).
+   * Carried through the IR; the document persistence *emission* is a
+   * later slice (Marten / EF `.ToJson()`), so today this only records
+   * intent. */
+  normalised?: boolean;
 }
 
 /** The aggregate's primary truth kind.  Named to match the
@@ -1258,6 +1299,12 @@ export interface DataSourceIR {
   retain?: number;
   isolationLevel?: "readUncommitted" | "readCommitted" | "repeatableRead" | "serializable";
   readonly?: boolean;
+  /** Saving shape of the materialised read model this binding routes
+   *  (D-DOCUMENT-AXIS, `normalised:` knob).  `false` → the `state` /
+   *  `snapshot` data is laid out as one JSON document.  Omitted →
+   *  default `true`.  Carried through the IR; emission is a later
+   *  slice. */
+  normalised?: boolean;
   /** Generic vendor-parameter map for the binding (RFC §3.2). */
   config?: readonly ConfigEntryIR[];
 }

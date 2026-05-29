@@ -77,7 +77,12 @@ export function wireType(
       s = csIdValueClrType("guid");
       break;
     case "enum":
-      s = "string";
+      // Enum crosses the wire as the enum TYPE (not `string`): paired with
+      // a global `JsonStringEnumConverter` (registered in Program.cs) the
+      // JSON bytes stay the member name (`"Public"`), but Swashbuckle now
+      // emits a named string-enum schema — matching Hono/Phoenix, which
+      // both publish a named enum component.
+      s = info.base;
       break;
     case "valueObject":
       s = `${info.base}${dir === "request" ? "Request" : "Response"}`;
@@ -89,6 +94,32 @@ export function wireType(
   if (info.isCollection) s = `IReadOnlyList<${s}>`;
   if (info.isNullable) s = `${s}?`;
   return s;
+}
+
+/** A DTO record positional parameter, marked `[property: Required]` when
+ *  the C# type is non-nullable.  Swashbuckle's `SupportNonNullableReference
+ *  Types` does NOT reliably infer required-ness from positional-record NRT
+ *  metadata (and never marks non-nullable *value* types required), so we
+ *  drive it explicitly from the IR: a field is required iff `wireType` did
+ *  not append `?` — exactly the optional→nullable mapping.  This matches
+ *  Hono/Phoenix, which mark every non-optional field required.  `[property:
+ *  Required]` targets the generated property (not the ctor param) so
+ *  Swashbuckle's DataAnnotations reader picks it up.
+ *
+ *  Exception: a non-nullable `bool` in a REQUEST is NOT required.  ASP.NET
+ *  model-binding defaults an omitted bool to `false` (no error), matching
+ *  Hono's `z.coerce.boolean()` (coerces `undefined` → `false`); both
+ *  backends accept the field's omission, so neither marks it required.
+ *  Numbers differ — `z.coerce.number()` rejects `undefined`, so numeric
+ *  request fields stay required on both sides. */
+export function dtoParam(
+  csType: string,
+  name: string,
+  dir: "request" | "response" = "response",
+): string {
+  const optionalBoolRequest = dir === "request" && csType === "bool";
+  const required = !csType.endsWith("?") && !optionalBoolRequest;
+  return `${required ? "[property: Required] " : ""}${csType} ${name}`;
 }
 
 /** Map a wire-shaped expression to a domain-typed argument for a command. */
@@ -125,7 +156,9 @@ export function wireToCommandArgument(
     case "id":
       return `new ${info.idTarget}Id(${expr})`;
     case "enum":
-      return `Enum.Parse<${info.base}>(${expr})`;
+      // The request DTO field is already the enum type (deserialized from
+      // the wire member name by JsonStringEnumConverter) — pass it through.
+      return expr;
     case "valueObject": {
       const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return expr;
@@ -170,7 +203,9 @@ export function projectToResponse(
     case "id":
       return `${domainExpr}.Value`;
     case "enum":
-      return `${domainExpr}.ToString()`;
+      // Response DTO field is the enum type; emit the enum value directly
+      // (JsonStringEnumConverter serialises it to the wire member name).
+      return domainExpr;
     case "valueObject": {
       const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return domainExpr;
@@ -224,7 +259,8 @@ export function domainToRequestExpr(
     case "id":
       return `${domainExpr}.Value`;
     case "enum":
-      return `${domainExpr}.ToString()`;
+      // Request DTO field is the enum type — emit the value directly.
+      return domainExpr;
     case "valueObject": {
       const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return domainExpr;
@@ -315,9 +351,9 @@ function responseRecordParams(
   const parts: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
-      parts.push(`${csIdValueClrType(idValueType)} Id`);
+      parts.push(dtoParam(csIdValueClrType(idValueType), "Id"));
     } else {
-      parts.push(`${wireType(wf.type, ctx, "response")} ${upperFirst(wf.name)}`);
+      parts.push(dtoParam(wireType(wf.type, ctx, "response"), upperFirst(wf.name)));
     }
   }
   return parts.join(", ");

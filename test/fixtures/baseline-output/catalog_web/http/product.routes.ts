@@ -64,7 +64,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       path: "/{id}",
       tags: ["products"],
       operationId: "getProductById",
-      request: { params: z.object({ id: z.string() }) },
+      request: { params: z.object({ id: z.string().uuid() }) },
       responses: {
         200: { description: "OK", content: { "application/json": { schema: ProductResponse } } },
         404: { description: "Not found", content: { "application/json": { schema: ErrorResponse } } },

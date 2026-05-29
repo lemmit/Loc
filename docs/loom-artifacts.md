@@ -32,7 +32,7 @@ consumption.
     ├── verification.json        # written by `ddd verify`
     ├── verification.md          # written by `ddd verify`
     └── snapshots/
-        ├── <module>.snapshot.json                  # migration baselines
+        ├── <Subdomain>.snapshot.json                  # migration baselines
         └── <ts>-<guid>.loomsnap.json               # provenance rule captures
 ```
 
@@ -87,7 +87,7 @@ populates these.
 
 | Pattern | Producer | What it is |
 |---|---|---|
-| `<module>.snapshot.json` | `src/system/snapshot.ts` + each backend's migration emitter (phase ⑨) | Migration baseline.  One file per module that owns a database schema; written on every `generate system` run.  Diffed against the previous file on the next regen to derive the next migration step.  See [`migrations-design.md`](migrations-design.md). |
+| `<Subdomain>.snapshot.json` | `src/system/snapshot.ts` + `src/system/migrations-builder.ts` (phase ⑨) | Migration baseline.  One file per subdomain that owns a database schema; written on every `generate system` run.  Diffed against the previous file on the next regen by `buildMigrations` to derive the next migration step; per-backend emitters in `src/generator/{phoenix-live-view,typescript,dotnet}/emit/migrations*.ts` translate the resulting `MigrationsIR` to platform-specific files. |
 | `<ts>-<guid>.loomsnap.json` | `ddd snapshot` (`src/system/loomsnap.ts`) | Provenance rule snapshot.  One immutable timestamped+GUID file per system; captures the rule snapshots for every `provenanced` field.  The latest such file is the one the generated runtime loads at startup.  See [`provenance.md`](provenance.md). |
 
 Migration snapshots are derived from the IR and written on every
@@ -112,8 +112,9 @@ regen.  Provenance snapshots are only written by the explicit
 
 ## Cross-references
 
-- [`migrations-design.md`](migrations-design.md) — what
-  `<module>.snapshot.json` diffs become at backend emission time.
+- [`generators.md` § Migrations](generators.md) — what
+  `<Subdomain>.snapshot.json` diffs become at backend emission time
+  (per-platform output table and `MigrationsIR` plumbing).
 - [`provenance.md`](provenance.md) — the `ddd snapshot` capture
   step and the runtime trace SDK.
 - [`traceability.md`](traceability.md) — the requirement / solution

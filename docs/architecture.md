@@ -100,7 +100,7 @@ to different stores.
 ```ddd
 dataSource ordersState {
   for: Orders, kind: state, use: primarySql
-  // optional: schema, tablePrefix, isolationLevel, ttl, every, retain, …
+  // optional: schema, tablePrefix, isolationLevel, ttl, every, retain, normalised, …
 }
 dataSource ordersCache {
   for: Orders, kind: cache, use: hotCache, ttl: 60
@@ -121,6 +121,7 @@ storage types via an enforced compatibility matrix:
 Defaults applied at emit time:
 
 - `schema:` omitted → defaults to `snake(contextName)` on relational stores; non-relational stores have no schema concept.
+- `normalised:` omitted → defaults to `true` (relational tables).  `normalised: false` marks the `state` / `snapshot` data as one JSON document (D-DOCUMENT-AXIS); the document persistence *emission* is a later slice, so today the knob is parsed and carried but does not yet change generated output.
 
 Backend deployables list which dataSources they wire up (see
 "Backend deployables" below).  The validators enforce that every
@@ -422,7 +423,7 @@ shape end-to-end.
 |---|---|
 | `subdomain`, `context`, aggregate fields | Drizzle schema, Hono routes, .NET commands (existing) |
 | `api X from <Ctx>` | Per-aggregate `api/<name>.ts` with React Query hooks (existing scaffold output) |
-| `storage X { type: postgres }` | Drizzle config + Phoenix/Hono/.NET Postgres migrations (see [`migrations-design.md`](migrations-design.md)) |
+| `storage X { type: postgres }` | Drizzle config + Phoenix/Hono/.NET Postgres migrations via the platform-neutral MigrationsIR (`src/ir/types/migrations-ir.ts` + `src/system/migrations-builder.ts`); per-backend emitters in `src/generator/{phoenix-live-view,typescript,dotnet}/emit/migrations*.ts` |
 | `storage X { type: <other> }` | Parses + validates; no generator output yet |
 | `dataSource X { for: C, kind: state, use: Y, schema: "...", tablePrefix: "..." }` | EF Core `ToTable("name", "schema")`, Drizzle `pgSchema("...").table(...)`, AshPostgres `schema "..." + table "prefix_..."`.  Schema defaults to `snake(contextName)` when omitted on a relational store. |
 | `dataSource X { ..., isolationLevel: <level> }` | Default isolation for transactional workflows in the bound context, overridden by per-workflow `transactional(<level>)`. |

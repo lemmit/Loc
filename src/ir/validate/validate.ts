@@ -1098,6 +1098,12 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
   },
   { property: "readonly", description: "no replica-aware persister is implemented yet" },
   { property: "keyPrefix", description: "no Redis-backed cache adapter is implemented yet" },
+  {
+    property: "normalised",
+    description:
+      "document persistence (normalised: false → one JSON document) has no emitter yet " +
+      "(Marten / EF .ToJson() is a later slice)",
+  },
 ];
 
 function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]): void {
@@ -2032,7 +2038,7 @@ function validatePermissions(sys: SystemIR, diags: LoomDiagnostic[]): void {
       if (seen.has(p.name)) {
         diags.push({
           severity: "error",
-          message: `module '${mod.name}': permission '${p.name}' is declared more than once.`,
+          message: `subdomain '${mod.name}': permission '${p.name}' is declared more than once.`,
           source: `${sys.name}/${mod.name}/permissions.${p.name}`,
         });
       }
@@ -2054,7 +2060,7 @@ function validatePermissionRefs(ctx: BoundedContextIR, diags: LoomDiagnostic[]):
         diags.push({
           severity: "error",
           message:
-            `permissions.${name}: no permission named '${name}' is declared in this module's 'permissions { ... }' block. ` +
+            `permissions.${name}: no permission named '${name}' is declared in this subdomain's 'permissions { ... }' block. ` +
             `Either add the declaration or fix the reference.`,
           source: `${ctx.name}/${location}`,
         });

@@ -264,6 +264,11 @@ builder.Services.AddControllers(opts =>
         JsonNamingPolicy.CamelCase;
     opts.JsonSerializerOptions.DictionaryKeyPolicy =
         JsonNamingPolicy.CamelCase;
+    // Enums cross the wire as their member name ("Public"), not the
+    // ordinal — matching Hono/Phoenix.  Swashbuckle detects this
+    // converter and emits a named string-enum schema for each enum type.
+    opts.JsonSerializerOptions.Converters.Add(
+        new System.Text.Json.Serialization.JsonStringEnumConverter());
 });
 
 // Permissive CORS so a generated React frontend on a different port
@@ -282,6 +287,22 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new() { Title = "${ns}", Version = "v1" });
+    // Mark non-nullable reference-type properties as required in the
+    // schema — matches Hono/Phoenix, which mark every non-optional field
+    // required.  Without this Swashbuckle leaves the required set empty.
+    c.SupportNonNullableReferenceTypes();
+    // operationId parity: the generated controller action method names are
+    // the PascalCase of the shared operationId (createProject, allProject,
+    // getProjectById, …).  Lower-casing the first char yields the exact
+    // camelCase operationId Hono/Phoenix emit, so client codegen function
+    // names line up.  Returns null for framework endpoints with no action.
+    c.CustomOperationIds(apiDesc =>
+    {
+        var action = apiDesc.ActionDescriptor.RouteValues.TryGetValue("action", out var a) ? a : null;
+        return string.IsNullOrEmpty(action)
+            ? null
+            : char.ToLowerInvariant(action[0]) + action.Substring(1);
+    });
 });
 
 var app = builder.Build();

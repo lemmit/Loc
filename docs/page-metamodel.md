@@ -1,6 +1,6 @@
 # Page metamodel — final v0
 
-> Supersedes the v22 React generator's hardcoded module-to-CRUD scaffolder
+> Supersedes the v22 React generator's hardcoded subdomain-to-CRUD scaffolder
 > with a declarative page metamodel: pages, components, scaffolding, state,
 > menus. Six declaration keywords, two expression-level reserved tokens,
 > one tiny grammar lift on `Lambda` and `Property`. No macro system, no
@@ -36,7 +36,7 @@ Three rules:
 
 | Keyword | Role |
 |---|---|
-| `ui` | Top-level block; `SystemMember`, peer to `module`, `deployable`, `theme`, `user`. |
+| `ui` | Top-level block; `SystemMember`, peer to `subdomain`, `deployable`, `theme`, `user`. |
 | `page` | Declares a route + body. |
 | `component` | Parameterised region tree — typed function from params (and optional state) to a body expression. |
 | `scaffold` | Single fixed multi-page rewrite from a domain selector to pages. |
@@ -62,24 +62,27 @@ Three rules:
 
 ```ddd
 system Acme {
-  module Sales { context Sales { ... } }
+  subdomain Sales { context Orders { ... } }
 
   theme { primary: "#3b82f6", neutral: "#9ca3af" }
   user  { id: string, permissions: string[] }
 
   ui SalesAdmin {
-    scaffold modules: Sales
+    scaffold subdomains: [Sales]
     page OrderConsole(customerId: Customer id) { ... }
     menu { ... }
   }
 
-  deployable api    { platform: dotnet, modules: Sales, port: 8080 }
+  storage primary { type: postgres }
+  dataSource ordersState { for: Orders, kind: state, use: primary }
+
+  deployable api    { platform: dotnet, contexts: [Orders], dataSources: [ordersState], port: 8080 }
   deployable webApp { platform: react,  targets: api, ui: SalesAdmin, port: 3001 }
 }
 ```
 
 The deployable references the ui via `ui: SalesAdmin`, mirroring how it
-already references modules. One ui can be served by multiple react
+already references hosted contexts. One ui can be served by multiple react
 deployables.
 
 **Validator obligations**
@@ -89,7 +92,7 @@ deployables.
 - `deployable.ui` must reference an existing `ui` block.
 - Only `react` deployables may set `ui:`.
 - Every `scaffold` selector and every page-data binding inside the `ui` must
-  resolve to a module reachable through the deployable's `targets` chain.
+  resolve to a subdomain reachable through the deployable's `targets` chain.
 
 ---
 
@@ -333,7 +336,7 @@ Users freely define their own `component`s, which compose these builtins.
 Single fixed pre-codegen pass. Not user-extensible. Hierarchical:
 
 ```
-scaffold modules:    A, B, …    →  ∪  scaffold contexts:   <each context in each module>
+scaffold subdomains: A, B, …    →  ∪  scaffold contexts:   <each context in each subdomain>
 scaffold contexts:   X, Y, …    →  ∪ {
                                        scaffold aggregates: <each aggregate in X>,
                                        scaffold workflows:  <each workflow in X>,
@@ -368,7 +371,7 @@ want, not what you don't.
 
 ```ddd
 ui SalesAdmin {
-  scaffold modules: Catalog                  // bulk
+  scaffold subdomains: [Catalog]             // bulk
   scaffold aggregates: Customer, Product     // a la carte
   scaffold workflows:  placeOrder
   page OrderList   { ... }                   // custom
@@ -504,7 +507,7 @@ gains an explicit `ui` block. The minimum is a one-liner that recovers
 today's behaviour verbatim:
 
 ```ddd
-ui WebApp { scaffold modules: Catalog, Sales, CustomerMgmt }
+ui WebApp { scaffold subdomains: [Catalog, Sales, CustomerMgmt] }
 
 deployable webApp {
     platform: react
@@ -629,7 +632,7 @@ StateField:
 // is now an AST-phase macro applied via the universal `with` clause on
 // the host UI block:
 //
-//   ui WebApp with scaffold(modules: [Sales, Catalog]) { ... }
+//   ui WebApp with scaffold(subdomains: [Sales, Catalog]) { ... }
 //
 // The macro expands to the same set of Page nodes the old grammar rule
 // produced.  See docs/scaffold-macros.md for the full surface
