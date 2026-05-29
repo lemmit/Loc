@@ -511,6 +511,7 @@ function renderController(ctx: EnrichedBoundedContextIR, ns: string, routePrefix
       .join(",\n            ");
     blocks.push(
       `    [HttpPost("${snake(wf.name)}")]\n` +
+        `    [ProducesResponseType(typeof(ProblemDetails), 400)]\n` +
         `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflow(wf.name)))}([FromBody] ${upperFirst(wf.name)}Request request)\n` +
         `    {\n` +
         `        var cmd = new ${upperFirst(wf.name)}Command(\n            ${cmdArgs});\n` +

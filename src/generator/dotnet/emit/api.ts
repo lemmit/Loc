@@ -1,4 +1,5 @@
 import type { AggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
+import { errorStatuses, type OpErrorKind } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
   type OpIdTokens,
@@ -16,6 +17,16 @@ import { renderDotnetLogCall, renderDotnetLogCallWithException } from "../../_ob
  *  yields the exact camelCase operationId Hono/Phoenix emit. */
 function actionName(tokens: OpIdTokens): string {
   return upperFirst(camelId(tokens));
+}
+
+/** `[ProducesResponseType]` attribute lines declaring the RFC 7807 error
+ *  responses for an operation kind (from the shared matrix).  A Swashbuckle
+ *  operation filter (see Program.cs) rewrites their content-type to
+ *  `application/problem+json` so the emitted spec matches Hono/Phoenix. */
+function producesProblem(kind: OpErrorKind, indent = "    "): string[] {
+  return errorStatuses(kind).map(
+    (s) => `${indent}[ProducesResponseType(typeof(ProblemDetails), ${s})]`,
+  );
 }
 
 // ASP.NET Core controller emission.  One controller per aggregate root,
@@ -102,6 +113,7 @@ export function renderController(
       : [];
     return [
       `    [HttpPost("{id}/${snake(op.name)}")]`,
+      ...producesProblem("operation"),
       `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}Request request)`,
       "    {",
       ...wireInLine,
@@ -139,6 +151,13 @@ export function renderController(
         : "        return Ok(result);";
     return [
       `    [HttpGet${f.isRoot ? "" : `("${snake(f.name)}")`}]`,
+      ...producesProblem(
+        f.returnShape === "optional"
+          ? "findOptional"
+          : f.returnShape === "list"
+            ? "findList"
+            : "findSingle",
+      ),
       `    public async Task<ActionResult<${responseType}>> ${actionName(opFind(agg.name, f.name))}(${f.queryRouteParams})`,
       "    {",
       `        var result = await _mediator.Send(new ${upperFirst(f.name)}Query(${f.queryConstructorArgs}));`,
@@ -181,6 +200,7 @@ export function renderController(
       `    public ${className}(IMediator mediator, ILogger<${className}> log) { _mediator = mediator; _log = log; }`,
       "",
       "    [HttpPost]",
+      ...producesProblem("create"),
       `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
       "    {",
       `        var cmd = new Create${agg.name}Command(`,
@@ -199,6 +219,7 @@ export function renderController(
       "    }",
       "",
       '    [HttpGet("{id}")]',
+      ...producesProblem("getById"),
       `    public async Task<ActionResult<${agg.name}Response>> ${actionName(opGetById(agg.name))}([FromRoute] ${shape.idClrType} id)`,
       "    {",
       `        var response = await _mediator.Send(new Get${agg.name}ByIdQuery(new ${agg.name}Id(id)));`,
@@ -282,22 +303,19 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         }
         if (context.Exception is ForbiddenException fe)
         {
-            context.Result = new ObjectResult(new { error = fe.Message, trace_id })
-            {
-                StatusCode = 403,
-            };
+            context.Result = Problem(context, 403, "Forbidden", fe.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is DomainException de)
         {
-            context.Result = new BadRequestObjectResult(new { error = de.Message, trace_id });
+            context.Result = Problem(context, 400, "Bad Request", de.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is AggregateNotFoundException nf)
         {
-            context.Result = new NotFoundObjectResult(new { error = nf.Message, trace_id });
+            context.Result = Problem(context, 404, "Not Found", nf.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
@@ -315,10 +333,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
               { name: "op", valueExpr: "xh.OpName" },
               { name: "error", valueExpr: "xh.Message" },
             ])}
-            context.Result = new ObjectResult(new { error = xh.Message, trace_id })
-            {
-                StatusCode = 500,
-            };
+            context.Result = Problem(context, 500, "Internal Server Error", xh.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
@@ -329,11 +344,60 @@ public sealed class DomainExceptionFilter : IExceptionFilter
           { name: "error", valueExpr: "context.Exception.Message" },
           { name: "status", valueExpr: "500" },
         ])}
-        context.Result = new ObjectResult(new { error = "internal", trace_id })
-        {
-            StatusCode = 500,
-        };
+        context.Result = Problem(context, 500, "Internal Server Error", "internal", trace_id);
         context.ExceptionHandled = true;
+    }
+
+    // RFC 7807 problem responder — application/problem+json body +
+    // x-request-id header (trace correlation moves off the body so it's
+    // byte-identical to Hono / Phoenix).  Shared by every non-validation arm.
+    private static IActionResult Problem(ExceptionContext context, int status, string title, string detail, string traceId)
+    {
+        context.HttpContext.Response.Headers["x-request-id"] = traceId;
+        return new ObjectResult(new ProblemDetails
+        {
+            Type = "about:blank",
+            Title = title,
+            Status = status,
+            Detail = detail,
+            Instance = context.HttpContext.Request.Path,
+        })
+        {
+            StatusCode = status,
+            ContentTypes = { "application/problem+json" },
+        };
+    }
+}
+`;
+}
+
+/** Swashbuckle operation filter — rewrites every declared 4xx/5xx response
+ *  to `application/problem+json` carrying the shared `ProblemDetails`
+ *  schema.  `[ProducesResponseType(typeof(ProblemDetails), …)]` on each
+ *  action declares WHICH statuses; this filter normalises the content-type
+ *  (Swashbuckle defaults error responses to `application/json`) so the
+ *  emitted spec's error contract matches Hono / Phoenix (RFC 7807). */
+export function renderProblemDetailsFilter(ns: string): string {
+  return `// Auto-generated.
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.OpenApi.Models;
+using Swashbuckle.AspNetCore.SwaggerGen;
+
+namespace ${ns}.Api;
+
+public sealed class ProblemDetailsResponsesFilter : IOperationFilter
+{
+    public void Apply(OpenApiOperation operation, OperationFilterContext context)
+    {
+        var schema = context.SchemaGenerator.GenerateSchema(typeof(ProblemDetails), context.SchemaRepository);
+        foreach (var (code, response) in operation.Responses)
+        {
+            if (code.Length == 3 && (code[0] == '4' || code[0] == '5'))
+            {
+                response.Content.Clear();
+                response.Content["application/problem+json"] = new OpenApiMediaType { Schema = schema };
+            }
+        }
     }
 }
 `;
