@@ -7,18 +7,14 @@ import { createApp } from "./http/index";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { baseLogger } from "./obs/log";
 
-// Fail fast on a missing DATABASE_URL.  Without this an unset value
-// surfaces as a confusing pg connection refusal mid-request; we'd
-// rather die at boot with a clear pointer to the env var.
+// Persistence connection — owned by the drizzle PersistenceAdapter
+// (DATABASE_URL guard → pg pool → pool-error logging → drizzle db).
 if (!process.env.DATABASE_URL) {
   throw new Error(
     "DATABASE_URL is required.  Set it in the environment " +
       "(e.g. postgres://user:pass@host:5432/db).",
   );
 }
-
-const port = Number(process.env.PORT ?? 3000);
-baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 // Surface pool-level connection errors on the structured stream — a
@@ -33,6 +29,9 @@ pool.on("error", (err) => {
   });
 });
 const db = drizzle(pool, { schema });
+
+const port = Number(process.env.PORT ?? 3000);
+baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
 
 // Apply pending schema migrations before serving traffic.  Drizzle's
 // runtime migrator reads db/migrations/meta/_journal.json + each

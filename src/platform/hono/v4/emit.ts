@@ -41,6 +41,7 @@ import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js"
 import type { Model } from "../../../language/generated/ast.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
+import { DRIZZLE_CONNECTION_SETUP } from "./adapters/drizzle-persistence.js";
 import { layeredStyleAdapter } from "./adapters/layered-style.js";
 import { resourceAdapterFor } from "./adapters/resource-clients.js";
 import { emitAuthFiles } from "./auth-emit.js";
@@ -532,32 +533,12 @@ import * as schema from "./db/schema";
 import { createApp } from "./http/index";
 ${migImport}${authStubImport}import { baseLogger } from "./obs/log";
 ${resourceImportBlock}
-// Fail fast on a missing DATABASE_URL.  Without this an unset value
-// surfaces as a confusing pg connection refusal mid-request; we'd
-// rather die at boot with a clear pointer to the env var.
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL is required.  Set it in the environment " +
-      "(e.g. postgres://user:pass@host:5432/db).",
-  );
-}
+// Persistence connection — owned by the drizzle PersistenceAdapter
+// (DATABASE_URL guard → pg pool → pool-error logging → drizzle db).
+${DRIZZLE_CONNECTION_SETUP.join("\n")}
 
 const port = Number(process.env.PORT ?? 3000);
 baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
-
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-// Surface pool-level connection errors on the structured stream — a
-// dropped backend connection (DB restart, network blip) emits 'error'
-// on the pool, not per-query.  Without this hook the failure surfaces
-// only as the NEXT request's 503 from /ready or a 500 from an
-// aggregate route; logging here gives ops the heads-up + the cause.
-pool.on("error", (err) => {
-  baseLogger.warn({
-    event: "db_disconnected",
-    reason: err instanceof Error ? err.message : String(err),
-  });
-});
-const db = drizzle(pool, { schema });
 ${migCall}${authStubCall}const app = createApp(db);
 const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });
