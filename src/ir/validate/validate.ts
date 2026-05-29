@@ -87,6 +87,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateViews(c, diags);
     validateCurrentUserScope(c, diags);
     validatePermissionRefs(c, diags);
+    validateInheritanceUnwired(c, diags);
   }
   validateExprIntegrity(loom, diags);
   return diags;
@@ -1103,6 +1104,32 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
   // and an unsupported shape for a given backend is rejected by the
   // per-backend `supportedShapes` capability check, not warned as inert.
 ];
+
+// Aggregate-inheritance (aggregate-inheritance.md, I2/I3) — truth-telling
+// while only the foundation has landed.  I1 shipped the surface + validators;
+// the I2 foundation merges a concrete's inherited base fields into its
+// `wireShape` (so DTOs carry the shared shape).  What is NOT yet generated:
+// the table strategy (`sharedTable` TPH / `ownTable` TPC), the `kind`
+// discriminator column, polymorphic `Party id` foreign keys, and base-type
+// queries (`find all Party`).  Warn so no one mistakes the inherited wire
+// shape for working storage.  Drop this warning when I2/I3 emission lands.
+function validateInheritanceUnwired(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  for (const agg of ctx.aggregates) {
+    if (!agg.isAbstract && !agg.extendsAggregate) continue;
+    const role = agg.isAbstract ? "abstract base" : `extends ${agg.extendsAggregate}`;
+    const layout = agg.inheritanceUsing ? `, inheritanceUsing(${agg.inheritanceUsing})` : "";
+    diags.push({
+      severity: "warning",
+      message:
+        `aggregate '${agg.name}' participates in inheritance (${role}${layout}), but ` +
+        `inheritance storage emission is not wired yet. Concrete subtypes inherit base fields ` +
+        `into their wire shape (I2 foundation); the table strategy (sharedTable TPH / ownTable ` +
+        `TPC), discriminator column, polymorphic 'X id' references, and base-type queries are ` +
+        `not yet generated. Tracked in aggregate-inheritance.md I2/I3.`,
+      source: `${ctx.name}/${agg.name}`,
+    });
+  }
+}
 
 function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const ds of sys.dataSources) {

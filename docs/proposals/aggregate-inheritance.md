@@ -6,10 +6,16 @@
 > the I1 validator rules are live (`loom.extends-non-abstract`,
 > `loom.extends-self`, `loom.inheritance-modifier-misplaced`,
 > `loom.abstract-aggregate-behavior`, `loom.abstract-repository`, and the
-> D-ES-TPH `loom.es-tph-forced-own-table`).  **No emission yet** — abstract
+> D-ES-TPH `loom.es-tph-forced-own-table`).  The **I2 foundation** has also
+> landed: enrichment merges a concrete's inherited base fields into its
+> `wireShape` (base fields after `id`, then own; own shadows a like-named
+> base field), so DTOs carry the shared shape — backend-neutral, needed by
+> both strategies.  **Storage emission is still pending** — abstract
 > aggregates produce no table/repo/routes and the `sharedTable`/`ownTable`
-> strategies carry no backend semantics until I2 (TPH) / I3 (TPC), which
-> hook the per-backend `PersistenceAdapter` seam (D-ADAPTER-HOME), not the
+> strategies, the `kind` discriminator, polymorphic `X id` refs, and
+> base-type queries are not yet generated (an `inheritance storage emission
+> is not wired` IR-validate warning says so).  I2 (TPH) / I3 (TPC) emission
+> hooks the per-backend `PersistenceAdapter` seam (D-ADAPTER-HOME), not the
 > route/repo builders directly.
 >
 > **Sister proposal**:

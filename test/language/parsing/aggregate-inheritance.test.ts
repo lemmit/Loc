@@ -8,7 +8,9 @@
 
 import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
+import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../../src/ir/lower/lower.js";
+import { validateLoomModel } from "../../../src/ir/validate/validate.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Aggregate, Model } from "../../../src/language/generated/ast.js";
 import { parseValid } from "../../_helpers/parse.js";
@@ -163,5 +165,56 @@ describe("aggregate inheritance — validator (I1)", () => {
       }
     `);
     expect(codes(errors)).not.toContain("loom.es-tph-forced-own-table");
+  });
+});
+
+describe("aggregate inheritance — field inheritance into wireShape (I2 foundation)", () => {
+  const SRC = `
+system Sys {
+  subdomain Sales {
+    context Parties {
+      abstract aggregate Party inheritanceUsing(ownTable) { name: string email: string }
+      aggregate Customer extends Party inheritanceUsing(ownTable) { creditLimit: decimal }
+    }
+  }
+}
+`;
+
+  it("merges base fields ahead of own fields in the concrete's wireShape", async () => {
+    const enriched = enrichLoomModel(lowerModel(await parseValid(SRC)));
+    const ctx = enriched.systems[0]!.subdomains[0]!.contexts.find((c) => c.name === "Parties")!;
+    const customer = ctx.aggregates.find((a) => a.name === "Customer")!;
+    const names = customer.wireShape!.map((f) => f.name);
+    // id first, then inherited base fields, then own.
+    expect(names).toEqual(["id", "name", "email", "creditLimit"]);
+  });
+
+  it("does not duplicate a base field the concrete redeclares (own shadows)", async () => {
+    const SRC2 = `
+system Sys {
+  subdomain Sales {
+    context Parties {
+      abstract aggregate Party inheritanceUsing(ownTable) { name: string }
+      aggregate Customer extends Party inheritanceUsing(ownTable) { name: string tier: int }
+    }
+  }
+}
+`;
+    const enriched = enrichLoomModel(lowerModel(await parseValid(SRC2)));
+    const ctx = enriched.systems[0]!.subdomains[0]!.contexts.find((c) => c.name === "Parties")!;
+    const customer = ctx.aggregates.find((a) => a.name === "Customer")!;
+    const names = customer.wireShape!.map((f) => f.name);
+    expect(names.filter((n) => n === "name")).toHaveLength(1);
+    expect(names).toEqual(["id", "name", "tier"]);
+  });
+
+  it("warns that inheritance storage emission is not wired yet (IR-validate)", async () => {
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(await parseValid(SRC))));
+    const warns = diags.filter(
+      (d) =>
+        d.severity === "warning" && /inheritance storage emission is not wired/.test(d.message),
+    );
+    // one for the abstract base, one for the concrete subtype.
+    expect(warns.map((w) => w.source).sort()).toEqual(["Parties/Customer", "Parties/Party"]);
   });
 });

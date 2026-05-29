@@ -262,7 +262,26 @@ export function enrichContext(
     ...rootValueObjects.filter((v) => !ownVoNames.has(v.name)),
   ];
   const enums = [...ctx.enums, ...rootEnums.filter((e) => !ownEnumNames.has(e.name))];
-  const aggregates = ctx.aggregates.map((a) => enrichAggregate(a, valueObjects, urlStyle));
+  // Aggregate-inheritance (I2 foundation): a concrete `extends Base` inherits
+  // the abstract base's declared fields into its own field list — base fields
+  // first (after id), then own — so its `wireShape` and every backend DTO
+  // carry the shared shape.  Backend-neutral: both `sharedTable` (TPH) and
+  // `ownTable` (TPC) need the merged shape.  Resolved within the context (the
+  // common case); a cross-context base is left to the emission slice.  Own
+  // fields shadow a like-named base field (no overriding semantics; a
+  // redeclaration validator can tighten this later).  Storage emission of the
+  // hierarchy itself (table strategy, discriminator, polymorphic queries) is
+  // not wired yet — see the `inheritance-storage-unwired` IR-validate warning.
+  const byName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  const withInheritance = ctx.aggregates.map((a) => {
+    if (!a.extendsAggregate) return a;
+    const base = byName.get(a.extendsAggregate);
+    if (!base) return a;
+    const ownNames = new Set(a.fields.map((f) => f.name));
+    const inherited = base.fields.filter((f) => !ownNames.has(f.name));
+    return inherited.length > 0 ? { ...a, fields: [...inherited, ...a.fields] } : a;
+  });
+  const aggregates = withInheritance.map((a) => enrichAggregate(a, valueObjects, urlStyle));
   const repositories = ensureFindAll(aggregates, ctx.repositories);
   return { ...ctx, valueObjects, enums, aggregates, repositories };
 }
