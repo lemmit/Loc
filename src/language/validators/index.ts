@@ -3,6 +3,7 @@
 // can pull them from a single import.
 
 export { checkBuilderCallType, checkLegacyConstructorCalls } from "./builder-call.js";
+export { checkCriteria } from "./criterion.js";
 export { checkDataSource } from "./datasource.js";
 export {
   checkDeployable,

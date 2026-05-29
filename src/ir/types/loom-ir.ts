@@ -473,6 +473,32 @@ export interface RepositoryIR {
   finds: FindIR[];
 }
 
+/** A named, parameterised, pure boolean predicate over a candidate
+ *  type — the Specification Pattern (Evans / Spring-Data style).  See
+ *  docs/criterion.md.
+ *
+ *  A criterion is *inlined* wherever it is referenced from a boolean
+ *  expression position (`view ... where`, repository `find ... where`,
+ *  an `invariant`, an operation guard): the use-site re-lowers the
+ *  predicate body with its parameters substituted and the candidate
+ *  rebound to the host receiver, so no backend consumes `CriterionIR`
+ *  directly today.  The IR record is retained for tooling, traceability
+ *  and the forthcoming `Repo.findAll(criterion, …)` surface. */
+export interface CriterionIR {
+  name: string;
+  params: ParamIR[];
+  /** The `of <T>` candidate type.  `kind: "entity"` for an aggregate
+   *  candidate; `kind: "primitive", name: "bool"` for a pure ambient
+   *  predicate with no candidate. */
+  targetType: TypeIR;
+  /** The lowered predicate body, lowered in the criterion's own scope
+   *  (parameters as `param` refs, candidate fields as `this-prop`).
+   *  Use-sites inline a freshly-substituted copy rather than reading
+   *  this; it exists for tooling / traceability / future query
+   *  emission. */
+  body: ExprIR;
+}
+
 export interface BoundedContextIR {
   name: string;
   enums: EnumIR[];
@@ -482,6 +508,8 @@ export interface BoundedContextIR {
   repositories: RepositoryIR[];
   workflows: WorkflowIR[];
   views: ViewIR[];
+  /** Named predicate specifications declared in this context. */
+  criteria: CriterionIR[];
 }
 
 /** A saved, strongly-typed query over one source aggregate.  Two

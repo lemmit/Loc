@@ -201,6 +201,7 @@ function emitProjectFromContexts(
     repositories: contexts.flatMap((c) => c.repositories),
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
+    criteria: contexts.flatMap((c) => c.criteria),
   };
   // Auth files — emitted only when the deployable opts in
   // via `auth: required` AND the system declares a user block (the
