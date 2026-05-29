@@ -94,8 +94,8 @@ Registry-defined, one table per kind. Each verb declares its required
 
 | kind | verb | capability | signature |
 |---|---|---|---|
-| `objectStore` | `put` | `blob` | `(key: string, body: bytes) → void` |
-| | `get` | `blob` | `(key: string) → bytes?` |
+| `objectStore` | `put` | `blob` | `(key: string, body: json) → void` |
+| | `get` | `blob` | `(key: string) → json?` |
 | | `list` | `list` | `(prefix: string) → string[]` |
 | | `signedUrl` | `signedUrl` | `(key: string) → string` |
 | | `delete` | `blob` | `(key: string) → void` |
@@ -104,8 +104,12 @@ Registry-defined, one table per kind. Each verb declares its required
 | `api` | `get` | `request` | `(path: string) → json` |
 | | `post` | `request` | `(path: string, body: json) → json` |
 
-`bytes` and `json` are new opaque primitive leaf types (siblings of the Phase-2
-`json` field type if present; otherwise introduced here). The vocabulary lives in
+**4a ships `objectStore` `put` / `get` only**, carrying `json` (the type Phase 2
+already has) rather than `bytes` — so a workflow can produce a value to store with
+no `extern` dependency and 4a is a self-contained vertical. `list` / `signedUrl` /
+`delete` land in 4b; a `bytes` payload (for true binary blobs) is introduced later,
+once domain code has a producer for it (an `extern` handler or an encoding
+surface). The vocabulary lives in
 `src/ir/resource-verbs.ts` (the data) with a name-only mirror pinned by a
 completeness test, mirroring `walker-stdlib.ts`.
 
@@ -204,9 +208,11 @@ workflow PlaceOrder(cmd: PlaceOrderCmd) {
 
 ## 8. Phasing
 
-- **4a** — `objectStore` on hono: lowering + validation + `emitOperation` +
-  usage-derived needs + async threading. One vertical, end to end.
-- **4b** — `queue` + `api` on hono; per-call interface override.
+- **4a** — `objectStore` `put`/`get` (carrying `json`) on hono: lowering +
+  validation + `emitOperation` + usage-derived needs + async threading. One
+  vertical, end to end, self-contained (no `extern` needed).
+- **4b** — `objectStore` `list`/`signedUrl`/`delete`, plus `queue` + `api` on
+  hono; per-call interface override (`signedUrl`→`rest`).
 - **4c** — `.NET` + Phoenix `ResourceAdapter`s for the same verbs.
 - **4d (optional)** — explicit `uses:` / `requires:` authoring on top of the
   proven implicit derivation.
@@ -219,9 +225,10 @@ no resource-ops.
 
 ## 9. Open questions
 
-1. **`bytes` representation** — `Uint8Array` / `Buffer` in TS, `byte[]` / `Stream`
-   in .NET; how is it produced by domain code (only from other resource-ops and
-   `extern` handlers, or a literal/encoding surface)?
+1. **`bytes` representation (post-4a)** — `Uint8Array` / `Buffer` in TS,
+   `byte[]` / `Stream` in .NET; how is it produced by domain code (only from
+   other resource-ops and `extern` handlers, or a literal/encoding surface)?
+   Deferred — 4a uses `json`, so this is only relevant when binary blobs land.
 2. **Result binding ergonomics** — `let x = files.get(k)` returns `bytes?`; how
    do downstream uses narrow it?
 3. **Queue message typing** — opaque `json` (v1) vs a declared message schema per
