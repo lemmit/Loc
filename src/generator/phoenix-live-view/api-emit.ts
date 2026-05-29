@@ -436,7 +436,7 @@ ${wireInLine}    record = ${contextModule}.create_${aggSnake}!(params)
     ])}
     conn
     |> put_status(:created)
-    |> json(record)
+    |> json(%{id: record.id})
   end
 
   @doc "PATCH /api/${aggPlural}/:id"

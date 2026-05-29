@@ -3062,3 +3062,108 @@ describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// #716 — Phoenix OpenAPI wire-surface parity with Hono/.NET.
+//   - enum/part refs are MODULE atoms (so OpenApiSpex registers them)
+//   - create endpoints return { id } (Create<Agg>Response)
+//   - views return a bare array (items: element-module ref)
+//   - request bools are not marked required
+// ---------------------------------------------------------------------------
+
+const WIRE_SOURCE = `system MiniWire {
+
+  subdomain Sales {
+    context Sales {
+      enum Status { Open, Closed }
+
+      aggregate Order {
+        name: string
+        status: Status
+        active: bool
+        derived display: string = name
+      }
+      repository Orders for Order { }
+
+      view ActiveOrders = Order where active == true
+    }
+  }
+
+  api SalesApi from Sales
+
+  ui SalesAdmin with scaffold(subdomains: [Sales]) {
+  }
+
+  deployable phoenixApp {
+    platform: phoenixLiveView,
+    contexts: [Sales],
+    serves: SalesApi,
+    ui: SalesAdmin,
+    port: 4000
+  }
+}
+`;
+
+describe("phoenix wire-surface parity (#716)", () => {
+  async function wireFiles(): Promise<Map<string, string>> {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pwire-"));
+    const file = path.join(dir, "wire.ddd");
+    fs.writeFileSync(file, WIRE_SOURCE);
+    const services = createDddServices(NodeFileSystem);
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
+    await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+    if (errors.length > 0) {
+      throw new Error(`Validation errors:\n${errors.map((e) => `  ${e.message}`).join("\n")}`);
+    }
+    const { files } = generateSystems(doc.parseResult.value as Model);
+    return files;
+  }
+
+  const SCHEMA = "phoenix_app/lib/phoenix_app_web/api/schemas";
+
+  it("references enum + part schemas as MODULE atoms (so they register in components)", async () => {
+    const files = await wireFiles();
+    const resp = files.get(`${SCHEMA}/order_response.ex`)!;
+    // Module atom, NOT a raw %OpenApiSpex.Reference{"$ref": ...}.
+    expect(resp).toMatch(/status: PhoenixAppWeb\.Api\.Schemas\.Status/);
+    expect(resp).not.toMatch(/status: %OpenApiSpex\.Reference/);
+  });
+
+  it("emits a Create<Agg>Response { id } schema and the create op references it", async () => {
+    const files = await wireFiles();
+    const createResp = files.get(`${SCHEMA}/create_order_response.ex`)!;
+    expect(createResp).toMatch(/title: "CreateOrderResponse"/);
+    expect(createResp).toMatch(/properties: %\{\s*id:/);
+    expect(createResp).toMatch(/required: \[:id\]/);
+    const spec = files.get("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex")!;
+    expect(spec).toMatch(/schema: PhoenixAppWeb\.Api\.Schemas\.CreateOrderResponse/);
+  });
+
+  it("create controller action returns just the id", async () => {
+    const files = await wireFiles();
+    const ctrl = files.get("phoenix_app/lib/phoenix_app_web/controllers/orders_controller.ex")!;
+    expect(ctrl).toMatch(/json\(%\{id: record\.id\}\)/);
+  });
+
+  it("view response is a bare array whose items reference the element module", async () => {
+    const files = await wireFiles();
+    const viewResp = files.get(`${SCHEMA}/active_orders_response.ex`)!;
+    expect(viewResp).toMatch(/type: :array/);
+    // Shorthand view → element is the aggregate response module (not an
+    // inline object), making it a structural list-wrapper.
+    expect(viewResp).toMatch(/items: PhoenixAppWeb\.Api\.Schemas\.OrderResponse/);
+    expect(viewResp).not.toMatch(/items: %OpenApiSpex\.Schema\{\s*type: :object/);
+  });
+
+  it("does not mark a request bool field required", async () => {
+    const files = await wireFiles();
+    const createReq = files.get(`${SCHEMA}/create_order_request.ex`)!;
+    // `active` (bool) present as a property…
+    expect(createReq).toMatch(/active: %OpenApiSpex\.Schema\{type: :boolean\}/);
+    // …but absent from the required list (name/status stay required).
+    expect(createReq).toMatch(/required: \[:name, :status\]/);
+  });
+});
