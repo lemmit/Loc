@@ -154,7 +154,11 @@ function txCallbackBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string
   ];
 }
 
-export function hydrateRootExpr(agg: EnrichedAggregateIR, rowVar: string, ctx: BoundedContextIR): string {
+export function hydrateRootExpr(
+  agg: EnrichedAggregateIR,
+  rowVar: string,
+  ctx: BoundedContextIR,
+): string {
   const fields: string[] = [];
   fields.push(`id: Ids.${agg.name}Id(${rowVar}.id)`);
   for (const f of agg.fields) {

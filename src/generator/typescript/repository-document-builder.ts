@@ -205,7 +205,10 @@ function findPredicate(
 
 // --- document (de)serialisers --------------------------------------------
 
-export function entityToDocFn(entity: AggregateIR | EntityPartIR, ctx: EnrichedBoundedContextIR): string {
+export function entityToDocFn(
+  entity: AggregateIR | EntityPartIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   const fnName = `${lowerFirst(entity.name)}ToDoc`;
   const entries: string[] = [`id: a.id as string`];
   if (isPart(entity)) entries.push(`parentId: a.parentId as string`);
