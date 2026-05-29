@@ -40,12 +40,15 @@ proposal docs.
    them. The only `crudish` change in scope is letting its *parameter
    shape* consume a synthesized `command` payload (§5.2).
 
-4. **Parity is a forcing function, not a filter.** Where the strict
-   conformance gate (`conformance-parity.yml`) surfaces a feature that
-   only one backend implements, the default response is **implement it
-   on the others**, not extend the diff's exclusion list. Temporary
-   filters are allowed only as a *time-boxed* unblock with a tracked
-   debt entry and a removal trigger (§6).
+4. **Parity is a forcing function — sequenced as its own phase.**
+   During active development, filtering a by-design single-backend
+   extension out of the parity diff (e.g. `ProvenanceLineage`) is a
+   legitimate way to keep the gate green while the feature settles.
+   The *strict* gate — flipping the filter off so the divergence forces
+   the missing implementations onto the other backends — is scheduled
+   as a **deliberate next phase**, not a same-PR requirement. Filters
+   are fine in the interim; each just carries a debt-register row (§6)
+   so the strict-gate phase has a worklist.
 
 **Non-goals** (unchanged from the proposals' deferred lists): generics
 on aggregates, row polymorphism, type-class abstractions, async/effect
@@ -210,9 +213,17 @@ Phoenix and asserts agreement (`docs/conformance.md`;
 `test/_helpers/openapi-normalize.ts`). Today it **filters** by-design
 single-backend extensions (e.g. `*_provenance` schemas) to stay green.
 
-This plan's stance: **prefer implementing the missing side over
-extending the filter.** The gate is the lever that keeps the debt
-visible and makes "Hono-only" a temporary state, not a permanent one.
+This plan's stance is **two-phase**:
+
+- **During dev:** filtering a by-design single-backend extension out of
+  the diff is fine — it keeps the gate green while the feature settles.
+- **Strict-gate phase (later):** flip the filters off so each
+  divergence forces the missing implementation onto the other backends.
+  This is when "Hono-only" stops being acceptable.
+
+The register below is the worklist that makes the strict-gate phase
+concrete: it keeps the debt visible so flipping a filter has a known
+cost and owner, rather than silently re-greening.
 
 ### 6.1 Debt register (cross-backend gaps, with citations)
 
@@ -223,7 +234,11 @@ visible and makes "Hono-only" a temporary state, not a permanent one.
 | DBT-3 | **`X id[]` reference ordering** | ✓ `ordinal` column | ✓ `ordinal` column | ✗ unordered / set semantics (`generators.md:751`) | display-only | Ash `ordinal` ordering, or ratify set semantics as the contract |
 | DBT-4 | **React list-page filter mode** | n/a | n/a | n/a | ✗ deferred; v1 emits hook only (`generators.md:43`; `body-walker.ts:658` `unsupported expr` fallback) | Implement filter-mode walker |
 | DBT-5 | **Page `requires <pred>` guard** | n/a | n/a | ⚠ v0 stub: bind-only (`generators.md:624`) | n/a | Full guard in `handle_params/3` |
-| DBT-6 | **.NET adapter menu stubs** | — | ⚠ `dapper`, `marten` (persistence), `layered` (style), `byFeature` (layout) declared but stubbed (`platform/dotnet.ts`) | 1 real only (no stubs) | — | Implement or remove the stubs (don't advertise unbuilt adapters) |
+
+> Out of scope for this plan: the .NET adapter-menu stubs
+> (`dapper` / `marten` / `layered` / `byFeature`) are a pre-ship
+> product-iteration concern, not type-system-adjacent debt — tracked
+> wherever the .NET backend roadmap lives, not here.
 
 > Note: `audited`-operation runtime parity (.NET/Phoenix) and the
 > RFC 7807 `ProblemDetails` error body are tracked separately under the
@@ -242,8 +257,9 @@ removal trigger so it can't become permanent:
 - `ProblemDetails` / `ErrorResponse` framework filter → revisit when a
   shared error envelope ships (exception-less A3 + conformance #706).
 
-A filter without a trigger entry is a defect; CI for this plan should
-fail review if one is added without a register row.
+New filters added during dev should land with a register row so the
+strict-gate phase inherits the full worklist — the row, not strictness,
+is the in-the-meantime requirement.
 
 ## 7. Sequencing
 
@@ -294,7 +310,6 @@ migration-safety and debt work onto its phases.
 | D-prov-wire | Expose current provenance lineage on the read wire as `ProvLineage option managed`? | **Defer**; off by default until DBT-1 closes, then opt-in. |
 | D-crud-payload | When P2 lands, default `crudish` to a `command`-payload param, or keep positional with payload behind a flag? | Flag first; flip default only post-parity. |
 | D-idarr-order | Ratify `X id[]` as unordered set semantics (close DBT-3 by spec), or implement Ash ordering? | Open — needs a wire-contract call. |
-| D-net-stubs | Implement .NET `dapper`/`marten`/`layered`/`byFeature` adapters, or remove them from the advertised menu? | Lean **remove from menu** until built; don't advertise stubs. |
 
 ## 10. Cross-references
 
