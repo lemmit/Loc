@@ -181,10 +181,12 @@ Resource:
         ('retain'         ':' retain=INT ','?)?
         ('isolationLevel' ':' isolationLevel=IsolationLevel ','?)?
         ('readonly'       ':' readonly?='true' ','?)?
+        ('config' ':' '{' (config+=ConfigEntry (',' config+=ConfigEntry)* ','?)? '}' ','?)?
     '}';
 
 DataSourceKind returns string:
-    'state' | 'eventLog' | 'snapshot' | 'cache' | 'replica';
+    'state' | 'eventLog' | 'snapshot' | 'cache' | 'replica'
+    | 'objectStore' | 'queue' | 'api';
 
 UiSugarBinding:
     'ui' ':' ref=[Ui:ID] ','?;
@@ -303,14 +305,29 @@ Storage:
         ('type' ':' type=StorageType ','?)
         ('instance' ':' instance=ID ','?)?
         ('connection' ':' connection=ConnectionSource ','?)?
+        ('config' ':' '{' (config+=ConfigEntry (',' config+=ConfigEntry)* ','?)? '}' ','?)?
     '}';
+
+// Generic vendor-parameter map (RFC §3.1/§8).  Keys are validated per
+// sourceType against the registry's config schema in IR validation; no
+// per-vendor clause keywords are introduced.
+ConfigEntry:
+    key=LooseName ':' value=ConfigValue;
+
+ConfigValue:
+      {infer StringConfigValue} value=STRING
+    | {infer IntConfigValue}    value=INT
+    | {infer BoolConfigValue}   value=BoolLiteral;
+
+BoolLiteral returns string: 'true' | 'false';
 
 StorageType returns string:
       'postgres' | 'mysql' | 'sqlite' | 'inMemory'
     | 'redis'
     | 'elastic' | 'meilisearch'
     | 'kafka'
-    | 'clickhouse' | 'bigquery';
+    | 'clickhouse' | 'bigquery'
+    | 'awsS3' | 'rabbitmq' | 'restApi';
 
 ConnectionSource:
       {infer ServiceConnectionSource} 'service' '(' service=ID ')'
@@ -463,7 +480,7 @@ StateFieldName returns string:
     // `DataSource` rule.
     | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
     | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-    | 'eventLog' | 'snapshot' | 'replica';
+    | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config';
 
 // ---- menu ---------------------------------------------------------------
 
@@ -839,7 +856,7 @@ Property:
         // (banking.ddd: `entity AccountTransaction { kind: string }`) still parse.
         | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
         | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-        | 'eventLog' | 'snapshot' | 'replica' | 'resource' | 'dataSources')
+        | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -929,7 +946,7 @@ LooseName returns string:
     // (storage roles), `for` predates this PR as a hard keyword.
     | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
     | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-    | 'eventLog' | 'snapshot' | 'replica' | 'resource' | 'dataSources';
+    | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1287,7 +1304,7 @@ NameRefIdent returns string:
        // `kind` (`Field { kind + ":", bind: v }` in walker tests).
        | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
        | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-       | 'eventLog' | 'snapshot' | 'replica' | 'resource' | 'dataSources';
+       | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources';
 
 // ---------------------------------------------------------------------------
 // Terminals

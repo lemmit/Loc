@@ -1,10 +1,12 @@
 import { platformOwnsBackend } from "../../language/validators/data/platform-rules.js";
 import { allPlatforms, platformFor } from "../../platform/registry.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
-import { capabilitiesFor, supportsSurfaceKind } from "../source-types.js";
+import { capabilitiesFor, configSchemaFor, supportsSurfaceKind } from "../source-types.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  ConfigEntryIR,
+  ConfigValueIR,
   DataSourceIR,
   DeployableIR,
   EnrichedAggregateIR,
@@ -57,6 +59,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateSystem(sys, diags);
     validateDataSourceCoverage(sys, diags);
     validateNeedCapabilities(sys, diags);
+    validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuth(sys, diags);
@@ -943,6 +946,87 @@ function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagnostic[]
         source: `${sys.name}/${resource.name}`,
       });
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Generic `config` map validation (RFC §8).  Keys are checked against
+// the sourceType's registry config schema: unknown keys warn (forward-
+// compatible), wrong-typed values error, and required keys missing from
+// a physical `storage` error.  Resource-level config is supplemental, so
+// the required-key check applies only to the storage declaration.
+// ---------------------------------------------------------------------------
+
+function validateResourceConfig(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const storageType = new Map(sys.storages.map((s) => [s.name, s.type] as const));
+  for (const s of sys.storages) {
+    checkConfigBlock(s.config, s.type, `storage '${s.name}'`, true, sys.name, diags);
+  }
+  for (const r of sys.dataSources) {
+    const sourceType = storageType.get(r.storageName);
+    if (!sourceType) continue;
+    checkConfigBlock(r.config, sourceType, `resource '${r.name}'`, false, sys.name, diags);
+  }
+}
+
+function checkConfigBlock(
+  config: readonly ConfigEntryIR[] | undefined,
+  sourceType: string,
+  label: string,
+  checkRequired: boolean,
+  sysName: string,
+  diags: LoomDiagnostic[],
+): void {
+  const schema = configSchemaFor(sourceType);
+  const byName = new Map(schema.map((k) => [k.name, k] as const));
+  const present = new Set<string>();
+  for (const entry of config ?? []) {
+    present.add(entry.key);
+    const spec = byName.get(entry.key);
+    if (!spec) {
+      diags.push({
+        severity: "warning",
+        message: `${label}: config key '${entry.key}' is not recognised by sourceType '${sourceType}' — it will be ignored.`,
+        source: `${sysName}/${label}`,
+      });
+      continue;
+    }
+    if (!configValueMatchesType(entry.value, spec)) {
+      const expected =
+        spec.type === "enum" && spec.values ? `one of ${spec.values.join(", ")}` : spec.type;
+      diags.push({
+        severity: "error",
+        message: `${label}: config key '${entry.key}' expects ${expected}.`,
+        source: `${sysName}/${label}`,
+      });
+    }
+  }
+  if (checkRequired) {
+    for (const spec of schema) {
+      if (spec.required && !present.has(spec.name)) {
+        diags.push({
+          severity: "error",
+          message: `${label}: required config key '${spec.name}' (sourceType '${sourceType}') is missing.`,
+          source: `${sysName}/${label}`,
+        });
+      }
+    }
+  }
+}
+
+function configValueMatchesType(
+  value: ConfigValueIR,
+  spec: { type: string; values?: readonly string[] },
+): boolean {
+  switch (spec.type) {
+    case "number":
+      return value.kind === "int";
+    case "boolean":
+      return value.kind === "bool";
+    case "enum":
+      return value.kind === "string" && (spec.values?.includes(value.value) ?? false);
+    default: // string | secret
+      return value.kind === "string";
   }
 }
 

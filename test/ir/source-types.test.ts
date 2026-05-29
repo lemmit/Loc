@@ -86,6 +86,17 @@ describe("sourceType registry — descriptors & lookups", () => {
     expect(configSchemaFor("postgres")).toEqual([]);
   });
 
+  it("seeds the Phase-2 kinds (objectStore/queue/api) on their sourceTypes", () => {
+    expect(supportsSurfaceKind("awsS3", "objectStore")).toBe(true);
+    expect(supportsSurfaceKind("rabbitmq", "queue")).toBe(true);
+    expect(supportsSurfaceKind("restApi", "api")).toBe(true);
+    // and not cross-wired
+    expect(supportsSurfaceKind("awsS3", "queue")).toBe(false);
+    expect(supportsSurfaceKind("postgres", "objectStore")).toBe(false);
+    expect([...interfacesFor("awsS3", "objectStore")].sort()).toEqual(["rest", "sdk"]);
+    expect(sourceTypeFor("awsS3")?.configKeys?.some((k) => k.name === "bucket" && k.required)).toBe(true);
+  });
+
   it("registerSourceType adds a descriptor that resolves through the lookups", () => {
     registerSourceType({
       name: "__test_objstore",

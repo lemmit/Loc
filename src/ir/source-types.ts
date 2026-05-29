@@ -74,6 +74,9 @@ export const SURFACE_KIND_MAP: Record<DataSourceKind, { infraKind: InfraKind; ca
   replica: { infraKind: "database", capability: "replica" },
   eventLog: { infraKind: "eventLog" },
   cache: { infraKind: "cache" },
+  objectStore: { infraKind: "objectStore" },
+  queue: { infraKind: "queue" },
+  api: { infraKind: "api" },
 };
 
 const set = <T>(...xs: T[]): ReadonlySet<T> => new Set(xs);
@@ -150,6 +153,41 @@ function seedBuiltins(): void {
   registerSourceType({
     name: "kafka",
     supports: { eventLog: { capabilities: set("append", "read", "replay"), interfaces: set<LoomInterface>() } },
+  });
+  // Phase 2 kinds: object store, queue, external API.
+  registerSourceType({
+    name: "awsS3",
+    supports: {
+      objectStore: {
+        capabilities: set("blob", "list", "signedUrl", "versioning"),
+        interfaces: set<LoomInterface>("rest", "sdk"),
+      },
+    },
+    configKeys: [
+      { name: "region", type: "string" },
+      { name: "bucket", type: "string", required: true },
+      { name: "endpoint", type: "string" },
+    ],
+  });
+  registerSourceType({
+    name: "rabbitmq",
+    supports: {
+      queue: {
+        capabilities: set("enqueue", "dequeue", "ack", "publish", "consume"),
+        interfaces: set<LoomInterface>("amqp"),
+      },
+    },
+    configKeys: [
+      { name: "vhost", type: "string" },
+      { name: "exchange", type: "string" },
+    ],
+  });
+  registerSourceType({
+    name: "restApi",
+    supports: {
+      api: { capabilities: set("request"), interfaces: set<LoomInterface>("rest") },
+    },
+    configKeys: [{ name: "baseUrl", type: "string", required: true }],
   });
   // Declared storage types with no kind binding today.
   for (const name of ["elastic", "meilisearch", "clickhouse", "bigquery"]) {

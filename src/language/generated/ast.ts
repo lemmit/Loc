@@ -57,6 +57,7 @@ export type DddKeywordNames =
     | "ashPhoenix"
     | "audited"
     | "auth"
+    | "awsS3"
     | "bi"
     | "bigquery"
     | "bind"
@@ -68,6 +69,7 @@ export type DddKeywordNames =
     | "check"
     | "clickhouse"
     | "component"
+    | "config"
     | "connection"
     | "contains"
     | "context"
@@ -141,6 +143,7 @@ export type DddKeywordNames =
     | "mysql"
     | "now"
     | "null"
+    | "objectStore"
     | "ogImage"
     | "onCreate"
     | "onUpdate"
@@ -157,6 +160,8 @@ export type DddKeywordNames =
     | "primary"
     | "private"
     | "provenanced"
+    | "queue"
+    | "rabbitmq"
     | "react"
     | "readCommitted"
     | "readUncommitted"
@@ -169,6 +174,7 @@ export type DddKeywordNames =
     | "requirement"
     | "requires"
     | "resource"
+    | "restApi"
     | "retain"
     | "route"
     | "schema"
@@ -244,12 +250,26 @@ export function isBaseType(item: unknown): item is BaseType {
     return reflection.isInstance(item, BaseType);
 }
 
+export type BoolLiteral = 'false' | 'true';
+
+export function isBoolLiteral(item: unknown): item is BoolLiteral {
+    return item === 'true' || item === 'false';
+}
+
 export type ComponentDecl = StateBlock;
 
 export const ComponentDecl = 'ComponentDecl';
 
 export function isComponentDecl(item: unknown): item is ComponentDecl {
     return reflection.isInstance(item, ComponentDecl);
+}
+
+export type ConfigValue = BoolConfigValue | IntConfigValue | StringConfigValue;
+
+export const ConfigValue = 'ConfigValue';
+
+export function isConfigValue(item: unknown): item is ConfigValue {
+    return reflection.isInstance(item, ConfigValue);
 }
 
 export type ConnectionSource = EnvConnectionSource | LiteralConnectionSource | SecretConnectionSource | ServiceConnectionSource;
@@ -268,10 +288,10 @@ export function isContextMember(item: unknown): item is ContextMember {
     return reflection.isInstance(item, ContextMember);
 }
 
-export type DataSourceKind = 'cache' | 'eventLog' | 'replica' | 'snapshot' | 'state';
+export type DataSourceKind = 'api' | 'cache' | 'eventLog' | 'objectStore' | 'queue' | 'replica' | 'snapshot' | 'state';
 
 export function isDataSourceKind(item: unknown): item is DataSourceKind {
-    return item === 'state' || item === 'eventLog' || item === 'snapshot' || item === 'cache' || item === 'replica';
+    return item === 'state' || item === 'eventLog' || item === 'snapshot' || item === 'cache' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'api';
 }
 
 export type DesignPack = 'ashPhoenix' | 'chakra' | 'mantine' | 'mui' | 'shadcn' | string;
@@ -342,10 +362,10 @@ export function isLiteralExpr(item: unknown): item is LiteralExpr {
     return reflection.isInstance(item, LiteralExpr);
 }
 
-export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'description' | 'design' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'framework' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'readonly' | 'replica' | 'resource' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'use' | 'views' | 'workflows' | string;
+export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'description' | 'design' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'framework' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'queue' | 'readonly' | 'replica' | 'resource' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'use' | 'views' | 'workflows' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'resource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'id' | 'modules' | 'permissions' | 'ui' | 'views' | 'workflows' | string;
@@ -384,10 +404,10 @@ export function isNamedDecl(item: unknown): item is NamedDecl {
     return reflection.isInstance(item, NamedDecl);
 }
 
-export type NameRefIdent = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'description' | 'design' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'filter' | 'framework' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'readonly' | 'replica' | 'resource' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'use' | 'views' | 'workflows' | string;
+export type NameRefIdent = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'description' | 'design' | 'env' | 'eventLog' | 'events' | 'every' | 'favicon' | 'filter' | 'framework' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'ogImage' | 'page' | 'permissions' | 'primary' | 'queue' | 'readonly' | 'replica' | 'resource' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'use' | 'views' | 'workflows' | string;
 
 export function isNameRefIdent(item: unknown): item is NameRefIdent {
-    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'resource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type PageProp = BodyProp | CanonicalProp | DescriptionProp | LayoutProp | OgImageProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
@@ -430,10 +450,10 @@ export function isStampEvent(item: unknown): item is StampEvent {
     return item === 'onCreate' || item === 'onUpdate';
 }
 
-export type StateFieldName = 'eventLog' | 'every' | 'filter' | 'implements' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'readonly' | 'replica' | 'retain' | 'schema' | 'snapshot' | 'stamp' | 'tablePrefix' | 'ttl' | 'use' | string;
+export type StateFieldName = 'config' | 'eventLog' | 'every' | 'filter' | 'implements' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'objectStore' | 'queue' | 'readonly' | 'replica' | 'retain' | 'schema' | 'snapshot' | 'stamp' | 'tablePrefix' | 'ttl' | 'use' | string;
 
 export function isStateFieldName(item: unknown): item is StateFieldName {
-    return item === 'filter' || item === 'stamp' || item === 'implements' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'filter' || item === 'stamp' || item === 'implements' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type Statement = AssignOrCallStmt | EmitStmt | LetStmt | PreconditionStmt | RequiresStmt;
@@ -444,10 +464,10 @@ export function isStatement(item: unknown): item is Statement {
     return reflection.isInstance(item, Statement);
 }
 
-export type StorageType = 'bigquery' | 'clickhouse' | 'elastic' | 'inMemory' | 'kafka' | 'meilisearch' | 'mysql' | 'postgres' | 'redis' | 'sqlite';
+export type StorageType = 'awsS3' | 'bigquery' | 'clickhouse' | 'elastic' | 'inMemory' | 'kafka' | 'meilisearch' | 'mysql' | 'postgres' | 'rabbitmq' | 'redis' | 'restApi' | 'sqlite';
 
 export function isStorageType(item: unknown): item is StorageType {
-    return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery';
+    return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery' || item === 'awsS3' || item === 'rabbitmq' || item === 'restApi';
 }
 
 export type SystemMember = Api | BoundedContext | Deployable | Layout | Resource | Storage | Subdomain | TestE2E | ThemeBlock | Ui | UserBlock;
@@ -590,6 +610,18 @@ export function isBodyProp(item: unknown): item is BodyProp {
     return reflection.isInstance(item, BodyProp);
 }
 
+export interface BoolConfigValue extends AstNode {
+    readonly $container: ConfigEntry;
+    readonly $type: 'BoolConfigValue';
+    value: BoolLiteral;
+}
+
+export const BoolConfigValue = 'BoolConfigValue';
+
+export function isBoolConfigValue(item: unknown): item is BoolConfigValue {
+    return reflection.isInstance(item, BoolConfigValue);
+}
+
 export interface BoolLit extends AstNode {
     readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'BoolLit';
@@ -692,6 +724,19 @@ export const Component = 'Component';
 
 export function isComponent(item: unknown): item is Component {
     return reflection.isInstance(item, Component);
+}
+
+export interface ConfigEntry extends AstNode {
+    readonly $container: Resource | Storage;
+    readonly $type: 'ConfigEntry';
+    key: LooseName;
+    value: ConfigValue;
+}
+
+export const ConfigEntry = 'ConfigEntry';
+
+export function isConfigEntry(item: unknown): item is ConfigEntry {
+    return reflection.isInstance(item, ConfigEntry);
 }
 
 export interface Containment extends AstNode {
@@ -972,6 +1017,18 @@ export const ImportStmt = 'ImportStmt';
 
 export function isImportStmt(item: unknown): item is ImportStmt {
     return reflection.isInstance(item, ImportStmt);
+}
+
+export interface IntConfigValue extends AstNode {
+    readonly $container: ConfigEntry;
+    readonly $type: 'IntConfigValue';
+    value: number;
+}
+
+export const IntConfigValue = 'IntConfigValue';
+
+export function isIntConfigValue(item: unknown): item is IntConfigValue {
+    return reflection.isInstance(item, IntConfigValue);
 }
 
 export interface IntLit extends AstNode {
@@ -1562,7 +1619,7 @@ export interface Property extends AstNode {
     readonly $type: 'Property';
     access?: FieldAccess;
     check?: Expression;
-    name: 'canonical' | 'connection' | 'dataSources' | 'description' | 'env' | 'eventLog' | 'every' | 'favicon' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'managed' | 'money' | 'ogImage' | 'readonly' | 'replica' | 'resource' | 'retain' | 'schema' | 'secret' | 'service' | 'snapshot' | 'tablePrefix' | 'token' | 'ttl' | 'use' | string;
+    name: 'canonical' | 'config' | 'connection' | 'dataSources' | 'description' | 'env' | 'eventLog' | 'every' | 'favicon' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'managed' | 'money' | 'objectStore' | 'ogImage' | 'queue' | 'readonly' | 'replica' | 'resource' | 'retain' | 'schema' | 'secret' | 'service' | 'snapshot' | 'tablePrefix' | 'token' | 'ttl' | 'use' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;
@@ -1642,6 +1699,7 @@ export function isRequiresStmt(item: unknown): item is RequiresStmt {
 export interface Resource extends AstNode {
     readonly $container: System;
     readonly $type: 'Resource';
+    config: Array<ConfigEntry>;
     context?: Reference<BoundedContext>;
     every?: number;
     isolationLevel?: IsolationLevel;
@@ -1780,6 +1838,7 @@ export function isStateField(item: unknown): item is StateField {
 export interface Storage extends AstNode {
     readonly $container: System;
     readonly $type: 'Storage';
+    config: Array<ConfigEntry>;
     connection?: ConnectionSource;
     instance?: string;
     name: LooseName;
@@ -1790,6 +1849,18 @@ export const Storage = 'Storage';
 
 export function isStorage(item: unknown): item is Storage {
     return reflection.isInstance(item, Storage);
+}
+
+export interface StringConfigValue extends AstNode {
+    readonly $container: ConfigEntry;
+    readonly $type: 'StringConfigValue';
+    value: string;
+}
+
+export const StringConfigValue = 'StringConfigValue';
+
+export function isStringConfigValue(item: unknown): item is StringConfigValue {
+    return reflection.isInstance(item, StringConfigValue);
 }
 
 export interface StringLit extends AstNode {
@@ -2146,6 +2217,7 @@ export type DddAstType = {
     BinaryChain: BinaryChain
     BindEntry: BindEntry
     BodyProp: BodyProp
+    BoolConfigValue: BoolConfigValue
     BoolLit: BoolLit
     BoundedContext: BoundedContext
     BuilderCall: BuilderCall
@@ -2155,6 +2227,8 @@ export type DddAstType = {
     CanonicalProp: CanonicalProp
     Component: Component
     ComponentDecl: ComponentDecl
+    ConfigEntry: ConfigEntry
+    ConfigValue: ConfigValue
     ConnectionSource: ConnectionSource
     Containment: Containment
     ContextMember: ContextMember
@@ -2180,6 +2254,7 @@ export type DddAstType = {
     IdType: IdType
     ImplementsDecl: ImplementsDecl
     ImportStmt: ImportStmt
+    IntConfigValue: IntConfigValue
     IntLit: IntLit
     Invariant: Invariant
     LValue: LValue
@@ -2251,6 +2326,7 @@ export type DddAstType = {
     StateField: StateField
     Statement: Statement
     Storage: Storage
+    StringConfigValue: StringConfigValue
     StringLit: StringLit
     Subdomain: Subdomain
     System: System
@@ -2287,7 +2363,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, ConnectionSource, Containment, ContextMember, DecLit, Deployable, DerivedProp, DescriptionProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, RouteProp, SecretConnectionSource, SensitivityClause, ServiceConnectionSource, SlotType, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
+        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, DecLit, Deployable, DerivedProp, DescriptionProp, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, RouteProp, SecretConnectionSource, SensitivityClause, ServiceConnectionSource, SlotType, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2335,6 +2411,11 @@ export class DddAstReflection extends AbstractAstReflection {
             case RouteProp:
             case TitleProp: {
                 return this.isSubtype(PageProp, supertype);
+            }
+            case BoolConfigValue:
+            case IntConfigValue:
+            case StringConfigValue: {
+                return this.isSubtype(ConfigValue, supertype);
             }
             case BoolLit:
             case DecLit:
@@ -2574,6 +2655,14 @@ export class DddAstReflection extends AbstractAstReflection {
                     ]
                 };
             }
+            case BoolConfigValue: {
+                return {
+                    name: BoolConfigValue,
+                    properties: [
+                        { name: 'value' }
+                    ]
+                };
+            }
             case BoolLit: {
                 return {
                     name: BoolLit,
@@ -2643,6 +2732,15 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'decls', defaultValue: [] },
                         { name: 'name' },
                         { name: 'params', defaultValue: [] }
+                    ]
+                };
+            }
+            case ConfigEntry: {
+                return {
+                    name: ConfigEntry,
+                    properties: [
+                        { name: 'key' },
+                        { name: 'value' }
                     ]
                 };
             }
@@ -2832,6 +2930,14 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: ImportStmt,
                     properties: [
                         { name: 'path' }
+                    ]
+                };
+            }
+            case IntConfigValue: {
+                return {
+                    name: IntConfigValue,
+                    properties: [
+                        { name: 'value' }
                     ]
                 };
             }
@@ -3283,6 +3389,7 @@ export class DddAstReflection extends AbstractAstReflection {
                 return {
                     name: Resource,
                     properties: [
+                        { name: 'config', defaultValue: [] },
                         { name: 'context' },
                         { name: 'every' },
                         { name: 'isolationLevel' },
@@ -3381,10 +3488,19 @@ export class DddAstReflection extends AbstractAstReflection {
                 return {
                     name: Storage,
                     properties: [
+                        { name: 'config', defaultValue: [] },
                         { name: 'connection' },
                         { name: 'instance' },
                         { name: 'name' },
                         { name: 'type' }
+                    ]
+                };
+            }
+            case StringConfigValue: {
+                return {
+                    name: StringConfigValue,
+                    properties: [
+                        { name: 'value' }
                     ]
                 };
             }
