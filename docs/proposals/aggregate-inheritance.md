@@ -1,6 +1,18 @@
 # Aggregate inheritance and storage strategies
 
-> Status: proposal. **Sister proposal**:
+> Status: **Phase I1 shipped** — `abstract aggregate`, `extends <Base>`, and
+> the `inheritanceUsing(sharedTable | ownTable)` header modifier parse and
+> lower (`AggregateIR.isAbstract` / `.extendsAggregate` / `.inheritanceUsing`);
+> the I1 validator rules are live (`loom.extends-non-abstract`,
+> `loom.extends-self`, `loom.inheritance-modifier-misplaced`,
+> `loom.abstract-aggregate-behavior`, `loom.abstract-repository`, and the
+> D-ES-TPH `loom.es-tph-forced-own-table`).  **No emission yet** — abstract
+> aggregates produce no table/repo/routes and the `sharedTable`/`ownTable`
+> strategies carry no backend semantics until I2 (TPH) / I3 (TPC), which
+> hook the per-backend `PersistenceAdapter` seam (D-ADAPTER-HOME), not the
+> route/repo builders directly.
+>
+> **Sister proposal**:
 > [`payload-transport-layer.md`](./payload-transport-layer.md) — they together
 > split the type system along two axes (state vs transport). Read both
 > before implementing either.
