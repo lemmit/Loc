@@ -447,12 +447,26 @@ function renderApiSpec(
             : isArrayReturn
               ? "findList"
               : "findSingle";
+        // Filter params cross as query parameters — Hono/.NET declare them,
+        // so Phoenix must too (name + type + required), or the parity gate's
+        // query-param dimension diffs `phoenix=[]`.  Required mirrors Hono's
+        // `zodFor`: a nullable param is optional, everything else required.
+        const queryParams = find.params
+          .map(
+            (p) =>
+              `            %OpenApiSpex.Parameter{name: :${p.name}, in: :query, required: ${
+                wireTypeInfo(p.type, "request").isNullable ? "false" : "true"
+              }, schema: ${openApiType(p.type, schemasModule)}}`,
+          )
+          .join(",\n");
+        const queryParamsBlock =
+          find.params.length > 0 ? `\n          parameters: [\n${queryParams}\n          ],` : "";
         pathEntries.push(
           `      "/${aggSlug}/${findSnake}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "${find.name} on ${agg.name}",
           operationId: "${camelId(opFind(agg.name, find.name))}",
-          tags: ["${aggSlug}"],
+          tags: ["${aggSlug}"],${queryParamsBlock}
           responses: %{
             200 => %OpenApiSpex.Response{
               description: "OK",

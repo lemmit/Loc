@@ -2370,6 +2370,11 @@ describe("OpenAPI spec — per-op + per-find paths", () => {
     // Per-find path
     expect(spec).toMatch(/"\/projects\/by_name"/);
     expect(spec).toMatch(/operationId: "byNameProject"/);
+    // The find's filter crosses as a required query parameter (Hono/.NET
+    // declare it too — without this the parity gate diffs `phoenix=[]`).
+    expect(spec).toMatch(
+      /%OpenApiSpex\.Parameter\{name: :name, in: :query, required: true, schema: %OpenApiSpex\.Schema\{type: :string\}\}/,
+    );
     // Auto-`all` find must NOT have its own path entry.
     expect(spec).not.toMatch(/"\/projects\/all"/);
   });
