@@ -22,6 +22,7 @@ import {
 import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import { buildDocumentRepositoryFile } from "../../../generator/typescript/repository-document-builder.js";
+import { buildEmbeddedRepositoryFile } from "../../../generator/typescript/repository-embedded-builder.js";
 import { enrichLoomModel } from "../../../ir/enrich/enrichments.js";
 import { lowerModel } from "../../../ir/lower/lower.js";
 import {
@@ -38,7 +39,10 @@ import {
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
 import { contextsHaveProvenancedField } from "../../../ir/util/prov-id.js";
-import { isDocumentShaped, resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
+import {
+  effectiveSavingShape,
+  resolveDataSourceConfig,
+} from "../../../ir/util/resolve-datasource.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
@@ -237,15 +241,18 @@ export function generateTypeScriptForContexts(
         `domain/${lowerFirst(agg.name)}.ts`,
         renderAggregate(agg, ctx, emitProvenance, emitTrace),
       );
-      // Document-shaped (`shape(document)`) aggregates persist as one
-      // jsonb column — route to the document repository (JSON round-trip
-      // via `_create`) instead of the normalised table-tree hydrate.
-      const isDocument = isDocumentShaped(agg, resolveDataSource?.(agg));
+      // Saving-shape routing: `document` → one jsonb blob + JSON
+      // round-trip via `_create`; `embedded` → queryable root columns +
+      // containments in jsonb columns; `relational` (default) → the
+      // normalised table-per-entity hydrate.
+      const shape = effectiveSavingShape(agg, resolveDataSource?.(agg));
       out.set(
         `db/repositories/${lowerFirst(agg.name)}-repository.ts`,
-        isDocument
+        shape === "document"
           ? buildDocumentRepositoryFile(agg, repo, ctx, emitTrace)
-          : buildRepositoryFile(agg, repo, ctx, emitTrace),
+          : shape === "embedded"
+            ? buildEmbeddedRepositoryFile(agg, repo, ctx, emitTrace)
+            : buildRepositoryFile(agg, repo, ctx, emitTrace),
       );
       // Routes file — adapter-dispatched in system mode (the layered
       // StyleAdapter re-derives audit / provenance gates from

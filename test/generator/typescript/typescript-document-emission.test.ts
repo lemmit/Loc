@@ -85,4 +85,29 @@ describe("Hono/Drizzle document-persistence emission (normalised(false))", () =>
     expect(repo).not.toContain("FromDoc");
     expect(repo).not.toContain("as CustomerDoc");
   });
+
+  // shape(embedded): queryable root columns + containment folded into a
+  // jsonb column.  Unlike document, finds are REAL SQL on the root.
+  it("embedded: root columns + one jsonb containment column, no part table", () => {
+    const schema = files.get("db/schema.ts")!;
+    expect(schema).toContain('export const wishlists = pgTable("wishlists", {');
+    expect(schema).toContain('customerId: text("customer_id").notNull(),');
+    expect(schema).toContain('items: jsonb("items").notNull(),');
+    expect(schema).not.toContain('pgTable("wish_items"');
+  });
+
+  it("embedded: root via columns, containment via jsonb; finds are real SQL", () => {
+    const repo = files.get("db/repositories/wishlist-repository.ts")!;
+    // Root hydrated from columns + items rebuilt from the jsonb column.
+    expect(repo).toContain(
+      "const items = ((row.items ?? []) as WishItemDoc[]).map((x) => wishItemFromDoc(x));",
+    );
+    expect(repo).toContain("Wishlist._create({ id: Ids.WishlistId(row.id)");
+    // Save writes root columns + items jsonb in one upsert.
+    expect(repo).toContain("items: aggregate.items.map((e) => wishItemToDoc(e))");
+    expect(repo).toContain(".onConflictDoUpdate({ target: schema.wishlists.id");
+    // byCustomer is a real indexed SQL WHERE on the root column — NOT in-memory.
+    expect(repo).toContain(".where(eq(schema.wishlists.customerId, customerId))");
+    expect(repo).not.toContain("FromDoc(row.data");
+  });
 });
