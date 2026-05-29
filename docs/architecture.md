@@ -66,8 +66,8 @@ deployables `serves:` apis.
 
 ## Storage instances
 
-`storage X { type: T }` declares a typed storage slot — reusable
-across deployables.  v0 type enum:
+`storage X { type: T }` declares a typed physical store — reusable
+across deployables, contexts, and bindings.  v0 type enum:
 
 | Category | Types |
 |---|---|
@@ -85,6 +85,50 @@ storage warehouse    { type: clickhouse }
 
 Only `postgres` has full generator support today.  Other types
 parse + validate but don't yet activate generator output.
+
+
+## DataSource bindings
+
+`storage` says *what physical store exists*; `dataSource` says
+*which context's data of which kind lands where*.  The split
+(D-STORAGE-SPLIT) means a single `storage` instance can back
+multiple contexts (each in its own Postgres schema), and a single
+context can route different data kinds (state vs eventLog vs cache)
+to different stores.
+
+```ddd
+dataSource ordersState {
+  for: Orders, kind: state, use: primarySql
+  // optional: schema, tablePrefix, isolationLevel, ttl, every, retain, …
+}
+dataSource ordersCache {
+  for: Orders, kind: cache, use: hotCache, ttl: 60
+}
+```
+
+Kinds (`state`, `eventLog`, `snapshot`, `cache`, `replica`) match
+storage types via an enforced compatibility matrix:
+
+| Kind | Compatible storage types | Aggregate predicate |
+|---|---|---|
+| `state` | postgres, mysql, sqlite, inMemory | at least one `stateBased` aggregate |
+| `eventLog` | postgres, mysql, sqlite, inMemory, kafka | at least one `eventSourced` aggregate |
+| `snapshot` | postgres, mysql, sqlite, inMemory | at least one `eventSourced` aggregate (snapshot policy) |
+| `cache` | redis, inMemory | any aggregate |
+| `replica` | postgres, mysql, sqlite | any aggregate |
+
+Defaults applied at emit time:
+
+- `schema:` omitted → defaults to `snake(contextName)` on relational stores; non-relational stores have no schema concept.
+
+Backend deployables list which dataSources they wire up (see
+"Backend deployables" below).  The validators enforce that every
+hosted `(context, persistence-kind)` pair has a matching binding,
+that every listed binding actually routes data, and that knob/kind/
+storage triples are coherent.
+
+A derived view of the resolved routing is emitted to
+`.loom/datasources.md` — see [`loom-artifacts.md`](loom-artifacts.md).
 
 
 ## UI consumer
@@ -154,40 +198,40 @@ declaration is self-contained.
 
 ```ddd
 deployable salesApi {
-  platform: hono                  // runtime
-  modules: Sales {                // domain
-    primary: primarySql           // transactional persistence
-    cache:   hotCache             // optional read-through cache
-    search:  searchIndex          // optional fulltext index
-    bi:      warehouse            // optional analytics export
-  }
-  serves: SalesApi                // contract this deployable implements
+  platform: hono                       // runtime
+  contexts: [Orders, Customers]        // domain contexts hosted
+  dataSources: [ordersState, customersState, ordersCache]  // routing
+  serves: SalesApi                     // contract this deployable implements
   port: 3000
 }
 ```
 
 The `serves:` field lists api contracts implemented by this
-backend.  The `modules: <M> { role: <storage> }` block wires
-each module's storage roles to declared storage instances.
-`primary:` is required when the brace block is non-empty;
-other roles (`cache`, `search`, `events`, `bi`) are optional.
+backend.  The `contexts:` field names which bounded contexts this
+deployable hosts.  The `dataSources:` field lists the
+system-scope `dataSource` decls that route those contexts'
+persistence — see "DataSource bindings" above.
 
-Multiple modules + multiple roles are admissible:
+Validators enforce:
+
+- Every hosted `(context, aggregate.persistenceStrategy→kind)`
+  pair must have a matching dataSource listed (no under-binding).
+- Every listed dataSource must cover at least one aggregate in the
+  hosted contexts (no dead binding — warning, not error).
+- Every dataSource's `for: <ctx>` must be in this deployable's
+  `contexts:`.
+
+Multiple contexts hosted by one deployable is the common case:
 
 ```ddd
 deployable monolithApi {
   platform: dotnet
-  modules:
-    Sales     { primary: salesPg,  bi: warehouse },
-    Marketing { primary: mktgPg,   bi: warehouse }
+  contexts: [Orders, Marketing]
+  dataSources: [ordersState, marketingState, ordersAuditLog]
   serves: SalesApi, MarketingApi
   port: 8080
 }
 ```
-
-Bare `modules: Sales, Marketing` (no brace block) is still
-admissible for backward compat — generator falls back to a
-default postgres + Drizzle setup.
 
 ### Frontend deployables
 
@@ -228,7 +272,8 @@ without a peer `targets:` link.
 ```ddd
 deployable phoenixApp {
   platform: phoenixLiveView
-  modules:  Sales { primary: primarySql }
+  contexts: [Orders]
+  dataSources: [ordersState]
   serves:   SalesApi
   ui:       SalesAdmin
   port:     4000
@@ -255,15 +300,16 @@ nothing else.
 
 ```ddd
 system Acme {
-  module Sales {
+  subdomain Sales {
     context Orders {
       aggregate Customer { name: string }
       repository Customers for Customer { find byEmail(email: string): Customer? }
     }
   }
 
-  api SalesApi from Sales
+  api SalesApi from Orders
   storage primarySql { type: postgres }
+  dataSource ordersState { for: Orders, kind: state, use: primarySql }
 
   ui WebApp {
     api Sales: SalesApi
@@ -277,7 +323,8 @@ system Acme {
 
   deployable salesApi {
     platform: hono
-    modules: Sales { primary: primarySql }
+    contexts: [Orders]
+    dataSources: [ordersState]
     serves: SalesApi
     port: 3000
   }
@@ -295,11 +342,13 @@ What the reader gets from any single declaration:
 
 | Read this... | ...and you know |
 |---|---|
-| `module Sales { ... }` | the domain — pure, persistence-agnostic |
-| `api SalesApi from Sales` | the contract — derived from Sales |
-| `storage primarySql { type: postgres }` | a typed storage instance, reusable |
+| `subdomain Sales { ... }` | a logical grouping; the domain lives in its `context` children |
+| `context Orders { aggregate Customer { ... } }` | the domain — pure, persistence-agnostic |
+| `api SalesApi from Orders` | the contract — derived from a bounded context |
+| `storage primarySql { type: postgres }` | a typed physical store |
+| `dataSource ordersState { for: Orders, kind: state, use: primarySql }` | which context's data of which kind lands where |
 | `ui WebApp { api Sales: SalesApi, ... }` | the UI takes Sales of contract SalesApi |
-| `deployable salesApi` | what's served, what module fills it, where each role's data lives |
+| `deployable salesApi` | what's served, which contexts hosted, which dataSources wire them up |
 | `deployable webApp` | what UI runs, which backend fills each api param |
 
 
@@ -358,20 +407,27 @@ shape end-to-end.
 | Backend doesn't serve a bound api | "Deployable 'X' does not 'serves: Y'" |
 | Missing UI param binding | "Deployable 'D' is missing a binding for ui parameter 'X: Y'" |
 | Duplicate storage names | "Duplicate storage 'X'" |
-| Module brace block missing primary | "Module 'X' must include a 'primary: <storage>' binding" |
+| Duplicate dataSource names | "Duplicate dataSource 'X'" |
+| Backend hosts an aggregate with no matching dataSource | "Deployable 'X' hosts aggregate 'C.A' (persistenceStrategy: stateBased, needs dataSource kind: state) but lists no matching dataSource." |
+| dataSource kind ↔ storage type mismatch | "dataSource 'X' kind 'cache' is incompatible with storage 'pg' of type 'postgres'.  kind 'cache' requires a storage of type inMemory or redis." |
+| dataSource listed but covers no aggregate (warning) | "Deployable 'X' lists dataSource 'Y' (kind: eventLog) for context 'C', but no aggregate is eventSourced — this binding routes no data." |
+| Knob incompatible with kind | "dataSource 'X': 'ttl' is only meaningful on kind: cache.  Got kind: state." |
 
 
 ## Generator wiring (today)
 
 | Layer | Generator-side |
 |---|---|
-| `module`, `context`, aggregate fields | Drizzle schema, Hono routes, .NET commands (existing) |
-| `api X from M` | Per-aggregate `api/<name>.ts` with React Query hooks (existing scaffold output) |
+| `subdomain`, `context`, aggregate fields | Drizzle schema, Hono routes, .NET commands (existing) |
+| `api X from <Ctx>` | Per-aggregate `api/<name>.ts` with React Query hooks (existing scaffold output) |
 | `storage X { type: postgres }` | Drizzle config + Phoenix/Hono/.NET Postgres migrations (see [`migrations-design.md`](migrations-design.md)) |
 | `storage X { type: <other> }` | Parses + validates; no generator output yet |
+| `dataSource X { for: C, kind: state, use: Y, schema: "...", tablePrefix: "..." }` | EF Core `ToTable("name", "schema")`, Drizzle `pgSchema("...").table(...)`, AshPostgres `schema "..." + table "prefix_..."`.  Schema defaults to `snake(contextName)` when omitted on a relational store. |
+| `dataSource X { ..., isolationLevel: <level> }` | Default isolation for transactional workflows in the bound context, overridden by per-workflow `transactional(<level>)`. |
+| `dataSource X { ..., ttl/every/retain/readonly/keyPrefix: ... }` | Validated for shape and compatibility; emitters do not yet consume — the IR validator warns at emit time so authors don't believe no-op knobs have effect. |
 | UI `api X: Y` parameter + body refs | Walker hook injection (slices 11.24–11.25) |
 | Deployable `serves:` / `ui: X { ... }` | Validator + composition checks (slice 11.26) |
-| Deployable `modules: X { primary: Y }` | Validator + IR (slice 11.27); the `primary` binding hints at the migration owner (`ModuleIR.migrationsOwner`), though each needsDb deployable currently still emits its own migration files against its own per-slug compose DB |
+| Deployable `contexts:` / `dataSources:` | IR-level coverage validator (every hosted (context, kind) pair must have a matching binding; every listed binding must cover at least one aggregate).  `migrationsOwner` derives one backend per subdomain for schema-migration emission. |
 
 
 ## Slice trail
@@ -386,3 +442,4 @@ testable piece:
 - **11.27** — `storage X { type: T }` + per-module storage map on backend deployable
 - **11.28** — Architecture integration test + acme.ddd migration
 - **11.29** — Button `disabled:` / `loading:` + object literal expressions
+- **D-STORAGE-SPLIT** — replaced 11.27's `modules: M { primary: storage }` block with system-scope `dataSource Name { for: C, kind: K, use: storage, … }` decls + `deployable.contexts: [...] dataSources: [...]`.  Adds the kind/storage compatibility matrix, the (context, kind) coverage validator, and the per-decl knob validator (PRs #698, #699, #701, #702).

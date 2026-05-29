@@ -22,6 +22,7 @@ consumption.
     ├── deployment.mmd
     ├── architecture.c4
     ├── architecture.c4.json
+    ├── datasources.md
     ├── traceability.md
     ├── traceability-matrix.md
     ├── traceability.mmd
@@ -45,6 +46,12 @@ traceability coverage, or migration baselines.
 | File | Producer | What it is |
 |---|---|---|
 | `wire-spec.json` | `src/system/wire-spec.ts` (phase ⑨) | JSON-Schema-shaped derivation from every aggregate / part / value object's `wireShape`.  Language-agnostic; the canonical source of truth for what the JSON over the wire looks like.  Diffable — wire-contract drift between regens shows up as a clean JSON diff. |
+
+## Storage routing
+
+| File | Producer | What it is |
+|---|---|---|
+| `datasources.md` | `src/system/datasources.ts` → `renderDataSourcesMd` | Per-system Markdown view of how `dataSource` declarations route domain contexts to physical storage.  Two sections: per-deployable routing (context → kind → storage with effective schema / table-prefix), and per-storage usage roll-up.  Catches accidental "primary" sharing and unused bindings at PR-review time. |
 
 ## Diagrams
 
