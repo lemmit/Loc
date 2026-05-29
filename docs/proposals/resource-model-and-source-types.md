@@ -91,7 +91,7 @@ carrying the per-binding configuration. It is the configured realization of a
 logical need.
 
 ```ddd
-resource ordersDb    { for: Orders, kind: database,    use: primarySql, schema: "orders" }
+resource ordersDb    { for: Orders, kind: state,       use: primarySql, schema: "orders" }
 resource ordersFiles { for: Orders, kind: objectStore, use: fileStore }
 resource orderJobs   { for: Orders, kind: queue,       use: jobBus }
 resource payApi      { for: Orders, kind: api,         use: payments }
@@ -181,7 +181,13 @@ keywords.
 
 - **`kind`** is the semantic role and the primary contract between a need and a
   provider: `database | eventLog | cache | objectStore | queue | api`. It is the
-  one dimension surfaced to users (on `resource`).
+  one dimension surfaced to users (on `resource`). **Surface note:** the
+  user-facing `kind:` keyword keeps the fine-grained persistence values
+  (`state | eventLog | snapshot | cache | replica`) and *adds* the new infra roles
+  (`objectStore | queue | api`); the registry reasons in the coarse infra kinds and
+  maps `state`/`snapshot`/`replica` onto `database` + a refining capability. This
+  keeps `kind:` as the `(context, kind)` routing discriminator while the
+  capability reframe stays internal.
 - **`capability`** refines a kind. The persistence roles Loom already
   distinguishes — `state`, `snapshot`, `replica` — are capabilities under
   `database`; `eventLog` and `cache` are kinds in their own right with their own
@@ -251,10 +257,11 @@ Invariants:
 
 ```ddd
 storage primarySql { type: postgres }
-resource ordersDb  { for: Orders, kind: database, use: primarySql, schema: "orders" }
+resource ordersDb  { for: Orders, kind: state, use: primarySql, schema: "orders" }
 ```
-Reached through `sql`; `state` / `snapshot` / `replica` are capabilities chosen by
-the aggregate's persistence and derived into the need.
+Reached through `sql`; the surface `kind:` stays fine-grained (`state` / `snapshot`
+/ `replica`), which the registry models as capabilities under `database` and
+derives into the need.
 
 ### 6.2 Postgres-backed event log
 
