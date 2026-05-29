@@ -12,6 +12,7 @@ import type {
 import type { MigrationsIR } from "../ir/types/migrations-ir.js";
 import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
+import { renderDataSourcesMd } from "./datasources.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderC4Model, renderC4SpecJson } from "./likec4.js";
 import {
@@ -154,6 +155,10 @@ function emitSystem(
   // diagram; hidden from the playground's file tree.
   out.set(".loom/architecture.c4", renderC4Model(sys));
   out.set(".loom/architecture.c4.json", renderC4SpecJson(sys));
+  // DataSource routing — derived markdown view of how `dataSource`
+  // declarations route domain contexts to physical storage.  Pairs
+  // with the Phase B / C / D validators.  See `datasources.ts`.
+  out.set(".loom/datasources.md", renderDataSourcesMd(sys));
 
   // E2E test scaffolding — emitted only when the system declares
   // `test e2e` blocks.  Lives at the system root so it can run against
