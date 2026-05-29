@@ -490,6 +490,8 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
           return ":utc_datetime";
         case "guid":
           return ":uuid";
+        case "json":
+          return ":map";
       }
     /* eslint-disable-next-line no-fallthrough */
     case "id":

@@ -5,11 +5,11 @@
 
 import { describe, expect, it } from "vitest";
 import type { EmitCtx } from "../../src/generator/_adapters/index.js";
-import { resolveLayout } from "../../src/platform/resolve-adapters.js";
 import {
   byLayerLayoutAdapter,
   type HonoArtifact,
 } from "../../src/platform/hono/v4/adapters/by-layer-layout.js";
+import { resolveLayout } from "../../src/platform/resolve-adapters.js";
 
 const ctx = {} as EmitCtx;
 

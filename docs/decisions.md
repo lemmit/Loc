@@ -201,6 +201,102 @@ the F1 micro-plan PRs; reopens after F1.
 
 ---
 
+## D-DOCUMENT-AXIS — document storage as two orthogonal header axes
+
+**Status:** PINNED (core axes, syntax, validation contract); the
+numbered **Open sub-questions** below remain OPEN.
+
+**Problem.** Loom models internal hierarchies but the
+relational-vs-document storage choice is implicit and unselectable
+(value objects → inline JSONB; entity parts → child tables); there is
+no open-shape JSON field; and a document/event-store backend (Marten)
+has nowhere to attach. The shipped `persistenceStrategy:` clause also
+conflates the event-sourcing *body contract* with *persistence* and
+sits anomalously inside the aggregate body. Full analysis in
+[`proposals/document-and-json-hierarchies.md`](./proposals/document-and-json-hierarchies.md).
+
+**Decision.** Two orthogonal **per-aggregate header modifiers**, plus a
+`json` field type. "Document" is a field type **and** a saving choice —
+**not** a new declaration kind.
+
+| Modifier | Axis | Values | Default |
+|---|---|---|---|
+| `persistedAs(...)` | primary truth kind | `eventLog` \| `state` | `state` |
+| `normalised(...)` | saving shape of the materialised read model / snapshot | `true` \| `false` (`false` = one JSON document) | `true` |
+
+- `persistedAs` values align to the D-STORAGE-SPLIT `kind` set, so
+  `resolve-datasource.ts`'s `eventSourced→eventLog` /
+  `stateBased→state` mapping becomes an **identity**.
+- `persistedAs` **renames + relocates** the shipped body
+  `persistenceStrategy: stateBased | eventSourced` → header
+  `persistedAs(eventLog | state)`. Breaking change; **hard cutover** —
+  `persistenceStrategy:` is removed (not accepted in parallel);
+  existing `.ddd` sources migrate in one step (codemod offered).
+- **All** aggregate-level config lives on the **header** as paren
+  modifiers (`ids`, `with`, `extends`, `persistedAs(…)`,
+  `normalised(…)`, `inheritanceUsing(…)`; bare `abstract`/`audited`).
+  **Nothing configures in the body** — the body holds members only.
+- New `json` **primitive field type** — opaque JSONB; a leaf in
+  `wireShape` (never expanded/diffed).
+- **Rejected:** `document` as an aggregate peer. **Deferred:** a
+  dedicated `document` value-type. **Dropped:** a per-containment
+  `as document/table` hint.
+- ES + document needs **no new `kind`**: a `kind: eventLog` binding +
+  a `kind: snapshot` (or `state`) binding carrying `normalised: false`.
+  Marten is the reference backend via a `martenPersistenceAdapter` on
+  the existing `PersistenceAdapter` seam.
+
+**Validator rules implied.**
+
+- `persistedAs(eventLog)` is the **declaration** of event-sourcing (the
+  rename of `persistenceStrategy: eventSourced`); there is no separate
+  `eventSourced` body marker.
+- The **body-discipline enforcement** — operations change state only by
+  emitting events, an `apply` exists per event, no direct `:=` mutation
+  — is **owned by the event-sourcing behavioral feature (appliers,
+  `workflow-and-applier.md`)** and is *gated on* `persistedAs(eventLog)`.
+  It is **not** implemented by the `persistedAs` rename itself, and
+  cannot land before `apply` exists in the grammar. So the rename slice
+  ships no body-contract validator; that enforcement arrives with the
+  applier feature.
+- `persistedAs(state)` (default / absent): operations mutate state
+  directly; no `apply`.
+- `persistedAs` is **explicit**, default `state` (omitted entirely
+  for state-based aggregates). **No inference and no suggestion lint.**
+- `normalised(false)` requires the context to resolve a
+  document-capable store/adapter; it constrains the `snapshot` binding
+  under `persistedAs(eventLog)`, the `state` binding under
+  `persistedAs(state)`.
+- Interaction (D-ES-TPH, generalised): a `persistedAs(eventLog)`
+  concrete subtype of a `sharedTable` base is forced to `ownTable`
+  regardless of `normalised`.
+
+**Sub-questions.**
+
+1. **`persistedAs` inference** — **RESOLVED: explicit, default `state`,
+   no inference, no lint.**
+2. **`json` shape-hint** — **RESOLVED: plain `json` for v1**; `json<T>`
+   out of scope.
+3. **Snapshot cadence for `eventLog` + document** — OPEN; reuse the
+   `snapshot` `dataSource`'s `every:` (recommended) vs a header arg.
+4. **Per-projection vs per-aggregate `normalised`** — OPEN; one shape
+   per aggregate in v1, per-projection deferred (recommended).
+5. **Real document DB** — OPEN; Postgres-JSONB only in v1 (Marten's
+   bet), `StorageType += mongo` deferred (recommended).
+
+**Affects.**
+
+- `document-and-json-hierarchies.md` — this is its decision record.
+- `aggregate-inheritance.md` — its `storage: shared|own` header clause
+  is renamed by D-RENAME (below) to the `inheritanceUsing(…)` paren
+  header modifier; same header line.
+- Shipped grammar — `persistenceStrategy:` (body) **removed** in favour
+  of `persistedAs(…)` (header); hard cutover, one-step source migration
+  (codemod).
+- `resolve-datasource.ts` — mode→kind mapping collapses to identity.
+
+---
+
 ## D-BACKEND-PKG — per-version backend packages are canonical
 
 **Status:** PINNED.
@@ -312,8 +408,8 @@ PINNED here when ratified.
 
 | Tag | Concern | Recommended answer (source) |
 |---|---|---|
-| D-RENAME | Aggregate-inheritance table-layout key naming | `inheritanceStrategy: shareTable \| ownTable` inside `aggregate { … }` (`aggregate-inheritance.md` + storage proposal §12) |
-| D-ES-TPH | ES concrete subtype of TPH abstract | Force `inheritanceStrategy: ownTable` (`aggregate-inheritance.md`) |
+| D-RENAME | Aggregate-inheritance layout key naming + syntax | **Amended by D-DOCUMENT-AXIS §4:** header paren modifier `inheritanceUsing(sharedTable \| ownTable)` (was `inheritanceStrategy: …`). Values kept **table-baked**, spelled `sharedTable \| ownTable` (refines pinned `shareTable` → `sharedTable`, reads as "shared table"); medium-neutral `shared\|own` rejected. (`aggregate-inheritance.md` + `document-and-json-hierarchies.md` §4a) |
+| D-ES-TPH | ES concrete subtype of TPH abstract | Force `inheritanceUsing(ownTable)` for a `persistedAs(eventLog)` concrete of a `sharedTable` base; generalises across `normalised` per D-DOCUMENT-AXIS (`aggregate-inheritance.md`) |
 | D1–D4, D14–D15 | Type-system carrier name / discriminator / postfix vs prefix ML syntax | Per `implementation-plan.md` D-table; locked before P3 |
 | D-POLICY-STYLE | Authorization grammar shape | `policy { data { … } operations { … } fields { … } }` reachability over function-style (`authorization.md`) |
 | D-LIFECYCLE-VERB | Lifecycle URL style default | `urlStyle: literal \| resource` (`lifecycle-operations.md`) |

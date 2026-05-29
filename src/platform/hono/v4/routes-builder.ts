@@ -729,6 +729,7 @@ const REQUEST_PRIMITIVE: Record<WirePrimitive, string> = {
   bool: "z.coerce.boolean()",
   datetime: "z.coerce.date()",
   guid: "z.string()",
+  json: "z.unknown()",
 };
 
 const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
@@ -740,6 +741,7 @@ const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
   bool: "z.boolean()",
   datetime: "z.string()",
   guid: "z.string()",
+  json: "z.unknown()",
 };
 
 export function zodFor(t: TypeIR): string {

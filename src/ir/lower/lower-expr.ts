@@ -904,10 +904,7 @@ function literalPromotionAnchor(t: TypeIR): "long" | "decimal" | "money" | null 
   return null;
 }
 
-function tryPromoteNumericLit(
-  expr: Expression,
-  target: "int" | "long" | "decimal" | "money" | "string" | "bool" | "datetime" | "guid",
-): ExprIR | null {
+function tryPromoteNumericLit(expr: Expression, target: PrimitiveName): ExprIR | null {
   if (target === "money") {
     if (isIntLit(expr)) return lit("money", String(expr.value));
     if (isDecLit(expr)) return lit("money", expr.value);

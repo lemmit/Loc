@@ -28,7 +28,7 @@ event  repository  for  find  where
 derived  invariant  when  function  operation  private
 precondition  emit  let  expect  expectThrows  test  new
 true  false  null  this  id
-int  long  decimal  money  string  bool  datetime  guid
+int  long  decimal  money  string  bool  datetime  guid  json
 ```
 
 ---
@@ -398,10 +398,18 @@ TypeRef       = BaseType ('[]')? ('?')?
 BaseType      = PrimitiveType | SlotType | IdType | NamedType
 IdType        = Identifier 'id'                // cross-aggregate FK
 NamedType     = Identifier                     // bare name
-PrimitiveType = 'int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid'
+PrimitiveType = 'int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid' | 'json'
 SlotType      = 'slot'                         // element-shaped param marker — UI-only
 MoneyLit      = 'money' '(' STRING ')'         // precise-decimal literal
 ```
+
+`json` is an **opaque JSON blob** — Loom does not model its interior.
+It maps to Postgres `JSONB` (Drizzle `jsonb`, EF `System.Text.Json.JsonElement`,
+Ash `:map`), TS `unknown`, Zod `z.unknown()`, and a freeform `object`
+in the OpenAPI/wire spec (a leaf — never expanded or structurally
+diffed).  Reach for a `valueobject` instead when the shape is known.
+See [`document-and-json-hierarchies.md`](proposals/document-and-json-hierarchies.md)
+(D-DOCUMENT-AXIS).
 
 A bare `Identifier` in type position must resolve to one of:
 

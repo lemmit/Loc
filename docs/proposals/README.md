@@ -65,6 +65,12 @@ Status reflects `origin/main` as of the last refresh of
 |---|---|---|
 | [`storage-and-platform-config.md`](./storage-and-platform-config.md) | PARTIAL | Top-level `storage <name> { type }` and deployable role-keyed slots shipped. Remaining: per-aggregate `persistenceStrategy:`, logical bindings (now `dataSource` per [D-STORAGE-SPLIT](../decisions.md#d-storage-split--split-the-overloaded-storage-keyword)), per-deployable `style:` / `layout:` / `persistence:`, `STORAGE_CAPABILITIES` matrix, adapter contracts. Granularity is per-context, not per-aggregate ([D-GRANULARITY](../decisions.md#d-granularity--storage-bindings-are-per-context-not-per-aggregate)); per-aggregate `for:` deferred to v2 override. |
 
+### Documents & JSON hierarchies
+
+| Doc | Status | Core addition |
+|---|---|---|
+| [`document-and-json-hierarchies.md`](./document-and-json-hierarchies.md) | PROPOSED | Persisting hierarchies as JSON documents (Marten / EF Core `.ToJson()` / Mongo-embedding analogues) instead of normalised tables. Separates open-shape `json` field (need A) from document-mapped typed hierarchy (need B). **Chosen direction:** two orthogonal per-aggregate header axes — a **truth kind** `persistedAs(eventLog | state)` (renamed from the shipped body `persistenceStrategy:`; values aligned to the `dataSource` `kind` set; carries the validated apply-always body contract) × a **saving shape** `normalised(true | false)` (new; `false` = document) — so the required **`persistedAs(eventLog)` + `normalised(false)`** (stream + document snapshot, Marten's sweet spot) is expressible. Wired via `normalised: false` on the `snapshot`/`state` `dataSource` + a Marten `PersistenceAdapter`. Plus a `json` primitive for open-shape data. Header-syntax reconciliation: all aggregate config on the header as paren modifiers, nothing in the body; amends D-RENAME (`inheritanceStrategy` → `inheritanceUsing`, colon→paren) and relocates/renames the shipped body `persistenceStrategy:`. Drops the per-containment hint; rejects "document as aggregate peer". Requests **D-DOCUMENT-AXIS**. |
+
 ### Type-system family — state, transport, exception-less, criterion
 
 > **Start here**: [`type-system-overview.md`](./type-system-overview.md).
@@ -184,7 +190,8 @@ Phase 5 — Deferred tail
 
 | Tag | What | Phase |
 |---|---|---|
-| D-RENAME | `inheritanceStrategy: shareTable \| ownTable` rename | 0.1 |
+| D-RENAME | `inheritanceUsing(sharedTable \| ownTable)` (amended by D-DOCUMENT-AXIS) | 0.1 |
+| D-DOCUMENT-AXIS | `persistedAs(…)` + `normalised(…)` header axes; `json` field | 0.1 |
 | D-STORAGE-SPLIT | Split overloaded `storage` keyword | 0.1 |
 | D-POLICY-STYLE | `policy {}` over function-style | 0.1 |
 | D-LIFECYCLE-VERB | `urlStyle:` default | 0.1 |
@@ -222,9 +229,10 @@ parallel.
 - **aggregate-inheritance.md ↔ storage.** Original
   `storage: shared | own` for inheritance table layout collides
   lexically with the storage proposal's `storage` keyword. Pinned
-  rename: `inheritanceStrategy: shareTable | ownTable`, inside the
-  `aggregate { … }` block (D-RENAME). ES concrete subtype of a TPH
-  abstract is forced to `inheritanceStrategy: ownTable`.
+  rename (D-RENAME, amended by D-DOCUMENT-AXIS §4): the header paren
+  modifier `inheritanceUsing(sharedTable | ownTable)`. A
+  `persistedAs(eventLog)` concrete subtype of a `sharedTable` abstract
+  is forced to `inheritanceUsing(ownTable)` (D-ES-TPH).
 
 - **Storage foundation positioning.** The storage micro-plan's
   foundation phases are positioned to land **before** the type-system

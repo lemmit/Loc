@@ -122,6 +122,7 @@ export type DddKeywordNames =
     | "internal"
     | "invariant"
     | "isolationLevel"
+    | "json"
     | "kafka"
     | "keyPrefix"
     | "kind"
@@ -1572,7 +1573,7 @@ export function isPrimitiveConversion(item: unknown): item is PrimitiveConversio
 export interface PrimitiveType extends AstNode {
     readonly $container: TypeRef;
     readonly $type: 'PrimitiveType';
-    name: 'bool' | 'datetime' | 'decimal' | 'guid' | 'int' | 'long' | 'money' | 'string';
+    name: 'bool' | 'datetime' | 'decimal' | 'guid' | 'int' | 'json' | 'long' | 'money' | 'string';
 }
 
 export const PrimitiveType = 'PrimitiveType';

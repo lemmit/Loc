@@ -5,6 +5,17 @@
 > split the type system along two axes (state vs transport). Read both
 > before implementing either.
 
+> **Pinned-decision alignment** (see [`docs/decisions.md`](../decisions.md)):
+> **D-RENAME**, as amended by **D-DOCUMENT-AXIS §4**, supersedes the
+> `storage: shared | own` header clause used throughout this doc. Read
+> every `storage: shared` / `storage: own` below as the paren header
+> modifier **`inheritanceUsing(sharedTable)`** / **`inheritanceUsing(ownTable)`**
+> (key renamed `inheritanceStrategy` → `inheritanceUsing`; colon → paren;
+> values respelled `shareTable` → `sharedTable`). The event-sourcing
+> marker is **`persistedAs(eventLog)`** (D-DOCUMENT-AXIS), so D-ES-TPH
+> reads: a `persistedAs(eventLog)` concrete of a `sharedTable` base is
+> forced to `inheritanceUsing(ownTable)`.
+
 ## TL;DR
 
 Today aggregates are flat. There's no first-class way to say "Customer

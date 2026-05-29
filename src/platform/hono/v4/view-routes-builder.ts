@@ -304,6 +304,8 @@ function zodForRow(t: TypeIR, enumValues: Map<string, string[]>): string {
           return "z.boolean()";
         case "datetime":
           return "z.string()";
+        case "json":
+          return "z.unknown()";
       }
     /* eslint-disable-next-line no-fallthrough */
     case "id":

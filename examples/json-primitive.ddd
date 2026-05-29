@@ -1,0 +1,21 @@
+// Alignment fixture for the `json` primitive type — an opaque JSON blob
+// whose interior Loom does not model.  See
+// docs/proposals/document-and-json-hierarchies.md (Option 1,
+// D-DOCUMENT-AXIS).
+//
+// Exercises the field shape across every backend: TS `unknown`, .NET
+// `System.Text.Json.JsonElement`, Phoenix Ash `:map`, Postgres `JSONB`,
+// Zod `z.unknown()`, OpenAPI freeform `object`.  Kept minimal — the
+// point is the leaf mapping, not domain logic (the interior is never
+// inspected, so no expressions over `json`).
+
+context Webhooks {
+
+  aggregate Delivery {
+    receivedAt: datetime
+    payload: json
+    headers: json
+  }
+
+  repository Deliveries for Delivery { }
+}

@@ -107,11 +107,17 @@ No new language features.
 
 ### 0.1 Decisions to pin before any grammar edit
 
-- D-RENAME — `inheritanceStrategy: shareTable | ownTable` (inside
-  `aggregate { … }`). Removes the only lexical collision with the
-  storage proposal.
-- D-ES-TPH — Force `inheritanceStrategy: ownTable` for ES concrete
-  subtypes of TPH abstract.
+- D-RENAME — header paren modifier `inheritanceUsing(sharedTable |
+  ownTable)` (was `inheritanceStrategy: shareTable | ownTable`).
+  Amended by D-DOCUMENT-AXIS §4 — **PINNED** in `decisions.md`.
+- D-ES-TPH — Force `inheritanceUsing(ownTable)` for a
+  `persistedAs(eventLog)` concrete subtype of a `sharedTable` abstract.
+- D-DOCUMENT-AXIS — **PINNED**. Two per-aggregate header axes
+  `persistedAs(eventLog | state)` (renames body `persistenceStrategy:`,
+  hard cutover) and `normalised(true | false)` (document vs relational
+  saving); `json` field type; document is not a declaration kind. See
+  `decisions.md` + `document-and-json-hierarchies.md`. Depends on
+  D-STORAGE-SPLIT (shares the `dataSource` `kind` set).
 - D-STORAGE-SPLIT — Split the `storage` keyword overload (see "Known
   issues" above).
 - Type-system D1–D4 + D14–D15 — carrier name, discriminator name,
