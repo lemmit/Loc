@@ -11,7 +11,7 @@ system Sys {
     context Sales { aggregate Order { name: string } }
   }
   storage pg    { type: postgres }
-  storage files { type: awsS3,    config: { region: "eu-central-1", bucket: "app-files" } }
+  storage files { type: s3,    config: { region: "eu-central-1", bucket: "app-files" } }
   storage bus   { type: rabbitmq, config: { vhost: "/" } }
   storage pay   { type: restApi,  config: { baseUrl: "https://pay.example.com" } }
 
@@ -32,7 +32,7 @@ system Sys {
 describe("hono resource-client emission", () => {
   it("emits one client module per sourceType with the resource's config", async () => {
     const { files } = generateSystems(await parseValid(SRC));
-    const s3 = files.get("api/resources/awsS3.ts")!;
+    const s3 = files.get("api/resources/s3.ts")!;
     expect(s3).toMatch(/import \{ S3Client \} from "@aws-sdk\/client-s3";/);
     expect(s3).toMatch(/export const salesFiles = new S3Client\(\{/);
     expect(s3).toMatch(/salesFilesBucket = .*"app-files"/);
@@ -54,7 +54,7 @@ describe("hono resource-client emission", () => {
     expect(pkg).toMatch(/"amqplib"/);
 
     const index = files.get("api/index.ts")!;
-    expect(index).toMatch(/import "\.\/resources\/awsS3";/);
+    expect(index).toMatch(/import "\.\/resources\/s3";/);
     expect(index).toMatch(/import "\.\/resources\/rabbitmq";/);
     expect(index).toMatch(/import "\.\/resources\/restApi";/);
   });

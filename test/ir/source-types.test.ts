@@ -87,14 +87,14 @@ describe("sourceType registry — descriptors & lookups", () => {
   });
 
   it("seeds the Phase-2 kinds (objectStore/queue/api) on their sourceTypes", () => {
-    expect(supportsSurfaceKind("awsS3", "objectStore")).toBe(true);
+    expect(supportsSurfaceKind("s3", "objectStore")).toBe(true);
     expect(supportsSurfaceKind("rabbitmq", "queue")).toBe(true);
     expect(supportsSurfaceKind("restApi", "api")).toBe(true);
     // and not cross-wired
-    expect(supportsSurfaceKind("awsS3", "queue")).toBe(false);
+    expect(supportsSurfaceKind("s3", "queue")).toBe(false);
     expect(supportsSurfaceKind("postgres", "objectStore")).toBe(false);
-    expect([...interfacesFor("awsS3", "objectStore")].sort()).toEqual(["rest", "sdk"]);
-    expect(sourceTypeFor("awsS3")?.configKeys?.some((k) => k.name === "bucket" && k.required)).toBe(
+    expect([...interfacesFor("s3", "objectStore")].sort()).toEqual(["rest", "sdk"]);
+    expect(sourceTypeFor("s3")?.configKeys?.some((k) => k.name === "bucket" && k.required)).toBe(
       true,
     );
   });

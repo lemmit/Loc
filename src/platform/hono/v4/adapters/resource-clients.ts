@@ -28,10 +28,10 @@ function storeOf(resource: DataSourceIR, stores: readonly StorageIR[]): StorageI
   return stores.find((s) => s.name === resource.storageName);
 }
 
-export const awsS3ResourceAdapter: ResourceAdapter = {
-  name: "awsS3",
+export const s3ResourceAdapter: ResourceAdapter = {
+  name: "s3",
   supportedKinds: ["objectStore"],
-  supports: (storageType, kind) => storageType === "awsS3" && supportsSurfaceKind("awsS3", kind),
+  supports: (storageType, kind) => storageType === "s3" && supportsSurfaceKind("s3", kind),
   emitProjectDeps: () => ({ "@aws-sdk/client-s3": "^3.700.0" }),
   emitClientModule(resources, stores): Lines {
     const out: string[] = [`import { S3Client } from "@aws-sdk/client-s3";`, ``];
@@ -110,7 +110,7 @@ function cap(s: string): string {
 }
 
 const ADAPTERS: readonly ResourceAdapter[] = [
-  awsS3ResourceAdapter,
+  s3ResourceAdapter,
   rabbitmqResourceAdapter,
   restApiResourceAdapter,
 ];

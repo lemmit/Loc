@@ -950,7 +950,7 @@ export type StorageKind =
   | "kafka"
   | "clickhouse"
   | "bigquery"
-  | "awsS3"
+  | "s3"
   | "rabbitmq"
   | "restApi";
 

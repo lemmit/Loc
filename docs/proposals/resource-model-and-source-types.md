@@ -76,7 +76,7 @@ vendor-specific parameters flow through `connection:` and a generic `config` map
 
 ```ddd
 storage primarySql { type: postgres, connection: service(db) }
-storage fileStore  { type: awsS3,    connection: env("S3_URL"),  config: { region: "eu-central-1", bucket: "app-files" } }
+storage fileStore  { type: s3,    connection: env("S3_URL"),  config: { region: "eu-central-1", bucket: "app-files" } }
 storage jobBus     { type: rabbitmq, connection: env("MQ_URL"),  config: { vhost: "/" } }
 storage payments   { type: restApi,  connection: env("PAY_URL") }
 ```
@@ -136,7 +136,7 @@ sourceType postgres
     eventLog: { capabilities: [append, read, replay],                                interfaces: [sql] }
     cache:    { capabilities: [get, set, ttl],                                       interfaces: [sql] }
 
-sourceType awsS3
+sourceType s3
   supports:
     objectStore: { capabilities: [blob, list, signedUrl, versioning], interfaces: [rest, sdk] }
 
@@ -273,7 +273,7 @@ resource ordersEvents { for: Orders, kind: eventLog, use: primarySql, every: 100
 ### 6.3 Object store (S3)
 
 ```ddd
-storage fileStore   { type: awsS3, config: { region: "eu-central-1", bucket: "app-files" } }
+storage fileStore   { type: s3, config: { region: "eu-central-1", bucket: "app-files" } }
 resource ordersFiles { for: Orders, kind: objectStore, use: fileStore }
 ```
 `blob` / `list` / `signedUrl`; browser flows prefer `rest`, backend batch flows
@@ -321,13 +321,13 @@ unused.
 
 **Phase 2 — New kinds: object store, queue, external API.** *(model + compose
 delivered; backend client emission deferred — see note.)*
-- Add `awsS3`, `rabbitmq`, `restApi` (and siblings) to the `type:` enumeration and
+- Add `s3`, `rabbitmq`, `restApi` (and siblings) to the `type:` enumeration and
   the registry; add `objectStore`, `queue`, `api` to the `kind:` enumeration; add
   their capabilities/interfaces to the registry. ✓
 - Add the generic `config` map on `storage`/`resource` for vendor parameters,
   validated against the registry schema. ✓
 - Compose integration: emit dev sidecars for the new-kind storages (minio for
-  `awsS3`, `rabbitmq`), gated so existing models stay byte-identical. ✓
+  `s3`, `rabbitmq`), gated so existing models stay byte-identical. ✓
 - Validation for the new kind↔sourceType↔capability combinations, driven by the
   registry. ✓
 - **Deferred — backend client emission.** Emitting object-store / queue /

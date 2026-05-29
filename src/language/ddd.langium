@@ -329,7 +329,7 @@ StorageType returns string:
     | 'elastic' | 'meilisearch'
     | 'kafka'
     | 'clickhouse' | 'bigquery'
-    | 'awsS3' | 'rabbitmq' | 'restApi';
+    | 's3' | 'rabbitmq' | 'restApi';
 
 ConnectionSource:
       {infer ServiceConnectionSource} 'service' '(' service=ID ')'

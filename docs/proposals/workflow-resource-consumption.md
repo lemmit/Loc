@@ -181,7 +181,7 @@ workflow ShareInvoice(order: Order id) {
   // returned to the caller; browser downloads directly
 }
 ```
-`signedUrl` requires the `signedUrl` capability (awsS3 offers it); may resolve
+`signedUrl` requires the `signedUrl` capability (s3 offers it); may resolve
 interface `rest`.
 
 ### 6.3 Queue + API in one workflow
