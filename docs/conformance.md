@@ -138,6 +138,21 @@ with the tracking issue and removed once the generator work lands:
   `HttpValidationProblemDetails` validation envelopes stay filtered even
   after #706 — they have no cross-backend counterpart.)
 
+### Per-pair strict gating
+
+The gate compares three pairs (`hono↔dotnet`, `hono↔phoenix`,
+`dotnet↔phoenix`). `STRICT_PAIRS` in `test/e2e/e2e.test.ts` controls which
+pairs hard-fail under `LOOM_E2E_STRICT_PARITY=1`:
+
+- **`hono↔dotnet`** — byte-identical (#707), gated **strict**.
+- **`hono↔phoenix` / `dotnet↔phoenix`** — **report-only** (logged, non-
+  blocking) pending **#716**: Phoenix still carries pre-existing wire-shape
+  divergences (no named enum schemas, full-entity create response, named
+  view wrappers vs bare arrays, required create-bools). When #716 lands,
+  the Phoenix pairs move into `STRICT_PAIRS`. Report-only keeps the
+  Phoenix findings visible on every run without blocking the (clean)
+  hono↔dotnet contract.
+
 ---
 
 ## Report-only vs strict mode

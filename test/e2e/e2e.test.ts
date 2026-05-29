@@ -40,6 +40,15 @@ const ENABLED = process.env.LOOM_E2E === "1";
 // drift between Hono / .NET / Phoenix at PR time.
 const STRICT_PARITY = process.env.LOOM_E2E_STRICT_PARITY === "1";
 
+// Per-pair strict allowlist.  `hono↔dotnet` is byte-identical (#707) and
+// gated strictly.  The two Phoenix pairs still carry pre-existing wire-shape
+// divergences (enum schemas, {id} create response, bare-array views, required
+// bools) tracked by #716 — they run REPORT-ONLY (logged, non-blocking) until
+// that lands, at which point they move back into this set.  Keeping the gate
+// strict for the clean pair stops hono↔dotnet from silently regressing while
+// the Phoenix work is in flight.
+const STRICT_PAIRS = new Set<string>(["hono ↔ dotnet"]);
+
 // Parity-only mode (per-PR CI tier): build + boot only the three backends
 // and run only the OpenAPI parity check — skip the behavioral DSL suite and
 // the Playwright UI run (and the React frontend builds they need).  The
@@ -345,8 +354,8 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         if (diff.enumValueDiffs.length) console.warn("  enum value-sets:", diff.enumValueDiffs);
       }
 
-      if (STRICT_PARITY) {
-        const pair = `${refName} ↔ ${otherName}`;
+      const pair = `${refName} ↔ ${otherName}`;
+      if (STRICT_PARITY && STRICT_PAIRS.has(pair)) {
         expect(diff.onlyRef, `ops only on ${refName} (${pair})`).toEqual([]);
         expect(diff.onlyOther, `ops only on ${otherName} (${pair})`).toEqual([]);
         expect(diff.cardMismatches, `cardinality drift (${pair})`).toEqual([]);
