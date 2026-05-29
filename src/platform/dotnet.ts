@@ -1,3 +1,14 @@
+import {
+  type LayoutAdapter,
+  type PersistenceAdapter,
+  type PlatformAdapterDefaults,
+  type PlatformAdapters,
+  type StyleAdapter,
+  stubAdapter,
+} from "../generator/_adapters/index.js";
+import { byLayerLayoutAdapter } from "../generator/dotnet/adapters/by-layer-layout.js";
+import { cqrsStyleAdapter } from "../generator/dotnet/adapters/cqrs-style.js";
+import { efcorePersistenceAdapter } from "../generator/dotnet/adapters/efcore-persistence.js";
 import { generateDotnetForContexts } from "../generator/dotnet/index.js";
 import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 
@@ -23,17 +34,18 @@ const dotnetPlatform: PlatformSurface = {
   reservedRepositoryFindNames: new Set(["saveAsync", "getByIdAsync"]),
   emitProject({ contexts, deployable, sys, migrations }): Map<string, string> {
     const namespace = deployable.name[0]!.toUpperCase() + deployable.name.slice(1);
-    // The orchestrator dispatches per-aggregate CQRS emission + byLayer
-    // path routing through adapters when given a pair.  Passing them
-    // explicitly here (rather than resolving via the registry) avoids
-    // a load-time cycle: adapter-registry ← cqrs-style ← cqrs-emit ←
-    // dto-mapping ← ir/enrich/enrichments ← platform/registry ←
-    // platform/dotnet.  The generator imports its own adapters
-    // directly from sibling files (`src/generator/dotnet/adapters/`)
-    // — that's not a layering violation because both live under
-    // `src/generator/dotnet/`.  Future per-deployable
-    // `persistence:` / `style:` / `layout:` overrides will resolve
-    // through the registry at this seam.
+    // The orchestrator (`generator/dotnet/index.ts`) dispatches
+    // per-aggregate CQRS emission + byLayer path routing through its
+    // OWN sibling adapters (`src/generator/dotnet/adapters/`), imported
+    // directly — never via `src/platform/`.  Two reasons: the
+    // `package → shared` layering invariant forbids `src/generator/`
+    // importing `src/platform/`, and resolving through `platform/`
+    // would re-enter the load-time cycle (registry → platform/dotnet →
+    // generator/dotnet/index → ir/enrich/enrichments → platformFor →
+    // registry).  Per-deployable `persistence:` / `style:` / `layout:`
+    // overrides resolve through `platform/resolve-adapters.ts` at the
+    // system orchestrator (`src/system/`, which may import
+    // `src/platform/`), not here.
     return generateDotnetForContexts(contexts, namespace, { deployable, sys, migrations });
   },
   composeService({ slug }): ComposeServiceShape {
@@ -51,6 +63,75 @@ const dotnetPlatform: PlatformSurface = {
       // /health stays for cheap liveness probing (k8s livenessProbe).
       healthPath: "/ready",
       internalPort: 8080,
+    };
+  },
+  // .NET — EF Core + Dapper + Marten persistence; CQRS + layered style;
+  // byLayer + byFeature layout.  `efcore` / `cqrs` / `byLayer` are real
+  // (F5a/b/c); `dapper` / `marten` / `layered` / `byFeature` are stubs.
+  // Built lazily (see PlatformSurface.adapters jsdoc) so the adapter
+  // bindings are read after init, not during the load-time cycle.
+  adapters(): PlatformAdapters {
+    const menu: PlatformAdapters = {
+      persistence: {
+        efcore: efcorePersistenceAdapter,
+        dapper: stubAdapter<PersistenceAdapter>(
+          "persistence",
+          "dapper",
+          "dotnet",
+          () => Object.keys(menu.persistence),
+          {
+            name: "dapper",
+            supportedStrategies: ["stateBased"],
+            supports: (type, kind, strategy) =>
+              strategy === "stateBased" &&
+              ["postgres", "mysql", "sqlite"].includes(type) &&
+              ["state", "snapshot", "replica"].includes(kind),
+          },
+        ),
+        marten: stubAdapter<PersistenceAdapter>(
+          "persistence",
+          "marten",
+          "dotnet",
+          () => Object.keys(menu.persistence),
+          {
+            name: "marten",
+            supportedStrategies: ["stateBased", "eventSourced"],
+            supports: (type) => type === "postgres",
+          },
+        ),
+      },
+      styles: {
+        cqrs: cqrsStyleAdapter,
+        layered: stubAdapter<StyleAdapter>(
+          "style",
+          "layered",
+          "dotnet",
+          () => Object.keys(menu.styles),
+          {
+            name: "layered",
+            supportedStrategies: ["stateBased"],
+            supportedLayouts: ["byLayer"],
+          },
+        ),
+      },
+      layouts: {
+        byLayer: byLayerLayoutAdapter,
+        byFeature: stubAdapter<LayoutAdapter>(
+          "layout",
+          "byFeature",
+          "dotnet",
+          () => Object.keys(menu.layouts),
+          { name: "byFeature" },
+        ),
+      },
+    };
+    return menu;
+  },
+  adapterDefaults(): PlatformAdapterDefaults {
+    return {
+      persistence: { stateBased: "efcore", eventSourced: "marten" },
+      style: "cqrs",
+      layout: "byLayer",
     };
   },
 };

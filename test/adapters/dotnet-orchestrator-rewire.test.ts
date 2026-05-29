@@ -9,7 +9,7 @@
 //
 // The dotnet generator imports its sibling adapters directly
 // (`./adapters/cqrs-style.js` / `./adapters/by-layer-layout.js`)
-// rather than resolving via `platform/adapter-registry.js`, so the
+// rather than resolving via `platform/resolve-adapters.js`, so the
 // rewire test spies on the adapter modules themselves — not the
 // registry.
 

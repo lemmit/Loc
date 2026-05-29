@@ -11,7 +11,7 @@ import {
   resolveLayout,
   resolvePersistence,
   resolveStyle,
-} from "../../src/platform/adapter-registry.js";
+} from "../../src/platform/resolve-adapters.js";
 
 describe("adapter registry — lookup", () => {
   it("backends carry adapter menus; frontends don't", () => {

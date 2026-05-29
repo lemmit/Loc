@@ -1,3 +1,7 @@
+import type { PlatformAdapterDefaults, PlatformAdapters } from "../generator/_adapters/index.js";
+import { ashPostgresPersistenceAdapter } from "../generator/phoenix-live-view/adapters/ash-postgres-persistence.js";
+import { ashStyleAdapter } from "../generator/phoenix-live-view/adapters/ash-style.js";
+import { byFeatureLayoutAdapter } from "../generator/phoenix-live-view/adapters/by-feature-layout.js";
 import { generatePhoenixLiveViewProject } from "../generator/phoenix-live-view/index.js";
 import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 
@@ -46,6 +50,24 @@ const phoenixLiveViewPlatform: PlatformSurface = {
       dependsOnDb: true,
       healthPath: "/health",
       internalPort: 4000,
+    };
+  },
+  // phoenixLiveView — Ash owns persistence + style (the Ash action
+  // surface), so the menu is a single ashPostgres persistence + an
+  // `ash` style + a default `byFeature` layout.  All real (F7a/b/c);
+  // no stubs.  Built lazily (see PlatformSurface.adapters jsdoc).
+  adapters(): PlatformAdapters {
+    return {
+      persistence: { ashPostgres: ashPostgresPersistenceAdapter },
+      styles: { ash: ashStyleAdapter },
+      layouts: { byFeature: byFeatureLayoutAdapter },
+    };
+  },
+  adapterDefaults(): PlatformAdapterDefaults {
+    return {
+      persistence: { stateBased: "ashPostgres", eventSourced: "ashPostgres" },
+      style: "ash",
+      layout: "byFeature",
     };
   },
 };

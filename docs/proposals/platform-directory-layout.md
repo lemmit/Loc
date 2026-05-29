@@ -1,7 +1,23 @@
 # Proposal — Platform directory layout: the framework-version axis
 
 > Status: **Proposal**. Nothing in this document is implemented yet.
->
+
+> **Pinned decisions affecting this proposal.**
+> [D-BACKEND-PKG](../decisions.md#d-backend-pkg--per-version-backend-packages-are-canonical)
+> pins the packaging-split end-state
+> ([`docs/plans/packaging-split.md`](../plans/packaging-split.md)) as
+> canonical and **rejects this proposal's Option A** (reversing the
+> `src/platform/hono/v4/` hoist): that hoist is the per-version
+> package-staging shape, and the `package → shared` layering invariant
+> (`test/platform/backend-packages-layering.test.ts`) forbids pulling
+> framework code back into the shared core. The surviving direction is
+> per-`<family>/v<N>/` homes that map to packages. Adapters move onto
+> the backend surface and the central `adapter-registry.ts` dissolves
+> per
+> [D-ADAPTER-HOME](../decisions.md#d-adapter-home--persistencestylelayout-adapters-live-on-the-backend-surface).
+> Read the "Recommendation" and "Decisions to confirm / V1" sections
+> below as superseded.
+
 > **Companion to (and partly superseded by)**
 > [`storage-and-platform-config-micro-plan.md`](./storage-and-platform-config-micro-plan.md).
 > That micro-plan owns the **adapter-taxonomy axes** —
@@ -190,6 +206,11 @@ emit orchestrator lives in `src/platform/<family>/v<N>/emit.ts` —
 imports cross the boundary.
 
 ### Recommendation
+
+> **Superseded by [D-BACKEND-PKG](../decisions.md#d-backend-pkg--per-version-backend-packages-are-canonical).**
+> The recommendation below (lean toward Option A) is **reversed**:
+> Option A is rejected; the per-version package-staging direction is
+> pinned. Kept for the argument record only.
 
 **Option A is the cleaner end state; Option B is the cheaper interim.**
 The decision turns on whether reversing the hono hoist is worth the
@@ -489,7 +510,7 @@ manifest + fs-discovery. Same content, different parent path.
 
 | ID | Decision | Recommended | Notes |
 |---|---|---|---|
-| V1 | Option A (reverse hono hoist) vs Option B (extend it to dotnet/phoenix)? | A | Cleaner end state; the churn cost is real but bounded. Decision must be made jointly with the micro-plan author before F6 lands. |
+| V1 | Option A (reverse hono hoist) vs Option B (extend it to dotnet/phoenix)? | ~~A~~ → **rejected** | **Resolved by [D-BACKEND-PKG](../decisions.md#d-backend-pkg--per-version-backend-packages-are-canonical): Option A is rejected.** The hono hoist stays (it stages the per-version package); the surviving direction is per-`<family>/v<N>/` homes mapping to packages, guarded by the `package → shared` invariant. |
 | V2 | If Option A: keep `src/platform/` at all? | Yes, but trim | It still holds `PlatformSurface` records, the registry, the manifest, and `fs-discovery.ts`. Just no per-family/per-version emitter code. |
 | V3 | Drop the `stacks/` directory segment when hoisting under `src/platform/react/`? | Yes | The `v<N>/` directory *is* the stack. Carries no information once co-located. |
 | V4 | Migrate React stacks before or after the micro-plan? | Before or independent | Orthogonal to the micro-plan; can land any time. |
