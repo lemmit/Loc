@@ -151,13 +151,18 @@ function renderAggregateResource(
 
   // Authorization: aggregates with `requires`-guarded operations opt into
   // Ash.Policy.Authorizer; the `policies` block + per-op SimpleCheck modules
-  // (below) enforce the guard, surfacing failures as Ash.Error.Forbidden → 403.
+  // enforce the guard, surfacing failures as Ash.Error.Forbidden → 403.
+  // The check modules are emitted BEFORE the resource: `authorize_if <Check>`
+  // calls `Check.init/1` at the resource's compile time, so the check must
+  // already be compiled (a forward reference in the same file fails with
+  // "module is not available").
   const hasGuards = agg.operations.some(isGuardedOperation);
   const authorizerLine = hasGuards ? ",\n    authorizers: [Ash.Policy.Authorizer]" : "";
   const policiesBlock = renderPolicies(agg, moduleName);
   const policyChecks = renderPolicyChecks(agg, renderCtx, moduleName);
+  const checksPrefix = policyChecks ? `${policyChecks}\n\n` : "";
 
-  return `defmodule ${moduleName} do
+  return `${checksPrefix}defmodule ${moduleName} do
   use Ash.Resource,
     domain: ${ctxModule},
     data_layer: AshPostgres.DataLayer${authorizerLine}
@@ -173,7 +178,7 @@ ${postgresBlockLines.join("\n")}
   end
 ${renderRelationships(agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
 
-${jasonImpl}${policyChecks}`;
+${jasonImpl}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -506,7 +511,7 @@ function renderPolicyChecks(agg: AggregateIR, ctx: RenderCtx, resourceModule: st
   end
 end`;
   });
-  return `\n\n${modules.join("\n\n")}`;
+  return `${modules.join("\n\n")}`;
 }
 
 // ---------------------------------------------------------------------------
