@@ -8,6 +8,7 @@
 
 import type {
   BoundedContextIR,
+  ContainmentIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
@@ -18,7 +19,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../ir/types/loom-ir.js";
-import { lines } from "../../util/code-builder.js";
+import { indent, lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./emit.js";
@@ -28,13 +29,60 @@ import {
   isRefCollection,
 } from "./repository-associations-builder.js";
 
+/** `agg`'s `contains` children paired with their resolved entity part,
+ *  dropping any containment whose part can't be found (defensive — the
+ *  IR guarantees they exist).  Both array-returning read paths derive
+ *  this set identically before bulk-loading. */
+function eagerContainsOf(agg: EnrichedAggregateIR): { c: ContainmentIR; part: EntityPartIR }[] {
+  return agg.contains
+    .map((c) => ({ c, part: agg.parts.find((p) => p.name === c.partName) }))
+    .filter((x): x is { c: ContainmentIR; part: EntityPartIR } => !!x.part);
+}
+
+/** Bulk-load every containment (collection + singular) into a per-parent
+ *  `Map` keyed off the already-loaded `rootIds`, emitted at 4-space
+ *  indent against `this.db`.  Shared verbatim by the two array-returning
+ *  read paths (`findManyByIds` and the array-returning `find`); a
+ *  collection accumulates into a `T[]` list, a singular is first-row-wins
+ *  into a single `T`. */
+function bulkLoadContainmentLines(
+  eagerContains: { c: ContainmentIR; part: EntityPartIR }[],
+  agg: EnrichedAggregateIR,
+  ctx: BoundedContextIR,
+): string[] {
+  return eagerContains.flatMap(({ c, part }) => {
+    const childTable = lowerFirst(plural(part.name));
+    const head = `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, rootIds));`;
+    if (c.collection) {
+      return [
+        head,
+        `    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`,
+        `    for (const r of ${c.name}Rows) {`,
+        `      const list = ${c.name}ByParent.get(r.parentId) ?? [];`,
+        `      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
+        `      ${c.name}ByParent.set(r.parentId, list);`,
+        `    }`,
+      ];
+    }
+    // Singular containment: at most one row per parent (DB doesn't
+    // enforce that, but the aggregate boundary does).  First-row-wins
+    // on duplicates.
+    return [
+      head,
+      `    const ${c.name}ByParent = new Map<string, ${part.name}>();`,
+      `    for (const r of ${c.name}Rows) {`,
+      `      if (${c.name}ByParent.has(r.parentId)) continue;`,
+      `      ${c.name}ByParent.set(r.parentId, ${hydrateEntityExpr(part, "r", agg, ctx)});`,
+      `    }`,
+    ];
+  });
+}
+
 export function findManyByIdsMethod(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string {
   const tableName = lowerFirst(plural(agg.name));
   // Bulk-load every containment (collections + singulars) into per-
   // parent maps; mirrors the array-return path of findQueryMethod.
-  const eagerContains = agg.contains
-    .map((c) => ({ c, part: agg.parts.find((p) => p.name === c.partName) }))
-    .filter((x): x is { c: typeof x.c; part: EntityPartIR } => !!x.part);
+  const eagerContains = eagerContainsOf(agg);
   const needsIdsLocal = eagerContains.length > 0 || associationsOf(agg).length > 0;
   return lines(
     `  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`,
@@ -42,29 +90,7 @@ export function findManyByIdsMethod(agg: EnrichedAggregateIR, ctx: BoundedContex
     `    const rootRows = await this.db.select().from(schema.${tableName}).where(inArray(schema.${tableName}.id, ids));`,
     `    if (rootRows.length === 0) return [];`,
     needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
-    ...eagerContains.flatMap(({ c, part }) => {
-      const childTable = lowerFirst(plural(part.name));
-      const head = `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, rootIds));`;
-      if (c.collection) {
-        return [
-          head,
-          `    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`,
-          `    for (const r of ${c.name}Rows) {`,
-          `      const list = ${c.name}ByParent.get(r.parentId) ?? [];`,
-          `      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
-          `      ${c.name}ByParent.set(r.parentId, list);`,
-          `    }`,
-        ];
-      }
-      return [
-        head,
-        `    const ${c.name}ByParent = new Map<string, ${part.name}>();`,
-        `    for (const r of ${c.name}Rows) {`,
-        `      if (${c.name}ByParent.has(r.parentId)) continue;`,
-        `      ${c.name}ByParent.set(r.parentId, ${hydrateEntityExpr(part, "r", agg, ctx)});`,
-        `    }`,
-      ];
-    }),
+    ...bulkLoadContainmentLines(eagerContains, agg, ctx),
     associationMapLines(agg, "this.db", "    "),
     `    return rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
     `  }`,
@@ -91,7 +117,7 @@ export function findByIdMethod(
           `    ${renderHonoStoreLogCall("txBegin", `aggregate: "${agg.name}", id: id as string`)}`,
           `    try {`,
           `      const result = await this.db.transaction(async (tx) => {`,
-          ...body.map((l) => `  ${l}`),
+          ...indent(2, body),
           `      });`,
           `      ${renderHonoStoreLogCall("txCommit", `aggregate: "${agg.name}", id: id as string`)}`,
           `      return result;`,
@@ -272,9 +298,7 @@ export function findQueryMethod(
     // undefined `shipping` variable.  Now we load each containment
     // into a per-parent Map and use a hydrate helper that reads from
     // those maps.
-    const eagerContains = agg.contains
-      .map((c) => ({ c, part: agg.parts.find((p) => p.name === c.partName) }))
-      .filter((x): x is { c: typeof x.c; part: EntityPartIR } => !!x.part);
+    const eagerContains = eagerContainsOf(agg);
     const needsIdsLocal = eagerContains.length > 0 || associationsOf(agg).length > 0;
     return lines(
       `  async ${find.name}(${params}): Promise<${agg.name}[]> {`,
@@ -284,32 +308,7 @@ export function findQueryMethod(
       `      return [];`,
       `    }`,
       needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
-      ...eagerContains.flatMap(({ c, part }) => {
-        const childTable = lowerFirst(plural(part.name));
-        const head = `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, rootIds));`;
-        if (c.collection) {
-          return [
-            head,
-            `    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`,
-            `    for (const r of ${c.name}Rows) {`,
-            `      const list = ${c.name}ByParent.get(r.parentId) ?? [];`,
-            `      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
-            `      ${c.name}ByParent.set(r.parentId, list);`,
-            `    }`,
-          ];
-        }
-        // Singular containment: at most one row per parent (DB doesn't
-        // enforce that, but the aggregate boundary does).  First-row-
-        // wins on duplicates.
-        return [
-          head,
-          `    const ${c.name}ByParent = new Map<string, ${part.name}>();`,
-          `    for (const r of ${c.name}Rows) {`,
-          `      if (${c.name}ByParent.has(r.parentId)) continue;`,
-          `      ${c.name}ByParent.set(r.parentId, ${hydrateEntityExpr(part, "r", agg, ctx)});`,
-          `    }`,
-        ];
-      }),
+      ...bulkLoadContainmentLines(eagerContains, agg, ctx),
       associationMapLines(agg, "this.db", "    "),
       `    const result = rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
       `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: result.length`)}`,
