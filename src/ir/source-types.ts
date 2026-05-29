@@ -23,14 +23,13 @@
 // eventLog), so swapping it in for the old `KIND_STORAGE` tables is a
 // behaviour-preserving change.
 
-import type { DataSourceKind, StorageKind } from "./types/loom-ir.js";
+import type { DataSourceKind, LoomInterface, StorageKind } from "./types/loom-ir.js";
+
+export type { LoomInterface } from "./types/loom-ir.js";
 
 /** The coarse, infrastructure-level semantic role a source plays.
  *  This is the registry's primary key axis (RFC §3.5). */
 export type InfraKind = "database" | "eventLog" | "cache" | "objectStore" | "queue" | "api";
-
-/** The access mode used to reach a source in a given context (RFC §3.5). */
-export type LoomInterface = "sql" | "rest" | "graphql" | "webSocket" | "amqp" | "sdk";
 
 /** What a sourceType offers for one infra kind. */
 export interface KindSupport {
@@ -244,6 +243,32 @@ export function interfacesFor(
   const descriptor = REGISTRY.get(sourceType);
   if (!descriptor) return new Set();
   return descriptor.supports[SURFACE_KIND_MAP[kind].infraKind]?.interfaces ?? new Set();
+}
+
+// Preference order when a (sourceType, kind) exposes more than one
+// interface (RFC §3.5).  Native / operational transports rank first
+// (sql for relational, amqp for queues), then SDK over raw REST for
+// backend consumers (e.g. S3 prefers `sdk` over `rest`).  A consuming
+// operation may override this once the workflow-level consumption
+// surface exists (Phase 4); until then this is the resolved default.
+const INTERFACE_PREFERENCE: readonly LoomInterface[] = [
+  "sql",
+  "amqp",
+  "sdk",
+  "rest",
+  "graphql",
+  "webSocket",
+];
+
+/** The default interface for `kind` on `sourceType` — the highest-
+ *  ranked valid interface per {@link INTERFACE_PREFERENCE}, or
+ *  `undefined` when the kind is unsupported. */
+export function defaultInterfaceFor(
+  sourceType: string,
+  kind: DataSourceKind,
+): LoomInterface | undefined {
+  const valid = interfacesFor(sourceType, kind);
+  return INTERFACE_PREFERENCE.find((i) => valid.has(i));
 }
 
 /** The capabilities a `sourceType` offers for `kind` (empty when

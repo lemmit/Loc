@@ -688,6 +688,11 @@ export type EnrichedSystemIR = Omit<SystemIR, "subdomains"> & {
   /** Derived logical needs, one per `(context, required kind)` — the
    *  implicit "need" layer (RFC §3.3).  Populated by `enrichLoomModel`. */
   needs: NeedIR[];
+  /** Resolved default access interface per resource name (RFC §3.5),
+   *  derived from the resource's sourceType + kind.  A consuming
+   *  operation may override it once the consumption surface exists
+   *  (Phase 4); until then this is the per-resource default. */
+  resourceInterfaces: Record<string, LoomInterface>;
 };
 
 // ---------------------------------------------------------------------------
@@ -1329,6 +1334,11 @@ export type DataSourceKind =
   | "objectStore"
   | "queue"
   | "api";
+
+/** Access mode used to reach a source in a given context (RFC §3.5).
+ *  Owned here (the IR vocabulary); the sourceType registry declares
+ *  which interfaces each `(sourceType, kind)` exposes. */
+export type LoomInterface = "sql" | "rest" | "graphql" | "webSocket" | "amqp" | "sdk";
 
 /** A derived, implicit logical *need*: what a bounded context requires
  *  of its data layer, independent of the technology that satisfies it
