@@ -17,7 +17,7 @@ system Acme {
                 invariant currency.length == 3
             }
 
-            aggregate Product {
+            aggregate Product with crudish {
                 sku: string
                 price: Money
                 invariant sku.length > 0
@@ -47,7 +47,7 @@ system Acme {
 
             event OrderConfirmed { order: Order id, at: datetime }
 
-            aggregate Order {
+            aggregate Order with crudish {
                 customerId: string
                 status: OrderStatus
                 placedAt: datetime
