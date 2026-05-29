@@ -175,11 +175,13 @@ describe("openapi-normalize", () => {
       );
     });
 
-    it("filters framework-emitted noise (Swashbuckle error envelopes)", () => {
-      // .NET (Swashbuckle) emits a `ProblemDetails` schema even when no
-      // application code references it.  The other two backends don't.
-      // Filtering here keeps the parity diff focused on app-authored
-      // contracts instead of framework boilerplate.
+    it("keeps the shared RFC 7807 ProblemDetails, filters .NET-only validation envelopes", () => {
+      // Under the drop-in guarantee the error body is RFC 7807
+      // `ProblemDetails`, emitted by ALL three backends — so it's part of
+      // the compared schema set, not framework noise.  Swashbuckle's
+      // model-state validation extras (`ValidationProblemDetails` /
+      // `HttpValidationProblemDetails`) have no cross-backend counterpart
+      // and stay filtered.
       const spec: OpenApiSpec = {
         components: {
           schemas: {
@@ -190,7 +192,7 @@ describe("openapi-normalize", () => {
           },
         },
       };
-      expect(schemaNames(spec)).toEqual(new Set(["ProductResponse"]));
+      expect(schemaNames(spec)).toEqual(new Set(["ProductResponse", "ProblemDetails"]));
     });
 
     it("returns empty set when no schemas declared", () => {

@@ -70,48 +70,25 @@ export function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
  * on a hardcoded "schemas to check" list that goes stale.
  */
 export function schemaNames(spec: OpenApiSpec): Set<string> {
-  // Skip schemas that one backend's framework / idiom emits but that are
-  // NOT part of the cross-backend *behavioural* contract.  Behavioural
-  // equivalence (idiomatic per backend) compares what a client observes —
-  // operations, field shapes, types, required-ness, enum value-sets — not
-  // how each framework names its envelopes or wraps its lists.
+  // The drop-in guarantee makes the component-schema *set* part of the
+  // wire surface: a client binds to schemas by name, so every backend
+  // must emit the same named components — including the list-response
+  // wrappers (`ProjectListResponse`).  We filter out only the schemas
+  // that are genuinely NOT part of the shared contract:
   const IDIOMATIC_SCHEMAS = new Set([
-    // Swashbuckle (.NET) error envelopes.
-    "ProblemDetails",
+    // .NET framework-only validation envelopes Swashbuckle auto-emits for
+    // `[ApiController]` model-state failures.  The shared error body is
+    // RFC 7807 `ProblemDetails` (compared, not filtered) — these two are
+    // .NET-specific validation extras with no cross-backend counterpart.
     "ValidationProblemDetails",
     "HttpValidationProblemDetails",
-    // Error *bodies* are idiomatic per backend — Hono names an
-    // `ErrorResponse` envelope, .NET returns `ProblemDetails`, Phoenix
-    // declares no error body.  Only the error *status codes* are
-    // behavioural, so the envelope schema itself is excluded.
-    "ErrorResponse",
     // Co-located provenance lineage is a TS/Hono-only wire extension
     // (only the TS backend persists lineage) — consistent with the
     // per-field `_provenance` exclusion in `fieldSet` / `requiredSet`.
     "ProvenanceLineage",
   ]);
   const schemas = spec.components?.schemas ?? {};
-  return new Set(
-    Object.keys(schemas).filter(
-      (n) => !IDIOMATIC_SCHEMAS.has(n) && !isListWrapperSchema(schemas[n]),
-    ),
-  );
-}
-
-/**
- * True for a "list wrapper" component — a named schema that is just
- * `{ type: array, items: { $ref } }`.  Hono/zod-openapi and Phoenix emit
- * the list response as a named component (`ProjectListResponse`); .NET
- * inlines `array<ProjectResponse>` at the operation.  Both express the
- * same behaviour, so the wrapper *name* is representational, not an
- * independent schema: `responseBodySchemas` resolves it to
- * `array<element>` and the element schema (`ProjectResponse`) is compared
- * on its own.  Excluding the wrapper keeps it from reading as a one-sided
- * `onlySchemas` divergence between a named-wrapper backend and an
- * inline-array backend.
- */
-function isListWrapperSchema(schema: OpenApiSchema | undefined): boolean {
-  return schema?.type === "array" && Boolean(schema.items?.$ref);
+  return new Set(Object.keys(schemas).filter((n) => !IDIOMATIC_SCHEMAS.has(n)));
 }
 
 /**
@@ -238,29 +215,21 @@ export function normalisePath(p: string): string {
  */
 function schemaRefName(
   schema: { $ref?: string; type?: string; items?: { $ref?: string } } | undefined,
-  spec: OpenApiSpec,
 ): string | null {
   if (!schema) return null;
-  // Direct ref: response body schema points at a named component.
+  // Direct ref: response body schema points at a named component.  Under
+  // the drop-in guarantee every backend emits the SAME named list-response
+  // wrapper (`ProjectListResponse`), so we return the component name as-is
+  // and compare it exactly — no resolving a named wrapper down to an
+  // inline `array<…>`.
   if (schema.$ref) {
     const m = schema.$ref.match(/^#\/components\/schemas\/(.+)$/);
-    if (!m) return null;
-    const name = m[1]!;
-    // Resolve a named list-wrapper component to its inline equivalent so
-    // `$ref:ProjectListResponse` (Hono/Phoenix) compares equal to an
-    // inline `array<ProjectResponse>` (.NET) — behavioural parity over
-    // representational naming.
-    const target = spec.components?.schemas?.[name];
-    if (target?.type === "array" && target.items?.$ref) {
-      const im = target.items.$ref.match(/^#\/components\/schemas\/(.+)$/);
-      if (im) return `array<${im[1]}>`;
-    }
-    return name;
+    return m ? (m[1] ?? null) : null;
   }
-  // Array wrapper: `{ type: array, items: { $ref: ... } }`.  Annotated
-  // with the array marker so the diff distinguishes single-item from
-  // collection bodies at a glance (`array<ProjectResponse>` reads
-  // differently from `ProjectResponse`).
+  // Inline array wrapper: `{ type: array, items: { $ref: ... } }`.  A
+  // backend that inlines its list response (rather than naming a wrapper
+  // component) reads as `array<Element>` — which then drifts against a
+  // backend that names the wrapper, surfacing the drop-in break.
   if (schema.type === "array" && schema.items?.$ref) {
     const m = schema.items.$ref.match(/^#\/components\/schemas\/(.+)$/);
     return m ? `array<${m[1]}>` : null;
@@ -294,7 +263,7 @@ export function requestBodySchemas(spec: OpenApiSpec): Map<string, string> {
         };
       };
       const schema = op.requestBody?.content?.["application/json"]?.schema;
-      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema, spec) ?? "");
+      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema) ?? "");
     }
   }
   return out;
@@ -349,7 +318,7 @@ export function responseBodySchemas(spec: OpenApiSpec): Map<string, string> {
       };
       const ok = op.responses?.["200"] ?? op.responses?.["201"];
       const schema = ok?.content?.["application/json"]?.schema;
-      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema, spec) ?? "");
+      out.set(`${method} ${normalisePath(p)}`, schemaRefName(schema) ?? "");
     }
   }
   return out;
