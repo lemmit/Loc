@@ -4,7 +4,9 @@ import * as path from "node:path";
 import type { SchemaSnapshot } from "../ir/types/migrations-ir.js";
 
 // ---------------------------------------------------------------------------
-// Snapshot store — reads `.loom/snapshots/<module>.snapshot.json` from disk.
+// Snapshot store — reads `.loom/snapshots/<Subdomain>.snapshot.json` from
+// disk.  The `module` parameter name in the API below is a pre-D-STORAGE-
+// SPLIT holdover; callers pass a subdomain name.
 //
 // The reader is fronted by an interface so tests inject an in-memory map
 // and the web playground can swap in a VFS-backed implementation that

@@ -527,7 +527,7 @@ The opt-in `LOOM_E2E_CA_DIR` environment variable (used by
 
 ### Cross-platform OpenAPI parity check
 
-When the same module is hosted on more than one deployable across
+When the same subdomain is hosted on more than one deployable across
 different platforms (Hono, .NET, Phoenix), the e2e additionally diffs
 their OpenAPI specs three ways to catch generator drift. Each backend
 self-describes via its framework-native OpenAPI emitter:

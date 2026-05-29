@@ -30,7 +30,7 @@ context Sales with softDeleteByDefault {
 }
 
 ui WebApp {
-  with scaffold(modules: [Sales])
+  with scaffold(subdomains: [Sales])
 }
 ```
 
@@ -47,8 +47,8 @@ per-element composers, which fan out to leaf macros.
 
 | Macro | Target | What it emits |
 |---|---|---|
-| `scaffold(modules:, contexts:, aggregates:, workflows:, views:)` | `ui` | Home / Workflows-index / Views-index singletons + invokes the composers below. |
-| `scaffoldModule(of: M)` | `ui` | One `scaffoldContext` per context in module `M`. |
+| `scaffold(subdomains:, contexts:, aggregates:, workflows:, views:)` | `ui` | Home / Workflows-index / Views-index singletons + invokes the composers below. |
+| `scaffoldSubdomain(of: S)` | `ui` | One `scaffoldContext` per context in subdomain `S`. |
 | `scaffoldContext(of: C)` | `ui` | One `scaffoldAggregate` / `scaffoldWorkflow` / `scaffoldView` per member of context `C`. |
 | `scaffoldAggregate(of: Agg)` | `ui` | A List page, a New (create-form) page, and a Detail page for `Agg`. |
 | `scaffoldWorkflow(of: W)` | `ui` | A Form page for workflow `W`. |
@@ -60,8 +60,8 @@ composer that delegates via `invokeMacro`.
 
 ### Composability
 
-Unfolding one level on `with scaffold(modules: [Sales])` reveals one
-`with scaffoldModule(of: Sales)` per supplied module.  Unfolding *that*
+Unfolding one level on `with scaffold(subdomains: [Sales])` reveals one
+`with scaffoldSubdomain(of: Sales)` per supplied subdomain.  Unfolding *that*
 reveals per-context composers, then per-aggregate / workflow / view
 leaves.  Users can drill into a single aggregate's scaffold without
 flattening the whole UI.
