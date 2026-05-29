@@ -14,6 +14,7 @@ import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   csIdValueClrType,
   domainToRequestExpr,
+  dtoParam,
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
@@ -108,9 +109,10 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
 
 function renderRequestDto(wf: WorkflowIR, ctx: EnrichedBoundedContextIR, ns: string): string {
   const params = wf.params
-    .map((p) => `${wireType(p.type, ctx, "request")} ${upperFirst(p.name)}`)
+    .map((p) => dtoParam(wireType(p.type, ctx, "request"), upperFirst(p.name)))
     .join(", ");
   return `// Auto-generated.
+using System.ComponentModel.DataAnnotations;
 using ${ns}.Domain.ValueObjects;
 using ${ns}.Domain.Enums;
 

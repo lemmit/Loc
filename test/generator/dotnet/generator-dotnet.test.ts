@@ -749,7 +749,7 @@ describe(".NET generator", () => {
     // Request DTO uses wire types (Guid for X id, string for datetime).
     const req = files.get("Application/Workflows/PlaceOrderRequest.cs")!;
     expect(req).toMatch(
-      /public sealed record PlaceOrderRequest\(Guid CustomerId, decimal Amount, string PlacedAt\)/,
+      /public sealed record PlaceOrderRequest\(\[property: Required\] Guid CustomerId, \[property: Required\] decimal Amount, \[property: Required\] string PlacedAt\)/,
     );
 
     // Command uses domain types (CustomerId, DateTime).
@@ -926,7 +926,7 @@ describe(".NET generator", () => {
     // global JsonStringEnumConverter) so Swashbuckle names the enum schema.
     const row = files.get("Application/Views/OrderSummaryRow.cs")!;
     expect(row).toMatch(
-      /public sealed record OrderSummaryRow\(Guid OrderId, OrderStatus Status, int LineCount\);/,
+      /public sealed record OrderSummaryRow\(\[property: Required\] Guid OrderId, \[property: Required\] OrderStatus Status, \[property: Required\] int LineCount\);/,
     );
 
     // Query returns IReadOnlyList<OrderSummaryRow>, not <Agg>Response.

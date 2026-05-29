@@ -37,6 +37,7 @@ function renderDtoFile(
   return `// Auto-generated.
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using ${args.ns}.Domain.Enums;
 
 namespace ${args.ns}.Application.${plural(args.aggName)}.${group};

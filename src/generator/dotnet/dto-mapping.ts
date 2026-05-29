@@ -96,6 +96,20 @@ export function wireType(
   return s;
 }
 
+/** A DTO record positional parameter, marked `[property: Required]` when
+ *  the C# type is non-nullable.  Swashbuckle's `SupportNonNullableReference
+ *  Types` does NOT reliably infer required-ness from positional-record NRT
+ *  metadata (and never marks non-nullable *value* types required), so we
+ *  drive it explicitly from the IR: a field is required iff `wireType` did
+ *  not append `?` — exactly the optional→nullable mapping.  This matches
+ *  Hono/Phoenix, which mark every non-optional field required.  `[property:
+ *  Required]` targets the generated property (not the ctor param) so
+ *  Swashbuckle's DataAnnotations reader picks it up. */
+export function dtoParam(csType: string, name: string): string {
+  const required = !csType.endsWith("?");
+  return `${required ? "[property: Required] " : ""}${csType} ${name}`;
+}
+
 /** Map a wire-shaped expression to a domain-typed argument for a command. */
 export function wireToCommandArgument(
   expr: string,
@@ -325,9 +339,9 @@ function responseRecordParams(
   const parts: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
-      parts.push(`${csIdValueClrType(idValueType)} Id`);
+      parts.push(dtoParam(csIdValueClrType(idValueType), "Id"));
     } else {
-      parts.push(`${wireType(wf.type, ctx, "response")} ${upperFirst(wf.name)}`);
+      parts.push(dtoParam(wireType(wf.type, ctx, "response"), upperFirst(wf.name)));
     }
   }
   return parts.join(", ");
