@@ -54,6 +54,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
     validateDataSourceCoverage(sys, diags);
+    validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
@@ -916,6 +917,78 @@ function coverageGapReason(kind: string, ctx: BoundedContextIR): string | undefi
   // cache / replica only require at least one aggregate, already
   // checked above.
   return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Honest-note pass: warn on dataSource knobs the AST validator accepts
+// but no current emitter consumes.
+//
+// At time of writing, three knobs route through to generated code:
+//   - `schema`       — EF Core ToTable, Drizzle pgSchema, AshPostgres
+//                      `postgres.schema`
+//   - `tablePrefix`  — same three emitters (table-name prefix)
+//
+// The other six knobs validate against the kind/storage compatibility
+// matrix in `src/language/validators/datasource.ts` but no emitter
+// reads them.  Setting one is a no-op at runtime:
+//
+//   - `ttl`            — would gate a Redis-backed cache adapter that
+//                        doesn't exist yet
+//   - `every` / `retain` — would gate snapshot policy on an event-
+//                        sourced persister (Marten / hono-ES adapter)
+//                        that doesn't exist yet
+//   - `isolationLevel` — transaction isolation not yet plumbed
+//                        through the EF Core / Drizzle / Ash paths
+//   - `readonly`       — would gate a replica-aware DbContext that
+//                        doesn't exist yet
+//   - `keyPrefix`      — would gate the same Redis cache adapter
+//                        gated by `ttl`
+//
+// We surface this as a warning at IR-validate time so the author sees
+// "validation accepts this but it's a no-op" instead of believing the
+// knob has effect.  When an adapter lands that consumes one of these,
+// the corresponding entry comes off the list — the truth-telling is
+// in code, not in a doc that goes stale.
+// ---------------------------------------------------------------------------
+
+interface UnwiredKnob {
+  property: keyof DataSourceIR;
+  description: string;
+}
+
+const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
+  { property: "ttl", description: "no Redis-backed cache adapter is implemented yet" },
+  {
+    property: "every",
+    description: "no event-sourced persister with snapshot policy is implemented yet",
+  },
+  {
+    property: "retain",
+    description: "no event-sourced persister with snapshot policy is implemented yet",
+  },
+  {
+    property: "isolationLevel",
+    description: "transaction isolation is not yet plumbed through any backend",
+  },
+  { property: "readonly", description: "no replica-aware persister is implemented yet" },
+  { property: "keyPrefix", description: "no Redis-backed cache adapter is implemented yet" },
+];
+
+function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const ds of sys.dataSources) {
+    for (const knob of UNWIRED_KNOBS) {
+      const value = ds[knob.property];
+      if (value === undefined) continue;
+      diags.push({
+        severity: "warning",
+        message:
+          `dataSource '${ds.name}' sets '${knob.property}', but ${knob.description}.  ` +
+          `The value is accepted by validation and persisted in the IR but no current ` +
+          `emitter consumes it — this is a no-op at runtime.`,
+        source: `${sys.name}/${ds.name}`,
+      });
+    }
+  }
 }
 
 function validateE2ETest(
