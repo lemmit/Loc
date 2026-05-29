@@ -404,7 +404,9 @@ function renderApiSpec(
 
     // Per-operation paths: POST /<plural>/{id}/<op>
     for (const op of agg.operations.filter((o) => o.visibility === "public")) {
-      const opSnake = snake(op.name);
+      // Spec path must track the route's URL segment (routeSlug, D-URLSTYLE);
+      // operationId + request module stay keyed on op.name.
+      const opSnake = snake(op.routeSlug ?? op.name);
       const opReqMod = `${schemasModule}.${upperFirst(op.name)}Request`;
       pathEntries.push(
         `      "/${aggSlug}/{id}/${opSnake}" => %OpenApiSpex.PathItem{

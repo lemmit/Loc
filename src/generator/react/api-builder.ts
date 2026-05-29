@@ -171,7 +171,9 @@ export function buildApiModule(
 
   // use<Op><Agg> — one per public operation.
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
-    const opSnake = snake(op.name);
+    // URL segment from routeSlug (D-URLSTYLE); the hook name + request
+    // type stay keyed on op.name.
+    const opSnake = snake(op.routeSlug ?? op.name);
     lines.push(`export function use${upperFirst(op.name)}${agg.name}(id: string) {`);
     lines.push(`  const qc = useQueryClient();`);
     lines.push(`  return useMutation({`);
