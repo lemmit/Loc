@@ -4,6 +4,7 @@ import {
   camelId,
   type OpIdTokens,
   opCreate,
+  opDestroy,
   opFind,
   opGetById,
   opOperation,
@@ -42,6 +43,9 @@ function producesProblem(kind: OpErrorKind, indent = "    "): string[] {
 interface ControllerShape {
   idClrType: string;
   createCmdArgs: string[];
+  /** When true, the aggregate has a canonical `destroy` — emit a
+   *  `DELETE /{id}` action dispatching `Destroy<Agg>Command`. */
+  destroyAction?: boolean;
   publicOps: Array<{ name: string; routeSlug?: string; cmdArgs: string[]; paramNames: string[] }>;
   finds: Array<{
     name: string;
@@ -237,6 +241,22 @@ export function renderController(
       "        return response is null ? NotFound() : Ok(response);",
       "    }",
       "",
+      // Canonical destroy → DELETE /{id} (hard delete).  Gated; reuses the
+      // getById error shape (404).  crudish's destroy is empty-bodied, so
+      // the command carries only the id.
+      ...(shape.destroyAction
+        ? [
+            '    [HttpDelete("{id}")]',
+            "    [ProducesResponseType(204)]",
+            ...producesProblem("getById"),
+            `    public async Task<IActionResult> ${actionName(opDestroy(agg.name))}([FromRoute] ${shape.idClrType} id)`,
+            "    {",
+            `        await _mediator.Send(new Destroy${agg.name}Command(new ${agg.name}Id(id)));`,
+            "        return NoContent();",
+            "    }",
+            "",
+          ]
+        : []),
       ...opBlocks,
       ...findBlocks,
       "}",

@@ -66,6 +66,9 @@ export function emitCqrs(
   emitResponseDtos(agg, ctx, ns, aggFolder, out);
   emitRequestDtos(agg, ctx, ns, aggFolder, out);
   emitCreateCommandAndHandler(agg, requiredFields, ns, aggFolder, out);
+  // Canonical destroy → Delete command + handler (gated on the IR
+  // lifecycle, so plain aggregates emit no extra CQRS files).
+  if (agg.canonicalDestroy) emitDestroyCommandAndHandler(agg, ns, aggFolder, out);
   emitOperationCommandsAndHandlers(agg, ctx, ns, aggFolder, out);
   emitGetByIdQueryAndHandler(agg, ctx, ns, aggFolder, out);
   emitFindQueriesAndHandlers(agg, repo, ctx, ns, aggFolder, out);
@@ -207,6 +210,41 @@ function emitCreateCommandAndHandler(
       validator.content,
     );
   }
+}
+
+/** Canonical hard-delete: `Destroy<Agg>Command(<Agg>Id Id)` + handler that
+ * loads (404 if absent), then hard-deletes via the repo.  Mirrors the
+ * operation-handler load→act→return shape; crudish's destroy is empty-bodied
+ * so there's no domain `destroy()` method to invoke. */
+function emitDestroyCommandAndHandler(
+  agg: AggregateIR,
+  ns: string,
+  aggFolder: string,
+  out: Map<string, string>,
+): void {
+  out.set(
+    `Application/${aggFolder}/Commands/Destroy${agg.name}Command.cs`,
+    renderCommand({
+      ns,
+      aggName: agg.name,
+      commandName: `Destroy${agg.name}Command`,
+      commandParams: `${agg.name}Id Id`,
+    }),
+  );
+  out.set(
+    `Application/${aggFolder}/Commands/Destroy${agg.name}Handler.cs`,
+    renderCommandHandler({
+      ns,
+      aggName: agg.name,
+      handlerName: `Destroy${agg.name}Handler`,
+      commandName: `Destroy${agg.name}Command`,
+      body:
+        `        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)\n` +
+        `            ?? throw new AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +
+        `        await _repo.DeleteAsync(aggregate, ct);\n` +
+        `        return Unit.Value;\n`,
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -576,6 +614,7 @@ function emitController(
     `Api/${upperFirst(plural(agg.name))}Controller.cs`,
     renderController(agg, repo, ns, {
       idClrType: csIdValueClrType(agg.idValueType),
+      destroyAction: !!agg.canonicalDestroy,
       createCmdArgs: requiredFields.map((f) =>
         wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx, usings),
       ),
