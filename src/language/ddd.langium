@@ -329,7 +329,7 @@ StorageType returns string:
     | 'elastic' | 'meilisearch'
     | 'kafka'
     | 'clickhouse' | 'bigquery'
-    | 'awsS3' | 'rabbitmq' | 'restApi';
+    | 's3' | 'rabbitmq' | 'restApi';
 
 ConnectionSource:
       {infer ServiceConnectionSource} 'service' '(' service=ID ')'
@@ -608,7 +608,7 @@ BoundedContext:
     '}';
 
 ContextMember:
-    EnumDecl | ValueObject | Aggregate | EventDecl | Repository | Workflow | View
+    EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
     | Criterion | FilterDecl | StampDecl | ImplementsDecl;
 
 EnumDecl:
@@ -788,6 +788,21 @@ EventDecl:
         (fields+=Property (','? fields+=Property)* ','?)?
     '}';
 
+// Payload — a structured-data carrier crossing a boundary
+// (payload-transport-layer.md, P1).  `payload` is the umbrella; the four
+// sugar keywords carry intent (command / query / response / error) but
+// the same structural-record wire contract.  `event` keeps its own
+// legacy `EventDecl` surface and is unified at the IR layer, so it is not
+// a `PayloadKind` here.  Generics / unions are deferred (P3 / P4): a P1
+// payload is a flat record of properties, mirroring `EventDecl`.
+PayloadDecl:
+    kind=PayloadKind name=ID '{'
+        (fields+=Property (','? fields+=Property)* ','?)?
+    '}';
+
+PayloadKind returns string:
+    'payload' | 'command' | 'query' | 'response' | 'error';
+
 Repository:
     'repository' name=ID 'for' aggregate=[Aggregate:ID] '{'
         finds+=FindDecl*
@@ -917,7 +932,13 @@ Property:
         // (banking.ddd: `entity AccountTransaction { kind: string }`) still parse.
         | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
         | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-        | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources')
+        | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources'
+        // Payload-family keywords (payload-transport-layer.md, P1) — soft in
+        // property position so pre-existing fields named `payload`, `error`,
+        // `query`, etc. (e.g. `event Foo { payload: string }`) keep parsing.
+        // They act as hard keywords only at `ContextMember` position, where
+        // `PayloadDecl` (`kind=PayloadKind name=ID '{'`) begins.
+        | 'payload' | 'command' | 'query' | 'response' | 'error')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1042,7 +1063,11 @@ LooseName returns string:
     // Api-body keyword (lifecycle Phase 2 / D-URLSTYLE) admitted as soft
     // so user code can still name a field `urlStyle`.  (`resource` is
     // already soft-admitted just above.)
-    | 'urlStyle';
+    | 'urlStyle'
+    // Payload-family keywords (payload-transport-layer.md, P1) admitted as
+    // soft in loose-name positions; hard only at `ContextMember`
+    // (`PayloadDecl`).
+    | 'payload' | 'command' | 'query' | 'response' | 'error';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1134,7 +1159,11 @@ LValueIdent returns string:
        // Soft-admit the lifecycle keywords so a bare-statement call
        // target like `ui.products.create({...})` parses (mirrors
        // MemberName).
-       | 'create' | 'destroy';
+       | 'create' | 'destroy'
+       // Payload-family keywords (payload-transport-layer.md, P1) — soft in
+       // l-value position so an assignment target naming a field `error`,
+       // `query`, etc. parses; hard only at `ContextMember` (`PayloadDecl`).
+       | 'payload' | 'command' | 'query' | 'response' | 'error';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)
@@ -1231,7 +1260,11 @@ MemberName returns string:
        // but it's also the collection-op name in `arr.where(λ)` — see
        // `src/util/collection-ops.ts` and the `case "where":` arms in the TS /
        // Phoenix renderers.  Admit it here so expression-position uses parse.
-       | 'where';
+       | 'where'
+       // Payload-family keywords (payload-transport-layer.md, P1) admitted
+       // after `.` so member access like `Sales.Customer.all.error` (a
+       // generated-hook field) keeps parsing; hard only at `ContextMember`.
+       | 'payload' | 'command' | 'query' | 'response' | 'error';
 
 // Lambdas accept either a single expression body (the only form
 // in v22) or a brace-wrapped block of statements.  Block bodies
@@ -1418,7 +1451,11 @@ NameRefIdent returns string:
        | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
        | 'retain' | 'isolationLevel' | 'readonly' | 'use'
        | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources'
-       | 'urlStyle';
+       | 'urlStyle'
+       // Payload-family keywords (payload-transport-layer.md, P1) admitted as
+       // bare NameRefs so expressions can read a field named `payload`,
+       // `error`, `query`, etc.  Hard only at `ContextMember` (`PayloadDecl`).
+       | 'payload' | 'command' | 'query' | 'response' | 'error';
 
 // ---------------------------------------------------------------------------
 // Terminals

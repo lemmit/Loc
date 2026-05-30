@@ -1,4 +1,5 @@
 import type { Reference } from "langium";
+import { AstUtils } from "langium";
 import {
   type BuiltinPackFamily,
   parseBuiltinDesignRef,
@@ -30,6 +31,7 @@ import type {
   Operation,
   Page,
   Parameter,
+  PayloadDecl,
   Property,
   Repository,
   Requirement,
@@ -73,6 +75,7 @@ import {
   isNameRef,
   isObjectLit,
   isOperation,
+  isPayloadDecl,
   isPermissionsBlock,
   isPostfixChain,
   isPreconditionStmt,
@@ -80,6 +83,7 @@ import {
   isRepository,
   isRequirement,
   isRequiresStmt,
+  isResource,
   isSolution,
   isSubdomain,
   isSystem,
@@ -93,6 +97,7 @@ import {
   isWorkflow,
 } from "../../language/generated/ast.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../platform/registry.js";
+import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
   ApiIR,
@@ -128,6 +133,7 @@ import type {
   PageMetadataIR,
   PageOriginIR,
   ParamIR,
+  PayloadIR,
   PermissionDeclIR,
   Platform,
   RawLoomModel,
@@ -1231,10 +1237,24 @@ function lowerContext(
   // `modulePermissions` (when set) does the same for the
   // `permissions.<name>` magic-identifier resolution; loose contexts
   // not bundled in a module pass undefined.
-  const env = newEnv(ctx, user, modulePermissions);
+  // Ambient resource handles in scope for this context (Phase 4):
+  // system-level `resource X { for: <thisCtx>, kind, … }` declarations,
+  // keyed by name → infra kind.  Workflow bodies resolve `files.put(…)`
+  // against this map.  Empty for loose contexts (no enclosing system).
+  const resources = new Map<string, DataSourceKind>();
+  const sys = AstUtils.getContainerOfType(ctx, isSystem);
+  if (sys) {
+    for (const m of sys.members) {
+      if (isResource(m) && m.context?.ref === ctx && m.kind) {
+        resources.set(m.name, m.kind as DataSourceKind);
+      }
+    }
+  }
+  const env = newEnv(ctx, user, modulePermissions, resources);
   const enums: EnumIR[] = [];
   const valueObjects: ValueObjectIR[] = [];
   const events: EventIR[] = [];
+  const payloads: PayloadIR[] = [];
   const aggregates: AggregateIR[] = [];
   const repositories: RepositoryIR[] = [];
   const workflows: WorkflowIR[] = [];
@@ -1250,6 +1270,7 @@ function lowerContext(
     if (isEnumDecl(m)) enums.push(lowerEnum(m));
     else if (isValueObject(m)) valueObjects.push(lowerValueObject(m, env));
     else if (isEventDecl(m)) events.push(lowerEvent(m));
+    else if (isPayloadDecl(m)) payloads.push(lowerPayload(m));
     else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env, ctxCaps));
     else if (isRepository(m)) repositories.push(lowerRepository(m, user, modulePermissions));
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
@@ -1261,6 +1282,12 @@ function lowerContext(
     enums,
     valueObjects,
     events,
+    // Unified payload-family view: the context's `event`s projected in as
+    // `kind: "event"` payloads, then the author-declared `PayloadDecl`s.
+    // `events` above stays populated so existing event emission is
+    // untouched.  P2's synthesized `<Agg>Wire` payloads are appended in
+    // enrichment, not here.
+    payloads: [...events.map(eventToPayload), ...payloads],
     aggregates,
     repositories,
     workflows,
@@ -1318,6 +1345,26 @@ function lowerEvent(e: EventDecl): EventIR {
     name: e.name,
     fields: e.fields.map((f) => lowerField(f)),
   };
+}
+
+/** Lower a `PayloadDecl` (payload / command / query / response / error)
+ *  to the unified `PayloadIR`.  Structural record only — generics and
+ *  unions are P3 / P4.  The grammar `kind` token doubles as the IR
+ *  discriminator. */
+function lowerPayload(p: PayloadDecl): PayloadIR {
+  return {
+    name: p.name,
+    kind: p.kind as PayloadIR["kind"],
+    fields: p.fields.map((f) => lowerField(f)),
+  };
+}
+
+/** Project a lowered `event` into the unified payload view as a
+ *  `kind: "event"` payload (payload-transport-layer.md P1 — "event is a
+ *  payload subtype").  Shares the underlying `FieldIR[]`; no copy needed
+ *  since both views are read-only downstream. */
+function eventToPayload(e: EventIR): PayloadIR {
+  return { name: e.name, kind: "event", fields: e.fields };
 }
 
 function lowerAggregate(
@@ -2153,6 +2200,34 @@ function lowerWorkflowStatement(
   if (isAssignOrCallStmt(stmt)) {
     const lv = stmt.target;
     if (!stmt.op && lv.call && lv.tail.length === 1) {
+      // `files.put(args)` — a bare resource-op call (Phase 4).  When the
+      // head is an ambient resource handle, lower to a `resource-call`
+      // statement; otherwise it's an op-call on a let binding.
+      const resourceKind = env.resources?.get(lv.head);
+      if (resourceKind) {
+        const verb = lv.tail[0]!;
+        const verbDef = findVerb(resourceKind, verb);
+        const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
+        return {
+          stmt: {
+            kind: "resource-call",
+            call: {
+              kind: "call",
+              callKind: "resource-op",
+              name: verb,
+              args,
+              resourceOp: {
+                resourceName: lv.head,
+                resourceKind,
+                verb,
+                capability: verbDef?.capability ?? "",
+                ...(verbDef?.interfaceOverride ? { interface: verbDef.interfaceOverride } : {}),
+              },
+            },
+          },
+          envAfter: env,
+        };
+      }
       // `name.op(args)` — op-call on a let binding.
       const aggName = aggNameForLocal(env, lv.head);
       const args = (lv.args ?? []).map((a) => lowerExpr(a, env));

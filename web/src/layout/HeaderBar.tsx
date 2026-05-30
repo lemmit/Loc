@@ -69,7 +69,7 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
           {copied ? "✓ Copied" : "Share link"}
         </Button>
         <PackPicker
-          workspaceVfs={workspace.vfs}
+          workspaceStore={workspace.store}
           buildClient={buildClient}
           onImported={() => scheduleAutoGenerate()}
           onError={(err) => {
@@ -77,7 +77,7 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
             console.warn("pack import:", err.message);
           }}
         />
-        <WorkspaceTree workspaceVfs={workspace.vfs} buildClient={buildClient} />
+        <WorkspaceTree workspaceStore={workspace.store} buildClient={buildClient} />
       </Group>
       <Group gap="xs" wrap="wrap">
         <Button
@@ -234,7 +234,7 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
             <Menu.Divider />
             <Box px="sm" py={6}>
               <PackPicker
-                workspaceVfs={workspace.vfs}
+                workspaceStore={workspace.store}
                 buildClient={buildClient}
                 onImported={() => scheduleAutoGenerate()}
                 onError={(err) => {
@@ -244,7 +244,7 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
               />
             </Box>
             <Box px="sm" py={6}>
-              <WorkspaceTree workspaceVfs={workspace.vfs} buildClient={buildClient} />
+              <WorkspaceTree workspaceStore={workspace.store} buildClient={buildClient} />
             </Box>
           </Menu.Dropdown>
         </Menu>

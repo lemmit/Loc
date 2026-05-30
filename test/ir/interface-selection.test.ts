@@ -13,7 +13,7 @@ describe("defaultInterfaceFor", () => {
     expect(defaultInterfaceFor("postgres", "state")).toBe("sql");
     expect(defaultInterfaceFor("postgres", "eventLog")).toBe("sql");
     expect(defaultInterfaceFor("rabbitmq", "queue")).toBe("amqp");
-    expect(defaultInterfaceFor("awsS3", "objectStore")).toBe("sdk"); // sdk ranks above rest
+    expect(defaultInterfaceFor("s3", "objectStore")).toBe("sdk"); // sdk ranks above rest
     expect(defaultInterfaceFor("restApi", "api")).toBe("rest");
   });
 
@@ -27,7 +27,7 @@ const SRC = `
 system Sys {
   subdomain Sales { context Sales { aggregate Order { name: string } } }
   storage pg    { type: postgres }
-  storage files { type: awsS3,    config: { bucket: "b" } }
+  storage files { type: s3,    config: { bucket: "b" } }
   storage bus   { type: rabbitmq }
   storage pay   { type: restApi,  config: { baseUrl: "https://x" } }
   resource salesState { for: Sales, kind: state,       use: pg }

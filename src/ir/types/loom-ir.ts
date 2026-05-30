@@ -484,6 +484,27 @@ export interface EventIR {
   fields: FieldIR[];
 }
 
+/** The payload-family discriminator (payload-transport-layer.md, P1).
+ *  `payload` is the umbrella; `event` / `command` / `query` / `response`
+ *  / `error` are sugar subtypes carrying the same structural-record wire
+ *  contract.  `event` is the only one that also has its own legacy
+ *  declaration surface (`EventDecl`) — it is projected into the unified
+ *  `payloads` view at lowering time; the rest parse via `PayloadDecl`. */
+export type PayloadKind = "payload" | "event" | "command" | "query" | "response" | "error";
+
+/** A structured-data carrier crossing a boundary (payload-transport-layer.md,
+ *  P1).  Structurally typed record of fields.  Generics / unions are
+ *  deferred to P3 / P4; this P1+P2 shape is a flat record only. */
+export interface PayloadIR {
+  name: string;
+  kind: PayloadKind;
+  fields: FieldIR[];
+  /** True for compiler-synthesized payloads (P2's per-aggregate
+   *  `<Agg>Wire`), false/absent for author-declared ones.  Lets later
+   *  phases and the validator distinguish derived shapes from source. */
+  synthesized?: boolean;
+}
+
 export interface FindIR {
   name: string;
   params: ParamIR[];
@@ -529,6 +550,12 @@ export interface BoundedContextIR {
   enums: EnumIR[];
   valueObjects: ValueObjectIR[];
   events: EventIR[];
+  /** Unified payload-family view (payload-transport-layer.md, P1+P2):
+   *  author-declared `PayloadDecl`s (payload/command/query/response/error),
+   *  the context's `event`s projected in with `kind: "event"`, and the
+   *  P2 synthesized per-aggregate `<Agg>Wire` payloads.  `events` stays
+   *  populated independently so existing event emission is untouched. */
+  payloads: PayloadIR[];
   aggregates: AggregateIR[];
   repositories: RepositoryIR[];
   workflows: WorkflowIR[];
@@ -646,6 +673,13 @@ export type WorkflowStmtIR =
       aggName: string;
       op: string;
       args: ExprIR[];
+    }
+  | {
+      // A bare (unbound) resource-op call statement — `files.put(k, v)`
+      // (Phase 4).  The `let`-bound form (`let x = files.get(k)`) rides
+      // `expr-let` instead.  `call` is the lowered `resource-op` call IR.
+      kind: "resource-call";
+      call: ExprIR;
     };
 
 export interface LoomModel {
@@ -1018,7 +1052,7 @@ export type StorageKind =
   | "kafka"
   | "clickhouse"
   | "bigquery"
-  | "awsS3"
+  | "s3"
   | "rabbitmq"
   | "restApi";
 
@@ -1435,6 +1469,24 @@ export interface NeedIR {
 // validator enforces both.
 export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView";
 
+/** Saving shapes (D-DOCUMENT-AXIS `shape(…)`) each backend platform can
+ *  EMIT today — the single source of truth for the `supportedShapes`
+ *  capability check.  A `shape(…)` not listed for the target platform is
+ *  a hard error (the backend has no emitter for it yet).  Keyed by the
+ *  bareword family (a `family@version` pin resolves via `platformFamily`
+ *  in the validator).  Frontend platforms (`react`/`static`) own no
+ *  persistence and are omitted.  Consumed by both the IR validator
+ *  (`validateSavingShapeSupport`) and the generator persistence adapters
+ *  (`PersistenceAdapter.supportedShapes`). */
+export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingShape[]>> = {
+  dotnet: ["relational", "embedded", "document"],
+  hono: ["relational", "embedded", "document"],
+  // Phoenix/Ash emits relational + embedded (Ash embedded resources);
+  // `document` (a single opaque `:map` — non-idiomatic for Ash) is a
+  // future allowed-but-warned addition.
+  phoenixLiveView: ["relational", "embedded"],
+};
+
 export interface DeployableIR {
   name: string;
   /** The platform **family** (`"hono"`, `"dotnet"`, `"react"`, …) —
@@ -1619,12 +1671,14 @@ export type RefKind =
   | "helper-fn"
   | "enum-value"
   | "current-user" // magic identifier — system's `user` block shape
+  | "resource" // ambient resource handle — `files`, `jobs`, … (Phase 4)
   | "unknown";
 
 export type CallKind =
   | "function" // calls a `function` declared in scope
   | "value-object-ctor" // calls a value-object constructor
   | "private-operation" // calls a private operation
+  | "resource-op" // a verb call on an ambient resource handle (Phase 4)
   | "free"; // unresolved free call
 
 export type BinOp =
@@ -1652,6 +1706,11 @@ export type ExprIR =
       refKind: RefKind;
       enumName?: string;
       type?: TypeIR;
+      /** Populated when `refKind === "resource"` — the resource's
+       *  declared name and infra kind, so a `.verb(...)` call on it can
+       *  lower to a `resource-op` without re-resolving (Phase 4). */
+      resourceName?: string;
+      resourceKind?: DataSourceKind;
     }
   | {
       kind: "member";
@@ -1687,6 +1746,18 @@ export type ExprIR =
       args: ExprIR[];
       /** Same shape as `method-call.argNames` — see above. */
       argNames?: (string | undefined)[];
+      /** Populated when `callKind === "resource-op"` (Phase 4) — the
+       *  resolved resource binding, verb, the capability it requires,
+       *  and the access interface (default from
+       *  `EnrichedSystemIR.resourceInterfaces`, with per-verb override).
+       *  The bound `ResourceAdapter.emitOperation` renders the call. */
+      resourceOp?: {
+        resourceName: string;
+        resourceKind: DataSourceKind;
+        verb: string;
+        capability: string;
+        interface?: LoomInterface;
+      };
       /** Per-primitive `style:` escape hatch.  Populated by lowering
        *  when the source supplied a `style: { … }` named arg on a
        *  walker-primitive call (`Container { style: { background: "red" }, ... }`).

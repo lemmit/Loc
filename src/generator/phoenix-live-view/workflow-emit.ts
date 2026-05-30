@@ -7,6 +7,7 @@ import type {
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
+import { buildPhoenixResourceModules } from "./adapters/resource-clients.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -60,7 +61,9 @@ function renderWorkflow(
   sys: SystemIR | undefined,
 ): string {
   const moduleName = `${contextModule}.Workflows.${upperFirst(wf.name)}`;
-  const renderCtx: RenderCtx = { thisName: "record", contextModule };
+  // Resource-op routing (Phase 4c): resourceName → helper module.
+  const resourceModules = buildPhoenixResourceModules(sys, appModule);
+  const renderCtx: RenderCtx = { thisName: "record", contextModule, resourceModules };
 
   const params = wf.params.map((p) => snake(p.name));
   const paramPattern =
@@ -249,6 +252,11 @@ function renderWorkflowStmt(
         },
       ];
     }
+    case "resource-call":
+      // 4c: the Phoenix ResourceAdapter renders the call here.
+      // renderExpr already throws via the resource-op guard; keep an
+      // explicit branch so the switch stays exhaustive.
+      return [{ kind: "expr", text: `    ${renderExpr(st.call, renderCtx)}` }];
   }
 }
 

@@ -33,6 +33,7 @@ import {
   checkMatchExpressions,
   checkMatcherArity,
   checkMatchesCalls,
+  checkPayloads,
   checkPrimitiveConversions,
   checkSlotMemberAccess,
   checkSlotTypePosition,
@@ -109,6 +110,10 @@ export class DddValidator {
     // only valid on a participant; and an event-sourced / document concrete
     // of a `sharedTable` base is forced to `ownTable` (D-ES-TPH).
     checkInheritance(model, accept);
+    // Payload declarations (payload-transport-layer.md, P1): name
+    // uniqueness within a context (and vs. value objects / events) and
+    // distinct non-empty field names.
+    checkPayloads(model, accept);
     // `slot` is a UI-only param marker (PR #632) — reject anywhere
     // outside a component's parameter list with a clear error rather
     // than letting the backend emitter throw at generate time.

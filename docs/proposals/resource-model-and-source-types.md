@@ -76,7 +76,7 @@ vendor-specific parameters flow through `connection:` and a generic `config` map
 
 ```ddd
 storage primarySql { type: postgres, connection: service(db) }
-storage fileStore  { type: awsS3,    connection: env("S3_URL"),  config: { region: "eu-central-1", bucket: "app-files" } }
+storage fileStore  { type: s3,    connection: env("S3_URL"),  config: { region: "eu-central-1", bucket: "app-files" } }
 storage jobBus     { type: rabbitmq, connection: env("MQ_URL"),  config: { vhost: "/" } }
 storage payments   { type: restApi,  connection: env("PAY_URL") }
 ```
@@ -136,7 +136,7 @@ sourceType postgres
     eventLog: { capabilities: [append, read, replay],                                interfaces: [sql] }
     cache:    { capabilities: [get, set, ttl],                                       interfaces: [sql] }
 
-sourceType awsS3
+sourceType s3
   supports:
     objectStore: { capabilities: [blob, list, signedUrl, versioning], interfaces: [rest, sdk] }
 
@@ -273,7 +273,7 @@ resource ordersEvents { for: Orders, kind: eventLog, use: primarySql, every: 100
 ### 6.3 Object store (S3)
 
 ```ddd
-storage fileStore   { type: awsS3, config: { region: "eu-central-1", bucket: "app-files" } }
+storage fileStore   { type: s3, config: { region: "eu-central-1", bucket: "app-files" } }
 resource ordersFiles { for: Orders, kind: objectStore, use: fileStore }
 ```
 `blob` / `list` / `signedUrl`; browser flows prefer `rest`, backend batch flows
@@ -321,13 +321,13 @@ unused.
 
 **Phase 2 — New kinds: object store, queue, external API.** *(model + compose
 delivered; backend client emission deferred — see note.)*
-- Add `awsS3`, `rabbitmq`, `restApi` (and siblings) to the `type:` enumeration and
+- Add `s3`, `rabbitmq`, `restApi` (and siblings) to the `type:` enumeration and
   the registry; add `objectStore`, `queue`, `api` to the `kind:` enumeration; add
   their capabilities/interfaces to the registry. ✓
 - Add the generic `config` map on `storage`/`resource` for vendor parameters,
   validated against the registry schema. ✓
 - Compose integration: emit dev sidecars for the new-kind storages (minio for
-  `awsS3`, `rabbitmq`), gated so existing models stay byte-identical. ✓
+  `s3`, `rabbitmq`), gated so existing models stay byte-identical. ✓
 - Validation for the new kind↔sourceType↔capability combinations, driven by the
   registry. ✓
 - **Deferred — backend client emission.** Emitting object-store / queue /
@@ -354,12 +354,13 @@ delivered; backend client emission deferred — see note.)*
   real backend output (shared `DRIZZLE_CONNECTION_SETUP` const; the server entry
   no longer hardcodes its own copy) — the prerequisite flagged for Phase 4.
 
-**Phase 4 — Workflow-level resource consumption (future, separate design).**
-The surface by which workflows/operations *use* a resource — the caller of the
-deferred Phase-2 clients — is its own design effort and gates backend client
-emission. Once defined, it plugs into the already-threaded `NeedIR` (needs would
-then be derived from actual consumption, not just aggregate persistence) and the
-registry's per-kind interfaces.
+**Phase 4 — Workflow-level resource consumption.** Designed in
+[`workflow-resource-consumption.md`](./workflow-resource-consumption.md): a
+`resource` becomes a capability-typed handle callable from a workflow through a
+closed per-kind verb vocabulary (`files.put(…)`, `jobs.enqueue(…)`,
+`rates.get(…)`). This is the caller of the Phase-2.4 clients; it activates the
+`need ⊆ sourceType` check (needs derive from verbs used) and the per-resource
+interface selection.
 
 ---
 

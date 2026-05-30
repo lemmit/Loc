@@ -20,6 +20,7 @@ import type { EmitCtx } from "../_adapters/index.js";
 import { generateReactForContexts } from "../react/index.js";
 import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
 import { cqrsStyleAdapter } from "./adapters/cqrs-style.js";
+import { emitDotnetResourceFiles } from "./adapters/resource-clients.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
@@ -197,6 +198,7 @@ function emitProjectFromContexts(
     enums: contexts.flatMap((c) => c.enums),
     valueObjects: contexts.flatMap((c) => c.valueObjects),
     events: contexts.flatMap((c) => c.events),
+    payloads: contexts.flatMap((c) => c.payloads),
     aggregates: contexts.flatMap((c) => c.aggregates),
     repositories: contexts.flatMap((c) => c.repositories),
     workflows: contexts.flatMap((c) => c.workflows),
@@ -247,6 +249,11 @@ function emitProjectFromContexts(
   if (hasMigrations) {
     emitDotnetMigrations(system!.migrations!, ns, out);
   }
+  // Resource client classes (objectStore / queue / api) + their NuGet
+  // deps (Phase 4c).  Empty when the deployable wires no consumable
+  // resources — the csproj stays byte-identical.
+  const resourceEmission = emitDotnetResourceFiles(system?.sys, ns);
+  for (const [path, content] of resourceEmission.files) out.set(path, content);
   emitProject(merged, ns, out, {
     authRequired,
     usesValidators,
@@ -254,6 +261,7 @@ function emitProjectFromContexts(
     hasEmbeddedSpa,
     hasMigrations,
     emitTrace,
+    resourceNugetDeps: resourceEmission.nugetDeps,
   });
   emitTestProject(merged, ns, out);
   // Fullstack mode — generate the React project under ClientApp/.
@@ -580,6 +588,7 @@ function emitProject(
     hasEmbeddedSpa?: boolean;
     hasMigrations?: boolean;
     emitTrace?: boolean;
+    resourceNugetDeps?: Record<string, string>;
   },
 ): void {
   const hasExtern = ctx.aggregates.some((a) => a.operations.some((o) => o.extern));
@@ -599,7 +608,7 @@ function emitProject(
       emitTrace,
     }),
   );
-  out.set(`${ns}.csproj`, renderCsproj(ns, hasExtern, usesValidators));
+  out.set(`${ns}.csproj`, renderCsproj(ns, hasExtern, usesValidators, options?.resourceNugetDeps));
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa }));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");

@@ -6,6 +6,7 @@ import type {
   AssociationIR,
   BoundedContextIR,
   CodeRefKind,
+  DataSourceKind,
   DeployableIR,
   DerivedIR,
   EnrichedAggregateIR,
@@ -24,6 +25,7 @@ import type {
   LoomModel,
   NeedIR,
   OperationIR,
+  PayloadIR,
   RawLoomModel,
   RepositoryIR,
   SubdomainIR,
@@ -199,18 +201,40 @@ function deriveNeeds(subdomains: EnrichedSubdomainIR[]): NeedIR[] {
   const needs: NeedIR[] = [];
   for (const sub of subdomains) {
     for (const ctx of sub.contexts) {
-      if (ctx.aggregates.length === 0) continue;
-      const hasState = ctx.aggregates.some((a) => (a.persistedAs ?? "state") === "state");
-      const hasEventLog = ctx.aggregates.some((a) => a.persistedAs === "eventLog");
-      if (hasState) {
-        needs.push({
-          contextName: ctx.name,
-          kind: "state",
-          capabilities: ["state", "crud", "query"],
-        });
+      if (ctx.aggregates.length > 0) {
+        const hasState = ctx.aggregates.some((a) => (a.persistedAs ?? "state") === "state");
+        const hasEventLog = ctx.aggregates.some((a) => a.persistedAs === "eventLog");
+        if (hasState) {
+          needs.push({
+            contextName: ctx.name,
+            kind: "state",
+            capabilities: ["state", "crud", "query"],
+          });
+        }
+        if (hasEventLog) {
+          needs.push({ contextName: ctx.name, kind: "eventLog", capabilities: ["append", "read"] });
+        }
       }
-      if (hasEventLog) {
-        needs.push({ contextName: ctx.name, kind: "eventLog", capabilities: ["append", "read"] });
+      // Usage-derived needs (Phase 4): a resource-op `files.put(...)` in
+      // a workflow body means the context requires the verb's capability
+      // of its `(context, kind)` resource.  Union per kind so a context
+      // using several verbs of one resource needs all their capabilities.
+      const byKind = new Map<DataSourceKind, Set<string>>();
+      for (const wf of ctx.workflows) {
+        for (const st of wf.statements) {
+          const call =
+            st.kind === "resource-call" ? st.call : st.kind === "expr-let" ? st.expr : undefined;
+          if (call?.kind === "call" && call.callKind === "resource-op" && call.resourceOp) {
+            const { resourceKind, capability } = call.resourceOp;
+            if (!capability) continue;
+            const set = byKind.get(resourceKind) ?? new Set<string>();
+            set.add(capability);
+            byKind.set(resourceKind, set);
+          }
+        }
+      }
+      for (const [kind, caps] of byKind) {
+        needs.push({ contextName: ctx.name, kind, capabilities: [...caps].sort() });
       }
     }
   }
@@ -283,7 +307,40 @@ export function enrichContext(
   });
   const aggregates = withInheritance.map((a) => enrichAggregate(a, valueObjects, urlStyle));
   const repositories = ensureFindAll(aggregates, ctx.repositories);
-  return { ...ctx, valueObjects, enums, aggregates, repositories };
+  // P2 (payload-transport-layer.md): give every concrete aggregate's wire
+  // shape a named, referenceable `<Agg>Wire` payload.  Purely additive IR
+  // surface — backends keep consuming `wireShape` directly, so emission is
+  // unchanged.  Abstract bases (aggregate-inheritance.md, #749) emit no
+  // table/DTO and are dropped from codegen, so they get no `<Base>Wire`;
+  // the `isAbstract` guard is forward-compatible (the field is absent on
+  // this branch and becomes a real flag once the inheritance track lands).
+  const wirePayloads = aggregates
+    .filter((a) => !(a as { isAbstract?: boolean }).isAbstract)
+    .map(synthesizeWirePayload);
+  // Idempotent: drop any synthesized payloads from a prior enrichment pass
+  // before re-appending, so `enrich(enrich(m))` deep-equals `enrich(m)`.
+  // Author-declared payloads (no `synthesized` flag) are preserved.  The
+  // `?? []` tolerates IR hand-constructed outside the standard lowering
+  // pipeline (test fixtures, the IR-level expander shim) that predate the
+  // `payloads` field — lowering always populates it for real sources.
+  const payloads = [...(ctx.payloads ?? []).filter((p) => !p.synthesized), ...wirePayloads];
+  return { ...ctx, valueObjects, enums, aggregates, repositories, payloads };
+}
+
+/** Derive the named `<Agg>Wire` payload (P2) from an enriched aggregate's
+ *  already-computed `wireShape`.  The wire shape is the single source of
+ *  truth for the cross-backend DTO; this just names it as a `PayloadIR`
+ *  so later phases (and authors, eventually) can reference it.  A
+ *  `WireField` maps to a `FieldIR` one-to-one on `{name, type, optional,
+ *  access}` — `source` is wire-shape bookkeeping the payload doesn't need. */
+function synthesizeWirePayload(agg: EnrichedAggregateIR): PayloadIR {
+  const fields: FieldIR[] = agg.wireShape.map((w) => ({
+    name: w.name,
+    type: w.type,
+    optional: w.optional,
+    access: w.access,
+  }));
+  return { name: `${agg.name}Wire`, kind: "payload", fields, synthesized: true };
 }
 
 /** Derive an action's HTTP path segment from the surfacing api's

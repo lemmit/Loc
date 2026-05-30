@@ -380,7 +380,7 @@ function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: 
   const volumes: string[] = [];
   for (const s of sys.storages) {
     const slug = serviceSlug(s.name);
-    if (s.type === "awsS3") {
+    if (s.type === "s3") {
       const volume = `${slug}-data`;
       volumes.push(volume);
       services.push([
