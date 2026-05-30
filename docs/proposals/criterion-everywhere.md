@@ -61,12 +61,28 @@
 > non-principal capability filters AND into every Drizzle read site; a
 > latent `lowerToDrizzle` gap (bare boolean column → `eq(col, true)`) was
 > fixed in passing. (3) shipped: Phoenix emits an Ash `base_filter`
-> (Ash's HasQueryFilter analog) for non-principal capability filters. On
-> both Hono and Phoenix, principal-referencing filters (tenancy) and
-> non-relational shapes are deferred and rejected by the validator with
-> `loom.context-filter-unsupported` (a clear error, not silent wrong
-> behaviour); .NET supports both via `HasQueryFilter`. Remaining:
-> principal-threading (tenancy) on Hono/Phoenix.
+> (Ash's HasQueryFilter analog) for non-principal capability filters.
+>
+> **Principal-referencing filters (tenancy, `currentUser.<field>`)** bind
+> from an **injected user-context service** and pass the value into the
+> query — *not* via DbContext/global-filter magic. Shipped on **.NET**
+> (relational): the repository injects `ICurrentUserAccessor` and AND-s
+> the predicate into every read, rendering `currentUser.tenantId` →
+> `_currentUser.User.TenantId`; non-principal filters still ride EF
+> `HasQueryFilter`. The earlier "`.NET` supports both via `HasQueryFilter`"
+> note was wrong — a principal predicate has no `currentUser` in
+> `OnModelCreating` scope and would have emitted non-compiling C#; the
+> injected-service design replaces it.
+>
+> Support matrix (what emits where; everything else is a clear
+> `loom.context-filter-unsupported` error, never silent):
+> - non-principal + relational → all three backends;
+> - non-principal + non-relational → .NET only;
+> - principal + relational → **.NET only** (this PR);
+> - principal + non-relational → deferred everywhere (the .NET document
+>   repository evaluates client-side and isn't wired);
+> - principal on Hono / Phoenix → deferred (same injected-service design,
+>   not yet ported).
 
 ## TL;DR
 

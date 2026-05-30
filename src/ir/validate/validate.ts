@@ -1017,20 +1017,31 @@ function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[]): voi
 //      the saving-shape validator usually blocks this upstream.)
 //
 // Non-principal capability filters on a relational aggregate
-// (`filter !this.isDeleted`) ARE emitted on both backends.
+// (`filter !this.isDeleted`) ARE emitted on every backend.
+//
+// Support matrix (rows = backend, value = which capability filters emit):
+//
+//   .NET      non-principal: any shape (HasQueryFilter / client-side doc)
+//             principal:     RELATIONAL only (repository injects
+//                            ICurrentUserAccessor + AND-s into each read;
+//                            the document repo evaluates client-side and
+//                            isn't wired) — non-relational deferred.
+//   Hono      non-principal: relational only;   principal: deferred.
+//   Phoenix   non-principal: relational only;   principal: deferred.
+//
+// Anything outside its row would emit silently-wrong query behaviour, so
+// reject it with `loom.context-filter-unsupported`.
 // ---------------------------------------------------------------------------
 function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
 
-  // Backends that consume contextFilters with the principal / shape
-  // limitation.  .NET (HasQueryFilter) is deliberately absent — it
-  // supports both deferred cases.
-  const LIMITED_FAMILIES = new Set(["hono", "phoenixLiveView"]);
-
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
-    if (!fam || !LIMITED_FAMILIES.has(fam)) continue;
+    if (!fam) continue;
+    const isDotnet = fam === "dotnet";
+    const isLimited = fam === "hono" || fam === "phoenixLiveView";
+    if (!isDotnet && !isLimited) continue;
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
@@ -1041,19 +1052,40 @@ function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         const usesPrincipal = filters.some((p) => exprUsesCurrentUser(p));
         const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
         const nonRelational = shape !== "relational";
-        if (!usesPrincipal && !nonRelational) continue;
-        const reason = usesPrincipal
-          ? `references currentUser (e.g. a tenancy filter); principal-referencing capability ` +
-            `filters are not yet wired on the ${fam} backend`
-          : `is persisted as shape(${shape}); capability filters are only wired for ` +
-            `relational aggregates on the ${fam} backend today`;
+
+        // Decide whether THIS backend can emit THIS filter.
+        let reason: string | null = null;
+        if (isDotnet) {
+          // .NET handles non-principal on any shape; principal only on
+          // relational (the document repo evaluates client-side and
+          // doesn't inject the accessor).
+          if (usesPrincipal && nonRelational) {
+            reason =
+              `references currentUser AND is persisted as shape(${shape}); ` +
+              `principal-referencing capability filters are wired for relational ` +
+              `aggregates only on .NET today (the document repository evaluates client-side)`;
+          }
+        } else {
+          // Hono / Phoenix: principal deferred entirely; non-principal
+          // relational only.
+          if (usesPrincipal) {
+            reason =
+              `references currentUser (e.g. a tenancy filter); principal-referencing ` +
+              `capability filters are not yet wired on the ${fam} backend — host the ` +
+              `aggregate on a .NET deployable, or drop the currentUser reference`;
+          } else if (nonRelational) {
+            reason =
+              `is persisted as shape(${shape}); capability filters are only wired for ` +
+              `relational aggregates on the ${fam} backend today`;
+          }
+        }
+        if (!reason) continue;
         diags.push({
           severity: "error",
           message:
             `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
             `'${ctxName}.${agg.name}' with a 'filter' capability predicate that ${reason}. ` +
-            `Host this aggregate on a .NET deployable, or remove the unsupported capability filter. ` +
-            `Non-principal filters on relational aggregates (e.g. 'filter !this.isDeleted') are emitted.`,
+            `Non-principal filters on relational aggregates (e.g. 'filter !this.isDeleted') are emitted everywhere.`,
           source: `${sys.name}/${dep.name}`,
           code: "loom.context-filter-unsupported",
         });
