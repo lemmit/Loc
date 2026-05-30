@@ -767,9 +767,13 @@ describe(".NET generator", () => {
     const files = generateDotnet(doc.parseResult.value as Model);
 
     // Request DTO uses wire types (Guid for X id, string for datetime).
+    // Required-ness targets the ctor PARAMETER (bare `[Required]`), not the
+    // property — `[property: Required]` on a positional record makes
+    // ASP.NET's record validation throw at model-binding time (500 on every
+    // POST).  Responses keep `[property: Required]`; see dtoParam.
     const req = files.get("Application/Workflows/PlaceOrderRequest.cs")!;
     expect(req).toMatch(
-      /public sealed record PlaceOrderRequest\(\[property: Required\] Guid CustomerId, \[property: Required\] decimal Amount, \[property: Required\] string PlacedAt\)/,
+      /public sealed record PlaceOrderRequest\(\[Required\] Guid CustomerId, \[Required\] decimal Amount, \[Required\] string PlacedAt\)/,
     );
 
     // Command uses domain types (CustomerId, DateTime).
