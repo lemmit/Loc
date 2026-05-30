@@ -428,7 +428,7 @@ system Sys {
     expect(sql).not.toMatch(/CREATE TABLE suppliers/);
   });
 
-  it("still rejects a polymorphic 'Party id' ref under TPH (deferred in v1)", async () => {
+  it("allows a polymorphic 'Party id' ref under TPH (single shared table)", async () => {
     const { errors } = await parse(`
       context T {
         abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
@@ -436,6 +436,22 @@ system Sys {
         aggregate Order { buyer: Party id }
       }
     `);
-    expect(codes(errors)).toContain("loom.polymorphic-id-ref-unsupported");
+    expect(codes(errors)).not.toContain("loom.polymorphic-id-ref-unsupported");
+  });
+
+  it("emits a polymorphic base reader: <Base> union + read-only <Base>Repository", async () => {
+    const { files } = generateSystems(await parseValid(TPH));
+    // The abstract base's discriminated-union type.
+    const union = files.get("api/domain/party.ts") ?? "";
+    expect(union).toMatch(/export type Party = Customer \| Supplier;/);
+    // A read-only repository that scans the shared table and dispatches on kind.
+    const reader = files.get("api/db/repositories/party-repository.ts") ?? "";
+    expect(reader).toMatch(/export class PartyRepository/);
+    expect(reader).toMatch(/async findById\(id: Ids\.PartyId\): Promise<Party \| null>/);
+    expect(reader).toMatch(/async findAll\(\): Promise<Party\[\]>/);
+    expect(reader).toMatch(/from\(schema\.parties\)/);
+    expect(reader).toMatch(/switch \(row\.kind\)/);
+    expect(reader).toMatch(/case "Customer":/);
+    expect(reader).toMatch(/case "Supplier":/);
   });
 });

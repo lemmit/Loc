@@ -130,24 +130,26 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
     }
   }
 
-  // Rule 6 — a polymorphic `Base id` reference to an abstract base is not
-  // supported yet.  Under `ownTable` (TPC) the proposal forbids it outright
-  // (the FK target is ambiguous across the per-concrete tables); under
-  // `sharedTable` (TPH) it would target the single base table, but TPH
-  // emission is not implemented yet (gated in IR-validate).  Until one of
-  // those lands, reject the reference with a concrete fix rather than emitting
-  // a dangling FK.  (A bare `Base` type ref is already steered to `Base id` by
-  // `loom.bare-aggregate-in-type`; this catches the `id` form that survives.)
+  // Rule 6 — a polymorphic `Base id` reference to an abstract base.  Under
+  // `sharedTable` (TPH) the whole hierarchy shares one table, so the FK target
+  // is unambiguous and the reference is allowed (resolved by the Hono base
+  // reader).  Under `ownTable` (TPC) there is no single table to key against —
+  // the FK target is ambiguous across the per-concrete tables — so it stays
+  // rejected with a concrete fix.  (A bare `Base` type ref is already steered
+  // to `Base id` by `loom.bare-aggregate-in-type`; this catches the `id` form.)
   for (const idType of idTypes) {
     const target = idType.target?.ref;
-    if (isAggregate(target) && target.isAbstract) {
-      accept(
-        "error",
-        `'${target.name} id' references the abstract base '${target.name}', which has no ` +
-          `single table to key against. Polymorphic references to an abstract base are not ` +
-          `supported yet — reference a concrete subtype's id (e.g. 'Customer id') instead.`,
-        { node: idType, property: "target", code: "loom.polymorphic-id-ref-unsupported" },
-      );
-    }
+    if (!isAggregate(target) || !target.isAbstract) continue;
+    const layout = target.inheritanceUsing ?? DEFAULT_LAYOUT;
+    if (layout !== "ownTable") continue;
+    accept(
+      "error",
+      `'${target.name} id' references the abstract base '${target.name}', which uses ` +
+        `inheritanceUsing(ownTable) (TPC) — there is no single table to key against, so the ` +
+        `foreign-key target is ambiguous across the per-concrete tables. Reference a concrete ` +
+        `subtype's id (e.g. 'Customer id'), or change '${target.name}' to ` +
+        `inheritanceUsing(sharedTable) (TPH) to allow polymorphic references.`,
+      { node: idType, property: "target", code: "loom.polymorphic-id-ref-unsupported" },
+    );
   }
 }

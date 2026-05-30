@@ -210,6 +210,34 @@ export function hydrateRootExpr(
   return `${agg.name}._create({ ${fields.join(", ")} })`;
 }
 
+/** Hydrate a TPH concrete directly from a shared-table row — used by the
+ *  polymorphic base reader (`PartyRepository`), which scans the shared table
+ *  and dispatches on `kind`.  Reads scalar / value-object / enum / id columns
+ *  with the non-null assertion (the row is known to be this concrete's
+ *  `kind`).  Contained parts and `X id[]` reference collections aren't eagerly
+ *  loaded by the base read (the per-concrete repository loads those fully) —
+ *  they default to empty/null here so the `_create` stays strictly typed;
+ *  v1 TPH concretes are expected to be flat (aggregate-inheritance.md). */
+export function hydrateConcreteFromSharedRow(
+  agg: EnrichedAggregateIR,
+  rowVar: string,
+  ctx: BoundedContextIR,
+): string {
+  const fields: string[] = [`id: Ids.${agg.name}Id(${rowVar}.id)`];
+  for (const f of agg.fields) {
+    if (isRefCollection(f.type)) {
+      fields.push(`${f.name}: []`);
+    } else {
+      fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx, true)}`);
+    }
+  }
+  fields.push(...provHydrateEntries(agg.fields, rowVar));
+  for (const c of agg.contains) {
+    fields.push(`${c.name}: ${c.collection ? "[]" : "null"}`);
+  }
+  return `${agg.name}._create({ ${fields.join(", ")} })`;
+}
+
 function provHydrateEntries(fields: FieldIR[], rowVar: string): string[] {
   return fields
     .filter((f) => f.provenanced)
