@@ -178,3 +178,211 @@ describe("frontend ACL — wired into emitted form catch blocks (Phase 2)", () =
     expect(src).toMatch(/notifications\.show\(\{ color: "green", message: "Order created" \}\)/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Behavioural test for the emitted applyServerErrors runtime.
+//
+// Static text assertions above prove the function is emitted with the right
+// SHAPE. This block transpiles the emitted source and EXECUTES it against
+// synthetic ProblemDetails / network-error inputs, proving the loop's
+// actual semantics — pointer→flat key translation, setError dispatch,
+// outcome branching, fallback behaviour for non-422 errors.
+// ---------------------------------------------------------------------------
+
+import ts from "typescript";
+
+interface SetErrorCall {
+  field: string;
+  options: { type: string; message: string };
+}
+
+/** Transpile the emitted apply-server-errors.ts to JS (strip types,
+ *  drop type-only imports) and return the live applyServerErrors
+ *  function.  Tied to the generated source — any drift in the
+ *  emitted text that breaks transpilation or invocation surfaces
+ *  here as a test failure. */
+function loadApplyServerErrors(
+  src: string,
+): (args: {
+  error: unknown;
+  setError: (field: string, options: { type: string; message: string }) => void;
+  fieldMap: Record<string, string>;
+}) => { kind: "applied" } | { kind: "global"; title: string } | { kind: "unhandled" } {
+  // Strip the `import type { … } from "react-hook-form";` line — it's
+  // type-only and would fail to resolve in a vm context.  TypeScript's
+  // transpiler also elides import-types, so removing manually is a
+  // belt-and-braces guard.
+  const trimmed = src.replace(/import type[\s\S]*?from\s*"react-hook-form";\s*\n/g, "");
+  const js = ts.transpileModule(trimmed, {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.CommonJS,
+      esModuleInterop: true,
+    },
+  }).outputText;
+
+  // Eval the CJS-shaped output in a function that closes over `exports`
+  // and `module`, returning the named binding.  No real require shim
+  // needed — the source has no value-imports after the type-strip.
+  const factory = new Function("exports", "module", `${js}\nreturn exports.applyServerErrors;`);
+  const mod = { exports: {} as Record<string, unknown> };
+  return factory(mod.exports, mod) as never;
+}
+
+function readApplyServerErrorsSrc(files: Map<string, string>): string {
+  const mainKey = [...files.keys()].find((k) => k.endsWith("/src/main.tsx"))!;
+  const reactRoot = mainKey.slice(0, -"/src/main.tsx".length);
+  return files.get(`${reactRoot}/src/lib/apply-server-errors.ts`)!;
+}
+
+describe("applyServerErrors — runtime behaviour against synthetic inputs", () => {
+  it("returns { kind: 'applied' } and dispatches setError per pointer for a 422 with errors[]", async () => {
+    const { files } = generateSystems(await buildAcme());
+    const fn = loadApplyServerErrors(readApplyServerErrorsSrc(files));
+
+    const calls: SetErrorCall[] = [];
+    const setError = (field: string, options: { type: string; message: string }): void => {
+      calls.push({ field, options });
+    };
+
+    const outcome = fn({
+      error: {
+        response: {
+          status: 422,
+          data: {
+            errors: [
+              { pointer: "/price/amount", message: "must be positive" },
+              { pointer: "/name", message: "too short" },
+            ],
+          },
+        },
+      },
+      setError,
+      fieldMap: {},
+    });
+
+    expect(outcome).toEqual({ kind: "applied" });
+    expect(calls).toEqual([
+      { field: "price.amount", options: { type: "server", message: "must be positive" } },
+      { field: "name", options: { type: "server", message: "too short" } },
+    ]);
+  });
+
+  it("routes pointers through the fieldMap when explicit mapping exists", async () => {
+    // When the wire pointer ('/price.amount' rooted differently) doesn't
+    // match the form-state key directly, the FieldMap is the lookup
+    // table.  This proves the indirection is wired correctly even
+    // though Phase 2's MVP uses an identity (empty) map.
+    const { files } = generateSystems(await buildAcme());
+    const fn = loadApplyServerErrors(readApplyServerErrorsSrc(files));
+
+    const calls: SetErrorCall[] = [];
+    const setError = (field: string, options: { type: string; message: string }): void => {
+      calls.push({ field, options });
+    };
+
+    fn({
+      error: {
+        response: {
+          status: 422,
+          data: { errors: [{ pointer: "/price/amount", message: "bad" }] },
+        },
+      },
+      setError,
+      fieldMap: { "price.amount": "priceAmountFlat" },
+    });
+
+    expect(calls).toEqual([
+      { field: "priceAmountFlat", options: { type: "server", message: "bad" } },
+    ]);
+  });
+
+  it("returns { kind: 'global', title } when 422 has a title but no errors[]", async () => {
+    const { files } = generateSystems(await buildAcme());
+    const fn = loadApplyServerErrors(readApplyServerErrorsSrc(files));
+    const calls: SetErrorCall[] = [];
+
+    const outcome = fn({
+      error: {
+        response: {
+          status: 422,
+          data: { title: "Inventory conflict — please retry" },
+        },
+      },
+      setError: (field, options) => calls.push({ field, options }),
+      fieldMap: {},
+    });
+
+    expect(outcome).toEqual({ kind: "global", title: "Inventory conflict — please retry" });
+    expect(calls).toEqual([]);
+  });
+
+  it("returns { kind: 'unhandled' } for non-422 status (e.g. 500)", async () => {
+    const { files } = generateSystems(await buildAcme());
+    const fn = loadApplyServerErrors(readApplyServerErrorsSrc(files));
+    const calls: SetErrorCall[] = [];
+
+    const outcome = fn({
+      error: { response: { status: 500, data: { title: "Internal Server Error" } } },
+      setError: (field, options) => calls.push({ field, options }),
+      fieldMap: {},
+    });
+
+    expect(outcome).toEqual({ kind: "unhandled" });
+    expect(calls).toEqual([]);
+  });
+
+  it("returns { kind: 'unhandled' } for network failure (no response object)", async () => {
+    const { files } = generateSystems(await buildAcme());
+    const fn = loadApplyServerErrors(readApplyServerErrorsSrc(files));
+    const calls: SetErrorCall[] = [];
+
+    const outcome = fn({
+      error: new Error("Network timeout"),
+      setError: (field, options) => calls.push({ field, options }),
+      fieldMap: {},
+    });
+
+    expect(outcome).toEqual({ kind: "unhandled" });
+    expect(calls).toEqual([]);
+  });
+
+  it("decodes URI-encoded JSON pointer segments correctly", async () => {
+    // RFC 6901 percent-escaping inside pointer segments — `/foo%2Fbar`
+    // should decode to the flat key `foo/bar`.  Edge case but cheap to
+    // assert; protects against pointer-to-flat regressions.
+    const { files } = generateSystems(await buildAcme());
+    const fn = loadApplyServerErrors(readApplyServerErrorsSrc(files));
+    const calls: SetErrorCall[] = [];
+
+    fn({
+      error: {
+        response: { status: 422, data: { errors: [{ pointer: "/foo%2Fbar", message: "x" }] } },
+      },
+      setError: (field, options) => calls.push({ field, options }),
+      fieldMap: {},
+    });
+
+    expect(calls[0].field).toBe("foo/bar");
+  });
+
+  it("falls back to flat pointer when no fieldMap match (identity behaviour)", async () => {
+    // The Phase 2 MVP relies on this: empty fieldMap means every
+    // pointer routes to itself (after the flatten transform).  Without
+    // this fallback, every form would need a populated fieldMap to do
+    // anything at all.
+    const { files } = generateSystems(await buildAcme());
+    const fn = loadApplyServerErrors(readApplyServerErrorsSrc(files));
+    const calls: SetErrorCall[] = [];
+
+    fn({
+      error: {
+        response: { status: 422, data: { errors: [{ pointer: "/customerId", message: "x" }] } },
+      },
+      setError: (field, options) => calls.push({ field, options }),
+      fieldMap: {},
+    });
+
+    expect(calls[0].field).toBe("customerId");
+  });
+});
