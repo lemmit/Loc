@@ -86,14 +86,14 @@ export function buildApiModule(
     const opInvariants = preconditionsAsInvariants(op);
     lines.push(
       ...emitObjectWithRefines(
-        `${upperFirst(op.name)}Request`,
+        `${upperFirst(op.name)}${agg.name}Request`,
         op.params.map((p) => ({ name: p.name, base: zodForRequest(p.type) })),
         opInvariants,
         new Set(op.params.map((p) => p.name)),
       ),
     );
     lines.push(
-      `export type ${upperFirst(op.name)}Request = z.infer<typeof ${upperFirst(op.name)}Request>;`,
+      `export type ${upperFirst(op.name)}${agg.name}Request = z.infer<typeof ${upperFirst(op.name)}${agg.name}Request>;`,
     );
   }
   lines.push("");
@@ -195,7 +195,7 @@ export function buildApiModule(
     lines.push(`export function use${upperFirst(op.name)}${agg.name}(id: string) {`);
     lines.push(`  const qc = useQueryClient();`);
     lines.push(`  return useMutation({`);
-    lines.push(`    mutationFn: async (input: ${upperFirst(op.name)}Request) => {`);
+    lines.push(`    mutationFn: async (input: ${upperFirst(op.name)}${agg.name}Request) => {`);
     lines.push(`      await api.post(\`/${tag}/\${id}/${opSnake}\`, input);`);
     lines.push(`    },`);
     lines.push(`    onSuccess: () => {`);

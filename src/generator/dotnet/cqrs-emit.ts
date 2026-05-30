@@ -149,7 +149,7 @@ function emitRequestDtos(
   });
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     records.push({
-      name: `${upperFirst(op.name)}Request`,
+      name: `${upperFirst(op.name)}${agg.name}Request`,
       params: op.params
         .map((p) => dtoParam(wireType(p.type, ctx, "request"), upperFirst(p.name), "request"))
         .join(", "),
@@ -297,7 +297,7 @@ function emitOperationCommandsAndHandlers(
       // Emit the user-implementable handler interface alongside the
       // auto Mediator handler, then dispatch through it.
       const ifaceName = `I${upperFirst(op.name)}${agg.name}Handler`;
-      const reqName = `${upperFirst(op.name)}Request`;
+      const reqName = `${upperFirst(op.name)}${agg.name}Request`;
       // Request record is wire-typed (X id → Guid, enum → string,
       // datetime → string, value-object → <VO>Request) but `cmd.X`
       // is domain-typed.  Convert each param via

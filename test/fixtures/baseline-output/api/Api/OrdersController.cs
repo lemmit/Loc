@@ -69,7 +69,7 @@ public sealed class OrdersController : ControllerBase
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
-    public async Task<IActionResult> AddLineOrder([FromRoute] Guid id, [FromBody] AddLineRequest request)
+    public async Task<IActionResult> AddLineOrder([FromRoute] Guid id, [FromBody] AddLineOrderRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "addLine", id);
         var cmd = new AddLineCommand(
@@ -85,7 +85,7 @@ public sealed class OrdersController : ControllerBase
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
-    public async Task<IActionResult> ConfirmOrder([FromRoute] Guid id, [FromBody] ConfirmRequest request)
+    public async Task<IActionResult> ConfirmOrder([FromRoute] Guid id, [FromBody] ConfirmOrderRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "confirm", id);
         var cmd = new ConfirmCommand(
@@ -99,7 +99,7 @@ public sealed class OrdersController : ControllerBase
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
-    public async Task<IActionResult> UpdateOrder([FromRoute] Guid id, [FromBody] UpdateRequest request)
+    public async Task<IActionResult> UpdateOrder([FromRoute] Guid id, [FromBody] UpdateOrderRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "update", id);
         var cmd = new UpdateCommand(

@@ -122,7 +122,7 @@ export function renderController(
       // 2xx body from the action signature, so it must be spelled out.
       "    [ProducesResponseType(204)]",
       ...producesProblem("operation"),
-      `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}Request request)`,
+      `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}${agg.name}Request request)`,
       "    {",
       ...wireInLine,
       // Business-narrative line — what the controller was asked to do,

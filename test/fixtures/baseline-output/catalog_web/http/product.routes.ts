@@ -17,10 +17,10 @@ const CreateProductRequest = z.object({
 }).openapi("CreateProductRequest");
 const CreateProductResponse = z.object({ id: z.string() }).openapi("CreateProductResponse");
 
-const UpdateRequest = z.object({
+const UpdateProductRequest = z.object({
   sku: z.string(),
   price: MoneySchema,
-}).openapi("UpdateRequest");
+}).openapi("UpdateProductRequest");
 
 const BySkuQuery = z.object({
   sku: z.string(),
@@ -119,7 +119,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       operationId: "updateProduct",
       request: {
         params: z.object({ id: z.string().uuid() }),
-        body: { content: { "application/json": { schema: UpdateRequest } } },
+        body: { content: { "application/json": { schema: UpdateProductRequest } } },
       },
       responses: {
         204: { description: "No content" },

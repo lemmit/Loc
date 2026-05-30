@@ -12,20 +12,20 @@ export const CreateOrderRequest = z.object({
 });
 export type CreateOrderRequest = z.infer<typeof CreateOrderRequest>;
 
-export const AddLineRequest = z.object({
+export const AddLineOrderRequest = z.object({
   productId: z.string(),
   qty: z.number().int().min(1),
 });
-export type AddLineRequest = z.infer<typeof AddLineRequest>;
-export const ConfirmRequest = z.object({
+export type AddLineOrderRequest = z.infer<typeof AddLineOrderRequest>;
+export const ConfirmOrderRequest = z.object({
 });
-export type ConfirmRequest = z.infer<typeof ConfirmRequest>;
-export const UpdateRequest = z.object({
+export type ConfirmOrderRequest = z.infer<typeof ConfirmOrderRequest>;
+export const UpdateOrderRequest = z.object({
   customerId: z.string(),
   status: OrderStatusSchema,
   placedAt: z.string(),
 });
-export type UpdateRequest = z.infer<typeof UpdateRequest>;
+export type UpdateOrderRequest = z.infer<typeof UpdateOrderRequest>;
 
 export const ByCustomerQuery = z.object({
   customerId: z.string(),
@@ -94,7 +94,7 @@ export function useDeleteOrder() {
 export function useAddLineOrder(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: AddLineRequest) => {
+    mutationFn: async (input: AddLineOrderRequest) => {
       await api.post(`/orders/${id}/add_line`, input);
     },
     onSuccess: () => {
@@ -107,7 +107,7 @@ export function useAddLineOrder(id: string) {
 export function useConfirmOrder(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: ConfirmRequest) => {
+    mutationFn: async (input: ConfirmOrderRequest) => {
       await api.post(`/orders/${id}/confirm`, input);
     },
     onSuccess: () => {
@@ -120,7 +120,7 @@ export function useConfirmOrder(id: string) {
 export function useUpdateOrder(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: UpdateRequest) => {
+    mutationFn: async (input: UpdateOrderRequest) => {
       await api.post(`/orders/${id}/update`, input);
     },
     onSuccess: () => {

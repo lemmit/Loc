@@ -8,9 +8,9 @@ namespace Api.Application.Orders.Requests;
 
 public sealed record CreateOrderRequest([property: Required] string CustomerId, [property: Required] OrderStatus Status, [property: Required] string PlacedAt);
 
-public sealed record AddLineRequest([property: Required] Guid ProductId, [property: Required] int Qty);
+public sealed record AddLineOrderRequest([property: Required] Guid ProductId, [property: Required] int Qty);
 
-public sealed record ConfirmRequest();
+public sealed record ConfirmOrderRequest();
 
-public sealed record UpdateRequest([property: Required] string CustomerId, [property: Required] OrderStatus Status, [property: Required] string PlacedAt);
+public sealed record UpdateOrderRequest([property: Required] string CustomerId, [property: Required] OrderStatus Status, [property: Required] string PlacedAt);
 

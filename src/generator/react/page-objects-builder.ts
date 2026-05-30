@@ -27,7 +27,7 @@ export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): 
   // body is assembled — page-object classes rarely use every Request/Response,
   // and dead `import type {}` lines fail the generated-code Biome gate.
   const candidateApiTypes: string[] = [`Create${agg.name}Request`];
-  for (const op of ops) candidateApiTypes.push(`${upperFirst(op.name)}Request`);
+  for (const op of ops) candidateApiTypes.push(`${upperFirst(op.name)}${agg.name}Request`);
   candidateApiTypes.push(`${agg.name}Response`);
 
   const lines: string[] = [];
@@ -156,7 +156,9 @@ export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): 
       lines.push("");
     } else {
       lines.push(`  /** ${op.name} — opens the modal, fills the form, submits. */`);
-      lines.push(`  async ${lowerFirst(op.name)}(input: ${opCap}Request): Promise<this> {`);
+      lines.push(
+        `  async ${lowerFirst(op.name)}(input: ${opCap}${agg.name}Request): Promise<this> {`,
+      );
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}").click();`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor();`);
       for (const p of op.params) {

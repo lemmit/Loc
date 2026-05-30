@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import type { Page, Locator } from "@playwright/test";
 import { expect } from "@playwright/test";
-import type { CreateProductRequest, UpdateRequest, ProductResponse } from "../../src/api/product";
+import type { CreateProductRequest, UpdateProductRequest, ProductResponse } from "../../src/api/product";
 
 export class ProductListPage {
   static readonly url = "/products";
@@ -83,7 +83,7 @@ export class ProductDetailPage {
   }
 
   /** update — opens the modal, fills the form, submits. */
-  async update(input: UpdateRequest): Promise<this> {
+  async update(input: UpdateProductRequest): Promise<this> {
     await this.page.getByTestId("products-op-update").click();
     await this.page.getByTestId("products-op-update-form").waitFor();
     if (input.sku !== undefined) {

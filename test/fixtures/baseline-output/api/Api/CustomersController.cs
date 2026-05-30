@@ -68,7 +68,7 @@ public sealed class CustomersController : ControllerBase
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
-    public async Task<IActionResult> UpdateCustomer([FromRoute] Guid id, [FromBody] UpdateRequest request)
+    public async Task<IActionResult> UpdateCustomer([FromRoute] Guid id, [FromBody] UpdateCustomerRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Customer", "update", id);
         var cmd = new UpdateCommand(

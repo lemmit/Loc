@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import type { Page, Locator } from "@playwright/test";
 import { expect } from "@playwright/test";
-import type { CreateOrderRequest, AddLineRequest, UpdateRequest, OrderResponse } from "../../src/api/order";
+import type { CreateOrderRequest, AddLineOrderRequest, UpdateOrderRequest, OrderResponse } from "../../src/api/order";
 
 export class OrderListPage {
   static readonly url = "/orders";
@@ -97,7 +97,7 @@ export class OrderDetailPage {
   }
 
   /** addLine — opens the modal, fills the form, submits. */
-  async addLine(input: AddLineRequest): Promise<this> {
+  async addLine(input: AddLineOrderRequest): Promise<this> {
     await this.page.getByTestId("orders-op-addLine").click();
     await this.page.getByTestId("orders-op-addLine-form").waitFor();
     if (input.productId !== undefined) {
@@ -127,7 +127,7 @@ export class OrderDetailPage {
   }
 
   /** update — opens the modal, fills the form, submits. */
-  async update(input: UpdateRequest): Promise<this> {
+  async update(input: UpdateOrderRequest): Promise<this> {
     await this.page.getByTestId("orders-op-update").click();
     await this.page.getByTestId("orders-op-update-form").waitFor();
     if (input.customerId !== undefined) {

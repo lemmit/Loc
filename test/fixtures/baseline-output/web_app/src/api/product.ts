@@ -14,11 +14,11 @@ export const CreateProductRequest = z.object({
 });
 export type CreateProductRequest = z.infer<typeof CreateProductRequest>;
 
-export const UpdateRequest = z.object({
+export const UpdateProductRequest = z.object({
   sku: z.string(),
   price: MoneySchema,
 });
-export type UpdateRequest = z.infer<typeof UpdateRequest>;
+export type UpdateProductRequest = z.infer<typeof UpdateProductRequest>;
 
 export const BySkuQuery = z.object({
   sku: z.string(),
@@ -80,7 +80,7 @@ export function useDeleteProduct() {
 export function useUpdateProduct(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: UpdateRequest) => {
+    mutationFn: async (input: UpdateProductRequest) => {
       await api.post(`/products/${id}/update`, input);
     },
     onSuccess: () => {

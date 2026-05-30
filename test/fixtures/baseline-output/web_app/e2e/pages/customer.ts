@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import type { Page, Locator } from "@playwright/test";
 import { expect } from "@playwright/test";
-import type { CreateCustomerRequest, UpdateRequest, CustomerResponse } from "../../src/api/customer";
+import type { CreateCustomerRequest, UpdateCustomerRequest, CustomerResponse } from "../../src/api/customer";
 
 export class CustomerListPage {
   static readonly url = "/customers";
@@ -81,7 +81,7 @@ export class CustomerDetailPage {
   }
 
   /** update — opens the modal, fills the form, submits. */
-  async update(input: UpdateRequest): Promise<this> {
+  async update(input: UpdateCustomerRequest): Promise<this> {
     await this.page.getByTestId("customers-op-update").click();
     await this.page.getByTestId("customers-op-update-form").waitFor();
     if (input.username !== undefined) {

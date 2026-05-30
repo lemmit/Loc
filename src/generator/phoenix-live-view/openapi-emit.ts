@@ -55,7 +55,10 @@ import type { ApiRoute } from "./api-emit.js";
 //   Entity part response:      <Part>Response
 //   Value object:              <Vo>
 //   Create request:            Create<Agg>Request
-//   Operation request:         <Op>Request   (Pascal-cased op name)
+//   Operation request:         <Op><Agg>Request  (aggregate-qualified — an
+//                              op name like `update` is shared across
+//                              aggregates, e.g. via crudish, so the DTO must
+//                              be qualified to avoid a schema-id collision)
 //   Workflow request:          <Wf>Request   (Pascal-cased workflow name)
 //   View response:             <View>Response
 // ---------------------------------------------------------------------------
@@ -191,7 +194,7 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     // Per-operation request schemas
     for (const op of agg.operations.filter((o) => o.visibility === "public")) {
       files.set(
-        `${schemaDir}/${snake(op.name)}_request.ex`,
+        `${schemaDir}/${snake(op.name)}_${snake(agg.name)}_request.ex`,
         renderOperationRequestSchema(agg, op, webModule),
       );
     }
@@ -427,7 +430,7 @@ function renderApiSpec(
       // Spec path must track the route's URL segment (routeSlug, D-URLSTYLE);
       // operationId + request module stay keyed on op.name.
       const opSnake = snake(op.routeSlug ?? op.name);
-      const opReqMod = `${schemasModule}.${upperFirst(op.name)}Request`;
+      const opReqMod = `${schemasModule}.${upperFirst(op.name)}${agg.name}Request`;
       pathEntries.push(
         `      "/${aggSlug}/{id}/${opSnake}" => %OpenApiSpex.PathItem{
         post: %OpenApiSpex.Operation{
@@ -828,7 +831,7 @@ function renderOperationRequestSchema(
   op: import("../../ir/types/loom-ir.js").OperationIR,
   webModule: string,
 ): string {
-  const schemaName = `${upperFirst(op.name)}Request`;
+  const schemaName = `${upperFirst(op.name)}${agg.name}Request`;
   const moduleName = `${webModule}.Api.Schemas.${schemaName}`;
   const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = op.params.map(
     (p: ParamIR) => ({
@@ -837,7 +840,6 @@ function renderOperationRequestSchema(
       optional: false,
     }),
   );
-  void agg;
   return renderSchemaModule(moduleName, schemaName, fields, `${webModule}.Api.Schemas`, true);
 }
 

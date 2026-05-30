@@ -13,11 +13,11 @@ const CreateCustomerRequest = z.object({
 }).openapi("CreateCustomerRequest").refine((data) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 const CreateCustomerResponse = z.object({ id: z.string() }).openapi("CreateCustomerResponse");
 
-const UpdateRequest = z.object({
+const UpdateCustomerRequest = z.object({
   username: z.string(),
   email: z.string(),
   age: z.coerce.number().int(),
-}).openapi("UpdateRequest");
+}).openapi("UpdateCustomerRequest");
 
 const ByEmailQuery = z.object({
   email: z.string(),
@@ -117,7 +117,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
       operationId: "updateCustomer",
       request: {
         params: z.object({ id: z.string().uuid() }),
-        body: { content: { "application/json": { schema: UpdateRequest } } },
+        body: { content: { "application/json": { schema: UpdateCustomerRequest } } },
       },
       responses: {
         204: { description: "No content" },

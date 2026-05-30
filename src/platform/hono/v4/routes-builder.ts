@@ -192,8 +192,8 @@ export function buildRoutesFile(
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     lines.push(
       ...emitWireSchema(
-        `const ${upperFirst(op.name)}Request`,
-        `${upperFirst(op.name)}Request`,
+        `const ${upperFirst(op.name)}${agg.name}Request`,
+        `${upperFirst(op.name)}${agg.name}Request`,
         op.params.map((p) => ({ name: p.name, base: zodFor(p.type) })),
         preconditionsAsInvariants(op),
         new Set(op.params.map((p) => p.name)),
@@ -539,7 +539,7 @@ function emitOperationRoute(
   out.push(`    request: {`);
   out.push(`      params: z.object({ id: z.string().uuid() }),`);
   out.push(
-    `      body: { content: { "application/json": { schema: ${upperFirst(op.name)}Request } } },`,
+    `      body: { content: { "application/json": { schema: ${upperFirst(op.name)}${agg.name}Request } } },`,
   );
   out.push(`    },`);
   out.push(`    responses: {`);
