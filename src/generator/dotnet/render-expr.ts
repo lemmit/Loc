@@ -38,6 +38,12 @@ export interface CsRenderContext {
    * `where` clauses, so other emission contexts (derived, invariant)
    * shouldn't reach it. */
   agg?: EnrichedAggregateIR;
+  /** Resource-op call routing: resourceName → static C# helper class
+   *  name (e.g. `salesFiles` → `S3Resources`).  Set on the workflow
+   *  render context (Phase 4c); a `resource-op` call renders to
+   *  `<class>.<Resource>_<Verb>(args)`.  When unset, a resource-op
+   *  throws at emit (non-resource render contexts never see one). */
+  resourceClasses?: Map<string, string>;
 }
 
 const DEFAULT: CsRenderContext = { thisName: "this" };
@@ -312,14 +318,21 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: CsRenderContext):
     case "function":
     case "private-operation":
       return `${ctx.thisName}.${upperFirst(e.name)}(${args})`;
-    case "resource-op":
-      // Resource consumption (Phase 4) is hono-only today; the .NET
-      // ResourceAdapter lands in 4c.  The IR validator does not block
-      // resource-ops per-platform yet, so guard at emit with a clear
-      // message rather than emitting broken C#.
-      throw new Error(
-        `Resource operations (e.g. '${e.resourceOp?.resourceName}.${e.resourceOp?.verb}') are not yet supported on the .NET backend.`,
-      );
+    case "resource-op": {
+      // Resource-op (Phase 4c) → `<Class>.<Resource>_<Verb>(args)`, an
+      // async static helper the .NET ResourceAdapter emits.  Awaited by
+      // the statement renderer.  The class is routed by sourceType via
+      // `ctx.resourceClasses`; a missing entry means this render context
+      // shouldn't carry a resource-op.
+      const op = e.resourceOp!;
+      const cls = ctx.resourceClasses?.get(op.resourceName);
+      if (!cls) {
+        throw new Error(
+          `Resource operation '${op.resourceName}.${op.verb}' reached the .NET renderer without a resource class mapping.`,
+        );
+      }
+      return `${cls}.${upperFirst(op.resourceName)}_${upperFirst(op.verb)}(${args})`;
+    }
     case "free":
       return `${upperFirst(e.name)}(${args})`;
   }
