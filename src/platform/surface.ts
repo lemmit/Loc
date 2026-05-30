@@ -104,6 +104,16 @@ export interface PlatformSurface {
    * the DSL's casing (lowerCamelCase) — the validator compares
    * against `find.name` directly. */
   readonly reservedRepositoryFindNames: ReadonlySet<string>;
+  /** The URL path prefix under which this backend serves its JSON
+   * REST surface, relative to the service origin.  Empty for `hono`
+   * and standalone `dotnet` (controllers mount at the root, e.g.
+   * `/orders`); `"/api"` for `phoenixLiveView` (whose router wraps
+   * every controller in `scope "/api"`).  Consumed by the React
+   * generator to compute a consuming frontend's `apiBaseUrl` instead
+   * of hardcoding a per-target-platform string, mirroring the
+   * `mountsUi` / `isFrontend` flag pattern.  Frontend platforms
+   * (`react` / `static`) serve no API and leave this empty. */
+  readonly apiBasePath: string;
   /** All files for one deployable's project, paths relative to the
    * deployable's folder under `<outdir>/`.
    *

@@ -57,6 +57,16 @@ import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflo
  *      output into `wwwroot/`. */
 export interface GenerateReactOptions {
   apiBaseUrl?: string;
+  /** Path prefix under which the target backend serves its JSON API,
+   *  relative to the service origin (e.g. `"/api"` for a
+   *  phoenixLiveView target whose router wraps controllers in
+   *  `scope "/api"`; `""` for hono / standalone dotnet which mount at
+   *  the root).  Appended to the computed `http://localhost:<port>`
+   *  base when `apiBaseUrl` isn't given explicitly.  The platform
+   *  layer (`src/platform/react.ts`) reads it off the target's
+   *  `PlatformSurface.apiBasePath`; this generator stays
+   *  platform-agnostic and only sees the resulting string. */
+  apiBasePath?: string;
   pathPrefix?: string;
   /** Top-level (workspace-wide) components — pure render functions
    *  declared as bare `ModelMember`s in any reachable `.ddd`
@@ -76,9 +86,13 @@ export function generateReactForContexts(
   const out = new Map<string, string>();
 
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
-  // Standalone react picks the target deployable's port; fullstack
-  // dotnet overrides with `"/api"` for same-origin SPA fetches.
-  const apiBaseUrl = options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
+  // Standalone react picks the target deployable's port, plus the
+  // backend's API base path (`/api` for Phoenix, `""` for Hono) so the
+  // generated client hits the scope the backend actually serves on.
+  // Fullstack dotnet overrides the whole base with `"/api"` for
+  // same-origin SPA fetches.
+  const apiBaseUrl =
+    options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}${options.apiBasePath ?? ""}`;
 
   // Per-aggregate api modules + pages.
   const aggregates: Array<{ agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }> = [];

@@ -32,6 +32,12 @@ const dotnetPlatform: PlatformSurface = {
   // it DOES on Hono — the validator takes the union across all
   // platforms (see `validateLoomModel`).
   reservedRepositoryFindNames: new Set(["saveAsync", "getByIdAsync"]),
+  // Standalone .NET mounts controllers at the root (`[Route("orders")]`).
+  // The fullstack/embedded-SPA mode moves them under `/api`, but that is
+  // a per-deployable decision handled inside the dotnet orchestrator
+  // (the SPA fetches same-origin `/api`), not a platform-wide default —
+  // so the platform's standalone base path is the empty root.
+  apiBasePath: "",
   emitProject({ contexts, deployable, sys, migrations }): Map<string, string> {
     const namespace = deployable.name[0]!.toUpperCase() + deployable.name.slice(1);
     // The orchestrator (`generator/dotnet/index.ts`) dispatches

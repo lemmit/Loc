@@ -622,6 +622,9 @@ defmodule ${appModule}.MixProject do
       {:phoenix, "~> 1.8"},
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_html, "~> 4.1"},
+      # CORS for cross-origin calls from a standalone React frontend
+      # (see the CORSPlug in endpoint.ex).
+      {:cors_plug, "~> 3.0"},
       {:phoenix_ecto, "~> 4.4"},
       {:ecto_sql, "~> 3.10"},
       {:postgrex, "~> 0.20"},
@@ -1054,6 +1057,13 @@ defmodule ${webModule}.Endpoint do
 
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+
+  # Permissive CORS so a generated React frontend on a different origin
+  # (its own port in dev compose) can reach the JSON API.  Mirrors the
+  # Hono backend's \`app.use("*", cors())\`; tighten the origins in
+  # production.  Mounted before the parsers / router so preflight
+  # OPTIONS requests are answered for every route.
+  plug CORSPlug
 
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],

@@ -47,6 +47,9 @@ const honoPlatform: PlatformSurface = {
   // one of these names would compile-error with TS2393 "Duplicate
   // function implementation".
   reservedRepositoryFindNames: new Set(["save", "findById", "getById"]),
+  // Hono mounts aggregate routers at the root (`app.route("/orders", …)`),
+  // so a consuming frontend hits the origin directly.
+  apiBasePath: "",
   emitProject({ contexts, deployable, sys, migrations, emitTrace }): Map<string, string> {
     // The package supplies its own pins to the shared emitter —
     // edge points package → shared, never the reverse.

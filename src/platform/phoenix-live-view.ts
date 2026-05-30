@@ -32,6 +32,10 @@ const phoenixLiveViewPlatform: PlatformSurface = {
   // of these would collide with the auto-generated CRUD action of
   // the same name on the resource module.
   reservedRepositoryFindNames: new Set(["get", "read", "create", "update", "destroy"]),
+  // The Phoenix router wraps every JSON controller in `scope "/api"`
+  // (health/ready aside), so a consuming React frontend must target
+  // `<origin>/api`, not the bare origin.
+  apiBasePath: "/api",
   emitProject({ contexts, deployable, sys, migrations, emitTrace }): Map<string, string> {
     return generatePhoenixLiveViewProject({ contexts, deployable, sys, migrations, emitTrace });
   },
