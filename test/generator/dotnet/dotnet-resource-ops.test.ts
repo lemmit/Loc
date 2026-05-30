@@ -44,7 +44,8 @@ describe(".NET resource client emission", () => {
 
     const mq = files.get("api/Resources/RabbitmqResources.cs")!;
     expect(mq).toMatch(/using RabbitMQ.Client;/);
-    expect(mq).toMatch(/public static Task SalesJobs_Enqueue\(string message\)/);
+    expect(mq).toMatch(/public static async Task SalesJobs_Enqueue\(string message\)/);
+    expect(mq).toMatch(/CreateChannelAsync/);
 
     const api = files.get("api/Resources/RestApiResources.cs")!;
     expect(api).toMatch(/public static async Task<string> SalesApi_Get\(string path\)/);
