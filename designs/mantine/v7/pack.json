@@ -465,6 +465,12 @@
         "named": [
           "modals"
         ]
+      },
+      {
+        "from": "../lib/apply-server-errors",
+        "named": [
+          "applyServerErrors"
+        ]
       }
     ],
     "form-default-onsubmit": [
@@ -472,6 +478,12 @@
         "from": "@mantine/notifications",
         "named": [
           "notifications"
+        ]
+      },
+      {
+        "from": "../lib/apply-server-errors",
+        "named": [
+          "applyServerErrors"
         ]
       }
     ]

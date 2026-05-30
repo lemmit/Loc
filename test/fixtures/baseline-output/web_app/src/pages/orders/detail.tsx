@@ -2,6 +2,7 @@
 import { useParams, Link as RouterLink } from "react-router";
 import { AddLineRequest, ConfirmRequest, useAddLineOrder, useConfirmOrder } from "../../api/order";
 import { useAllProducts } from "../../api/product";
+import { applyServerErrors } from "../../lib/apply-server-errors";
 import { DateTimeValue, IdValue, KeyValueRow } from "../../lib/format";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Alert, Anchor, Badge, Breadcrumbs, Button, Card, Group, NumberInput, Select, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
@@ -18,7 +19,7 @@ function openAddLineModal(mut: ReturnType<typeof useAddLineOrder>): void {
 
 function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>; onClose: () => void }) {
   const __products = useAllProducts();
-  const { handleSubmit, control } = useForm<AddLineRequest>({
+  const { handleSubmit, setError, control } = useForm<AddLineRequest>({
     resolver: zodResolver(AddLineRequest),
     defaultValues: { productId: "", qty: 0 },
   });
@@ -31,7 +32,12 @@ function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>
           notifications.show({ color: "green", message: "Add Line succeeded" });
           onClose();
         } catch (e) {
-          notifications.show({ color: "red", message: (e as Error).message });
+          const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+          if (outcome.kind === "global") {
+            notifications.show({ color: "red", message: outcome.title });
+          } else if (outcome.kind === "unhandled") {
+            notifications.show({ color: "red", message: (e as Error).message });
+          }
         }
       })}
     >
@@ -68,7 +74,7 @@ function openConfirmModal(mut: ReturnType<typeof useConfirmOrder>): void {
 }
 
 function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>; onClose: () => void }) {
-  const { handleSubmit } = useForm<ConfirmRequest>({
+  const { handleSubmit, setError } = useForm<ConfirmRequest>({
     resolver: zodResolver(ConfirmRequest),
     defaultValues: {  },
   });
@@ -81,7 +87,12 @@ function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>
           notifications.show({ color: "green", message: "Confirm succeeded" });
           onClose();
         } catch (e) {
-          notifications.show({ color: "red", message: (e as Error).message });
+          const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+          if (outcome.kind === "global") {
+            notifications.show({ color: "red", message: outcome.title });
+          } else if (outcome.kind === "unhandled") {
+            notifications.show({ color: "red", message: (e as Error).message });
+          }
         }
       })}
     >
