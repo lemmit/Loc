@@ -2,16 +2,65 @@
 
 > Tracks: [`../proposals/frontend-acl.md`](../proposals/frontend-acl.md) — SEALED.
 > Branch: `claude/magical-johnson-7XnzR`.
-> **Phase 1.1+1.2 shipped** (commit `f341d4b`): `src/lib/strict-field-map.ts` + `src/lib/apply-server-errors.ts` emitted into every React deployable, behaviourally inert. Baseline fixture refreshed. 5 dedicated tests + 307 React tests green.
 >
-> **Codebase reality discovered during 1.1/1.2 work that revises the rest of the plan:** schemas are NOT in a central `src/lib/schemas.ts` — they're emitted inline inside each `src/api/<agg>.ts` by `buildApiModule` (`src/generator/react/api-builder.ts:40`). The central `src/lib/schemas.ts` exists only conditionally for the shared `moneySchema` helper (`src/generator/react/index.ts:275–277`).
+> **Phase 1.1+1.2 shipped** (commit `f341d4b`): `src/lib/strict-field-map.ts` + `src/lib/apply-server-errors.ts` emitted into every React deployable, behaviourally inert. Baseline fixture refreshed. Dedicated emission + content tests added.
 >
-> **Consequence:** Step 1.3 ("split `src/lib/schemas.ts` into per-action files") was based on a wrong premise. There is nothing to split — schemas already live in per-aggregate files. The FieldMap emission (originally Step 1.4) is **inextricable** from the schema restructure (flat-key inputs + `.transform()` + `.readonly()`) because a FieldMap has nothing to translate while the schema stays nested. Step 1.3+1.4 therefore collapse into Phase 2 as one atomic change.
+> **Phase 2 shipped** (commit `aa86ced`): ACL loop wired into every generated form's catch block across all 8 pack/version combinations (mantine v7+v9, shadcn v3+v4, mui v5+v7, chakra v2+v3) — for both create/workflow forms (`form-default-onsubmit.hbs`) and operation-modal forms (`form-op-module.hbs`). `setError` plumbed through the `useForm()` destructure where the pack uses that pattern (mantine/mui/chakra); shadcn uses `form.setError` directly. Pack `pack.json` imports updated. Walker's op-form computed destructure unconditionally includes `setError`. 5 baseline-fixture pages refreshed. 4 new wiring-assertion tests added.
 >
-> **Revised phasing** (current truth):
-> - Phase 1 (DONE): two shared lib files, behaviourally inert.
-> - Phase 2: schema restructure inside `src/api/<agg>.ts` (flat-key + transform + readonly + FormState/Payload exports + per-action FieldMap instance + flattener) **and** walker rewire **and** pack template amendments — one atomic landing because the consumer-side types change.
-> - Phase 3: `option` field rendering.
+> **Phase 2 hardening shipped** (commit `ab73700`): 7 behavioural tests for the emitted `applyServerErrors` runtime — transpiles the emitted TS in-test via `ts.transpileModule` (no extra dep), executes the live function against synthetic ProblemDetails / network-error inputs, and asserts the actual semantics (pointer→flat translation, per-pointer `setError` dispatch, outcome branching, URI-encoded segment handling, identity-fallback when fieldMap is empty). The runtime is now fully covered at the unit level.
+>
+> **Status:** Phase 1 + Phase 2 + Phase 2 hardening complete. Full fast suite 3002 / 3022 tests passing (20 skipped); Biome clean. The end-to-end ACL loop is live in every generated React project. Any backend that returns RFC 7807 ProblemDetails 422 with `errors[].pointer` will surface those errors inline on the corresponding form fields without page-author plumbing.
+>
+> **Codebase reality discovered during 1.1/1.2 work that revised the rest of the plan:** schemas are NOT in a central `src/lib/schemas.ts` — they're emitted inline inside each `src/api/<agg>.ts` by `buildApiModule` (`src/generator/react/api-builder.ts:40`). The central `src/lib/schemas.ts` exists only conditionally for the shared `moneySchema` helper. This collapsed the original Steps 1.3+1.4 into Phase 3 below.
+
+## What's NOT done (deferred — see "Why deferred" below)
+
+### Phase 3 — Schema restructure: flat-key inputs + transform + dual types
+
+**Goal:** make `<Action>FormState` (`z.input`) and `<Action>Payload` (`z.output`) diverge meaningfully. Today they're identical because there's no `.transform()` in the schema chain. The proposal's vocabulary distinction only becomes real after this.
+
+**Concretely:** restructure each `Create<Agg>Request` / `<Op>Request` in `src/api/<agg>.ts` so that:
+- Value-object fields flatten to dot-keys at the input side (`{ "price.amount": z.number(), "price.currency": z.string() }` instead of `{ price: MoneySchema }`)
+- A `.transform(flat → nested)` step reconstitutes the nested shape on the output
+- `.readonly()` seals the output type
+- Three exports per action: `<action>Schema` (unchanged identifier, new shape), `<Action>FormState = z.input<typeof ...>`, `<Action>Payload = z.output<typeof ...>`
+- Per-action FieldMap constant emitted alongside, with `satisfies StrictFieldMap<Payload, FormState>` providing real type-level constraint
+- Form walker switches to `useForm<FormState>`, error access changes from `errors.price?.amount?.message` (nested) to `errors["price.amount"]?.message` (flat)
+
+**Why deferred from this branch:**
+- The user explicitly pushed back on emitting things with no current value (toast shim, empty FieldMap exports, fabricated `_runtime/` directory). Emitting `<Action>FormState` and `<Action>Payload` as separate type aliases that are STRUCTURALLY IDENTICAL — because the schema has no transform — falls in the same category. Empty exports for "future use" generate noise.
+- The schema restructure is a meaningful architectural change. It changes the form-state TYPE that consumers see, the error access pattern in JSX, and the form walker's typing. Doing it half-way (emit new types alongside, retire old) doubles the surface during transition.
+- It's also not blocking the ACL loop. The current setup works because (a) RHF's `setError` accepts dot-paths into nested state, (b) `pointerToFlat("/price/amount") → "price.amount"`, and (c) RHF's `Path<T>` machinery handles both flat and nested registration uniformly.
+
+**When to do it:** when there's a concrete user-visible requirement that flat ≠ nested — e.g., a form field whose label / order / grouping differs from the wire shape, or when `loom-forms.md` lands and forms bind to action params (which may explicitly flatten in ways the wire shape doesn't).
+
+### Phase 4 — `option` field rendering (the "leave unchanged" toggle)
+
+Gated on [`partial-update.md`](../proposals/partial-update.md) defining the wire encoding for `T option`. Out of scope until that lands.
+
+## What's done — summary table
+
+| Phase | Status | Commit | Files | Tests |
+|---|---|---|---|---|
+| 1.1 — `strict-field-map.ts` emit | Shipped | `f341d4b` | 2 (src + fixture) | 2 (emission, content) |
+| 1.2 — `apply-server-errors.ts` emit | Shipped | `f341d4b` | 2 (src + fixture) | 3 (emission, content, pack-agnostic) |
+| 2 — Catch-block wiring across all 8 packs | Shipped | `aa86ced` | 43 (16 templates + 8 pack.json + 12 decls + 1 walker + 5 fixtures + 1 test) | 4 (form-of, form-op×2 forms, form-runs, toast preservation) |
+| 2 hardening — runtime behavioural tests | Shipped | `ab73700` | 1 (test only) | 7 (applied, fieldMap routing, global, unhandled×2, URI decode, identity fallback) |
+
+**Total: 49 files changed across 4 commits, 16 dedicated ACL tests, full fast suite green (3002 / 3022).**
+
+## Validation gates passed
+
+- `npm test` — 3002 / 3022 passed (0 failed)
+- `npx vitest run test/generator/react/` + `page-emitter-equivalence` — 311 / 311 passed
+- `npx biome ci --diagnostic-level=error .` — clean
+- `npm run build` — clean (composite tsc)
+
+Pending in CI (long-running):
+- `LOOM_REACT_BUILD=1 npm run test:tsc-react` — generated React projects × all packs tsc-clean
+- `LOOM_BIOME=1 npm run test:biome-gen` — Biome lint against emitted TSX (catches output drift)
+- `LOOM_TS_BUILD=1 npm run test:tsc` — TS backend tsc-clean (catches wire-shape regressions)
+- `LOOM_E2E=1 npm run test:e2e` — full stack 422 round-trip via Playwright
 
 ## Context
 
