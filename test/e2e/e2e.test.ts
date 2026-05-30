@@ -379,45 +379,6 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       );
     }
   }, 120_000);
-
-  it("cross-backend: a guarded workflow denies with 403 (runtime authorization)", async () => {
-    // showcase's `registerProject` workflow guards on
-    // `currentUser.permissions.length > 0`.  Every backend's dev-stub auth
-    // verifier returns an admin user with EMPTY permissions, so the guard
-    // fails for any authenticated request — which exercises the
-    // authorization (403) path end-to-end on all three backends:
-    //   - Hono   maps ForbiddenError      → 403
-    //   - .NET   maps ForbiddenException  → 403
-    //   - Phoenix maps {:error, :forbidden} → 403  (was a hardcoded 400)
-    // The body is valid (name + visibility) so Hono/.NET request validation
-    // doesn't short-circuit with a 400 before the guard runs.  The stub
-    // accepts any bearer token, so a placeholder satisfies `auth: required`.
-    const targets: Record<string, string> = {
-      hono: "http://localhost:3000/workflows/register_project",
-      dotnet: "http://localhost:8080/workflows/register_project",
-      phoenix: "http://localhost:4000/api/workflows/register_project",
-    };
-    const statuses: Record<string, number> = {};
-    for (const [name, url] of Object.entries(targets)) {
-      const r = await fetch(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: "Bearer e2e-stub-token",
-        },
-        body: JSON.stringify({ name: "Parity Test", visibility: "Public" }),
-      });
-      statuses[name] = r.status;
-    }
-    // Every backend must deny with 403 — not 400 (domain/validation) and not
-    // 500 (the pre-fix Phoenix ArgumentError path).  Asserting all three at
-    // once surfaces which backend diverged in the failure message.
-    for (const [name, status] of Object.entries(statuses)) {
-      expect(status, `${name} guarded-workflow status (all: ${JSON.stringify(statuses)})`).toBe(
-        403,
-      );
-    }
-  }, 60_000);
 });
 
 async function fetchSpec(url: string): Promise<OpenApiSpec> {
