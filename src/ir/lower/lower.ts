@@ -31,6 +31,7 @@ import type {
   Operation,
   Page,
   Parameter,
+  PayloadDecl,
   Property,
   Repository,
   Requirement,
@@ -74,6 +75,7 @@ import {
   isNameRef,
   isObjectLit,
   isOperation,
+  isPayloadDecl,
   isPermissionsBlock,
   isPostfixChain,
   isPreconditionStmt,
@@ -131,6 +133,7 @@ import type {
   PageMetadataIR,
   PageOriginIR,
   ParamIR,
+  PayloadIR,
   PermissionDeclIR,
   Platform,
   RawLoomModel,
@@ -1251,6 +1254,7 @@ function lowerContext(
   const enums: EnumIR[] = [];
   const valueObjects: ValueObjectIR[] = [];
   const events: EventIR[] = [];
+  const payloads: PayloadIR[] = [];
   const aggregates: AggregateIR[] = [];
   const repositories: RepositoryIR[] = [];
   const workflows: WorkflowIR[] = [];
@@ -1266,6 +1270,7 @@ function lowerContext(
     if (isEnumDecl(m)) enums.push(lowerEnum(m));
     else if (isValueObject(m)) valueObjects.push(lowerValueObject(m, env));
     else if (isEventDecl(m)) events.push(lowerEvent(m));
+    else if (isPayloadDecl(m)) payloads.push(lowerPayload(m));
     else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env, ctxCaps));
     else if (isRepository(m)) repositories.push(lowerRepository(m, user, modulePermissions));
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
@@ -1277,6 +1282,12 @@ function lowerContext(
     enums,
     valueObjects,
     events,
+    // Unified payload-family view: the context's `event`s projected in as
+    // `kind: "event"` payloads, then the author-declared `PayloadDecl`s.
+    // `events` above stays populated so existing event emission is
+    // untouched.  P2's synthesized `<Agg>Wire` payloads are appended in
+    // enrichment, not here.
+    payloads: [...events.map(eventToPayload), ...payloads],
     aggregates,
     repositories,
     workflows,
@@ -1334,6 +1345,26 @@ function lowerEvent(e: EventDecl): EventIR {
     name: e.name,
     fields: e.fields.map((f) => lowerField(f)),
   };
+}
+
+/** Lower a `PayloadDecl` (payload / command / query / response / error)
+ *  to the unified `PayloadIR`.  Structural record only — generics and
+ *  unions are P3 / P4.  The grammar `kind` token doubles as the IR
+ *  discriminator. */
+function lowerPayload(p: PayloadDecl): PayloadIR {
+  return {
+    name: p.name,
+    kind: p.kind as PayloadIR["kind"],
+    fields: p.fields.map((f) => lowerField(f)),
+  };
+}
+
+/** Project a lowered `event` into the unified payload view as a
+ *  `kind: "event"` payload (payload-transport-layer.md P1 — "event is a
+ *  payload subtype").  Shares the underlying `FieldIR[]`; no copy needed
+ *  since both views are read-only downstream. */
+function eventToPayload(e: EventIR): PayloadIR {
+  return { name: e.name, kind: "event", fields: e.fields };
 }
 
 function lowerAggregate(

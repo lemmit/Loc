@@ -25,6 +25,7 @@ import type {
   LoomModel,
   NeedIR,
   OperationIR,
+  PayloadIR,
   RawLoomModel,
   RepositoryIR,
   SubdomainIR,
@@ -287,7 +288,40 @@ export function enrichContext(
   const enums = [...ctx.enums, ...rootEnums.filter((e) => !ownEnumNames.has(e.name))];
   const aggregates = ctx.aggregates.map((a) => enrichAggregate(a, valueObjects, urlStyle));
   const repositories = ensureFindAll(aggregates, ctx.repositories);
-  return { ...ctx, valueObjects, enums, aggregates, repositories };
+  // P2 (payload-transport-layer.md): give every concrete aggregate's wire
+  // shape a named, referenceable `<Agg>Wire` payload.  Purely additive IR
+  // surface — backends keep consuming `wireShape` directly, so emission is
+  // unchanged.  Abstract bases (aggregate-inheritance.md, #749) emit no
+  // table/DTO and are dropped from codegen, so they get no `<Base>Wire`;
+  // the `isAbstract` guard is forward-compatible (the field is absent on
+  // this branch and becomes a real flag once the inheritance track lands).
+  const wirePayloads = aggregates
+    .filter((a) => !(a as { isAbstract?: boolean }).isAbstract)
+    .map(synthesizeWirePayload);
+  // Idempotent: drop any synthesized payloads from a prior enrichment pass
+  // before re-appending, so `enrich(enrich(m))` deep-equals `enrich(m)`.
+  // Author-declared payloads (no `synthesized` flag) are preserved.  The
+  // `?? []` tolerates IR hand-constructed outside the standard lowering
+  // pipeline (test fixtures, the IR-level expander shim) that predate the
+  // `payloads` field — lowering always populates it for real sources.
+  const payloads = [...(ctx.payloads ?? []).filter((p) => !p.synthesized), ...wirePayloads];
+  return { ...ctx, valueObjects, enums, aggregates, repositories, payloads };
+}
+
+/** Derive the named `<Agg>Wire` payload (P2) from an enriched aggregate's
+ *  already-computed `wireShape`.  The wire shape is the single source of
+ *  truth for the cross-backend DTO; this just names it as a `PayloadIR`
+ *  so later phases (and authors, eventually) can reference it.  A
+ *  `WireField` maps to a `FieldIR` one-to-one on `{name, type, optional,
+ *  access}` — `source` is wire-shape bookkeeping the payload doesn't need. */
+function synthesizeWirePayload(agg: EnrichedAggregateIR): PayloadIR {
+  const fields: FieldIR[] = agg.wireShape.map((w) => ({
+    name: w.name,
+    type: w.type,
+    optional: w.optional,
+    access: w.access,
+  }));
+  return { name: `${agg.name}Wire`, kind: "payload", fields, synthesized: true };
 }
 
 /** Derive an action's HTTP path segment from the surfacing api's
