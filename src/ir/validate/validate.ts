@@ -73,7 +73,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateSystem(sys, diags);
     validateDataSourceCoverage(sys, diags);
     validateSavingShapeSupport(sys, diags);
-    validateHonoContextFilterSupport(sys, diags);
+    validateContextFilterSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
@@ -996,33 +996,41 @@ function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[]): voi
 }
 
 // ---------------------------------------------------------------------------
-// Capability-filter support on the Hono backend (partial today).  A
-// `filter <expr>` capability installs at the query layer on every read.
-// On .NET it rides EF Core's `HasQueryFilter` (global, DI-resolved).
-// Drizzle has no global query filter, so the predicate is AND-ed into
-// each generated read site.  Two cases are not yet wired and would
-// otherwise emit silently-wrong SQL (a soft-delete / tenancy-isolation
-// footgun), so reject them with a clear error instead:
+// Capability-filter support on the Hono and Phoenix backends (partial
+// today).  A `filter <expr>` capability installs at the query layer on
+// every read.  On .NET it rides EF Core's `HasQueryFilter` (global,
+// DI-resolved) — no restriction.  Hono AND-s the predicate into each
+// Drizzle read site; Phoenix emits an Ash `base_filter`.  Two cases are
+// not yet wired on either and would otherwise emit silently-wrong query
+// behaviour (a soft-delete / tenancy-isolation footgun), so reject them
+// with a clear error instead:
 //
 //   1. Principal-referencing filters (`this.tenantId ==
-//      currentUser.tenantId`).  The always-on load path (`findById` /
-//      `getById` / `findManyByIds`) would need the request principal
-//      threaded through those methods and every caller — deferred.
+//      currentUser.tenantId`).  Binding the request principal into the
+//      always-on read path is deferred (Hono: thread through findById +
+//      callers; Phoenix: an actor-bound base_filter) — see
+//      docs/proposals/criterion-everywhere.md.
 //   2. Non-relational shapes (`shape(document)` / `shape(embedded)`).
-//      A document aggregate stores its fields inside one `jsonb` column,
-//      so `this.isDeleted` is not a top-level column the predicate can
-//      reference without JSON-path lowering — deferred.
+//      Fields live inside a jsonb column, so `this.isDeleted` is not a
+//      top-level column the predicate can reference without JSON-path
+//      lowering — deferred.  (Phoenix only emits relational anyway, so
+//      the saving-shape validator usually blocks this upstream.)
 //
 // Non-principal capability filters on a relational aggregate
-// (`filter !this.isDeleted`) ARE emitted on Hono.  See
-// docs/proposals/criterion-everywhere.md.
+// (`filter !this.isDeleted`) ARE emitted on both backends.
 // ---------------------------------------------------------------------------
-function validateHonoContextFilterSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
 
+  // Backends that consume contextFilters with the principal / shape
+  // limitation.  .NET (HasQueryFilter) is deliberately absent — it
+  // supports both deferred cases.
+  const LIMITED_FAMILIES = new Set(["hono", "phoenixLiveView"]);
+
   for (const dep of sys.deployables) {
-    if (platformFamily(dep.platform) !== "hono") continue;
+    const fam = platformFamily(dep.platform);
+    if (!fam || !LIMITED_FAMILIES.has(fam)) continue;
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
@@ -1036,9 +1044,9 @@ function validateHonoContextFilterSupport(sys: SystemIR, diags: LoomDiagnostic[]
         if (!usesPrincipal && !nonRelational) continue;
         const reason = usesPrincipal
           ? `references currentUser (e.g. a tenancy filter); principal-referencing capability ` +
-            `filters are not yet wired on Hono`
+            `filters are not yet wired on the ${fam} backend`
           : `is persisted as shape(${shape}); capability filters are only wired for ` +
-            `relational aggregates on Hono today`;
+            `relational aggregates on the ${fam} backend today`;
         diags.push({
           severity: "error",
           message:
