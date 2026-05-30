@@ -634,7 +634,7 @@ defmodule ${appModule}.MixProject do
       {:jason, "~> 1.2"},
       {:bandit, "~> 1.5"},
       {:plug_cowboy, "~> 2.5"},
-      {:open_api_spex, "~> 3.0"}
+      {:open_api_spex, "~> 3.0"}${extraDepLines}
     ]
   end
 
