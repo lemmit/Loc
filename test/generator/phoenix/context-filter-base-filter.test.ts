@@ -51,7 +51,12 @@ describe("Phoenix capability filter — base_filter", () => {
   it("emits a base_filter for a non-principal capability predicate", async () => {
     const files = await generate(sys("filter !this.isDeleted"));
     const doc = find(files, (k) => k.endsWith("/docs/doc.ex"), "doc.ex");
-    expect(doc).toContain("base_filter expr(not record.is_deleted)");
+    // Ash filter expressions reference attributes by bare name (no
+    // `record.` receiver), else `record` is read as a relationship.
+    // (Scope the negative check to the base_filter line — `record.` is a
+    // legitimate Elixir binding elsewhere, e.g. the inspect fn.)
+    const baseFilterLine = doc.split("\n").find((l) => l.includes("base_filter"))!;
+    expect(baseFilterLine).toBe("  base_filter expr(not is_deleted)");
   });
 
   it("emits no base_filter when the aggregate has no capability filter", async () => {
