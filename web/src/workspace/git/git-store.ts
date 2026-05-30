@@ -87,30 +87,12 @@ export const LOOM_AUTHOR: GitAuthor = {
   email: "playground@loom.local",
 };
 
-/** One entry of a tree-vs-tree diff. */
-export interface FileDiff {
-  path: VfsPath;
-  status: "added" | "removed" | "modified";
-}
-
 /** Options for the `list*` family.  `skip` prunes subtrees (absolute
  *  paths) from the underlying walk — e.g. the source scan skips
  *  `/workspace/generated`. */
 export interface ListOpts {
   skip?: ReadonlyArray<VfsPath>;
 }
-
-/** Outcome of a merge — either a clean result or a conflict listing.
- *  Never throws on conflict, so callers branch on `ok`. */
-export type MergeOutcome =
-  | {
-      ok: true;
-      oid?: string;
-      fastForward?: boolean;
-      alreadyMerged?: boolean;
-      mergeCommit?: boolean;
-    }
-  | { ok: false; conflicts: VfsPath[] };
 
 /** A single commit, projected to the fields the UI/log needs. */
 export interface CommitInfo {
@@ -121,8 +103,6 @@ export interface CommitInfo {
 }
 
 const REPO_RELATIVE = (path: VfsPath): string => path.replace(/^\//, "");
-const ABSOLUTE = (filepath: string): VfsPath =>
-  filepath.startsWith("/") ? filepath : "/" + filepath;
 
 export class GitStore {
   private readonly subs = new Set<Subscription>();
@@ -410,103 +390,6 @@ export class GitStore {
     return new TextDecoder().decode(blob);
   }
 
-  /** Create a branch at the current HEAD (without checking it out). */
-  async branch(name: string): Promise<void> {
-    await git.branch({ fs: this.fsc, dir: this.dir, ref: name });
-  }
-
-  async currentBranch(): Promise<string> {
-    const branch = await git.currentBranch({
-      fs: this.fsc,
-      dir: this.dir,
-      fullname: false,
-    });
-    return branch ?? "main";
-  }
-
-  /** Check out `ref` into the working tree, then notify subscribers of
-   *  the working-tree paths that changed.
-   *
-   *  Note: isomorphic-git's checkout selects files to overwrite by an
-   *  oid/stat diff.  Under coarse-mtime backends (fake-indexeddb in
-   *  tests) a same-size edit can share an mtime and be skipped; real
-   *  browsers give millisecond mtimes for edits seconds apart, so this
-   *  is a test-environment artifact, not a production concern. */
-  async checkout(ref: string, force = false): Promise<void> {
-    const before = await this.contentMap();
-    await git.checkout({ fs: this.fsc, dir: this.dir, ref, force });
-    await this.notifyDiff(before);
-  }
-
-  /** Merge `theirs` into the current branch.  Returns a structured
-   *  outcome instead of throwing on conflict; on a clean merge the
-   *  working tree is synced and subscribers are notified.  The
-   *  generated-base relationship the proposal models is established by
-   *  the commit graph (PR 4); here this is the merge primitive. */
-  async merge(
-    theirs: string,
-    opts: { author?: GitAuthor; message?: string } = {},
-  ): Promise<MergeOutcome> {
-    const before = await this.contentMap();
-    const author = opts.author ?? LOOM_AUTHOR;
-    try {
-      const res = await git.merge({
-        fs: this.fsc,
-        dir: this.dir,
-        theirs,
-        author: { ...author },
-        message: opts.message,
-      });
-      // merge updates HEAD/index; materialise the result in the working
-      // tree so reads reflect it, then fan out the changed paths.
-      await git.checkout({
-        fs: this.fsc,
-        dir: this.dir,
-        ref: await this.currentBranch(),
-        force: true,
-      });
-      await this.notifyDiff(before);
-      return {
-        ok: true,
-        oid: res.oid,
-        fastForward: res.fastForward,
-        alreadyMerged: res.alreadyMerged,
-        mergeCommit: res.mergeCommit,
-      };
-    } catch (err) {
-      if (err instanceof git.Errors.MergeConflictError) {
-        return { ok: false, conflicts: err.data.filepaths.map(ABSOLUTE) };
-      }
-      throw err;
-    }
-  }
-
-  /** Per-file diff between two refs/trees (blobs only).  Minimal
-   *  added/removed/modified classification — the unified-diff UX is a
-   *  later concern; isomorphic-git has no one-shot unified diff. */
-  async treeDiff(a: string, b: string): Promise<FileDiff[]> {
-    const out: FileDiff[] = [];
-    await git.walk({
-      fs: this.fsc,
-      dir: this.dir,
-      trees: [git.TREE({ ref: a }), git.TREE({ ref: b })],
-      map: async (filepath, entries) => {
-        if (filepath === ".") return;
-        const [A, B] = entries as Array<git.WalkerEntry | null>;
-        const aType = A ? await A.type() : undefined;
-        const bType = B ? await B.type() : undefined;
-        if (aType !== "blob" && bType !== "blob") return; // dirs/trees
-        const path = ABSOLUTE(filepath);
-        if (!A || aType !== "blob") out.push({ path, status: "added" });
-        else if (!B || bType !== "blob") out.push({ path, status: "removed" });
-        else if ((await A.oid()) !== (await B.oid()))
-          out.push({ path, status: "modified" });
-      },
-    });
-    out.sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
-    return out;
-  }
-
   // -- snapshot -------------------------------------------------------------
 
   /** Project the workspace tree to the `VfsEntry` union — the shape the
@@ -572,29 +455,6 @@ export class GitStore {
     };
     await visit("/");
     return out;
-  }
-
-  /** Snapshot every workspace file's content — used to diff before/after
-   *  a checkout/merge so the notifier can fan out the changed paths. */
-  private async contentMap(): Promise<Map<VfsPath, string>> {
-    const map = new Map<VfsPath, string>();
-    for (const node of await this.walkTree()) {
-      if (node.kind !== "file") continue;
-      map.set(node.path, (await this.readFile(node.path)) ?? "");
-    }
-    return map;
-  }
-
-  private async notifyDiff(before: Map<VfsPath, string>): Promise<void> {
-    const after = await this.contentMap();
-    const changed = new Set<VfsPath>();
-    for (const [path, content] of after) {
-      if (before.get(path) !== content) changed.add(path);
-    }
-    for (const path of before.keys()) {
-      if (!after.has(path)) changed.add(path);
-    }
-    if (changed.size > 0) this.notify([...changed].sort());
   }
 
   /** mkdirp for a file's parent chain (so LightningFS `writeFile`
