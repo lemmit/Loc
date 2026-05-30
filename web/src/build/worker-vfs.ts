@@ -20,14 +20,20 @@
 // cost it anything.
 // ---------------------------------------------------------------------------
 
-import type { Vfs } from "../vfs/types.js";
+import type { ReadableVfs } from "../vfs/types.js";
 
-let current: Vfs | null = null;
+// The worker reads templates and never mutates, subscribes, or
+// snapshots through this singleton, so its declared type is the
+// read-only capability.  A full `Vfs` (e.g. the `MemoryVfs` the
+// worker boot seeds) is assignable here, so callers are unaffected;
+// the narrowing just stops anyone reaching for a mutate method off
+// the worker VFS.
+let current: ReadableVfs | null = null;
 
 /** Bind the worker's VFS instance.  Last write wins; the worker
  *  itself only calls this once at boot, so re-binding only happens
  *  in tests that need a clean slate. */
-export function setWorkerVfs(vfs: Vfs): void {
+export function setWorkerVfs(vfs: ReadableVfs): void {
   current = vfs;
 }
 
@@ -35,7 +41,7 @@ export function setWorkerVfs(vfs: Vfs): void {
  *  seeded — i.e. the consumer is running outside the worker boot
  *  path.  Tests that exercise `loader-vfs.ts` directly need to call
  *  `setWorkerVfs(new MemoryVfs())` themselves. */
-export function getWorkerVfs(): Vfs {
+export function getWorkerVfs(): ReadableVfs {
   if (!current) {
     throw new Error(
       "worker-vfs: getWorkerVfs called before setWorkerVfs.  In the worker, seed via `seedBuiltinPacks` then `setWorkerVfs`; in tests, construct a MemoryVfs and bind it manually.",

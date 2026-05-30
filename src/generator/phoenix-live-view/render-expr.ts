@@ -34,6 +34,11 @@ export interface RenderCtx {
    *  membership form inside repository `where` clauses, so other
    *  emission contexts (derived, invariant) shouldn't reach it. */
   agg?: EnrichedAggregateIR;
+  /** Resource-op routing (Phase 4c): resourceName → fully-qualified
+   *  Elixir helper module (e.g. `salesFiles` → `MyApp.Resources.S3`).
+   *  A `resource-op` call renders `<Module>.<resource>_<verb>(args)`.
+   *  Unset outside workflow rendering — a resource-op there throws. */
+  resourceModules?: Map<string, string>;
 }
 
 const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };
@@ -192,8 +197,13 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: RenderCtx): string 
 
 function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: RenderCtx): string {
   const recv = renderExpr(e.receiver, ctx);
-  // Array/list length shorthand → Elixir `length(list)` or `Enum.count`
-  if (e.receiverType.kind === "array" && e.member === "count") {
+  // Array/list size shorthand.  The DSL admits both `.count` and
+  // `.length` on arrays (see the .NET renderer's matching comment);
+  // both map to Elixir `Enum.count/1`.  Without the `.length` arm an
+  // array `.length` fell through to `<recv>.length`, a map field access
+  // that raises `BadMapError` on a list at runtime (e.g. a workflow
+  // guard `currentUser.permissions.length > 0` → 500 instead of 403).
+  if (e.receiverType.kind === "array" && (e.member === "count" || e.member === "length")) {
     return `Enum.count(${recv})`;
   }
   if (
@@ -309,6 +319,19 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): strin
         : `${snake(e.name)}(${ctx.thisName})`;
     case "free":
       return `${snake(e.name)}(${args})`;
+    case "resource-op": {
+      // Resource-op (Phase 4c) → `<Module>.<resource>_<verb>(args)`, a
+      // helper function the Phoenix ResourceAdapter emits.  Routed by
+      // sourceType via `ctx.resourceModules`.
+      const op = e.resourceOp!;
+      const mod = ctx.resourceModules?.get(op.resourceName);
+      if (!mod) {
+        throw new Error(
+          `Resource operation '${op.resourceName}.${op.verb}' reached the Phoenix renderer without a module mapping.`,
+        );
+      }
+      return `${mod}.${snake(op.resourceName)}_${snake(op.verb)}(${args})`;
+    }
   }
 }
 

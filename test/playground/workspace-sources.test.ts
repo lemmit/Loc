@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
-import { MemoryVfs } from "../../web/src/vfs/memory-vfs.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import "fake-indexeddb/auto";
+import { GitStore, openGitFs } from "../../web/src/workspace/git/index.js";
 import {
   DEFAULT_PATH,
   isDddSource,
@@ -9,10 +10,33 @@ import {
   type WorkspaceSourcesSnapshot,
 } from "../../web/src/workspace/workspace-sources.js";
 
-function makeVfs(seed: Record<string, string> = {}): MemoryVfs {
-  const vfs = new MemoryVfs();
-  vfs.hydrate(Object.entries(seed));
-  return vfs;
+// ---------------------------------------------------------------------------
+// WorkspaceSourcesController over the async git store.  The controller
+// keeps a resident sync snapshot (so `snapshot`/`subscribe` stay sync
+// for the LSP/editor) refreshed from async git reads; mutators are
+// async.  Tests `await controller.ready()` after construction and await
+// each mutator before asserting the resident snapshot.
+// ---------------------------------------------------------------------------
+
+let dbCounter = 0;
+function uniqueDbName(): string {
+  return `loom-ws-test-${++dbCounter}`;
+}
+
+/** Open a fresh git store, optionally seeding `.ddd`/other files. */
+async function freshStore(seed: Record<string, string> = {}): Promise<GitStore> {
+  const store = new GitStore(await openGitFs(uniqueDbName()));
+  for (const [path, content] of Object.entries(seed)) {
+    await store.writeFile(path, content);
+  }
+  return store;
+}
+
+/** Construct a controller and wait for its initial refresh. */
+async function makeController(store: GitStore | null): Promise<WorkspaceSourcesController> {
+  const c = new WorkspaceSourcesController(store);
+  await c.ready();
+  return c;
 }
 
 describe("workspace sources — pure helpers", () => {
@@ -24,15 +48,14 @@ describe("workspace sources — pure helpers", () => {
     expect(isDddSource("/workspace/main.txt")).toBe(false);
   });
 
-  it("snapshotSources filters to .ddd files under /workspace/", () => {
-    const vfs = makeVfs({
+  it("snapshotSources filters to .ddd files under /workspace/", async () => {
+    const store = await freshStore({
       "/workspace/main.ddd": "context A {}",
       "/workspace/sub/orders.ddd": "context B {}",
       "/workspace/design/mantine/pack.json": "{}",
       "/workspace/notes.txt": "ignored",
-      "/elsewhere/other.ddd": "ignored",
     });
-    const snap = snapshotSources(vfs);
+    const snap = await snapshotSources(store);
     expect([...snap.keys()].sort()).toEqual(["/workspace/main.ddd", "/workspace/sub/orders.ddd"]);
   });
 
@@ -48,13 +71,13 @@ describe("workspace sources — pure helpers", () => {
 });
 
 describe("WorkspaceSourcesController", () => {
-  it("initial snapshot reflects existing VFS contents", () => {
-    const vfs = makeVfs({
+  it("initial snapshot reflects existing store contents", async () => {
+    const store = await freshStore({
       "/workspace/main.ddd": "main",
       "/workspace/sub/orders.ddd": "orders",
       "/workspace/ignored.txt": "should not appear",
     });
-    const controller = new WorkspaceSourcesController(vfs);
+    const controller = await makeController(store);
     const snap = controller.snapshot();
     expect([...snap.files.entries()].sort()).toEqual([
       ["/workspace/main.ddd", "main"],
@@ -64,177 +87,165 @@ describe("WorkspaceSourcesController", () => {
     controller.dispose();
   });
 
-  it("null VFS yields an empty snapshot and a working (no-op) write", () => {
-    const c = new WorkspaceSourcesController(null);
+  it("null store yields an empty snapshot and working (no-op) mutators", async () => {
+    const c = await makeController(null);
     expect(c.snapshot().files.size).toBe(0);
     expect(c.snapshot().activePath).toBe(DEFAULT_PATH);
-    // write/delete are silent no-ops when persistence is unavailable
-    // — mirrors useWorkspace's "hostile storage" fallback.
-    expect(() => c.write("/workspace/main.ddd", "x")).not.toThrow();
-    expect(() => c.delete("/workspace/main.ddd")).not.toThrow();
+    await expect(c.write("/workspace/main.ddd", "x")).resolves.toBeUndefined();
+    await expect(c.delete("/workspace/main.ddd")).resolves.toBeUndefined();
     c.dispose();
   });
 
-  it("setActivePath emits a snapshot with the new active file", () => {
-    const vfs = makeVfs({
+  it("setActivePath emits a snapshot with the new active file", async () => {
+    const store = await freshStore({
       "/workspace/main.ddd": "m",
       "/workspace/orders.ddd": "o",
     });
-    const c = new WorkspaceSourcesController(vfs);
+    const c = await makeController(store);
     const listener = vi.fn<(s: WorkspaceSourcesSnapshot) => void>();
     c.subscribe(listener);
     c.setActivePath("/workspace/orders.ddd");
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener.mock.calls[0]![0].activePath).toBe("/workspace/orders.ddd");
-    // No-op for setting the same path.
     listener.mockClear();
     c.setActivePath("/workspace/orders.ddd");
     expect(listener).not.toHaveBeenCalled();
     c.dispose();
   });
 
-  it("write persists to VFS and re-emits via the subscription", () => {
-    const vfs = makeVfs();
-    const c = new WorkspaceSourcesController(vfs);
+  it("write persists to the store and re-emits", async () => {
+    const store = await freshStore();
+    const c = await makeController(store);
     const listener = vi.fn<(s: WorkspaceSourcesSnapshot) => void>();
     c.subscribe(listener);
-    c.write("/workspace/main.ddd", "context A {}");
-    expect(vfs.read("/workspace/main.ddd")).toBe("context A {}");
+    await c.write("/workspace/main.ddd", "context A {}");
+    expect(await store.readFile("/workspace/main.ddd")).toBe("context A {}");
     expect(listener).toHaveBeenCalled();
     const latest = listener.mock.calls.at(-1)![0];
     expect(latest.files.get("/workspace/main.ddd")).toBe("context A {}");
     c.dispose();
   });
 
-  it("rejects writes to non-.ddd paths", () => {
-    const vfs = makeVfs();
-    const c = new WorkspaceSourcesController(vfs);
-    expect(() => c.write("/workspace/notes.txt", "x")).toThrow(/must be a \/workspace\/\*\.ddd/);
-    expect(() => c.write("/elsewhere/main.ddd", "x")).toThrow(/must be a \/workspace\/\*\.ddd/);
+  it("rejects writes to non-.ddd paths", async () => {
+    const c = await makeController(await freshStore());
+    await expect(c.write("/workspace/notes.txt", "x")).rejects.toThrow(
+      /must be a \/workspace\/\*\.ddd/,
+    );
+    await expect(c.write("/elsewhere/main.ddd", "x")).rejects.toThrow(
+      /must be a \/workspace\/\*\.ddd/,
+    );
     c.dispose();
   });
 
-  it("delete removes from VFS and re-emits", () => {
-    const vfs = makeVfs({
+  it("delete removes from the store and re-emits", async () => {
+    const store = await freshStore({
       "/workspace/main.ddd": "m",
       "/workspace/orders.ddd": "o",
     });
-    const c = new WorkspaceSourcesController(vfs);
+    const c = await makeController(store);
     const listener = vi.fn<(s: WorkspaceSourcesSnapshot) => void>();
     c.subscribe(listener);
-    c.delete("/workspace/orders.ddd");
-    expect(vfs.exists("/workspace/orders.ddd")).toBe(false);
+    await c.delete("/workspace/orders.ddd");
+    expect(await store.exists("/workspace/orders.ddd")).toBe(false);
     expect(listener).toHaveBeenCalled();
     const latest = listener.mock.calls.at(-1)![0];
     expect([...latest.files.keys()]).toEqual(["/workspace/main.ddd"]);
     c.dispose();
   });
 
-  it("deleting the active file re-points activePath to main.ddd when present", () => {
-    const vfs = makeVfs({
+  it("deleting the active file re-points activePath to main.ddd when present", async () => {
+    const store = await freshStore({
       "/workspace/main.ddd": "m",
       "/workspace/orders.ddd": "o",
     });
-    const c = new WorkspaceSourcesController(vfs);
+    const c = await makeController(store);
     c.setActivePath("/workspace/orders.ddd");
-    c.delete("/workspace/orders.ddd");
+    await c.delete("/workspace/orders.ddd");
     expect(c.snapshot().activePath).toBe(DEFAULT_PATH);
     c.dispose();
   });
 
-  it("deleting the active file with no main.ddd falls back to the first remaining", () => {
-    const vfs = makeVfs({
+  it("deleting the active file with no main.ddd falls back to the first remaining", async () => {
+    const store = await freshStore({
       "/workspace/orders.ddd": "o",
       "/workspace/shipping.ddd": "s",
       "/workspace/billing.ddd": "b",
     });
-    const c = new WorkspaceSourcesController(vfs);
+    const c = await makeController(store);
     c.setActivePath("/workspace/orders.ddd");
-    c.delete("/workspace/orders.ddd");
-    // Lexicographic — billing.ddd wins.
+    await c.delete("/workspace/orders.ddd");
     expect(c.snapshot().activePath).toBe("/workspace/billing.ddd");
     c.dispose();
   });
 
-  it("deleting a non-active file leaves activePath untouched", () => {
-    const vfs = makeVfs({
+  it("deleting a non-active file leaves activePath untouched", async () => {
+    const store = await freshStore({
       "/workspace/main.ddd": "m",
       "/workspace/orders.ddd": "o",
     });
-    const c = new WorkspaceSourcesController(vfs);
+    const c = await makeController(store);
     c.setActivePath("/workspace/main.ddd");
-    c.delete("/workspace/orders.ddd");
+    await c.delete("/workspace/orders.ddd");
     expect(c.snapshot().activePath).toBe("/workspace/main.ddd");
     c.dispose();
   });
 
-  it("external VFS writes propagate through the subscription", () => {
-    const vfs = makeVfs({ "/workspace/main.ddd": "old" });
-    const c = new WorkspaceSourcesController(vfs);
+  it("external store writes propagate through the subscription", async () => {
+    const store = await freshStore({ "/workspace/main.ddd": "old" });
+    const c = await makeController(store);
     const listener = vi.fn<(s: WorkspaceSourcesSnapshot) => void>();
     c.subscribe(listener);
-    // Simulate another tab / worker writing the same VFS directly.
-    vfs.write("/workspace/main.ddd", "new");
-    expect(listener).toHaveBeenCalled();
-    expect(listener.mock.calls.at(-1)![0].files.get("/workspace/main.ddd")).toBe("new");
+    // Simulate another writer touching the same store directly. The
+    // controller's store subscription drives an async refresh, so wait
+    // for the snapshot to reflect it.
+    await store.writeFile("/workspace/main.ddd", "new");
+    await vi.waitFor(() => expect(c.snapshot().files.get("/workspace/main.ddd")).toBe("new"));
     c.dispose();
   });
 
-  it("design-pack writes under /workspace/design/ don't appear in `files`", () => {
-    const vfs = makeVfs();
-    const c = new WorkspaceSourcesController(vfs);
-    const listener = vi.fn<(s: WorkspaceSourcesSnapshot) => void>();
-    c.subscribe(listener);
-    // A design-pack file change still fires the prefix subscription,
-    // but the snapshot filter keeps `files` to .ddd sources only.
-    vfs.write("/workspace/design/mantine/pack.json", "{}");
-    expect(listener).toHaveBeenCalled();
-    const latest = listener.mock.calls.at(-1)![0];
-    expect([...latest.files.keys()]).toEqual([]);
+  it("design-pack writes under /workspace/design/ don't appear in `files`", async () => {
+    const store = await freshStore();
+    const c = await makeController(store);
+    await store.writeFile("/workspace/design/mantine/pack.json", "{}");
+    await vi.waitFor(() => {
+      // refresh ran; files stays empty (design packs aren't .ddd)
+      expect([...c.snapshot().files.keys()]).toEqual([]);
+    });
+    expect(await store.exists("/workspace/design/mantine/pack.json")).toBe(true);
     c.dispose();
   });
 
-  describe("empty folders (via first-class VFS dir entries)", () => {
-    it("createEmptyFolder calls vfs.mkdir and surfaces in `emptyFolders`", () => {
-      const vfs = makeVfs({ "/workspace/main.ddd": "m" });
-      const c = new WorkspaceSourcesController(vfs);
-      c.createEmptyFolder("shared");
+  describe("empty folders (via first-class git dir entries)", () => {
+    it("createEmptyFolder calls mkdir and surfaces in `emptyFolders`", async () => {
+      const store = await freshStore({ "/workspace/main.ddd": "m" });
+      const c = await makeController(store);
+      await c.createEmptyFolder("shared");
       const snap = c.snapshot();
-      // Real dir entry in the VFS — no `.gitkeep` sentinel.
-      expect(vfs.isDirectory("/workspace/shared")).toBe(true);
-      expect(vfs.exists("/workspace/shared/.gitkeep")).toBe(false);
+      expect(await store.isDirectory("/workspace/shared")).toBe(true);
       expect([...snap.emptyFolders]).toEqual(["shared"]);
-      // The dir entry doesn't leak into the .ddd files map.
       expect([...snap.files.keys()]).toEqual(["/workspace/main.ddd"]);
       c.dispose();
     });
 
-    it("nested folder names round-trip", () => {
-      const vfs = makeVfs();
-      const c = new WorkspaceSourcesController(vfs);
-      c.createEmptyFolder("audit/log");
+    it("nested folder names round-trip", async () => {
+      const store = await freshStore();
+      const c = await makeController(store);
+      await c.createEmptyFolder("audit/log");
       const snap = c.snapshot();
-      expect(vfs.isDirectory("/workspace/audit")).toBe(true);
-      expect(vfs.isDirectory("/workspace/audit/log")).toBe(true);
-      // `audit` is also empty (has only the nested `audit/log` dir,
-      // no .ddd descendants); both surface in the empty set.
+      expect(await store.isDirectory("/workspace/audit")).toBe(true);
+      expect(await store.isDirectory("/workspace/audit/log")).toBe(true);
       expect([...snap.emptyFolders].sort()).toEqual(["audit", "audit/log"]);
       c.dispose();
     });
 
-    it("a folder that has .ddd content is NOT in `emptyFolders`", () => {
-      const vfs = makeVfs({
+    it("a folder that has .ddd content is NOT in `emptyFolders`", async () => {
+      const store = await freshStore({
         "/workspace/main.ddd": "m",
         "/workspace/shared/money.ddd": "valueobject Money { v: int }",
       });
-      // Pre-create a dir entry to simulate a folder that USED to be
-      // empty but has since gained a real file.  The "promotion-out"
-      // rule should silently drop it from the empty set.
-      vfs.mkdir("/workspace/shared");
-      const c = new WorkspaceSourcesController(vfs);
+      const c = await makeController(store);
       const snap = c.snapshot();
       expect([...snap.emptyFolders]).toEqual([]);
-      // shared/money.ddd still shows up normally.
       expect([...snap.files.keys()].sort()).toEqual([
         "/workspace/main.ddd",
         "/workspace/shared/money.ddd",
@@ -242,34 +253,35 @@ describe("WorkspaceSourcesController", () => {
       c.dispose();
     });
 
-    it("deleteEmptyFolder calls vfs.rmdir", () => {
-      const vfs = makeVfs({ "/workspace/main.ddd": "m" });
-      vfs.mkdir("/workspace/shared");
-      const c = new WorkspaceSourcesController(vfs);
+    it("deleteEmptyFolder calls rmdir", async () => {
+      const store = await freshStore({ "/workspace/main.ddd": "m" });
+      const c = await makeController(store);
+      await c.createEmptyFolder("shared");
       expect([...c.snapshot().emptyFolders]).toEqual(["shared"]);
-      c.deleteEmptyFolder("shared");
-      expect(vfs.exists("/workspace/shared")).toBe(false);
+      await c.deleteEmptyFolder("shared");
+      expect(await store.exists("/workspace/shared")).toBe(false);
       expect([...c.snapshot().emptyFolders]).toEqual([]);
       c.dispose();
     });
 
-    it("rejects an empty folder name", () => {
-      const vfs = makeVfs();
-      const c = new WorkspaceSourcesController(vfs);
-      expect(() => c.createEmptyFolder("")).toThrow(/folder name is required/);
-      expect(() => c.createEmptyFolder("/")).toThrow(/folder name is required/);
+    it("rejects an empty folder name", async () => {
+      const c = await makeController(await freshStore());
+      await expect(c.createEmptyFolder("")).rejects.toThrow(/folder name is required/);
+      await expect(c.createEmptyFolder("/")).rejects.toThrow(/folder name is required/);
       c.dispose();
     });
   });
 
-  it("dispose unsubscribes from the VFS and stops emitting", () => {
-    const vfs = makeVfs({ "/workspace/main.ddd": "m" });
-    const c = new WorkspaceSourcesController(vfs);
+  it("dispose unsubscribes from the store and stops emitting", async () => {
+    const store = await freshStore({ "/workspace/main.ddd": "m" });
+    const c = await makeController(store);
     const listener = vi.fn<(s: WorkspaceSourcesSnapshot) => void>();
     c.subscribe(listener);
     c.dispose();
     listener.mockClear();
-    vfs.write("/workspace/main.ddd", "post-dispose");
+    await store.writeFile("/workspace/main.ddd", "post-dispose");
+    // Give any (incorrectly) scheduled refresh a chance to fire.
+    await new Promise((r) => setTimeout(r, 20));
     expect(listener).not.toHaveBeenCalled();
   });
 });

@@ -5,9 +5,7 @@ import type {
   BuildRpcResponse,
   GenerateParams,
   GenerateResult,
-  VfsEntry,
-  VfsListResult,
-  VfsSnapshotResult,
+  VfsDeleteResult,
   VfsWriteResult,
 } from "../../web/src/build/protocol.js";
 
@@ -22,7 +20,12 @@ import type {
 // ---------------------------------------------------------------------------
 
 describe("BuildRpcRequest discriminated union", () => {
-  it("accepts the four method variants", () => {
+  it("accepts the supported method variants", () => {
+    // The worker keeps only the RPCs with live callers: generate (text
+    // or entryPath) and the incremental vfs.write / vfs.delete used to
+    // push design-pack changes.  The read-side vfs.list / vfs.snapshot
+    // ops were dropped — the loader reads the worker VFS directly and
+    // respawn re-seeds from the git-store projection.
     const requests: BuildRpcRequest[] = [
       { id: 1, method: "generate", params: { text: "system X {}" } },
       { id: 2, method: "generate", params: { entryPath: "/workspace/main.ddd" } },
@@ -32,10 +35,8 @@ describe("BuildRpcRequest discriminated union", () => {
         params: { entries: [{ path: "/workspace/main.ddd", content: "..." }] },
       },
       { id: 4, method: "vfs.delete", params: { paths: ["/workspace/main.ddd"] } },
-      { id: 5, method: "vfs.list", params: { prefix: "/workspace" } },
-      { id: 6, method: "vfs.snapshot", params: {} },
     ];
-    expect(requests).toHaveLength(6);
+    expect(requests).toHaveLength(4);
   });
 
   it("forbids `text` and `entryPath` together at the type level", () => {
@@ -63,14 +64,11 @@ describe("BuildRpcResponse result variants", () => {
     expect(fail.ok).toBe(false);
   });
 
-  it("encodes vfs ack shapes (write/delete/list/snapshot)", () => {
+  it("encodes vfs ack shapes (write/delete)", () => {
     const write: VfsWriteResult = { ok: true, paths: ["/a", "/b"] };
-    const list: VfsListResult = { ok: true, paths: ["/a", "/b"] };
-    const entries: VfsEntry[] = [{ path: "/a", content: "x" }];
-    const snap: VfsSnapshotResult = { ok: true, entries };
+    const del: VfsDeleteResult = { ok: true, paths: ["/a"] };
     expect(write.paths).toEqual(["/a", "/b"]);
-    expect(list.paths).toEqual(["/a", "/b"]);
-    expect(snap.entries[0].path).toBe("/a");
+    expect(del.paths).toEqual(["/a"]);
   });
 
   it("response carries id + result xor error", () => {

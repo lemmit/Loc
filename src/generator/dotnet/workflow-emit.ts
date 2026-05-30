@@ -2,15 +2,16 @@ import {
   type AggregateIR,
   type BoundedContextIR,
   type EnrichedBoundedContextIR,
-  exprUsesCurrentUser,
   operationUsesCurrentUser,
   type SystemIR,
   type WorkflowIR,
   type WorkflowStmtIR,
+  workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import { dotnetResourceAdapterFor, resourceClassName } from "./adapters/resource-clients.js";
 import {
   csIdValueClrType,
   domainToRequestExpr,
@@ -39,6 +40,39 @@ import { renderCsExpr, renderCsType } from "./render-expr.js";
 // ---------------------------------------------------------------------------
 
 const INDENT = "        ";
+
+/** resourceName → static C# helper class, for every resource whose
+ *  sourceType has a .NET ResourceAdapter (Phase 4c).  Routes resource-op
+ *  call sites + drives the `Resources/*.cs` emission and NuGet deps. */
+function buildResourceClasses(sys: SystemIR | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!sys) return out;
+  const storeType = new Map(sys.storages.map((s) => [s.name, s.type] as const));
+  for (const r of sys.dataSources) {
+    const sourceType = storeType.get(r.storageName);
+    if (sourceType && dotnetResourceAdapterFor(sourceType)) {
+      out.set(r.name, resourceClassName(sourceType));
+    }
+  }
+  return out;
+}
+
+/** Every resource-op call in a workflow (bare or let-bound). */
+function workflowResourceOps(wf: WorkflowIR): { resourceName: string }[] {
+  const out: { resourceName: string }[] = [];
+  for (const st of wf.statements) {
+    const call =
+      st.kind === "resource-call" ? st.call : st.kind === "expr-let" ? st.expr : undefined;
+    if (call?.kind === "call" && call.callKind === "resource-op" && call.resourceOp) {
+      out.push({ resourceName: call.resourceOp.resourceName });
+    }
+  }
+  return out;
+}
+
+function workflowUsesResourceOp(wf: WorkflowIR): boolean {
+  return workflowResourceOps(wf).length > 0;
+}
 
 export function emitWorkflows(
   ctx: EnrichedBoundedContextIR,
@@ -144,26 +178,6 @@ public sealed record ${upperFirst(wf.name)}Command(${params}) : ICommand;
 // Handler — orchestrates the workflow body.
 // ---------------------------------------------------------------------------
 
-/** True when any statement (or sub-expression inside it) references
- *  `currentUser`.  When true, the handler injects ICurrentUserAccessor
- *  and materialises a `var currentUser` local at the top of `Handle`. */
-function workflowUsesCurrentUser(wf: WorkflowIR): boolean {
-  return wf.statements.some((s) => {
-    switch (s.kind) {
-      case "precondition":
-      case "requires":
-      case "expr-let":
-        return exprUsesCurrentUser(s.expr);
-      case "emit":
-      case "factory-let":
-        return s.fields.some((f) => exprUsesCurrentUser(f.value));
-      case "repo-let":
-      case "op-call":
-        return s.args.some(exprUsesCurrentUser);
-    }
-  });
-}
-
 function renderHandler(
   wf: WorkflowIR,
   usage: WorkflowUsage,
@@ -242,8 +256,13 @@ function renderHandler(
   // renderExprWithCmdParams rewrites those refs at render time, keyed by the
   // workflow's param-name set.
   const paramNames = new Set(wf.params.map((p) => p.name));
+  // Resource-op routing (Phase 4c): resourceName → static helper class,
+  // built from the system's resources + storages.  Empty when the
+  // deployable wires no consumable resources.
+  const resourceClasses = buildResourceClasses(sys);
+  if (resourceClasses.size > 0 && workflowUsesResourceOp(wf)) usings.add(`${ns}.Resources`);
   const renderArg = (e: import("../../ir/types/loom-ir.js").ExprIR): string => {
-    return renderExprWithCmdParams(e, paramNames, usings);
+    return renderExprWithCmdParams(e, paramNames, usings, resourceClasses);
   };
 
   for (const st of wf.statements) {
@@ -423,9 +442,16 @@ function renderStatement(
       return [`${INDENT}${st.target}.${upperFirst(st.op)}(${callArgs});`];
     }
     case "expr-let": {
+      // `let x = files.get(k)` — a resource-op RHS is an async helper, so
+      // await it; ordinary expr-lets render unchanged.
+      const isResourceOp = st.expr.kind === "call" && st.expr.callKind === "resource-op";
       const exprText = renderArg(st.expr);
-      return [`${INDENT}var ${st.name} = ${exprText};`];
+      return [`${INDENT}var ${st.name} = ${isResourceOp ? "await " : ""}${exprText};`];
     }
+    case "resource-call":
+      // 4c: bare resource-op statement (`files.put(k, v)`) → awaited async
+      // helper call.
+      return [`${INDENT}await ${renderArg(st.call)};`];
   }
 }
 
@@ -434,6 +460,7 @@ function renderExprWithCmdParams(
   e: import("../../ir/types/loom-ir.js").ExprIR,
   paramNames: Set<string>,
   usings?: Set<string>,
+  resourceClasses?: Map<string, string>,
 ): string {
   // Substitute by rewriting the IR before renderCsExpr.
   const rewrite = (
@@ -490,7 +517,7 @@ function renderExprWithCmdParams(
     }
     return e;
   };
-  return renderCsExpr(rewrite(e), { thisName: "this", usings });
+  return renderCsExpr(rewrite(e), { thisName: "this", usings, resourceClasses });
 }
 
 // ---------------------------------------------------------------------------

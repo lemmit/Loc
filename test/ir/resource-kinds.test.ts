@@ -15,7 +15,7 @@ system Sys {
     }
   }
   storage pg    { type: postgres }
-  storage files { type: awsS3,    config: { region: "eu-central-1", bucket: "app-files" } }
+  storage files { type: s3,    config: { region: "eu-central-1", bucket: "app-files" } }
   storage bus   { type: rabbitmq, config: { vhost: "/" } }
   storage pay   { type: restApi,  config: { baseUrl: "https://pay.example.com" } }
 
@@ -73,7 +73,7 @@ describe("config-map validation", () => {
     expect(diags.filter((d) => /config key|required config/.test(d.message))).toEqual([]);
   });
 
-  it("errors when a required config key is missing (awsS3 needs bucket)", async () => {
+  it("errors when a required config key is missing (s3 needs bucket)", async () => {
     const diags = await irDiagnostics(
       valid.replace(
         `config: { region: "eu-central-1", bucket: "app-files" }`,

@@ -9,6 +9,10 @@
 
 // Hono-framework builders now live in this package (P2b) — siblings.
 import type { EmitCtx } from "../../../generator/_adapters/index.js";
+import {
+  buildBaseReaderFile,
+  buildBaseUnionFile,
+} from "../../../generator/typescript/base-reader-builder.js";
 import { emitTypescriptMigrations } from "../../../generator/typescript/emit/migrations.js";
 import {
   renderAggregate,
@@ -23,6 +27,7 @@ import { buildExternHandlersFile } from "../../../generator/typescript/extern-bu
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import { buildDocumentRepositoryFile } from "../../../generator/typescript/repository-document-builder.js";
 import { buildEmbeddedRepositoryFile } from "../../../generator/typescript/repository-embedded-builder.js";
+import { isTphBase, tphConcretesOf } from "../../../generator/typescript/tph.js";
 import { enrichLoomModel } from "../../../ir/enrich/enrichments.js";
 import { lowerModel } from "../../../ir/lower/lower.js";
 import {
@@ -175,10 +180,12 @@ export function generateTypeScriptForContexts(
     enums: contexts.flatMap((c) => c.enums),
     valueObjects: contexts.flatMap((c) => c.valueObjects),
     events: contexts.flatMap((c) => c.events),
+    payloads: contexts.flatMap((c) => c.payloads),
     aggregates: contexts.flatMap((c) => c.aggregates),
     repositories: contexts.flatMap((c) => c.repositories),
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
+    criteria: contexts.flatMap((c) => c.criteria),
   };
 
   out.set("domain/ids.ts", renderIds(merged));
@@ -208,7 +215,17 @@ export function generateTypeScriptForContexts(
   );
   if (merged.workflows.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
-    out.set("http/workflows.ts", buildWorkflowsFile(merged, aggsByName));
+    // resourceName → sourceType, so workflow bodies can import their
+    // resource-op verb helpers from the right client module (Phase 4).
+    const resourceSourceTypes = new Map<string, string>();
+    if (system) {
+      const storeType = new Map(system.sys.storages.map((s) => [s.name, s.type] as const));
+      for (const r of system.sys.dataSources) {
+        const st = storeType.get(r.storageName);
+        if (st) resourceSourceTypes.set(r.name, st);
+      }
+    }
+    out.set("http/workflows.ts", buildWorkflowsFile(merged, aggsByName, resourceSourceTypes));
   }
   if (merged.views.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
@@ -236,6 +253,11 @@ export function generateTypeScriptForContexts(
   // owns the aggregate.
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) {
+      // A TPH abstract base owns the shared table (emitted in db/schema.ts)
+      // but is never instantiated — no domain module, repository, routes, or
+      // tests.  Concrete subtypes carry all of that; their repository targets
+      // the shared table filtered by `kind` (see the repository builders).
+      if (agg.isAbstract) continue;
       const repo = findRepoFor(ctx, agg.name);
       out.set(
         `domain/${lowerFirst(agg.name)}.ts`,
@@ -277,6 +299,21 @@ export function generateTypeScriptForContexts(
       if (testsFile) {
         out.set(`domain/${lowerFirst(agg.name)}.test.ts`, testsFile);
       }
+    }
+    // TPH (aggregate-inheritance.md): each `sharedTable` base owns the shared
+    // table but has no per-concrete repo/routes.  Emit its polymorphic read
+    // home — the `<Base>` discriminated union + a read-only `<Base>Repository`
+    // (findById / findAll dispatching on `kind`) — so `find all <Base>` and
+    // polymorphic `<Base> id` dereferences resolve to a tagged union.
+    for (const base of ctx.aggregates) {
+      if (!isTphBase(base, ctx.aggregates)) continue;
+      const concretes = tphConcretesOf(base, ctx.aggregates) as typeof ctx.aggregates;
+      if (concretes.length === 0) continue;
+      out.set(`domain/${lowerFirst(base.name)}.ts`, buildBaseUnionFile(base, concretes));
+      out.set(
+        `db/repositories/${lowerFirst(base.name)}-repository.ts`,
+        buildBaseReaderFile(base, concretes, ctx),
+      );
     }
   }
 

@@ -370,23 +370,6 @@ self.onmessage = async (ev: MessageEvent<BuildRpcRequest>) => {
         response.result = { ok: true, paths: removed };
         break;
       }
-      case "vfs.list": {
-        response.result = {
-          ok: true,
-          paths: [...workerVfs.list(req.params.prefix)],
-        };
-        break;
-      }
-      case "vfs.snapshot": {
-        const snap = workerVfs.snapshot();
-        // Tagged-entry projection — both file and dir entries
-        // cross the wire so a respawn restores empty folders too.
-        const entries = [...snap.values()].sort((a, b) =>
-          a.path.localeCompare(b.path),
-        );
-        response.result = { ok: true, entries };
-        break;
-      }
       default:
         response.error = {
           message: `Unknown method: ${(req as { method: string }).method}`,

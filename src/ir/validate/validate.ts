@@ -1,6 +1,10 @@
-import { platformOwnsBackend } from "../../language/validators/data/platform-rules.js";
+import {
+  platformOwnsBackend,
+  platformSavingShapes,
+} from "../../language/validators/data/platform-rules.js";
 import { allPlatforms, platformFor } from "../../platform/registry.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
+import { verbsForKind } from "../resource-verbs.js";
 import { capabilitiesFor, configSchemaFor, supportsSurfaceKind } from "../source-types.js";
 import type {
   AggregateIR,
@@ -20,7 +24,11 @@ import type {
   TypeIR,
 } from "../types/loom-ir.js";
 import { allContexts, findUsesCurrentUser } from "../types/loom-ir.js";
-import { dataSourceKindForAggregate } from "../util/resolve-datasource.js";
+import {
+  dataSourceKindForAggregate,
+  effectiveSavingShape,
+  resolveDataSourceConfig,
+} from "../util/resolve-datasource.js";
 
 // ---------------------------------------------------------------------------
 // Loom IR validator — semantic checks that need the full IR (not just
@@ -58,6 +66,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
     validateDataSourceCoverage(sys, diags);
+    validateSavingShapeSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
@@ -76,6 +85,9 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     // enum are easier to catch there since lowering loses that
     // information by design.
   }
+  // Which backend (needsDb) platforms host each context — drives the TPH
+  // storage gate (sharedTable is implemented for Hono only, v1).
+  const backendPlatformsByContext = backendPlatformsHostingEachContext(loom);
   // Per-context checks apply uniformly whether the context is
   // bundled in a system's modules or sits at the top level.
   for (const c of allContexts(loom)) {
@@ -87,6 +99,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateViews(c, diags);
     validateCurrentUserScope(c, diags);
     validatePermissionRefs(c, diags);
+    validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
   validateExprIntegrity(loom, diags);
   return diags;
@@ -898,6 +911,50 @@ function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): voi
   }
 }
 
+// ---------------------------------------------------------------------------
+// Saving-shape capability (D-DOCUMENT-AXIS).  An aggregate's effective
+// `shape(…)` must be one the hosting backend can actually emit.  Today
+// the matrix is partial — .NET / Hono emit all three (relational /
+// embedded / document); Phoenix emits only relational — so a
+// `shape(document)` aggregate on a Phoenix deployable would otherwise
+// emit *relationally*, silently mismatching the per-shape migration.
+// This turns that footgun into a clear error (the capability tier).
+//
+// Per-projection: the effective shape is resolved binding-aware (a
+// `resource { shape: … }` override wins over the aggregate header), the
+// same way the migration + backend emitters resolve it, so the check
+// matches what would actually be produced.  Frontend platforms own no
+// persistence (platformSavingShapes → undefined) and are skipped.
+// ---------------------------------------------------------------------------
+function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+
+  for (const dep of sys.deployables) {
+    if (!platformOwnsBackend(dep.platform)) continue;
+    const supported = platformSavingShapes(dep.platform);
+    if (!supported) continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
+        if (supported.includes(shape)) continue;
+        diags.push({
+          severity: "error",
+          message:
+            `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
+            `'${ctxName}.${agg.name}' with shape(${shape}), but that backend can only ` +
+            `emit: ${supported.join(", ")}.  Use a supported shape, or host this ` +
+            `aggregate on a deployable whose platform emits shape(${shape}).`,
+          source: `${sys.name}/${dep.name}`,
+        });
+      }
+    }
+  }
+}
+
 /** Returns a human-readable reason a dataSource of `kind` covers
  *  nothing in `ctx`, or undefined when the binding is exercised by
  *  at least one aggregate.  Encodes the dataSource-kind → aggregate-
@@ -1103,6 +1160,82 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
   // and an unsupported shape for a given backend is rejected by the
   // per-backend `supportedShapes` capability check, not warned as inert.
 ];
+
+// Aggregate-inheritance storage gate (aggregate-inheritance.md, I2/I3).
+//
+// `ownTable` (TPC) emission is wired on every backend: the abstract base is
+// dropped from the generation view (system/index.ts `collectContextsFor`) and
+// each concrete emits as a standalone table carrying the merged base + own
+// fields (the `wireShape` merge in enrichContext).
+//
+// `sharedTable` (TPH) is implemented for the Hono backend only (v1): the
+// hierarchy lives in one shared table named for the base, with a `kind`
+// discriminator and per-concrete columns made nullable; each concrete's repo
+// filters/stamps `kind`. So a TPH hierarchy is allowed iff its context is
+// hosted by a Hono backend deployable. Otherwise it's an error (not a
+// warning) — TPH on .NET/Phoenix isn't built, and a context with no Hono host
+// has no implemented emission target. `sharedTable` is the omitted-modifier
+// default, so an inheritance hierarchy with no `inheritanceUsing(…)` is TPH
+// too. Polymorphic `Party id` refs and `find all Party` remain deferred (the
+// language validator rejects the former); document / TPT shapes are later.
+const DEFAULT_INHERITANCE_LAYOUT = "sharedTable" as const;
+
+/** Map each context name to the set of backend (needsDb) platforms that host
+ *  it — a context is TPH-capable iff that set includes `hono`. */
+function backendPlatformsHostingEachContext(loom: EnrichedLoomModel): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const sys of loom.systems) {
+    for (const d of sys.deployables) {
+      if (!platformFor(d.platform).needsDb) continue;
+      for (const cn of d.contextNames) {
+        const set = out.get(cn) ?? new Set<string>();
+        set.add(d.platform);
+        out.set(cn, set);
+      }
+    }
+  }
+  return out;
+}
+
+function validateInheritanceStorage(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  const byName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  const hostedByHono = backendPlatforms.has("hono");
+  for (const agg of ctx.aggregates) {
+    if (!agg.isAbstract && !agg.extendsAggregate) continue;
+    // A concrete's layout defaults to its base's (resolved within the
+    // context); a per-concrete `inheritanceUsing(…)` override wins. The
+    // abstract base uses its own declared layout. Either way an omitted
+    // modifier means `sharedTable` (TPH), the documented default.
+    const base = agg.extendsAggregate ? byName.get(agg.extendsAggregate) : undefined;
+    const effective = agg.inheritanceUsing ?? base?.inheritanceUsing ?? DEFAULT_INHERITANCE_LAYOUT;
+    if (effective !== "sharedTable") continue;
+    // Implemented when a Hono backend hosts the context.
+    if (hostedByHono) continue;
+    const role = agg.isAbstract ? "abstract base" : `extends ${agg.extendsAggregate}`;
+    const how = agg.inheritanceUsing
+      ? "inheritanceUsing(sharedTable)"
+      : "the omitted-modifier default (sharedTable)";
+    const others = [...backendPlatforms].filter((p) => p !== "hono");
+    const hostNote =
+      others.length > 0
+        ? `it is hosted by ${others.join(", ")}, where TPH is not implemented`
+        : "no Hono backend deployable hosts this context";
+    diags.push({
+      severity: "error",
+      message:
+        `aggregate '${agg.name}' (${role}) resolves to sharedTable (TPH) inheritance via ` +
+        `${how}, but TPH storage emission is implemented for the Hono backend only — ` +
+        `${hostNote}. Host the context on a Hono deployable, or declare ` +
+        `'inheritanceUsing(ownTable)' to use the per-concrete (TPC) layout (all backends). ` +
+        `Tracked in aggregate-inheritance.md I2/I3.`,
+      source: `${ctx.name}/${agg.name}`,
+    });
+  }
+}
 
 function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const ds of sys.dataSources) {
@@ -1746,8 +1879,13 @@ function validateWorkflowBody(
             source: `${ctx.name}/${wf.name}`,
           });
         }
+        // `let x = files.get(k)` — the bound form of a resource-op.
+        checkResourceOpExpr(st.expr, ctx, wf, diags);
         break;
       }
+      case "resource-call":
+        checkResourceOpExpr(st.call, ctx, wf, diags);
+        break;
     }
   }
 
@@ -1767,6 +1905,37 @@ function validateWorkflowBody(
     diags.push({
       severity: "error",
       message: `workflow '${wf.name}': isolation level '${wf.isolation}' requires the 'transactional' keyword.`,
+      source: `${ctx.name}/${wf.name}`,
+    });
+  }
+}
+
+// Validate a resource-op call expression in a workflow body (Phase 4):
+//   - the verb must belong to the resource's kind vocabulary
+//     (lowering leaves `capability === ""` on an unknown verb);
+//   - a resource-op may not run inside a transactional span — an S3
+//     `put` can't roll back with the DB transaction (use the outbox).
+// The capability-gap check (need ⊆ sourceType) is handled by
+// `validateNeedCapabilities`, which consumes the usage-derived needs.
+function checkResourceOpExpr(
+  expr: import("../types/loom-ir.js").ExprIR,
+  ctx: BoundedContextIR,
+  wf: { name: string; transactional: boolean },
+  diags: LoomDiagnostic[],
+): void {
+  if (expr.kind !== "call" || expr.callKind !== "resource-op" || !expr.resourceOp) return;
+  const op = expr.resourceOp;
+  if (op.capability === "") {
+    diags.push({
+      severity: "error",
+      message: `workflow '${wf.name}': '${op.resourceName}.${op.verb}(...)' — '${op.verb}' is not a valid verb for a ${op.resourceKind} resource.  Available: ${verbsForKind(op.resourceKind).join(", ") || "(none)"}.`,
+      source: `${ctx.name}/${wf.name}`,
+    });
+  }
+  if (wf.transactional) {
+    diags.push({
+      severity: "error",
+      message: `workflow '${wf.name}': resource operation '${op.resourceName}.${op.verb}(...)' cannot run inside a transactional workflow — external effects don't roll back with the database transaction.  Move it out of the transactional span, or publish through an outbox.`,
       source: `${ctx.name}/${wf.name}`,
     });
   }

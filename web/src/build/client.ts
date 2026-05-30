@@ -5,8 +5,6 @@ import type {
   SnapshotResult,
   VfsEntry,
   VfsDeleteResult,
-  VfsListResult,
-  VfsSnapshotResult,
   VfsWriteResult,
 } from "./protocol.js";
 
@@ -17,9 +15,7 @@ type AnyResult =
   | GenerateResult
   | SnapshotResult
   | VfsWriteResult
-  | VfsDeleteResult
-  | VfsListResult
-  | VfsSnapshotResult;
+  | VfsDeleteResult;
 
 interface PendingSlot {
   resolve: (v: AnyResult) => void;
@@ -143,17 +139,6 @@ export class LoomBuildClient {
    *  dropped; the response lists the paths that actually existed. */
   vfsDelete(paths: string[]): Promise<VfsDeleteResult> {
     return this.call("vfs.delete", { paths }) as Promise<VfsDeleteResult>;
-  }
-
-  /** List paths under a prefix — see `MemoryVfs.list` for prefix
-   *  semantics (directory-boundary match). */
-  vfsList(prefix: string): Promise<VfsListResult> {
-    return this.call("vfs.list", { prefix }) as Promise<VfsListResult>;
-  }
-
-  /** Full snapshot of the worker's VFS. */
-  vfsSnapshot(): Promise<VfsSnapshotResult> {
-    return this.call("vfs.snapshot", {}) as Promise<VfsSnapshotResult>;
   }
 
   /** Terminate the current worker and start a fresh one, replaying
