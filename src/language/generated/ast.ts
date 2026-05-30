@@ -2140,6 +2140,7 @@ export function isTypeRef(item: unknown): item is TypeRef {
 export interface Ui extends AstNode {
     readonly $container: System;
     readonly $type: 'Ui';
+    framework?: Framework;
     members: Array<UiMember>;
     name: string;
     withClause?: WithClause;
@@ -3798,6 +3799,7 @@ export class DddAstReflection extends AbstractAstReflection {
                 return {
                     name: Ui,
                     properties: [
+                        { name: 'framework' },
                         { name: 'members', defaultValue: [] },
                         { name: 'name' },
                         { name: 'withClause' }
