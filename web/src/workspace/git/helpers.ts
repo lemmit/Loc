@@ -28,16 +28,16 @@ import type {
  *  generate (PR 4). */
 export const GENERATED_BASE_REF = "refs/loom/generated-base";
 
-/** Stage all working-tree changes and commit them.  No-op commit is
- *  avoided by returning `undefined` when nothing was staged. */
+/** Stage all working-tree changes and commit them.  Delegates to
+ *  `GitStore.commitWorkingTree` so every commit path (autosave +
+ *  regenerate) shares one serialised lock and a no-op (nothing staged)
+ *  returns `undefined`. */
 export async function commitOnSave(
   store: GitStore,
   message: string,
   author?: GitAuthor,
 ): Promise<string | undefined> {
-  const staged = await store.stageAll();
-  if (!staged) return undefined;
-  return store.commit(message, author);
+  return store.commitWorkingTree(message, author);
 }
 
 /** Regenerate-as-merge: merge `theirsRef` (the freshly-generated tree's

@@ -93,6 +93,13 @@ export interface FileDiff {
   status: "added" | "removed" | "modified";
 }
 
+/** Options for the `list*` family.  `skip` prunes subtrees (absolute
+ *  paths) from the underlying walk — e.g. the source scan skips
+ *  `/workspace/generated`. */
+export interface ListOpts {
+  skip?: ReadonlyArray<VfsPath>;
+}
+
 /** Outcome of a merge — either a clean result or a conflict listing.
  *  Never throws on conflict, so callers branch on `ok`. */
 export type MergeOutcome =
@@ -119,6 +126,9 @@ const ABSOLUTE = (filepath: string): VfsPath =>
 
 export class GitStore {
   private readonly subs = new Set<Subscription>();
+  /** Serialises commits so concurrent callers (debounced autosave +
+   *  an intentional regenerate) can't interleave git index/HEAD writes. */
+  private commitChain: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly gfs: GitFs) {}
 
@@ -233,26 +243,27 @@ export class GitStore {
   }
 
   /** Files under `prefix`, sorted.  Directory-boundary prefix match. */
-  async list(prefix: VfsPath): Promise<VfsPath[]> {
-    return this.listFiltered(prefix, "file");
+  async list(prefix: VfsPath, opts?: ListOpts): Promise<VfsPath[]> {
+    return this.listFiltered(prefix, "file", opts?.skip);
   }
 
   /** Directories under `prefix`, sorted. */
-  async listDirs(prefix: VfsPath): Promise<VfsPath[]> {
-    return this.listFiltered(prefix, "dir");
+  async listDirs(prefix: VfsPath, opts?: ListOpts): Promise<VfsPath[]> {
+    return this.listFiltered(prefix, "dir", opts?.skip);
   }
 
   /** Files and directories under `prefix`, sorted. */
-  async listAll(prefix: VfsPath): Promise<VfsPath[]> {
-    return this.listFiltered(prefix, undefined);
+  async listAll(prefix: VfsPath, opts?: ListOpts): Promise<VfsPath[]> {
+    return this.listFiltered(prefix, undefined, opts?.skip);
   }
 
   private async listFiltered(
     prefix: VfsPath,
     kind: "file" | "dir" | undefined,
+    skip?: ReadonlyArray<VfsPath>,
   ): Promise<VfsPath[]> {
     const norm = normalizePath(prefix);
-    const all = await this.walkTree();
+    const all = await this.walkTree(skip);
     const out: VfsPath[] = [];
     for (const node of all) {
       if (kind !== undefined && node.kind !== kind) continue;
@@ -341,6 +352,27 @@ export class GitStore {
       message,
       author: { ...author },
     });
+  }
+
+  /** Stage the whole working tree and commit it, serialised against any
+   *  other in-flight `commitWorkingTree` so two commits never interleave.
+   *  Returns the new commit oid, or `undefined` when nothing changed. */
+  async commitWorkingTree(
+    message: string,
+    author: GitAuthor = LOOM_AUTHOR,
+  ): Promise<string | undefined> {
+    const run = this.commitChain.then(async () => {
+      const staged = await this.stageAll();
+      if (!staged) return undefined;
+      return this.commit(message, author);
+    });
+    // Keep the chain alive regardless of this run's outcome so one
+    // failure doesn't wedge every subsequent commit.
+    this.commitChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   async log(depth?: number): Promise<CommitInfo[]> {
@@ -502,9 +534,17 @@ export class GitStore {
   /** Recursive walk of the LightningFS tree, skipping the gitdir.
    *  Returns every file and directory as `{ path, kind }`.  At
    *  playground scale (low hundreds of paths) a full walk per list call
-   *  is negligible, matching MemoryVfs's full-scan listing. */
-  private async walkTree(): Promise<Array<{ path: VfsPath; kind: "file" | "dir" }>> {
+   *  is negligible, matching MemoryVfs's full-scan listing.
+   *
+   *  `skip` prunes whole subtrees by absolute path — the hot per-keystroke
+   *  source scan passes `/workspace/generated` so it doesn't traverse the
+   *  (potentially large) generated tree just to filter it out. */
+  private async walkTree(
+    skip?: ReadonlyArray<VfsPath>,
+  ): Promise<Array<{ path: VfsPath; kind: "file" | "dir" }>> {
     const out: Array<{ path: VfsPath; kind: "file" | "dir" }> = [];
+    const skipSet =
+      skip && skip.length > 0 ? new Set(skip.map((p) => normalizePath(p))) : null;
     const visit = async (dirPath: VfsPath): Promise<void> => {
       let names: string[];
       try {
@@ -515,6 +555,7 @@ export class GitStore {
       for (const name of names) {
         if (dirPath === "/" && name === ".git") continue; // never expose the repo
         const childPath = dirPath === "/" ? `/${name}` : `${dirPath}/${name}`;
+        if (skipSet?.has(childPath)) continue; // prune this subtree
         let st: { isDirectory(): boolean };
         try {
           st = await this.fs.promises.stat(childPath);
