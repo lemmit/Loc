@@ -30,6 +30,7 @@ import {
 import {
   camelId,
   opCreate,
+  opDestroy,
   opFind,
   opGetById,
   opList,
@@ -398,6 +399,25 @@ function renderApiSpec(
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${respMod}}}
             }${errorResponseEntries("getById", schemasModule)}
           }
+        }${
+          // Canonical destroy → DELETE /<aggs>/{id}.  Gated on the IR
+          // lifecycle so the Phoenix spec matches the Hono/.NET destroy
+          // route (operationId + 404/409 error set from the shared matrix);
+          // the route + controller `def destroy` are emitted in api-emit.ts.
+          agg.canonicalDestroy
+            ? `,
+        delete: %OpenApiSpex.Operation{
+          summary: "Destroy ${agg.name}",
+          operationId: "${camelId(opDestroy(agg.name))}",
+          tags: ["${aggSlug}"],
+          parameters: [
+            %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
+          ],
+          responses: %{
+            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("destroy", schemasModule)}
+          }
+        }`
+            : ""
         }
       }`,
     );

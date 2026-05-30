@@ -248,8 +248,7 @@ export function renderController(
         ? [
             '    [HttpDelete("{id}")]',
             "    [ProducesResponseType(204)]",
-            ...producesProblem("getById"),
-            "    [ProducesResponseType(typeof(ProblemDetails), 409)]",
+            ...producesProblem("destroy"),
             `    public async Task<IActionResult> ${actionName(opDestroy(agg.name))}([FromRoute] ${shape.idClrType} id)`,
             "    {",
             "        try",
