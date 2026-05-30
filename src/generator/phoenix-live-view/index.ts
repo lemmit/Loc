@@ -12,6 +12,7 @@ import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx } from "../_adapters/index.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { ashStyleAdapter } from "./adapters/ash-style.js";
+import { emitPhoenixResourceFiles } from "./adapters/resource-clients.js";
 import { type ApiRoute, emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
@@ -464,7 +465,12 @@ function emitShellFiles(
 ): void {
   const port = deployable.port ?? 4000;
 
-  out.set("mix.exs", renderMixExs(appName, appModule));
+  // Resource client modules (objectStore / queue / api) + their Hex
+  // deps (Phase 4c).  Empty when the deployable wires no consumable
+  // resources — mix.exs stays byte-identical.
+  const resourceEmission = emitPhoenixResourceFiles(sys, appName, appModule);
+  for (const [path, content] of resourceEmission.files) out.set(path, content);
+  out.set("mix.exs", renderMixExs(appName, appModule, resourceEmission.hexDeps));
   out.set(".formatter.exs", renderFormatterExs());
   out.set("Dockerfile", renderDockerfile(appName));
   out.set(".dockerignore", renderDockerignore());
@@ -566,7 +572,17 @@ function emitShellFiles(
 // Individual shell file renderers
 // ---------------------------------------------------------------------------
 
-function renderMixExs(appName: string, appModule: string): string {
+function renderMixExs(
+  appName: string,
+  appModule: string,
+  extraHexDeps: Record<string, string> = {},
+): string {
+  // Resource-client Hex deps (Phase 4c) — `{:ex_aws, "~> 2.5"}` etc.,
+  // appended to the base dep list.  Sorted for stable output.
+  const extraDepLines = Object.entries(extraHexDeps)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, ver]) => `,\n      {:${name}, ${ver}}`)
+    .join("");
   return `# Auto-generated.
 defmodule ${appModule}.MixProject do
   use Mix.Project
