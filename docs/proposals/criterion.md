@@ -623,6 +623,15 @@ Orders.latestActive(20)
 
 Either path names the bundle. No `specification` construct needed.
 
+> **Update:** the named-bundle role is now filled by a dedicated
+> keyword, `retrieval` (a composed `criterion` + `sort` + `loads`, run
+> via `Repo.run(R(args), page?)`) — see
+> [`retrieval.md`](./retrieval.md). It deliberately avoids the name
+> "Specification" (which means the *atom* on JPA but the *bundle* on
+> .NET/Ardalis); `criterion` stays the predicate, `retrieval` is the
+> bundle. The ad-hoc `Repo.findAll(criterion, sort?, page?, loads?)`
+> above remains the anonymous form of the same mechanism.
+
 ## Workflow-calls-workflow + `private workflow` (related extension)
 
 For reusable cross-aggregate orchestration that *mutates* — what
@@ -885,6 +894,14 @@ or after the find-variant re-shape.
   that proposal; result types are shape-parameterised per its
   shape-typing rules. **Default is whole aggregate; `loads:` is
   optimisation.**
+- [`retrieval.md`](./retrieval.md) — the named bundle keyword
+  (`retrieval` + `Repo.run`) that hoists `criterion` + `sort` + `loads`
+  into a reusable declaration; this proposal's `findAll` is its
+  anonymous form.
+- [`reified-criteria.md`](./reified-criteria.md) — makes backends
+  consume `CriterionIR` directly (the predicate becomes a constructed
+  object, not an inlined body); defines the `RetrievalIR` / `LoadPlanIR`
+  seam.
 - [`aggregate-inheritance.md`](./aggregate-inheritance.md) — state
   layer; criteria over abstract aggregates resolve to concrete
   types via the polymorphic id reference rule.

@@ -211,6 +211,87 @@ keeping the suite green.
    free; this is the proposal's natural payoff
    ([`java-backend.md`](./java-backend.md)).
 
+## Naming — "Specification" is a backend word, not a Loom word
+
+The word "Specification" is overloaded across the ecosystems this design
+touches, and the overload is the source of real confusion. Pinning it:
+
+- **Hibernate** splits `Criterion` (a predicate fragment) from `Criteria`
+  (a full query). **Spring Data JPA** has `Specification<T>` as its
+  *predicate* type (composed with `.and()/.or()`), and no bundle type at
+  all — the bundle is the `findAll(spec, Pageable)` *call*. **Ardalis
+  (.NET)** uses `Specification<T>` for the *bundle* (predicate + sort +
+  page + includes in one object). So the same word, "Specification,"
+  names the **atom** on JPA and the **bundle** on .NET. The frameworks
+  disagree.
+
+Loom therefore does **not** adopt "Specification" as a source keyword or
+an IR type name. The word stays *generated-code-local*, meaning whatever
+the target framework makes it mean. Loom's vocabulary lives on three
+strictly separated shelves:
+
+| Shelf | Atom (predicate) | Bundle (predicate + sort + loads) |
+|---|---|---|
+| **Source keyword** | `criterion` *(shipped)* | `retrieval` *(see [`retrieval.md`](./retrieval.md))* |
+| **IR type** | `CriterionIR` / `CriterionRefIR` | `RetrievalIR` (+ `LoadPlanIR` for the fetch shape) |
+| **Generated-code-local** | .NET `Criterion<T>` · JPA `Specification<T>` · Hono predicate closure · Ash filter fragment | .NET Ardalis `Specification<T>` · JPA `findAll(spec, Pageable)` · Hono query builder · Ash read action |
+
+The discipline: **`criterion` and `retrieval` are the only words an
+author writes; `CriterionIR` / `LoadPlanIR` / `RetrievalIR` are the only
+names the IR uses; "Specification" never travels upward from generated
+code.** That is why a reified criterion can emit *as* a JPA
+`Specification<T>` (the atom) and *as* part of an Ardalis
+`Specification<T>` (the bundle) without any clash in Loom's own model —
+those names simply don't exist at the Loom level.
+
+### The internal seam — `CriterionIR` + `LoadPlanIR` + `RetrievalIR`
+
+Reifying criteria introduces two IR-level structures, paired at every
+retrieval site. They are deliberately **separate** because they have
+different lifetimes:
+
+```
+CriterionIR     — the predicate atom. Shared: one per `criterion`,
+                  reused at every use-site. Reified (this proposal);
+                  use-sites reference it via CriterionRefIR, not inline.
+
+LoadPlanIR      — the fetch shape for one retrieval. Per use-site:
+                  the same criterion can be retrieved with different
+                  load shapes at different calls. Default value is
+                  `whole(agg)` — the full owned aggregate tree,
+                  cross-aggregate refs as ids (the default-whole policy
+                  from load-specifications.md). Enrich-phase derivable
+                  from the aggregate's `contains` + fields, exactly like
+                  `wireShape`; `loads:` transforms it (restrict / expand).
+
+RetrievalIR     — the bundle node tying them together:
+                  { criterion: CriterionRefIR, sort?, loadPlan,
+                    targetType }.  No `page` field — pagination is a
+                  call-site argument on the retrieval's executor, never
+                  part of the bundle.
+```
+
+The predicate is shared and stable; the load shape is per-call and
+derived. Folding them into one object would force either re-deriving the
+predicate per site (back to inlining) or attaching a per-site load shape
+to a shared object (wrong scope) — so the honest model is two
+structures, met at `RetrievalIR`.
+
+**`LoadPlanIR` is a second *secondary, derived* IR** — the first being
+`MigrationsIR` (CLAUDE.md: *"the only secondary IR is `MigrationsIR`"*).
+This is a deliberate addition, justified the same way: derive once,
+share across every backend. Its **default (`whole(agg)`) is structural**
+(no analysis — falls straight out of the aggregate shape in enrich phase
+⑥); only the *narrowing* of that default by body inference is
+analysis-heavy, and that — like `load-specifications.md`'s inference — is
+explicitly **v2**. v1 populates `LoadPlanIR` from `whole(agg)` +
+explicit `loads:` only.
+
+The synthesised-vs-named axis: ad-hoc `Repo.findAll(criterion, sort?,
+page?, loads?)` synthesises a `RetrievalIR` per call; a declared
+`retrieval` ([`retrieval.md`](./retrieval.md)) lowers to a *named,
+reusable* one. Same node, two doors.
+
 ## Open questions
 
 1. **Anonymous capability filters.** `filter !this.isDeleted` has no
@@ -240,6 +321,9 @@ keeping the suite green.
 - [`criterion.md`](./criterion.md) — the parent criterion design
   (`from` / `when` / `findAll` surfaces); reification is compatible with
   those use-sites (they construct + apply specs).
+- [`retrieval.md`](./retrieval.md) — the named *bundle* keyword
+  (`retrieval` + `Repo.run`) that graduates the `RetrievalIR` /
+  `LoadPlanIR` seam defined here into source.
 - [`java-backend.md`](./java-backend.md) — `Specification<T>` emission is
   this proposal on the Java backend; the two should land together.
 - [`docs/criterion.md`](../criterion.md) — shipped criterion core.
