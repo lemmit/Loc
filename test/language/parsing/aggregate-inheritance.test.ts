@@ -167,6 +167,33 @@ describe("aggregate inheritance — validator (I1)", () => {
     `);
     expect(codes(errors)).not.toContain("loom.es-tph-forced-own-table");
   });
+
+  it("rejects a voluntary ownTable override under a sharedTable base (loom.tph-own-override-unsupported)", async () => {
+    // Mixed strategy (Pattern 3): LegacyVendor opts out of the shared table.
+    // Rejected at the declaration regardless of any polymorphic reference,
+    // naming the offending concrete.
+    const { errors } = await parse(`
+      context T {
+        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        aggregate Customer extends Party { creditLimit: decimal }
+        aggregate LegacyVendor extends Party inheritanceUsing(ownTable) { obscure: string }
+      }
+    `);
+    expect(codes(errors)).toContain("loom.tph-own-override-unsupported");
+    expect(errors.some((e) => /LegacyVendor/.test(e.message ?? ""))).toBe(true);
+  });
+
+  it("keeps the D-ES-TPH ownTable opt-out allowed (eventLog concrete is not a mixed-strategy override)", async () => {
+    // An eventLog concrete is FORCED to ownTable by D-ES-TPH — that sanctioned
+    // opt-out must not trip the voluntary-override gate.
+    const { errors } = await parse(`
+      context T {
+        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        aggregate Ledger extends Party persistedAs(eventLog) inheritanceUsing(ownTable) { n: int }
+      }
+    `);
+    expect(codes(errors)).not.toContain("loom.tph-own-override-unsupported");
+  });
 });
 
 describe("aggregate inheritance — field inheritance into wireShape (I2 foundation)", () => {
