@@ -20,7 +20,7 @@ Today the React generator emits one Zod schema per aggregate / operation / view 
 | **Server validation errors** (HTTP 422 ProblemDetails) → form field errors | No mapping — `onError` handlers do not exist on emitted mutations | Auto-generated middleware that maps each `errors[i].pointer` to a flat form-field key via `FieldMap` and calls `setError()` |
 | **Tier-2 vs Tier-1 split** (server-driven invariant breach vs local UX precondition) | Tier 1 only (Zod); no Tier 2 path | Both: Zod stays the local gate; the ACL hydrates server-side breaches inline |
 
-**Proposed**: introduce a `frontend ACL` layer in the React generator that emits a `FormState` / `CommandPayload` / `FieldMap` triple per bound action, plus a tiny per-project runtime (`handleServerValidationError`) that closes the loop with React Hook Form's `setError`. No new DSL syntax. The IR already carries everything needed once `lifecycle-operations` + `payload-transport-layer` are in.
+**Proposed**: emit a `FormState` / `CommandPayload` / `FieldMap` triple per bound action (colocated with that action's schema), plus two small shared utility modules — one type-only (`StrictFieldMap<P, F>`), one runtime (`applyServerErrors`) — that close the loop with React Hook Form's `setError`. No new DSL syntax. The IR already carries everything needed once `lifecycle-operations` + `payload-transport-layer` are in.
 
 The user-visible result is that any backend validation failure (uniqueness conflict, cross-aggregate invariant, async catch-up rule) lands on the field that caused it, with the message the server wrote, without the page author writing a line of plumbing.
 
@@ -48,7 +48,7 @@ For every bound action (a `create` / `operation` / `destroy` from `lifecycle-ope
 | **`CommandPayload<A>`** | Nested: value objects re-composed, primitives coerced, `option` carriers collapsed, deep `readonly` | 🔒 Frozen | `z.output<typeof schemaFor(A)>` |
 | **`FieldMap<A>`** | Strictly-typed dictionary: pointer-on-the-wire → form-state key (and reverse) | 🔒 Const, compile-time-checked | Derived from the same wire projection that emits the Zod transform |
 
-Naming: lowercase action-derived (`updateProductFormState`, `updateProductPayload`, `updateProductFieldMap`). Exported from the same module as the Zod schema (`src/<module>/products/update-product.schema.ts`), one schema per file (per `StrictFieldMap` constraint #2 in the blueprint).
+Naming: lowercase action-derived (`updateProductFormState`, `updateProductPayload`, `updateProductFieldMap`). The four exports (schema, FormState, Payload, FieldMap instance) live in **one file per action**: `src/lib/schemas/update-product.schema.ts`. The FieldMap *instance* is per-action and never globalised into a project-wide registry — drift in one action breaks that action's build, in isolation.
 
 Cross-cutting names (no plurals, no `Dto`, no `Model`):
 - **State** — never spoken of without an action qualifier (`UpdateProductFormState`, never just "the form state").
@@ -88,9 +88,9 @@ The four cells of the matrix the blueprint draws — State, Payload, Command, Re
             ║       │                                         ║
             ║       ◄── ProblemDetails 422  (errors[].pointer)║
             ║                                                 ║
-            ║   handleServerValidationError({                 ║
-            ║     error, setError, fieldMap: FieldMap<A>,     ║
-            ║     fallbackToast: toast.error                  ║
+            ║   applyServerErrors({                           ║
+            ║     error, setError,                            ║
+            ║     fieldMap: <action>FieldMap                  ║
             ║   })                                            ║
             ║       │                                         ║
             ║       ▼  (pointer → flat key, setError)         ║
@@ -102,16 +102,28 @@ Every arrow on this diagram is generator-owned. The page author writes a `Create
 
 ## Design — what gets emitted
 
-### Per-action emission, in one file
+### File layout — three locations, three concerns
 
-For action `A` (say `Product.update`), the React generator emits one file at `src/<module>/products/update-product.schema.ts`:
+The React generator emits to three places. Two of them already exist as conventions (`src/lib/schemas/...` and `src/lib/...` are the existing homes for generated Zod schemas and helpers — see `src/generator/react/index.ts`); the third file is new.
+
+```
+src/lib/schemas/<action>.schema.ts    — PER ACTION: schema + FormState + Payload + FieldMap instance
+src/lib/strict-field-map.ts           — SHARED, TYPES ONLY: StrictFieldMap<P, F>
+src/lib/apply-server-errors.ts        — SHARED, RUNTIME: applyServerErrors(error, setError, fieldMap)
+```
+
+Each file has one concern. The per-action file owns *its* action's contract; drift breaks that action's build, in isolation. The two shared files are tiny — both Loom-owned, both overwritten on regen.
+
+### Per-action emission
+
+For action `A` (say `Product.update`), `src/lib/schemas/update-product.schema.ts`:
 
 ```ts
 // Generated from Product.update.
 // Do not edit — round-trip via the .ddd source.
 
 import { z } from "zod";
-import type { UseFormSetError, FieldValues, Path } from "react-hook-form";
+import type { StrictFieldMap } from "../strict-field-map";
 
 // ─── 1. The schema: single source of truth ──────────────────────────────────
 export const updateProductSchema = z
@@ -130,7 +142,7 @@ export const updateProductSchema = z
 export type UpdateProductFormState = z.input<typeof updateProductSchema>;
 export type UpdateProductPayload   = z.output<typeof updateProductSchema>;
 
-// ─── 3. Bidirectional FieldMap, statically pinned to both shapes ───────────
+// ─── 3. The FieldMap *instance* for this action, statically pinned to both shapes
 export const updateProductFieldMap = {
   "price.amount":   "price.amount",
   "price.currency": "price.currency",
@@ -138,45 +150,63 @@ export const updateProductFieldMap = {
 } as const satisfies StrictFieldMap<UpdateProductPayload, UpdateProductFormState>;
 ```
 
+The four exports stay together because they describe a single contract; renaming a wire field requires editing exactly this file. The `satisfies` clause turns any drift between payload pointers and form-state keys into a TypeScript compile error inside the generated project.
+
 (A flat-key form state means `register("price.amount")` becomes a literal key, not a nested path — this sidesteps RHF's nested-error-object access pattern and the JSON-pointer ↔ dot-path discrepancy in one move. See decision D-FAC-FLAT below.)
 
-`StrictFieldMap<TPayload, TFormState>` lives in the per-project runtime (next section). The `satisfies` clause turns any drift into a TypeScript compile error inside the generated project — exactly the bidirectional safety the blueprint's Appendix C asks for.
+### Shared type machinery — `src/lib/strict-field-map.ts`
 
-### Per-project runtime — emitted once, not per action
+Pure compile-time types. ~10 lines, no runtime emission, fully tree-shaken out of the bundle. Imported by every `<action>.schema.ts`.
 
-The React generator emits a single `src/_runtime/acl.ts` per project (alongside `src/_runtime/api.ts`):
+```ts
+// Generated — do not edit.
+
+/** Every dot-notation path inside an object type. Internal helper. */
+type NestedPaths<T> = T extends Function ? never
+  : T extends object ? { [K in keyof T & string]:
+        T[K] extends object ? `${K}` | `${K}.${NestedPaths<T[K]>}` : `${K}`
+    }[keyof T & string] : never;
+
+/** Strictly typed bidirectional pin between a payload shape and a form-state shape. */
+export type StrictFieldMap<TPayload, TFormState> = {
+  readonly [K in NestedPaths<TPayload>]?: keyof TFormState & string;
+};
+```
+
+`NestedPaths<T>` stays unexported — only `StrictFieldMap` is part of the surface. One concept per file, one export.
+
+### Shared runtime helper — `src/lib/apply-server-errors.ts`
+
+Pure logic, no pack-specific bits, no toast — that's the caller's concern. ~25 lines.
 
 ```ts
 // Generated — do not edit.
 
 import type { UseFormSetError, FieldValues, Path } from "react-hook-form";
+import type { StrictFieldMap } from "./strict-field-map";
 
-/** Every dot-notation path inside an object type. */
-export type NestedPaths<T> = T extends Function ? never
-  : T extends object ? { [K in keyof T & string]:
-        T[K] extends object ? `${K}` | `${K}.${NestedPaths<T[K]>}` : `${K}`
-    }[keyof T & string] : never;
+interface ProblemDetails {
+  title?: string;
+  errors?: { pointer: string; message: string }[];
+}
 
-export type StrictFieldMap<TPayload, TFormState> = {
-  readonly [K in NestedPaths<TPayload>]?: keyof TFormState & string;
-};
-
-export interface ServerValidationErrorArgs<TPayload, TFormState extends FieldValues> {
+export interface ApplyServerErrorsArgs<TPayload, TFormState extends FieldValues> {
   readonly error: unknown;
   readonly setError: UseFormSetError<TFormState>;
   readonly fieldMap: StrictFieldMap<TPayload, TFormState>;
-  readonly fallbackToast?: (message: string) => void;
 }
 
-/**
- * Decodes a ProblemDetails 422 body (see exception-less.md) into per-field
- * RHF errors. Returns true if the error was consumed.
- */
-export function handleServerValidationError<TPayload, TFormState extends FieldValues>(
-  { error, setError, fieldMap, fallbackToast }: ServerValidationErrorArgs<TPayload, TFormState>
-): boolean {
+/** Result of decoding: which path the caller should take on its own (toast / silent / rethrow). */
+export type ServerErrorOutcome =
+  | { kind: "applied" }                                    // field errors were set; render inline
+  | { kind: "global"; title: string }                      // 422 with a title only; caller should toast
+  | { kind: "unhandled" };                                 // not a 422 we can decode; caller decides
+
+export function applyServerErrors<TPayload, TFormState extends FieldValues>(
+  { error, setError, fieldMap }: ApplyServerErrorsArgs<TPayload, TFormState>
+): ServerErrorOutcome {
   const r = (error as { response?: { status?: number; data?: ProblemDetails } }).response;
-  if (r?.status !== 422 || !r.data) return false;
+  if (r?.status !== 422 || !r.data) return { kind: "unhandled" };
 
   const pd = r.data;
   if (Array.isArray(pd.errors) && pd.errors.length > 0) {
@@ -185,18 +215,16 @@ export function handleServerValidationError<TPayload, TFormState extends FieldVa
       const target  = (fieldMap as Record<string, string | undefined>)[flatKey] ?? flatKey;
       setError(target as Path<TFormState>, { type: "server", message });
     }
-    return true;
+    return { kind: "applied" };
   }
-  if (pd.title && fallbackToast) { fallbackToast(pd.title); return true; }
-  return false;
+  return pd.title ? { kind: "global", title: pd.title } : { kind: "unhandled" };
 }
 
-interface ProblemDetails { title?: string; errors?: { pointer: string; message: string }[]; }
 const pointerToFlat = (p: string) =>
   p.startsWith("/") ? p.slice(1).split("/").map(decodeURIComponent).join(".") : p;
 ```
 
-This is ~40 lines, written once, never edited by the user, never modified by the generator after first emission unless the contract changes (we own the file; we overwrite on regen, the same way we own `src/_runtime/api.ts`).
+Note the shape: the helper *applies* the field errors but **returns** an outcome rather than calling a `fallbackToast` callback. The caller (the form walker's emitted catch block) decides whether to toast, snackbar, log, or rethrow — using the pack-native primitive emitted inline. This keeps `apply-server-errors.ts` pack-agnostic and gives every call site full control over the global-error path without a callback dance.
 
 ### Form-walker rewrite — three new things at the submit boundary
 
@@ -208,21 +236,28 @@ The body walker (`src/generator/react/body-walker.ts`) already wires `useForm` +
      = useForm<UpdateProductFormState>({ resolver: zodResolver(updateProductSchema) });
    ```
 
-2. **Wrap the submit handler in the ACL.**
+2. **Wrap the submit handler in `applyServerErrors`, then emit a pack-native toast inline for the non-field-error paths.**
+
+   Example for the Mantine pack:
    ```ts
    const onSubmit = handleSubmit(async (payload /* : UpdateProductPayload */) => {
      try {
        await updateProductMutation.mutateAsync(payload);
      } catch (e) {
-       const handled = handleServerValidationError({
-         error: e, setError, fieldMap: updateProductFieldMap,
-         fallbackToast: msg => toast.error(msg),
-       });
-       if (!handled) toast.error("Network failure — please retry.");
+       const outcome = applyServerErrors({ error: e, setError, fieldMap: updateProductFieldMap });
+       if (outcome.kind === "global") {
+         notifications.show({ message: outcome.title, color: "red" });
+       } else if (outcome.kind === "unhandled") {
+         notifications.show({ message: "Network failure — please retry.", color: "red" });
+       }
+       // outcome.kind === "applied" → errors are already on the form fields; nothing else to do.
      }
    });
    ```
-   Generator-owned. The page body never sees `setError` or the mutation.
+
+   The shadcn version of that same catch block emits `toast.error(outcome.title)` instead; the MUI version emits `enqueueSnackbar(outcome.title, { variant: "error" })`; the Chakra version emits the `useToast()`-bound call. Each pack's emit lives in its design pack (`designs/<pack>/forms/form-error-toast.hbs` or analogous), the same way field rendering already does. There is **no shared `toast.ts` runtime file** — the call is one line, idiomatic to the pack, emitted directly at the catch block.
+
+   The page body never sees `setError`, `applyServerErrors`, or the mutation.
 
 3. **Generate default values from the Read Model** when the form is `OperationForm { for: instance.update }` (i.e. the page has loaded an instance via `find`). The flattening reverses `FieldMap` and walks the Read Model with the same wire projection (`forApiRead`). `defaultValues` becomes a flat record of strings/numbers — the bottom of the loop closes.
 
@@ -326,9 +361,17 @@ Reasons:
 
 The cost is unfamiliarity for hand-writing JSX against the generated form state — but the form *is* generated, so this is a generator-internal trade.
 
-### D-FAC-SINGLE-SCHEMA-FILE — Schema + types + FieldMap colocate, one file per action
+### D-FAC-SINGLE-SCHEMA-FILE — Schema + types + FieldMap instance colocate, one file per action
 
-Appendix C, constraint #2: schema, FormState type, CommandPayload type, FieldMap stay together. Loom generators already follow per-aggregate-per-action file layout; this just locks it in. A rename of the action's params requires editing exactly one file in the generated tree (and one operation declaration in the `.ddd`).
+The four exports that describe a single action's contract (schema, FormState, Payload, FieldMap instance) live in one file. A rename of the action's params requires editing exactly one file in the generated tree (and one operation declaration in the `.ddd`). FieldMap instances are deliberately **not** lifted into a project-wide registry: drift in one action breaks that action's build, not the whole project.
+
+### D-FAC-SPLIT-SHARED — Type machinery and runtime helper live in separate files
+
+`StrictFieldMap<P, F>` is a compile-time type erased from the bundle; `applyServerErrors` is a runtime function. They share zero implementation — only a type-parameter reference. Putting them in the same file because they share that reference would bury two distinct concerns (a recursive type definition; a 422-decoding state machine) under one filename that names neither. They sit in `src/lib/strict-field-map.ts` and `src/lib/apply-server-errors.ts` respectively, in the existing `src/lib/` neighbourhood where the React generator already emits `schemas.ts` and `format.tsx`.
+
+### D-FAC-NO-TOAST-RUNTIME — No shared toast indirection
+
+The form-error toast is one pack-native line (`notifications.show(...)` / `toast.error(...)` / `enqueueSnackbar(...)` / `useToast()(...)`). The body walker already dispatches per pack for every other rendering decision; it emits the toast call inline at the catch block, sourced from a pack template (`designs/<pack>/forms/form-error-toast.hbs`). A shared `toast.ts` re-export would be a wrapper around a one-liner — pure indirection.
 
 ### D-FAC-NO-NEW-DSL — Zero `.ddd`-level surface changes
 
@@ -352,7 +395,7 @@ The `type: "server"` discriminator lets a pack (or a future code-review tool) st
 
 ### D-FAC-MUTATION-NO-ONERROR — Translation happens in the form, not the hook
 
-`useMutation`'s `onError` is tempting (it would centralize translation in one place) but it forces *every* call site of the hook to share the same translation policy. A form binding wants `setError` + toast-fallback; a background sync job wants logging + retry; a quick-action button wants a snackbar. Putting the translator inside the form's submit handler lets each call site decide. The runtime helper (`handleServerValidationError`) is shared; the *policy* (where to send the error) is not.
+`useMutation`'s `onError` is tempting (it would centralize translation in one place) but it forces *every* call site of the hook to share the same translation policy. A form binding wants `setError` + toast-fallback; a background sync job wants logging + retry; a quick-action button wants a snackbar. Putting the translator inside the form's submit handler lets each call site decide. The runtime helper (`applyServerErrors`) is shared; the *policy* (which pack-native toast / snackbar / silent path to take on the `global` and `unhandled` outcomes) is not — it's emitted inline at each call site by the design pack.
 
 ## Open items
 
@@ -374,19 +417,19 @@ The `type: "server"` discriminator lets a pack (or a future code-review tool) st
 
 ### Phase 1 — Schema + dual-type emission (~2 days)
 
-- Emit the per-action `<action>.schema.ts` file with the `z.input` / `z.output` / `FieldMap` triple.
+- Emit the per-action `src/lib/schemas/<action>.schema.ts` file with the schema, `z.input` / `z.output` types, and the FieldMap instance.
 - Lock the `satisfies StrictFieldMap` clause so any drift surfaces as a TSC error in the generated project.
-- Emit `src/_runtime/acl.ts` with `StrictFieldMap`, `NestedPaths`, and `handleServerValidationError`.
+- Emit `src/lib/strict-field-map.ts` (type-only, ~10 lines).
+- Emit `src/lib/apply-server-errors.ts` (runtime helper, ~25 lines).
 
 Depends on: `loom-forms.md` Phase F1 (FormBindingIR), `payload-transport-layer.md` Phase 1 (PayloadIR scaffolding). Can land alongside the existing schema emission as a parallel-emit, opt-in path until `loom-forms.md` ships.
 
 ### Phase 2 — Form walker rewiring + mutation translation (~2 days)
 
 - Type `useForm` against `<Action>FormState`.
-- Wrap `handleSubmit`'s submit handler with `try { … } catch { handleServerValidationError(…) }`.
-- Emit per-action `flattenFor<Action>(readModel)` helper.
+- Wrap `handleSubmit`'s submit handler with `try { … } catch { applyServerErrors(…) }` plus a per-pack inline toast emit for the `global` / `unhandled` outcomes (`designs/<pack>/forms/form-error-toast.hbs`).
+- Emit per-action `flattenFor<Action>(readModel)` helper next to the schema.
 - Wire `defaultValues` from the Read Model through the flattener.
-- Wire fallback toast via the existing infrastructure toast service (introduce `src/_runtime/toast.ts` as a thin re-export over the pack's notification primitive — Mantine `notifications`, shadcn `sonner`, MUI `Snackbar`, Chakra `useToast`).
 
 Depends on: Phase 1, `loom-forms.md` Phase F2 (api-client integration).
 
@@ -409,4 +452,4 @@ Total: ~5 days serialised; ~3 days with parallelism. Carries the same dependency
 
 ---
 
-*Conversation thread that produced this proposal: a reader-supplied architectural blueprint ("Unified Data Flow for Domain-Driven Frontends") proposed an explicit State / Payload / Command / Read Model vocabulary with Zod `z.input` ↔ `z.output` duality, a strictly-typed `FieldMap` for bidirectional pointer↔field translation, and an Anti-Corruption Layer that decodes RFC 7807 ProblemDetails into RHF `setError` calls. Loom already has the wire-shape spine, the Zod emission, RHF wiring, and the ProblemDetails contract (via `exception-less.md`). The missing pieces are the dual-type emission, the FieldMap projection, and the runtime translator — collected here as a single, terminating proposal that finishes the frontend story `loom-forms.md` started.*
+*Conversation thread that produced this proposal: a reader-supplied architectural blueprint ("Unified Data Flow for Domain-Driven Frontends") proposed an explicit State / Payload / Command / Read Model vocabulary with Zod `z.input` ↔ `z.output` duality, a strictly-typed `FieldMap` for bidirectional pointer↔field translation, and an Anti-Corruption Layer that decodes RFC 7807 ProblemDetails into RHF `setError` calls. Loom already has the wire-shape spine, the Zod emission, RHF wiring, and the ProblemDetails contract (via `exception-less.md`). The missing pieces are the dual-type emission, the per-action FieldMap projection, and the shared decoder — collected here as a single, terminating proposal that finishes the frontend story `loom-forms.md` started. Three rounds of review trimmed earlier drafts: a per-pack toast shim and a fabricated `_runtime/` directory convention were both removed; the shared code was split into a compile-time types file and a runtime helper file in the existing `src/lib/` neighbourhood; per-action FieldMaps stay colocated with their schemas and are never globalised.*
