@@ -578,6 +578,13 @@ export type WorkflowStmtIR =
       aggName: string;
       op: string;
       args: ExprIR[];
+    }
+  | {
+      // A bare (unbound) resource-op call statement — `files.put(k, v)`
+      // (Phase 4).  The `let`-bound form (`let x = files.get(k)`) rides
+      // `expr-let` instead.  `call` is the lowered `resource-op` call IR.
+      kind: "resource-call";
+      call: ExprIR;
     };
 
 export interface LoomModel {
@@ -1552,12 +1559,14 @@ export type RefKind =
   | "helper-fn"
   | "enum-value"
   | "current-user" // magic identifier — system's `user` block shape
+  | "resource" // ambient resource handle — `files`, `jobs`, … (Phase 4)
   | "unknown";
 
 export type CallKind =
   | "function" // calls a `function` declared in scope
   | "value-object-ctor" // calls a value-object constructor
   | "private-operation" // calls a private operation
+  | "resource-op" // a verb call on an ambient resource handle (Phase 4)
   | "free"; // unresolved free call
 
 export type BinOp =
@@ -1585,6 +1594,11 @@ export type ExprIR =
       refKind: RefKind;
       enumName?: string;
       type?: TypeIR;
+      /** Populated when `refKind === "resource"` — the resource's
+       *  declared name and infra kind, so a `.verb(...)` call on it can
+       *  lower to a `resource-op` without re-resolving (Phase 4). */
+      resourceName?: string;
+      resourceKind?: DataSourceKind;
     }
   | {
       kind: "member";
@@ -1620,6 +1634,18 @@ export type ExprIR =
       args: ExprIR[];
       /** Same shape as `method-call.argNames` — see above. */
       argNames?: (string | undefined)[];
+      /** Populated when `callKind === "resource-op"` (Phase 4) — the
+       *  resolved resource binding, verb, the capability it requires,
+       *  and the access interface (default from
+       *  `EnrichedSystemIR.resourceInterfaces`, with per-verb override).
+       *  The bound `ResourceAdapter.emitOperation` renders the call. */
+      resourceOp?: {
+        resourceName: string;
+        resourceKind: DataSourceKind;
+        verb: string;
+        capability: string;
+        interface?: LoomInterface;
+      };
       /** Per-primitive `style:` escape hatch.  Populated by lowering
        *  when the source supplied a `style: { … }` named arg on a
        *  walker-primitive call (`Container { style: { background: "red" }, ... }`).

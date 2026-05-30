@@ -249,6 +249,11 @@ function renderWorkflowStmt(
         },
       ];
     }
+    case "resource-call":
+      // 4c: the Phoenix ResourceAdapter renders the call here.
+      // renderExpr already throws via the resource-op guard; keep an
+      // explicit branch so the switch stays exhaustive.
+      return [{ kind: "expr", text: `    ${renderExpr(st.call, renderCtx)}` }];
   }
 }
 

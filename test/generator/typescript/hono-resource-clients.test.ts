@@ -33,7 +33,8 @@ describe("hono resource-client emission", () => {
   it("emits one client module per sourceType with the resource's config", async () => {
     const { files } = generateSystems(await parseValid(SRC));
     const s3 = files.get("api/resources/s3.ts")!;
-    expect(s3).toMatch(/import \{ S3Client \} from "@aws-sdk\/client-s3";/);
+    expect(s3).toMatch(/S3Client/);
+    expect(s3).toMatch(/from "@aws-sdk\/client-s3";/);
     expect(s3).toMatch(/export const salesFiles = new S3Client\(\{/);
     expect(s3).toMatch(/salesFilesBucket = .*"app-files"/);
     expect(s3).toMatch(/"eu-central-1"/);

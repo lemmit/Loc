@@ -34,7 +34,14 @@ export const s3ResourceAdapter: ResourceAdapter = {
   supports: (storageType, kind) => storageType === "s3" && supportsSurfaceKind("s3", kind),
   emitProjectDeps: () => ({ "@aws-sdk/client-s3": "^3.700.0" }),
   emitClientModule(resources, stores): Lines {
-    const out: string[] = [`import { S3Client } from "@aws-sdk/client-s3";`, ``];
+    const out: string[] = [
+      `import {`,
+      `  GetObjectCommand,`,
+      `  PutObjectCommand,`,
+      `  S3Client,`,
+      `} from "@aws-sdk/client-s3";`,
+      ``,
+    ];
     for (const r of resources) {
       const store = storeOf(r, stores);
       const region = cfg(store, "region") ?? "us-east-1";
@@ -53,6 +60,35 @@ export const s3ResourceAdapter: ResourceAdapter = {
         out.push(`  forcePathStyle: true,`);
       }
       out.push(`});`);
+      out.push(``);
+      // Verb helpers consumed by workflow bodies (`files.put`/`files.get`
+      // → `<resource>$put`/`<resource>$get`).  These own the SDK mapping
+      // so the call site stays vendor-neutral.  `body` is the `json`
+      // payload (stored as a UTF-8 JSON string); `get` returns the
+      // parsed json or `null` when the key is absent.
+      out.push(`export async function ${r.name}$put(key: string, body: unknown): Promise<void> {`);
+      out.push(`  await ${r.name}.send(`);
+      out.push(`    new PutObjectCommand({`);
+      out.push(`      Bucket: ${r.name}Bucket,`);
+      out.push(`      Key: key,`);
+      out.push(`      Body: JSON.stringify(body),`);
+      out.push(`      ContentType: "application/json",`);
+      out.push(`    }),`);
+      out.push(`  );`);
+      out.push(`}`);
+      out.push(``);
+      out.push(`export async function ${r.name}$get(key: string): Promise<unknown> {`);
+      out.push(`  try {`);
+      out.push(
+        `    const res = await ${r.name}.send(new GetObjectCommand({ Bucket: ${r.name}Bucket, Key: key }));`,
+      );
+      out.push(`    const text = await res.Body?.transformToString();`);
+      out.push(`    return text ? JSON.parse(text) : null;`);
+      out.push(`  } catch (err) {`);
+      out.push(`    if ((err as { name?: string }).name === "NoSuchKey") return null;`);
+      out.push(`    throw err;`);
+      out.push(`  }`);
+      out.push(`}`);
       out.push(``);
     }
     return out;

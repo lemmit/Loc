@@ -38,6 +38,9 @@ import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 export function buildWorkflowsFile(
   ctx: BoundedContextIR,
   aggsByName: Map<string, AggregateIR>,
+  /** resourceName → sourceType, so resource-op verb helpers can be
+   *  imported from `../resources/<sourceType>` (Phase 4). */
+  resourceSourceTypes: Map<string, string> = new Map(),
 ): string {
   if (ctx.workflows.length === 0) return "";
   // Build the body first; imports are derived from what the body actually
@@ -205,8 +208,39 @@ export function buildWorkflowsFile(
   if (voEnumReferenced.length > 0) {
     imports.push(`import { ${voEnumReferenced.join(", ")} } from "../domain/value-objects";`);
   }
+  // Resource-op verb helpers (Phase 4): `<resource>$<verb>` exported by
+  // the client module at `../resources/<sourceType>`.  Group the
+  // imports by sourceType module; one named import per (resource, verb)
+  // pair the body uses.
+  const helperByModule = new Map<string, Set<string>>();
+  for (const wf of ctx.workflows) {
+    for (const op of resourceOpsIn(wf)) {
+      const sourceType = resourceSourceTypes.get(op.resourceName);
+      if (!sourceType) continue;
+      const mod = `../resources/${sourceType}`;
+      const set = helperByModule.get(mod) ?? new Set<string>();
+      set.add(`${op.resourceName}$${op.verb}`);
+      helperByModule.set(mod, set);
+    }
+  }
+  for (const [mod, helpers] of helperByModule) {
+    imports.push(`import { ${[...helpers].sort().join(", ")} } from "${mod}";`);
+  }
 
   return [...imports, "", ...body].join("\n") + "\n";
+}
+
+/** Every resource-op call in a workflow's statements (bare or let-bound). */
+function resourceOpsIn(wf: WorkflowIR): { resourceName: string; verb: string }[] {
+  const out: { resourceName: string; verb: string }[] = [];
+  for (const st of wf.statements) {
+    const call =
+      st.kind === "resource-call" ? st.call : st.kind === "expr-let" ? st.expr : undefined;
+    if (call?.kind === "call" && call.callKind === "resource-op" && call.resourceOp) {
+      out.push({ resourceName: call.resourceOp.resourceName, verb: call.resourceOp.verb });
+    }
+  }
+  return out;
 }
 
 function emitWorkflowRoute(
@@ -362,6 +396,11 @@ function renderStmt(
     }
     case "expr-let":
       return [`${indent}const ${st.name} = ${renderArg(st.expr)};`];
+    case "resource-call":
+      // Bare resource-op statement (`files.put(k, v)`).  `renderArg`
+      // renders the call as `(await files$put(...))`; emit it as a
+      // statement (Phase 4).
+      return [`${indent}${renderArg(st.call)};`];
   }
 }
 

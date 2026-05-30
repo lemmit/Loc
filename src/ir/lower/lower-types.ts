@@ -23,7 +23,13 @@ import {
   isSlotType,
   isValueObject,
 } from "../../language/generated/ast.js";
-import type { IdValueType, PermissionDeclIR, TypeIR, UserIR } from "../types/loom-ir.js";
+import type {
+  DataSourceKind,
+  IdValueType,
+  PermissionDeclIR,
+  TypeIR,
+  UserIR,
+} from "../types/loom-ir.js";
 
 /** Synthetic entity name used to type the `currentUser` magic
  *  identifier.  Member access on the user shape resolves through
@@ -57,14 +63,21 @@ export interface Env {
    *  validator surfaces a friendly diagnostic for any
    *  `permissions.X` reference there. */
   modulePermissions?: PermissionDeclIR[];
+  /** Resources in scope for the enclosing context — `resource X { for:
+   *  <thisCtx>, kind, … }` declarations, keyed by name to their infra
+   *  kind.  Drives resolution of an ambient resource handle
+   *  (`files.put(...)`) in workflow bodies (Phase 4).  Undefined / empty
+   *  outside a context or when none are declared for it. */
+  resources?: Map<string, DataSourceKind>;
 }
 
 export function newEnv(
   ctx: BoundedContext,
   user?: UserIR,
   modulePermissions?: PermissionDeclIR[],
+  resources?: Map<string, DataSourceKind>,
 ): Env {
-  return { ctx, locals: new Map(), user, modulePermissions };
+  return { ctx, locals: new Map(), user, modulePermissions, resources };
 }
 
 export function withLocal(
