@@ -23,6 +23,49 @@
 > [`docs/capabilities.md`](../capabilities.md),
 > [`docs/proposals/multi-tenancy-design-note.md`](./multi-tenancy-design-note.md).
 
+> **Implementation status (corrected after codebase grounding).** Three
+> pieces this note presents as "to do" are **already shipped**, and the
+> real remaining gap is narrower and lives in the backends, not the
+> validator/IR:
+>
+> - **The selectability oracle already exists** as
+>   `firstNonQueryableNode(e)` in `src/ir/validate/validate.ts:701` —
+>   returns `null` if selectable, else a human-readable label — and is
+>   already wired onto `find` filters (`validate.ts:545`) and `view`
+>   filters (`validate.ts:1928`). Because criteria inline into those
+>   positions, a non-selectable criterion in a `find`/`view` `where` is
+>   *already* rejected today.
+> - **`currentUser.<scalar>` as a request-time bound parameter is already
+>   implemented on all three backends.** The oracle admits it
+>   (`validate.ts:724`, `:769`); TS/Drizzle threads a `currentUser: User`
+>   repo-method parameter (`repository-find-builder.ts:257-263`,
+>   `:609-610`); .NET renders `currentUser` (`render-expr.ts:208`);
+>   Phoenix renders `current_user` (`render-expr.ts:175`). The
+>   `usesPrincipal` / `implicitParams` IR tagging this note proposes is
+>   therefore **redundant** — the threading mechanism already exists via
+>   `findUsesCurrentUser` / `exprUsesCurrentUser`
+>   (`loom-ir.ts:1847-1898`).
+> - **`now()` is already a `literal` kind** (`loom-ir.ts:1599`), rendered
+>   `DateTime.UtcNow` / `DateTime.utc_now()`, and admitted by the oracle
+>   (all literals pass).
+>
+> **The actual gap** is the `filter` capability (lowered to
+> `agg.contextFilters: ExprIR[]`, `lower.ts:1397`). It is **consumed by
+> .NET only** (`emit/efcore.ts:142`, one `HasQueryFilter` per predicate);
+> the Drizzle and Phoenix/Ash generators ignore `contextFilters`
+> entirely, so `filter !this.isDeleted` (soft-delete, tenancy) silently
+> does nothing on two of three backends. And `contextFilters` is **never
+> run through `firstNonQueryableNode`**, so an unselectable capability
+> filter is not diagnosed. Note EF Core's `HasQueryFilter` is *global and
+> automatic* per entity, whereas Drizzle/Ecto have no global filter — so
+> the work is AND-ing the predicates into **every** read site in the
+> generated repository, not a single registration. "Criterion everywhere
+> with full filter targeting" therefore reduces to: (1) validate
+> `contextFilters` via the existing oracle + emit
+> `loom.criterion-not-selectable`; (2) consume `contextFilters` in
+> Drizzle; (3) consume `contextFilters` in Phoenix/Ash. Delivered
+> Drizzle-first per the implementation decision.
+
 ## TL;DR
 
 A `criterion` is one named predicate, but it is consumed in two
