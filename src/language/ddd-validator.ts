@@ -23,6 +23,7 @@ import {
   checkBinaryOperands,
   checkBuilderCallType,
   checkContext,
+  checkCriteria,
   checkDataSource,
   checkDeployable,
   checkLayout,
@@ -130,6 +131,9 @@ export class DddValidator {
     // deferred until we settle the failure model (`T?` vs throw);
     // an explicit error keeps the surface honest in the meantime.
     checkPrimitiveConversions(model, accept);
+    // Criterion declarations + use sites: candidate-type support,
+    // body purity, reference cycles, and call arity.
+    checkCriteria(model, accept);
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
         checkContext(m, accept);

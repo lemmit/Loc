@@ -4,7 +4,7 @@
 // generator + (later) bundler work.
 //
 // Phase 2 of the IDE refactor: the protocol grows VFS mutate methods
-// (`vfs.write` / `vfs.delete` / `vfs.list` / `vfs.snapshot`) so the
+// (`vfs.write` / `vfs.delete`) so the
 // main thread can stream files into the worker-local VFS introduced
 // in Phase 1.  `generate` gains an `entryPath` variant that reads
 // source from the VFS instead of taking it as an inline argument;
@@ -81,20 +81,8 @@ export interface VfsDeleteOk {
   paths: string[];
 }
 
-export interface VfsListOk {
-  ok: true;
-  paths: string[];
-}
-
-export interface VfsSnapshotOk {
-  ok: true;
-  entries: VfsEntry[];
-}
-
 export type VfsWriteResult = VfsWriteOk;
 export type VfsDeleteResult = VfsDeleteOk;
-export type VfsListResult = VfsListOk;
-export type VfsSnapshotResult = VfsSnapshotOk;
 
 /** `generate` takes either an inline `text` (legacy) or an
  *  `entryPath` that resolves inside the VFS (Phase 2+).  Exactly
@@ -108,9 +96,7 @@ export type BuildRpcRequest =
   | { id: number; method: "generate"; params: GenerateParams }
   | { id: number; method: "snapshot"; params: GenerateParams }
   | { id: number; method: "vfs.write"; params: { entries: VfsEntry[] } }
-  | { id: number; method: "vfs.delete"; params: { paths: string[] } }
-  | { id: number; method: "vfs.list"; params: { prefix: string } }
-  | { id: number; method: "vfs.snapshot"; params: Record<string, never> };
+  | { id: number; method: "vfs.delete"; params: { paths: string[] } };
 
 export interface BuildRpcResponse {
   id: number;
@@ -118,8 +104,6 @@ export interface BuildRpcResponse {
     | GenerateResult
     | SnapshotResult
     | VfsWriteResult
-    | VfsDeleteResult
-    | VfsListResult
-    | VfsSnapshotResult;
+    | VfsDeleteResult;
   error?: { message: string };
 }

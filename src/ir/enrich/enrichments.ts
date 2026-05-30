@@ -6,6 +6,7 @@ import type {
   AssociationIR,
   BoundedContextIR,
   CodeRefKind,
+  DataSourceKind,
   DeployableIR,
   DerivedIR,
   EnrichedAggregateIR,
@@ -200,18 +201,40 @@ function deriveNeeds(subdomains: EnrichedSubdomainIR[]): NeedIR[] {
   const needs: NeedIR[] = [];
   for (const sub of subdomains) {
     for (const ctx of sub.contexts) {
-      if (ctx.aggregates.length === 0) continue;
-      const hasState = ctx.aggregates.some((a) => (a.persistedAs ?? "state") === "state");
-      const hasEventLog = ctx.aggregates.some((a) => a.persistedAs === "eventLog");
-      if (hasState) {
-        needs.push({
-          contextName: ctx.name,
-          kind: "state",
-          capabilities: ["state", "crud", "query"],
-        });
+      if (ctx.aggregates.length > 0) {
+        const hasState = ctx.aggregates.some((a) => (a.persistedAs ?? "state") === "state");
+        const hasEventLog = ctx.aggregates.some((a) => a.persistedAs === "eventLog");
+        if (hasState) {
+          needs.push({
+            contextName: ctx.name,
+            kind: "state",
+            capabilities: ["state", "crud", "query"],
+          });
+        }
+        if (hasEventLog) {
+          needs.push({ contextName: ctx.name, kind: "eventLog", capabilities: ["append", "read"] });
+        }
       }
-      if (hasEventLog) {
-        needs.push({ contextName: ctx.name, kind: "eventLog", capabilities: ["append", "read"] });
+      // Usage-derived needs (Phase 4): a resource-op `files.put(...)` in
+      // a workflow body means the context requires the verb's capability
+      // of its `(context, kind)` resource.  Union per kind so a context
+      // using several verbs of one resource needs all their capabilities.
+      const byKind = new Map<DataSourceKind, Set<string>>();
+      for (const wf of ctx.workflows) {
+        for (const st of wf.statements) {
+          const call =
+            st.kind === "resource-call" ? st.call : st.kind === "expr-let" ? st.expr : undefined;
+          if (call?.kind === "call" && call.callKind === "resource-op" && call.resourceOp) {
+            const { resourceKind, capability } = call.resourceOp;
+            if (!capability) continue;
+            const set = byKind.get(resourceKind) ?? new Set<string>();
+            set.add(capability);
+            byKind.set(resourceKind, set);
+          }
+        }
+      }
+      for (const [kind, caps] of byKind) {
+        needs.push({ contextName: ctx.name, kind, capabilities: [...caps].sort() });
       }
     }
   }

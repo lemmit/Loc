@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { emitApiControllers } from "../../../src/generator/phoenix-live-view/api-emit.js";
 import { emitAggregateResources } from "../../../src/generator/phoenix-live-view/domain-emit.js";
 import { emitOpenApiSpec } from "../../../src/generator/phoenix-live-view/openapi-emit.js";
@@ -3220,5 +3220,67 @@ describe("phoenix wire-surface parity (#716)", () => {
     if (ctrl) {
       expect(ctrl).toMatch(/put_resp_content_type\("application\/problem\+json"\)/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Authorization: `requires` guards → Ash policies → HTTP 403
+//
+// A failed `requires` guard previously raised an ArgumentError inside the
+// Ash change fn → HTTP 500 (and workflows returned 400), diverging from
+// Hono/.NET which return 403.  Operations now enforce the guard via
+// Ash.Policy.Authorizer (a per-op SimpleCheck), and the workflow
+// error_response maps {:error, :forbidden} → 403.  Driven off the real
+// showcase, which guards `Project.rename`/`promote` + `registerProject`.
+// ---------------------------------------------------------------------------
+describe("authorization — requires guards emit Ash policies (403)", () => {
+  let files: Map<string, string>;
+  beforeAll(async () => {
+    const services = createDddServices(NodeFileSystem);
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(path.resolve(repoRoot, "examples/showcase.ddd")),
+    );
+    await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+    files = generateSystems(doc.parseResult.value as Model).files;
+  });
+
+  it("guarded aggregate opts into Ash.Policy.Authorizer with a per-op policy + SimpleCheck", () => {
+    const proj = files.get("phoenix_api/lib/phoenix_api/catalog/project.ex")!;
+    expect(proj).toMatch(/authorizers: \[Ash\.Policy\.Authorizer\]/);
+    expect(proj).toMatch(/policies do/);
+    expect(proj).toMatch(
+      /policy action\(:rename\) do\s*\n\s*authorize_if PhoenixApi\.Catalog\.Project\.Checks\.Rename/,
+    );
+    // SimpleCheck module reuses the expr renderer (current_user = actor);
+    // nil actor is forbidden outright.
+    expect(proj).toMatch(/defmodule PhoenixApi\.Catalog\.Project\.Checks\.Rename do/);
+    expect(proj).toMatch(/use Ash\.Policy\.SimpleCheck/);
+    expect(proj).toMatch(/def match\?\(nil, _context, _opts\), do: false/);
+    expect(proj).toMatch(/current_user = actor\s*\n\s*current_user\.role == "admin"/);
+  });
+
+  it("guarded op's change fn no longer raises ArgumentError (the old 500 path)", () => {
+    const proj = files.get("phoenix_api/lib/phoenix_api/catalog/project.ex")!;
+    // The `requires` is gone from the change body — enforcement is the policy.
+    expect(proj).not.toMatch(/raise\(ArgumentError, "Forbidden/);
+  });
+
+  it("controller threads the JWT actor + authorize?: true on guarded ops", () => {
+    const ctrl = files.get("phoenix_api/lib/phoenix_api_web/controllers/projects_controller.ex")!;
+    expect(ctrl).toMatch(/def rename\(conn, %\{"id" => id\} = params\) do/);
+    expect(ctrl).toMatch(
+      /rename_project!\(id, params\["new_name"\], actor: current_user, authorize\?: true\)/,
+    );
+  });
+
+  it("workflow error_response maps :forbidden → 403 (was hardcoded 400)", () => {
+    const wf = files.get("phoenix_api/lib/phoenix_api_web/controllers/workflows_controller.ex")!;
+    expect(wf).toMatch(/:forbidden -> \{403, "Forbidden"\}/);
+    expect(wf).toMatch(/_ -> \{400, "Bad Request"\}/);
+  });
+
+  it("mix.exs declares a SAT solver so Ash policies can solve at runtime", () => {
+    const mix = files.get("phoenix_api/mix.exs")!;
+    expect(mix).toMatch(/:simple_sat/);
   });
 });

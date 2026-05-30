@@ -1,4 +1,5 @@
 import type { Reference } from "langium";
+import { AstUtils } from "langium";
 import {
   type BuiltinPackFamily,
   parseBuiltinDesignRef,
@@ -12,6 +13,7 @@ import type {
   ConnectionSource,
   Containment,
   Create,
+  Criterion,
   Deployable,
   DerivedProp,
   Destroy,
@@ -56,6 +58,7 @@ import {
   isComponent,
   isContainment,
   isCreate,
+  isCriterion,
   isDeployable,
   isDerivedProp,
   isDestroy,
@@ -80,6 +83,7 @@ import {
   isRepository,
   isRequirement,
   isRequiresStmt,
+  isResource,
   isSolution,
   isSubdomain,
   isSystem,
@@ -93,6 +97,7 @@ import {
   isWorkflow,
 } from "../../language/generated/ast.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../platform/registry.js";
+import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
   ApiIR,
@@ -104,6 +109,7 @@ import type {
   ConnectionSourceIR,
   ContainmentIR,
   ContextStampIR,
+  CriterionIR,
   DataSourceIR,
   DataSourceKind,
   DeployableIR,
@@ -163,6 +169,7 @@ import { lowerStatement } from "./lower-stmt.js";
 import {
   cstText,
   type Env,
+  findEntityByName,
   inAggregate,
   inPart,
   inValueObject,
@@ -1230,7 +1237,20 @@ function lowerContext(
   // `modulePermissions` (when set) does the same for the
   // `permissions.<name>` magic-identifier resolution; loose contexts
   // not bundled in a module pass undefined.
-  const env = newEnv(ctx, user, modulePermissions);
+  // Ambient resource handles in scope for this context (Phase 4):
+  // system-level `resource X { for: <thisCtx>, kind, … }` declarations,
+  // keyed by name → infra kind.  Workflow bodies resolve `files.put(…)`
+  // against this map.  Empty for loose contexts (no enclosing system).
+  const resources = new Map<string, DataSourceKind>();
+  const sys = AstUtils.getContainerOfType(ctx, isSystem);
+  if (sys) {
+    for (const m of sys.members) {
+      if (isResource(m) && m.context?.ref === ctx && m.kind) {
+        resources.set(m.name, m.kind as DataSourceKind);
+      }
+    }
+  }
+  const env = newEnv(ctx, user, modulePermissions, resources);
   const enums: EnumIR[] = [];
   const valueObjects: ValueObjectIR[] = [];
   const events: EventIR[] = [];
@@ -1239,6 +1259,7 @@ function lowerContext(
   const repositories: RepositoryIR[] = [];
   const workflows: WorkflowIR[] = [];
   const views: ViewIR[] = [];
+  const criteria: CriterionIR[] = [];
   // Context-level capabilities propagate to every aggregate inside.
   // Lower them here in the context env (no `this` binding); each
   // aggregate's lowering re-uses the lowered IR directly.  The `this`
@@ -1254,6 +1275,7 @@ function lowerContext(
     else if (isRepository(m)) repositories.push(lowerRepository(m, user, modulePermissions));
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
     else if (isView(m)) views.push(lowerView(m, env));
+    else if (isCriterion(m)) criteria.push(lowerCriterion(m, env));
   }
   return {
     name: ctx.name,
@@ -1270,6 +1292,32 @@ function lowerContext(
     repositories,
     workflows,
     views,
+    criteria,
+  };
+}
+
+/** Lower a `criterion <Name>(params) of <T> = <expr>` declaration to
+ *  its IR record.  The predicate body is lowered in the criterion's own
+ *  scope: an aggregate candidate binds `this` (and bare field names) to
+ *  the candidate aggregate; parameters become `param` locals.  Use-sites
+ *  do not read this body — they inline a freshly-substituted copy via
+ *  `lower-expr.ts` — but it is retained for tooling, traceability and the
+ *  forthcoming `Repo.findAll(criterion, …)` surface. */
+function lowerCriterion(c: Criterion, env: Env): CriterionIR {
+  const targetType = lowerType(c.target);
+  let bodyEnv: Env = { ...env, locals: new Map() };
+  if (targetType.kind === "entity") {
+    const candidate = findEntityByName(env, targetType.name);
+    if (candidate && isAggregate(candidate)) bodyEnv = inAggregate(bodyEnv, candidate);
+  }
+  for (const p of c.params) {
+    bodyEnv = withLocal(bodyEnv, p.name, "param", lowerType(p.type));
+  }
+  return {
+    name: c.name,
+    params: c.params.map((p) => ({ name: p.name, type: lowerType(p.type) })),
+    targetType,
+    body: lowerExpr(c.body, bodyEnv),
   };
 }
 
@@ -2147,6 +2195,34 @@ function lowerWorkflowStatement(
   if (isAssignOrCallStmt(stmt)) {
     const lv = stmt.target;
     if (!stmt.op && lv.call && lv.tail.length === 1) {
+      // `files.put(args)` — a bare resource-op call (Phase 4).  When the
+      // head is an ambient resource handle, lower to a `resource-call`
+      // statement; otherwise it's an op-call on a let binding.
+      const resourceKind = env.resources?.get(lv.head);
+      if (resourceKind) {
+        const verb = lv.tail[0]!;
+        const verbDef = findVerb(resourceKind, verb);
+        const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
+        return {
+          stmt: {
+            kind: "resource-call",
+            call: {
+              kind: "call",
+              callKind: "resource-op",
+              name: verb,
+              args,
+              resourceOp: {
+                resourceName: lv.head,
+                resourceKind,
+                verb,
+                capability: verbDef?.capability ?? "",
+                ...(verbDef?.interfaceOverride ? { interface: verbDef.interfaceOverride } : {}),
+              },
+            },
+          },
+          envAfter: env,
+        };
+      }
       // `name.op(args)` — op-call on a let binding.
       const aggName = aggNameForLocal(env, lv.head);
       const args = (lv.args ?? []).map((a) => lowerExpr(a, env));

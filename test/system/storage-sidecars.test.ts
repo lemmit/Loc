@@ -10,7 +10,7 @@ system Sys {
     context Sales { aggregate Order { name: string } }
   }
   storage pg    { type: postgres }
-  storage files { type: awsS3,    config: { bucket: "app-files" } }
+  storage files { type: s3,    config: { bucket: "app-files" } }
   storage bus   { type: rabbitmq, config: { vhost: "/" } }
 
   resource salesState { for: Sales, kind: state,       use: pg }
@@ -27,7 +27,7 @@ system Sys {
 `;
 
 describe("storage sidecars in docker-compose", () => {
-  it("emits a minio service + volume for an awsS3 storage and a rabbitmq service", async () => {
+  it("emits a minio service + volume for an s3 storage and a rabbitmq service", async () => {
     const { files } = generateSystems(await parseValid(SRC));
     const compose = files.get("docker-compose.yml")!;
     expect(compose).toMatch(/image: minio\/minio:latest/);

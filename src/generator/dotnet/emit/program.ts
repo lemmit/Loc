@@ -434,7 +434,14 @@ export function renderCsproj(
   ns: string,
   hasExtern: boolean = false,
   usesValidators: boolean = false,
+  resourceNugetDeps: Record<string, string> = {},
 ): string {
+  // Resource-client NuGet refs (Phase 4c) — AWSSDK.S3 / RabbitMQ.Client
+  // etc., one row per package the deployable's consumed resources need.
+  const resourceRefs = Object.entries(resourceNugetDeps)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, version]) => `\n    <PackageReference Include="${id}" Version="${version}" />`)
+    .join("");
   // Scrutor only ships when the project actually scans for
   // [ExternHandler]-decorated classes.
   const scrutorRef = hasExtern
@@ -477,7 +484,7 @@ export function renderCsproj(
     </PackageReference>
     <PackageReference Include="Mediator.Abstractions" Version="2.1.7" />
     <!-- OpenAPI spec emitted at /swagger/v1/swagger.json -->
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />${scrutorRef}${validatorRef}
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />${scrutorRef}${validatorRef}${resourceRefs}
   </ItemGroup>
 </Project>
 `;

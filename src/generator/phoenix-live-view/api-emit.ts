@@ -285,13 +285,22 @@ ${actions}
 
   # RFC 7807 problem body — application/problem+json + x-request-id header
   # (trace correlation off the body so it's byte-identical to Hono / .NET).
+  # Status-aware: a \`{:error, :forbidden}\` from a workflow \`requires\` guard
+  # maps to 403 (matching Hono/.NET); every other reason is a 400 domain
+  # error.
   defp error_response(conn, reason) do
+    {status, title} =
+      case reason do
+        :forbidden -> {403, "Forbidden"}
+        _ -> {400, "Bad Request"}
+      end
+
     trace_id = get_resp_header(conn, "x-request-id") |> List.first("unknown")
-    body = Jason.encode!(%{type: "about:blank", title: "Bad Request", status: 400, detail: inspect(reason), instance: conn.request_path})
+    body = Jason.encode!(%{type: "about:blank", title: title, status: status, detail: inspect(reason), instance: conn.request_path})
     conn
     |> put_resp_content_type("application/problem+json")
     |> put_resp_header("x-request-id", trace_id)
-    |> send_resp(400, body)
+    |> send_resp(status, body)
   end
 end
 `;
@@ -498,10 +507,17 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
     const opPath = snake(op.routeSlug ?? op.name);
     const argReads = op.params.map((p) => `params[${JSON.stringify(snake(p.name))}]`).join(", ");
     const callArgs = argReads.length > 0 ? `id, ${argReads}` : "id";
+    // Guarded operations (a `requires` clause) run under Ash authorization:
+    // thread the JWT actor + authorize?: true so the resource's policy fires
+    // (a failed guard → Ash.Error.Forbidden → HTTP 403, matching Hono/.NET).
+    // Unguarded ops keep the plain call (no policies → no authorize? needed).
+    const guarded = op.statements.some((s) => s.kind === "requires");
+    const cuLine = guarded ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
+    const callOpts = guarded ? ", actor: current_user, authorize?: true" : "";
     opActions.push(`  @doc "POST /api/${aggPlural}/:id/${opPath}"
   def ${opSnake}(conn, %{"id" => id} = params) do
     _ = params
-    ${contextModule}.${opSnake}_${aggSnake}!(${callArgs})
+${cuLine}    ${contextModule}.${opSnake}_${aggSnake}!(${callArgs}${callOpts})
     send_resp(conn, 204, "")
   end`);
   }

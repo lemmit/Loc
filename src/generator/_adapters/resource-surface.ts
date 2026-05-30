@@ -27,7 +27,7 @@ import type { EmitCtx, Lines } from "./types.js";
 
 export interface ResourceAdapter {
   /** Registry key — the `sourceType` name this adapter realizes
-   *  (e.g. `awsS3`, `rabbitmq`, `restApi`).  Lowercase / camelCase to
+   *  (e.g. `s3`, `rabbitmq`, `restApi`).  Lowercase / camelCase to
    *  match the `StorageKind` value. */
   readonly name: string;
   /** Infrastructure kinds this adapter can wire (objectStore / queue /

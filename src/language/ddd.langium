@@ -329,7 +329,7 @@ StorageType returns string:
     | 'elastic' | 'meilisearch'
     | 'kafka'
     | 'clickhouse' | 'bigquery'
-    | 'awsS3' | 'rabbitmq' | 'restApi';
+    | 's3' | 'rabbitmq' | 'restApi';
 
 ConnectionSource:
       {infer ServiceConnectionSource} 'service' '(' service=ID ')'
@@ -609,7 +609,7 @@ BoundedContext:
 
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
-    | FilterDecl | StampDecl | ImplementsDecl;
+    | Criterion | FilterDecl | StampDecl | ImplementsDecl;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -842,6 +842,34 @@ View:
 BindEntry:
     name=ID '=' expr=Expression;
 
+// Criterion — a named, parameterised, pure boolean predicate over a
+// candidate type `T` (the Specification Pattern, Evans / Spring-Data
+// style).  See docs/criterion.md.
+//
+//   criterion ActiveCustomer of Customer = active
+//   criterion InRegion(region: string) of Customer = region == region
+//   criterion HasManagerRole of bool = currentUser.role == "manager"
+//   criterion CanForceClose of Order { where: status != Closed }
+//
+// `of <T>` names the candidate type.  Inside the body, bare names and
+// `this` resolve against the candidate aggregate's fields (the same
+// convention as `invariant` / `derived` / `function` bodies); criteria
+// over `bool` are pure ambient predicates with no candidate.
+//
+// A criterion reference in any boolean-expression position (`view ...
+// where`, repository `find ... where`, an `invariant`, an operation
+// guard) is inlined at lowering time into the host expression — so
+// composition (`ActiveCustomer && InRegion("EU")`) falls out of the
+// ordinary boolean operators with no extra machinery and no per-backend
+// query-engine change.  The lowered predicate flows through the same
+// where→SQL path the inline filter does today.
+Criterion:
+    'criterion' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? 'of' target=TypeRef
+    (
+        '=' body=Expression
+      | '{' 'where' ':' body=Expression '}'
+    );
+
 // ---------------------------------------------------------------------------
 // Members
 // ---------------------------------------------------------------------------
@@ -968,6 +996,13 @@ Parameter:
 // constraints (e.g. only specific names are valid for menu metadata).
 LooseName returns string:
     ID
+    // `of` is a hard keyword only in the `criterion <Name>(...) of <T>`
+    // rule.  Admit it as a soft keyword everywhere LooseName is used so
+    // the page-metamodel arg name `of` keeps parsing — `List(of: Order)`,
+    // `List { of: x }` — and pre-existing files that named a field `of`
+    // are unaffected (mirrors the `money` / field-access soft-keyword
+    // treatment).
+    | 'of'
     | 'id' | 'permissions' | 'contains'
     | 'ui' | 'page' | 'component' | 'state' | 'menu'
     | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'

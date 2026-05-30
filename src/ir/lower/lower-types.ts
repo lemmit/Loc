@@ -23,7 +23,14 @@ import {
   isSlotType,
   isValueObject,
 } from "../../language/generated/ast.js";
-import type { IdValueType, PermissionDeclIR, TypeIR, UserIR } from "../types/loom-ir.js";
+import type {
+  DataSourceKind,
+  ExprIR,
+  IdValueType,
+  PermissionDeclIR,
+  TypeIR,
+  UserIR,
+} from "../types/loom-ir.js";
 
 /** Synthetic entity name used to type the `currentUser` magic
  *  identifier.  Member access on the user shape resolves through
@@ -49,6 +56,18 @@ export interface Env {
    *  resolve the magic `currentUser` identifier.  Undefined for
    *  systems / loose contexts that don't declare a user block. */
   user?: UserIR;
+  /** Active criterion-parameter substitutions, set only while inlining
+   *  a `criterion` body at a use site (see `inlineCriterion` in
+   *  lower-expr.ts).  Maps each parameter name to the caller's already-
+   *  lowered argument expression; a bare reference to the parameter in
+   *  the body resolves directly to that expression.  Undefined outside a
+   *  criterion inline. */
+  criterionArgs?: Map<string, ExprIR>;
+  /** Names of the criteria currently being inlined, outermost first.
+   *  Guards against `criterion A = B` / `criterion B = A` cycles — a
+   *  reference to a name already on the stack is left unresolved for the
+   *  validator (`loom.criterion-cycle`) to report. */
+  criterionStack?: string[];
   /** Module-scoped permission catalogue — populated when the
    *  enclosing context lives inside a module that declares one or
    *  more `permissions { ... }` blocks.  Drives resolution of the
@@ -57,14 +76,21 @@ export interface Env {
    *  validator surfaces a friendly diagnostic for any
    *  `permissions.X` reference there. */
   modulePermissions?: PermissionDeclIR[];
+  /** Resources in scope for the enclosing context — `resource X { for:
+   *  <thisCtx>, kind, … }` declarations, keyed by name to their infra
+   *  kind.  Drives resolution of an ambient resource handle
+   *  (`files.put(...)`) in workflow bodies (Phase 4).  Undefined / empty
+   *  outside a context or when none are declared for it. */
+  resources?: Map<string, DataSourceKind>;
 }
 
 export function newEnv(
   ctx: BoundedContext,
   user?: UserIR,
   modulePermissions?: PermissionDeclIR[],
+  resources?: Map<string, DataSourceKind>,
 ): Env {
-  return { ctx, locals: new Map(), user, modulePermissions };
+  return { ctx, locals: new Map(), user, modulePermissions, resources };
 }
 
 export function withLocal(
