@@ -84,13 +84,26 @@ those three fields. The fields belong on `ui` directly.
 
 A deployable `hosts:` a `ui`. The host's **platform** decides *how*:
 
-- **Standalone** — host owns no backend (`needsDb === false`): `vite` (dev server
-  + `vite build`), `static` (prod static serve). The host `targets:` a separate
-  backend deployable for its API base URL (today's cross-origin + CORS path).
+- **Standalone** — host owns no backend (`needsDb === false`). This is **exactly
+  what `platform: react` / `platform: static` already do today** (and they are
+  literally the same surface object — `registry.ts:36` aliases `static:
+  reactPlatform`, zero behavioural difference): the deployable is built with
+  `vite build` then served by `vite preview --host 0.0.0.0 --port 3000`
+  (`dockerfile.hbs`), calling its backend **cross-origin** via a generated
+  `VITE_API_BASE_URL` env pointing at the `targets:` deployable's port +
+  `apiBasePath` (`react.ts:41`), with runtime overrides
+  (`window.__LOOM_API_BASE__`, `import.meta.env`). The standalone host is,
+  literally, **Vite's preview server over a built bundle** — no nginx, no dev
+  server.
 - **Embedded** — host owns a backend (`needsDb === true`): `dotnet` (`wwwroot/` +
   `MapFallbackToFile`), `phoenix` (`priv/static`), `hono` (static middleware). The
-  bundle is built and dropped into the backend's static root; API base becomes
-  same-origin `/api`.
+  *same* built bundle, dropped into the backend's static root; API base becomes
+  **same-origin `/api`** (`dotnet/index.ts:274` passes `apiBaseUrl: "/api"`)
+  instead of the cross-origin env.
+
+The standalone path is therefore **unchanged behaviour** under this proposal —
+the existing `react`/`static` Vite-preview host *is* the standalone host; only the
+spelling moves (framework → `ui`, host platform named for what it is).
 
 **No `hosting: embedded|standalone` keyword.** The split is a *derived* property
 of the host platform — the `needsDb`/owns-a-backend flag the registry already
@@ -152,10 +165,15 @@ the existing `targets:` for the standalone API edge:
 case a non-event: today every deployable hosts exactly one `ui`; the grammar
 already admits more.
 
-`platform: vite` and `platform: static` become **frontend-host platforms** in the
-registry (`needsDb: false`, `hostableFrameworks: {react, …}`). `platform: react`
+Today's `react` and `static` are **already one host wearing two names** (`static:
+reactPlatform`, `registry.ts:36`) — a `needsDb: false` Vite-preview host. Under
+this proposal they **collapse into a single standalone host platform** (the
+framework that distinguished them moves to `ui`). Name it for what it is — e.g.
+`vite` (`needsDb: false`, `hostableFrameworks: {react, …}`). `platform: react`
 is retired as a *platform* — it was always "Vite hosts React," now spelled
-`ui { framework: react } + deployable { platform: vite }`.
+`ui { framework: react } + deployable { platform: vite }`. The keyword `static`
+(if kept) becomes a no-op alias or is dropped, since it never differed from
+`react` behaviourally.
 
 ## 4. What it subsumes (migration story)
 
@@ -205,13 +223,15 @@ admits it.
 
 ## 7. Open questions
 
-1. **Is Vite a host, or a build step every host shares?** `vite build` runs even
-   for the dotnet-embedded case (it produces the bundle dropped into `wwwroot`).
-   So Vite is arguably the *ui's builder* (belongs to `stack:`), while the *host*
-   is "Vite **preview/dev server**" only in the standalone case. Leaning: yes,
-   `platform: vite` means "Vite's own server serves it" (standalone), with the
-   build tool living in `stack:` regardless of host — keeps "host = what serves
-   the built assets" clean.
+1. **Is Vite a host, or a build step every host shares? — answered by the code:
+   both, in one container.** Today the standalone container runs `vite build`
+   (the build step) *then* `vite preview` (the serving host) — `dockerfile.hbs`.
+   For the dotnet-embedded case the same `vite build` runs but the bundle is
+   served by ASP.NET, not `vite preview`. So the honest split is: `vite build`
+   belongs to the `ui`'s `stack:` (it runs regardless of host); `platform: vite`
+   names *the `vite preview` server* (standalone serving), which a backend host
+   replaces with its own static middleware. "Host = what serves the built
+   assets" holds cleanly.
 2. **`stack:` vs `design:` independence.** Stack-version flips react-dom 18→19 and
    router 6→7; design picks the component lib. Fully orthogonal on `ui`, or does a
    design pack constrain a stack range?
