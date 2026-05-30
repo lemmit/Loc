@@ -63,16 +63,33 @@ describe("hono capability-filter support guard", () => {
     expect(errs[0]).toContain("shape(document)");
   });
 
-  it("accepts both cases on a dotnet deployable (HasQueryFilter handles them)", async () => {
+  it("accepts a relational principal filter on .NET (repository injects ICurrentUserAccessor)", async () => {
     expect(
       await honoFilterErrors(
         sys("dotnet", { filter: "filter this.tenantId == currentUser.tenantId" }),
       ),
     ).toEqual([]);
+  });
+
+  it("accepts a non-principal document filter on .NET (client-side eval)", async () => {
     expect(
       await honoFilterErrors(
         sys("dotnet", { shape: "document", filter: "filter !this.isDeleted" }),
       ),
     ).toEqual([]);
+  });
+
+  it("rejects a principal filter on a non-relational (document) .NET aggregate", async () => {
+    // .NET wires principal filters in the relational repository only; the
+    // document repository evaluates client-side and isn't wired.
+    const errs = await honoFilterErrors(
+      sys("dotnet", {
+        shape: "document",
+        filter: "filter this.tenantId == currentUser.tenantId",
+      }),
+    );
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("currentUser");
+    expect(errs[0]).toContain("shape(document)");
   });
 });

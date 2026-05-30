@@ -44,6 +44,14 @@ export interface CsRenderContext {
    *  `<class>.<Resource>_<Verb>(args)`.  When unset, a resource-op
    *  throws at emit (non-resource render contexts never see one). */
   resourceClasses?: Map<string, string>;
+  /** Rendered expression the `currentUser` magic identifier lowers to.
+   *  Defaults to the bare `currentUser` local/parameter that per-request
+   *  handlers (operations, workflows, view binds) and find methods
+   *  materialise.  Repository capability-filter rendering overrides it
+   *  with the injected accessor read (`_currentUser.User`) so a
+   *  principal-referencing `filter` predicate resolves without a method
+   *  parameter — see emit/repository.ts. */
+  currentUserExpr?: string;
 }
 
 const DEFAULT: CsRenderContext = { thisName: "this" };
@@ -205,7 +213,10 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: CsRenderContext): s
       // view bind) materialises a local / parameter named
       // `currentUser` typed as `User`; this rendering keeps member
       // access (`currentUser.role`) idiomatic on both backends.
-      return "currentUser";
+      // Repository capability filters override `currentUserExpr` with
+      // the injected accessor read so member access becomes
+      // `_currentUser.User.TenantId`.
+      return ctx.currentUserExpr ?? "currentUser";
     default:
       // `refKind === "unknown"` is intentional for some positions
       // (e2e test bodies, member-chain receivers like `Order.byId(...)`

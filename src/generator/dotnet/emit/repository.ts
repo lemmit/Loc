@@ -5,11 +5,11 @@ import type {
   ParamIR,
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
-import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
-import { renderCsType } from "../render-expr.js";
+import { renderCsExpr, renderCsType } from "../render-expr.js";
 import { joinDbSetName, joinEntityName, joinFkPropName } from "./join-entities.js";
 
 // Repository interface (Domain layer) + EF-backed implementation
@@ -72,6 +72,23 @@ export function renderRepositoryImpl(
   const finds = repo?.finds ?? [];
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const setName = plural(upperFirst(agg.name));
+  // Principal-referencing capability filters (`filter this.tenantId ==
+  // currentUser.tenantId`) cannot ride EF's HasQueryFilter (no
+  // `currentUser` in OnModelCreating's scope, and we keep zero DbContext
+  // magic).  Instead the repository injects ICurrentUserAccessor and
+  // AND-s these predicates into every root read, rendering the
+  // `currentUser` ref as the injected accessor read (`_currentUser.User`).
+  // Non-principal filters stay on HasQueryFilter (efcore.ts).
+  const principalFilters = (agg.contextFilters ?? []).filter((p) => exprUsesCurrentUser(p));
+  const usesPrincipalFilter = principalFilters.length > 0;
+  // The `.Where(x => …)` clause string AND-ing every principal predicate,
+  // or "" when the aggregate has none.  `_currentUser.User` is the
+  // injected accessor read (see CsRenderContext.currentUserExpr).
+  const principalWhere = usesPrincipalFilter
+    ? `.Where(x => ${principalFilters
+        .map((p) => renderCsExpr(p, { thisName: "x", currentUserExpr: "_currentUser.User" }))
+        .join(" && ")})`
+    : "";
   const associations = agg.associations;
   // Reference-collection (`Id<T>[]`) load + save lines.  Each
   // association is a separate `_db.<JoinDbSet>` whose rows are
@@ -80,7 +97,12 @@ export function renderRepositoryImpl(
   // TS/Hono Drizzle implementation line-for-line (see
   // src/generator/typescript/repository-builder.ts).
   const loadByIdLines = buildLoadByIdLines(associations);
-  const loadManyByIdsLines = buildLoadManyByIdsLines(agg.name, setName, associations);
+  const loadManyByIdsLines = buildLoadManyByIdsLines(
+    agg.name,
+    setName,
+    associations,
+    principalWhere,
+  );
   const saveDiffSyncLines = buildSaveDiffSyncLines(associations);
   // Per-find catalog log: `find_executed` (debug) at every method's
   // return.  Mirrors the Hono repo emission so cross-backend log
@@ -100,7 +122,7 @@ export function renderRepositoryImpl(
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",
-      `        var result = await _db.${setName}${filter}${projection};`,
+      `        var result = await _db.${setName}${principalWhere}${filter}${projection};`,
       `        ${renderDotnetLogCall("findExecuted", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "find", valueExpr: `"${f.name}"` },
@@ -127,7 +149,7 @@ export function renderRepositoryImpl(
       `using ${ns}.Domain.Enums;`,
       `using ${ns}.Infrastructure.Persistence;`,
       associations.length > 0 ? `using ${ns}.Infrastructure.Persistence.JoinTables;` : null,
-      anyFindUsesUser ? `using ${ns}.Auth;` : null,
+      anyFindUsesUser || usesPrincipalFilter ? `using ${ns}.Auth;` : null,
       "",
       `namespace ${ns}.Infrastructure.Repositories;`,
       "",
@@ -139,17 +161,25 @@ export function renderRepositoryImpl(
       // for the controllers + DomainExceptionFilter, so the entire
       // generated codebase keeps one logging pattern.
       `    private readonly ILogger<${agg.name}Repository> _log;`,
+      // Scoped accessor for the request principal — injected only when a
+      // principal-referencing capability filter needs the current user's
+      // claims (e.g. tenancy).  Registered scoped in DI alongside the
+      // existing ICurrentUserAccessor handler wiring.
+      usesPrincipalFilter ? "    private readonly ICurrentUserAccessor _currentUser;" : null,
       "",
-      `    public ${agg.name}Repository(AppDbContext db, IDomainEventDispatcher events, ILogger<${agg.name}Repository> log)`,
+      usesPrincipalFilter
+        ? `    public ${agg.name}Repository(AppDbContext db, IDomainEventDispatcher events, ILogger<${agg.name}Repository> log, ICurrentUserAccessor currentUser)`
+        : `    public ${agg.name}Repository(AppDbContext db, IDomainEventDispatcher events, ILogger<${agg.name}Repository> log)`,
       "    {",
       "        _db = db;",
       "        _events = events;",
       "        _log = log;",
+      usesPrincipalFilter ? "        _currentUser = currentUser;" : null,
       "    }",
       "",
       `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken ct = default)`,
       "    {",
-      `        var found = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == id, ct);`,
+      `        var found = await _db.${setName}${principalWhere}.FirstOrDefaultAsync(x => x.Id == id, ct);`,
       // aggregate_loaded (debug) — mirrors the Hono repo emission;
       // `found` is a bool so a downstream filter can grep failed loads
       // by (event="aggregate_loaded", Found=false).
@@ -272,13 +302,16 @@ function buildLoadManyByIdsLines(
   aggName: string,
   setName: string,
   associations: AssociationIR[],
+  principalWhere = "",
 ): string[] {
   if (associations.length === 0) {
-    return [`        return await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`];
+    return [
+      `        return await _db.${setName}${principalWhere}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`,
+    ];
   }
   const out: string[] = [];
   out.push(
-    `        var roots = await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`,
+    `        var roots = await _db.${setName}${principalWhere}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`,
   );
   out.push("        if (roots.Count == 0) return roots;");
   for (const a of associations) {

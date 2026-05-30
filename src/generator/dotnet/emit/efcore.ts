@@ -8,6 +8,7 @@ import type {
   ExprIR,
   FieldIR,
 } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
@@ -139,9 +140,20 @@ export function renderConfiguration(
   // macros into level-correct trios (capability at context, state
   // at aggregate), every filter just lands here regardless of
   // whether the aggregate names a capability via `implements`.
-  const filterLines = (agg.contextFilters ?? []).map(
-    (predicate) => `        b.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
-  );
+  // Only NON-principal predicates ride HasQueryFilter — it re-evaluates
+  // a closed expression per query, which is exactly right for a static
+  // predicate like `!x.IsDeleted`.  Principal-referencing predicates
+  // (`x.TenantId == currentUser.TenantId`) cannot: there is no
+  // `currentUser` in OnModelCreating's scope, and we deliberately keep
+  // zero DbContext magic.  Those are AND-ed into each repository read
+  // site instead, with the value pulled from an injected
+  // ICurrentUserAccessor — see emit/repository.ts.
+  const filterLines = (agg.contextFilters ?? [])
+    .filter((p) => !exprUsesCurrentUser(p))
+    .map(
+      (predicate) =>
+        `        b.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
+    );
   return (
     lines(
       "// Auto-generated.",
