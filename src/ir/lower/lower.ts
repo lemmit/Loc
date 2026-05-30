@@ -1442,9 +1442,10 @@ function lowerAggregate(
 // aggregate state.  The event param binds as a `refKind: "param"` local
 // over the aggregate env (so `this.x := e.y` resolves `this` against the
 // aggregate and `e` against the bound param).  The param's type carries
-// the event name as an entity-shaped marker — member access on it
-// (`e.field`) is not yet field-resolved (events aren't in the entity
-// registry); that fidelity lands with applier emission (Phase A2).  The
+// the event name as an entity-shaped marker; member access on it
+// (`e.field`) type-resolves through `findEventByName` / `memberOnEvent`
+// in lower-expr (events aren't a distinct TypeIR kind, so the entity
+// marker + a field-only fallback is the contained representation).  The
 // body's purity (assignments / derivations only; no `emit`, no
 // side-effecting calls) is enforced by the phase-⑦ discipline validator,
 // not here — lowering preserves source fidelity.

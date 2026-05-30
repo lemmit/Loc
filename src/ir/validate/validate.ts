@@ -1454,6 +1454,11 @@ function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
         const visit = visitor(source);
         for (const st of op.statements) walkExprsInStmt(st, visit);
       }
+      for (const ap of agg.appliers ?? []) {
+        const source = `${c.name}/${agg.name}/apply(${ap.event})`;
+        const visit = visitor(source);
+        for (const st of ap.statements) walkExprsInStmt(st, visit);
+      }
       for (const inv of agg.invariants) {
         const source = `${c.name}/${agg.name}/invariant`;
         const visit = visitor(source);

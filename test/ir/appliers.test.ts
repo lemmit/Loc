@@ -94,6 +94,27 @@ describe("appliers — grammar + lowering", () => {
     expect(applier.statements[0].kind).toBe("add");
   });
 
+  it("type-resolves member access on the event param (e.field) from the event's fields", async () => {
+    // `Bumped { counter: Counter id, by: int }` — `e.by` must resolve to
+    // int, and `e.counter` to an `id` ref, not the string fallback.
+    const agg = await lowerFirstAgg(
+      counter({
+        persistedAs: "eventLog",
+        appliers: `apply(e: Bumped) { total := e.by }`,
+      }),
+    );
+    const [applier] = agg.appliers ?? [];
+    const stmt = applier.statements[0];
+    expect(stmt.kind).toBe("assign");
+    // The RHS is the `e.by` member access; its resolved memberType is int.
+    const value = stmt.kind === "assign" ? stmt.value : undefined;
+    expect(value?.kind).toBe("member");
+    if (value?.kind === "member") {
+      expect(value.memberType).toEqual({ kind: "primitive", name: "int" });
+      expect(value.receiverType).toEqual({ kind: "entity", name: "Bumped" });
+    }
+  });
+
   it("leaves appliers undefined when the aggregate declares none", async () => {
     const agg = await lowerFirstAgg(counter({ persistedAs: "eventLog" }));
     // The default command emits Bumped but declares no applier — the IR
