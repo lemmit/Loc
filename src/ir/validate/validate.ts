@@ -54,6 +54,11 @@ export interface LoomDiagnostic {
   message: string;
   /** Where the diagnostic came from — `<system>/<test-name>`. */
   source: string;
+  /** Optional stable diagnostic code (e.g. `loom.criterion-not-selectable`)
+   *  mirroring the `loom.*` codes the Langium-side validators attach.
+   *  Lets tests and tooling match a diagnostic by identity rather than
+   *  by message substring. Undefined on the older message-only diags. */
+  code?: string;
 }
 
 export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
@@ -586,6 +591,44 @@ function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagnostic[])
             `comparison between two columns (${bothCols}) is not queryable. ` +
             `Drizzle's eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
           source: `${ctx.name}/${repo.name}.${find.name}`,
+        });
+      }
+    }
+  }
+  // `filter <expr>` capability predicates (lowered to
+  // `agg.contextFilters`) are a SELECTION position too: every backend
+  // installs them at the query layer (.NET `HasQueryFilter`, Drizzle
+  // read-site conjunction, Ecto base-query helper), so they must lower
+  // to the same queryable subset as a `find`/`view` `where`.  Until now
+  // they bypassed this check — an unselectable capability filter would
+  // silently emit nothing (Drizzle/Ecto) or fail at C# render (.NET).
+  // `currentUser.<scalar>` is admitted here exactly as in find filters:
+  // the backend threads the request principal in (row-level
+  // soft-delete / tenancy filters are the motivating case).
+  for (const agg of ctx.aggregates) {
+    const filters = (agg as EnrichedAggregateIR).contextFilters ?? [];
+    for (const predicate of filters) {
+      const offending = firstNonQueryableNode(predicate);
+      if (offending) {
+        diags.push({
+          severity: "error",
+          message:
+            `aggregate '${agg.name}': a 'filter' capability predicate is not selectable (${offending}). ` +
+            `Capability filters install at the query layer, so they must lower to the queryable subset: ` +
+            `comparisons, &&/||/!, parens, 'this.<column>' / 'this.<vo>.<sub>' refs, 'currentUser.<field>', literals.`,
+          source: `${ctx.name}/${agg.name}`,
+          code: "loom.criterion-not-selectable",
+        });
+        continue;
+      }
+      const unknown = firstUnknownColumnRef(predicate, agg, ctx);
+      if (unknown) {
+        diags.push({
+          severity: "error",
+          message:
+            `aggregate '${agg.name}': a 'filter' capability predicate references unknown field ${unknown} on '${agg.name}'.`,
+          source: `${ctx.name}/${agg.name}`,
+          code: "loom.criterion-not-selectable",
         });
       }
     }
