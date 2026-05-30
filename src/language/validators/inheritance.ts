@@ -13,6 +13,7 @@ import { AstUtils, type ValidationAcceptor } from "langium";
 import type { Aggregate, IdType, Model, Repository } from "../generated/ast.js";
 import {
   isAggregate,
+  isContainment,
   isCreate,
   isDestroy,
   isIdType,
@@ -141,6 +142,38 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
             `the entire hierarchy ownTable (TPC).`,
           { node: agg, property: "inheritanceUsing", code: "loom.tph-own-override-unsupported" },
         );
+      }
+    }
+
+    // Rule 4c — a `contains` part on a TPH (sharedTable) concrete is not
+    // supported in v1.  A contained part needs its own join table keyed by the
+    // parent's FK, and the parent table here is the SHARED base table — the
+    // schema emitter doesn't emit that join table for a TPH concrete yet, so
+    // the concrete's repository references a `schema.<part>` that was never
+    // emitted (14 dangling `tsc` errors at the moment).  Gate it at the source
+    // rather than ship a repository that can't compile.  (Pattern 4 in
+    // aggregate-inheritance.md — TPT-shape-via-`contains` on a TPH base — is
+    // the deferred feature that lifts this.)  TPC (`ownTable`) concretes are
+    // unaffected: each is a standalone table and its parts join to it normally.
+    if (base?.isAbstract) {
+      const baseLayout = base.inheritanceUsing ?? DEFAULT_LAYOUT;
+      const effective = agg.inheritanceUsing ?? baseLayout;
+      const forcesOwn = agg.persistedAs === "eventLog" || agg.shape === "document";
+      if (effective === "sharedTable" && !forcesOwn) {
+        for (const m of agg.members) {
+          if (isContainment(m)) {
+            accept(
+              "error",
+              `'${agg.name}' is a sharedTable (TPH) concrete and cannot declare 'contains ` +
+                `${m.name}' yet — a contained part needs a join table keyed on the parent, but a ` +
+                `TPH concrete has no table of its own (it shares '${base.name}'s table), and the ` +
+                `join table isn't emitted, so the generated repository won't compile. Move the ` +
+                `part to an ownTable (TPC) hierarchy, or model it as a separate aggregate ` +
+                `referenced by id.`,
+              { node: m, property: "name", code: "loom.tph-contains-unsupported" },
+            );
+          }
+        }
       }
     }
   }

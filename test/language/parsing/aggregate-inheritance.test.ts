@@ -194,6 +194,38 @@ describe("aggregate inheritance — validator (I1)", () => {
     `);
     expect(codes(errors)).not.toContain("loom.tph-own-override-unsupported");
   });
+
+  it("rejects a 'contains' part on a TPH (sharedTable) concrete (loom.tph-contains-unsupported)", async () => {
+    // A contained part needs a join table keyed on the parent, but a TPH
+    // concrete shares the base table and the join table isn't emitted — the
+    // generated repository wouldn't compile. Gate it, naming the part.
+    const { errors } = await parse(`
+      context T {
+        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        aggregate Customer extends Party {
+          creditLimit: decimal
+          contains addresses: Address[]
+          entity Address { street: string }
+        }
+      }
+    `);
+    expect(codes(errors)).toContain("loom.tph-contains-unsupported");
+    expect(errors.some((e) => /addresses/.test(e.message ?? ""))).toBe(true);
+  });
+
+  it("allows a 'contains' part on an ownTable (TPC) concrete (it has its own table)", async () => {
+    const { errors } = await parse(`
+      context T {
+        abstract aggregate Party inheritanceUsing(ownTable) { name: string }
+        aggregate Customer extends Party inheritanceUsing(ownTable) {
+          creditLimit: decimal
+          contains addresses: Address[]
+          entity Address { street: string }
+        }
+      }
+    `);
+    expect(codes(errors)).not.toContain("loom.tph-contains-unsupported");
+  });
 });
 
 describe("aggregate inheritance — field inheritance into wireShape (I2 foundation)", () => {
