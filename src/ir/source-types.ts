@@ -162,7 +162,7 @@ function seedBuiltins(): void {
   });
   // Phase 2 kinds: object store, queue, external API.
   registerSourceType({
-    name: "awsS3",
+    name: "s3",
     supports: {
       objectStore: {
         capabilities: set("blob", "list", "signedUrl", "versioning"),

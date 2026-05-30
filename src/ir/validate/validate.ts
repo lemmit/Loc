@@ -4,6 +4,7 @@ import {
 } from "../../language/validators/data/platform-rules.js";
 import { allPlatforms, platformFor } from "../../platform/registry.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
+import { verbsForKind } from "../resource-verbs.js";
 import { capabilitiesFor, configSchemaFor, supportsSurfaceKind } from "../source-types.js";
 import type {
   AggregateIR,
@@ -1798,8 +1799,13 @@ function validateWorkflowBody(
             source: `${ctx.name}/${wf.name}`,
           });
         }
+        // `let x = files.get(k)` — the bound form of a resource-op.
+        checkResourceOpExpr(st.expr, ctx, wf, diags);
         break;
       }
+      case "resource-call":
+        checkResourceOpExpr(st.call, ctx, wf, diags);
+        break;
     }
   }
 
@@ -1819,6 +1825,37 @@ function validateWorkflowBody(
     diags.push({
       severity: "error",
       message: `workflow '${wf.name}': isolation level '${wf.isolation}' requires the 'transactional' keyword.`,
+      source: `${ctx.name}/${wf.name}`,
+    });
+  }
+}
+
+// Validate a resource-op call expression in a workflow body (Phase 4):
+//   - the verb must belong to the resource's kind vocabulary
+//     (lowering leaves `capability === ""` on an unknown verb);
+//   - a resource-op may not run inside a transactional span — an S3
+//     `put` can't roll back with the DB transaction (use the outbox).
+// The capability-gap check (need ⊆ sourceType) is handled by
+// `validateNeedCapabilities`, which consumes the usage-derived needs.
+function checkResourceOpExpr(
+  expr: import("../types/loom-ir.js").ExprIR,
+  ctx: BoundedContextIR,
+  wf: { name: string; transactional: boolean },
+  diags: LoomDiagnostic[],
+): void {
+  if (expr.kind !== "call" || expr.callKind !== "resource-op" || !expr.resourceOp) return;
+  const op = expr.resourceOp;
+  if (op.capability === "") {
+    diags.push({
+      severity: "error",
+      message: `workflow '${wf.name}': '${op.resourceName}.${op.verb}(...)' — '${op.verb}' is not a valid verb for a ${op.resourceKind} resource.  Available: ${verbsForKind(op.resourceKind).join(", ") || "(none)"}.`,
+      source: `${ctx.name}/${wf.name}`,
+    });
+  }
+  if (wf.transactional) {
+    diags.push({
+      severity: "error",
+      message: `workflow '${wf.name}': resource operation '${op.resourceName}.${op.verb}(...)' cannot run inside a transactional workflow — external effects don't roll back with the database transaction.  Move it out of the transactional span, or publish through an outbox.`,
       source: `${ctx.name}/${wf.name}`,
     });
   }

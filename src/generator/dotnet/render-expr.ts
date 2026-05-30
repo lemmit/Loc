@@ -312,6 +312,14 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: CsRenderContext):
     case "function":
     case "private-operation":
       return `${ctx.thisName}.${upperFirst(e.name)}(${args})`;
+    case "resource-op":
+      // Resource consumption (Phase 4) is hono-only today; the .NET
+      // ResourceAdapter lands in 4c.  The IR validator does not block
+      // resource-ops per-platform yet, so guard at emit with a clear
+      // message rather than emitting broken C#.
+      throw new Error(
+        `Resource operations (e.g. '${e.resourceOp?.resourceName}.${e.resourceOp?.verb}') are not yet supported on the .NET backend.`,
+      );
     case "free":
       return `${upperFirst(e.name)}(${args})`;
   }

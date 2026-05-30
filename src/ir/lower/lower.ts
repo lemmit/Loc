@@ -1,4 +1,5 @@
 import type { Reference } from "langium";
+import { AstUtils } from "langium";
 import {
   type BuiltinPackFamily,
   parseBuiltinDesignRef,
@@ -80,6 +81,7 @@ import {
   isRepository,
   isRequirement,
   isRequiresStmt,
+  isResource,
   isSolution,
   isSubdomain,
   isSystem,
@@ -93,6 +95,7 @@ import {
   isWorkflow,
 } from "../../language/generated/ast.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../platform/registry.js";
+import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
   ApiIR,
@@ -1231,7 +1234,20 @@ function lowerContext(
   // `modulePermissions` (when set) does the same for the
   // `permissions.<name>` magic-identifier resolution; loose contexts
   // not bundled in a module pass undefined.
-  const env = newEnv(ctx, user, modulePermissions);
+  // Ambient resource handles in scope for this context (Phase 4):
+  // system-level `resource X { for: <thisCtx>, kind, … }` declarations,
+  // keyed by name → infra kind.  Workflow bodies resolve `files.put(…)`
+  // against this map.  Empty for loose contexts (no enclosing system).
+  const resources = new Map<string, DataSourceKind>();
+  const sys = AstUtils.getContainerOfType(ctx, isSystem);
+  if (sys) {
+    for (const m of sys.members) {
+      if (isResource(m) && m.context?.ref === ctx && m.kind) {
+        resources.set(m.name, m.kind as DataSourceKind);
+      }
+    }
+  }
+  const env = newEnv(ctx, user, modulePermissions, resources);
   const enums: EnumIR[] = [];
   const valueObjects: ValueObjectIR[] = [];
   const events: EventIR[] = [];
@@ -2148,6 +2164,33 @@ function lowerWorkflowStatement(
   if (isAssignOrCallStmt(stmt)) {
     const lv = stmt.target;
     if (!stmt.op && lv.call && lv.tail.length === 1) {
+      // `files.put(args)` — a bare resource-op call (Phase 4).  When the
+      // head is an ambient resource handle, lower to a `resource-call`
+      // statement; otherwise it's an op-call on a let binding.
+      const resourceKind = env.resources?.get(lv.head);
+      if (resourceKind) {
+        const verb = lv.tail[0]!;
+        const verbDef = findVerb(resourceKind, verb);
+        const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
+        return {
+          stmt: {
+            kind: "resource-call",
+            call: {
+              kind: "call",
+              callKind: "resource-op",
+              name: verb,
+              args,
+              resourceOp: {
+                resourceName: lv.head,
+                resourceKind,
+                verb,
+                capability: verbDef?.capability ?? "",
+              },
+            },
+          },
+          envAfter: env,
+        };
+      }
       // `name.op(args)` — op-call on a let binding.
       const aggName = aggNameForLocal(env, lv.head);
       const args = (lv.args ?? []).map((a) => lowerExpr(a, env));

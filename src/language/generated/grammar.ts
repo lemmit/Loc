@@ -2881,7 +2881,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "awsS3"
+            "value": "s3"
           },
           {
             "$type": "Keyword",

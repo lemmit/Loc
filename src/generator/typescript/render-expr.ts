@@ -254,6 +254,14 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: TsRenderContext):
       return fromOutside
         ? `${ctx.thisName}.${lowerFirst(e.name)}(${args})`
         : `this.${lowerFirst(e.name)}(${args})`;
+    case "resource-op": {
+      // A verb call on an ambient resource handle (Phase 4).  The
+      // resource client module exports an async `<resource>$<verb>`
+      // helper that owns the SDK mapping; the call site is uniform and
+      // awaited inline so it composes in any expression position.
+      const op = e.resourceOp!;
+      return `(await ${op.resourceName}$${op.verb}(${args}))`;
+    }
     case "free":
       return `${e.name}(${args})`;
   }

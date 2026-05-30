@@ -67,6 +67,7 @@ import {
 } from "../../language/generated/ast.js";
 import { isCollectionOp } from "../../util/collection-ops.js";
 import { isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
+import { findVerb, type ResourceVerbDef } from "../resource-verbs.js";
 import type {
   ExprIR,
   IdValueType,
@@ -99,6 +100,30 @@ import {
  *  identifier.  Member access on the user shape resolves through
  *  `env.user.fields` rather than the bounded-context namespace, so
  *  the name doesn't collide with any user-declared aggregate / part. */
+
+/** Synthetic entity name used to type an ambient resource handle.  A
+ *  `.verb(...)` call on a ref of this type lowers to a `resource-op`;
+ *  the name carries no members of its own (Phase 4). */
+const RESOURCE_HANDLE_SHAPE = "__ResourceHandle";
+
+/** Map a resource verb's declared result to a `TypeIR`.  `json`/`json?`
+ *  → the `json` primitive (optional wrapped); `void`/unknown → a string
+ *  placeholder (the value is unused at a void call site). */
+function verbResultType(verbDef: ResourceVerbDef | undefined): TypeIR {
+  if (!verbDef) return { kind: "primitive", name: "string" };
+  switch (verbDef.result) {
+    case "json":
+      return { kind: "primitive", name: "json" };
+    case "json?":
+      return { kind: "optional", inner: { kind: "primitive", name: "json" } };
+    case "string":
+      return { kind: "primitive", name: "string" };
+    case "string[]":
+      return { kind: "array", element: { kind: "primitive", name: "string" } };
+    default:
+      return { kind: "primitive", name: "string" };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Expressions
@@ -321,6 +346,29 @@ function applySuffixToRecv(
   if (ms.call) {
     const args = ms.args.map((a) => lowerExpr(a.value, env));
     const argNames = ms.args.map((a) => a.name || undefined);
+    // `<resource>.<verb>(args)` — a verb call on an ambient resource
+    // handle lowers to a `resource-op` call (Phase 4).  The verb's
+    // capability comes from the resource-verb registry; an unknown verb
+    // still lowers (carrying the raw name) so the IR validator can emit
+    // a precise diagnostic rather than the lowering silently dropping it.
+    if (recv.kind === "ref" && recv.refKind === "resource" && recv.resourceKind) {
+      const verbDef = findVerb(recv.resourceKind, ms.member);
+      const callIR: ExprIR = {
+        kind: "call",
+        callKind: "resource-op",
+        name: ms.member,
+        args,
+        ...(argNames.some((n) => n !== undefined) ? { argNames } : {}),
+        resourceOp: {
+          resourceName: recv.resourceName ?? recv.name,
+          resourceKind: recv.resourceKind,
+          verb: ms.member,
+          capability: verbDef?.capability ?? "",
+        },
+      };
+      const resultType = verbResultType(verbDef);
+      return { recv: callIR, recvType: resultType };
+    }
     const collectionOp = isCollectionOp(ms.member);
     const mcIR: ExprIR = {
       kind: "method-call",
@@ -627,6 +675,22 @@ function resolveNameRef(name: string, env: Env): ExprIR {
       name: "currentUser",
       refKind: "current-user",
       type: { kind: "entity", name: USER_SHAPE_NAME },
+    };
+  }
+  // Ambient resource handle (`files`, `jobs`, …) — a `resource X { for:
+  // <thisCtx>, … }` declaration in scope (Phase 4).  Resolved before
+  // locals so it isn't shadowable, mirroring `currentUser`.  The type is
+  // a synthetic marker; a `.verb(...)` call on this ref lowers to a
+  // `resource-op` (see `applySuffixToRecv`).
+  const resourceKind = env.resources?.get(name);
+  if (resourceKind) {
+    return {
+      kind: "ref",
+      name,
+      refKind: "resource",
+      resourceName: name,
+      resourceKind,
+      type: { kind: "entity", name: RESOURCE_HANDLE_SHAPE },
     };
   }
   const local = env.locals.get(name);

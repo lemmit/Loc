@@ -160,6 +160,8 @@ function workflowUsesCurrentUser(wf: WorkflowIR): boolean {
       case "repo-let":
       case "op-call":
         return s.args.some(exprUsesCurrentUser);
+      case "resource-call":
+        return exprUsesCurrentUser(s.call);
     }
   });
 }
@@ -426,6 +428,11 @@ function renderStatement(
       const exprText = renderArg(st.expr);
       return [`${INDENT}var ${st.name} = ${exprText};`];
     }
+    case "resource-call":
+      // 4c: the .NET ResourceAdapter renders the call here.  renderArg
+      // already throws via render-expr's resource-op guard, but keep an
+      // explicit branch so the switch stays exhaustive.
+      return [`${INDENT}${renderArg(st.call)};`];
   }
 }
 

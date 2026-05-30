@@ -57,7 +57,6 @@ export type DddKeywordNames =
     | "ashPhoenix"
     | "audited"
     | "auth"
-    | "awsS3"
     | "bi"
     | "bigquery"
     | "bind"
@@ -184,6 +183,7 @@ export type DddKeywordNames =
     | "restApi"
     | "retain"
     | "route"
+    | "s3"
     | "schema"
     | "search"
     | "secret"
@@ -479,10 +479,10 @@ export function isStatement(item: unknown): item is Statement {
     return reflection.isInstance(item, Statement);
 }
 
-export type StorageType = 'awsS3' | 'bigquery' | 'clickhouse' | 'elastic' | 'inMemory' | 'kafka' | 'meilisearch' | 'mysql' | 'postgres' | 'rabbitmq' | 'redis' | 'restApi' | 'sqlite';
+export type StorageType = 'bigquery' | 'clickhouse' | 'elastic' | 'inMemory' | 'kafka' | 'meilisearch' | 'mysql' | 'postgres' | 'rabbitmq' | 'redis' | 'restApi' | 's3' | 'sqlite';
 
 export function isStorageType(item: unknown): item is StorageType {
-    return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery' || item === 'awsS3' || item === 'rabbitmq' || item === 'restApi';
+    return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery' || item === 's3' || item === 'rabbitmq' || item === 'restApi';
 }
 
 export type SystemMember = Api | BoundedContext | Deployable | Layout | Resource | Storage | Subdomain | TestE2E | ThemeBlock | Ui | UserBlock;

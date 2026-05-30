@@ -309,6 +309,12 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): strin
         : `${snake(e.name)}(${ctx.thisName})`;
     case "free":
       return `${snake(e.name)}(${args})`;
+    case "resource-op":
+      // Resource consumption (Phase 4) is hono-only today; the Phoenix
+      // ResourceAdapter lands in 4c.  Guard at emit with a clear message.
+      throw new Error(
+        `Resource operations (e.g. '${e.resourceOp?.resourceName}.${e.resourceOp?.verb}') are not yet supported on the Phoenix backend.`,
+      );
   }
 }
 
