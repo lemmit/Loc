@@ -364,6 +364,7 @@ function applySuffixToRecv(
           resourceKind: recv.resourceKind,
           verb: ms.member,
           capability: verbDef?.capability ?? "",
+          ...(verbDef?.interfaceOverride ? { interface: verbDef.interfaceOverride } : {}),
         },
       };
       const resultType = verbResultType(verbDef);

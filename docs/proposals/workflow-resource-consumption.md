@@ -216,8 +216,15 @@ workflow PlaceOrder(cmd: PlaceOrderCmd) {
   call sites render `(await …)`, rather than threading adapter context into
   `render-expr`. Unknown-verb and no-op-in-transactional-span are the active
   validations; the capability gap rides the Phase-1 `need ⊆ sourceType` check.
-- **4b** — `objectStore` `list`/`signedUrl`/`delete`, plus `queue` + `api` on
-  hono; per-call interface override (`signedUrl`→`rest`).
+- **4b** ✓ — `objectStore` `list`/`signedUrl`/`delete`, plus `queue`
+  (`enqueue`/`publish`) and `api` (`get`/`post`) on hono, with the per-verb
+  interface override (`signedUrl`→`rest`, threaded onto `resourceOp.interface`).
+  The s3 adapter gains the presigner dep; rabbitmq emits a cached-channel
+  enqueue/publish; restApi emits fetch get/post. **Known limit:** an inline
+  object literal as a verb arg (`enqueue({ id })`) doesn't parse in workflow
+  statement position yet (a pre-existing grammar gap, not resource-specific) —
+  pass a param/`let`-bound value for now; object-literal args are a separable
+  grammar enhancement.
 - **4c** — `.NET` + Phoenix `ResourceAdapter`s for the same verbs.
 - **4d (optional)** — explicit `uses:` / `requires:` authoring on top of the
   proven implicit derivation.

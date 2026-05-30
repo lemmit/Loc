@@ -41,11 +41,11 @@ describe("hono resource-client emission", () => {
 
     const mq = files.get("api/resources/rabbitmq.ts")!;
     expect(mq).toMatch(/import \* as amqp from "amqplib";/);
-    expect(mq).toMatch(/export const connectSalesJobs = \(\) => amqp.connect\(salesJobsUrl\)/);
+    expect(mq).toMatch(/export async function salesJobs\$enqueue\(message: unknown\)/);
 
     const api = files.get("api/resources/restApi.ts")!;
     expect(api).toMatch(/salesApiBaseUrl = .*"https:\/\/pay.example.com"/);
-    expect(api).toMatch(/fetch: \(path: string/);
+    expect(api).toMatch(/export async function salesApi\$get\(path: string\)/);
   });
 
   it("adds the client deps to package.json and side-effect-imports the modules at boot", async () => {
