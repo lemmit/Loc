@@ -2,11 +2,11 @@ import {
   type AggregateIR,
   type BoundedContextIR,
   type EnrichedBoundedContextIR,
-  exprUsesCurrentUser,
   operationUsesCurrentUser,
   type SystemIR,
   type WorkflowIR,
   type WorkflowStmtIR,
+  workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
@@ -177,28 +177,6 @@ public sealed record ${upperFirst(wf.name)}Command(${params}) : ICommand;
 // ---------------------------------------------------------------------------
 // Handler — orchestrates the workflow body.
 // ---------------------------------------------------------------------------
-
-/** True when any statement (or sub-expression inside it) references
- *  `currentUser`.  When true, the handler injects ICurrentUserAccessor
- *  and materialises a `var currentUser` local at the top of `Handle`. */
-function workflowUsesCurrentUser(wf: WorkflowIR): boolean {
-  return wf.statements.some((s) => {
-    switch (s.kind) {
-      case "precondition":
-      case "requires":
-      case "expr-let":
-        return exprUsesCurrentUser(s.expr);
-      case "emit":
-      case "factory-let":
-        return s.fields.some((f) => exprUsesCurrentUser(f.value));
-      case "repo-let":
-      case "op-call":
-        return s.args.some(exprUsesCurrentUser);
-      case "resource-call":
-        return exprUsesCurrentUser(s.call);
-    }
-  });
-}
 
 function renderHandler(
   wf: WorkflowIR,
