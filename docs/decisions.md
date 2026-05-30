@@ -683,3 +683,77 @@ against the real model here.
 **Affects.** `lifecycle-operations.md` Phase 2 + integration-seams
 sections (superseded by `lifecycle-url-style.md`); `ApiIR.urlStyle`,
 `OperationIR.routeSlug`; the enrichment pass; depends on D-LIFECYCLE-VERB.
+
+---
+
+## D-PHOENIX-SURFACE — the decomposed Phoenix platform surface
+
+**Status:** OPEN. (Recommended answer recorded below; reconciles two
+proposals that, taken individually, collide. Subsumes the **D-PHOENIX-ECTO**
+ask from `elixir-ecto-and-api-only-backends.md`.)
+
+**Problem.** Two proposals each free a *different* axis off the single
+`phoenixLiveView` keyword, and their individually-recommended fixes
+**conflict**:
+
+- `elixir-ecto-and-api-only-backends.md` frees the **domain** axis (Ash vs
+  Ecto) and its **Option B** recommends carrying that axis *in the platform
+  name* — `phoenixLiveView` = Ash, a new `phoenix` = Ecto.
+- `embedded-frontend-composition.md` frees the **hosted-UI-framework** axis
+  (LiveView vs embedded React) and recommends **retiring `phoenixLiveView`**
+  entirely — one `phoenix` platform, with `liveview` demoted to a
+  `framework:` value on `ui`.
+
+Composed, they collide: Option B uses the *name* to encode the domain axis,
+while the framework note frees a *different* axis off that same name and
+deletes it. You cannot do both. `phoenixLiveView` froze **two** axes plus the
+host into one token; the fix must free **both** axes the same way — neither
+should be re-frozen into a platform name.
+
+**Decision (recommended).** **One** backend platform, **`phoenix`**, with
+both frozen axes expressed as orthogonal config — *not* as platform names:
+
+| Concern | Where it lives | Values |
+|---|---|---|
+| **Host runtime** | `platform: phoenix` | the Phoenix/BEAM runtime (`needsDb: true`, `apiBasePath: "/api"`, serves `priv/static`) |
+| **Domain layer** | a per-deployable domain modifier (spelling TBD: e.g. `domain: ash \| ecto`, or the D-ADAPTER-HOME `style:`/`persistence:` adapter) | `ash` \| `ecto` |
+| **Hosted UI framework** | `ui { framework: … }` + `deployable { hosts: }` | `liveview` (Phoenix-only) \| `react`/… (any static host) |
+
+This makes `phoenix.hostableFrameworks = {liveview} ∪ {react, …}` — the
+richest of any platform — a *derived* consequence of Phoenix being the only
+platform that is both a render runtime **and** a static-asset host, not a
+special case. It is **a refinement of D-PHOENIX-ECTO Option B**: keep Option
+B's "no `family@version`, no `apiOnly` platform" conclusions, but reject its
+"domain axis = platform name" mechanism (which the framework note shows
+double-books the name). Option A (adapter swap) remains the *eventual*
+factoring for the domain axis under D-ADAPTER-HOME; this decision is only
+about **not** spending the platform name on either axis.
+
+**Consequences.**
+
+- `phoenixLiveView` is retired as a platform token; a desugar shim maps it to
+  `platform: phoenix` + domain `ash` + the referenced `ui` gaining
+  `framework: liveview` (mirrors the `platform: react` → vite-host shim).
+- **API-only** stays resolved by **D-API-ONLY** (absence of a `ui`/`hosts:`
+  mount) — unchanged; it is neither a name nor a flag.
+- **Phoenix-embeds-React** (bundle → `priv/static`, same-origin `/api`)
+  becomes expressible for free — the `wwwroot` twin of dotnet.
+- The four Phoenix shapes {Ash,Ecto} × {LiveView, embedded-React} +
+  {API-only} are spanned by two orthogonal modifiers, not 5+ platform names.
+
+**Open within this decision.**
+
+1. **Domain-axis spelling** — bare modifier `domain: ash|ecto` vs the
+   D-ADAPTER-HOME `style:`/`persistence:` adapter surface. Defer to whichever
+   the Ecto note's Phase 2 lands; this decision only pins that it is **not** a
+   platform name.
+2. **Default domain** when unspecified on `platform: phoenix` — `ash`
+   (matches today's `phoenixLiveView` behaviour after desugar) is the natural
+   default.
+
+**Affects.** `embedded-frontend-composition.md` §6 (its "retire
+`phoenixLiveView`" is this decision's framework half); `elixir-ecto-and-api-only-backends.md`
+§4 + §6 (supersedes its D-PHOENIX-ECTO Option-B "sibling platform name" with
+"one `phoenix` platform + non-name domain modifier"); the `Platform` grammar
+enum + `Framework` enum; `src/platform/registry.ts`; `checkDeployable`;
+depends on D-ADAPTER-HOME for the eventual domain-axis adapter seam.

@@ -295,6 +295,16 @@ A desugar shim (`phoenixLiveView` → `phoenix` host + the referenced `ui` gaini
 `framework: liveview`, domain axis `ash`) keeps existing sources parsing —
 mirroring the `platform: react` → vite-host shim in §4.
 
+This is the **framework half** of **D-PHOENIX-SURFACE** (`../decisions.md`),
+which reconciles this note with the Ecto note: a single `phoenix` platform
+carries *neither* frozen axis in its name — the domain axis (Ash/Ecto) is a
+non-name modifier (the Ecto note's call), and the framework axis (LiveView/React)
+is `ui { framework: }`. Note the collision the decision resolves: the Ecto note's
+own **Option B** would have spent the platform *name* on the domain axis
+(`phoenixLiveView`=Ash, `phoenix`=Ecto), which double-books the exact name this
+section retires. D-PHOENIX-SURFACE keeps Option B's other conclusions but moves
+the domain axis off the name.
+
 ## 7. Deferred: one page-set, two frameworks
 
 Putting framework on `ui` means a single `ui` block is one framework. The rare
@@ -343,8 +353,10 @@ admits it.
   framework. "API-only = absence of a `ui` mount" becomes "a backend deployable
   with no `hosts:`," and the `apiBaseUrl`/CORS seam (`react/index.ts:48–52`) it
   flags is exactly the standalone-vs-embedded fork §2.2 formalises. The two notes
-  are independently landable but should agree on the `phoenix` platform name and
-  the domain-axis spelling.
+  are independently landable but **must agree on the `phoenix` surface** — pinned
+  as **D-PHOENIX-SURFACE** (`../decisions.md`), which supersedes the Ecto note's
+  D-PHOENIX-ECTO Option-B "sibling platform name" with "one `phoenix` platform,
+  both frozen axes as non-name config."
 - **`storage-and-platform-config*.md`** — those open the backend platform into
   composable axes (style/layout/persistence). This is the **frontend** twin:
   `platform: react` was a frozen bundle the same way `platform: dotnet`'s

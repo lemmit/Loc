@@ -234,6 +234,18 @@ only code needed is the React `apiBaseUrl` `/api` branch + CORS from §2.1.
 > Ash/Ecto axis) recorded in [`../decisions.md`](../decisions.md).
 > **D-API-ONLY is resolved by §2.1**: API-only = absence of a `ui` mount,
 > no new platform name, no `apiOnly` emission flag.
+>
+> **Update — superseded by D-PHOENIX-SURFACE.** Option B above (carry the
+> Ash/Ecto axis in the *platform name*: `phoenixLiveView`=Ash, `phoenix`=Ecto)
+> **collides** with `embedded-frontend-composition.md`, which frees a *second*
+> axis (LiveView vs embedded React) off that same `phoenixLiveView` name and
+> retires it. D-PHOENIX-SURFACE reconciles them: **one `phoenix` platform**, the
+> domain axis carried by a **non-name modifier** (not `phoenixLiveView`-vs-`phoenix`),
+> the framework axis by `ui { framework: }`. Option B's other conclusions survive
+> (no `family@version`, no `apiOnly` platform); only its "axis = name" mechanism is
+> replaced. Option A (adapter swap, D-ADAPTER-HOME) remains the eventual domain-axis
+> factoring. The domain-modifier *spelling* stays this note's call (D-PHOENIX-SURFACE
+> open item #1).
 
 ## 5. Conformance — the non-negotiable gate
 
