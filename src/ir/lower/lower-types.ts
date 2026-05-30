@@ -3,6 +3,7 @@ import type {
   Aggregate,
   BoundedContext,
   EntityPart,
+  EventDecl,
   FunctionDecl,
   Operation,
   TypeRef,
@@ -14,6 +15,7 @@ import {
   isDerivedProp,
   isEntityPart,
   isEnumDecl,
+  isEventDecl,
   isFunctionDecl,
   isIdType,
   isNamedType,
@@ -232,6 +234,20 @@ export function findValueObjectByName(env: Env, name: string): ValueObject | und
   if (!env.ctx) return undefined;
   for (const m of env.ctx.members) {
     if (isValueObject(m) && m.name === name) return m;
+  }
+  return undefined;
+}
+
+/** Look up a context-level `event` declaration by name.  Used to
+ *  type-resolve member access on an applier's event parameter
+ *  (`apply(e: OrderPlaced) { … e.field … }`) — the param carries the
+ *  event name as an `entity`-shaped marker (events aren't a distinct
+ *  TypeIR kind), and member typing falls back to this lookup when the
+ *  name isn't an aggregate / entity part. */
+export function findEventByName(env: Env, name: string): EventDecl | undefined {
+  if (!env.ctx) return undefined;
+  for (const m of env.ctx.members) {
+    if (isEventDecl(m) && m.name === name) return m;
   }
   return undefined;
 }
