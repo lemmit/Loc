@@ -9,16 +9,12 @@ export {
   normalizePath,
   LOOM_AUTHOR,
   type GitAuthor,
-  type FileDiff,
-  type MergeOutcome,
+  type ListOpts,
   type CommitInfo,
+  type CommitFileChange,
 } from "./git-store.js";
-export {
-  commitOnSave,
-  regenerateMerge,
-  diffForDisplay,
-  GENERATED_BASE_REF,
-} from "./helpers.js";
+export { startAutoCommit, type AutoCommitOptions } from "./auto-commit.js";
+export { commitOnSave, GENERATED_BASE_REF } from "./helpers.js";
 export {
   applyGeneratedTree,
   readGeneratedTree,

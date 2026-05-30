@@ -169,10 +169,23 @@ function renderAggregateResource(
   // duplication of the conversion fn.
   const jasonImpl = renderJasonEncoderImpl(moduleName, wireAtoms, appModule);
 
-  return `defmodule ${moduleName} do
+  // Authorization: aggregates with `requires`-guarded operations opt into
+  // Ash.Policy.Authorizer; the `policies` block + per-op SimpleCheck modules
+  // enforce the guard, surfacing failures as Ash.Error.Forbidden → 403.
+  // The check modules are emitted BEFORE the resource: `authorize_if <Check>`
+  // calls `Check.init/1` at the resource's compile time, so the check must
+  // already be compiled (a forward reference in the same file fails with
+  // "module is not available").
+  const hasGuards = agg.operations.some(isGuardedOperation);
+  const authorizerLine = hasGuards ? ",\n    authorizers: [Ash.Policy.Authorizer]" : "";
+  const policiesBlock = renderPolicies(agg, moduleName);
+  const policyChecks = renderPolicyChecks(agg, renderCtx, moduleName);
+  const checksPrefix = policyChecks ? `${policyChecks}\n\n` : "";
+
+  return `${checksPrefix}defmodule ${moduleName} do
   use Ash.Resource,
     domain: ${ctxModule},
-    data_layer: AshPostgres.DataLayer
+    data_layer: AshPostgres.DataLayer${authorizerLine}
 
   postgres do
 ${postgresBlockLines.join("\n")}
@@ -183,7 +196,7 @@ ${postgresBlockLines.join("\n")}
     ${[...persistedFields.map((f) => renderAttribute(f, ctxModule)), ...embeddedAttrLines].join("\n    ")}
     timestamps()
   end
-${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
+${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
 
 ${jasonImpl}`;
 }
@@ -478,6 +491,78 @@ function renderValidations(
 }
 
 // ---------------------------------------------------------------------------
+// Authorization policies (`requires` guards → Ash.Policy.Authorizer)
+// ---------------------------------------------------------------------------
+
+/** The `requires` guard expressions on an operation (authorization gates,
+ *  distinct from `precondition` domain checks). */
+function operationGuards(op: OperationIR): ExprIR[] {
+  return op.statements.filter((s) => s.kind === "requires").map((s) => s.expr);
+}
+
+/** True when the operation carries ≥1 `requires` authorization guard. */
+function isGuardedOperation(op: OperationIR): boolean {
+  return op.statements.some((s) => s.kind === "requires");
+}
+
+/** Per-guarded-op SimpleCheck module name (e.g. `…Project.Checks.Rename`). */
+function policyCheckModule(resourceModule: string, op: OperationIR): string {
+  return `${resourceModule}.Checks.${upperFirst(op.name)}`;
+}
+
+/** `policies do … end` block — one `policy action(:op)` per guarded
+ *  operation, authorizing via the op's generated SimpleCheck.  Idiomatic
+ *  Ash authorization: a failed check yields `Ash.Error.Forbidden`, which
+ *  the bang code-interface raises and Phoenix maps to HTTP 403 (matching
+ *  Hono/.NET).  Returns "" when the aggregate has no guarded operations. */
+function renderPolicies(agg: AggregateIR, resourceModule: string): string {
+  const guarded = agg.operations.filter(isGuardedOperation);
+  if (guarded.length === 0) return "";
+  const blocks = guarded.map(
+    (op) =>
+      `    policy action(:${snake(op.name)}) do\n      authorize_if ${policyCheckModule(
+        resourceModule,
+        op,
+      )}\n    end`,
+  );
+  return `\n  policies do\n${blocks.join("\n")}\n  end\n`;
+}
+
+/** One `Ash.Policy.SimpleCheck` module per guarded operation.  Reuses the
+ *  domain expression renderer by binding `current_user = actor`; multiple
+ *  `requires` clauses AND together.  A nil actor is forbidden outright.
+ *  Emitted as sibling modules after the resource (like the Jason impl). */
+function renderPolicyChecks(agg: AggregateIR, ctx: RenderCtx, resourceModule: string): string {
+  const guarded = agg.operations.filter(isGuardedOperation);
+  if (guarded.length === 0) return "";
+  const modules = guarded.map((op) => {
+    const cond = operationGuards(op)
+      .map((e) => renderExpr(e, ctx))
+      .join(" and ");
+    const describe = op.statements
+      .filter((s) => s.kind === "requires")
+      .map((s) => s.source)
+      .join("; ");
+    return `defmodule ${policyCheckModule(resourceModule, op)} do
+  @moduledoc false
+  use Ash.Policy.SimpleCheck
+
+  @impl true
+  def describe(_opts), do: ${JSON.stringify(`requires: ${describe}`)}
+
+  @impl true
+  def match?(nil, _context, _opts), do: false
+
+  def match?(actor, _context, _opts) do
+    current_user = actor
+    ${cond}
+  end
+end`;
+  });
+  return `${modules.join("\n\n")}`;
+}
+
+// ---------------------------------------------------------------------------
 // Actions (operations)
 // ---------------------------------------------------------------------------
 
@@ -548,9 +633,14 @@ function renderOperationAction(op: OperationIR, ctx: RenderCtx, _ctxModule: stri
   const available = new Set(op.params.map((p) => p.name));
   const validateLines = renderOperationValidates(op, ctx, available);
 
-  // Filter out precondition statements before rendering change block —
-  // preconditions are emitted as validate clauses above, not in the change fn.
-  const nonPrecondStmts = op.statements.filter((s) => s.kind !== "precondition");
+  // Filter out precondition AND requires statements before rendering the
+  // change block — preconditions become validate clauses (above), and
+  // requires guards become Ash policies (see renderPolicies); neither
+  // belongs in the change fn.  (A `requires` left here would raise an
+  // ArgumentError → HTTP 500 instead of the policy's 403.)
+  const nonPrecondStmts = op.statements.filter(
+    (s) => s.kind !== "precondition" && s.kind !== "requires",
+  );
   const stmts = renderElixirStatements(nonPrecondStmts, ctx, "changeset");
 
   // Bind the domain-style identifiers (`record`, `current_user`, each param)

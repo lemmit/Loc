@@ -11,6 +11,7 @@ import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js"
 import { effectiveSavingShape } from "../../../ir/util/resolve-datasource.js";
 import { lines as joinLines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
+import { isTphBase, isTphConcrete, ownFieldsOf, tableOwnerName, tphConcretesOf } from "../tph.js";
 
 /** Per-aggregate dataSource lookup the orchestrator passes in.  Lets
  *  the schema emitter ask "what schema / tablePrefix does THIS
@@ -86,6 +87,28 @@ export function renderSchema(
   for (const agg of ctx.aggregates) {
     const schema = schemaFor(agg);
     const prefix = prefixFor(agg);
+    // TPH (aggregate-inheritance.md, sharedTable): the whole hierarchy is one
+    // table named for the abstract base.  A TPH concrete shares it, so it
+    // emits no table of its own; the abstract base emits the shared table
+    // (base columns + every concrete's own columns, made nullable, + the
+    // `kind` discriminator).
+    if (isTphConcrete(agg, ctx.aggregates)) {
+      // …but a TPH concrete's contained parts still need their own tables.
+      // Each part FKs the SHARED base table (the concrete has no table of its
+      // own), so the parent name resolves through `tableOwnerName` — the part
+      // row's `parentId` holds the shared-table row id, which is exactly the
+      // concrete's id (Pattern 4, TPT-via-`contains`).  `emitTable` keys the
+      // parts otherwise identically to a plain aggregate's.
+      const owner = tableOwnerName(agg, ctx.aggregates);
+      for (const part of agg.parts) {
+        tables.push(emitTable(part.name, part.fields, owner, ctx, new Set(), { schema, prefix }));
+      }
+      continue;
+    }
+    if (isTphBase(agg, ctx.aggregates)) {
+      tables.push(emitTphTable(agg, ctx, { schema, prefix }));
+      continue;
+    }
     const shape = effectiveSavingShape(agg, lookup?.(agg));
     // Document (`shape(document)`): the whole aggregate is one opaque
     // jsonb blob (`id, data, version`).  No part/join tables.
@@ -355,6 +378,43 @@ function emitDocumentTable(
     `  version: integer("version").notNull(),`,
     `});`,
   ].join("\n");
+}
+
+/** TPH shared table (aggregate-inheritance.md, sharedTable): one table for
+ *  the whole hierarchy.  Columns are `id`, the `kind` discriminator, the
+ *  abstract base's own columns (keeping their declared nullability), then
+ *  every concrete subtype's own columns forced nullable (a row is only ever
+ *  one `kind`, so the other kinds' columns are null).  Concrete columns are
+ *  de-duplicated by name (first declaration wins) — a later validator can
+ *  tighten clashing redeclarations.  v1 covers scalar / value-object / enum /
+ *  id columns; parts, containments, and reference collections on a TPH
+ *  hierarchy are a later slice. */
+function emitTphTable(
+  base: AggregateIR,
+  ctx: BoundedContextIR,
+  options: { schema?: string; prefix?: string } = {},
+): string {
+  const baseTable = snake(plural(base.name));
+  const tableName = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
+  const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
+  const lines: string[] = [];
+  lines.push(`export const ${lowerFirst(plural(base.name))} = ${tableFactory}("${tableName}", {`);
+  lines.push(`  id: text("id").primaryKey(),`);
+  lines.push(`  kind: text("kind").notNull(),`);
+  for (const f of base.fields) {
+    lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
+  }
+  const seen = new Set(base.fields.map((f) => f.name));
+  for (const concrete of tphConcretesOf(base, ctx.aggregates)) {
+    for (const f of ownFieldsOf(concrete, base)) {
+      if (seen.has(f.name)) continue;
+      seen.add(f.name);
+      // Force nullable: only rows of this concrete's `kind` populate it.
+      lines.push(...drizzleColumnLines({ ...f, optional: true }, ctx).map((s) => `  ${s}`));
+    }
+  }
+  lines.push(`});`);
+  return lines.join("\n");
 }
 
 function emitTable(

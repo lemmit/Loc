@@ -18,13 +18,16 @@ import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { joinColumnName, joinTableConstName } from "./emit.js";
 import { associationsOf, isRefCollection } from "./repository-associations-builder.js";
+import { discriminatorValue, tableOwnerName } from "./tph.js";
 
 /** Inner body of the save db.transaction callback at 6-space indent.
  *  Extracted so the trace-on variant can re-indent and wrap it with the
  *  outer try/catch + tx_* logs.  Also the seam where `child_synced`
  *  trace lines (--trace) are injected per child upsert. */
 function saveTxBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace: boolean): string[] {
-  const tableName = lowerFirst(plural(agg.name));
+  // Under TPH the upsert targets the shared base table; non-TPH aggregates
+  // resolve to their own table (byte-identical output).
+  const tableName = lowerFirst(plural(tableOwnerName(agg, ctx.aggregates)));
   const containBlocks = agg.contains.flatMap((c): string[] => {
     if (!c.collection) return [];
     const part = agg.parts.find((p) => p.name === c.partName);
@@ -133,8 +136,12 @@ export function saveMethod(
 }
 
 function rootProjection(agg: EnrichedAggregateIR, varExpr: string, ctx: BoundedContextIR): string {
+  // TPH: stamp the `kind` discriminator so the shared-table row records which
+  // concrete it is (null for non-TPH aggregates → entry omitted).
+  const kind = discriminatorValue(agg, ctx.aggregates);
   return projectionObject(varExpr, [
     { fieldName: "id", expr: `${varExpr}.id as string` },
+    ...(kind ? [{ fieldName: "kind", expr: JSON.stringify(kind) }] : []),
     // Reference collections live in join tables, not on the root row.
     ...agg.fields
       .filter((f) => !isRefCollection(f.type))

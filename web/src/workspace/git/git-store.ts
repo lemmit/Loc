@@ -87,23 +87,12 @@ export const LOOM_AUTHOR: GitAuthor = {
   email: "playground@loom.local",
 };
 
-/** One entry of a tree-vs-tree diff. */
-export interface FileDiff {
-  path: VfsPath;
-  status: "added" | "removed" | "modified";
+/** Options for the `list*` family.  `skip` prunes subtrees (absolute
+ *  paths) from the underlying walk — e.g. the source scan skips
+ *  `/workspace/generated`. */
+export interface ListOpts {
+  skip?: ReadonlyArray<VfsPath>;
 }
-
-/** Outcome of a merge — either a clean result or a conflict listing.
- *  Never throws on conflict, so callers branch on `ok`. */
-export type MergeOutcome =
-  | {
-      ok: true;
-      oid?: string;
-      fastForward?: boolean;
-      alreadyMerged?: boolean;
-      mergeCommit?: boolean;
-    }
-  | { ok: false; conflicts: VfsPath[] };
 
 /** A single commit, projected to the fields the UI/log needs. */
 export interface CommitInfo {
@@ -113,12 +102,22 @@ export interface CommitInfo {
   timestamp: number;
 }
 
+/** One file's change within a commit (vs. its first parent).  Paths are
+ *  absolute (`/workspace/...`).  Read-only — used by the History view. */
+export interface CommitFileChange {
+  path: VfsPath;
+  status: "added" | "modified" | "removed";
+}
+
 const REPO_RELATIVE = (path: VfsPath): string => path.replace(/^\//, "");
 const ABSOLUTE = (filepath: string): VfsPath =>
-  filepath.startsWith("/") ? filepath : "/" + filepath;
+  filepath.startsWith("/") ? filepath : `/${filepath}`;
 
 export class GitStore {
   private readonly subs = new Set<Subscription>();
+  /** Serialises commits so concurrent callers (debounced autosave +
+   *  an intentional regenerate) can't interleave git index/HEAD writes. */
+  private commitChain: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly gfs: GitFs) {}
 
@@ -233,26 +232,27 @@ export class GitStore {
   }
 
   /** Files under `prefix`, sorted.  Directory-boundary prefix match. */
-  async list(prefix: VfsPath): Promise<VfsPath[]> {
-    return this.listFiltered(prefix, "file");
+  async list(prefix: VfsPath, opts?: ListOpts): Promise<VfsPath[]> {
+    return this.listFiltered(prefix, "file", opts?.skip);
   }
 
   /** Directories under `prefix`, sorted. */
-  async listDirs(prefix: VfsPath): Promise<VfsPath[]> {
-    return this.listFiltered(prefix, "dir");
+  async listDirs(prefix: VfsPath, opts?: ListOpts): Promise<VfsPath[]> {
+    return this.listFiltered(prefix, "dir", opts?.skip);
   }
 
   /** Files and directories under `prefix`, sorted. */
-  async listAll(prefix: VfsPath): Promise<VfsPath[]> {
-    return this.listFiltered(prefix, undefined);
+  async listAll(prefix: VfsPath, opts?: ListOpts): Promise<VfsPath[]> {
+    return this.listFiltered(prefix, undefined, opts?.skip);
   }
 
   private async listFiltered(
     prefix: VfsPath,
     kind: "file" | "dir" | undefined,
+    skip?: ReadonlyArray<VfsPath>,
   ): Promise<VfsPath[]> {
     const norm = normalizePath(prefix);
-    const all = await this.walkTree();
+    const all = await this.walkTree(skip);
     const out: VfsPath[] = [];
     for (const node of all) {
       if (kind !== undefined && node.kind !== kind) continue;
@@ -343,6 +343,27 @@ export class GitStore {
     });
   }
 
+  /** Stage the whole working tree and commit it, serialised against any
+   *  other in-flight `commitWorkingTree` so two commits never interleave.
+   *  Returns the new commit oid, or `undefined` when nothing changed. */
+  async commitWorkingTree(
+    message: string,
+    author: GitAuthor = LOOM_AUTHOR,
+  ): Promise<string | undefined> {
+    const run = this.commitChain.then(async () => {
+      const staged = await this.stageAll();
+      if (!staged) return undefined;
+      return this.commit(message, author);
+    });
+    // Keep the chain alive regardless of this run's outcome so one
+    // failure doesn't wedge every subsequent commit.
+    this.commitChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   async log(depth?: number): Promise<CommitInfo[]> {
     const commits = await git.log({ fs: this.fsc, dir: this.dir, depth });
     return commits.map((c) => ({
@@ -378,97 +399,41 @@ export class GitStore {
     return new TextDecoder().decode(blob);
   }
 
-  /** Create a branch at the current HEAD (without checking it out). */
-  async branch(name: string): Promise<void> {
-    await git.branch({ fs: this.fsc, dir: this.dir, ref: name });
-  }
-
-  async currentBranch(): Promise<string> {
-    const branch = await git.currentBranch({
-      fs: this.fsc,
-      dir: this.dir,
-      fullname: false,
-    });
-    return branch ?? "main";
-  }
-
-  /** Check out `ref` into the working tree, then notify subscribers of
-   *  the working-tree paths that changed.
-   *
-   *  Note: isomorphic-git's checkout selects files to overwrite by an
-   *  oid/stat diff.  Under coarse-mtime backends (fake-indexeddb in
-   *  tests) a same-size edit can share an mtime and be skipped; real
-   *  browsers give millisecond mtimes for edits seconds apart, so this
-   *  is a test-environment artifact, not a production concern. */
-  async checkout(ref: string, force = false): Promise<void> {
-    const before = await this.contentMap();
-    await git.checkout({ fs: this.fsc, dir: this.dir, ref, force });
-    await this.notifyDiff(before);
-  }
-
-  /** Merge `theirs` into the current branch.  Returns a structured
-   *  outcome instead of throwing on conflict; on a clean merge the
-   *  working tree is synced and subscribers are notified.  The
-   *  generated-base relationship the proposal models is established by
-   *  the commit graph (PR 4); here this is the merge primitive. */
-  async merge(
-    theirs: string,
-    opts: { author?: GitAuthor; message?: string } = {},
-  ): Promise<MergeOutcome> {
-    const before = await this.contentMap();
-    const author = opts.author ?? LOOM_AUTHOR;
-    try {
-      const res = await git.merge({
-        fs: this.fsc,
-        dir: this.dir,
-        theirs,
-        author: { ...author },
-        message: opts.message,
-      });
-      // merge updates HEAD/index; materialise the result in the working
-      // tree so reads reflect it, then fan out the changed paths.
-      await git.checkout({
-        fs: this.fsc,
-        dir: this.dir,
-        ref: await this.currentBranch(),
-        force: true,
-      });
-      await this.notifyDiff(before);
-      return {
-        ok: true,
-        oid: res.oid,
-        fastForward: res.fastForward,
-        alreadyMerged: res.alreadyMerged,
-        mergeCommit: res.mergeCommit,
-      };
-    } catch (err) {
-      if (err instanceof git.Errors.MergeConflictError) {
-        return { ok: false, conflicts: err.data.filepaths.map(ABSOLUTE) };
-      }
-      throw err;
-    }
-  }
-
-  /** Per-file diff between two refs/trees (blobs only).  Minimal
-   *  added/removed/modified classification — the unified-diff UX is a
-   *  later concern; isomorphic-git has no one-shot unified diff. */
-  async treeDiff(a: string, b: string): Promise<FileDiff[]> {
-    const out: FileDiff[] = [];
+  /** The `/workspace` files a commit changed relative to its first parent
+   *  (added / modified / removed).  A root commit (no parent) reports
+   *  every file as `added`.  Read-only: walks the two commit trees and
+   *  compares blob oids — commits here are linear (no merges), so the
+   *  first parent is the exact base.  Used by the History view. */
+  async commitChanges(oid: string): Promise<CommitFileChange[]> {
+    const { commit } = await git.readCommit({ fs: this.fsc, dir: this.dir, oid });
+    const parent = commit.parent[0];
+    const trees = parent
+      ? [git.TREE({ ref: parent }), git.TREE({ ref: oid })]
+      : [git.TREE({ ref: oid })];
+    const out: CommitFileChange[] = [];
     await git.walk({
       fs: this.fsc,
       dir: this.dir,
-      trees: [git.TREE({ ref: a }), git.TREE({ ref: b })],
+      trees,
       map: async (filepath, entries) => {
         if (filepath === ".") return;
-        const [A, B] = entries as Array<git.WalkerEntry | null>;
-        const aType = A ? await A.type() : undefined;
-        const bType = B ? await B.type() : undefined;
-        if (aType !== "blob" && bType !== "blob") return; // dirs/trees
-        const path = ABSOLUTE(filepath);
-        if (!A || aType !== "blob") out.push({ path, status: "added" });
-        else if (!B || bType !== "blob") out.push({ path, status: "removed" });
-        else if ((await A.oid()) !== (await B.oid()))
-          out.push({ path, status: "modified" });
+        const abs = ABSOLUTE(filepath);
+        // Only surface tracked workspace content; never the bootstrapped
+        // empty `/workspace` dir node itself.
+        if (!abs.startsWith("/workspace/")) return;
+        if (parent) {
+          const [A, B] = entries as Array<git.WalkerEntry | null>;
+          const aBlob = A && (await A.type()) === "blob";
+          const bBlob = B && (await B.type()) === "blob";
+          if (!aBlob && !bBlob) return; // dirs/trees
+          if (!aBlob) out.push({ path: abs, status: "added" });
+          else if (!bBlob) out.push({ path: abs, status: "removed" });
+          else if ((await A.oid()) !== (await B.oid()))
+            out.push({ path: abs, status: "modified" });
+        } else {
+          const [A] = entries as Array<git.WalkerEntry | null>;
+          if (A && (await A.type()) === "blob") out.push({ path: abs, status: "added" });
+        }
       },
     });
     out.sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
@@ -502,9 +467,17 @@ export class GitStore {
   /** Recursive walk of the LightningFS tree, skipping the gitdir.
    *  Returns every file and directory as `{ path, kind }`.  At
    *  playground scale (low hundreds of paths) a full walk per list call
-   *  is negligible, matching MemoryVfs's full-scan listing. */
-  private async walkTree(): Promise<Array<{ path: VfsPath; kind: "file" | "dir" }>> {
+   *  is negligible, matching MemoryVfs's full-scan listing.
+   *
+   *  `skip` prunes whole subtrees by absolute path — the hot per-keystroke
+   *  source scan passes `/workspace/generated` so it doesn't traverse the
+   *  (potentially large) generated tree just to filter it out. */
+  private async walkTree(
+    skip?: ReadonlyArray<VfsPath>,
+  ): Promise<Array<{ path: VfsPath; kind: "file" | "dir" }>> {
     const out: Array<{ path: VfsPath; kind: "file" | "dir" }> = [];
+    const skipSet =
+      skip && skip.length > 0 ? new Set(skip.map((p) => normalizePath(p))) : null;
     const visit = async (dirPath: VfsPath): Promise<void> => {
       let names: string[];
       try {
@@ -515,6 +488,7 @@ export class GitStore {
       for (const name of names) {
         if (dirPath === "/" && name === ".git") continue; // never expose the repo
         const childPath = dirPath === "/" ? `/${name}` : `${dirPath}/${name}`;
+        if (skipSet?.has(childPath)) continue; // prune this subtree
         let st: { isDirectory(): boolean };
         try {
           st = await this.fs.promises.stat(childPath);
@@ -531,29 +505,6 @@ export class GitStore {
     };
     await visit("/");
     return out;
-  }
-
-  /** Snapshot every workspace file's content — used to diff before/after
-   *  a checkout/merge so the notifier can fan out the changed paths. */
-  private async contentMap(): Promise<Map<VfsPath, string>> {
-    const map = new Map<VfsPath, string>();
-    for (const node of await this.walkTree()) {
-      if (node.kind !== "file") continue;
-      map.set(node.path, (await this.readFile(node.path)) ?? "");
-    }
-    return map;
-  }
-
-  private async notifyDiff(before: Map<VfsPath, string>): Promise<void> {
-    const after = await this.contentMap();
-    const changed = new Set<VfsPath>();
-    for (const [path, content] of after) {
-      if (before.get(path) !== content) changed.add(path);
-    }
-    for (const path of before.keys()) {
-      if (!after.has(path)) changed.add(path);
-    }
-    if (changed.size > 0) this.notify([...changed].sort());
   }
 
   /** mkdirp for a file's parent chain (so LightningFS `writeFile`

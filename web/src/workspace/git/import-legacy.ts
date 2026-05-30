@@ -1,19 +1,18 @@
 // ---------------------------------------------------------------------------
-// One-time migration: legacy IdbVfs workspace → git store.
+// One-time migration: legacy IndexedDB workspace → git store.
 //
 // Before the git-backed store, the playground persisted `/workspace/**`
-// last-write-wins in the `loom-workspace` IndexedDB via `IdbVfs`.  On
-// first load after the migration, if the git workspace is still empty
-// but that legacy IDB holds workspace content, import it into an initial
-// commit so returning users don't lose their work.  Idempotent: once the
-// git workspace has any content the import is skipped, so it runs at most
-// once per browser.
+// last-write-wins in the `loom-workspace` IndexedDB.  On first load after
+// the migration, if the git workspace is still empty but that legacy IDB
+// holds workspace content, import it into an initial commit so returning
+// users don't lose their work.  Idempotent: once the git workspace has
+// any content the import is skipped, so it runs at most once per browser.
 //
-// `IdbVfs` is retained solely as the read source for this import; its
-// removal is the final cleanup PR.
+// The legacy store is read through the small `readLegacyWorkspace` reader
+// (`vfs/legacy-idb.ts`) — the only surviving slice of the old `IdbVfs`.
 // ---------------------------------------------------------------------------
 
-import { IdbVfs } from "../../vfs/idb-vfs.js";
+import { readLegacyWorkspace } from "../../vfs/legacy-idb.js";
 import { commitOnSave } from "./helpers.js";
 import type { GitStore } from "./git-store.js";
 
@@ -24,14 +23,7 @@ export async function importLegacyIdbWorkspace(store: GitStore): Promise<boolean
   const existing = await store.list("/workspace");
   if (existing.length > 0) return false;
 
-  let legacy: IdbVfs;
-  try {
-    legacy = await IdbVfs.open();
-  } catch {
-    return false; // hostile storage — nothing to import
-  }
-
-  const entries = [...legacy.snapshot().values()].filter((e) =>
+  const entries = (await readLegacyWorkspace()).filter((e) =>
     e.path.startsWith("/workspace/"),
   );
   if (entries.length === 0) return false;

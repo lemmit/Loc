@@ -386,7 +386,32 @@ export interface AggregateIR {
    * (default `relational`); a per-projection `dataSource shape:` knob
    * can override it (see {@link effectiveSavingShape}). */
   savingShape?: SavingShape;
+  /** Aggregate-inheritance (aggregate-inheritance.md, I1).  `true` for an
+   * `abstract aggregate` base — never instantiated, no repository, emits no
+   * table of its own.  Omitted (≡ false) for ordinary/concrete aggregates. */
+  isAbstract?: boolean;
+  /** Name of the `abstract` base this aggregate `extends`, if any.  Always
+   * resolves to an abstract aggregate (enforced by the validator).  Field
+   * inheritance into the concrete's `wireShape` is an I2 concern; in I1 this
+   * only records the declared relationship. */
+  extendsAggregate?: string;
+  /** Inheritance table layout declared via the `inheritanceUsing(…)` header
+   * modifier (D-RENAME).  `sharedTable` = TPH (one table + `kind`
+   * discriminator); `ownTable` = TPC (table per concrete).  Omitted when not
+   * declared; only meaningful on an `abstract` base or an `extends` subtype.
+   * A `persistedAs(eventLog)` / `shape(document)` concrete of a `sharedTable`
+   * base is forced to `ownTable` (D-ES-TPH; enforced by the validator). */
+  inheritanceUsing?: InheritanceLayout;
 }
+
+/** Inheritance table layout — the aggregate-inheritance layout axis
+ *  (D-RENAME, amended by D-DOCUMENT-AXIS §4).  Spelled in source as the
+ *  `inheritanceUsing(sharedTable | ownTable)` header paren modifier.
+ *    - `sharedTable` — TPH: the whole hierarchy shares one table with a
+ *      `kind` discriminator column; `Party id` refs target that base table.
+ *    - `ownTable` — TPC: one table per concrete, no base table; bare
+ *      `Party id` refs to the base are forbidden (FK target ambiguous). */
+export type InheritanceLayout = "sharedTable" | "ownTable";
 
 /** How an aggregate's hierarchy is physically laid out — the saving-shape
  *  axis of D-DOCUMENT-AXIS (orthogonal to {@link PersistenceStrategy},
@@ -465,6 +490,27 @@ export interface EventIR {
   fields: FieldIR[];
 }
 
+/** The payload-family discriminator (payload-transport-layer.md, P1).
+ *  `payload` is the umbrella; `event` / `command` / `query` / `response`
+ *  / `error` are sugar subtypes carrying the same structural-record wire
+ *  contract.  `event` is the only one that also has its own legacy
+ *  declaration surface (`EventDecl`) — it is projected into the unified
+ *  `payloads` view at lowering time; the rest parse via `PayloadDecl`. */
+export type PayloadKind = "payload" | "event" | "command" | "query" | "response" | "error";
+
+/** A structured-data carrier crossing a boundary (payload-transport-layer.md,
+ *  P1).  Structurally typed record of fields.  Generics / unions are
+ *  deferred to P3 / P4; this P1+P2 shape is a flat record only. */
+export interface PayloadIR {
+  name: string;
+  kind: PayloadKind;
+  fields: FieldIR[];
+  /** True for compiler-synthesized payloads (P2's per-aggregate
+   *  `<Agg>Wire`), false/absent for author-declared ones.  Lets later
+   *  phases and the validator distinguish derived shapes from source. */
+  synthesized?: boolean;
+}
+
 export interface FindIR {
   name: string;
   params: ParamIR[];
@@ -510,6 +556,12 @@ export interface BoundedContextIR {
   enums: EnumIR[];
   valueObjects: ValueObjectIR[];
   events: EventIR[];
+  /** Unified payload-family view (payload-transport-layer.md, P1+P2):
+   *  author-declared `PayloadDecl`s (payload/command/query/response/error),
+   *  the context's `event`s projected in with `kind: "event"`, and the
+   *  P2 synthesized per-aggregate `<Agg>Wire` payloads.  `events` stays
+   *  populated independently so existing event emission is untouched. */
+  payloads: PayloadIR[];
   aggregates: AggregateIR[];
   repositories: RepositoryIR[];
   workflows: WorkflowIR[];
@@ -1888,6 +1940,33 @@ export function exprUsesCurrentUser(e: ExprIR | undefined): boolean {
  *  emits, calls — references `currentUser` anywhere. */
 export function operationUsesCurrentUser(op: OperationIR): boolean {
   return op.statements.some(stmtUsesCurrentUser);
+}
+
+/** True when any of the workflow's statements (or a sub-expression
+ *  inside one) references `currentUser`.  When true, a backend's
+ *  workflow handler must materialise a `currentUser` binding (from the
+ *  request-scoped auth actor) before the rendered guard/expr — which
+ *  emits the bare token `currentUser` — can resolve.  Shared by the
+ *  Hono and .NET workflow emitters. */
+export function workflowUsesCurrentUser(wf: WorkflowIR): boolean {
+  return wf.statements.some(workflowStmtUsesCurrentUser);
+}
+
+function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+    case "expr-let":
+      return exprUsesCurrentUser(s.expr);
+    case "emit":
+    case "factory-let":
+      return s.fields.some((f) => exprUsesCurrentUser(f.value));
+    case "repo-let":
+    case "op-call":
+      return s.args.some(exprUsesCurrentUser);
+    case "resource-call":
+      return exprUsesCurrentUser(s.call);
+  }
 }
 
 /** True when the find's `where` filter references `currentUser`.
