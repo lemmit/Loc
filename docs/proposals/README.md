@@ -158,6 +158,7 @@ layer that consumes it.
 
 | Doc | Status | Core addition |
 |---|---|---|
+| [`playground-git-vfs.md`](./playground-git-vfs.md) | SHIPPED | Browser playground filesystem is git-native: LightningFS + isomorphic-git durable store, async workspace layer over it (sync resident snapshot for LSP/editor), one-time legacy-IDB import, generated code versioned under `/workspace/generated/**` with regeneration as a per-file 3-way merge, debounced commit-on-save. `web/`-only. Landed in #748 (+ preview-from-workspace), #757 (commit-on-save + race guard + scoped scan), #761 (cleanup). Plan: [`../plans/playground-git-vfs-implementation.md`](../plans/playground-git-vfs-implementation.md). Deferred: in-editor conflict-marker indicator. |
 | [`mutation-testing.md`](./mutation-testing.md) | PROPOSED (OUT OF SCOPE) | IR-level `ExprIR → ExprIR[]` operators; gated instrumented emit mode preserving byte-identical fixtures; staged runner plan. Excluded from the global plan per maintainer. |
 
 ## Phase summary (precis of global plan)
