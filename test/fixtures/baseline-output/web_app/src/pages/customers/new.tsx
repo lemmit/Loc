@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { useNavigate, Link as RouterLink } from "react-router";
 import { CreateCustomerRequest, useCreateCustomer } from "../../api/customer";
+import { applyServerErrors } from "../../lib/apply-server-errors";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Anchor, Breadcrumbs, Button, Card, Group, NumberInput, Stack, Text, TextInput, Title } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -9,7 +10,7 @@ import { Controller, useForm } from "react-hook-form";
 export default function CustomerNew() {
   const navigate = useNavigate();
   const create = useCreateCustomer();
-  const { register, handleSubmit, control, formState: { errors } } = useForm<CreateCustomerRequest>({
+  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<CreateCustomerRequest>({
     resolver: zodResolver(CreateCustomerRequest),
     defaultValues: { username: "", email: "", age: 0 },
   });
@@ -28,7 +29,12 @@ export default function CustomerNew() {
                     notifications.show({ color: "green", message: "Customer created" });
                     navigate(`/customers/${out.id}`);
                   } catch (e) {
-                    notifications.show({ color: "red", message: (e as Error).message });
+                    const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+                    if (outcome.kind === "global") {
+                      notifications.show({ color: "red", message: outcome.title });
+                    } else if (outcome.kind === "unhandled") {
+                      notifications.show({ color: "red", message: (e as Error).message });
+                    }
                   }
                 })} data-testid="customers-new">
           <Stack gap="md">

@@ -22,7 +22,12 @@ function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{
                 toast({ status: "success", description: "{{humanOp}} succeeded" });
                 onClose();
               } catch (e) {
-                toast({ status: "error", description: (e as Error).message });
+                const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+                if (outcome.kind === "global") {
+                  toast({ status: "error", description: outcome.title });
+                } else if (outcome.kind === "unhandled") {
+                  toast({ status: "error", description: (e as Error).message });
+                }
               }
             })}
           >

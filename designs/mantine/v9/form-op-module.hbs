@@ -20,7 +20,12 @@ function {{opPascal}}Form({ mut, onClose }: { mut: ReturnType<typeof use{{opPasc
           notifications.show({ color: "green", message: "{{humanOp}} succeeded" });
           onClose();
         } catch (e) {
-          notifications.show({ color: "red", message: (e as Error).message });
+          const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+          if (outcome.kind === "global") {
+            notifications.show({ color: "red", message: outcome.title });
+          } else if (outcome.kind === "unhandled") {
+            notifications.show({ color: "red", message: (e as Error).message });
+          }
         }
       })}
     >

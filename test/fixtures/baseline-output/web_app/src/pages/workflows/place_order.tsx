@@ -2,6 +2,7 @@
 import { useNavigate, Link as RouterLink } from "react-router";
 import { useAllProducts } from "../../api/product";
 import { PlaceOrderRequest, usePlaceOrderWorkflow } from "../../api/workflows";
+import { applyServerErrors } from "../../lib/apply-server-errors";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Anchor, Breadcrumbs, Button, Card, Group, NumberInput, Select, Stack, Text, TextInput, Title } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -11,7 +12,7 @@ export default function PlaceOrderWorkflow() {
   const navigate = useNavigate();
   const run = usePlaceOrderWorkflow();
   const __products = useAllProducts();
-  const { register, handleSubmit, control, formState: { errors } } = useForm<PlaceOrderRequest>({
+  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<PlaceOrderRequest>({
     resolver: zodResolver(PlaceOrderRequest),
     defaultValues: { customerId: "", productId: "", quantity: 0 },
   });
@@ -30,7 +31,12 @@ export default function PlaceOrderWorkflow() {
                     notifications.show({ color: "green", message: "Place Order completed" });
                     navigate("/workflows");
                   } catch (e) {
-                    notifications.show({ color: "red", message: (e as Error).message });
+                    const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+                    if (outcome.kind === "global") {
+                      notifications.show({ color: "red", message: outcome.title });
+                    } else if (outcome.kind === "unhandled") {
+                      notifications.show({ color: "red", message: (e as Error).message });
+                    }
                   }
                 })} data-testid="workflow-place_order">
           <Stack gap="md">

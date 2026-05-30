@@ -479,6 +479,12 @@
         "named": [
           "toaster"
         ]
+      },
+      {
+        "from": "../lib/apply-server-errors",
+        "named": [
+          "applyServerErrors"
+        ]
       }
     ],
     "form-default-onsubmit": [
@@ -486,6 +492,12 @@
         "from": "../lib/toaster",
         "named": [
           "toaster"
+        ]
+      },
+      {
+        "from": "../lib/apply-server-errors",
+        "named": [
+          "applyServerErrors"
         ]
       }
     ],
