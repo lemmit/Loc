@@ -14,6 +14,7 @@ export {
 } from "./deployable.js";
 export { checkMacroExpansion } from "./macros.js";
 export { checkMatchExpressions, checkMatcherArity, checkMatchesCalls } from "./match.js";
+export { checkPayloads } from "./payload.js";
 export {
   checkAssignOrCall,
   checkCallStmt,

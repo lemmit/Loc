@@ -197,6 +197,7 @@ function emitProjectFromContexts(
     enums: contexts.flatMap((c) => c.enums),
     valueObjects: contexts.flatMap((c) => c.valueObjects),
     events: contexts.flatMap((c) => c.events),
+    payloads: contexts.flatMap((c) => c.payloads),
     aggregates: contexts.flatMap((c) => c.aggregates),
     repositories: contexts.flatMap((c) => c.repositories),
     workflows: contexts.flatMap((c) => c.workflows),

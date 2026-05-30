@@ -459,6 +459,27 @@ export interface EventIR {
   fields: FieldIR[];
 }
 
+/** The payload-family discriminator (payload-transport-layer.md, P1).
+ *  `payload` is the umbrella; `event` / `command` / `query` / `response`
+ *  / `error` are sugar subtypes carrying the same structural-record wire
+ *  contract.  `event` is the only one that also has its own legacy
+ *  declaration surface (`EventDecl`) — it is projected into the unified
+ *  `payloads` view at lowering time; the rest parse via `PayloadDecl`. */
+export type PayloadKind = "payload" | "event" | "command" | "query" | "response" | "error";
+
+/** A structured-data carrier crossing a boundary (payload-transport-layer.md,
+ *  P1).  Structurally typed record of fields.  Generics / unions are
+ *  deferred to P3 / P4; this P1+P2 shape is a flat record only. */
+export interface PayloadIR {
+  name: string;
+  kind: PayloadKind;
+  fields: FieldIR[];
+  /** True for compiler-synthesized payloads (P2's per-aggregate
+   *  `<Agg>Wire`), false/absent for author-declared ones.  Lets later
+   *  phases and the validator distinguish derived shapes from source. */
+  synthesized?: boolean;
+}
+
 export interface FindIR {
   name: string;
   params: ParamIR[];
@@ -478,6 +499,12 @@ export interface BoundedContextIR {
   enums: EnumIR[];
   valueObjects: ValueObjectIR[];
   events: EventIR[];
+  /** Unified payload-family view (payload-transport-layer.md, P1+P2):
+   *  author-declared `PayloadDecl`s (payload/command/query/response/error),
+   *  the context's `event`s projected in with `kind: "event"`, and the
+   *  P2 synthesized per-aggregate `<Agg>Wire` payloads.  `events` stays
+   *  populated independently so existing event emission is untouched. */
+  payloads: PayloadIR[];
   aggregates: AggregateIR[];
   repositories: RepositoryIR[];
   workflows: WorkflowIR[];

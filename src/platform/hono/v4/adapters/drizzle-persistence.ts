@@ -179,6 +179,7 @@ export function emitDrizzleSchema(
     enums: ctx.contexts.flatMap((c) => c.enums),
     valueObjects: ctx.contexts.flatMap((c) => c.valueObjects),
     events: ctx.contexts.flatMap((c) => c.events),
+    payloads: ctx.contexts.flatMap((c) => c.payloads),
     aggregates: ctx.contexts.flatMap((c) => c.aggregates),
     repositories: ctx.contexts.flatMap((c) => c.repositories),
     workflows: ctx.contexts.flatMap((c) => c.workflows),
