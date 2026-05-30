@@ -5,6 +5,7 @@ import { FilesPane } from "./FilesPane";
 import { PreviewPane } from "./PreviewPane";
 import { BackendBody, BackendHeader } from "./BackendPanel";
 import { TestsBody } from "./TestsPanel";
+import { HistoryBody } from "./HistoryPanel";
 import { OutputPanel, outputAggregateDot } from "./OutputPanel";
 import type { LayoutCtx, MobileCodeView, MobileTab } from "./ctx";
 
@@ -20,7 +21,14 @@ interface Props {
   ctx: LayoutCtx;
 }
 
-const TAB_VALUES: readonly MobileTab[] = ["code", "preview", "output", "backend", "tests"] as const;
+const TAB_VALUES: readonly MobileTab[] = [
+  "code",
+  "preview",
+  "output",
+  "backend",
+  "tests",
+  "history",
+] as const;
 
 function isMobileTab(v: string | null): v is MobileTab {
   return v !== null && (TAB_VALUES as readonly string[]).includes(v);
@@ -146,6 +154,9 @@ export function MobileShell({ ctx }: Props): JSX.Element {
       <Tabs.Panel value="tests">
         <TestsBody ctx={ctx} active={activeTab === "tests"} />
       </Tabs.Panel>
+      <Tabs.Panel value="history">
+        <HistoryBody ctx={ctx} active={activeTab === "history"} />
+      </Tabs.Panel>
       <Tabs.List grow>
         <Tabs.Tab value="code" data-testid="mobile-tab-code">Code</Tabs.Tab>
         <Tabs.Tab value="preview" data-testid="mobile-tab-preview">Preview</Tabs.Tab>
@@ -164,6 +175,7 @@ export function MobileShell({ ctx }: Props): JSX.Element {
         </Tabs.Tab>
         <Tabs.Tab value="backend" data-testid="mobile-tab-backend">Runtime</Tabs.Tab>
         <Tabs.Tab value="tests" data-testid="mobile-tab-tests">Tests</Tabs.Tab>
+        <Tabs.Tab value="history" data-testid="mobile-tab-history">History</Tabs.Tab>
       </Tabs.List>
     </Tabs>
   );
