@@ -1422,9 +1422,10 @@ export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView
 export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingShape[]>> = {
   dotnet: ["relational", "embedded", "document"],
   hono: ["relational", "embedded", "document"],
-  // Phoenix/Ash emits relational today; embedded (Ash embedded
-  // resources) + document (single `:map`) are follow-ups.
-  phoenixLiveView: ["relational"],
+  // Phoenix/Ash emits relational + embedded (Ash embedded resources);
+  // `document` (a single opaque `:map` — non-idiomatic for Ash) is a
+  // future allowed-but-warned addition.
+  phoenixLiveView: ["relational", "embedded"],
 };
 
 export interface DeployableIR {

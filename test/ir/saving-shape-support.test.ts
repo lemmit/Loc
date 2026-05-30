@@ -47,17 +47,15 @@ describe("saving-shape capability validation", () => {
     expect(await shapeErrors(sys("hono", "embedded"))).toEqual([]);
   });
 
-  it("rejects shape(document) on a phoenixLiveView deployable (relational-only today)", async () => {
+  it("rejects shape(document) on a phoenixLiveView deployable (no Ash document emitter)", async () => {
     const errs = await shapeErrors(sys("phoenixLiveView", "document"));
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("shape(document)");
     expect(errs[0]).toContain("Cart");
   });
 
-  it("rejects shape(embedded) on a phoenixLiveView deployable", async () => {
-    const errs = await shapeErrors(sys("phoenixLiveView", "embedded"));
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("shape(embedded)");
+  it("accepts shape(embedded) on a phoenixLiveView deployable (Ash embedded resources)", async () => {
+    expect(await shapeErrors(sys("phoenixLiveView", "embedded"))).toEqual([]);
   });
 
   it("accepts the default (relational) shape on every backend, incl. Phoenix", async () => {
