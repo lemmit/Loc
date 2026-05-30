@@ -303,4 +303,35 @@ system Sys {
     `);
     expect(codes(errors)).toContain("loom.polymorphic-id-ref-unsupported");
   });
+
+  // The abstract-base exclusion lives in the shared system orchestrator
+  // (collectContextsFor), upstream of every platform's emitProject — so
+  // ownTable/TPC is complete cross-backend, not just for Hono. A concrete
+  // `extends` subtype is a normal aggregate carrying the merged base fields,
+  // and the abstract base emits nothing on any backend.
+  for (const [platform, port] of [
+    ["dotnet", 5000],
+    ["phoenixLiveView", 4000],
+  ] as const) {
+    it(`drops the abstract base on the ${platform} backend (concretes still emit)`, async () => {
+      const model = await parseValid(`
+system Sys {
+  subdomain Parties {
+    context Parties {
+      abstract aggregate Party inheritanceUsing(ownTable) { name: string email: string }
+      aggregate Customer extends Party inheritanceUsing(ownTable) { creditLimit: decimal }
+    }
+  }
+  storage primary { type: postgres }
+  resource partiesState { for: Parties, kind: state, use: primary }
+  deployable api { platform: ${platform} contexts: [Parties] dataSources: [partiesState] port: ${port} }
+}`);
+      const { files } = generateSystems(model);
+      const paths = [...files.keys()];
+      // Concrete subtype emits its files; the abstract base emits none of
+      // its own (no file named for `Party` that isn't a `Customer` file).
+      expect(paths.some((p) => /customer/i.test(p))).toBe(true);
+      expect(paths.some((p) => /\bparty\b/i.test(p) && !/customer/i.test(p))).toBe(false);
+    });
+  }
 });
