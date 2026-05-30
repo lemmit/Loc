@@ -23,6 +23,7 @@ import {
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { useWorkspaceSources } from "./workspace/use-workspace-sources";
+import { applyGeneratedTree, readGeneratedTree } from "./workspace/git";
 import {
   buildShareUrl,
   readHash,
@@ -183,7 +184,7 @@ export default function App(): JSX.Element {
   // yet), so the VFS / generate / write call sites get the exact
   // same path string they did before.  Phase 2b2 adds the Files
   // panel that flips the active path.
-  const sources = useWorkspaceSources(workspace.vfs);
+  const sources = useWorkspaceSources(workspace.store);
   const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
   const [buildClientReady, setBuildClientReady] = useState(false);
@@ -340,8 +341,32 @@ export default function App(): JSX.Element {
     lspClientRef.current = new LoomLspClient();
   }
 
-  const workspaceForSeedRef = useRef(workspace);
-  workspaceForSeedRef.current = workspace;
+  // Resident `VfsEntry[]` projection of `/workspace`, kept fresh from
+  // the async git store.  The build-worker seed callback is sync (it
+  // fires on worker spawn/respawn over `postMessage`), so it reads this
+  // precomputed snapshot rather than awaiting git — the RPC boundary
+  // collapses the async store into a sync payload.  This is a derived
+  // projection, not a second source of truth.
+  const seedEntriesRef = useRef<VfsEntry[]>([]);
+  useEffect(() => {
+    const store = workspace.store;
+    if (!store) {
+      seedEntriesRef.current = [];
+      return;
+    }
+    let cancelled = false;
+    const refresh = (): void => {
+      void store.snapshotEntries("/workspace").then((entries) => {
+        if (!cancelled) seedEntriesRef.current = entries;
+      });
+    };
+    refresh();
+    const unsubscribe = store.subscribe("/workspace", refresh);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [workspace.store]);
 
   // Push every workspace `.ddd` source into the LSP worker as a Monaco
   // model. Without this, only the currently-edited file reaches the LSP via
@@ -360,21 +385,10 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     const build = new LoomBuildClient({
-      seedWorkspace: () => {
-        const vfs = workspaceForSeedRef.current.vfs;
-        if (!vfs) return [];
-        // Snapshot the workspace as tagged entries so directory
-        // entries (created via `mkdir`, empty by design) survive
-        // the worker respawn — the previous `list().flatMap(read)`
-        // shape silently dropped them by filtering out
-        // `read() === undefined`.
-        const out = [];
-        for (const [path, entry] of vfs.snapshot()) {
-          if (!path.startsWith("/workspace/")) continue;
-          out.push(entry);
-        }
-        return out;
-      },
+      // Sync seed: replay the resident `/workspace` projection into the
+      // freshly-spawned worker.  Tagged entries preserve empty dir
+      // entries (created via `mkdir`) across a respawn.
+      seedWorkspace: () => seedEntriesRef.current,
     });
     // The runtime engine encapsulates the bundle + runtime workers
     // behind the RuntimeEngine seam.  `onLost` maps 1:1 to the old
@@ -462,21 +476,27 @@ export default function App(): JSX.Element {
   // both the IDB-backed workspace VFS and the build client are ready.
   useEffect(() => {
     if (!workspace.loaded || !buildClientReady) return;
-    const vfs = workspace.vfs;
+    const store = workspace.store;
     const client = buildClientRef.current;
-    if (!vfs || !client) return;
-    const designPaths = vfs.list("/workspace/design/");
-    if (designPaths.length === 0) return;
-    // Use tagged VfsEntry shape — `list` is files-only so every
-    // path here is a file, but the wire protocol expects the
-    // discriminated union.
-    const entries: VfsEntry[] = [];
-    for (const path of designPaths) {
-      const content = vfs.read(path);
-      if (content != null) entries.push({ kind: "file", path, content });
-    }
-    void client.vfsWrite(entries);
-  }, [workspace.loaded, workspace.vfs, buildClientReady]);
+    if (!store || !client) return;
+    let cancelled = false;
+    void (async () => {
+      const designPaths = await store.list("/workspace/design/");
+      if (designPaths.length === 0 || cancelled) return;
+      // Use tagged VfsEntry shape — `list` is files-only so every
+      // path here is a file, but the wire protocol expects the
+      // discriminated union.
+      const entries: VfsEntry[] = [];
+      for (const path of designPaths) {
+        const content = await store.readFile(path);
+        if (content != null) entries.push({ kind: "file", path, content });
+      }
+      if (!cancelled && entries.length > 0) await client.vfsWrite(entries);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace.loaded, workspace.store, buildClientReady]);
 
   // Sync `sourceRef` whenever the active file's initial content
   // changes — happens both on example switch AND on multi-file tab
@@ -761,20 +781,57 @@ export default function App(): JSX.Element {
   // / Boot buttons still call these.  Live-mode cascade is now driven
   // from inside `runGenerate` by passing the fresh result to the next
   // step explicitly (no ref ping-pong).
-  async function runGenerate(): Promise<void> {
+  // Version generated output into the git-backed workspace as a per-file
+  // 3-way merge ("scaffold then own").  Only the *intentional* generate
+  // paths (the Generate / Run buttons) persist — the 5s auto-generate
+  // keeps the in-memory preview behaviour so typing doesn't spawn commits
+  // or churn the workspace tree.  Best-effort: a failure here never
+  // breaks the generate itself.
+  // Version the generated tree and return the merged result as the file
+  // set to bundle — so the preview reflects hand edits to generated code
+  // ("scaffold then own").  Returns null (→ caller bundles the in-memory
+  // output) when there's no store, nothing generated, or the merged read
+  // came back empty.  Best-effort: a failure never breaks generate.
+  async function persistGeneratedTree(
+    result: GenerateResult | null,
+  ): Promise<VirtualFile[] | null> {
+    const store = workspace.store;
+    if (!store || !result?.ok || result.files.length === 0) return null;
+    try {
+      await applyGeneratedTree(store, result.files);
+      const merged = await readGeneratedTree(store);
+      if (merged.length === 0) return null;
+      return merged.map((f) => ({
+        path: f.path,
+        content: f.content,
+        size: f.content.length,
+      }));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("failed to version generated output:", err);
+      return null;
+    }
+  }
+
+  async function runGenerate(persist = false): Promise<void> {
     const result = await runGenerateStep();
+    let bundleGen: GenerateResult | null = result;
+    if (persist && result?.ok) {
+      const merged = await persistGeneratedTree(result);
+      if (merged) bundleGen = { ...result, files: merged };
+    }
     if (
       liveModeRef.current &&
-      result?.ok &&
-      result.files.length > 0
+      bundleGen?.ok &&
+      bundleGen.files.length > 0
     ) {
-      const bundleRes = await runBundleStep(result);
+      const bundleRes = await runBundleStep(bundleGen);
       if (bundleRes?.hono.ok) {
         await runBootStep(bundleRes.hono);
       }
     }
   }
-  runGenerateRef.current = runGenerate;
+  runGenerateRef.current = () => runGenerate();
 
   async function runBundle(): Promise<void> {
     if (!generateSuccess) return;
@@ -806,7 +863,12 @@ export default function App(): JSX.Element {
   async function runFull(): Promise<void> {
     const gen = await runGenerateStep();
     if (!gen?.ok || gen.files.length === 0) return;
-    const bundleRes = await runBundleStep(gen);
+    // Intentional run → version the output and bundle the merged tree
+    // (reflects hand edits to generated code).
+    let bundleGen: GenerateOk = gen;
+    const merged = await persistGeneratedTree(gen);
+    if (merged) bundleGen = { ...gen, files: merged };
+    const bundleRes = await runBundleStep(bundleGen);
     if (!bundleRes?.hono.ok) return;
     const booted = await runBootStep(bundleRes.hono);
     if (!booted) return;
@@ -1040,7 +1102,7 @@ export default function App(): JSX.Element {
     clearAppLog,
     copied,
     copyShareLink,
-    runGenerate: () => void runGenerate(),
+    runGenerate: () => void runGenerate(true),
     runBundle: () => void runBundle(),
     runBoot: () => void runBoot(),
     runResetData: () => void runResetData(),
