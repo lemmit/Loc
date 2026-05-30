@@ -195,10 +195,10 @@ describe("aggregate inheritance — validator (I1)", () => {
     expect(codes(errors)).not.toContain("loom.tph-own-override-unsupported");
   });
 
-  it("rejects a 'contains' part on a TPH (sharedTable) concrete (loom.tph-contains-unsupported)", async () => {
-    // A contained part needs a join table keyed on the parent, but a TPH
-    // concrete shares the base table and the join table isn't emitted — the
-    // generated repository wouldn't compile. Gate it, naming the part.
+  it("allows a 'contains' part on a TPH (sharedTable) concrete (Pattern 4)", async () => {
+    // A TPH concrete's contained part gets its own table FK'd to the SHARED
+    // base table — the concrete's id IS the shared-table row id, so the
+    // repository's parentId-keyed load/save works unchanged.
     const { errors } = await parse(`
       context T {
         abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
@@ -209,8 +209,7 @@ describe("aggregate inheritance — validator (I1)", () => {
         }
       }
     `);
-    expect(codes(errors)).toContain("loom.tph-contains-unsupported");
-    expect(errors.some((e) => /addresses/.test(e.message ?? ""))).toBe(true);
+    expect(codes(errors)).not.toContain("loom.tph-contains-unsupported");
   });
 
   it("allows a 'contains' part on an ownTable (TPC) concrete (it has its own table)", async () => {
@@ -555,5 +554,40 @@ system Sys {
     `);
     expect(codes(errors)).not.toContain("loom.polymorphic-id-ref-mixed-strategy");
     expect(codes(errors)).not.toContain("loom.polymorphic-id-ref-unsupported");
+  });
+
+  it("emits a contained part on a TPH concrete as a table FK'd to the SHARED base (Pattern 4)", async () => {
+    const SRC = `
+system Sys {
+  subdomain Parties {
+    context Parties {
+      abstract aggregate Party inheritanceUsing(sharedTable) { name: string email: string }
+      aggregate Customer extends Party {
+        creditLimit: decimal
+        contains addresses: Address[]
+        entity Address { street: string city: string }
+      }
+      aggregate Supplier extends Party { taxId: string }
+    }
+  }
+  storage primary { type: postgres }
+  resource partiesState { for: Parties, kind: state, use: primary }
+  deployable api { platform: hono contexts: [Parties] dataSources: [partiesState] port: 3000 }
+}`;
+    const { files } = generateSystems(await parseValid(SRC));
+    const schema = files.get("api/db/schema.ts") ?? "";
+    // The part gets its own table…
+    expect(schema).toMatch(/\.table\("addresses"/);
+    // …whose parent FK targets the SHARED base table (`party_id`), NOT a
+    // non-existent `customer_id`.
+    expect(schema).toMatch(/parentId: text\("party_id"\)/);
+    expect(schema).not.toMatch(/text\("customer_id"\)/);
+    // The repo loads/saves the part keyed on parentId (= the shared row id).
+    const repo = files.get("api/db/repositories/customer-repository.ts") ?? "";
+    expect(repo).toMatch(/from\(schema\.addresses\).+parentId/s);
+    // The migration FKs `addresses` to the shared `parties` table.
+    const sql = [...files.entries()].find(([p]) => /db\/migrations\/.*\.sql$/.test(p))?.[1] ?? "";
+    expect(sql).toMatch(/CREATE TABLE addresses/);
+    expect(sql).toMatch(/FOREIGN KEY \(party_id\) REFERENCES parties/);
   });
 });

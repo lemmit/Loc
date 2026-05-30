@@ -2,6 +2,7 @@ import {
   isTphBase,
   isTphConcrete,
   ownFieldsOf,
+  tableOwnerName,
   tphConcretesOf,
 } from "../generator/typescript/tph.js";
 import type {
@@ -72,7 +73,17 @@ export function schemaFromModule(
     // (emits no table); the base emits the shared table (base columns + every
     // concrete's own columns made nullable + the `kind` discriminator) so the
     // runtime DDL matches the Drizzle schema (emit/schema.ts `emitTphTable`).
-    if (isTphConcrete(agg, pool)) continue;
+    if (isTphConcrete(agg, pool)) {
+      // A TPH concrete emits no table of its own, but its contained parts
+      // still need their tables — FK'd to the SHARED base table (Pattern 4),
+      // mirroring emit/schema.ts.  `tableOwnerName` resolves the concrete to
+      // its base; the part's `parentId` holds the shared-table row id.
+      const owner = tableOwnerName(agg, pool);
+      for (const part of agg.parts) {
+        tables.push(tableForPart(part, agg, module.name, owner));
+      }
+      continue;
+    }
     if (isTphBase(agg, pool)) {
       tables.push(tphTableForAggregate(agg, pool, module.name));
       continue;
@@ -421,10 +432,19 @@ function tphTableForAggregate(
   return { name: tableName, ownerModule, columns, primaryKey: ["id"], foreignKeys, indexes };
 }
 
-function tableForPart(part: EntityPartIR, parent: AggregateIR, ownerModule: string): TableShape {
+function tableForPart(
+  part: EntityPartIR,
+  parent: AggregateIR,
+  ownerModule: string,
+  // The aggregate that physically owns the parent table.  For a plain
+  // aggregate this is `parent.name`; for a TPH concrete it's the shared base
+  // table (the concrete has no table of its own), so the part's FK targets the
+  // base.  Defaults to `parent.name` so non-inheritance output is unchanged.
+  ownerName: string = parent.name,
+): TableShape {
   const tableName = plural(snake(part.name));
-  const parentTable = plural(snake(parent.name));
-  const parentFk = `${snake(parent.name)}_id`;
+  const parentTable = plural(snake(ownerName));
+  const parentFk = `${snake(ownerName)}_id`;
   const columns: ColumnShape[] = [
     { name: "id", type: idColumnType(parent.idValueType), nullable: false },
     { name: parentFk, type: idColumnType(parent.idValueType), nullable: false },
