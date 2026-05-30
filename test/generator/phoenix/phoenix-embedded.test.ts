@@ -69,7 +69,11 @@ describe("Phoenix shape(embedded) — Ash embedded resources", () => {
     expect(line).not.toContain("order_id");
     expect(line).not.toContain("domain: ");
     // Embedded part must NOT appear in the domain module's resources block.
-    const domain = find(files, (k) => k.endsWith("/orders.ex") && !k.includes("/orders/"), "domain");
+    const domain = find(
+      files,
+      (k) => k.endsWith("/orders.ex") && !k.includes("/orders/"),
+      "domain",
+    );
     expect(domain).toContain(".Orders.Order do");
     expect(domain).not.toContain(".Orders.Line");
   });
