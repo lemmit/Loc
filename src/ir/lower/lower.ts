@@ -7,6 +7,7 @@ import {
 import type {
   Aggregate,
   Api,
+  Apply,
   BoundedContext,
   Component,
   ConfigEntry,
@@ -52,6 +53,7 @@ import type {
 } from "../../language/generated/ast.js";
 import {
   isAggregate,
+  isApply,
   isAssignOrCallStmt,
   isBoundedContext,
   isComponent,
@@ -99,6 +101,7 @@ import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
   ApiIR,
+  ApplyIR,
   BoundedContextIR,
   CodeRefIR,
   CodeRefKind,
@@ -1365,6 +1368,7 @@ function lowerAggregate(
   const destroys = (agg.members.filter(isDestroy) as Destroy[]).map((d) => lowerDestroy(d, inner));
   const canonicalCreate = creates.find((c) => c.canonical) ?? null;
   const canonicalDestroy = destroys.find((d) => d.canonical) ?? null;
+  const appliers = (agg.members.filter(isApply) as Apply[]).map((a) => lowerApply(a, inner));
   const tests: TestIR[] = [];
   for (const m of agg.members) {
     if (isTestBlock(m)) tests.push(lowerTest(m, inner));
@@ -1399,7 +1403,31 @@ function lowerAggregate(
     implementsCapabilities: implementsCaps.length > 0 ? implementsCaps : undefined,
     persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,
     savingShape: (agg.shape as import("../types/loom-ir.js").SavingShape | undefined) ?? undefined,
+    appliers: appliers.length > 0 ? appliers : undefined,
   };
+}
+
+// Applier lowering — `apply(e: Event) { … }` folds one event type into
+// aggregate state.  The event param binds as a `refKind: "param"` local
+// over the aggregate env (so `this.x := e.y` resolves `this` against the
+// aggregate and `e` against the bound param).  The param's type carries
+// the event name as an entity-shaped marker — member access on it
+// (`e.field`) is not yet field-resolved (events aren't in the entity
+// registry); that fidelity lands with applier emission (Phase A2).  The
+// body's purity (assignments / derivations only; no `emit`, no
+// side-effecting calls) is enforced by the phase-⑦ discipline validator,
+// not here — lowering preserves source fidelity.
+function lowerApply(a: Apply, env: Env): ApplyIR {
+  const eventName = a.event.ref?.name ?? a.event.$refText;
+  const inner = withLocal(env, a.param, "param", { kind: "entity", name: eventName });
+  const statements: StmtIR[] = [];
+  let bodyEnv = inner;
+  for (const s of a.body) {
+    const result = lowerStatement(s, bodyEnv);
+    statements.push(result.stmt);
+    bodyEnv = result.envAfter;
+  }
+  return { event: eventName, param: a.param, statements };
 }
 
 // ---------------------------------------------------------------------------

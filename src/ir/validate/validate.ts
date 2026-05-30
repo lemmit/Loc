@@ -17,6 +17,7 @@ import type {
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
+  StmtIR,
   SubdomainIR,
   SystemIR,
   TestE2EIR,
@@ -92,6 +93,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);
     validateExternOperations(c, diags);
+    validateEventSourcedDiscipline(c, diags);
     validateWorkflows(c, diags);
     validateViews(c, diags);
     validateCurrentUserScope(c, diags);
@@ -362,6 +364,145 @@ function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagnostic[]
             `The user-supplied handler owns mutation, emit, and any other logic — leave the .ddd body to the gates that run before it.`,
           source: `${ctx.name}/${agg.name}.${op.name}`,
         });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers Phase A1).
+//
+// `persistedAs(eventLog)` makes an aggregate event-sourced: its truth is
+// the event stream, and state is a fold of that stream.  That imposes a
+// body contract distinct from a state-based aggregate:
+//
+//   1. Appliers (`apply(e: E) { … }`) are only meaningful on an
+//      event-sourced aggregate.  On a state-based one they have nothing
+//      to fold — flag them.
+//   2. Command bodies (`operation` / `create` / `destroy`) decide and
+//      `emit`; they must not mutate `this` directly.  The state
+//      transition is the applier's job — a command that assigns to
+//      `this.x` would bypass the stream and desync the fold.
+//   3. Every event a command emits needs a matching applier, or the
+//      fold silently drops that transition.
+//   4. Applier bodies are pure folds: assignments / collection mutations
+//      and `let` bindings only.  No `emit` (an applier reacts to an
+//      event, it doesn't raise one), and no side-effecting calls (the
+//      fold must be deterministic and replayable).
+//   5. At most one applier per event type — two folds for one event are
+//      ambiguous.
+//
+// Emission of the event store / fold / projection layer is the deferred
+// Phase A2; this validator establishes the contract the surface promises
+// so authors get the discipline checked before any code is generated.
+// ---------------------------------------------------------------------------
+
+function validateEventSourcedDiscipline(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  for (const agg of ctx.aggregates) {
+    const isEventSourced = agg.persistedAs === "eventLog";
+    const appliers = agg.appliers ?? [];
+
+    // Rule 1 — appliers require an event-sourced aggregate.
+    if (!isEventSourced && appliers.length > 0) {
+      diags.push({
+        severity: "error",
+        message:
+          `aggregate '${agg.name}' declares apply(...) but is not event-sourced. ` +
+          `Appliers fold events into state; they only apply to a 'persistedAs(eventLog)' aggregate. ` +
+          `Add 'persistedAs(eventLog)' to the aggregate header, or remove the applier.`,
+        source: `${ctx.name}/${agg.name}`,
+      });
+    }
+
+    if (!isEventSourced) continue;
+
+    // Rule 5 — one applier per event type.
+    const appliersByEvent = new Map<string, number>();
+    for (const ap of appliers) {
+      appliersByEvent.set(ap.event, (appliersByEvent.get(ap.event) ?? 0) + 1);
+    }
+    for (const [eventName, count] of appliersByEvent) {
+      if (count > 1) {
+        diags.push({
+          severity: "error",
+          message:
+            `aggregate '${agg.name}' declares ${count} appliers for event '${eventName}'. ` +
+            `An event folds into state exactly one way — declare a single apply(${eventName}).`,
+          source: `${ctx.name}/${agg.name}`,
+        });
+      }
+    }
+
+    // Rules 2 + 3 — command bodies emit-only; emitted events covered.
+    const appliedEvents = new Set(appliers.map((a) => a.event));
+    const commands: { label: string; statements: StmtIR[] }[] = [
+      ...agg.operations.map((op) => ({
+        label: `operation '${op.name}'`,
+        statements: op.statements,
+      })),
+      ...(agg.creates ?? []).map((c) => ({
+        label: `create '${c.name}'`,
+        statements: c.statements,
+      })),
+      ...(agg.destroys ?? []).map((d) => ({
+        label: `destroy '${d.name}'`,
+        statements: d.statements,
+      })),
+    ];
+    for (const cmd of commands) {
+      for (const stmt of cmd.statements) {
+        if (stmt.kind === "assign" || stmt.kind === "add" || stmt.kind === "remove") {
+          diags.push({
+            severity: "error",
+            message:
+              `aggregate '${agg.name}' ${cmd.label} mutates 'this' directly, but the aggregate is event-sourced. ` +
+              `Command bodies on a 'persistedAs(eventLog)' aggregate decide and 'emit'; the state change belongs in an apply(...) block. ` +
+              `Replace the assignment with an 'emit', and fold it in an applier.`,
+            source: `${ctx.name}/${agg.name}`,
+          });
+        }
+        if (stmt.kind === "emit" && !appliedEvents.has(stmt.eventName)) {
+          diags.push({
+            severity: "error",
+            message:
+              `aggregate '${agg.name}' ${cmd.label} emits '${stmt.eventName}' but no applier folds it. ` +
+              `Every emitted event needs a matching apply(${stmt.eventName}: ${stmt.eventName}) on the aggregate, ` +
+              `or the event is recorded but never reflected in state.`,
+            source: `${ctx.name}/${agg.name}`,
+          });
+        }
+      }
+    }
+
+    // Rule 4 — applier bodies are pure folds.
+    for (const ap of appliers) {
+      for (const stmt of ap.statements) {
+        if (stmt.kind === "emit") {
+          diags.push({
+            severity: "error",
+            message:
+              `aggregate '${agg.name}' apply(${ap.event}) emits an event. ` +
+              `An applier reacts to an event by folding it into state — it must not emit. ` +
+              `Move the 'emit' to the command body that decides it.`,
+            source: `${ctx.name}/${agg.name}`,
+          });
+        } else if (stmt.kind === "call") {
+          diags.push({
+            severity: "error",
+            message:
+              `aggregate '${agg.name}' apply(${ap.event}) calls '${stmt.name}'. ` +
+              `Applier bodies must be deterministic, replayable folds — assignments and 'let' only, no side-effecting calls.`,
+            source: `${ctx.name}/${agg.name}`,
+          });
+        } else if (stmt.kind === "precondition" || stmt.kind === "requires") {
+          diags.push({
+            severity: "error",
+            message:
+              `aggregate '${agg.name}' apply(${ap.event}) contains a '${stmt.kind}' statement. ` +
+              `Guards belong in the command that decides the event; by the time it is applied the decision is already made.`,
+            source: `${ctx.name}/${agg.name}`,
+          });
+        }
       }
     }
   }
