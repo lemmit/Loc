@@ -204,7 +204,98 @@ mirroring how `platform: "hono@v4"` desugars to family+version.
 framework's generator and a capability set* — never the host generator's serving
 code.
 
-## 6. Deferred: one page-set, two frameworks
+## 6. The Phoenix keystone — where this note and the Ecto note meet
+
+Phoenix is the test case that *validates* the whole decomposition, because
+`phoenixLiveView` is the most-fused keyword in the system: it froze **two** axes
+plus the host into a single point.
+
+| Axis | What varies | `phoenixLiveView` froze it to | Freed by |
+|---|---|---|---|
+| **Domain layer** | Ash vs Ecto | **Ash** | `elixir-ecto-and-api-only-backends.md` |
+| **Hosted UI framework** | LiveView vs React vs … | **LiveView** | **this note** |
+| **Host runtime** | who serves the assets | the Phoenix/BEAM runtime | (stays — it's the real identity) |
+
+Decomposed, "Phoenix" is **host `phoenix` × domain `(ash|ecto)` × hosted
+framework**. This note owns only the third axis; the domain axis is the Ecto
+note's and is not re-litigated here.
+
+### 6.1 Phoenix has the richest `hostableFrameworks` of any platform — *derived*, not special-cased
+
+The §2.3 rule — *a host can serve a `ui` iff it provides the runtime that
+framework requires* — explains exactly why Phoenix is unusual:
+
+```
+phoenix.hostableFrameworks = { liveview }  ∪  { react, angular, vue, … }
+                               └─ runtime ─┘     └──── static bundles ────┘
+                               only phoenix       any static-asset host
+```
+
+Phoenix is the **only** platform that is *both* a server-render runtime *and* a
+static-asset host — it already serves `priv/static` (`phoenix-live-view/index.ts`)
+and already sets `apiBasePath: "/api"` / `needsDb: true`
+(`phoenix-live-view.ts:28,38`). That dual nature is why it can host LiveView
+(which nothing else can) **and** embed React (which any static host can). The
+model *derives* Phoenix's uniqueness from one predicate instead of encoding it as
+a fullstack special case.
+
+### 6.2 `framework: liveview` on a `ui` is coherent, not a hack
+
+LiveView *is* the page DSL with a different render target. The heex-walker already
+lowers the same `List`/`Detail`/`Form`/`match` primitives to HEEx that the
+tsx-walker lowers to TSX (`heex-target.ts` vs `tsx-target.ts`). The `framework:`
+value just selects the event-wiring seam:
+
+- `framework: liveview` → events wire to **in-process domain calls** (no API hop).
+- `framework: react` → events wire to **`fetch('/api/…')`** against the host's
+  same-origin API.
+
+So putting `framework` on `ui` fits LiveView as naturally as it fits React — the
+distinction is a real, already-implemented target fork, not a new concept.
+
+### 6.3 The full Phoenix grid (what becomes expressible)
+
+```ddd
+# (Ash, liveview) — today's phoenixLiveView fullstack, respelled
+ui Admin { framework: liveview, design: ashPhoenix, page … }
+deployable App { platform: phoenix, hosts: Admin, serves: AdminApi }   # + domain axis: ash
+
+# (Ecto, liveview) — Ecto note deliverable #1, now expressible
+deployable App { platform: phoenix, hosts: Admin, serves: AdminApi }   # + domain axis: ecto
+
+# (Ash|Ecto, react EMBEDDED) — the dotnet-embeds-React parallel; today IMPOSSIBLE
+ui Web { framework: react, design: mantine }
+deployable App { platform: phoenix, hosts: Web, serves: WebApi }       # served from priv/static, same-origin /api
+
+# (Ash|Ecto, API-only) — Ecto note #2/#3: simply no `hosts:`
+deployable Api { platform: phoenix, serves: WebApi }
+```
+
+(The domain-axis surface — `ash`/`ecto` — is illustrative; its exact spelling is
+the Ecto note's call.)
+
+Mapping the matrix to status:
+
+| Phoenix shape | Status | Mechanism |
+|---|---|---|
+| Standalone React **targets** Phoenix | ✅ **shipped** (`da6fd4e`, this branch) | cross-origin `VITE_API_BASE_URL` → Phoenix `/api` |
+| Phoenix **API-only** (no UI) | ✅ expressible | absence of `hosts:` (Ecto note §2.1: `liveview-emit.ts:61` already emits it) |
+| Phoenix hosts **LiveView** (fullstack) | ✅ respelled | `ui { framework: liveview }` + `hosts:` |
+| Phoenix **embeds React** (same-origin) | 🆕 **unlocked here** | `react ∈ phoenix.hostableFrameworks`; bundle → `priv/static`, base `/api` — the `priv/static` twin of dotnet's `wwwroot` |
+
+The last row is the new capability, and it costs **nothing host-side**: Phoenix
+already serves `priv/static`, so the moment `react` is in its `hostableFrameworks`
+the embed works through the same seam dotnet uses for `wwwroot` (§5).
+
+### 6.4 Retire `phoenixLiveView` as a platform name
+
+The keyword names a frozen *pair*. Decomposed: the **platform is `phoenix`**, and
+**`liveview` is one value in its `hostableFrameworks`**, sitting next to `react`.
+A desugar shim (`phoenixLiveView` → `phoenix` host + the referenced `ui` gaining
+`framework: liveview`, domain axis `ash`) keeps existing sources parsing —
+mirroring the `platform: react` → vite-host shim in §4.
+
+## 7. Deferred: one page-set, two frameworks
 
 Putting framework on `ui` means a single `ui` block is one framework. The rare
 "same pages, shipped as both React and LiveView" case is **not blocked** — it's
@@ -221,7 +312,7 @@ This is why merging onto `ui` carries no real downside: the capability we'd
 theoretically lose has a clean home at the host edge, and the grammar already
 admits it.
 
-## 7. Open questions
+## 8. Open questions
 
 1. **Is Vite a host, or a build step every host shares? — answered by the code:
    both, in one container.** Today the standalone container runs `vite build`
@@ -243,12 +334,17 @@ admits it.
    backend; an embedded host `hosts:` but needs no `targets:` (same origin).
    Validator rule: `targets:` required iff host is standalone.
 
-## 8. Relationship to other proposals
+## 9. Relationship to other proposals
 
-- **`elixir-ecto-and-api-only-backends.md`** — "API-only = absence of a `ui`
-  mount" becomes, under this model, "a backend deployable with no `hosts:`." The
-  `apiBaseUrl`/CORS seam (`react/index.ts:48–52`) it flags is exactly the
-  standalone-vs-embedded fork §2.2 formalises.
+- **`elixir-ecto-and-api-only-backends.md`** — the **complementary axis** on the
+  same Phoenix keyword (see §6). That note frees Phoenix's *domain* layer (Ash vs
+  Ecto); this one frees its *hosted UI framework* (LiveView vs embedded React).
+  Together they fully decompose `phoenixLiveView` into `phoenix` × domain ×
+  framework. "API-only = absence of a `ui` mount" becomes "a backend deployable
+  with no `hosts:`," and the `apiBaseUrl`/CORS seam (`react/index.ts:48–52`) it
+  flags is exactly the standalone-vs-embedded fork §2.2 formalises. The two notes
+  are independently landable but should agree on the `phoenix` platform name and
+  the domain-axis spelling.
 - **`storage-and-platform-config*.md`** — those open the backend platform into
   composable axes (style/layout/persistence). This is the **frontend** twin:
   `platform: react` was a frozen bundle the same way `platform: dotnet`'s
