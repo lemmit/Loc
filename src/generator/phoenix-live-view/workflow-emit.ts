@@ -89,6 +89,25 @@ function renderWorkflow(
     { name: "workflow", valueExpr: JSON.stringify(wf.name) },
   ]);
 
+  // precondition / requires statements short-circuit with
+  // `throw({:error, …})`.  The controller calls `run/2` inside a
+  // `case`, which does NOT catch throws — an uncaught throw crashes the
+  // request (500) instead of yielding the `{:error, reason}` the
+  // controller maps to 403 / 400.  Wrap the body in `try/catch :throw`
+  // so a thrown `{:error, …}` becomes the function's return value.  Only
+  // emit the wrapper when a guard can actually throw, keeping
+  // guard-free workflows unchanged.
+  const hasGuards = wf.statements.some((s) => s.kind === "precondition" || s.kind === "requires");
+  const runBody = hasGuards
+    ? [
+        "    try do",
+        indentLines(body, "  "),
+        "    catch",
+        "      :throw, {:error, _} = err -> err",
+        "    end",
+      ].join("\n")
+    : body;
+
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc "Workflow: ${upperFirst(wf.name)}"
@@ -103,10 +122,20 @@ defmodule ${moduleName} do
   def run(${paramPattern}, current_user \\\\ nil) do
     _ = current_user
     ${startedCall}
-${body}
+${runBody}
   end
 end
 `;
+}
+
+/** Prefix every non-empty line of a multi-line block with `pad`.  Used
+ *  to re-indent a rendered workflow body when nesting it inside a
+ *  `try/catch` wrapper. */
+function indentLines(block: string, pad: string): string {
+  return block
+    .split("\n")
+    .map((l) => (l.length > 0 ? pad + l : l))
+    .join("\n");
 }
 
 // ---------------------------------------------------------------------------
