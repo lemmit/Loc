@@ -237,6 +237,11 @@ export function generateTypeScriptForContexts(
   // owns the aggregate.
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) {
+      // A TPH abstract base owns the shared table (emitted in db/schema.ts)
+      // but is never instantiated — no domain module, repository, routes, or
+      // tests.  Concrete subtypes carry all of that; their repository targets
+      // the shared table filtered by `kind` (see the repository builders).
+      if (agg.isAbstract) continue;
       const repo = findRepoFor(ctx, agg.name);
       out.set(
         `domain/${lowerFirst(agg.name)}.ts`,

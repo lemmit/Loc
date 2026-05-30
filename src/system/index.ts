@@ -238,18 +238,27 @@ function collectContextsFor(
 ): EnrichedBoundedContextIR[] {
   const want = new Set(d.contextNames);
   const out: EnrichedBoundedContextIR[] = [];
+  // An abstract base (aggregate-inheritance.md) is kept in the generation
+  // view only when it OWNS a physical table the platform must emit — i.e. a
+  // `sharedTable` (TPH) base on the Hono backend, the one backend that
+  // implements TPH (v1).  Otherwise it emits nothing of its own (no table /
+  // repository / routes) and is stripped here, a single chokepoint:
+  //   - `ownTable` (TPC) base, any backend → dropped; each concrete is a
+  //     standalone table carrying the merged base fields.
+  //   - `sharedTable` (TPH) base on a non-Hono backend → dropped; TPH is
+  //     gated as not-implemented there by IR-validate, so it never generates.
+  // Concretes always stay; the per-aggregate emit loop skips abstract bases
+  // for repo/routes regardless, so a kept TPH base only contributes its table.
+  const isHono = d.platform === "hono";
+  const keepsTable = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
+    !!a.isAbstract && isHono && (a.inheritanceUsing ?? "sharedTable") === "sharedTable";
+  const dropped = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
+    !!a.isAbstract && !keepsTable(a);
   for (const mod of modulesByName.values()) {
     for (const c of mod.contexts) {
       if (!want.has(c.name)) continue;
-      // Abstract bases (aggregate-inheritance.md) emit nothing of their own:
-      // no table, repository, or routes. Strip them from the generation view
-      // here — a single chokepoint that covers all four backends — so each
-      // platform sees only concrete aggregates. Concretes already carry the
-      // base's fields via the wireShape merge (enrichContext), so dropping the
-      // base loses no shape. (`ownTable`/TPC: each concrete is a standalone
-      // table. `sharedTable`/TPH is gated as not-implemented in IR-validate.)
-      const concrete = c.aggregates.filter((a) => !a.isAbstract);
-      out.push(concrete.length === c.aggregates.length ? c : { ...c, aggregates: concrete });
+      const kept = c.aggregates.filter((a) => !dropped(a));
+      out.push(kept.length === c.aggregates.length ? c : { ...c, aggregates: kept });
     }
   }
   return out;

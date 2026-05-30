@@ -335,3 +335,107 @@ system Sys {
     });
   }
 });
+
+describe("aggregate inheritance — sharedTable/TPH emission on Hono (I2)", () => {
+  const codes = (es: { code?: string | number }[]) =>
+    es.map((e) => e.code).filter((c): c is string => typeof c === "string");
+
+  const TPH = `
+system Sys {
+  subdomain Parties {
+    context Parties {
+      abstract aggregate Party inheritanceUsing(sharedTable) { name: string email: string }
+      aggregate Customer extends Party { creditLimit: decimal }
+      aggregate Supplier extends Party { taxId: string }
+    }
+  }
+  storage primary { type: postgres }
+  resource partiesState { for: Parties, kind: state, use: primary }
+  deployable api { platform: hono contexts: [Parties] dataSources: [partiesState] port: 3000 }
+}`;
+
+  it("does not gate a TPH hierarchy hosted by a Hono backend", async () => {
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(await parseValid(TPH))));
+    expect(diags.filter((d) => d.severity === "error" && /TPH/.test(d.message))).toEqual([]);
+  });
+
+  it("errors a TPH hierarchy hosted by a non-Hono backend (dotnet)", async () => {
+    const ON_DOTNET = TPH.replace("platform: hono", "platform: dotnet").replace(
+      "port: 3000",
+      "port: 5000",
+    );
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(await parseValid(ON_DOTNET))));
+    const errors = diags.filter(
+      (d) => d.severity === "error" && /Hono backend only/.test(d.message),
+    );
+    expect(errors.map((e) => e.source).sort()).toEqual([
+      "Parties/Customer",
+      "Parties/Party",
+      "Parties/Supplier",
+    ]);
+  });
+
+  it("emits ONE shared table with a `kind` discriminator + nullable concrete columns", async () => {
+    const { files } = generateSystems(await parseValid(TPH));
+    const schema = files.get("api/db/schema.ts") ?? "";
+    // One shared `parties` table; no per-concrete tables.
+    expect(schema).toMatch(/\.table\("parties"/);
+    expect(schema).not.toMatch(/\.table\("customers"/);
+    expect(schema).not.toMatch(/\.table\("suppliers"/);
+    // Discriminator + base columns not-null, concrete columns nullable.
+    expect(schema).toMatch(/kind: text\("kind"\)\.notNull\(\)/);
+    expect(schema).toMatch(/name: text\("name"\)\.notNull\(\)/);
+    expect(schema).toMatch(/creditLimit: numeric\("credit_limit"\),/); // no .notNull()
+    expect(schema).toMatch(/taxId: text\("tax_id"\),/); // no .notNull()
+  });
+
+  it("targets the shared table, filtering and stamping `kind`, in each concrete repo", async () => {
+    const { files } = generateSystems(await parseValid(TPH));
+    const repo = files.get("api/db/repositories/customer-repository.ts") ?? "";
+    // Reads/writes go to the shared `parties` table…
+    expect(repo).toMatch(/from\(schema\.parties\)/);
+    expect(repo).toMatch(/insert\(schema\.parties\)/);
+    // …filtered by this concrete's `kind` on reads…
+    expect(repo).toMatch(/eq\(schema\.parties\.kind, "Customer"\)/);
+    // …and stamped with `kind` on writes.
+    expect(repo).toMatch(/kind: "Customer"/);
+    // Nullable shared columns are asserted non-null on hydrate (kind filter
+    // guarantees presence) so the domain `_create` stays strictly typed.
+    expect(repo).toMatch(/Number\(root\.creditLimit!\)/);
+  });
+
+  it("mounts only concrete routers; the abstract base has no repo/routes/domain", async () => {
+    const { files } = generateSystems(await parseValid(TPH));
+    const paths = [...files.keys()];
+    expect(paths).toContain("api/http/customer.routes.ts");
+    expect(paths).toContain("api/http/supplier.routes.ts");
+    expect(paths.some((p) => /party\.routes|party-repository|domain\/party\b/i.test(p))).toBe(
+      false,
+    );
+    const idx = files.get("api/http/index.ts") ?? "";
+    expect(idx).toMatch(/app\.route\("\/customers"/);
+    expect(idx).not.toMatch(/app\.route\("\/parties"/);
+  });
+
+  it("emits a matching shared-table migration (no per-concrete tables)", async () => {
+    const { files } = generateSystems(await parseValid(TPH));
+    const sql = [...files.entries()].find(([p]) => /db\/migrations\/.*\.sql$/.test(p))?.[1] ?? "";
+    expect(sql).toMatch(/CREATE TABLE parties \(/);
+    expect(sql).toMatch(/kind TEXT NOT NULL/);
+    expect(sql).toMatch(/credit_limit DECIMAL NULL/);
+    expect(sql).toMatch(/tax_id TEXT NULL/);
+    expect(sql).not.toMatch(/CREATE TABLE customers/);
+    expect(sql).not.toMatch(/CREATE TABLE suppliers/);
+  });
+
+  it("still rejects a polymorphic 'Party id' ref under TPH (deferred in v1)", async () => {
+    const { errors } = await parse(`
+      context T {
+        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        aggregate Customer extends Party { creditLimit: decimal }
+        aggregate Order { buyer: Party id }
+      }
+    `);
+    expect(codes(errors)).toContain("loom.polymorphic-id-ref-unsupported");
+  });
+});

@@ -76,6 +76,9 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     // enum are easier to catch there since lowering loses that
     // information by design.
   }
+  // Which backend (needsDb) platforms host each context — drives the TPH
+  // storage gate (sharedTable is implemented for Hono only, v1).
+  const backendPlatformsByContext = backendPlatformsHostingEachContext(loom);
   // Per-context checks apply uniformly whether the context is
   // bundled in a system's modules or sits at the top level.
   for (const c of allContexts(loom)) {
@@ -87,7 +90,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateViews(c, diags);
     validateCurrentUserScope(c, diags);
     validatePermissionRefs(c, diags);
-    validateInheritanceStorage(c, diags);
+    validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
   validateExprIntegrity(loom, diags);
   return diags;
@@ -1107,24 +1110,47 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
 
 // Aggregate-inheritance storage gate (aggregate-inheritance.md, I2/I3).
 //
-// `ownTable` (TPC) emission is wired: the abstract base is dropped from the
-// generation view (system/index.ts `collectContextsFor`) and each concrete
-// emits as a standalone table carrying the merged base + own fields (the
-// `wireShape` merge in enrichContext). No discriminator, no shared base
-// table — so nothing extra is needed and we stay quiet.
+// `ownTable` (TPC) emission is wired on every backend: the abstract base is
+// dropped from the generation view (system/index.ts `collectContextsFor`) and
+// each concrete emits as a standalone table carrying the merged base + own
+// fields (the `wireShape` merge in enrichContext).
 //
-// `sharedTable` (TPH) is NOT implemented: it needs a `kind` discriminator
-// column, a tagged-union wire shape, polymorphic `Party id` foreign keys,
-// and a single-scan `find all Party`. Until that lands, gate it as an error
-// (not a warning) so a `sharedTable` hierarchy fails the build rather than
-// silently emitting per-concrete tables that drop the polymorphism the
-// author asked for. `sharedTable` is the omitted-modifier default, so an
-// inheritance hierarchy with no `inheritanceUsing(…)` trips this too — the
-// author must opt into `ownTable` explicitly while TPH is unimplemented.
+// `sharedTable` (TPH) is implemented for the Hono backend only (v1): the
+// hierarchy lives in one shared table named for the base, with a `kind`
+// discriminator and per-concrete columns made nullable; each concrete's repo
+// filters/stamps `kind`. So a TPH hierarchy is allowed iff its context is
+// hosted by a Hono backend deployable. Otherwise it's an error (not a
+// warning) — TPH on .NET/Phoenix isn't built, and a context with no Hono host
+// has no implemented emission target. `sharedTable` is the omitted-modifier
+// default, so an inheritance hierarchy with no `inheritanceUsing(…)` is TPH
+// too. Polymorphic `Party id` refs and `find all Party` remain deferred (the
+// language validator rejects the former); document / TPT shapes are later.
 const DEFAULT_INHERITANCE_LAYOUT = "sharedTable" as const;
 
-function validateInheritanceStorage(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+/** Map each context name to the set of backend (needsDb) platforms that host
+ *  it — a context is TPH-capable iff that set includes `hono`. */
+function backendPlatformsHostingEachContext(loom: EnrichedLoomModel): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const sys of loom.systems) {
+    for (const d of sys.deployables) {
+      if (!platformFor(d.platform).needsDb) continue;
+      for (const cn of d.contextNames) {
+        const set = out.get(cn) ?? new Set<string>();
+        set.add(d.platform);
+        out.set(cn, set);
+      }
+    }
+  }
+  return out;
+}
+
+function validateInheritanceStorage(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
   const byName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  const hostedByHono = backendPlatforms.has("hono");
   for (const agg of ctx.aggregates) {
     if (!agg.isAbstract && !agg.extendsAggregate) continue;
     // A concrete's layout defaults to its base's (resolved within the
@@ -1134,18 +1160,25 @@ function validateInheritanceStorage(ctx: BoundedContextIR, diags: LoomDiagnostic
     const base = agg.extendsAggregate ? byName.get(agg.extendsAggregate) : undefined;
     const effective = agg.inheritanceUsing ?? base?.inheritanceUsing ?? DEFAULT_INHERITANCE_LAYOUT;
     if (effective !== "sharedTable") continue;
+    // Implemented when a Hono backend hosts the context.
+    if (hostedByHono) continue;
     const role = agg.isAbstract ? "abstract base" : `extends ${agg.extendsAggregate}`;
     const how = agg.inheritanceUsing
       ? "inheritanceUsing(sharedTable)"
       : "the omitted-modifier default (sharedTable)";
+    const others = [...backendPlatforms].filter((p) => p !== "hono");
+    const hostNote =
+      others.length > 0
+        ? `it is hosted by ${others.join(", ")}, where TPH is not implemented`
+        : "no Hono backend deployable hosts this context";
     diags.push({
       severity: "error",
       message:
         `aggregate '${agg.name}' (${role}) resolves to sharedTable (TPH) inheritance via ` +
-        `${how}, but TPH storage emission is not implemented yet (it needs a discriminator ` +
-        `column, tagged-union wire shape, and polymorphic 'X id' keys). Declare ` +
-        `'inheritanceUsing(ownTable)' on the hierarchy to use the implemented per-concrete ` +
-        `(TPC) layout. Tracked in aggregate-inheritance.md I2/I3.`,
+        `${how}, but TPH storage emission is implemented for the Hono backend only — ` +
+        `${hostNote}. Host the context on a Hono deployable, or declare ` +
+        `'inheritanceUsing(ownTable)' to use the per-concrete (TPC) layout (all backends). ` +
+        `Tracked in aggregate-inheritance.md I2/I3.`,
       source: `${ctx.name}/${agg.name}`,
     });
   }
