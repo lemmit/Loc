@@ -1,5 +1,16 @@
 # Criterion everywhere — the selectability model
 
+> **Mechanism superseded by
+> [`reified-criteria.md`](./reified-criteria.md).** This doc's *inline*
+> approach (substitute the criterion body at each use-site; thread
+> `currentUser` per read site) is carried to its limit by PRs
+> #760 / #762 / #767, and #767 is where it cracks (one value, two
+> binding mechanisms in one repository). Reified criteria construct a
+> Specification object instead, making `currentUser` an ordinary
+> constructor argument. **This doc's *semantics* survive** — the
+> selectability model and use-site enforcement rules below are kept by
+> reification; only the inlining mechanism is replaced.
+
 > Status: **DRAFT / refinement.** Sharpens one under-specified corner of
 > [`docs/proposals/criterion.md`](./criterion.md) — the "queryable
 > subset" — into a concrete, per-operand **selectability** classification,
