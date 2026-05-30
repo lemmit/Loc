@@ -56,6 +56,17 @@
 > `loom.criterion-not-selectable`; (2) consume `contextFilters` in
 > Drizzle; (3) consume `contextFilters` in Phoenix/Ash. Delivered
 > Drizzle-first per the implementation decision.
+>
+> **Delivery status.** (1) shipped (PR #760). (2) shipped (PR #760):
+> non-principal capability filters AND into every Drizzle read site; a
+> latent `lowerToDrizzle` gap (bare boolean column → `eq(col, true)`) was
+> fixed in passing. (3) shipped: Phoenix emits an Ash `base_filter`
+> (Ash's HasQueryFilter analog) for non-principal capability filters. On
+> both Hono and Phoenix, principal-referencing filters (tenancy) and
+> non-relational shapes are deferred and rejected by the validator with
+> `loom.context-filter-unsupported` (a clear error, not silent wrong
+> behaviour); .NET supports both via `HasQueryFilter`. Remaining:
+> principal-threading (tenancy) on Hono/Phoenix.
 
 ## TL;DR
 
