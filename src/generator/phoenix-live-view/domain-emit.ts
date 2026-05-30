@@ -323,11 +323,20 @@ ${jasonImpl}`;
  *  excluded here (the IR validator rejects them on Phoenix), so what
  *  remains renders to a closed Ash expression.  Returns a line that
  *  splices after the `postgres do` block (leading newline so the module
- *  template stays readable when absent). */
+ *  template stays readable when absent).
+ *
+ *  Ash filter expressions reference the row's own attributes by BARE
+ *  name (`is_deleted`), and related attributes by relationship path
+ *  (`address.postal_code`) — there is no `record`/`self` receiver. The
+ *  shared `renderExpr` threads `thisName` as the receiver, so we render
+ *  with `record` and strip the leading `record.` from each reference
+ *  (`record.address.postal_code` → `address.postal_code`). */
 function renderBaseFilter(agg: AggregateIR, ctx: RenderCtx): string {
   const predicates = (agg.contextFilters ?? []).filter((p) => !exprUsesCurrentUser(p));
   if (predicates.length === 0) return "";
-  const rendered = predicates.map((p) => renderExpr(p, { ...ctx, thisName: "record" }));
+  const rendered = predicates.map((p) =>
+    renderExpr(p, { ...ctx, thisName: "record" }).replace(/\brecord\./g, ""),
+  );
   const body = rendered.length === 1 ? rendered[0]! : `and(${rendered.join(", ")})`;
   return `\n  base_filter expr(${body})\n`;
 }
