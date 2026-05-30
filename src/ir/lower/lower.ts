@@ -2185,6 +2185,7 @@ function lowerWorkflowStatement(
                 resourceKind,
                 verb,
                 capability: verbDef?.capability ?? "",
+                ...(verbDef?.interfaceOverride ? { interface: verbDef.interfaceOverride } : {}),
               },
             },
           },
