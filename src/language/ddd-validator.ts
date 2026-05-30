@@ -26,6 +26,7 @@ import {
   checkCriteria,
   checkDataSource,
   checkDeployable,
+  checkInheritance,
   checkLayout,
   checkLegacyConstructorCalls,
   checkMacroExpansion,
@@ -103,6 +104,12 @@ export class DddValidator {
     // Type-position references: bare aggregate name (must be `X id`),
     // and cross-aggregate entity-part name (must go through the root).
     checkTypeReferences(model, accept);
+    // Aggregate-inheritance surface (aggregate-inheritance.md, I1):
+    // `extends` may only target an `abstract` base; abstract bases have no
+    // repository and declare no lifecycle actions; `inheritanceUsing(…)` is
+    // only valid on a participant; and an event-sourced / document concrete
+    // of a `sharedTable` base is forced to `ownTable` (D-ES-TPH).
+    checkInheritance(model, accept);
     // Payload declarations (payload-transport-layer.md, P1): name
     // uniqueness within a context (and vs. value objects / events) and
     // distinct non-empty field names.

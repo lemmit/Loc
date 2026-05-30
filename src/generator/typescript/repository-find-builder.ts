@@ -27,9 +27,36 @@ import {
   associationsOf,
   isRefCollection,
 } from "./repository-associations-builder.js";
+import { discriminatorValue, isTphConcrete, tableOwnerName } from "./tph.js";
+
+/** The Drizzle table const a repository reads from for `agg` — the shared
+ *  TPH base table for a TPH concrete, otherwise the aggregate's own table. */
+function repoTableName(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string {
+  return lowerFirst(plural(tableOwnerName(agg, ctx.aggregates)));
+}
+
+/** A `kind` discriminator predicate scoping reads to this concrete's rows in
+ *  the shared TPH table, or null when `agg` is not a TPH concrete. */
+function kindPredicate(
+  agg: EnrichedAggregateIR,
+  ctx: BoundedContextIR,
+  tableName: string,
+): string | null {
+  const kind = discriminatorValue(agg, ctx.aggregates);
+  return kind ? `eq(schema.${tableName}.kind, ${JSON.stringify(kind)})` : null;
+}
+
+/** Combine an id/param filter with the optional `kind` predicate. */
+function withKind(filter: string, kindPred: string | null): string {
+  return kindPred ? `and(${filter}, ${kindPred})` : filter;
+}
 
 export function findManyByIdsMethod(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string {
-  const tableName = lowerFirst(plural(agg.name));
+  const tableName = repoTableName(agg, ctx);
+  const idFilter = withKind(
+    `inArray(schema.${tableName}.id, ids)`,
+    kindPredicate(agg, ctx, tableName),
+  );
   // Bulk-load every containment (collections + singulars) into per-
   // parent maps; mirrors the array-return path of findQueryMethod.
   const eagerContains = agg.contains
@@ -39,7 +66,7 @@ export function findManyByIdsMethod(agg: EnrichedAggregateIR, ctx: BoundedContex
   return lines(
     `  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
-    `    const rootRows = await this.db.select().from(schema.${tableName}).where(inArray(schema.${tableName}.id, ids));`,
+    `    const rootRows = await this.db.select().from(schema.${tableName}).where(${idFilter});`,
     `    if (rootRows.length === 0) return [];`,
     needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
     ...eagerContains.flatMap(({ c, part }) => {
@@ -109,7 +136,8 @@ export function findByIdMethod(
  *  Extracted so the trace-on variant can re-indent and wrap it with the
  *  outer try/catch + tx_* logs. */
 function txCallbackBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string[] {
-  const tableName = lowerFirst(plural(agg.name));
+  const tableName = repoTableName(agg, ctx);
+  const idFilter = withKind(`eq(schema.${tableName}.id, id)`, kindPredicate(agg, ctx, tableName));
   // Eager-load each `contains` child (collection or singular).
   const childLoads = agg.contains.flatMap((c): string[] => {
     const part = agg.parts.find((p) => p.name === c.partName);
@@ -137,7 +165,7 @@ function txCallbackBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string
     ];
   });
   return [
-    `      const rootRows = await tx.select().from(schema.${tableName}).where(eq(schema.${tableName}.id, id));`,
+    `      const rootRows = await tx.select().from(schema.${tableName}).where(${idFilter});`,
     `      if (rootRows.length === 0) {`,
     `        ${renderHonoStoreLogCall("aggregateLoaded", `aggregate: "${agg.name}", id: id as string, found: false`)}`,
     `        return null;`,
@@ -159,6 +187,12 @@ export function hydrateRootExpr(
   rowVar: string,
   ctx: BoundedContextIR,
 ): string {
+  // A TPH concrete reads from the shared table, where its own (non-base)
+  // columns are nullable (only this `kind`'s rows populate them). The `kind`
+  // filter on every read guarantees they're present, so assert non-null on
+  // hydrate — otherwise `string | null` columns fail the domain `_create`
+  // signature under strict tsc.
+  const forceNonNull = isTphConcrete(agg, ctx.aggregates);
   const fields: string[] = [];
   fields.push(`id: Ids.${agg.name}Id(${rowVar}.id)`);
   for (const f of agg.fields) {
@@ -166,12 +200,40 @@ export function hydrateRootExpr(
       // Loaded into a local const from the join table (see findByIdMethod).
       fields.push(`${f.name}`);
     } else {
-      fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
+      fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx, forceNonNull)}`);
     }
   }
   fields.push(...provHydrateEntries(agg.fields, rowVar));
   for (const c of agg.contains) {
     fields.push(`${c.name}`);
+  }
+  return `${agg.name}._create({ ${fields.join(", ")} })`;
+}
+
+/** Hydrate a TPH concrete directly from a shared-table row — used by the
+ *  polymorphic base reader (`PartyRepository`), which scans the shared table
+ *  and dispatches on `kind`.  Reads scalar / value-object / enum / id columns
+ *  with the non-null assertion (the row is known to be this concrete's
+ *  `kind`).  Contained parts and `X id[]` reference collections aren't eagerly
+ *  loaded by the base read (the per-concrete repository loads those fully) —
+ *  they default to empty/null here so the `_create` stays strictly typed;
+ *  v1 TPH concretes are expected to be flat (aggregate-inheritance.md). */
+export function hydrateConcreteFromSharedRow(
+  agg: EnrichedAggregateIR,
+  rowVar: string,
+  ctx: BoundedContextIR,
+): string {
+  const fields: string[] = [`id: Ids.${agg.name}Id(${rowVar}.id)`];
+  for (const f of agg.fields) {
+    if (isRefCollection(f.type)) {
+      fields.push(`${f.name}: []`);
+    } else {
+      fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx, true)}`);
+    }
+  }
+  fields.push(...provHydrateEntries(agg.fields, rowVar));
+  for (const c of agg.contains) {
+    fields.push(`${c.name}: ${c.collection ? "[]" : "null"}`);
   }
   return `${agg.name}._create({ ${fields.join(", ")} })`;
 }
@@ -198,8 +260,13 @@ function hydrateEntityExpr(
   return `${part.name}._create({ ${fields.join(", ")} })`;
 }
 
-function hydrateFieldExpr(f: FieldIR, rowVar: string, ctx: BoundedContextIR): string {
-  return hydrateValueExpr(f.name, f.type, rowVar, ctx, f.optional);
+function hydrateFieldExpr(
+  f: FieldIR,
+  rowVar: string,
+  ctx: BoundedContextIR,
+  forceNonNull = false,
+): string {
+  return hydrateValueExpr(f.name, f.type, rowVar, ctx, f.optional, forceNonNull);
 }
 
 function hydrateValueExpr(
@@ -208,10 +275,15 @@ function hydrateValueExpr(
   rowVar: string,
   ctx: BoundedContextIR,
   optional: boolean,
+  forceNonNull = false,
 ): string {
-  const colExpr = `${rowVar}.${fieldName}`;
+  // For a TPH concrete's required column (nullable in the shared table, but
+  // guaranteed present by the `kind` filter), assert non-null on read.
+  // Optional fields keep their own `== null` guard, so no bang there.
+  const bang = forceNonNull && !optional ? "!" : "";
+  const colExpr = `${rowVar}.${fieldName}${bang}`;
   if (t.kind === "optional") {
-    return `(${colExpr} == null ? null : ${hydrateValueExpr(fieldName, t.inner, rowVar, ctx, true)})`;
+    return `(${rowVar}.${fieldName} == null ? null : ${hydrateValueExpr(fieldName, t.inner, rowVar, ctx, true, forceNonNull)})`;
   }
   if (t.kind === "primitive") {
     // decimal hydrates lossy through JS `number` — money does NOT
@@ -232,7 +304,7 @@ function hydrateValueExpr(
   if (t.kind === "valueobject") {
     const cols = valueObjectColumnNames(fieldName, t.name, ctx);
     const args = cols
-      .map((c) => primitiveColumnRead(`${rowVar}.${c.columnName}`, c.type))
+      .map((c) => primitiveColumnRead(`${rowVar}.${c.columnName}${bang}`, c.type))
       .join(", ");
     if (optional) {
       return `(${rowVar}.${cols[0]!.columnName} == null ? null : new ${t.name}(${args}))`;
@@ -253,7 +325,7 @@ export function findQueryMethod(
   find: FindIR,
   ctx: EnrichedBoundedContextIR,
 ): string {
-  const tableName = lowerFirst(plural(agg.name));
+  const tableName = repoTableName(agg, ctx);
   // When the find's `where` references currentUser, the method gains a
   // trailing `currentUser: User` parameter that the closure-captured
   // Drizzle predicate reads from.  Hono routes / workflow handlers
@@ -349,6 +421,9 @@ export function buildFindWhereClause(
   tableName: string,
   ctx: EnrichedBoundedContextIR,
 ): string {
+  // Under TPH every read of this concrete is scoped to its `kind` rows in the
+  // shared table (null for non-TPH aggregates → byte-identical output).
+  const kindPred = kindPredicate(agg, ctx, tableName);
   if (find.filter) {
     // The IR validator (Layer ②) rejects any `where` clause that can't
     // lower to Drizzle's queryable subset, so by the time we get here
@@ -362,7 +437,7 @@ export function buildFindWhereClause(
           "Please file a bug.",
       );
     }
-    return `.where(${lowered.expr})`;
+    return `.where(${withKind(lowered.expr, kindPred)})`;
   }
   // Drizzle's `eq<T>(left, right)` infers `T` from the column's TS type
   // (plain `string` for `text(...)` columns).  Branded id params
@@ -380,6 +455,7 @@ export function buildFindWhereClause(
       conditions.push(`eq(schema.${tableName}.${matched.name}, ${p.name})`);
     }
   }
+  if (kindPred) conditions.push(kindPred);
   if (conditions.length === 0) return "";
   return `.where(${conditions.length === 1 ? conditions[0] : `and(${conditions.join(", ")})`})`;
 }
@@ -394,13 +470,16 @@ function hydrateRootForFindAllExpr(
   rowVar: string,
   ctx: BoundedContextIR,
 ): string {
+  // See hydrateRootExpr: TPH concrete own columns are nullable in the shared
+  // table but present for this `kind`, so assert non-null on read.
+  const forceNonNull = isTphConcrete(agg, ctx.aggregates);
   const fields: string[] = [];
   fields.push(`id: Ids.${agg.name}Id(${rowVar}.id)`);
   for (const f of agg.fields) {
     if (isRefCollection(f.type)) {
       fields.push(`${f.name}: ${f.name}ByOwner.get(${rowVar}.id) ?? []`);
     } else {
-      fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
+      fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx, forceNonNull)}`);
     }
   }
   fields.push(...provHydrateEntries(agg.fields, rowVar));

@@ -1435,6 +1435,11 @@ function lowerAggregate(
     persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,
     savingShape: (agg.shape as import("../types/loom-ir.js").SavingShape | undefined) ?? undefined,
     appliers: appliers.length > 0 ? appliers : undefined,
+    isAbstract: agg.isAbstract ? true : undefined,
+    extendsAggregate: agg.superType?.ref?.name ?? agg.superType?.$refText ?? undefined,
+    inheritanceUsing:
+      (agg.inheritanceUsing as import("../types/loom-ir.js").InheritanceLayout | undefined) ??
+      undefined,
   };
 }
 

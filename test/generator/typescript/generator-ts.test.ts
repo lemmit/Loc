@@ -1483,6 +1483,55 @@ describe("typescript generator", () => {
       expect(route).toMatch(/aggregate\.cancel\(currentUser\)/);
     });
 
+    const SRC_WORKFLOW_GUARD = `
+      system Acme {
+        user {
+          id: string
+          role: string
+        }
+        subdomain Sales {
+          context Orders {
+            aggregate Order {
+              customerId: string
+              status: string
+            }
+            repository Orders for Order { }
+            workflow archiveAll() {
+              requires currentUser.role == "admin"
+              let o = Order.create({ customerId: "c", status: "archived" })
+            }
+            workflow touchOne() {
+              let o = Order.create({ customerId: "c", status: "new" })
+            }
+          }
+        }
+        deployable api {
+          platform: hono
+          contexts: [Orders]
+          port: 3000
+          auth: required
+        }
+      }
+    `;
+
+    it("guarded workflow binds currentUser before the requires check, and denies with ForbiddenError (403)", async () => {
+      // A `requires currentUser.…` guard in a workflow renders the bare
+      // token `currentUser`; without a binding the handler throws a
+      // ReferenceError (→ 500) before it can deny.  The handler must read
+      // the request-scoped user — mirroring the per-operation route — so a
+      // failed guard raises ForbiddenError, which onError maps to 403.
+      const files = await emitForAuthSystem(SRC_WORKFLOW_GUARD);
+      const wf = files.get("http/workflows.ts")!;
+      expect(wf).toMatch(
+        /const currentUser = httpCtx\.get\("currentUser"\) as import\("\.\.\/auth\/user-types"\)\.User;/,
+      );
+      expect(wf).toMatch(/if \(!\(currentUser\.role === "admin"\)\) throw new ForbiddenError\(/);
+      expect(wf).toMatch(/if \(err instanceof ForbiddenError\) return problem\(403,/);
+      // The binding is conditional: only the guarded workflow's handler
+      // gets it — `touchOne` never references currentUser.
+      expect((wf.match(/httpCtx\.get\("currentUser"\)/g) ?? []).length).toBe(1);
+    });
+
     // -----------------------------------------------------------------------
     // currentUser inside find / view filters
     // -----------------------------------------------------------------------
