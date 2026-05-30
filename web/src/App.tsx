@@ -58,6 +58,7 @@ import {
   type UnsupportedPlatform,
 } from "./layout/ctx";
 import type { OutputStream } from "./layout/OutputPanel";
+import { useGeneratedConflicts } from "./layout/generated-conflicts";
 import type { TestResult } from "./testing/harness";
 import type { LogLine } from "./util/log-line";
 
@@ -185,6 +186,9 @@ export default function App(): JSX.Element {
   // same path string they did before.  Phase 2b2 adds the Files
   // panel that flips the active path.
   const sources = useWorkspaceSources(workspace.store);
+  // Live list of generated files left with unresolved regenerate-merge
+  // conflict markers — surfaced in the Output "Conflicts" stream.
+  const generatedConflicts = useGeneratedConflicts(workspace.store);
   const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
   const [buildClientReady, setBuildClientReady] = useState(false);
@@ -1055,6 +1059,7 @@ export default function App(): JSX.Element {
     editorHandleRef,
     diagnostics,
     errorCount,
+    generatedConflicts,
     warningCount,
     pipeline,
     generateResult,
