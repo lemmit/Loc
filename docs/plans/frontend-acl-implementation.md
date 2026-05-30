@@ -2,6 +2,16 @@
 
 > Tracks: [`../proposals/frontend-acl.md`](../proposals/frontend-acl.md) — SEALED.
 > Branch: `claude/magical-johnson-7XnzR`.
+> **Phase 1.1+1.2 shipped** (commit `f341d4b`): `src/lib/strict-field-map.ts` + `src/lib/apply-server-errors.ts` emitted into every React deployable, behaviourally inert. Baseline fixture refreshed. 5 dedicated tests + 307 React tests green.
+>
+> **Codebase reality discovered during 1.1/1.2 work that revises the rest of the plan:** schemas are NOT in a central `src/lib/schemas.ts` — they're emitted inline inside each `src/api/<agg>.ts` by `buildApiModule` (`src/generator/react/api-builder.ts:40`). The central `src/lib/schemas.ts` exists only conditionally for the shared `moneySchema` helper (`src/generator/react/index.ts:275–277`).
+>
+> **Consequence:** Step 1.3 ("split `src/lib/schemas.ts` into per-action files") was based on a wrong premise. There is nothing to split — schemas already live in per-aggregate files. The FieldMap emission (originally Step 1.4) is **inextricable** from the schema restructure (flat-key inputs + `.transform()` + `.readonly()`) because a FieldMap has nothing to translate while the schema stays nested. Step 1.3+1.4 therefore collapse into Phase 2 as one atomic change.
+>
+> **Revised phasing** (current truth):
+> - Phase 1 (DONE): two shared lib files, behaviourally inert.
+> - Phase 2: schema restructure inside `src/api/<agg>.ts` (flat-key + transform + readonly + FormState/Payload exports + per-action FieldMap instance + flattener) **and** walker rewire **and** pack template amendments — one atomic landing because the consumer-side types change.
+> - Phase 3: `option` field rendering.
 
 ## Context
 
