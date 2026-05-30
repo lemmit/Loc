@@ -26,6 +26,13 @@ import type { GitStore } from "./git/index.js";
 const WORKSPACE_PREFIX = "/workspace/";
 export const DEFAULT_PATH = "/workspace/main.ddd";
 
+/** Generated output (machine-owned, under `/workspace/generated/`) is
+ *  never a `.ddd` source nor a user-created empty folder, so the source
+ *  scans prune it — important because it can be the largest subtree and
+ *  these scans run on every autosave. */
+const GENERATED_SUBTREE = "/workspace/generated";
+const SKIP_GENERATED = { skip: [GENERATED_SUBTREE] } as const;
+
 export interface WorkspaceSourcesSnapshot {
   files: ReadonlyMap<string, string>;
   /** Workspace-relative folder paths that exist as empty folders
@@ -50,7 +57,7 @@ export function isDddSource(path: string): boolean {
  *  scale).  Async because the git store's reads are async. */
 export async function snapshotSources(store: GitStore): Promise<Map<string, string>> {
   const out = new Map<string, string>();
-  for (const path of await store.list(WORKSPACE_PREFIX)) {
+  for (const path of await store.list(WORKSPACE_PREFIX, SKIP_GENERATED)) {
     if (!isDddSource(path)) continue;
     const content = await store.readFile(path);
     if (content != null) out.set(path, content);
@@ -64,12 +71,14 @@ export async function snapshotSources(store: GitStore): Promise<Map<string, stri
  *  explicit dir entry stays in the store but is no longer "empty"
  *  from the workspace UI's POV). */
 export async function snapshotEmptyFolders(store: GitStore): Promise<Set<string>> {
-  const dirs = await store.listDirs(WORKSPACE_PREFIX);
+  // Prune the generated subtree: its dirs aren't user-created empty
+  // folders, and its files aren't `.ddd` sources.
+  const dirs = await store.listDirs(WORKSPACE_PREFIX, SKIP_GENERATED);
   if (dirs.length === 0) return new Set();
   // Mark every folder that has a `.ddd` descendant — those are not
   // empty for our purposes even though they have a real dir entry.
   const populatedFolders = new Set<string>();
-  for (const path of await store.list(WORKSPACE_PREFIX)) {
+  for (const path of await store.list(WORKSPACE_PREFIX, SKIP_GENERATED)) {
     if (!isDddSource(path)) continue;
     const rel = path.slice(WORKSPACE_PREFIX.length);
     let parent = rel;
@@ -127,6 +136,11 @@ export class WorkspaceSourcesController {
   private readonly listeners = new Set<WorkspaceSourcesListener>();
   private unsubscribeStore: (() => void) | null = null;
   private disposed = false;
+  /** Monotonic refresh ticket.  A mutation kicks an explicit refresh and
+   *  the store subscription kicks another; the highest ticket wins, so a
+   *  slower earlier read can't clobber the resident snapshot with stale
+   *  data (the async-refresh race). */
+  private refreshSeq = 0;
   private readonly readyPromise: Promise<void>;
 
   constructor(private readonly store: GitStore | null) {
@@ -155,11 +169,14 @@ export class WorkspaceSourcesController {
    *  torn-down controller. */
   private async refresh(): Promise<void> {
     if (!this.store || this.disposed) return;
+    const seq = ++this.refreshSeq;
     const [files, emptyFolders] = await Promise.all([
       snapshotSources(this.store),
       snapshotEmptyFolders(this.store),
     ]);
-    if (this.disposed) return;
+    // Drop this result if a newer refresh started while we were reading —
+    // it observed at least as recent a state and will emit.
+    if (this.disposed || seq !== this.refreshSeq) return;
     this.files = files;
     this.emptyFolders = emptyFolders;
     this.emit();
@@ -240,7 +257,11 @@ export class WorkspaceSourcesController {
     await this.store.deleteFile(path);
     await this.refresh();
     if (wasActive) {
-      this.activePath = pickFallbackActivePath(this.files.keys());
+      // Filter the deleted path out explicitly rather than trusting the
+      // refresh to have already dropped it — the refresh can be superseded
+      // by a concurrent event under the sequence guard.
+      const remaining = [...this.files.keys()].filter((p) => p !== path);
+      this.activePath = pickFallbackActivePath(remaining);
       this.emit();
     }
   }

@@ -23,7 +23,7 @@ import {
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { useWorkspaceSources } from "./workspace/use-workspace-sources";
-import { applyGeneratedTree, readGeneratedTree } from "./workspace/git";
+import { applyGeneratedTree, readGeneratedTree, startAutoCommit } from "./workspace/git";
 import {
   buildShareUrl,
   readHash,
@@ -366,6 +366,16 @@ export default function App(): JSX.Element {
       cancelled = true;
       unsubscribe();
     };
+  }, [workspace.store]);
+
+  // Debounced commit-on-save: turn working-tree writes (source edits, pack
+  // imports, generated-tree merges) into git history once the editing
+  // settles, so the "versioned workspace" is real.  Serialised inside the
+  // store so it can't race an intentional regenerate commit.
+  useEffect(() => {
+    const store = workspace.store;
+    if (!store) return;
+    return startAutoCommit(store);
   }, [workspace.store]);
 
   // Push every workspace `.ddd` source into the LSP worker as a Monaco
