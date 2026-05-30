@@ -54,7 +54,8 @@ export type MobileTab =
   | "preview"
   | "output"
   | "backend"
-  | "tests";
+  | "tests"
+  | "history";
 
 /** Sub-view of the consolidated mobile "Code" tab: the source editor,
  *  the visual page Builder, the structural Model, or the generated-file

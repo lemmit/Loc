@@ -102,7 +102,16 @@ export interface CommitInfo {
   timestamp: number;
 }
 
+/** One file's change within a commit (vs. its first parent).  Paths are
+ *  absolute (`/workspace/...`).  Read-only — used by the History view. */
+export interface CommitFileChange {
+  path: VfsPath;
+  status: "added" | "modified" | "removed";
+}
+
 const REPO_RELATIVE = (path: VfsPath): string => path.replace(/^\//, "");
+const ABSOLUTE = (filepath: string): VfsPath =>
+  filepath.startsWith("/") ? filepath : `/${filepath}`;
 
 export class GitStore {
   private readonly subs = new Set<Subscription>();
@@ -388,6 +397,47 @@ export class GitStore {
   async readBlobText(oid: string): Promise<string> {
     const { blob } = await git.readBlob({ fs: this.fsc, dir: this.dir, oid });
     return new TextDecoder().decode(blob);
+  }
+
+  /** The `/workspace` files a commit changed relative to its first parent
+   *  (added / modified / removed).  A root commit (no parent) reports
+   *  every file as `added`.  Read-only: walks the two commit trees and
+   *  compares blob oids — commits here are linear (no merges), so the
+   *  first parent is the exact base.  Used by the History view. */
+  async commitChanges(oid: string): Promise<CommitFileChange[]> {
+    const { commit } = await git.readCommit({ fs: this.fsc, dir: this.dir, oid });
+    const parent = commit.parent[0];
+    const trees = parent
+      ? [git.TREE({ ref: parent }), git.TREE({ ref: oid })]
+      : [git.TREE({ ref: oid })];
+    const out: CommitFileChange[] = [];
+    await git.walk({
+      fs: this.fsc,
+      dir: this.dir,
+      trees,
+      map: async (filepath, entries) => {
+        if (filepath === ".") return;
+        const abs = ABSOLUTE(filepath);
+        // Only surface tracked workspace content; never the bootstrapped
+        // empty `/workspace` dir node itself.
+        if (!abs.startsWith("/workspace/")) return;
+        if (parent) {
+          const [A, B] = entries as Array<git.WalkerEntry | null>;
+          const aBlob = A && (await A.type()) === "blob";
+          const bBlob = B && (await B.type()) === "blob";
+          if (!aBlob && !bBlob) return; // dirs/trees
+          if (!aBlob) out.push({ path: abs, status: "added" });
+          else if (!bBlob) out.push({ path: abs, status: "removed" });
+          else if ((await A.oid()) !== (await B.oid()))
+            out.push({ path: abs, status: "modified" });
+        } else {
+          const [A] = entries as Array<git.WalkerEntry | null>;
+          if (A && (await A.type()) === "blob") out.push({ path: abs, status: "added" });
+        }
+      },
+    });
+    out.sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
+    return out;
   }
 
   // -- snapshot -------------------------------------------------------------
