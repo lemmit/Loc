@@ -3,10 +3,10 @@ import "fake-indexeddb/auto";
 import {
   applyGeneratedTree,
   GENERATED_PREFIX,
+  type GeneratedFile,
   GitStore,
   openGitFs,
   readGeneratedTree,
-  type GeneratedFile,
 } from "../../web/src/workspace/git/index.js";
 
 // ---------------------------------------------------------------------------

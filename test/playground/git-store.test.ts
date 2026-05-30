@@ -1,14 +1,14 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import "fake-indexeddb/auto";
 
+import type { VfsPath } from "../../web/src/vfs/types.js";
 import {
-  GitStore,
   commitOnSave,
   diffForDisplay,
+  GitStore,
   openGitFs,
   regenerateMerge,
 } from "../../web/src/workspace/git/index.js";
-import type { VfsPath } from "../../web/src/vfs/types.js";
 
 // ---------------------------------------------------------------------------
 // GitStore — async, git-backed durable store (LightningFS +
@@ -43,9 +43,7 @@ describe("GitStore: file API round-trip", () => {
 
   it("writes then reads a file (with mkdirp of parents)", async () => {
     await store.writeFile("/workspace/nested/dir/main.ddd", "system X {}");
-    expect(await store.readFile("/workspace/nested/dir/main.ddd")).toBe(
-      "system X {}",
-    );
+    expect(await store.readFile("/workspace/nested/dir/main.ddd")).toBe("system X {}");
     expect(await store.exists("/workspace/nested/dir/main.ddd")).toBe(true);
     expect(await store.isFile("/workspace/nested/dir/main.ddd")).toBe(true);
     expect(await store.isDirectory("/workspace/nested")).toBe(true);
@@ -73,10 +71,7 @@ describe("GitStore: file API round-trip", () => {
     await store.writeFile("/workspace/main.ddd", "a");
     await store.writeFile("/workspace/sub/b.ddd", "b");
     await store.mkdir("/workspace/empty");
-    expect(await store.list("/workspace")).toEqual([
-      "/workspace/main.ddd",
-      "/workspace/sub/b.ddd",
-    ]);
+    expect(await store.list("/workspace")).toEqual(["/workspace/main.ddd", "/workspace/sub/b.ddd"]);
     // Directory listings include the bootstrapped `/workspace` root and
     // any parent dirs LightningFS materialises for nested files — the
     // workspace controller's `snapshotEmptyFolders` already accounts for
@@ -138,12 +133,8 @@ describe("GitStore: path normalization", () => {
   });
 
   it("rejects relative paths and root escapes", async () => {
-    await expect(store.readFile("workspace/x.ddd")).rejects.toThrow(
-      /must be absolute/,
-    );
-    await expect(store.readFile("/../escape")).rejects.toThrow(
-      /escapes root/,
-    );
+    await expect(store.readFile("workspace/x.ddd")).rejects.toThrow(/must be absolute/);
+    await expect(store.readFile("/../escape")).rejects.toThrow(/escapes root/);
   });
 });
 
@@ -189,9 +180,7 @@ describe("GitStore: notifier", () => {
 
   it("fires on write/delete with boundary-aware prefix matching", async () => {
     const seen: VfsPath[][] = [];
-    const unsub = store.subscribe("/workspace", (changed) =>
-      seen.push([...changed]),
-    );
+    const unsub = store.subscribe("/workspace", (changed) => seen.push([...changed]));
     await store.writeFile("/workspace/a.ddd", "1");
     await store.deleteFile("/workspace/a.ddd");
     expect(seen).toEqual([["/workspace/a.ddd"], ["/workspace/a.ddd"]]);
@@ -235,10 +224,7 @@ describe("GitStore: regenerate merge", () => {
 
   // Build a base commit, then a divergent branch ("theirs") + a
   // divergent main, and merge theirs back in.
-  async function setupDivergence(theirsContent: {
-    a: string;
-    b?: string;
-  }): Promise<void> {
+  async function setupDivergence(theirsContent: { a: string; b?: string }): Promise<void> {
     await store.writeFile("/workspace/a.ddd", "base-a");
     await store.writeFile("/workspace/b.ddd", "base-b");
     await commitOnSave(store, "base");

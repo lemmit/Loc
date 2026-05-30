@@ -56,10 +56,7 @@ describe("workspace sources — pure helpers", () => {
       "/workspace/notes.txt": "ignored",
     });
     const snap = await snapshotSources(store);
-    expect([...snap.keys()].sort()).toEqual([
-      "/workspace/main.ddd",
-      "/workspace/sub/orders.ddd",
-    ]);
+    expect([...snap.keys()].sort()).toEqual(["/workspace/main.ddd", "/workspace/sub/orders.ddd"]);
   });
 
   it("pickFallbackActivePath prefers main.ddd, else lexicographically-first", () => {
@@ -202,9 +199,7 @@ describe("WorkspaceSourcesController", () => {
     // controller's store subscription drives an async refresh, so wait
     // for the snapshot to reflect it.
     await store.writeFile("/workspace/main.ddd", "new");
-    await vi.waitFor(() =>
-      expect(c.snapshot().files.get("/workspace/main.ddd")).toBe("new"),
-    );
+    await vi.waitFor(() => expect(c.snapshot().files.get("/workspace/main.ddd")).toBe("new"));
     c.dispose();
   });
 
