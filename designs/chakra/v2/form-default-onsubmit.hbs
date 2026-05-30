@@ -4,6 +4,11 @@
                 toast({ status: "success", title: "{{successMessage}}" });
                 {{{redirectStmt}}};
               } catch (e) {
-                toast({ status: "error", title: (e as Error).message });
+                const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+                if (outcome.kind === "global") {
+                  toast({ status: "error", title: outcome.title });
+                } else if (outcome.kind === "unhandled") {
+                  toast({ status: "error", title: (e as Error).message });
+                }
               }
             }

@@ -4,6 +4,11 @@
                 toaster.create({ type: "success", title: "{{successMessage}}" });
                 {{{redirectStmt}}};
               } catch (e) {
-                toaster.create({ type: "error", title: (e as Error).message });
+                const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+                if (outcome.kind === "global") {
+                  toaster.create({ type: "error", title: outcome.title });
+                } else if (outcome.kind === "unhandled") {
+                  toaster.create({ type: "error", title: (e as Error).message });
+                }
               }
             }

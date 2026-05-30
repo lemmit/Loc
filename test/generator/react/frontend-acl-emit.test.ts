@@ -111,3 +111,70 @@ describe("frontend ACL shared files — content", () => {
     expect(src).not.toMatch(/useToast/);
   });
 });
+
+describe("frontend ACL — wired into emitted form catch blocks (Phase 2)", () => {
+  // Verifies the ACL loop is live in the generated React project — every
+  // generated form's submit handler calls applyServerErrors with setError
+  // and switches on the outcome.  Independent of fixture snapshots so
+  // tightening / refactoring the catch shape can't silently disable the
+  // loop.
+
+  it("orders/new.tsx (form-of/create) imports and uses applyServerErrors", async () => {
+    const { files } = generateSystems(await buildAcme());
+    const mainKey = [...files.keys()].find((k) => k.endsWith("/src/main.tsx"))!;
+    const reactRoot = mainKey.slice(0, -"/src/main.tsx".length);
+    const src = files.get(`${reactRoot}/src/pages/orders/new.tsx`)!;
+    expect(src).toMatch(
+      /import \{ applyServerErrors \} from "\.\.\/\.\.\/lib\/apply-server-errors"/,
+    );
+    expect(src).toMatch(/setError/);
+    expect(src).toMatch(
+      /applyServerErrors\(\{\s*error:\s*e,\s*setError,\s*fieldMap:\s*\{\}\s*as const\s*\}\)/,
+    );
+    expect(src).toMatch(/outcome\.kind === "global"/);
+    expect(src).toMatch(/outcome\.kind === "unhandled"/);
+  });
+
+  it("orders/detail.tsx (form-op/modal) imports and uses applyServerErrors", async () => {
+    const { files } = generateSystems(await buildAcme());
+    const mainKey = [...files.keys()].find((k) => k.endsWith("/src/main.tsx"))!;
+    const reactRoot = mainKey.slice(0, -"/src/main.tsx".length);
+    const src = files.get(`${reactRoot}/src/pages/orders/detail.tsx`)!;
+    expect(src).toMatch(
+      /import \{ applyServerErrors \} from "\.\.\/\.\.\/lib\/apply-server-errors"/,
+    );
+    // Two op-forms on this page (AddLine + Confirm) — both should be wired.
+    const calls = src.match(/applyServerErrors\(\{/g) ?? [];
+    expect(calls.length).toBe(2);
+    // setError is destructured from useForm in both op-form components.
+    const setErrorDestructures = src.match(/\{\s*[^}]*setError[^}]*\}\s*=\s*useForm</g) ?? [];
+    expect(setErrorDestructures.length).toBe(2);
+  });
+
+  it("workflows/place_order.tsx (form-runs) imports and uses applyServerErrors", async () => {
+    const { files } = generateSystems(await buildAcme());
+    const mainKey = [...files.keys()].find((k) => k.endsWith("/src/main.tsx"))!;
+    const reactRoot = mainKey.slice(0, -"/src/main.tsx".length);
+    const src = files.get(`${reactRoot}/src/pages/workflows/place_order.tsx`)!;
+    expect(src).toMatch(
+      /import \{ applyServerErrors \} from "\.\.\/\.\.\/lib\/apply-server-errors"/,
+    );
+    expect(src).toMatch(/setError/);
+    expect(src).toMatch(/applyServerErrors\(\{/);
+  });
+
+  it("pack-native toast is preserved for global + unhandled outcomes", async () => {
+    // Mantine pack — catch block routes outcome.global to notifications.show
+    // with outcome.title, and outcome.unhandled to notifications.show with
+    // the raw Error message.  Successful-path notification is untouched.
+    const { files } = generateSystems(await buildAcme());
+    const mainKey = [...files.keys()].find((k) => k.endsWith("/src/main.tsx"))!;
+    const reactRoot = mainKey.slice(0, -"/src/main.tsx".length);
+    const src = files.get(`${reactRoot}/src/pages/orders/new.tsx`)!;
+    expect(src).toMatch(/notifications\.show\(\{ color: "red", message: outcome\.title \}\)/);
+    expect(src).toMatch(
+      /notifications\.show\(\{ color: "red", message: \(e as Error\)\.message \}\)/,
+    );
+    expect(src).toMatch(/notifications\.show\(\{ color: "green", message: "Order created" \}\)/);
+  });
+});

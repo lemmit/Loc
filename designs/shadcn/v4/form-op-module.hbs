@@ -22,7 +22,12 @@ function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{
                 toast.success("{{humanOp}} succeeded");
                 setOpen(false);
               } catch (e) {
-                toast.error((e as Error).message);
+                const outcome = applyServerErrors({ error: e, setError: form.setError, fieldMap: {} as const });
+                if (outcome.kind === "global") {
+                  toast.error(outcome.title);
+                } else if (outcome.kind === "unhandled") {
+                  toast.error((e as Error).message);
+                }
               }
             })}
           >
