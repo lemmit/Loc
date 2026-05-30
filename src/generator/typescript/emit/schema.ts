@@ -93,11 +93,12 @@ export function renderSchema(
       tables.push(emitDocumentTable(agg.name, { schema, prefix }));
       continue;
     }
-    // NOTE: `shape(embedded)` on the TS/Drizzle backend currently emits
-    // RELATIONALLY (root + part tables) — the embedded repository (root
-    // columns + parts read from a jsonb column) is a follow-up.  It
-    // compiles correctly as relational; the shared embedded migration
-    // shape (jsonb-per-containment) is only consumed by .NET so far.
+    // Embedded (`shape(embedded)`): queryable root row + one jsonb column
+    // per containment.  No part tables, no join tables.
+    if (shape === "embedded") {
+      tables.push(emitEmbeddedTable(agg, ctx, indexedColumnsFor(agg, ctx), { schema, prefix }));
+      continue;
+    }
     const indexed = indexedColumnsFor(agg, ctx);
     tables.push(emitTable(agg.name, agg.fields, undefined, ctx, indexed, { schema, prefix }));
     for (const part of agg.parts) {
@@ -292,6 +293,49 @@ function collectColumnRefs(e: ExprIR, out: Set<string>): void {
     default:
       return;
   }
+}
+
+/** Embedded-children persistence table (`shape(embedded)`): the root's
+ *  scalar / `X id` fields stay queryable columns (like the relational
+ *  root), but each containment folds into a single jsonb column and
+ *  reference collections into a jsonb id-array column.  No part tables,
+ *  no join tables.  Mirrors the EF owned-`.ToJson()` / Ash embedded
+ *  shape and the shared embedded migration table. */
+function emitEmbeddedTable(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  indexedColumns: Set<string>,
+  options: { schema?: string; prefix?: string } = {},
+): string {
+  const baseTable = snake(plural(agg.name));
+  const tableName = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
+  const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
+  const lines: string[] = [];
+  lines.push(`export const ${lowerFirst(plural(agg.name))} = ${tableFactory}("${tableName}", {`);
+  lines.push(`  id: text("id").primaryKey(),`);
+  for (const f of agg.fields) {
+    if (f.type.kind === "array" && f.type.element.kind === "id") {
+      const not = f.optional ? "" : ".notNull()";
+      lines.push(`  ${f.name}: jsonb("${snake(f.name)}")${not},`);
+      continue;
+    }
+    lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
+  }
+  for (const c of agg.contains) {
+    lines.push(`  ${c.name}: jsonb("${snake(c.name)}").notNull(),`);
+  }
+  const indexEntries = [...indexedColumns].map(
+    (col) =>
+      `    ${lowerFirst(agg.name)}${pascalize(col)}Idx: index("${tableName}_${snake(col)}_idx").on(table.${col}),`,
+  );
+  if (indexEntries.length === 0) {
+    lines.push(`});`);
+  } else {
+    lines.push(`}, (table) => ({`);
+    lines.push(...indexEntries);
+    lines.push(`}));`);
+  }
+  return lines.join("\n");
 }
 
 /** Document-shaped persistence table: one jsonb `data` column holding

@@ -206,14 +206,19 @@ the F1 micro-plan PRs; reopens after F1.
 **Status:** PINNED (core axes, syntax, validation contract); the
 numbered **Open sub-questions** below remain OPEN.
 
-**Implementation:** surface + IR landed — `json` primitive (#703),
-`persistedAs(eventLog | state)` (#711), `normalised(true | false)`
-surface (#713). The document-persistence **emission** (Slice D) is
-**in progress**: a document *mode* in the **existing** per-backend
-adapters (EF Core `.ToJson()` / Drizzle `jsonb` / Ash embedded) +
-document table shape — **no new Marten backend** (see the Marten note
-below). Until it lands `normalised(false)` is carried in the IR but
-inert (an `UNWIRED_KNOBS` warning says so). See
+**Implementation: SHIPPED.** `json` primitive (#703);
+`persistedAs(eventLog | state)` (#711); the saving-shape axis —
+originally drafted as the boolean `normalised(true | false)` (#713),
+**reworked to the 3-valued `shape(relational | embedded | document)`**
+(#724) once it was clear the axis is a spectrum, not a boolean — with
+emission across the backends: **`embedded`** on all of dotnet/hono/
+phoenixLiveView (EF owned `.ToJson()` / Drizzle jsonb / Ash embedded
+resources, #724/#735/#750), **`document`** on dotnet/hono (STJ /
+jsonb blob, #724), and a **`supportedShapes` capability validator**
+(#738) that errors on a `shape(…)` the target backend can't emit. No
+new Marten backend. Remaining (deferred): Ash `document` (non-idiomatic
+single-`:map`, allowed-but-warned) and `eventLog` + snapshot
+rehydration (gated behind the appliers feature). See
 `document-and-json-hierarchies.md` §9.
 
 **Problem.** Loom models internal hierarchies but the
@@ -232,7 +237,11 @@ sits anomalously inside the aggregate body. Full analysis in
 | Modifier | Axis | Values | Default |
 |---|---|---|---|
 | `persistedAs(...)` | primary truth kind | `eventLog` \| `state` | `state` |
-| `normalised(...)` | saving shape of the materialised read model / snapshot | `true` \| `false` (`false` = one JSON document) | `true` |
+| `shape(...)` | saving shape of the materialised read model / snapshot | `relational` \| `embedded` \| `document` | `relational` |
+
+(`shape(...)` superseded the original boolean `normalised(true\|false)`
+in #724 — `shape(relational)` == old `shape(relational)`, `shape(document)`
+== old `shape(document)`, with `embedded` added as the queryable middle.)
 
 - `persistedAs` values align to the D-STORAGE-SPLIT `kind` set, so
   `resolve-datasource.ts`'s `eventSourced→eventLog` /
@@ -244,7 +253,7 @@ sits anomalously inside the aggregate body. Full analysis in
   existing `.ddd` sources migrate in one step (codemod offered).
 - **All** aggregate-level config lives on the **header** as paren
   modifiers (`ids`, `with`, `extends`, `persistedAs(…)`,
-  `normalised(…)`, `inheritanceUsing(…)`; bare `abstract`/`audited`).
+  `shape(…)`, `inheritanceUsing(…)`; bare `abstract`/`audited`).
   **Nothing configures in the body** — the body holds members only.
 - New `json` **primitive field type** — opaque JSONB; a leaf in
   `wireShape` (never expanded/diffed).
@@ -252,7 +261,7 @@ sits anomalously inside the aggregate body. Full analysis in
   dedicated `document` value-type. **Dropped:** a per-containment
   `as document/table` hint.
 - ES + document needs **no new `kind`**: a `kind: eventLog` binding +
-  a `kind: snapshot` (or `state`) binding carrying `normalised: false`.
+  a `kind: snapshot` (or `state`) binding carrying `shape: document`.
 - **No dedicated Marten backend.** "Store as a document" is *the
   aggregate read model in one JSONB column*, which every backend's ORM
   already supports — so the `document` shape is a **mode added to the
@@ -263,7 +272,7 @@ sits anomalously inside the aggregate body. Full analysis in
   document half *is* EF `.ToJson()`, and its event-store half (stream +
   document-snapshot rehydration) needs appliers
   (`workflow-and-applier.md`) regardless of backend. So Slice D's
-  achievable target is **`persistedAs(state)` + `normalised(false)`**;
+  achievable target is **`persistedAs(state)` + `shape(document)`**;
   the `eventLog` + document case is deferred behind appliers.
 
 **Validator rules implied.**
@@ -283,13 +292,13 @@ sits anomalously inside the aggregate body. Full analysis in
   directly; no `apply`.
 - `persistedAs` is **explicit**, default `state` (omitted entirely
   for state-based aggregates). **No inference and no suggestion lint.**
-- `normalised(false)` requires the context to resolve a
+- `shape(document)` requires the context to resolve a
   document-capable store/adapter; it constrains the `snapshot` binding
   under `persistedAs(eventLog)`, the `state` binding under
   `persistedAs(state)`.
 - Interaction (D-ES-TPH, generalised): a `persistedAs(eventLog)`
   concrete subtype of a `sharedTable` base is forced to `ownTable`
-  regardless of `normalised`.
+  regardless of `shape`.
 
 **Sub-questions.**
 
@@ -301,17 +310,17 @@ sits anomalously inside the aggregate body. Full analysis in
    the `snapshot` `dataSource`'s `every:` knob** (already in
    D-STORAGE-SPLIT). Cadence is binding/infra config; no aggregate-header
    arg.
-4. **Per-projection vs per-aggregate `normalised`** — **RESOLVED:
+4. **Per-projection vs per-aggregate `shape`** — **RESOLVED:
    per-projection.** The shape is settable per read-model: the
-   per-binding `dataSource normalised:` knob (on the `state` / `snapshot`
+   per-binding `dataSource shape:` knob (on the `state` / `snapshot`
    / `replica` binding) governs that projection's shape; the
-   aggregate-header `normalised(…)` is the default. This stays within
+   aggregate-header `shape(…)` is the default. This stays within
    D-GRANULARITY (per `(context, kind)` binding, not per-aggregate). Richer
    *named* projections (multiple read models of one ES aggregate, each a
    different shape) depend on future read-model modelling and are out of
    v1 scope.
 5. **Real document DB** — **RESOLVED: Postgres-JSONB only in v1**
-   (Marten's own bet); `normalised(false)` resolves to JSONB / Marten
+   (Marten's own bet); `shape(document)` resolves to JSONB / Marten
    docs on Postgres. `StorageType += mongo` deferred.
 
 **Affects.**
@@ -440,7 +449,7 @@ modifiers; nothing in the body. Values stay **table-baked**, spelled
 `sharedTable | ownTable` (refines the earlier `shareTable`, reads as
 "shared table"); the medium-neutral `shared | own` spelling is
 rejected (the choice is specifically about table layout, and naming it
-so keeps it honest when document/JSON saving enters via `normalised`).
+so keeps it honest when document/JSON saving enters via `shape`).
 
 **Validator rules implied.**
 
@@ -463,8 +472,8 @@ header line). Interacts with D-ES-TPH below.
 **Decision.** A `persistedAs(eventLog)` concrete subtype of a
 `sharedTable` (TPH) abstract base is **forced to
 `inheritanceUsing(ownTable)`** — an event-sourced stream cannot share a
-state table with its siblings. Generalises across `normalised` per
-D-DOCUMENT-AXIS: a `normalised(false)` (document) concrete of a
+state table with its siblings. Generalises across `shape` per
+D-DOCUMENT-AXIS: a `shape(document)` (document) concrete of a
 `sharedTable` base is likewise forced to `ownTable`. The validator
 raises an error (not a silent coercion) so the author writes the
 forced modifier explicitly.

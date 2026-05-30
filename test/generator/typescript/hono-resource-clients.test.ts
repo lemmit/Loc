@@ -11,7 +11,7 @@ system Sys {
     context Sales { aggregate Order { name: string } }
   }
   storage pg    { type: postgres }
-  storage files { type: awsS3,    config: { region: "eu-central-1", bucket: "app-files" } }
+  storage files { type: s3,    config: { region: "eu-central-1", bucket: "app-files" } }
   storage bus   { type: rabbitmq, config: { vhost: "/" } }
   storage pay   { type: restApi,  config: { baseUrl: "https://pay.example.com" } }
 
@@ -32,19 +32,20 @@ system Sys {
 describe("hono resource-client emission", () => {
   it("emits one client module per sourceType with the resource's config", async () => {
     const { files } = generateSystems(await parseValid(SRC));
-    const s3 = files.get("api/resources/awsS3.ts")!;
-    expect(s3).toMatch(/import \{ S3Client \} from "@aws-sdk\/client-s3";/);
+    const s3 = files.get("api/resources/s3.ts")!;
+    expect(s3).toMatch(/S3Client/);
+    expect(s3).toMatch(/from "@aws-sdk\/client-s3";/);
     expect(s3).toMatch(/export const salesFiles = new S3Client\(\{/);
     expect(s3).toMatch(/salesFilesBucket = .*"app-files"/);
     expect(s3).toMatch(/"eu-central-1"/);
 
     const mq = files.get("api/resources/rabbitmq.ts")!;
     expect(mq).toMatch(/import \* as amqp from "amqplib";/);
-    expect(mq).toMatch(/export const connectSalesJobs = \(\) => amqp.connect\(salesJobsUrl\)/);
+    expect(mq).toMatch(/export async function salesJobs\$enqueue\(message: unknown\)/);
 
     const api = files.get("api/resources/restApi.ts")!;
     expect(api).toMatch(/salesApiBaseUrl = .*"https:\/\/pay.example.com"/);
-    expect(api).toMatch(/fetch: \(path: string/);
+    expect(api).toMatch(/export async function salesApi\$get\(path: string\)/);
   });
 
   it("adds the client deps to package.json and side-effect-imports the modules at boot", async () => {
@@ -54,7 +55,7 @@ describe("hono resource-client emission", () => {
     expect(pkg).toMatch(/"amqplib"/);
 
     const index = files.get("api/index.ts")!;
-    expect(index).toMatch(/import "\.\/resources\/awsS3";/);
+    expect(index).toMatch(/import "\.\/resources\/s3";/);
     expect(index).toMatch(/import "\.\/resources\/rabbitmq";/);
     expect(index).toMatch(/import "\.\/resources\/restApi";/);
   });

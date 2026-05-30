@@ -17,7 +17,11 @@ import {
   BUILTIN_PACK_LATEST,
   packFormatForBuiltin,
 } from "../../../generator/_packs/builtin-formats.js";
-import type { Platform } from "../../../ir/types/loom-ir.js";
+import {
+  PLATFORM_SAVING_SHAPES,
+  type Platform,
+  type SavingShape,
+} from "../../../ir/types/loom-ir.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../../platform/registry.js";
 
 /** Frontend keyword platforms — those that are valid as bareword
@@ -57,6 +61,17 @@ export function platformFamily(platform: string | undefined): string | undefined
  *  the backend predicate. */
 export function platformOwnsBackend(platform: string | undefined): boolean {
   return platform != null && parseBuiltinPlatformRef(platform) !== null;
+}
+
+/** Saving shapes (D-DOCUMENT-AXIS `shape(…)`) the given platform can
+ *  emit today — the capability tier of the supportedShapes validator.
+ *  Resolves a `family@version` pin to its family first.  `undefined` for
+ *  frontend / unknown platforms (they own no persistence). */
+export function platformSavingShapes(
+  platform: string | undefined,
+): readonly SavingShape[] | undefined {
+  const fam = platformFamily(platform);
+  return fam ? PLATFORM_SAVING_SHAPES[fam as Platform] : undefined;
 }
 
 /** Framework a deployable will render against, given its platform

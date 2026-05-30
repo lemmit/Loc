@@ -16,6 +16,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { effectiveSavingShape } from "../../ir/util/resolve-datasource.js";
 import { classifyForWire, singleFieldShape } from "../../ir/validate/invariant-classify.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderJasonEncoderImpl } from "./jason-camel-emit.js";
@@ -57,13 +58,14 @@ export function emitAggregateResources(
 
   for (const agg of ctx.aggregates) {
     const ds = options.resolveDataSource?.(agg);
-    const aggOpts = { schema: ds?.schema, prefix: ds?.tablePrefix };
+    // `shape(embedded)`: contained parts fold into a jsonb column on the
+    // root via Ash embedded resources (`attribute :items, {:array,
+    // Part}`) instead of child tables + `has_many`.  The root stays a
+    // postgres-backed resource; the part becomes `data_layer: :embedded`.
+    const embedded = effectiveSavingShape(agg, ds) === "embedded";
+    const aggOpts = { schema: ds?.schema, prefix: ds?.tablePrefix, embedded };
     const path = `lib/${appSnake}/${ctxSnake}/${snake(agg.name)}.ex`;
     out.set(path, renderAggregateResource(agg, ctx, appModule, ctxModule, aggOpts));
-    // Also emit entity-part resources (contained entities become
-    // Ash.Resource embedded/joined resources).  Parts inherit the
-    // owning aggregate's schema + prefix — they always live in the
-    // same physical store as the root.
     for (const part of agg.parts) {
       const partPath = `lib/${appSnake}/${ctxSnake}/${snake(part.name)}.ex`;
       out.set(partPath, renderEntityPartResource(part, agg, ctx, appModule, ctxModule, aggOpts));
@@ -81,8 +83,9 @@ function renderAggregateResource(
   ctx: BoundedContextIR,
   appModule: string,
   ctxModule: string,
-  options: { schema?: string; prefix?: string } = {},
+  options: { schema?: string; prefix?: string; embedded?: boolean } = {},
 ): string {
+  const embedded = !!options.embedded;
   const moduleName = `${ctxModule}.${upperFirst(agg.name)}`;
   const baseTable = snake(plural(agg.name));
   const tableSnake = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
@@ -112,9 +115,26 @@ function renderAggregateResource(
   // Field list for the `defimpl Jason.Encoder` block: :id, persisted
   // fields only, timestamps.  Reference-collection fields are excluded
   // (lazy-loaded via the join table; would surface as nil otherwise).
+  // Embedded (`shape(embedded)`) containment attributes: each `contains`
+  // becomes `attribute :<name>, {:array, <Part>}` (collection) /
+  // `attribute :<name>, <Part>` (single), where `<Part>` is the
+  // `data_layer: :embedded` resource — Ash stores it inline as jsonb.
+  const embeddedAttrLines = embedded
+    ? agg.contains.map((c) => {
+        const partMod = `${ctxModule}.${upperFirst(c.partName)}`;
+        return c.collection
+          ? `attribute :${snake(c.name)}, {:array, ${partMod}}, default: []`
+          : `attribute :${snake(c.name)}, ${partMod}`;
+      })
+    : [];
+
   const wireAtoms = [
     ":id",
     ...persistedFields.map((f) => `:${snake(f.name)}`),
+    // Embedded containments serialise inline (each has its own Jason
+    // encoder); add them to the wire shape.  Relational containments are
+    // separate relationships and stay out of the attribute encoder.
+    ...(embedded ? agg.contains.map((c) => `:${snake(c.name)}`) : []),
     ":inserted_at",
     ":updated_at",
   ];
@@ -173,10 +193,10 @@ ${postgresBlockLines.join("\n")}
 
   attributes do
     ${renderPrimaryKey(agg.idValueType)}
-    ${persistedFields.map((f) => renderAttribute(f, ctxModule)).join("\n    ")}
+    ${[...persistedFields.map((f) => renderAttribute(f, ctxModule)), ...embeddedAttrLines].join("\n    ")}
     timestamps()
   end
-${renderRelationships(agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
+${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
 
 ${jasonImpl}`;
 }
@@ -191,9 +211,37 @@ function renderEntityPartResource(
   _ctx: BoundedContextIR,
   appModule: string,
   ctxModule: string,
-  options: { schema?: string; prefix?: string } = {},
+  options: { schema?: string; prefix?: string; embedded?: boolean } = {},
 ): string {
   const moduleName = `${ctxModule}.${upperFirst(part.name)}`;
+  const renderCtxEmbedded: RenderCtx = { thisName: "record", contextModule: ctxModule };
+
+  // Embedded (`shape(embedded)`): the part has no table of its own — it
+  // is stored inline in its parent's jsonb column.  So `data_layer:
+  // :embedded`, no `postgres do`, no parent FK / `belongs_to`, no
+  // timestamps (the parent row carries those); just id + fields +
+  // validations + the standard embedded actions.  Its Jason encoder
+  // serialises only id + fields.
+  if (options.embedded) {
+    const partAtoms = [":id", ...part.fields.map((f) => `:${snake(f.name)}`)];
+    const jasonImplEmbedded = renderJasonEncoderImpl(moduleName, partAtoms, appModule);
+    return `defmodule ${moduleName} do
+  use Ash.Resource,
+    data_layer: :embedded
+
+  attributes do
+    uuid_primary_key :id
+    ${part.fields.map((f) => renderAttribute(f, ctxModule)).join("\n    ")}
+  end
+${renderValidations(part.invariants, renderCtxEmbedded, new Set(part.fields.map((f) => f.name)))}
+  actions do
+    defaults [:read, :create, :update, :destroy]
+  end
+${renderHelperFunctions(part.functions, renderCtxEmbedded)}end
+
+${jasonImplEmbedded}`;
+  }
+
   const baseTable = snake(plural(part.name));
   const tableSnake = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
   const repoModule = `${appModule}.Repo`;
