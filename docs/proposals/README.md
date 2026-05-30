@@ -73,6 +73,12 @@ Status reflects `origin/main` as of the last refresh of
 |---|---|---|
 | [`kubernetes-helm.md`](./kubernetes-helm.md) | PROPOSED | Emit a Helm chart (+ the raw k8s manifests it renders to) alongside `docker-compose.yml`, as a new `src/system/` artifact sibling. **Emitter-only** (no grammar/IR change in v1); database assumed **external/managed** (connection `Secret`, no in-cluster postgres); tuning lives in `values.yaml`. Reverses the stated non-goal in `docs/tools.md:324` / `docs/generators.md:764`. Defers infra-in-DSL (`replicas`/`resources`/`ingress` clauses) and a per-platform `workloadShape` surface method to follow-ups. |
 
+### Backends & code generation
+
+| Doc | Status | Core addition |
+|---|---|---|
+| [`elixir-ecto-and-api-only-backends.md`](./elixir-ecto-and-api-only-backends.md) | PROPOSED | Effort/shape study for three backend-matrix additions: a non-Ash Elixir/Phoenix/**Ecto** full-stack generator, plus **API-only** flavours of both the Ash and Ecto backends (JSON surface consumed by the React frontend). Grounds each in the `PlatformSurface`/adapter/conformance machinery: the **Ecto domain layer** is the dominant cost (hand-built `Ecto.Schema`/`Ecto.Changeset`/context modules vs Ash's declarative resources); the HEEx walker, `MigrationsIR`→Ecto migrations, and the existing JSON+OpenAPI surface are **reuse**; API-only is a cheap *UI-absent strip* of a full backend. Recommends a sibling `phoenix` platform for the Ash/Ecto axis (Option B) over an adapter swap (Option A, later) or `family@version` (rejected), and modelling API-only by absence of a `ui` mount rather than new platform names. Requests **D-PHOENIX-ECTO** and **D-API-ONLY**. |
+
 ### Documents & JSON hierarchies
 
 | Doc | Status | Core addition |
