@@ -11,7 +11,7 @@ import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js"
 import { effectiveSavingShape } from "../../../ir/util/resolve-datasource.js";
 import { lines as joinLines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
-import { isTphBase, isTphConcrete, ownFieldsOf, tphConcretesOf } from "../tph.js";
+import { isTphBase, isTphConcrete, ownFieldsOf, tableOwnerName, tphConcretesOf } from "../tph.js";
 
 /** Per-aggregate dataSource lookup the orchestrator passes in.  Lets
  *  the schema emitter ask "what schema / tablePrefix does THIS
@@ -92,7 +92,19 @@ export function renderSchema(
     // emits no table of its own; the abstract base emits the shared table
     // (base columns + every concrete's own columns, made nullable, + the
     // `kind` discriminator).
-    if (isTphConcrete(agg, ctx.aggregates)) continue;
+    if (isTphConcrete(agg, ctx.aggregates)) {
+      // …but a TPH concrete's contained parts still need their own tables.
+      // Each part FKs the SHARED base table (the concrete has no table of its
+      // own), so the parent name resolves through `tableOwnerName` — the part
+      // row's `parentId` holds the shared-table row id, which is exactly the
+      // concrete's id (Pattern 4, TPT-via-`contains`).  `emitTable` keys the
+      // parts otherwise identically to a plain aggregate's.
+      const owner = tableOwnerName(agg, ctx.aggregates);
+      for (const part of agg.parts) {
+        tables.push(emitTable(part.name, part.fields, owner, ctx, new Set(), { schema, prefix }));
+      }
+      continue;
+    }
     if (isTphBase(agg, ctx.aggregates)) {
       tables.push(emitTphTable(agg, ctx, { schema, prefix }));
       continue;
