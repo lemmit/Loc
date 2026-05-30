@@ -7714,7 +7714,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@128"
+                    "$ref": "#/rules@129"
                   },
                   "arguments": []
                 }
