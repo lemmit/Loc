@@ -440,6 +440,55 @@ export class GitStore {
     return out;
   }
 
+  /** Restore the `/workspace` tree to the state captured by commit `oid`
+   *  — overwrite/add every file from that commit and delete workspace
+   *  files it didn't contain.  Content-based (read the commit's blobs and
+   *  write them), so it doesn't depend on git checkout's stat shortcut and
+   *  never moves HEAD: the caller commits the restored state as a new
+   *  commit, keeping history linear and recoverable.  Returns the absolute
+   *  paths it changed. */
+  async restoreCommit(oid: string): Promise<VfsPath[]> {
+    // Target = the commit's /workspace blobs.
+    const target = new Map<VfsPath, string>();
+    await git.walk({
+      fs: this.fsc,
+      dir: this.dir,
+      trees: [git.TREE({ ref: oid })],
+      map: async (filepath, entries) => {
+        if (filepath === ".") return;
+        const abs = ABSOLUTE(filepath);
+        if (!abs.startsWith("/workspace/")) return;
+        const [entry] = entries as Array<git.WalkerEntry | null>;
+        if (entry && (await entry.type()) === "blob") {
+          const { blob } = await git.readBlob({
+            fs: this.fsc,
+            dir: this.dir,
+            oid: await entry.oid(),
+          });
+          target.set(abs, new TextDecoder().decode(blob));
+        }
+      },
+    });
+
+    const changed: VfsPath[] = [];
+    // Delete current workspace files absent from the target.
+    for (const node of await this.walkTree()) {
+      if (node.kind !== "file" || !node.path.startsWith("/workspace/")) continue;
+      if (!target.has(node.path)) {
+        await this.deleteFile(node.path);
+        changed.push(node.path);
+      }
+    }
+    // Write/overwrite the target files that differ.
+    for (const [path, content] of target) {
+      if ((await this.readFile(path)) !== content) {
+        await this.writeFile(path, content);
+        changed.push(path);
+      }
+    }
+    return changed;
+  }
+
   // -- snapshot -------------------------------------------------------------
 
   /** Project the workspace tree to the `VfsEntry` union — the shape the
