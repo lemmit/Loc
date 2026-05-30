@@ -40,6 +40,15 @@ The recurring tax on **every** new backend is **strict cross-backend
 OpenAPI/wire-spec parity** (a per-PR CI gate, `LOOM_E2E_STRICT_PARITY=1`,
 9 dimensions). Budget real time there regardless of LOC.
 
+**Investigation outcome (§2.1):** the Phoenix generator **already** emits a
+clean API-only project when a deployable mounts no `ui`
+(`liveview-emit.ts:61`) — so #2 needs no new emission path. The only
+consumption-side gap is React's `apiBaseUrl`, which appends `/api` solely
+for `dotnet`+`ui`; a Phoenix target needs the same `/api` branch
+(`react/index.ts:48–52`) plus a CORS plug for the cross-origin call. This
+**resolves D-API-ONLY** (API-only = absence of a `ui` mount; no new
+platform name).
+
 ## 1. Where each piece lives today (the baseline)
 
 The four registered platforms implement `PlatformSurface`
@@ -106,14 +115,56 @@ So an **API-only Phoenix** is the existing JSON surface **minus** the UI
 layer (HEEx walker, `liveview-emit`, sidebar, theme, the design pack,
 UI page-objects), with a `react` deployable pointed at it.
 
-**Open question to confirm first (cheap, decides the whole shape of #2/#3):**
-does the current Phoenix generator already degrade gracefully when **no
-`ui` is bound to the deployable** — i.e. emit only domain + JSON API +
-OpenAPI and skip HEEx — or is LiveView/page emission unconditional? If the
-former, API-only is largely a *configuration* of today's backend plus a
-consuming `react` deployable; if the latter, it needs an explicit
-`apiOnly` emission path. Resolve this before committing to a modelling
-option in §4.
+### 2.1 Investigation — what's already there vs. the real gap
+
+The decisive open question ("does the generator degrade gracefully with no
+`ui` bound, or is LiveView emission unconditional?") was **investigated
+against the source. The backend already degrades gracefully** — API-only
+is a *capability by absence of a `ui` mount*, not a missing emission path:
+
+- `liveview-emit.ts:61` — `if (!deployable.uiName) return { files: out,
+  routes };`. A backend with no `ui:` binding emits **no** HEEx page
+  modules, **no** UI page-objects (they're emitted inside the
+  `for (page of ui.pages)` loop), and **no** `live` routes.
+- `index.ts:174` — the sidebar component is gated on `deployable.uiName`.
+- The router renderer (`index.ts`, `renderRouter`) has an explicit
+  empty-routes branch (`# No pages declared in this deployable's ui:
+  block.`), and the `scope "/api"` block degrades the same way.
+- Everything else still emits unconditionally: domain resources, the JSON
+  controllers + `/api` routes (`api-emit.ts`), the OpenAPI spec
+  (`openapi-emit.ts`), the always-on health controller, migrations, and
+  auth.
+
+So **#2 (Ash API-only) needs no new `apiOnly` emission path** — declare a
+`phoenixLiveView` deployable that mounts no `ui`, point a `react`
+deployable at it. The remaining deltas are small and specific:
+
+1. **Consumption base-path (the one real code gap).** Phoenix serves JSON
+   at `/api/<tag>` (route `path: \`/${tag}\`` at `api-emit.ts:43`, wrapped
+   in `scope "/api"`). But React's `apiBaseUrl` (`react/index.ts:48–52`)
+   only appends `/api` for a `dotnet` target that also mounts a `ui`
+   (same-origin embedded SPA); any other target gets
+   `http://localhost:<port>` and the generated client hits `<base>/<tag>`
+   (`api-builder.ts`). A Phoenix target therefore resolves to
+   `http://localhost:4000/<tag>` and **misses** the `/api` scope. Fix: a
+   `react/index.ts` branch yielding `http://localhost:<port>/api` for a
+   Phoenix (and Hono-vs-Phoenix-symmetric) target. ~5–10 LOC; the
+   `dotnet`/`"/api"` special-case is the proof the seam exists.
+2. **CORS for the cross-origin call.** Unlike the `dotnet` embedded-SPA
+   case (same origin, so no CORS), a standalone `react` deployable calling
+   Phoenix is cross-origin — Phoenix needs a CORS plug in its endpoint
+   pipeline. This is the *same* consideration as today's standalone
+   Hono+React topology; whatever that path does (CORS plug vs. dev proxy),
+   Phoenix should mirror it. (Confirm the Hono+React standalone story and
+   match it.)
+3. **Two harmless leftovers** (optional cleanup). `theme.css`
+   (`index.ts:188`) and the root/app HEEx layouts (`index.ts:522–525`) are
+   emitted unconditionally and are dead weight in an API-only build.
+   Gating them on `deployable.uiName` is a trivial tidy, not a blocker.
+
+This **resolves D-API-ONLY** (see §4): model API-only by absence of a `ui`
+mount; do **not** mint `phoenixLiveViewApi`-style platform names. The same
+resolution applies to #3 (Ecto API-only) once #1 exists.
 
 ## 3. The Ecto domain layer (the real work)
 
@@ -171,17 +222,18 @@ seam is widened. Three options:
   *versions* of one family (they coexist, neither supersedes the other),
   and the registry keys `BUILTIN_PLATFORM_LATEST` by family.
 
-**API-only** is an orthogonal axis. Prefer **not** minting new platform
-names for it: model it as the existing backend emitting only its API
-surface when **no `ui` is bound** to the deployable (with a consuming
-`react` deployable), pending the §2 investigation. If an explicit switch
-is needed, a per-deployable `apiOnly` mode threaded into `emitProject`
-beats a `phoenixLiveViewApi` platform (which would fork the matrix
-combinatorially: {Ash, Ecto} × {fullstack, API-only}).
+**API-only** is an orthogonal axis, and the §2.1 investigation settles it:
+model it as the existing backend emitting only its API surface when **no
+`ui` is bound** to the deployable (with a consuming `react` deployable) —
+which is **already the implemented behaviour** (`liveview-emit.ts:61`). Do
+**not** mint `phoenixLiveViewApi`-style platform names (which would fork
+the matrix combinatorially: {Ash, Ecto} × {fullstack, API-only}); the
+only code needed is the React `apiBaseUrl` `/api` branch + CORS from §2.1.
 
 > Requests a pinned decision **D-PHOENIX-ECTO** (Option A vs B for the
-> Ash/Ecto axis) and **D-API-ONLY** (capability-by-absence-of-`ui` vs an
-> explicit per-deployable mode), recorded in [`../decisions.md`](../decisions.md).
+> Ash/Ecto axis) recorded in [`../decisions.md`](../decisions.md).
+> **D-API-ONLY is resolved by §2.1**: API-only = absence of a `ui` mount,
+> no new platform name, no `apiOnly` emission flag.
 
 ## 5. Conformance — the non-negotiable gate
 
@@ -207,14 +259,17 @@ Implications:
 Ordering matters because the API-only variants are cheap *strips* of a
 full backend:
 
-1. **Phase 0 (½–1 day):** resolve the §2 open question — does today's
-   Phoenix emit a clean API-only project when no `ui` is bound? Output: a
-   decision on D-API-ONLY.
-2. **Phase 1 — Ash API-only (#2), ~3–6 days.** `mountsUi:false` behaviour
-   (per Phase 0 outcome), a consuming `react` deployable, a deployable
-   validator forbidding a `ui` mount on the API-only path, and a
-   conformance/CI entry. Lowest-risk, immediately useful, and exercises
-   the React-consumes-Phoenix path end-to-end before the heavier work.
+1. ~~**Phase 0** — confirm graceful API-only degradation.~~ **Done (§2.1):**
+   the generator already emits a clean API-only project when no `ui` is
+   bound (`liveview-emit.ts:61`). D-API-ONLY resolved.
+2. **Phase 1 — Ash API-only (#2), ~3–6 days.** Now a short, itemised list
+   (per §2.1): (a) the React `apiBaseUrl` `/api` branch for a Phoenix
+   target (~5–10 LOC); (b) a CORS plug for the cross-origin React→Phoenix
+   call, mirroring the standalone Hono+React story; (c) optional gating of
+   the dead `theme.css`/HEEx-layout emits on `deployable.uiName`; (d) a
+   `react`-targets-`phoenixLiveView` example + a conformance/CI entry.
+   Lowest-risk, immediately useful, and exercises the
+   React-consumes-Phoenix path end-to-end before the heavier work.
 3. **Phase 2 — Ecto full-stack (#1), ~4–6 weeks.** Decide D-PHOENIX-ECTO
    (recommend Option B sibling platform for v0). Build the Ecto domain
    layer (§3), reuse the HEEx walker + `MigrationsIR` + design pack, add a
