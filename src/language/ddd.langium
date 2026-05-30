@@ -715,7 +715,7 @@ MacroArgValue:
 
 AggregateMember:
     Containment | DerivedProp | Invariant | FunctionDecl | Operation | Create | Destroy | EntityPart | TestBlock | Property
-    | FilterDecl | StampDecl | ImplementsDecl;
+    | FilterDecl | StampDecl | ImplementsDecl | Apply;
 
 // ---- capability source surface ----------------------------------
 //
@@ -1003,6 +1003,20 @@ Create:
 // `OperationIR` with `kind: "destroy"`.
 Destroy:
     'destroy' (name=ID)? ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? '{'
+        body+=Statement*
+    '}';
+
+// Applier — the event-fold body of an event-sourced aggregate
+// (`persistedAs(eventLog)`).  `apply(e: OrderPlaced) { … }` binds the
+// emitted event instance to `param` and mutates `this` to fold it into
+// state.  Under the event-log discipline the command bodies
+// (`operation`/`create`) may only `emit`; the actual state transition
+// lives here.  Applier bodies are pure folds — assignments (`:=`/`+=`/
+// `-=`) and derivations only, no `emit` and no side-effecting calls.
+// Lowers to `ApplyIR`; never joins `agg.operations`.  See
+// docs/proposals/workflow-and-applier.md.
+Apply:
+    'apply' '(' param=LooseName ':' event=[EventDecl:ID] ')' '{'
         body+=Statement*
     '}';
 

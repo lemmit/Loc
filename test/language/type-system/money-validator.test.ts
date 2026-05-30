@@ -257,7 +257,7 @@ describe("money — invariants and preconditions are gated too", () => {
         aggregate Invoice {
           subtotal: money
           rate: decimal
-          operation apply(amount: money) {
+          operation chargeFee(amount: money) {
             precondition amount > rate
             subtotal := subtotal - amount
           }

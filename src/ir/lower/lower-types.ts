@@ -4,6 +4,7 @@ import type {
   BoundedContext,
   EntityPart,
   EnumDecl,
+  EventDecl,
   FunctionDecl,
   Operation,
   TypeRef,
@@ -15,6 +16,7 @@ import {
   isDerivedProp,
   isEntityPart,
   isEnumDecl,
+  isEventDecl,
   isFunctionDecl,
   isIdType,
   isNamedType,
@@ -252,10 +254,28 @@ export function findValueObjectByName(env: Env, name: string): ValueObject | und
   return undefined;
 }
 
+/** Look up a context-level `enum` declaration by name.  Used by the
+ *  env-aware NamedType fallback when a macro-emitted reference (e.g.
+ *  `crudish`'s update params) lacks a `$refNode` and the Langium linker
+ *  left `ref` undefined. */
 export function findEnumByName(env: Env, name: string): EnumDecl | undefined {
   if (!env.ctx) return undefined;
   for (const m of env.ctx.members) {
     if (isEnumDecl(m) && m.name === name) return m;
+  }
+  return undefined;
+}
+
+/** Look up a context-level `event` declaration by name.  Used to
+ *  type-resolve member access on an applier's event parameter
+ *  (`apply(e: OrderPlaced) { … e.field … }`) — the param carries the
+ *  event name as an `entity`-shaped marker (events aren't a distinct
+ *  TypeIR kind), and member typing falls back to this lookup when the
+ *  name isn't an aggregate / entity part. */
+export function findEventByName(env: Env, name: string): EventDecl | undefined {
+  if (!env.ctx) return undefined;
+  for (const m of env.ctx.members) {
+    if (isEventDecl(m) && m.name === name) return m;
   }
   return undefined;
 }
