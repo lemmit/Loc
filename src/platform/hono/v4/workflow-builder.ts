@@ -1,11 +1,12 @@
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  ExprIR,
-  TypeIR,
-  WorkflowIR,
-  WorkflowStmtIR,
+import {
+  type AggregateIR,
+  type BoundedContextIR,
+  type ExprIR,
+  type TypeIR,
+  type WorkflowIR,
+  type WorkflowStmtIR,
+  workflowUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import { camelId, opWorkflow } from "../../../ir/util/openapi-ids.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
@@ -280,6 +281,19 @@ function emitWorkflowRoute(
   // Avoids re-computing brand conversions on every reference.
   for (const p of wf.params) {
     out.push(`    const ${p.name} = ${paramExprs.get(p.name)};`);
+  }
+  // Bind the request-scoped current user when the workflow body
+  // references `currentUser` (in a guard / precondition / expr).  The
+  // renderer emits the bare token `currentUser`; without this binding
+  // it's an unbound identifier and the handler throws a ReferenceError
+  // (→ 500) before a `requires` guard can deny (→ 403).  Mirrors the
+  // per-operation route binding in routes-builder and the .NET handler's
+  // `var currentUser = _currentUser.User`.  `auth: required` on the
+  // deployable is validated upstream, so the value is present.
+  if (workflowUsesCurrentUser(wf)) {
+    out.push(
+      `    const currentUser = httpCtx.get("currentUser") as import("../auth/user-types").User;`,
+    );
   }
   // Repos used by this workflow.  Construct on the request `db` for
   // non-transactional; deferred construction inside the tx callback

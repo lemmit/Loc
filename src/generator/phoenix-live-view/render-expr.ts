@@ -197,8 +197,13 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: RenderCtx): string 
 
 function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: RenderCtx): string {
   const recv = renderExpr(e.receiver, ctx);
-  // Array/list length shorthand → Elixir `length(list)` or `Enum.count`
-  if (e.receiverType.kind === "array" && e.member === "count") {
+  // Array/list size shorthand.  The DSL admits both `.count` and
+  // `.length` on arrays (see the .NET renderer's matching comment);
+  // both map to Elixir `Enum.count/1`.  Without the `.length` arm an
+  // array `.length` fell through to `<recv>.length`, a map field access
+  // that raises `BadMapError` on a list at runtime (e.g. a workflow
+  // guard `currentUser.permissions.length > 0` → 500 instead of 403).
+  if (e.receiverType.kind === "array" && (e.member === "count" || e.member === "length")) {
     return `Enum.count(${recv})`;
   }
   if (

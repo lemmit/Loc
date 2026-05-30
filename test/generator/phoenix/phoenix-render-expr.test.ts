@@ -308,6 +308,25 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
     ).toBe("Enum.count(record.items)");
   });
 
+  it("collapses array.length → Enum.count(...) (not a `.length` field access)", () => {
+    // The DSL admits both `.count` and `.length` on arrays; a missing
+    // `.length` arm let it fall through to `record.items.length`, a map
+    // field access that raises `BadMapError` on a list at runtime — the
+    // root cause of guarded workflows returning 500 instead of 403.
+    expect(
+      renderExpr(
+        {
+          kind: "member",
+          receiver: thisProp("items"),
+          member: "length",
+          receiverType: { kind: "array", element: STRING },
+          memberType: INT,
+        },
+        ctx,
+      ),
+    ).toBe("Enum.count(record.items)");
+  });
+
   it("renders string.matches(literal) as Regex.match?(~r/…/, …)", () => {
     expect(
       renderExpr(

@@ -1936,6 +1936,33 @@ export function operationUsesCurrentUser(op: OperationIR): boolean {
   return op.statements.some(stmtUsesCurrentUser);
 }
 
+/** True when any of the workflow's statements (or a sub-expression
+ *  inside one) references `currentUser`.  When true, a backend's
+ *  workflow handler must materialise a `currentUser` binding (from the
+ *  request-scoped auth actor) before the rendered guard/expr — which
+ *  emits the bare token `currentUser` — can resolve.  Shared by the
+ *  Hono and .NET workflow emitters. */
+export function workflowUsesCurrentUser(wf: WorkflowIR): boolean {
+  return wf.statements.some(workflowStmtUsesCurrentUser);
+}
+
+function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+    case "expr-let":
+      return exprUsesCurrentUser(s.expr);
+    case "emit":
+    case "factory-let":
+      return s.fields.some((f) => exprUsesCurrentUser(f.value));
+    case "repo-let":
+    case "op-call":
+      return s.args.some(exprUsesCurrentUser);
+    case "resource-call":
+      return exprUsesCurrentUser(s.call);
+  }
+}
+
 /** True when the find's `where` filter references `currentUser`.
  *  Such finds gain a `currentUser: User` parameter on the generated
  *  repository method, threaded through CQRS handler / Hono route call
