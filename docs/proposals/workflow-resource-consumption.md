@@ -208,9 +208,14 @@ workflow PlaceOrder(cmd: PlaceOrderCmd) {
 
 ## 8. Phasing
 
-- **4a** — `objectStore` `put`/`get` (carrying `json`) on hono: lowering +
-  validation + `emitOperation` + usage-derived needs + async threading. One
-  vertical, end to end, self-contained (no `extern` needed).
+- **4a** ✓ — `objectStore` `put`/`get` (carrying `json`) on hono: lowering +
+  validation + usage-derived needs + async threading, delivered end to end.
+  Notes vs the sketch: the verb registry (`src/ir/resource-verbs.ts`) needs no
+  language-side mirror because resource-op validation runs in the IR layer; the
+  s3 adapter emits per-resource async verb helpers (`<resource>$put`/`$get`) and
+  call sites render `(await …)`, rather than threading adapter context into
+  `render-expr`. Unknown-verb and no-op-in-transactional-span are the active
+  validations; the capability gap rides the Phase-1 `need ⊆ sourceType` check.
 - **4b** — `objectStore` `list`/`signedUrl`/`delete`, plus `queue` + `api` on
   hono; per-call interface override (`signedUrl`→`rest`).
 - **4c** — `.NET` + Phoenix `ResourceAdapter`s for the same verbs.
