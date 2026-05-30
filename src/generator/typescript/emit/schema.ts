@@ -8,6 +8,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js";
+import { effectiveSavingShape } from "../../../ir/util/resolve-datasource.js";
 import { lines as joinLines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 
@@ -83,9 +84,22 @@ export function renderSchema(
   const prefixFor = (agg: AggregateIR): string | undefined => lookup?.(agg)?.tablePrefix;
   const tables: string[] = [];
   for (const agg of ctx.aggregates) {
-    const indexed = indexedColumnsFor(agg, ctx);
     const schema = schemaFor(agg);
     const prefix = prefixFor(agg);
+    const shape = effectiveSavingShape(agg, lookup?.(agg));
+    // Document (`shape(document)`): the whole aggregate is one opaque
+    // jsonb blob (`id, data, version`).  No part/join tables.
+    if (shape === "document") {
+      tables.push(emitDocumentTable(agg.name, { schema, prefix }));
+      continue;
+    }
+    // Embedded (`shape(embedded)`): queryable root row + one jsonb column
+    // per containment.  No part tables, no join tables.
+    if (shape === "embedded") {
+      tables.push(emitEmbeddedTable(agg, ctx, indexedColumnsFor(agg, ctx), { schema, prefix }));
+      continue;
+    }
+    const indexed = indexedColumnsFor(agg, ctx);
     tables.push(emitTable(agg.name, agg.fields, undefined, ctx, indexed, { schema, prefix }));
     for (const part of agg.parts) {
       tables.push(emitTable(part.name, part.fields, agg.name, ctx, new Set(), { schema, prefix }));
@@ -279,6 +293,68 @@ function collectColumnRefs(e: ExprIR, out: Set<string>): void {
     default:
       return;
   }
+}
+
+/** Embedded-children persistence table (`shape(embedded)`): the root's
+ *  scalar / `X id` fields stay queryable columns (like the relational
+ *  root), but each containment folds into a single jsonb column and
+ *  reference collections into a jsonb id-array column.  No part tables,
+ *  no join tables.  Mirrors the EF owned-`.ToJson()` / Ash embedded
+ *  shape and the shared embedded migration table. */
+function emitEmbeddedTable(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  indexedColumns: Set<string>,
+  options: { schema?: string; prefix?: string } = {},
+): string {
+  const baseTable = snake(plural(agg.name));
+  const tableName = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
+  const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
+  const lines: string[] = [];
+  lines.push(`export const ${lowerFirst(plural(agg.name))} = ${tableFactory}("${tableName}", {`);
+  lines.push(`  id: text("id").primaryKey(),`);
+  for (const f of agg.fields) {
+    if (f.type.kind === "array" && f.type.element.kind === "id") {
+      const not = f.optional ? "" : ".notNull()";
+      lines.push(`  ${f.name}: jsonb("${snake(f.name)}")${not},`);
+      continue;
+    }
+    lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
+  }
+  for (const c of agg.contains) {
+    lines.push(`  ${c.name}: jsonb("${snake(c.name)}").notNull(),`);
+  }
+  const indexEntries = [...indexedColumns].map(
+    (col) =>
+      `    ${lowerFirst(agg.name)}${pascalize(col)}Idx: index("${tableName}_${snake(col)}_idx").on(table.${col}),`,
+  );
+  if (indexEntries.length === 0) {
+    lines.push(`});`);
+  } else {
+    lines.push(`}, (table) => ({`);
+    lines.push(...indexEntries);
+    lines.push(`}));`);
+  }
+  return lines.join("\n");
+}
+
+/** Document-shaped persistence table: one jsonb `data` column holding
+ *  the whole serialised aggregate read model + a `version` concurrency
+ *  counter.  Mirrors the .NET `<Agg>Document` record. */
+function emitDocumentTable(
+  name: string,
+  options: { schema?: string; prefix?: string } = {},
+): string {
+  const baseTable = snake(plural(name));
+  const tableName = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
+  const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
+  return [
+    `export const ${lowerFirst(plural(name))} = ${tableFactory}("${tableName}", {`,
+    `  id: text("id").primaryKey(),`,
+    `  data: jsonb("data").notNull(),`,
+    `  version: integer("version").notNull(),`,
+    `});`,
+  ].join("\n");
 }
 
 function emitTable(

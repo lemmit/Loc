@@ -1,6 +1,6 @@
 # Proposal: Documents and JSON-Based Hierarchies
 
-**Status:** Decisions sealed — **all §8 sub-questions resolved** (cadence reuses the snapshot `dataSource`'s `every:`; `normalised` is per-projection via the per-binding knob; Postgres-JSONB only; no `json<T>`). Core direction **PINNED** as [D-DOCUMENT-AXIS](../decisions.md) (D-RENAME amended alongside). **Implementation: surface + IR complete** — Slices A (`json`, #703), B (`persistedAs(eventLog\|state)`, #711), and C (`normalised(true\|false)` surface, #713) are **merged**. Slice D — the document-persistence *emission* (Marten / EF `.ToJson()` / document table shape) — is **not started**. Full breakdown in §9.
+**Status:** Decisions sealed — **all §8 sub-questions resolved**. Core direction **PINNED** as [D-DOCUMENT-AXIS](../decisions.md). **The saving-shape axis is a 3-point spectrum, not a boolean:** `shape(relational | embedded | document)` (reworked from the boolean `normalised(true|false)` once that became clear — see §9 row C′). Slices A (`json`, #703), B (`persistedAs`, #711), C (shape surface, #713 + #724 rework) are merged/landed. Emission (PR #724): the shared migration emits the right table per shape; **.NET emits all three shapes** (relational; `embedded` via owned-`.ToJson()`; `document` via the persistence-record blob); **TS emits `relational` + `document`**. Remaining: `embedded` on Drizzle + Phoenix, and the two-tier `supportedShapes` validator. Full breakdown in §9.
 **Scope:** Survey how Loom should let a modeller persist a hierarchy as a *document* (a single JSON tree) instead of a normalised set of tables, and whether "document" deserves to be a declaration kind next to `aggregate`/`entity`, a field type, a persistence strategy, or some combination. Compares against Marten, EF Core, and MongoDB-style modelling. Ends with a recommendation.
 
 > **Pinned decisions affecting this proposal** (see [`docs/decisions.md`](../decisions.md)):
@@ -37,15 +37,18 @@
 >    omitted. *(This truth-kind is a different storing concern from axis
 >    2 — the log is always JSON-event rows; axis 2 governs only the
 >    derived read model. Grammar reconciliation in §2.3.)*
-> 2. **`normalised(true | false)`** (saving, new): **how the
->    materialised read model / snapshot is laid out**. The axis that is
->    genuinely new here.
+> 2. **`shape(relational | embedded | document)`** (saving, new): **how the
+>    materialised read model / snapshot is laid out** — a 3-point
+>    spectrum (table-per-entity → queryable root + embedded-children
+>    jsonb → one opaque jsonb blob). The axis that is genuinely new here.
+>    *(Originally drafted as the boolean `normalised(true|false)`;
+>    reworked to the enum once the spectrum was clear — §9 row C′.)*
 >
 > The combination explicitly required is **`persistedAs(eventLog)` +
-> `normalised(false)`** (Marten's sweet spot: an append-only event
+> `shape(document)`** (Marten's sweet spot: an append-only event
 > stream with the aggregate snapshot/projection persisted as a single
 > JSON document). Consequently **Option 3 is dropped** and **Option 4
-> is reframed** as the `normalised` axis (not a third truth-kind value).
+> is reframed** as the `shape` axis (not a third truth-kind value).
 > See §2.3 and §7.
 
 ---
@@ -201,7 +204,7 @@ A `persistedAs(state)` aggregate with `normalised(false)` is equally valid (whol
 
 - **Grammar:** add a header `normalised` modifier on `Aggregate` (`ddd.langium:610–614`), e.g. `('normalised' '(' normalised=Bool ')')?` placed with `ids` / `withClause` before `{`, with `Bool returns string: 'true' | 'false'` (default `true`). Separately, reconcile the body-structure marker per §2.3 + §4: a header `('persistedAs' '(' persistedAs=TruthKind ')')?` with `TruthKind returns string: 'eventLog' | 'state'`, replacing the body `persistenceStrategy: …`.
 - **IR:** `AggregateIR` (`loom-ir.ts:327`) gains `normalised?: boolean` (default `true`) alongside `persistedAs?: "eventLog" | "state"`; `resolve-datasource.ts`'s `eventSourced → eventLog` / `stateBased → state` mapping becomes an identity, and it additionally requests a document-shaped `snapshot` binding when `normalised === false`.
-- **Per-backend:** the natural **Marten** target. The `PersistenceAdapter` contract gates on strategy today (`efcore-persistence.ts:43` declares `supportedStrategies: ["stateBased"]`); a `martenPersistenceAdapter` would declare `supportedStrategies: ["state", "eventLog"]` **and** advertise the `document` shape, while the EF adapter advertises `normalised` only (plus root `.ToJson()` for `persistedAs(state)` + `normalised(false)`). The adapter contract may need a `supportedShapes` companion to `supportedStrategies` so the orchestrator can pick the right adapter from the (persistedAs × normalised) pair.
+- **Per-backend — a document *mode* in the existing adapters, not a new backend.** "Store as a document" is *the aggregate read model in one JSONB column*, and every backend already has that primitive (each serialises value objects to JSONB today). So the `document` shape is added to the **existing** per-backend adapters via their ORM's native whole-object-to-JSON feature: .NET **EF Core `.ToJson()`** chained onto the `OwnsOne`/`OwnsMany` mapping it already emits (`efcore.ts`); TS **Drizzle `jsonb`** column; Phoenix **Ash embedded resource / `:map`**. The `PersistenceAdapter` contract gates on strategy today (`efcore-persistence.ts:43` declares `supportedStrategies: ["stateBased"]`); add a **`supportedShapes`** companion (`["normalised","document"]`) so the orchestrator routes a `normalised(false)` binding to the *same* adapter's document branch. **A dedicated `martenPersistenceAdapter` was considered and rejected** — its document half is exactly EF `.ToJson()`, and its event-store half (stream + document snapshot rehydration) needs appliers (`workflow-and-applier.md`), so it is gated on that feature regardless of the backend choice.
 - **Trade-offs:** Whole-aggregate granularity (no per-field control) — matches how Marten/Mongo actually work, and is exactly what dropping Option 3 commits to. Keeps the aggregate API unchanged (invariant §2.2#4). Pairs with Option 5 for the storage binding.
 - **Syntax — paren modifier in the header.** `normalised(false)`, placed on the aggregate *header* line (before `{`), next to `ids` / `with` / `extends`.
 
@@ -370,7 +373,7 @@ A validator nudge (`loom.json-field-known-shape`) can suggest promoting a `json`
 | `lower/` | leaf | wireShape like VO | — | thread axis | — |
 | `enrich/enrichments.ts` | leaf in wireShape | wireShape, no assoc | — | migrationsOwner / snapshot owner | — |
 | `migrations-builder.ts` / `sql-pg.ts` | already `json`→JSONB | keep arrays JSON | — | doc/snapshot table shape | placement |
-| backends (TS/.NET/Phoenix/React) | unknown/JsonElement/:map | DTO from wireShape | — | **new Marten adapter** + `supportedShapes` | session wiring |
+| backends (TS/.NET/Phoenix/React) | unknown/JsonElement/:map | DTO from wireShape | — | **document mode in existing adapters** (EF `.ToJson()` / Drizzle `jsonb` / Ash embedded) + `supportedShapes` | session wiring |
 | validators | known-shape nudge | embed-acyclic (§2.2#2) | — | strategy×normalised×storage compat | normalised×kind compat |
 | docs | `language.md` | `language.md` | — | `migrations-design.md` | `architecture.md` |
 
@@ -382,7 +385,7 @@ Phases follow the one-directional pipeline in `CLAUDE.md`; nothing here crosses 
 
 **Document is *both* a small field type and a per-aggregate `normalised(false)` choice — and is *not* an aggregate peer.** The driving requirement is **`persistedAs(eventLog)` + `normalised(false)`**, only expressible once the saving shape is its own axis (§2.3). Concretely, adopt:
 
-1. **Options 4 + 5 — the core, as the `normalised` axis.** Add per-aggregate `normalised(true | false)` (Option 4) orthogonal to the truth-kind axis `persistedAs(eventLog | state)`, wired through `normalised: false` on the `snapshot` (ES) or `state` (state-based) `dataSource` binding (Option 5). Served by a new `martenPersistenceAdapter` advertising `supportedStrategies: ["state","eventLog"]` + the `document` shape, plugged into the existing `PersistenceAdapter` seam (`efcore-persistence.ts:41`). The headline combination — append-only event stream + document snapshot/projection — is the deliverable.
+1. **Options 4 + 5 — the core, as the `normalised` axis.** Add per-aggregate `normalised(true | false)` (Option 4) orthogonal to the truth-kind axis `persistedAs(eventLog | state)`, wired through `normalised: false` on the `snapshot` (ES) or `state` (state-based) `dataSource` binding (Option 5). Served by a **document mode added to the existing per-backend adapters** (EF `.ToJson()` / Drizzle `jsonb` / Ash embedded), advertising a `document` shape via a new `supportedShapes` companion to `supportedStrategies` on the existing `PersistenceAdapter` seam (`efcore-persistence.ts:41`) — **no new backend**. The immediate deliverable is **`persistedAs(state)` + `normalised(false)`** (whole current state as one document), which each ORM's JSON-column feature delivers directly. The headline ES combination — append-only event stream + document snapshot/projection — stays deferred behind appliers (`workflow-and-applier.md`), which it needs whether or not a Marten adapter exists.
 2. **Option 1 (`json` primitive) — ship alongside or first.** Smallest, fully orthogonal (covers need A, which Option 4 does *not* touch), and mostly already plumbed (`json` column kind + `JSONB` renderer exist). A prerequisite-free win that is independent of the document-store work.
 3. **Drop Option 3.** Decided: once whole-aggregate `normalised(false)` is the model, the per-edge embedding knob refines a relational layout we've opted out of; its residual case is already served by value objects.
 4. **Defer Option 2.** Revisit a dedicated `document` *type* only if a "typed-collection-that-is-never-a-table" sub-structure proves to need its own name independent of the aggregate-level axis.
@@ -413,7 +416,8 @@ This keeps the domain model honest (the aggregate API is unchanged regardless of
 
 Delivered in slices off `main` (each its own squash-merged PR). The
 **surface and IR are complete**; the document-persistence **emission**
-is not yet built.
+(Slice D) is **in progress** — a document *mode* in the existing
+adapters, **no new Marten backend** (see below).
 
 ### Done
 
@@ -421,36 +425,62 @@ is not yet built.
 |---|---|---|---|
 | **A — `json` primitive** | Opaque JSON field type. Per-backend leaf mapping: TS `unknown` / Zod `z.unknown()`, .NET `System.Text.Json.JsonElement`, Phoenix Ash `:map`, Postgres `JSONB` (Drizzle `jsonb`), OpenAPI freeform `object` (wire-spec leaf). Grammar + `PrimitiveName`/`WirePrimitive` + migrations. | `ddd.langium`, `loom-ir.ts`, all 4 generators, `migrations-builder.ts`, `wire-spec.ts`; `test/generator/json-primitive-emission.test.ts` | #703 |
 | **B — `persistedAs(eventLog\|state)`** | Hard-cutover rename of the shipped body `persistenceStrategy: stateBased\|eventSourced` → header paren modifier. Values aligned to the `dataSource` `kind` set, so `resolve-datasource` is now an identity. Adapters / default-menus / `resolve-adapters` updated. **No body-discipline validator** (deferred — owned by the applier feature). | `ddd.langium`, `loom-ir.ts`, `lower.ts`, `resolve-datasource.ts`, `validate.ts`, `print-structural.ts`, all persistence/style adapters; parsing/IR/validation/adapter tests | #711 |
-| **C — `normalised(true\|false)`** | Saving-shape **surface**: aggregate header modifier + `dataSource` `normalised:` knob, threaded through IR + printer, parsed/validated. Added to `UNWIRED_KNOBS` so a `dataSource normalised:` warns "accepted, persisted in IR, but no emitter consumes it yet". | `ddd.langium`, `loom-ir.ts`, `lower.ts`, `print-structural.ts`, `validate.ts`; `test/language/parsing/aggregate-normalised.test.ts` | #713 |
+| **C — saving-shape surface** | Aggregate header modifier + `dataSource` knob, threaded through IR + printer, parsed/validated. **Originally shipped as the boolean `normalised(true\|false)` (#713); reworked to the 3-valued `shape(relational\|embedded\|document)` (#724)** once it was clear the axis is a spectrum, not a boolean. | `ddd.langium`, `loom-ir.ts`, `lower.ts`, `print-structural.ts`, `validate.ts`; `test/language/parsing/aggregate-shape.test.ts` | #713, #724 |
+| **C′ — `shape` 3-value rework** | `normalised(bool)` → `shape(relational\|embedded\|document)`; `SavingShape` defined in the IR, `effectiveSavingShape(agg, resolved)` (binding wins → header → `relational`), `isDocumentShaped` kept as a thin derivation. Behaviour-preserving: `shape(document)` == the prior `normalised(false)` opaque blob. The inert-knob warning dropped (the knob is consumed; unsupported shape is a per-backend `supportedShapes` check). | `ddd.langium`, `loom-ir.ts`, `resolve-datasource.ts`, `print-structural.ts`, `validate.ts`, all 4 generators + adapters | #724 |
+| **D.1 — backend-neutral document foundation** | `PersistenceAdapter.supportedShapes: SavingShape[]` (efcore advertises `["normalised","document"]`); `ResolvedDataSource.normalised` + `isDocumentShaped(agg, resolved)` per-projection resolver (binding wins, header is default); migrations `(id, data jsonb, version)` document table shape (parts fold into `data`, references ride as id arrays — no part/join tables), binding-aware in `buildMigrations`. Byte-identical for all non-document aggregates. | `_adapters/persistence-surface.ts`, `efcore-persistence.ts`, `ir/util/resolve-datasource.ts`, `system/migrations-builder.ts`; `resolve-datasource.test.ts` (+5), `migrations-builder.test.ts` (+3) | #724 |
+| **D.2 — EF (.NET) document emission** | STJ + persistence-record, domain class untouched (incl. parts). `<Agg>Document` POCO `(Id, Data jsonb, Version)` + EF config; `<Agg>Snapshot`/`<Part>Snapshot` records mirror the entity's C# types (ID record-structs + VO records round-trip natively); `ToSnapshot()`/`FromSnapshot(...)` on the entity (reach private setters + `_<containment>` lists, `AssertInvariants` once over the full tree); document repository (de)serialises `Data`, bumps `Version`, finds eval client-side; DbContext routes to `DbSet<<Agg>Document>`, join tables skipped. **`dotnet-build /warnaserror` green.** | `dotnet/emit/document.ts`, `entity.ts`, `efcore.ts`, `repository.ts`, `dotnet/index.ts`; `examples/document.ddd`; `dotnet-document-emission.test.ts` (+7) | #724 |
+| **D.3-TS — Drizzle (Hono) document emission** | Schema emits `(id, data jsonb, version)` (part/join tables skipped); structural repository (`repository-document-builder.ts`) serialises getters → plain object (`<entity>ToDoc`) and rebuilds via the same `_create({...})` factory (`<entity>FromDoc`); finds eval in-memory (`renderTsExpr` with `this`→`x`); `toWire` reused unchanged. Routed on `shape(document)`. **`tsc + tsup` gate green** (`examples/document.ddd` added). | `typescript/repository-document-builder.ts`, `typescript/emit/schema.ts`, `hono/v4/emit.ts`; `typescript-document-emission.test.ts` (+5) | #724 |
+| **D.4-mig — embedded migration shape** | 3-way `schemaFromModule` (relational \| embedded \| document); `embeddedTableForAggregate` = queryable root columns + one JSONB column per containment + ref-collections as JSONB id-arrays, no part/join tables. `buildMigrations` binding-aware via `effectiveSavingShape`. One physical shape every backend maps to → no per-backend migration fork. | `system/migrations-builder.ts`; `migrations-builder.test.ts` (+1) | #724 |
+| **D.5-net — EF (.NET) embedded emission** | `shape(embedded)` folds each containment into a JSONB column via owned-types `OwnsOne/OwnsMany(...).ToJson("<col>")` — no child table — while the **entity, repository and `DbSet<Agg>` stay the normal relational ones** (EF owned-JSON is transparent), so finds remain real indexed SQL on the root. 3-way orchestrator routing; join entities skipped for embedded. | `dotnet/emit/efcore.ts`, `dotnet/index.ts`; `examples/document.ddd` (Wishlist), `dotnet-document-emission.test.ts` (+2) | #724 |
 
 Net: an aggregate header like
-`aggregate ShoppingCart persistedAs(eventLog) normalised(false) { … }`
-parses, validates, prints, and threads through the IR end-to-end; a
-`json` field works across every backend.
+`aggregate ShoppingCart persistedAs(eventLog) shape(document) { … }`
+parses, validates, prints, and threads end-to-end; a `json` field works
+across every backend; the migrations layer emits the right table per
+saving shape (relational / embedded / document); **.NET emits all three
+shapes**, and TS/.NET emit `document`.
 
 ### Missing (not yet built)
 
-- **Slice D — document persistence emission.** The piece that actually
-  *consumes* `normalised(false)` / `persistedAs(eventLog)`:
-  - a **Marten** `PersistenceAdapter` (.NET event-sourced + document
-    store) on the existing `PersistenceAdapter` seam;
-  - EF Core `.ToJson()` mapping for `persistedAs(state)` + `normalised(false)`;
-  - the document table shape `(id, data jsonb, version)` in
-    `migrations-builder` / `sql-pg`;
-  - snapshot/projection rehydration for the `eventLog` + document case.
-  Until D lands, `normalised(false)` is **carried but inert** (the
-  `UNWIRED_KNOBS` warning says so).
+- **`embedded` on Drizzle (TS) + Phoenix (Ash) — the remaining emitters.**
+  The shape surface, IR, migration shape, and the .NET emitter all do
+  `embedded`; the two other backends don't yet (they emit a
+  `shape(embedded)` aggregate *relationally* for now — compiles, just not
+  folded).
+  - **Drizzle (TS):** a third repository builder — root hydrated/saved
+    from columns (the relational path) + each containment (de)serialised
+    from its jsonb column (the document-part path); finds stay real SQL on
+    the root. Schema emits root columns + jsonb-per-containment (the
+    `emitEmbeddedTable` shape, drafted then reverted pending the repo).
+  - **Phoenix (Ash):** contained parts become `data_layer: :embedded`
+    resources (`attribute :items, {:array, WishItem}`); root attributes
+    stay columns. This now maps cleanly onto the **shared** embedded
+    migration table (no fork — the migration shape is per-strategy, and
+    `embeddedTableForAggregate` already emits root columns + jsonb-per-
+    containment for every backend). Add a `phoenix-build` fixture.
+- **`supportedShapes` — two-tier validator.** Capability (error: the
+  backend has no emitter for that shape yet) vs idiomaticity (warning: it
+  *can* emit it but it's a poor fit). Lets Ash eventually offer
+  `document` as a single `:map` resource — **allowed but warned
+  non-idiomatic** — rather than being permanently "unsupported". The
+  validator is *not* what avoids the migration fork (the per-strategy
+  shape is); it's purely UX.
+- **`document` on Phoenix (Ash)** — a single `:map` attribute resource
+  (the opaque blob). Implementable, **non-idiomatic** (loses Ash's
+  attribute/calculation/relationship value); a later allowed-but-warned
+  addition. Not scheduled.
+- **`eventLog` + document/embedded** (event stream + snapshot
+  rehydration, Marten's other half) needs the fold/apply logic from
+  **appliers** (`workflow-and-applier.md`); deferred behind that feature.
 - **Event-sourcing body-discipline validator** (emit/apply, no direct
-  `:=` mutation). Owned by `workflow-and-applier.md` (appliers aren't in
-  the grammar yet); gated on `persistedAs(eventLog)`. Not part of the
-  B rename.
+  `:=` mutation). Owned by `workflow-and-applier.md`; gated on
+  `persistedAs(eventLog)`.
 - **Option 2 — dedicated `document` value-type** (deferred), and
   **Option 3 — per-containment `as document/table`** (dropped).
-- **Open sub-questions** — all resolved (§8); they shape Slice D:
-  cadence reuses the `snapshot` binding's `every:`; `normalised` is
-  **per-projection** (per-binding `dataSource normalised:`, aggregate
-  header is the default); **Postgres-JSONB only** (no `mongo`); no
-  `json<T>`.
+- **Open sub-questions** — all resolved (§8): cadence reuses the
+  `snapshot` binding's `every:`; the shape is **per-projection** (per-
+  binding `dataSource shape:`, aggregate header is the default);
+  **Postgres-JSONB only** (no `mongo`); no `json<T>`.
 
 ---
 

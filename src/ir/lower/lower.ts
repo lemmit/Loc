@@ -13,6 +13,7 @@ import type {
   ConnectionSource,
   Containment,
   Create,
+  Criterion,
   Deployable,
   DerivedProp,
   Destroy,
@@ -56,6 +57,7 @@ import {
   isComponent,
   isContainment,
   isCreate,
+  isCriterion,
   isDeployable,
   isDerivedProp,
   isDestroy,
@@ -105,6 +107,7 @@ import type {
   ConnectionSourceIR,
   ContainmentIR,
   ContextStampIR,
+  CriterionIR,
   DataSourceIR,
   DataSourceKind,
   DeployableIR,
@@ -163,6 +166,7 @@ import { lowerStatement } from "./lower-stmt.js";
 import {
   cstText,
   type Env,
+  findEntityByName,
   inAggregate,
   inPart,
   inValueObject,
@@ -557,7 +561,7 @@ function lowerSystem(sys: System): SystemIR {
             }
           : {}),
         ...(d.readonly ? { readonly: true } : {}),
-        ...(d.normalised == null ? {} : { normalised: d.normalised === "true" }),
+        ...(d.shape == null ? {} : { shape: d.shape as DataSourceIR["shape"] }),
         ...(d.config.length ? { config: d.config.map(lowerConfigEntry) } : {}),
       }),
     );
@@ -1251,6 +1255,7 @@ function lowerContext(
   const repositories: RepositoryIR[] = [];
   const workflows: WorkflowIR[] = [];
   const views: ViewIR[] = [];
+  const criteria: CriterionIR[] = [];
   // Context-level capabilities propagate to every aggregate inside.
   // Lower them here in the context env (no `this` binding); each
   // aggregate's lowering re-uses the lowered IR directly.  The `this`
@@ -1265,6 +1270,7 @@ function lowerContext(
     else if (isRepository(m)) repositories.push(lowerRepository(m, user, modulePermissions));
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
     else if (isView(m)) views.push(lowerView(m, env));
+    else if (isCriterion(m)) criteria.push(lowerCriterion(m, env));
   }
   return {
     name: ctx.name,
@@ -1275,6 +1281,32 @@ function lowerContext(
     repositories,
     workflows,
     views,
+    criteria,
+  };
+}
+
+/** Lower a `criterion <Name>(params) of <T> = <expr>` declaration to
+ *  its IR record.  The predicate body is lowered in the criterion's own
+ *  scope: an aggregate candidate binds `this` (and bare field names) to
+ *  the candidate aggregate; parameters become `param` locals.  Use-sites
+ *  do not read this body — they inline a freshly-substituted copy via
+ *  `lower-expr.ts` — but it is retained for tooling, traceability and the
+ *  forthcoming `Repo.findAll(criterion, …)` surface. */
+function lowerCriterion(c: Criterion, env: Env): CriterionIR {
+  const targetType = lowerType(c.target);
+  let bodyEnv: Env = { ...env, locals: new Map() };
+  if (targetType.kind === "entity") {
+    const candidate = findEntityByName(env, targetType.name);
+    if (candidate && isAggregate(candidate)) bodyEnv = inAggregate(bodyEnv, candidate);
+  }
+  for (const p of c.params) {
+    bodyEnv = withLocal(bodyEnv, p.name, "param", lowerType(p.type));
+  }
+  return {
+    name: c.name,
+    params: c.params.map((p) => ({ name: p.name, type: lowerType(p.type) })),
+    targetType,
+    body: lowerExpr(c.body, bodyEnv),
   };
 }
 
@@ -1366,7 +1398,7 @@ function lowerAggregate(
     contextStamps: stamps.length > 0 ? stamps : undefined,
     implementsCapabilities: implementsCaps.length > 0 ? implementsCaps : undefined,
     persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,
-    normalised: agg.normalised == null ? undefined : agg.normalised === "true",
+    savingShape: (agg.shape as import("../types/loom-ir.js").SavingShape | undefined) ?? undefined,
   };
 }
 

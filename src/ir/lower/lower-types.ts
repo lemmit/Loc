@@ -25,6 +25,7 @@ import {
 } from "../../language/generated/ast.js";
 import type {
   DataSourceKind,
+  ExprIR,
   IdValueType,
   PermissionDeclIR,
   TypeIR,
@@ -55,6 +56,18 @@ export interface Env {
    *  resolve the magic `currentUser` identifier.  Undefined for
    *  systems / loose contexts that don't declare a user block. */
   user?: UserIR;
+  /** Active criterion-parameter substitutions, set only while inlining
+   *  a `criterion` body at a use site (see `inlineCriterion` in
+   *  lower-expr.ts).  Maps each parameter name to the caller's already-
+   *  lowered argument expression; a bare reference to the parameter in
+   *  the body resolves directly to that expression.  Undefined outside a
+   *  criterion inline. */
+  criterionArgs?: Map<string, ExprIR>;
+  /** Names of the criteria currently being inlined, outermost first.
+   *  Guards against `criterion A = B` / `criterion B = A` cycles — a
+   *  reference to a name already on the stack is left unresolved for the
+   *  validator (`loom.criterion-cycle`) to report. */
+  criterionStack?: string[];
   /** Module-scoped permission catalogue — populated when the
    *  enclosing context lives inside a module that declares one or
    *  more `permissions { ... }` blocks.  Drives resolution of the

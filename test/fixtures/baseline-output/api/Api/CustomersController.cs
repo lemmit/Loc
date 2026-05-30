@@ -58,7 +58,7 @@ public sealed class CustomersController : ControllerBase
     [HttpGet("by_email")]
     [ProducesResponseType(typeof(CustomerResponse), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
-    public async Task<ActionResult<CustomerResponse?>> ByEmailCustomer([FromQuery] string email)
+    public async Task<ActionResult<CustomerResponse?>> ByEmailCustomer([FromQuery] [Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] string email)
     {
         var result = await _mediator.Send(new ByEmailQuery(email));
         return result is null ? NotFound() : Ok(result);

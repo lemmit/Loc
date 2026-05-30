@@ -16,6 +16,11 @@ export {
   renderQuery,
   renderQueryHandler,
 } from "./emit/cqrs.js";
+export {
+  renderDocumentConfiguration,
+  renderDocumentPoco,
+  renderSnapshots,
+} from "./emit/document.js";
 export { renderRequestDtos, renderResponseDtos } from "./emit/dto.js";
 export { renderConfiguration, renderDbContext } from "./emit/efcore.js";
 export { renderEntity } from "./emit/entity.js";
@@ -37,6 +42,7 @@ export {
   renderTestCsproj,
 } from "./emit/program.js";
 export {
+  renderDocumentRepositoryImpl,
   renderRepositoryImpl,
   renderRepositoryInterface,
 } from "./emit/repository.js";

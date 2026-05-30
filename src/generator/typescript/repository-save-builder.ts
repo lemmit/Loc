@@ -161,7 +161,7 @@ function provColumnEntries(
     .map((f) => ({ fieldName: `${f.name}_provenance`, expr: `${varExpr}.${f.name}_provenance` }));
 }
 
-function projectFieldEntries(
+export function projectFieldEntries(
   f: FieldIR,
   varExpr: string,
   ctx: BoundedContextIR,
@@ -207,7 +207,7 @@ function projectValueEntries(
   return [{ fieldName, expr: valueExpr }];
 }
 
-function projectionObject(
+export function projectionObject(
   _varExpr: string,
   entries: { fieldName: string; expr: string }[],
 ): string {

@@ -21,10 +21,17 @@ import type {
   DataSourceIR,
   DataSourceKind,
   PersistenceStrategy,
+  SavingShape,
   StorageIR,
   StorageKind,
 } from "../../ir/types/loom-ir.js";
 import type { EmitCtx, Lines } from "./types.js";
+
+// `SavingShape` (the `shape(relational | embedded | document)` axis) is
+// defined canonically in the IR layer; re-exported here so adapter
+// authors import it from the persistence surface alongside
+// `PersistenceAdapter`.
+export type { SavingShape };
 
 export interface PersistenceAdapter {
   /** Registry key — what `persistence: <name>` in source resolves
@@ -32,6 +39,12 @@ export interface PersistenceAdapter {
   readonly name: string;
   /** Aggregate persistence strategies this library can host. */
   readonly supportedStrategies: readonly PersistenceStrategy[];
+  /** Saving shapes this adapter can emit (D-DOCUMENT-AXIS).  Omitted ⇒
+   *  `["relational"]` only.  An adapter advertising `"embedded"` /
+   *  `"document"` can host a `shape(embedded)` / `shape(document)`
+   *  aggregate; the validator rejects a `shape(…)` the target backend
+   *  doesn't list (e.g. `document` on an Ash target). */
+  readonly supportedShapes?: readonly SavingShape[];
   /** Per-binding capability check.  The validator calls this for
    *  every `dataSource X { for:, kind:, use: }` to reject obviously
    *  wrong combinations (e.g. routing an `eventLog` to redis through

@@ -127,6 +127,38 @@ export function propertyTypes(spec: OpenApiSpec, schemaName: string): Map<string
   return out;
 }
 
+/** The `format` of a property schema, peeled through nullable unions —
+ *  `undefined` when none is declared.  Drives the format check, which is
+ *  deliberately conservative: it only flags when BOTH backends declare a
+ *  format and they DIFFER (e.g. `date-time` vs `date`).  A format declared
+ *  on one side but omitted on the other is the dominant dialect asymmetry
+ *  (Swashbuckle emits `int32`/`uuid` where Ash/zod omit it) and is *not*
+ *  flagged — that would be noise, not a contract break. */
+function propFormat(schema: unknown): string | undefined {
+  if (!schema || typeof schema !== "object") return undefined;
+  const s = schema as { format?: string; oneOf?: unknown[]; anyOf?: unknown[] };
+  const union = s.oneOf ?? s.anyOf;
+  if (Array.isArray(union)) {
+    const nonNull = union.filter((m) => (m as { type?: string }).type !== "null");
+    if (nonNull.length === 1) return propFormat(nonNull[0]);
+  }
+  return s.format;
+}
+
+/** Per-property declared `format` for a named component schema — only props
+ *  that declare one (see `propFormat`). */
+export function propertyFormats(spec: OpenApiSpec, schemaName: string): Map<string, string> {
+  const schema = spec.components?.schemas?.[schemaName];
+  const props = (schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {};
+  const out = new Map<string, string>();
+  for (const [k, v] of Object.entries(props)) {
+    if (k.endsWith("_provenance")) continue;
+    const f = propFormat(v);
+    if (f !== undefined) out.set(k, f);
+  }
+  return out;
+}
+
 /**
  * All named component schemas in a spec, minus framework-emitted noise
  * (e.g. Swashbuckle's `ProblemDetails`, OpenApiSpex's internal types) that
@@ -478,6 +510,45 @@ export function pathParamSignatures(spec: OpenApiSpec): Map<string, string> {
   return out;
 }
 
+/**
+ * Per-operation *query*-parameter signature.  Unlike path parameters,
+ * query-parameter NAMES are part of the contract (a client sends
+ * `?name=…`), so they're compared by name → type → required.  Each
+ * operation's signature is the name-sorted list of
+ * `<name>:<type>:<req|opt>` entries (order-independent, since dialects
+ * don't agree on parameter order).
+ *
+ * `format` is folded out here for the same reason as `propTypeSig` — it's
+ * the most dialect-divergent facet; the structural contract is name + type
+ * + required.  An operation with no query parameters gets an empty
+ * signature so "declares but other omits" surfaces as a mismatch.
+ */
+export function queryParamSignatures(spec: OpenApiSpec): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [p, item] of Object.entries(spec.paths ?? {})) {
+    if (isInfraPath(p)) continue;
+    for (const [m, raw] of Object.entries(item)) {
+      const method = m.toUpperCase();
+      if (!HTTP_METHODS.includes(method)) continue;
+      const op = raw as {
+        parameters?: Array<{
+          in?: string;
+          name?: string;
+          required?: boolean;
+          schema?: { type?: string };
+        }>;
+      };
+      const sigs = (op.parameters ?? [])
+        .filter((q) => q.in === "query")
+        .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
+        .map((q) => `${q.name ?? "?"}:${q.schema?.type ?? "any"}:${q.required ? "req" : "opt"}`)
+        .join(",");
+      out.set(`${method} ${normalisePath(p)}`, sigs);
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Cross-backend parity diff (pure)
 //
@@ -514,6 +585,14 @@ export interface ParityDiff {
    * `integer` on another (folded over nullable/format dialect noise; see
    * `propTypeSig`).  Closes the same-name-different-type blind spot. */
   propertyTypeDiffs: string[];
+  /** Per-property `format` drift — only where BOTH backends declare a
+   * format and they differ (`date-time` vs `date`).  One-sided format is
+   * dialect asymmetry, not a contract break, and is not flagged. */
+  propertyFormatDiffs: string[];
+  /** Per-op query-parameter drift on the intersection — a query param
+   * present/typed/required differently across backends (compared by name;
+   * see `queryParamSignatures`). */
+  queryParamDiffs: string[];
   /** Per-op path-parameter type drift on the intersection (e.g. one
    * backend declares `{type: string}`, another `{type: string, format:
    * uuid}`). */
@@ -588,6 +667,7 @@ export function diffSpecs(
   const fieldDiffs: string[] = [];
   const requiredDiffs: string[] = [];
   const propertyTypeDiffs: string[] = [];
+  const propertyFormatDiffs: string[] = [];
   for (const schema of sharedSchemas) {
     const refFields = fieldSet(ref.spec, schema);
     const otherFields = fieldSet(other.spec, schema);
@@ -608,6 +688,16 @@ export function diffSpecs(
         propertyTypeDiffs.push(
           `${schema}.${prop}: ${ref.name}=${refSig}, ${other.name}=${otherSig}`,
         );
+      }
+    }
+    // Per-property format drift — only where BOTH sides declare a format
+    // and they differ (one-sided format is dialect asymmetry, not flagged).
+    const refFmts = propertyFormats(ref.spec, schema);
+    const otherFmts = propertyFormats(other.spec, schema);
+    for (const [prop, refF] of refFmts) {
+      const otherF = otherFmts.get(prop);
+      if (otherF !== undefined && refF !== otherF) {
+        propertyFormatDiffs.push(`${schema}.${prop}: ${ref.name}=${refF}, ${other.name}=${otherF}`);
       }
     }
     // Intersection-based required diff: if a field doesn't exist on a
@@ -637,6 +727,21 @@ export function diffSpecs(
     const otherSig = otherParams.get(op) ?? "";
     if (refSig !== otherSig) {
       paramTypeDiffs.push(`${op}: ${ref.name}=[${refSig}], ${other.name}=[${otherSig}]`);
+    }
+  }
+
+  // Per-op query-parameter drift on the op intersection — name/type/required
+  // of `in: query` params (the parameterized finds' filters), which the
+  // path-param dimension deliberately doesn't cover.
+  const refQuery = queryParamSignatures(ref.spec);
+  const otherQuery = queryParamSignatures(other.spec);
+  const queryParamDiffs: string[] = [];
+  for (const op of refQuery.keys()) {
+    if (!otherQuery.has(op)) continue;
+    const r = refQuery.get(op) ?? "";
+    const o = otherQuery.get(op) ?? "";
+    if (r !== o) {
+      queryParamDiffs.push(`${op}: ${ref.name}=[${r}], ${other.name}=[${o}]`);
     }
   }
 
@@ -733,7 +838,9 @@ export function diffSpecs(
     fieldDiffs,
     requiredDiffs,
     propertyTypeDiffs,
+    propertyFormatDiffs,
     paramTypeDiffs,
+    queryParamDiffs,
     requestBodyDiffs,
     responseBodyDiffs,
     operationIdDiffs,
@@ -753,7 +860,9 @@ export function isCleanDiff(diff: ParityDiff): boolean {
     diff.fieldDiffs.length === 0 &&
     diff.requiredDiffs.length === 0 &&
     diff.propertyTypeDiffs.length === 0 &&
+    diff.propertyFormatDiffs.length === 0 &&
     diff.paramTypeDiffs.length === 0 &&
+    diff.queryParamDiffs.length === 0 &&
     diff.requestBodyDiffs.length === 0 &&
     diff.responseBodyDiffs.length === 0 &&
     diff.operationIdDiffs.length === 0 &&

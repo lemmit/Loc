@@ -374,14 +374,29 @@ export interface AggregateIR {
    * round-trip. */
   persistedAs?: PersistenceStrategy;
   /** Saving shape of the materialised read model / snapshot
-   * (D-DOCUMENT-AXIS, `normalised(true | false)` header modifier).
-   * `false` → store the aggregate as one JSON document instead of
-   * normalised tables.  Omitted when not declared (default `true`).
-   * Carried through the IR; the document persistence *emission* is a
-   * later slice (Marten / EF `.ToJson()`), so today this only records
-   * intent. */
-  normalised?: boolean;
+   * (D-DOCUMENT-AXIS, `shape(relational | embedded | document)` header
+   * modifier).  One of three points on the relational↔document
+   * spectrum (see {@link SavingShape}).  Omitted when not declared
+   * (default `relational`); a per-projection `dataSource shape:` knob
+   * can override it (see {@link effectiveSavingShape}). */
+  savingShape?: SavingShape;
 }
+
+/** How an aggregate's hierarchy is physically laid out — the saving-shape
+ *  axis of D-DOCUMENT-AXIS (orthogonal to {@link PersistenceStrategy},
+ *  the truth-kind axis).  Three points on the relational↔document
+ *  spectrum:
+ *    - `relational` — table-per-entity: root columns + child tables +
+ *      join tables.  The default.  Queryable everywhere.
+ *    - `embedded` — queryable root row (its scalar / `X id` fields stay
+ *      columns) with contained parts folded into JSONB columns; no child
+ *      tables.  EF owned-types `.ToJson()`, Drizzle jsonb column, Ash
+ *      embedded resources.
+ *    - `document` — the whole aggregate (root included) serialised as one
+ *      opaque JSONB blob (`id, data, version`); schema-flexible,
+ *      load-by-id (Marten-style).  Not every backend supports it (see
+ *      `PersistenceAdapter.supportedShapes`). */
+export type SavingShape = "relational" | "embedded" | "document";
 
 /** The aggregate's primary truth kind.  Named to match the
  *  `dataSource` `kind` vocabulary (`state` / `eventLog`); surfaced in
@@ -458,6 +473,32 @@ export interface RepositoryIR {
   finds: FindIR[];
 }
 
+/** A named, parameterised, pure boolean predicate over a candidate
+ *  type — the Specification Pattern (Evans / Spring-Data style).  See
+ *  docs/criterion.md.
+ *
+ *  A criterion is *inlined* wherever it is referenced from a boolean
+ *  expression position (`view ... where`, repository `find ... where`,
+ *  an `invariant`, an operation guard): the use-site re-lowers the
+ *  predicate body with its parameters substituted and the candidate
+ *  rebound to the host receiver, so no backend consumes `CriterionIR`
+ *  directly today.  The IR record is retained for tooling, traceability
+ *  and the forthcoming `Repo.findAll(criterion, …)` surface. */
+export interface CriterionIR {
+  name: string;
+  params: ParamIR[];
+  /** The `of <T>` candidate type.  `kind: "entity"` for an aggregate
+   *  candidate; `kind: "primitive", name: "bool"` for a pure ambient
+   *  predicate with no candidate. */
+  targetType: TypeIR;
+  /** The lowered predicate body, lowered in the criterion's own scope
+   *  (parameters as `param` refs, candidate fields as `this-prop`).
+   *  Use-sites inline a freshly-substituted copy rather than reading
+   *  this; it exists for tooling / traceability / future query
+   *  emission. */
+  body: ExprIR;
+}
+
 export interface BoundedContextIR {
   name: string;
   enums: EnumIR[];
@@ -467,6 +508,8 @@ export interface BoundedContextIR {
   repositories: RepositoryIR[];
   workflows: WorkflowIR[];
   views: ViewIR[];
+  /** Named predicate specifications declared in this context. */
+  criteria: CriterionIR[];
 }
 
 /** A saved, strongly-typed query over one source aggregate.  Two
@@ -1323,11 +1366,10 @@ export interface DataSourceIR {
   isolationLevel?: "readUncommitted" | "readCommitted" | "repeatableRead" | "serializable";
   readonly?: boolean;
   /** Saving shape of the materialised read model this binding routes
-   *  (D-DOCUMENT-AXIS, `normalised:` knob).  `false` → the `state` /
-   *  `snapshot` data is laid out as one JSON document.  Omitted →
-   *  default `true`.  Carried through the IR; emission is a later
-   *  slice. */
-  normalised?: boolean;
+   *  (D-DOCUMENT-AXIS, `shape:` knob).  Per-projection override of the
+   *  aggregate header's `shape(…)` (see {@link SavingShape} /
+   *  {@link effectiveSavingShape}).  Omitted → the header decides. */
+  shape?: SavingShape;
   /** Generic vendor-parameter map for the binding (RFC §3.2). */
   config?: readonly ConfigEntryIR[];
 }
@@ -1374,6 +1416,23 @@ export interface NeedIR {
 // database (`needsDb: true`) and never declares `targets:` —
 // validator enforces both.
 export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView";
+
+/** Saving shapes (D-DOCUMENT-AXIS `shape(…)`) each backend platform can
+ *  EMIT today — the single source of truth for the `supportedShapes`
+ *  capability check.  A `shape(…)` not listed for the target platform is
+ *  a hard error (the backend has no emitter for it yet).  Keyed by the
+ *  bareword family (a `family@version` pin resolves via `platformFamily`
+ *  in the validator).  Frontend platforms (`react`/`static`) own no
+ *  persistence and are omitted.  Consumed by both the IR validator
+ *  (`validateSavingShapeSupport`) and the generator persistence adapters
+ *  (`PersistenceAdapter.supportedShapes`). */
+export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingShape[]>> = {
+  dotnet: ["relational", "embedded", "document"],
+  hono: ["relational", "embedded", "document"],
+  // Phoenix/Ash emits relational today; embedded (Ash embedded
+  // resources) + document (single `:map`) are follow-ups.
+  phoenixLiveView: ["relational"],
+};
 
 export interface DeployableIR {
   name: string;

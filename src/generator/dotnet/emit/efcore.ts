@@ -28,19 +28,38 @@ function contextAssociations(ctx: EnrichedBoundedContextIR): AssociationIR[] {
   return ctx.aggregates.flatMap((a) => a.associations);
 }
 
-export function renderDbContext(ctx: EnrichedBoundedContextIR, ns: string): string {
+export function renderDbContext(
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+  /** Names of document-shaped (`shape(document)`) aggregates in this
+   *  context.  Each contributes a `DbSet<<Agg>Document>` + the document
+   *  configuration instead of the normalised entity DbSet/config, and
+   *  its reference-collection join tables are skipped (they fold into
+   *  the JSON document).  Empty / omitted ⇒ byte-identical with the
+   *  all-normalised output. */
+  documentAggs: ReadonlySet<string> = new Set(),
+): string {
+  const isDoc = (name: string) => documentAggs.has(name);
+  const anyDoc = ctx.aggregates.some((a) => isDoc(a.name));
   const aggUsings = ctx.aggregates.map((a) => `using ${ns}.Domain.${plural(a.name)};`);
-  const dbSets = ctx.aggregates.map(
-    (a) => `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
+  if (anyDoc) aggUsings.push(`using ${ns}.Infrastructure.Persistence.Documents;`);
+  const dbSets = ctx.aggregates.map((a) =>
+    isDoc(a.name)
+      ? `    public DbSet<${a.name}Document> ${plural(upperFirst(a.name))} => Set<${a.name}Document>();`
+      : `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
   );
-  const applyConfigs = ctx.aggregates.map(
-    (a) => `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
+  const applyConfigs = ctx.aggregates.map((a) =>
+    isDoc(a.name)
+      ? `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}DocumentConfiguration());`
+      : `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
   );
   // Join-entity DbSets + their ApplyConfiguration entries.  Each
   // reference-collection field on an aggregate produces one join
   // entity (the join table lives outside any single aggregate's
   // configuration so it can serve queries against either side).
-  const joinAssocs = contextAssociations(ctx);
+  // Document aggregates fold their reference collections into the JSON
+  // document — no join table, so drop their associations here.
+  const joinAssocs = contextAssociations(ctx).filter((a) => !isDoc(a.ownerAgg));
   const joinUsings =
     joinAssocs.length > 0 ? [`using ${ns}.Infrastructure.Persistence.JoinTables;`] : [];
   const joinDbSets = joinAssocs.map((a) => {
@@ -92,7 +111,7 @@ export function renderConfiguration(
    *  snake-case plural ("tenant_a_orders").  Absent today on systems
    *  that don't declare any dataSource bindings — output stays
    *  byte-identical when both fields are undefined. */
-  options: { schema?: string; tablePrefix?: string } = {},
+  options: { schema?: string; tablePrefix?: string; embedded?: boolean } = {},
 ): string {
   const fieldConfigs = agg.fields.flatMap((f) => fieldConfigLines(f, "        ", "b"));
   const containmentLines = agg.contains.flatMap((c) => containmentConfigLines(c, agg, options));
@@ -234,13 +253,36 @@ function fieldConfigLines(f: FieldIR, indent: string, builder: string): string[]
 function containmentConfigLines(
   c: ContainmentIR,
   agg: AggregateIR,
-  options: { schema?: string; tablePrefix?: string } = {},
+  options: { schema?: string; tablePrefix?: string; embedded?: boolean } = {},
 ): string[] {
+  const part = agg.parts.find((p) => p.name === c.partName);
+  const partFields = part?.fields ?? [];
+  // Embedded (`shape(embedded)`) fold: the containment serialises into a
+  // single JSONB column on the root via EF owned-types `.ToJson(...)` —
+  // no child table.  The nested owned entities need no key/FK/table;
+  // `HasConversion` on their id/enum/VO fields still applies inside JSON.
+  if (options.embedded) {
+    const jsonCol = snake(c.name);
+    const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, "            ", "o"));
+    if (!c.collection) {
+      return [
+        `        b.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)}, o => {`,
+        `            o.ToJson("${jsonCol}");`,
+        ...partFieldLines,
+        "        });",
+      ];
+    }
+    return [
+      `        b.Ignore(x => x.${upperFirst(c.name)});`,
+      `        b.OwnsMany<${c.partName}>("_${c.name}", o => {`,
+      `            o.ToJson("${jsonCol}");`,
+      ...partFieldLines,
+      "        });",
+    ];
+  }
   if (!c.collection) {
     return [`        b.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)});`];
   }
-  const part = agg.parts.find((p) => p.name === c.partName);
-  const partFields = part?.fields ?? [];
   const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, "            ", "o"));
   return [
     "        // Ignore the public read-accessor and tell EF to map the",

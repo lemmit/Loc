@@ -9,7 +9,11 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
-import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
+import {
+  effectiveSavingShape,
+  isDocumentShaped,
+  resolveDataSourceConfig,
+} from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import type { EmitCtx } from "../_adapters/index.js";
@@ -30,6 +34,9 @@ import {
   renderDbContext,
   renderDockerfile,
   renderDockerignore,
+  renderDocumentConfiguration,
+  renderDocumentPoco,
+  renderDocumentRepositoryImpl,
   renderEntity,
   renderEnum,
   renderEvent,
@@ -44,6 +51,7 @@ import {
   renderProgram,
   renderRepositoryImpl,
   renderRepositoryInterface,
+  renderSnapshots,
   renderTestCsproj,
   renderTestsFile,
   renderValueObject,
@@ -193,6 +201,7 @@ function emitProjectFromContexts(
     repositories: contexts.flatMap((c) => c.repositories),
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
+    criteria: contexts.flatMap((c) => c.criteria),
   };
   // Auth files — emitted only when the deployable opts in
   // via `auth: required` AND the system declares a user block (the
@@ -210,7 +219,10 @@ function emitProjectFromContexts(
   // hand-written stamping logic).
   emitStampingInterceptor(merged, ns, out);
   const usesStamping = merged.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
-  out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
+  out.set(
+    "Infrastructure/Persistence/AppDbContext.cs",
+    renderDbContext(merged, ns, documentAggNames(contexts, system?.sys)),
+  );
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
   // Program.cs registrations only when at least one aggregate
@@ -427,14 +439,28 @@ function emitAggregate(
 ): void {
   const aggFolder = plural(agg.name);
   const repo = findRepoFor(ctx, agg.name);
+  // dataSource resolution drives BOTH the table-mapping knobs (schema /
+  // tablePrefix) and the saving SHAPE.  `isDoc` (shape(document))
+  // switches this aggregate onto the document-persistence path: a
+  // single JSONB column + STJ round-trip, no normalised entity table,
+  // no join tables.  In the legacy single-context entry there's no
+  // emitCtx/sys, so resolution falls back to the aggregate header's
+  // `normalised(…)` (the default).
+  const ds = emitCtx ? resolveDataSourceConfig(agg, ctx, emitCtx.sys) : undefined;
+  const shape = effectiveSavingShape(agg, ds);
+  const isDoc = shape === "document";
+  const isEmbedded = shape === "embedded";
 
   for (const part of agg.parts) {
     out.set(
       `Domain/${aggFolder}/${part.name}.cs`,
-      renderEntity(part, false, ns, agg.name, emitTrace),
+      renderEntity(part, false, ns, agg.name, emitTrace, isDoc),
     );
   }
-  out.set(`Domain/${aggFolder}/${agg.name}.cs`, renderEntity(agg, true, ns, agg.name, emitTrace));
+  out.set(
+    `Domain/${aggFolder}/${agg.name}.cs`,
+    renderEntity(agg, true, ns, agg.name, emitTrace, isDoc),
+  );
   // Views whose source is this aggregate become parameterless,
   // filtered, list-returning finds on the repository.  Synthesised
   // here so all the existing find emission paths (interface,
@@ -451,36 +477,58 @@ function emitAggregate(
   const findBodies = buildFindBodies(agg, repoWithViews, repoImplUsings);
   out.set(
     `Infrastructure/Repositories/${agg.name}Repository.cs`,
-    renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
-      extraUsings: [...repoImplUsings].sort(),
-      emitTrace,
-    }),
+    isDoc
+      ? renderDocumentRepositoryImpl(agg, repoWithViews, ns, findBodies, {
+          extraUsings: [...repoImplUsings].sort(),
+        })
+      : renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
+          extraUsings: [...repoImplUsings].sort(),
+          emitTrace,
+        }),
   );
-  // dataSource-driven EF Core configuration: when the system declares
-  // a matching `dataSource X { for: <ctx>, kind: state|eventLog, ... }`
-  // binding, its `schema` (defaulted to `snake(ctx.name)` when DSL
-  // omits it) / `tablePrefix` flow into the per-aggregate ToTable args.
-  // Falls back to the existing default-shape output when no binding
-  // exists (byte-identical with pre-dataSource emit).
-  const ds = emitCtx ? resolveDataSourceConfig(agg, ctx, emitCtx.sys) : undefined;
-  out.set(
-    `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
-    renderConfiguration(agg, ns, ctx, {
-      schema: ds?.schema,
-      tablePrefix: ds?.tablePrefix,
-    }),
-  );
-  // One file per reference-collection association: the join entity
-  // class + its EF Core configuration (composite PK, ordinal, FK
-  // converters).  Skipped silently when the aggregate has no
-  // `Id<T>[]` fields.
-  for (const assoc of agg.associations) {
-    const cls = joinEntityName(assoc);
-    out.set(`Infrastructure/Persistence/JoinTables/${cls}.cs`, renderJoinEntity(assoc, ns));
+  if (isDoc) {
+    // Document-shaped persistence: a `<Agg>Document` record (one JSONB
+    // column) + its EF configuration + the snapshot DTOs the repository
+    // (de)serialises.  No normalised entity configuration, no join
+    // tables — contained parts + references fold into the document.
     out.set(
-      `Infrastructure/Persistence/Configurations/${cls}Configuration.cs`,
-      renderJoinEntityConfiguration(assoc, ns),
+      `Infrastructure/Persistence/Documents/${agg.name}Document.cs`,
+      renderDocumentPoco(agg, ns),
     );
+    out.set(
+      `Infrastructure/Persistence/Configurations/${agg.name}DocumentConfiguration.cs`,
+      renderDocumentConfiguration(agg, ns, { schema: ds?.schema, tablePrefix: ds?.tablePrefix }),
+    );
+    out.set(`Domain/${aggFolder}/${agg.name}Snapshots.cs`, renderSnapshots(agg, ns));
+  } else {
+    // Relational (default) AND embedded both use the normal entity +
+    // repository + DbSet<Agg>; they differ only in the EF configuration:
+    // `embedded` folds each containment into a JSONB column via owned-
+    // types `.ToJson(...)` (no child table), so its `OwnsMany/OwnsOne`
+    // calls carry `.ToJson()` and the join tables are skipped.
+    // dataSource-driven schema / tablePrefix knobs flow through both.
+    out.set(
+      `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
+      renderConfiguration(agg, ns, ctx, {
+        schema: ds?.schema,
+        tablePrefix: ds?.tablePrefix,
+        embedded: isEmbedded,
+      }),
+    );
+    // One file per reference-collection association: the join entity
+    // class + its EF Core configuration (composite PK, ordinal, FK
+    // converters).  Skipped for embedded (reference collections fold
+    // into a JSONB column) and when the aggregate has no `Id<T>[]` fields.
+    if (!isEmbedded) {
+      for (const assoc of agg.associations) {
+        const cls = joinEntityName(assoc);
+        out.set(`Infrastructure/Persistence/JoinTables/${cls}.cs`, renderJoinEntity(assoc, ns));
+        out.set(
+          `Infrastructure/Persistence/Configurations/${cls}Configuration.cs`,
+          renderJoinEntityConfiguration(assoc, ns),
+        );
+      }
+    }
   }
   // CQRS emission — adapter-dispatched when an EmitCtx is available
   // (system mode), direct call in the legacy single-context path.
@@ -512,7 +560,10 @@ function emitInfrastructure(
   out: Map<string, string>,
   usesValidators: boolean,
 ): void {
-  out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(ctx, ns));
+  out.set(
+    "Infrastructure/Persistence/AppDbContext.cs",
+    renderDbContext(ctx, ns, documentAggNames([ctx])),
+  );
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set("Api/ListResponseWrapperFilter.cs", renderListWrapperFilter(ns, listWrapperPairs([ctx])));
@@ -574,6 +625,23 @@ function emitTestProject(ctx: BoundedContextIR, ns: string, out: Map<string, str
 
 function findRepoFor(ctx: BoundedContextIR, name: string): RepositoryIR | undefined {
   return ctx.repositories.find((r) => r.aggregateName === name);
+}
+
+/** Names of document-shaped (`shape(document)`) aggregates across the
+ *  given contexts, resolved the same way `emitAggregate` does (binding
+ *  wins, aggregate header is the default).  `sys` is absent in the
+ *  legacy single-context entry, so resolution falls back to the
+ *  header.  Consumed by `renderDbContext` to route each aggregate's
+ *  DbSet + configuration. */
+function documentAggNames(contexts: EnrichedBoundedContextIR[], sys?: SystemIR): Set<string> {
+  const names = new Set<string>();
+  for (const ctx of contexts) {
+    for (const agg of ctx.aggregates) {
+      const ds = sys ? resolveDataSourceConfig(agg, ctx, sys) : undefined;
+      if (isDocumentShaped(agg, ds)) names.add(agg.name);
+    }
+  }
+  return names;
 }
 
 /** Synthesise a repository that includes the user-declared finds

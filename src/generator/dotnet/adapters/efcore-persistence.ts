@@ -10,7 +10,12 @@
 // into one entry per platform — no semantic change to the output.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, DataSourceIR, StorageIR } from "../../../ir/types/loom-ir.js";
+import {
+  type AggregateIR,
+  type DataSourceIR,
+  PLATFORM_SAVING_SHAPES,
+  type StorageIR,
+} from "../../../ir/types/loom-ir.js";
 import type { EmitCtx, Lines, PersistenceAdapter } from "../../_adapters/index.js";
 import { renderConfiguration, renderDbContext } from "../emit/efcore.js";
 import { emitDotnetMigrations } from "../emit/migrations.js";
@@ -41,6 +46,11 @@ const splitLines = (s: string): Lines => s.split("\n");
 export const efcorePersistenceAdapter: PersistenceAdapter = {
   name: "efcore",
   supportedStrategies: ["state"],
+  // D-DOCUMENT-AXIS: EF emits all three saving shapes — relational
+  // tables, `embedded` (owned-types `.ToJson()`), and the opaque
+  // `document` blob.  Sourced from the single capability map so the
+  // adapter advertisement and the validator never drift.
+  supportedShapes: PLATFORM_SAVING_SHAPES.dotnet,
 
   supports(storageType, kind, persistenceStrategy) {
     return (

@@ -181,7 +181,7 @@ Resource:
         ('retain'         ':' retain=INT ','?)?
         ('isolationLevel' ':' isolationLevel=IsolationLevel ','?)?
         ('readonly'       ':' readonly?='true' ','?)?
-        ('normalised'     ':' normalised=BoolFlag ','?)?
+        ('shape'          ':' shape=SavingShape ','?)?
         ('config' ':' '{' (config+=ConfigEntry (',' config+=ConfigEntry)* ','?)? '}' ','?)?
     '}';
 
@@ -609,7 +609,7 @@ BoundedContext:
 
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | Repository | Workflow | View
-    | FilterDecl | StampDecl | ImplementsDecl;
+    | Criterion | FilterDecl | StampDecl | ImplementsDecl;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -628,7 +628,7 @@ ValueObjectMember:
     Property | DerivedProp | Invariant | FunctionDecl;
 
 Aggregate:
-    'aggregate' name=ID ('ids' idKind=IdKind)? ('persistedAs' '(' persistedAs=TruthKind ')')? ('normalised' '(' normalised=BoolFlag ')')? withClause=WithClause? '{'
+    'aggregate' name=ID ('ids' idKind=IdKind)? ('persistedAs' '(' persistedAs=TruthKind ')')? ('shape' '(' shape=SavingShape ')')? withClause=WithClause? '{'
         members+=AggregateMember*
     '}';
 
@@ -643,12 +643,15 @@ TruthKind returns string:
     'eventLog' | 'state';
 
 // D-DOCUMENT-AXIS: saving shape of the materialised read model /
-// snapshot — `normalised(false)` stores the aggregate as one JSON
-// document instead of normalised tables.  Header paren modifier on
-// the aggregate; colon entry on the `dataSource` binding.  Default
-// (absent) is `true`.
-BoolFlag returns string:
-    'true' | 'false';
+// snapshot — how the aggregate's hierarchy is physically laid out.
+// Header paren modifier on the aggregate (`shape(document)`); colon
+// entry on the `dataSource` binding (`shape: document`).  Three points
+// on the relational↔document spectrum (default absent = `relational`):
+//   - `relational` — table-per-entity (root columns + child tables + join tables)
+//   - `embedded`   — queryable root row + contained parts folded into JSONB columns
+//   - `document`   — the whole aggregate serialised as one opaque JSONB blob (Marten-style)
+SavingShape returns string:
+    'relational' | 'embedded' | 'document';
 
 // ---- macro `with` clause ----------------------------------------
 //
@@ -824,6 +827,34 @@ View:
 BindEntry:
     name=ID '=' expr=Expression;
 
+// Criterion — a named, parameterised, pure boolean predicate over a
+// candidate type `T` (the Specification Pattern, Evans / Spring-Data
+// style).  See docs/criterion.md.
+//
+//   criterion ActiveCustomer of Customer = active
+//   criterion InRegion(region: string) of Customer = region == region
+//   criterion HasManagerRole of bool = currentUser.role == "manager"
+//   criterion CanForceClose of Order { where: status != Closed }
+//
+// `of <T>` names the candidate type.  Inside the body, bare names and
+// `this` resolve against the candidate aggregate's fields (the same
+// convention as `invariant` / `derived` / `function` bodies); criteria
+// over `bool` are pure ambient predicates with no candidate.
+//
+// A criterion reference in any boolean-expression position (`view ...
+// where`, repository `find ... where`, an `invariant`, an operation
+// guard) is inlined at lowering time into the host expression — so
+// composition (`ActiveCustomer && InRegion("EU")`) falls out of the
+// ordinary boolean operators with no extra machinery and no per-backend
+// query-engine change.  The lowered predicate flows through the same
+// where→SQL path the inline filter does today.
+Criterion:
+    'criterion' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? 'of' target=TypeRef
+    (
+        '=' body=Expression
+      | '{' 'where' ':' body=Expression '}'
+    );
+
 // ---------------------------------------------------------------------------
 // Members
 // ---------------------------------------------------------------------------
@@ -944,6 +975,13 @@ Parameter:
 // constraints (e.g. only specific names are valid for menu metadata).
 LooseName returns string:
     ID
+    // `of` is a hard keyword only in the `criterion <Name>(...) of <T>`
+    // rule.  Admit it as a soft keyword everywhere LooseName is used so
+    // the page-metamodel arg name `of` keeps parsing — `List(of: Order)`,
+    // `List { of: x }` — and pre-existing files that named a field `of`
+    // are unaffected (mirrors the `money` / field-access soft-keyword
+    // treatment).
+    | 'of'
     | 'id' | 'permissions' | 'contains'
     | 'ui' | 'page' | 'component' | 'state' | 'menu'
     | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'

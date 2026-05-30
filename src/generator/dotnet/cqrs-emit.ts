@@ -598,7 +598,18 @@ function emitController(
         name: find.name,
         isRoot: find.name === "all",
         queryRouteParams: find.params
-          .map((p) => `[FromQuery] ${wireType(p.type, ctx, "request")} ${p.name}`)
+          .map((p) => {
+            // A required find param must bind required so Swashbuckle emits
+            // `required: true` — a non-nullable reference type alone reads as
+            // optional, diverging from Hono/Phoenix (which mark it required).
+            // Optional params (`kind === "optional"`) stay optional.  Attribute
+            // fully-qualified to avoid an unused `using` under /warnaserror.
+            const bind =
+              p.type.kind === "optional"
+                ? ""
+                : "[Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] ";
+            return `[FromQuery] ${bind}${wireType(p.type, ctx, "request")} ${p.name}`;
+          })
           .join(", "),
         queryConstructorArgs: find.params
           .map((p) => wireToCommandArgument(p.name, p.type, ctx, usings))

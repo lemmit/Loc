@@ -41,6 +41,11 @@ export function renderEntity(
   ns: string,
   rootName: string,
   emitTrace = false,
+  /** When true, the entity is part of a document-shaped
+   *  (`shape(document)`) aggregate: emit the `ToSnapshot()` /
+   *  `FromSnapshot(...)` mapping methods the JSONB repository serialises
+   *  through.  Additive — byte-identical output when false. */
+  document = false,
 ): string {
   // `operations` is the discriminator between EnrichedAggregateIR and
   // EnrichedEntityPartIR — wrapped in a type predicate so the union
@@ -286,6 +291,65 @@ export function renderEntity(
       ]
     : [];
 
+  // Document-shape (shape(document)) round-trip mapping.  Emitted
+  // ONLY for entities inside a document aggregate.  Both methods live
+  // on the entity class so they can reach private setters + the
+  // `_<containment>` backing lists; the repository calls them across
+  // the same assembly via `internal`.  `ToSnapshot` copies state out;
+  // `FromSnapshot` rebuilds it (running AssertInvariants once, AFTER
+  // the contained parts are rehydrated, so part-dependent invariants
+  // see the full tree — unlike `_Create`, which only knows fields).
+  const snapshotLines: string[] = [];
+  if (document) {
+    const toInit: string[] = [];
+    toInit.push("            Id = Id,");
+    if (!isRoot) toInit.push("            ParentId = ParentId,");
+    for (const f of entity.fields) {
+      toInit.push(`            ${upperFirst(f.name)} = ${upperFirst(f.name)},`);
+    }
+    for (const c of entity.contains) {
+      toInit.push(
+        c.collection
+          ? `            ${upperFirst(c.name)} = _${c.name}.Select(__x => __x.ToSnapshot()).ToList(),`
+          : `            ${upperFirst(c.name)} = ${upperFirst(c.name)}.ToSnapshot(),`,
+      );
+    }
+    snapshotLines.push(
+      `    internal ${entity.name}Snapshot ToSnapshot()`,
+      "    {",
+      `        return new ${entity.name}Snapshot`,
+      "        {",
+      ...toInit,
+      "        };",
+      "    }",
+      "",
+      `    internal static ${entity.name} FromSnapshot(${entity.name}Snapshot s)`,
+      "    {",
+      `        var e = new ${entity.name}();`,
+      "        e.Id = s.Id;",
+    );
+    if (!isRoot) snapshotLines.push("        e.ParentId = s.ParentId;");
+    for (const f of entity.fields) {
+      snapshotLines.push(`        e.${upperFirst(f.name)} = s.${upperFirst(f.name)};`);
+    }
+    for (const c of entity.contains) {
+      if (c.collection) {
+        snapshotLines.push(
+          `        foreach (var __it in s.${upperFirst(c.name)}) e._${c.name}.Add(${c.partName}.FromSnapshot(__it));`,
+        );
+      } else {
+        snapshotLines.push(
+          `        e.${upperFirst(c.name)} = ${c.partName}.FromSnapshot(s.${upperFirst(c.name)});`,
+        );
+      }
+    }
+    snapshotLines.push(
+      emitTrace ? `        e.AssertInvariants("<init>");` : "        e.AssertInvariants();",
+      "        return e;",
+      "    }",
+    );
+  }
+
   const extraUsings = [...usings].sort().map((n) => `using ${n};`);
   return (
     lines(
@@ -325,6 +389,7 @@ export function renderEntity(
       "",
       ...createInternalLines,
       ...createPublicLines,
+      ...(snapshotLines.length > 0 ? ["", ...snapshotLines] : []),
       "}",
     ) + "\n"
   );

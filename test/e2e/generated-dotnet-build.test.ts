@@ -38,6 +38,10 @@ describe.skipIf(!ENABLED)(
       "examples/banking.ddd",
       "examples/inventory.ddd",
       "examples/roster.ddd",
+      // Document-persistence path (`normalised(false)`): exercises the
+      // STJ round-trip emit — `<Agg>Document` record, snapshot DTOs,
+      // `ToSnapshot()`/`FromSnapshot(...)`, jsonb column.
+      "examples/document.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {
