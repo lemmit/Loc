@@ -17,7 +17,7 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect, useState } from "react";
-import { requestPersistentStorage } from "../vfs/idb-vfs.js";
+import { requestPersistentStorage } from "../vfs/legacy-idb.js";
 import { GitStore, openGitFs } from "./git/index.js";
 import { importLegacyIdbWorkspace } from "./git/import-legacy.js";
 

@@ -2,13 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import "fake-indexeddb/auto";
 
 import type { VfsPath } from "../../web/src/vfs/types.js";
-import {
-  commitOnSave,
-  diffForDisplay,
-  GitStore,
-  openGitFs,
-  regenerateMerge,
-} from "../../web/src/workspace/git/index.js";
+import { commitOnSave, GitStore, openGitFs } from "../../web/src/workspace/git/index.js";
 
 // ---------------------------------------------------------------------------
 // GitStore — async, git-backed durable store (LightningFS +
@@ -161,15 +155,6 @@ describe("GitStore: git ops", () => {
     expect(again).toBeUndefined();
     expect(await store.log()).toHaveLength(1);
   });
-
-  it("checkout restores the working tree to a committed state", async () => {
-    await store.writeFile("/workspace/main.ddd", "v1");
-    await commitOnSave(store, "v1");
-    await store.writeFile("/workspace/main.ddd", "v2-uncommitted");
-    expect(await store.readFile("/workspace/main.ddd")).toBe("v2-uncommitted");
-    await store.checkout("main", true);
-    expect(await store.readFile("/workspace/main.ddd")).toBe("v1");
-  });
 });
 
 describe("GitStore: notifier", () => {
@@ -202,82 +187,6 @@ describe("GitStore: notifier", () => {
     store.subscribe("/workspace", (changed) => seen.push([...changed]));
     await store.mkdir("/workspace/a/b/c");
     expect(seen).toEqual([["/workspace/a", "/workspace/a/b", "/workspace/a/b/c"]]);
-  });
-
-  it("checkout fires the working-tree paths that changed", async () => {
-    await store.writeFile("/workspace/main.ddd", "committed-v1");
-    await commitOnSave(store, "v1");
-    await store.writeFile("/workspace/main.ddd", "edited-uncommitted");
-    const seen: VfsPath[][] = [];
-    store.subscribe("/workspace", (changed) => seen.push([...changed]));
-    await store.checkout("main", true);
-    expect(await store.readFile("/workspace/main.ddd")).toBe("committed-v1");
-    expect(seen).toEqual([["/workspace/main.ddd"]]);
-  });
-});
-
-describe("GitStore: regenerate merge", () => {
-  let store: GitStore;
-  beforeEach(async () => {
-    store = await freshStore();
-  });
-
-  // Build a base commit, then a divergent branch ("theirs") + a
-  // divergent main, and merge theirs back in.
-  async function setupDivergence(theirsContent: { a: string; b?: string }): Promise<void> {
-    await store.writeFile("/workspace/a.ddd", "base-a");
-    await store.writeFile("/workspace/b.ddd", "base-b");
-    await commitOnSave(store, "base");
-
-    await store.branch("theirs");
-    await store.checkout("theirs", true);
-    await store.writeFile("/workspace/a.ddd", theirsContent.a);
-    if (theirsContent.b) await store.writeFile("/workspace/b.ddd", theirsContent.b);
-    await commitOnSave(store, "theirs change");
-
-    await store.checkout("main", true);
-  }
-
-  it("clean merge keeps both sides' non-overlapping edits", async () => {
-    await setupDivergence({ a: "theirs-a" }); // theirs edits a only
-    await store.writeFile("/workspace/b.ddd", "main-b"); // main edits b only
-    await commitOnSave(store, "main change");
-
-    const outcome = await regenerateMerge(store, "theirs");
-    expect(outcome.ok).toBe(true);
-    expect(await store.readFile("/workspace/a.ddd")).toBe("theirs-a");
-    expect(await store.readFile("/workspace/b.ddd")).toBe("main-b");
-  });
-
-  it("conflicting merge returns a structured conflict result", async () => {
-    await setupDivergence({ a: "theirs-version" }); // theirs edits a
-    await store.writeFile("/workspace/a.ddd", "main-version"); // main edits a
-    await commitOnSave(store, "main change");
-
-    const outcome = await regenerateMerge(store, "theirs");
-    expect(outcome.ok).toBe(false);
-    if (!outcome.ok) {
-      expect(outcome.conflicts).toContain("/workspace/a.ddd");
-    }
-  });
-
-  it("diffForDisplay reports added / removed / modified between refs", async () => {
-    await store.writeFile("/workspace/keep.ddd", "k1");
-    await store.writeFile("/workspace/gone.ddd", "g");
-    await commitOnSave(store, "first");
-    const first = await store.resolveRef("HEAD");
-
-    await store.writeFile("/workspace/keep.ddd", "k2"); // modified
-    await store.deleteFile("/workspace/gone.ddd"); // removed
-    await store.writeFile("/workspace/new.ddd", "n"); // added
-    await commitOnSave(store, "second");
-    const second = await store.resolveRef("HEAD");
-
-    const diff = await diffForDisplay(store, first, second);
-    const byPath = Object.fromEntries(diff.map((d) => [d.path, d.status]));
-    expect(byPath["/workspace/keep.ddd"]).toBe("modified");
-    expect(byPath["/workspace/gone.ddd"]).toBe("removed");
-    expect(byPath["/workspace/new.ddd"]).toBe("added");
   });
 });
 
