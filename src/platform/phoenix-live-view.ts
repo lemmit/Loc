@@ -3,7 +3,11 @@ import { ashPostgresPersistenceAdapter } from "../generator/phoenix-live-view/ad
 import { ashStyleAdapter } from "../generator/phoenix-live-view/adapters/ash-style.js";
 import { byFeatureLayoutAdapter } from "../generator/phoenix-live-view/adapters/by-feature-layout.js";
 import { generatePhoenixLiveViewProject } from "../generator/phoenix-live-view/index.js";
-import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
+import {
+  type ComposeServiceShape,
+  type PlatformSurface,
+  STATIC_BUNDLE_FRAMEWORKS,
+} from "./surface.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix LiveView platform — fullstack Elixir/Ash deployable.
@@ -28,6 +32,12 @@ const phoenixLiveViewPlatform: PlatformSurface = {
   needsDb: true,
   mountsUi: true,
   isFrontend: false,
+  // The keystone (D-PHOENIX-SURFACE): Phoenix is the only platform that
+  // is BOTH a server-render runtime (LiveView, spelled `phoenixLiveView`)
+  // AND a static-asset host (`priv/static`), so it serves its own
+  // runtime-coupled framework UNIONED with every static-bundle framework.
+  // Richest `hostableFrameworks` of any platform.
+  hostableFrameworks: new Set(["phoenixLiveView", ...STATIC_BUNDLE_FRAMEWORKS]),
   // Ash code-interface conventions.  A user-declared find named one
   // of these would collide with the auto-generated CRUD action of
   // the same name on the resource module.

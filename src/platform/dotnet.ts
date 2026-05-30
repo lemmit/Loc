@@ -10,13 +10,20 @@ import { byLayerLayoutAdapter } from "../generator/dotnet/adapters/by-layer-layo
 import { cqrsStyleAdapter } from "../generator/dotnet/adapters/cqrs-style.js";
 import { efcorePersistenceAdapter } from "../generator/dotnet/adapters/efcore-persistence.js";
 import { generateDotnetForContexts } from "../generator/dotnet/index.js";
-import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
+import {
+  type ComposeServiceShape,
+  type PlatformSurface,
+  STATIC_BUNDLE_FRAMEWORKS,
+} from "./surface.js";
 
 const dotnetPlatform: PlatformSurface = {
   name: "dotnet",
   defaultPort: 8080,
   needsDb: true,
   isFrontend: false,
+  // Static-asset host (embeds a SPA via wwwroot + SPA fallback):
+  // serves any static-bundle framework.  D-PHOENIX-SURFACE.
+  hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
   // .NET admits an embedded React SPA via static-files middleware +
   // SPA fallback route — see the fullstack branch in
   // `generator/dotnet/index.ts` that fires when `deployable.uiName`

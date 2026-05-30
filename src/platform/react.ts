@@ -1,5 +1,9 @@
 import { generateReactForContexts } from "../generator/react/index.js";
-import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
+import {
+  type ComposeServiceShape,
+  type PlatformSurface,
+  STATIC_BUNDLE_FRAMEWORKS,
+} from "./surface.js";
 
 const reactPlatform: PlatformSurface = {
   name: "react",
@@ -8,6 +12,9 @@ const reactPlatform: PlatformSurface = {
   needsDb: false,
   mountsUi: true,
   isFrontend: true,
+  // Standalone static-asset host (Vite preview over a built bundle):
+  // serves any static-bundle framework.  D-PHOENIX-SURFACE.
+  hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
   // React generator only emits API hooks — no per-aggregate
   // repository class.  No find-name collisions are possible.
   reservedRepositoryFindNames: new Set(),
