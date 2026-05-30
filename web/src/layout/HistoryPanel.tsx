@@ -1,6 +1,7 @@
 import {
   Badge,
   Box,
+  Button,
   Code,
   Group,
   Loader,
@@ -11,7 +12,7 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { useEffect, useMemo, useState } from "react";
-import type { CommitFileChange, CommitInfo } from "../workspace/git";
+import { type CommitFileChange, type CommitInfo, commitOnSave } from "../workspace/git";
 import type { LayoutCtx } from "./ctx";
 import { classifyCommit, formatRelativeTime, shortOid } from "./history-format";
 
@@ -45,6 +46,9 @@ export function HistoryBody({
   const [hideAutosaves, setHideAutosaves] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [changes, setChanges] = useState<Record<string, CommitFileChange[]>>({});
+  // Inline "restore this version" confirm + in-flight state, keyed by oid.
+  const [confirmOid, setConfirmOid] = useState<string | null>(null);
+  const [restoringOid, setRestoringOid] = useState<string | null>(null);
   // Re-render periodically so relative timestamps stay fresh.
   const [, setNowTick] = useState(0);
 
@@ -101,6 +105,26 @@ export function HistoryBody({
       });
     }
   };
+
+  const restore = (oid: string): void => {
+    if (!store) return;
+    setRestoringOid(oid);
+    void (async () => {
+      try {
+        await store.restoreCommit(oid);
+        await commitOnSave(store, `restore to ${shortOid(oid)}`);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("restore failed:", err);
+      } finally {
+        setRestoringOid(null);
+        setConfirmOid(null);
+      }
+    })();
+  };
+
+  // The newest commit is the current state — restoring to it is a no-op.
+  const headOid = commits[0]?.oid;
 
   if (!store) {
     return (
@@ -196,6 +220,43 @@ export function HistoryBody({
                           </Group>
                         ))}
                       </Stack>
+                    )}
+                    {c.oid !== headOid && (
+                      <Box mt={6}>
+                        {confirmOid === c.oid ? (
+                          <Group gap={6} wrap="nowrap" data-testid="history-restore-confirm">
+                            <Text size="xs" c="dimmed" style={{ flex: 1 }}>
+                              Restore the workspace to this version?
+                            </Text>
+                            <Button
+                              size="compact-xs"
+                              color="orange"
+                              loading={restoringOid === c.oid}
+                              onClick={() => restore(c.oid)}
+                              data-testid="history-restore-do"
+                            >
+                              Restore
+                            </Button>
+                            <Button
+                              size="compact-xs"
+                              variant="subtle"
+                              disabled={restoringOid === c.oid}
+                              onClick={() => setConfirmOid(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </Group>
+                        ) : (
+                          <Button
+                            size="compact-xs"
+                            variant="light"
+                            onClick={() => setConfirmOid(c.oid)}
+                            data-testid="history-restore"
+                          >
+                            Restore this version
+                          </Button>
+                        )}
+                      </Box>
                     )}
                   </Box>
                 )}
