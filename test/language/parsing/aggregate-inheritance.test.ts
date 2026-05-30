@@ -455,4 +455,46 @@ system Sys {
     expect(reader).toMatch(/case "Customer":/);
     expect(reader).toMatch(/case "Supplier":/);
   });
+
+  it("rejects a polymorphic 'Party id' ref to an ownTable (TPC) base (ambiguous FK)", async () => {
+    const { errors } = await parse(`
+      context T {
+        abstract aggregate Party inheritanceUsing(ownTable) { name: string }
+        aggregate Customer extends Party inheritanceUsing(ownTable) { creditLimit: decimal }
+        aggregate Order { buyer: Party id }
+      }
+    `);
+    expect(codes(errors)).toContain("loom.polymorphic-id-ref-unsupported");
+  });
+
+  it("rejects a polymorphic 'Party id' ref to a MIXED hierarchy (sharedTable base + ownTable override)", async () => {
+    // LegacyVendor overrides to ownTable, so it lives in its own table outside
+    // the shared one the base reader scans — a `Party id` would silently miss
+    // it.  The diagnostic names the offending sibling.
+    const { errors } = await parse(`
+      context T {
+        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        aggregate Customer extends Party { creditLimit: decimal }
+        aggregate LegacyVendor extends Party inheritanceUsing(ownTable) { obscure: string }
+        aggregate Order { buyer: Party id }
+      }
+    `);
+    expect(codes(errors)).toContain("loom.polymorphic-id-ref-mixed-strategy");
+    expect(errors.some((e) => /LegacyVendor/.test(e.message ?? ""))).toBe(true);
+    // It's the mixed case specifically, not the all-ownTable case.
+    expect(codes(errors)).not.toContain("loom.polymorphic-id-ref-unsupported");
+  });
+
+  it("allows a polymorphic 'Party id' ref when every concrete is sharedTable", async () => {
+    const { errors } = await parse(`
+      context T {
+        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        aggregate Customer extends Party { creditLimit: decimal }
+        aggregate Supplier extends Party inheritanceUsing(sharedTable) { taxId: string }
+        aggregate Order { buyer: Party id }
+      }
+    `);
+    expect(codes(errors)).not.toContain("loom.polymorphic-id-ref-mixed-strategy");
+    expect(codes(errors)).not.toContain("loom.polymorphic-id-ref-unsupported");
+  });
 });

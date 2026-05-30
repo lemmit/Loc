@@ -130,26 +130,58 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
     }
   }
 
-  // Rule 6 — a polymorphic `Base id` reference to an abstract base.  Under
-  // `sharedTable` (TPH) the whole hierarchy shares one table, so the FK target
-  // is unambiguous and the reference is allowed (resolved by the Hono base
-  // reader).  Under `ownTable` (TPC) there is no single table to key against —
-  // the FK target is ambiguous across the per-concrete tables — so it stays
-  // rejected with a concrete fix.  (A bare `Base` type ref is already steered
-  // to `Base id` by `loom.bare-aggregate-in-type`; this catches the `id` form.)
+  // Rule 6 — a polymorphic `Base id` reference to an abstract base.  Whether
+  // the FK target is unambiguous depends on the *effective* layout of every
+  // concrete in the hierarchy (a concrete's own `inheritanceUsing` overrides
+  // the base's — the per-concrete-override pattern, aggregate-inheritance.md):
+  //
+  //   - `ownTable` (TPC) base → no single table to key against; the FK target
+  //     is ambiguous across the per-concrete tables.  Rejected outright
+  //     (`loom.polymorphic-id-ref-unsupported`).
+  //   - `sharedTable` (TPH) base whose concretes are *all* shared → one table,
+  //     unambiguous FK; allowed (resolved by the Hono base reader).
+  //   - `sharedTable` base with an `ownTable`-override concrete (mixed
+  //     strategy) → the overridden concrete lives in its own table, outside
+  //     the shared one the base reader scans, so a `Base id` would silently
+  //     miss it.  Rejected (`loom.polymorphic-id-ref-mixed-strategy`), naming
+  //     the offending sibling so the fix is obvious.
+  //
+  // (A bare `Base` type ref is already steered to `Base id` by
+  // `loom.bare-aggregate-in-type`; this catches the `id` form.)
   for (const idType of idTypes) {
-    const target = idType.target?.ref;
-    if (!isAggregate(target) || !target.isAbstract) continue;
-    const layout = target.inheritanceUsing ?? DEFAULT_LAYOUT;
-    if (layout !== "ownTable") continue;
-    accept(
-      "error",
-      `'${target.name} id' references the abstract base '${target.name}', which uses ` +
-        `inheritanceUsing(ownTable) (TPC) — there is no single table to key against, so the ` +
-        `foreign-key target is ambiguous across the per-concrete tables. Reference a concrete ` +
-        `subtype's id (e.g. 'Customer id'), or change '${target.name}' to ` +
-        `inheritanceUsing(sharedTable) (TPH) to allow polymorphic references.`,
-      { node: idType, property: "target", code: "loom.polymorphic-id-ref-unsupported" },
+    const base = idType.target?.ref;
+    if (!isAggregate(base) || !base.isAbstract) continue;
+    const baseLayout = base.inheritanceUsing ?? DEFAULT_LAYOUT;
+    if (baseLayout === "ownTable") {
+      accept(
+        "error",
+        `'${base.name} id' references the abstract base '${base.name}', which uses ` +
+          `inheritanceUsing(ownTable) (TPC) — there is no single table to key against, so the ` +
+          `foreign-key target is ambiguous across the per-concrete tables. Reference a concrete ` +
+          `subtype's id (e.g. 'Customer id'), or change '${base.name}' to ` +
+          `inheritanceUsing(sharedTable) (TPH) to allow polymorphic references.`,
+        { node: idType, property: "target", code: "loom.polymorphic-id-ref-unsupported" },
+      );
+      continue;
+    }
+    // sharedTable base: reject if any concrete overrides to `ownTable`.  The
+    // effective layout of a concrete is its own modifier, else the base's.
+    const ownSiblings = aggregates.filter(
+      (a) =>
+        a.superType?.ref === base &&
+        (a.inheritanceUsing ?? base.inheritanceUsing ?? DEFAULT_LAYOUT) === "ownTable",
     );
+    if (ownSiblings.length > 0) {
+      const names = ownSiblings.map((a) => `'${a.name}'`).join(", ");
+      accept(
+        "error",
+        `'${base.name} id' references the abstract base '${base.name}', but its hierarchy mixes ` +
+          `storage strategies: ${names} override(s) to inheritanceUsing(ownTable) and live in a ` +
+          `separate table, so a polymorphic '${base.name} id' would silently miss them. Reference ` +
+          `a concrete subtype's id instead, or make every concrete sharedTable (TPH) so the ` +
+          `whole hierarchy shares one table.`,
+        { node: idType, property: "target", code: "loom.polymorphic-id-ref-mixed-strategy" },
+      );
+    }
   }
 }
