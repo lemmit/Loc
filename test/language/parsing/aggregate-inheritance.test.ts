@@ -404,14 +404,15 @@ system Sys {
     expect(repo).toMatch(/Number\(root\.creditLimit!\)/);
   });
 
-  it("mounts only concrete routers; the abstract base has no repo/routes/domain", async () => {
+  it("mounts only concrete routers; the abstract base has no HTTP routes/mount", async () => {
     const { files } = generateSystems(await parseValid(TPH));
     const paths = [...files.keys()];
     expect(paths).toContain("api/http/customer.routes.ts");
     expect(paths).toContain("api/http/supplier.routes.ts");
-    expect(paths.some((p) => /party\.routes|party-repository|domain\/party\b/i.test(p))).toBe(
-      false,
-    );
+    // The abstract base is never instantiated → no routes file, no mount. (It
+    // DOES get a read-only base reader + union — covered by the base-reader
+    // test below — but those are read-side data plumbing, not HTTP surface.)
+    expect(paths.some((p) => /party\.routes/i.test(p))).toBe(false);
     const idx = files.get("api/http/index.ts") ?? "";
     expect(idx).toMatch(/app\.route\("\/customers"/);
     expect(idx).not.toMatch(/app\.route\("\/parties"/);
