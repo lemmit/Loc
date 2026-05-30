@@ -107,8 +107,9 @@ layer that consumes it.
 |---|---|---|
 | [`lifecycle-operations.md`](./lifecycle-operations.md) | PROPOSED | Three keywords on aggregates (`create [name]`, `operation name`, `destroy [name]`) with kind-tagged typed actions; framework-owned persistence; body operating on pre-bound `this`. Drops PATCH (POST for body-carrying actions, DELETE only for canonical destroy). API-layer `urlStyle: literal \| resource`. Reframes `crudish` to emit the canonical lifecycle trio. Rejects: lifecycle-on-service, per-operation route alias, generic action kind, `delete` keyword. |
 | [`loom-forms.md`](./loom-forms.md) | PROPOSED | `CreateForm` / `OperationForm` / `DestroyForm` walker primitives binding strictly to typed actions defined by `lifecycle-operations.md`. The action's param list IS the form's field list — no field-walking fallback. Submission dispatches via the generated API client. Fixes the layering bug where form walker + API generators independently synthesise the create contract. |
+| [`frontend-acl.md`](./frontend-acl.md) | PROPOSED | Frontend Anti-Corruption Layer: per-bound-action emission of `FormState` (`z.input`, flat, mutable) + `CommandPayload` (`z.output`, nested, frozen) + `StrictFieldMap` (bidirectional, typechecked against both shapes), plus a per-project `handleServerValidationError` runtime that maps RFC 7807 ProblemDetails 422 `errors[].pointer` back onto RHF form fields via `setError`. Resolves `loom-forms.md` open items #3 (`option` rendering) and #4 (pointer → field mapping). Zero `.ddd` surface; React-only. |
 
-**Read order:** lifecycle-operations first (foundation); forms second.
+**Read order:** lifecycle-operations first (foundation); forms second; frontend-acl third (form runtime).
 
 ### Workflow
 
