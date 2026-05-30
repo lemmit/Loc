@@ -113,6 +113,36 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
         );
       }
     }
+
+    // Rule 4b — a *voluntary* `ownTable` override of a `sharedTable` (TPH)
+    // base (the per-concrete-override "mixed strategy", aggregate-inheritance.md
+    // Pattern 3) is not supported in v1.  Such a concrete generates a working
+    // standalone table today, but it sits OUTSIDE the shared table the base
+    // reader scans, so `find all <Base>` and polymorphic `<Base> id` can't see
+    // it (a UNION-ALL read over mixed strategies is deferred — the proposal
+    // marks per-concrete override as an open question).  Rather than ship a
+    // half-supported hierarchy that silently drops the override concrete from
+    // every polymorphic query, reject the override until full mixed-strategy
+    // emission lands.  The event-sourced / document case (Rule 4 `forcesOwn`)
+    // is the one sanctioned `ownTable`-under-`sharedTable`: it's a forced
+    // opt-out, not a free choice, and an ES/document concrete is never a
+    // polymorphic read target — so it stays allowed.
+    if (base?.isAbstract) {
+      const baseLayout = base.inheritanceUsing ?? DEFAULT_LAYOUT;
+      const forcesOwn = agg.persistedAs === "eventLog" || agg.shape === "document";
+      if (baseLayout === "sharedTable" && agg.inheritanceUsing === "ownTable" && !forcesOwn) {
+        accept(
+          "error",
+          `'${agg.name}' declares inheritanceUsing(ownTable) under the sharedTable (TPH) base ` +
+            `'${base.name}' — a per-concrete storage override (mixed strategy) is not supported ` +
+            `yet. The override concrete would live in its own table, outside the shared one, so ` +
+            `'find all ${base.name}' and polymorphic '${base.name} id' references can't see it. ` +
+            `Make '${agg.name}' sharedTable to keep the whole hierarchy in one table, or make ` +
+            `the entire hierarchy ownTable (TPC).`,
+          { node: agg, property: "inheritanceUsing", code: "loom.tph-own-override-unsupported" },
+        );
+      }
+    }
   }
 
   // Rule 5 — an abstract aggregate has no repository of its own; repositories
