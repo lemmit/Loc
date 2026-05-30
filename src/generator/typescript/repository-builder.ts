@@ -27,10 +27,12 @@ import {
   isRefCollection,
 } from "./repository-associations-builder.js";
 import {
+  contextFilterPredicate,
   findByIdMethod,
   findManyByIdsMethod,
   findQueryMethod,
   lowerToDrizzle,
+  nonPrincipalContextFilters,
 } from "./repository-find-builder.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { saveMethod } from "./repository-save-builder.js";
@@ -73,11 +75,20 @@ export function buildRepositoryFile(
       .map((f) => f.filter)
       .filter((x): x is import("../../ir/types/loom-ir.js").ExprIR => !!x),
     ...viewFilters,
+    // Non-principal capability filters (`filter !this.isDeleted`) AND
+    // into every root read; include them in the ops walk so the import
+    // narrower keeps `and` / `not` / comparison helpers they need.
+    ...nonPrincipalContextFilters(agg),
   ];
   for (const f of allFilters) {
     const lowered = lowerToDrizzle(f, lowerFirst(plural(agg.name)), ctx);
     if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
   }
+  // The single AND-able capability-filter predicate for this aggregate's
+  // table (null when it has no non-principal capability filter).  Threaded
+  // into each root-table read site below; child/containment reads
+  // (parentId-keyed) are unaffected — the filter constrains root rows.
+  const filterPred = contextFilterPredicate(agg, lowerFirst(plural(agg.name)), ctx, drizzleOps);
   // If any find or matching view filter references currentUser, the
   // per-method signature gains a `currentUser: User` parameter that
   // the closure-captured Drizzle predicate reads.  Pull the User
@@ -113,7 +124,7 @@ export function buildRepositoryFile(
     `    private readonly events: DomainEventDispatcher,`,
     `  ) {}`,
     "",
-    findByIdMethod(agg, ctx, emitTrace),
+    findByIdMethod(agg, ctx, emitTrace, filterPred),
     "",
     `  async getById(id: Ids.${agg.name}Id): Promise<${agg.name}> {`,
     `    const found = await this.findById(id);`,
@@ -124,12 +135,12 @@ export function buildRepositoryFile(
     // Bulk loader used by views that follow `X id` references in bind
     // expressions.  Same hydration path as the array-return finds;
     // filter is a single `inArray`.
-    findManyByIdsMethod(agg, ctx),
+    findManyByIdsMethod(agg, ctx, filterPred),
     "",
     saveMethod(agg, ctx, emitTrace),
     "",
-    ...(repo?.finds ?? []).flatMap((find) => [findQueryMethod(agg, find, ctx), ""]),
-    ...viewFinds.flatMap((find) => [findQueryMethod(agg, find, ctx), ""]),
+    ...(repo?.finds ?? []).flatMap((find) => [findQueryMethod(agg, find, ctx, filterPred), ""]),
+    ...viewFinds.flatMap((find) => [findQueryMethod(agg, find, ctx, filterPred), ""]),
     // toWire — domain instance → wire DTO (plain object).  Used by the
     // Hono routes layer to serialize responses; the shape mirrors the
     // .NET <Agg>Response record so the cross-check sees identical specs.
