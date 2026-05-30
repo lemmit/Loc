@@ -250,7 +250,9 @@ function checkConstructible(agg: Aggregate, accept: ValidationAcceptor): void {
     "warning",
     `Aggregate '${agg.name}' is not constructible without the implicit create: it declares no 'create' and the required field(s) ${undefaulted
       .map((n) => `'${n}'`)
-      .join(", ")} have no default. Add a 'create(...)' (or 'with crudish'), or give the field(s) a default value.`,
+      .join(
+        ", ",
+      )} have no default. Add a 'create(...)' (or 'with crudish'), or give the field(s) a default value.`,
     { node: agg, code: "loom.not-constructible" },
   );
 }
