@@ -23,12 +23,12 @@ import {
   type PickedPack,
 } from "./pack-picker.js";
 import type { LoomBuildClient } from "../build/client.js";
-import type { IdbVfs } from "../vfs/idb-vfs.js";
+import type { GitStore } from "./git/index.js";
 
 interface Props {
-  /** Workspace VFS — picked pack files persist here so they
-   *  survive reload (Phase 3). */
-  workspaceVfs: IdbVfs | null;
+  /** Workspace git store — picked pack files persist here (written to
+   *  the working tree, durable in IndexedDB) so they survive reload. */
+  workspaceStore: GitStore | null;
   /** Build worker client — picked pack files also push here so
    *  the next `generateFromPath` can resolve `design: "./design/X"`
    *  immediately, without waiting for a worker restart to re-seed
@@ -44,7 +44,7 @@ interface Props {
 }
 
 export function PackPicker({
-  workspaceVfs,
+  workspaceStore,
   buildClient,
   onImported,
   onError,
@@ -56,17 +56,14 @@ export function PackPicker({
   async function importPack(pack: PickedPack): Promise<void> {
     validatePickedPack(pack);
     const entries = packToVfsEntries(pack);
-    // Persist to workspace VFS first so a worker crash mid-flight
-    // doesn't lose the import — the next reload re-replays it.
-    // Force-flush after the writes: import is a deliberate user
-    // action, not an auto-save burst, so the 250ms IDB debounce
-    // shouldn't gate persistence.  If the user immediately reloads
-    // after picking, the import is already on disk.
-    if (workspaceVfs) {
+    // Persist to the workspace store first so a worker crash mid-flight
+    // doesn't lose the import — the next reload reads it back from the
+    // working tree.  Each `writeFile` awaits the durable IndexedDB
+    // write, so once these resolve the import has survived a reload.
+    if (workspaceStore) {
       for (const { path, content } of entries) {
-        workspaceVfs.write(path, content);
+        await workspaceStore.writeFile(path, content);
       }
-      await workspaceVfs.flush();
     }
     // Push to build worker so generation resolves the pack on the
     // very next run.  Awaiting the ACK preserves write-then-generate

@@ -46,6 +46,7 @@ Status reflects `origin/main` as of the last refresh of
 | [`global-implementation-plan.md`](./global-implementation-plan.md) | REFERENCE | Topological ordering across the whole corpus; audits against `origin/main`; pins decisions; lists coordinated single-PR moments (M1/M2/M3, etc.). Start here for "what's next". |
 | [`implementation-plan.md`](./implementation-plan.md) | REFERENCE | Stacked delivery plan for the type-system family (aggregate-inheritance + payload-transport + exception-less + criterion). Phase-by-phase, dependency-explicit. Consumed by Phase 2 of the global plan. |
 | [`type-system-overview.md`](./type-system-overview.md) | REFERENCE | 10-minute orientation across the type-system family. Read first if you're picking up any of P/A/Crit. |
+| [`production-readiness.md`](./production-readiness.md) | REFERENCE | Roadmap naming the scaffold→system gap (bounded reads, deny-by-default, async messaging/outbox, caching, search projections, account management, i18n, k8s emit, ops surface, inter-service calls). Cross-references the per-feature proposals and flags which still need one. |
 | [`storage-and-platform-config-plan.md`](./storage-and-platform-config-plan.md) | REFERENCE | 14-phase, 17–19 PR build order for the storage proposal. Consumed by Phase 1A. |
 | [`storage-and-platform-config-micro-plan.md`](./storage-and-platform-config-micro-plan.md) | REFERENCE | Foundation-first sub-plan (skeleton-only delivery, ~22 days serialised, F1 broken into 6 small PRs). Consumed by Phase 1A. |
 
@@ -58,12 +59,25 @@ Status reflects `origin/main` as of the last refresh of
 | [`test-layout-and-macro-consolidation.md`](./test-layout-and-macro-consolidation.md) | SHIPPED | Test tree mirrors `src/` phases; macros consolidated under `src/macros/`. |
 | [`platform-directory-layout.md`](./platform-directory-layout.md) | PROPOSED | Framework-version axis for backend code (`hono@v4`→`v5`, `net8`→`net10`, Ash 3→4). **Option A (reverse the hono hoist) is rejected per [D-BACKEND-PKG](../decisions.md#d-backend-pkg--per-version-backend-packages-are-canonical).** The surviving direction is per-`<family>/v<N>/` homes that stage toward the packaging-split's per-version packages; adapters move to the backend surface per [D-ADAPTER-HOME](../decisions.md#d-adapter-home--persistencestylelayout-adapters-live-on-the-backend-surface). |
 | [`per-package-output-tree.md`](./per-package-output-tree.md) | PROPOSED (deferred) | Per-layer **output** packages (`-domain`/`-dal`/`-api`/`-contracts`/`-ui`) — the "Loom as ORM" enabler. Output-side twin of the packaging split; expressible as a `LayoutAdapter` extension. Right direction, deferred on one-time fixture/CI cost + the playground-workspace prerequisite — not on value. |
+| [`java-backend.md`](./java-backend.md) | VISION (deferred) | Fourth domain-logic backend: **Spring Boot + Spring Data JPA (Hibernate) + Postgres**, in-tree `PlatformSurface` at `src/platform/java.ts`. Purely additive codegen (no grammar/IR change); ~6–9 wk to .NET parity (anchored to .NET's ~8k LOC). Adapter menu `jpa`(real)/`jooq`/`axon` mirrors `efcore`/`dapper`/`marten`. Emits jMolecules DDD annotations (free ArchUnit). **Headline differentiator** — reusable `Specification<T>` from criterions — **depends on [`criterion-everywhere.md`](./criterion-everywhere.md)**, so it waits. |
 
 ### Storage & platform config
 
 | Doc | Status | Core addition |
 |---|---|---|
 | [`storage-and-platform-config.md`](./storage-and-platform-config.md) | PARTIAL | Top-level `storage <name> { type }` and deployable role-keyed slots shipped. Remaining: per-aggregate `persistenceStrategy:`, logical bindings (now `dataSource` per [D-STORAGE-SPLIT](../decisions.md#d-storage-split--split-the-overloaded-storage-keyword)), per-deployable `style:` / `layout:` / `persistence:`, `STORAGE_CAPABILITIES` matrix, adapter contracts. Granularity is per-context, not per-aggregate ([D-GRANULARITY](../decisions.md#d-granularity--storage-bindings-are-per-context-not-per-aggregate)); per-aggregate `for:` deferred to v2 override. |
+
+### Deployment & infrastructure
+
+| Doc | Status | Core addition |
+|---|---|---|
+| [`kubernetes-helm.md`](./kubernetes-helm.md) | PROPOSED | Emit a Helm chart (+ the raw k8s manifests it renders to) alongside `docker-compose.yml`, as a new `src/system/` artifact sibling. **Emitter-only** (no grammar/IR change in v1); database assumed **external/managed** (connection `Secret`, no in-cluster postgres); tuning lives in `values.yaml`. Reverses the stated non-goal in `docs/tools.md:324` / `docs/generators.md:764`. Defers infra-in-DSL (`replicas`/`resources`/`ingress` clauses) and a per-platform `workloadShape` surface method to follow-ups. |
+
+### Backends & code generation
+
+| Doc | Status | Core addition |
+|---|---|---|
+| [`elixir-ecto-and-api-only-backends.md`](./elixir-ecto-and-api-only-backends.md) | PROPOSED | Effort/shape study for three backend-matrix additions: a non-Ash Elixir/Phoenix/**Ecto** full-stack generator, plus **API-only** flavours of both the Ash and Ecto backends (JSON surface consumed by the React frontend). Grounds each in the `PlatformSurface`/adapter/conformance machinery: the **Ecto domain layer** is the dominant cost (hand-built `Ecto.Schema`/`Ecto.Changeset`/context modules vs Ash's declarative resources); the HEEx walker, `MigrationsIR`→Ecto migrations, and the existing JSON+OpenAPI surface are **reuse**; API-only is a cheap *UI-absent strip* of a full backend. Recommends a sibling `phoenix` platform for the Ash/Ecto axis (Option B) over an adapter swap (Option A, later) or `family@version` (rejected), and modelling API-only by absence of a `ui` mount rather than new platform names. Requests **D-PHOENIX-ECTO** and **D-API-ONLY**. |
 
 ### Documents & JSON hierarchies
 
@@ -81,7 +95,8 @@ Status reflects `origin/main` as of the last refresh of
 | [`aggregate-inheritance.md`](./aggregate-inheritance.md) | PROPOSED | Abstract aggregates with single inheritance; storage strategies `shareTable`/`ownTable` (renamed per D-RENAME). Nominal, no generics. Independent track. |
 | [`payload-transport-layer.md`](./payload-transport-layer.md) | PROPOSED | `payload` umbrella over events/commands/queries/responses/errors. Carrier-bounded generics with ML-postfix syntax (`customer page`). Named (`payload Foo = A \| B`) and anonymous `or` unions. Auto-synthesised aggregate wire payloads. Foundation for the whole family. |
 | [`exception-less.md`](./exception-less.md) | PROPOSED | `error` payloads (HTTP-blind in the domain). `option` ML-postfix sugar. `?` propagation operator. `Repo.getById` re-shape to `T or NotFound`. Per-api `status` mapping + stdlib defaults driving auto-generated RFC 7807 ProblemDetails. Two-regime split (aggregate-throws vs boundary-returns-carrier). No `Result<T, E>` wrappers. |
-| [`criterion.md`](./criterion.md) | PROPOSED | `criterion <Name>(args) of T = <bool expr>` (Spring-Data / Evans style). Bound to params via `from <Criterion>(args)`, to operation guards via `when <Criterion>` (auto-exposed `can-<op>` endpoint). Plus built-in `Repo.findAll(criterion, sort?, page?, loads?)` ("repository with 40 methods" → composition). Plus `private workflow` modifier + workflow-calls-workflow body extension. Resolves D23. |
+| [`criterion.md`](./criterion.md) | PARTIAL | `criterion <Name>(args) of T = <bool expr>` (Spring-Data / Evans style). **Core shipped**: declaration, body validation (purity / queryable / cycle / arity), and compile-time inline into every existing boolean-expression position (`view`/`find` `where`, invariants, operation preconditions) — composition via `&&`/`||`/`!` for free, no backend query-engine change. See [`docs/criterion.md`](../criterion.md). **Deferred** (need exception-less + payload-transport): `from <Criterion>(args)`, `when <Criterion>` + auto-exposed `can-<op>`, built-in `Repo.findAll(criterion, sort?, page?, loads?)`, `private workflow`. Resolves D23. |
+| [`criterion-everywhere.md`](./criterion-everywhere.md) | DRAFT | Refines `criterion.md`'s "queryable subset" into a per-leaf-operand **selectability** model (decided per use-site, not globally). Folds `currentUser.<scalar>` / `now()` into selection as **request-time bound params** (each backend's ambient accessor: `SecurityContextHolder` / `IHttpContextAccessor` / Hono ctx / Ash `actor`). Establishes **use-site-owns-enforcement** (same predicate → 403 gate vs silent row-subset filter vs 422 invariant). Validator + lowering + IR-tagging only; no grammar change. ~1–1.5 wk. |
 | [`partial-update.md`](./partial-update.md) | PROPOSED | `command` + `T option` fields for PATCH semantics. Supersedes the v0 `Optional<T>` proposal. **Folded into A1** of the implementation plan. |
 | [`load-specifications.md`](./load-specifications.md) | PROPOSED | `loads` clause + compiler-inferred load plans + shape (loadedness) typing. **Folded into P3** of the implementation plan. |
 
@@ -126,6 +141,12 @@ layer that consumes it.
 |---|---|---|
 | [`authorization.md`](./authorization.md) | PROPOSED | `DataKey` hierarchical scoping; `policy { data { … } operations { … } fields { … } }` reachability, operation/view/workflow gates, field masking. Pinned per D-POLICY-STYLE over the function-style alternative. Phases 1–4 in Phase 3.2; phases 5–7 (`exists`, field rules, `implies`) in Phase 5. |
 | [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md) | PROPOSED | `tenancy by user.tenantId` at system level; `crossTenant` / `platform` aggregate modifiers; auto-stamped `TenantId` column + EF/Drizzle/Ash query filter. Ships before authorization phase 1 (DataKey leftmost = TenantId). |
+
+### On-ramp & day-one runtime
+
+| Doc | Status | Core addition |
+|---|---|---|
+| [`quickstart-and-day-one-batteries.md`](./quickstart-and-day-one-batteries.md) | PROPOSED | Collapses zero-to-running into `ddd new` + npm publish + a quick-start stack default; adds a unified `ddd dev` watch/regenerate/live loop and a one-command `ddd deploy <target>` (Fly/Render/Railway) over the existing Dockerfiles + compose + per-deployable DBs; and the universal runtime constructs the model can't express today — turnkey `auth { providers }` with login/signup UI + sessions + default-deny (completing `auth.md`'s known holes), `job` (scheduled/event-triggered), `email`, object `storage` + `File`/`Upload`, and `seed`. Strictly additive; opt-in models emit byte-identically. |
 
 ### UX / output
 

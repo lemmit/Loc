@@ -179,6 +179,7 @@ export function generateTypeScriptForContexts(
     repositories: contexts.flatMap((c) => c.repositories),
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
+    criteria: contexts.flatMap((c) => c.criteria),
   };
 
   out.set("domain/ids.ts", renderIds(merged));
@@ -208,7 +209,17 @@ export function generateTypeScriptForContexts(
   );
   if (merged.workflows.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
-    out.set("http/workflows.ts", buildWorkflowsFile(merged, aggsByName));
+    // resourceName → sourceType, so workflow bodies can import their
+    // resource-op verb helpers from the right client module (Phase 4).
+    const resourceSourceTypes = new Map<string, string>();
+    if (system) {
+      const storeType = new Map(system.sys.storages.map((s) => [s.name, s.type] as const));
+      for (const r of system.sys.dataSources) {
+        const st = storeType.get(r.storageName);
+        if (st) resourceSourceTypes.set(r.name, st);
+      }
+    }
+    out.set("http/workflows.ts", buildWorkflowsFile(merged, aggsByName, resourceSourceTypes));
   }
   if (merged.views.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));

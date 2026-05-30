@@ -479,6 +479,32 @@ export interface RepositoryIR {
   finds: FindIR[];
 }
 
+/** A named, parameterised, pure boolean predicate over a candidate
+ *  type — the Specification Pattern (Evans / Spring-Data style).  See
+ *  docs/criterion.md.
+ *
+ *  A criterion is *inlined* wherever it is referenced from a boolean
+ *  expression position (`view ... where`, repository `find ... where`,
+ *  an `invariant`, an operation guard): the use-site re-lowers the
+ *  predicate body with its parameters substituted and the candidate
+ *  rebound to the host receiver, so no backend consumes `CriterionIR`
+ *  directly today.  The IR record is retained for tooling, traceability
+ *  and the forthcoming `Repo.findAll(criterion, …)` surface. */
+export interface CriterionIR {
+  name: string;
+  params: ParamIR[];
+  /** The `of <T>` candidate type.  `kind: "entity"` for an aggregate
+   *  candidate; `kind: "primitive", name: "bool"` for a pure ambient
+   *  predicate with no candidate. */
+  targetType: TypeIR;
+  /** The lowered predicate body, lowered in the criterion's own scope
+   *  (parameters as `param` refs, candidate fields as `this-prop`).
+   *  Use-sites inline a freshly-substituted copy rather than reading
+   *  this; it exists for tooling / traceability / future query
+   *  emission. */
+  body: ExprIR;
+}
+
 export interface BoundedContextIR {
   name: string;
   enums: EnumIR[];
@@ -488,6 +514,8 @@ export interface BoundedContextIR {
   repositories: RepositoryIR[];
   workflows: WorkflowIR[];
   views: ViewIR[];
+  /** Named predicate specifications declared in this context. */
+  criteria: CriterionIR[];
 }
 
 /** A saved, strongly-typed query over one source aggregate.  Two
@@ -599,6 +627,13 @@ export type WorkflowStmtIR =
       aggName: string;
       op: string;
       args: ExprIR[];
+    }
+  | {
+      // A bare (unbound) resource-op call statement — `files.put(k, v)`
+      // (Phase 4).  The `let`-bound form (`let x = files.get(k)`) rides
+      // `expr-let` instead.  `call` is the lowered `resource-op` call IR.
+      kind: "resource-call";
+      call: ExprIR;
     };
 
 export interface LoomModel {
@@ -971,7 +1006,7 @@ export type StorageKind =
   | "kafka"
   | "clickhouse"
   | "bigquery"
-  | "awsS3"
+  | "s3"
   | "rabbitmq"
   | "restApi";
 
@@ -1388,6 +1423,24 @@ export interface NeedIR {
 // validator enforces both.
 export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView";
 
+/** Saving shapes (D-DOCUMENT-AXIS `shape(…)`) each backend platform can
+ *  EMIT today — the single source of truth for the `supportedShapes`
+ *  capability check.  A `shape(…)` not listed for the target platform is
+ *  a hard error (the backend has no emitter for it yet).  Keyed by the
+ *  bareword family (a `family@version` pin resolves via `platformFamily`
+ *  in the validator).  Frontend platforms (`react`/`static`) own no
+ *  persistence and are omitted.  Consumed by both the IR validator
+ *  (`validateSavingShapeSupport`) and the generator persistence adapters
+ *  (`PersistenceAdapter.supportedShapes`). */
+export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingShape[]>> = {
+  dotnet: ["relational", "embedded", "document"],
+  hono: ["relational", "embedded", "document"],
+  // Phoenix/Ash emits relational + embedded (Ash embedded resources);
+  // `document` (a single opaque `:map` — non-idiomatic for Ash) is a
+  // future allowed-but-warned addition.
+  phoenixLiveView: ["relational", "embedded"],
+};
+
 export interface DeployableIR {
   name: string;
   /** The platform **family** (`"hono"`, `"dotnet"`, `"react"`, …) —
@@ -1572,12 +1625,14 @@ export type RefKind =
   | "helper-fn"
   | "enum-value"
   | "current-user" // magic identifier — system's `user` block shape
+  | "resource" // ambient resource handle — `files`, `jobs`, … (Phase 4)
   | "unknown";
 
 export type CallKind =
   | "function" // calls a `function` declared in scope
   | "value-object-ctor" // calls a value-object constructor
   | "private-operation" // calls a private operation
+  | "resource-op" // a verb call on an ambient resource handle (Phase 4)
   | "free"; // unresolved free call
 
 export type BinOp =
@@ -1605,6 +1660,11 @@ export type ExprIR =
       refKind: RefKind;
       enumName?: string;
       type?: TypeIR;
+      /** Populated when `refKind === "resource"` — the resource's
+       *  declared name and infra kind, so a `.verb(...)` call on it can
+       *  lower to a `resource-op` without re-resolving (Phase 4). */
+      resourceName?: string;
+      resourceKind?: DataSourceKind;
     }
   | {
       kind: "member";
@@ -1640,6 +1700,18 @@ export type ExprIR =
       args: ExprIR[];
       /** Same shape as `method-call.argNames` — see above. */
       argNames?: (string | undefined)[];
+      /** Populated when `callKind === "resource-op"` (Phase 4) — the
+       *  resolved resource binding, verb, the capability it requires,
+       *  and the access interface (default from
+       *  `EnrichedSystemIR.resourceInterfaces`, with per-verb override).
+       *  The bound `ResourceAdapter.emitOperation` renders the call. */
+      resourceOp?: {
+        resourceName: string;
+        resourceKind: DataSourceKind;
+        verb: string;
+        capability: string;
+        interface?: LoomInterface;
+      };
       /** Per-primitive `style:` escape hatch.  Populated by lowering
        *  when the source supplied a `style: { … }` named arg on a
        *  walker-primitive call (`Container { style: { background: "red" }, ... }`).

@@ -28,13 +28,26 @@ function storeOf(resource: DataSourceIR, stores: readonly StorageIR[]): StorageI
   return stores.find((s) => s.name === resource.storageName);
 }
 
-export const awsS3ResourceAdapter: ResourceAdapter = {
-  name: "awsS3",
+export const s3ResourceAdapter: ResourceAdapter = {
+  name: "s3",
   supportedKinds: ["objectStore"],
-  supports: (storageType, kind) => storageType === "awsS3" && supportsSurfaceKind("awsS3", kind),
-  emitProjectDeps: () => ({ "@aws-sdk/client-s3": "^3.700.0" }),
+  supports: (storageType, kind) => storageType === "s3" && supportsSurfaceKind("s3", kind),
+  emitProjectDeps: () => ({
+    "@aws-sdk/client-s3": "^3.700.0",
+    "@aws-sdk/s3-request-presigner": "^3.700.0",
+  }),
   emitClientModule(resources, stores): Lines {
-    const out: string[] = [`import { S3Client } from "@aws-sdk/client-s3";`, ``];
+    const out: string[] = [
+      `import {`,
+      `  DeleteObjectCommand,`,
+      `  GetObjectCommand,`,
+      `  ListObjectsV2Command,`,
+      `  PutObjectCommand,`,
+      `  S3Client,`,
+      `} from "@aws-sdk/client-s3";`,
+      `import { getSignedUrl } from "@aws-sdk/s3-request-presigner";`,
+      ``,
+    ];
     for (const r of resources) {
       const store = storeOf(r, stores);
       const region = cfg(store, "region") ?? "us-east-1";
@@ -54,6 +67,56 @@ export const awsS3ResourceAdapter: ResourceAdapter = {
       }
       out.push(`});`);
       out.push(``);
+      // Verb helpers consumed by workflow bodies (`files.put`/`files.get`
+      // → `<resource>$put`/`<resource>$get`).  These own the SDK mapping
+      // so the call site stays vendor-neutral.  `body` is the `json`
+      // payload (stored as a UTF-8 JSON string); `get` returns the
+      // parsed json or `null` when the key is absent.
+      out.push(`export async function ${r.name}$put(key: string, body: unknown): Promise<void> {`);
+      out.push(`  await ${r.name}.send(`);
+      out.push(`    new PutObjectCommand({`);
+      out.push(`      Bucket: ${r.name}Bucket,`);
+      out.push(`      Key: key,`);
+      out.push(`      Body: JSON.stringify(body),`);
+      out.push(`      ContentType: "application/json",`);
+      out.push(`    }),`);
+      out.push(`  );`);
+      out.push(`}`);
+      out.push(``);
+      out.push(`export async function ${r.name}$get(key: string): Promise<unknown> {`);
+      out.push(`  try {`);
+      out.push(
+        `    const res = await ${r.name}.send(new GetObjectCommand({ Bucket: ${r.name}Bucket, Key: key }));`,
+      );
+      out.push(`    const text = await res.Body?.transformToString();`);
+      out.push(`    return text ? JSON.parse(text) : null;`);
+      out.push(`  } catch (err) {`);
+      out.push(`    if ((err as { name?: string }).name === "NoSuchKey") return null;`);
+      out.push(`    throw err;`);
+      out.push(`  }`);
+      out.push(`}`);
+      out.push(``);
+      out.push(`export async function ${r.name}$list(prefix: string): Promise<string[]> {`);
+      out.push(
+        `  const res = await ${r.name}.send(new ListObjectsV2Command({ Bucket: ${r.name}Bucket, Prefix: prefix }));`,
+      );
+      out.push(
+        `  return (res.Contents ?? []).map((o) => o.Key ?? "").filter((k) => k.length > 0);`,
+      );
+      out.push(`}`);
+      out.push(``);
+      out.push(`export async function ${r.name}$signedUrl(key: string): Promise<string> {`);
+      out.push(
+        `  return getSignedUrl(${r.name}, new GetObjectCommand({ Bucket: ${r.name}Bucket, Key: key }), { expiresIn: 3600 });`,
+      );
+      out.push(`}`);
+      out.push(``);
+      out.push(`export async function ${r.name}$delete(key: string): Promise<void> {`);
+      out.push(
+        `  await ${r.name}.send(new DeleteObjectCommand({ Bucket: ${r.name}Bucket, Key: key }));`,
+      );
+      out.push(`}`);
+      out.push(``);
     }
     return out;
   },
@@ -68,11 +131,38 @@ export const rabbitmqResourceAdapter: ResourceAdapter = {
   emitClientModule(resources): Lines {
     const out: string[] = [`import * as amqp from "amqplib";`, ``];
     for (const r of resources) {
-      out.push(`// queue '${r.name}' — connection opened lazily by the consumer (Phase 4).`);
+      out.push(`// queue '${r.name}' — channel opened lazily and cached.`);
       out.push(
         `export const ${r.name}Url = process.env.${envVar(r.name)} ?? "amqp://guest:guest@${r.name}:5672";`,
       );
-      out.push(`export const connect${cap(r.name)} = () => amqp.connect(${r.name}Url);`);
+      out.push(`let ${r.name}Channel: amqp.Channel | undefined;`);
+      out.push(`async function ${r.name}$channel(): Promise<amqp.Channel> {`);
+      out.push(`  if (!${r.name}Channel) {`);
+      out.push(`    const conn = await amqp.connect(${r.name}Url);`);
+      out.push(`    ${r.name}Channel = await conn.createChannel();`);
+      out.push(`  }`);
+      out.push(`  return ${r.name}Channel;`);
+      out.push(`}`);
+      out.push(``);
+      // enqueue → default exchange, routing key = queue name (asserted).
+      out.push(`export async function ${r.name}$enqueue(message: unknown): Promise<void> {`);
+      out.push(`  const ch = await ${r.name}$channel();`);
+      out.push(`  await ch.assertQueue("${r.name}", { durable: true });`);
+      out.push(
+        `  ch.sendToQueue("${r.name}", Buffer.from(JSON.stringify(message)), { persistent: true });`,
+      );
+      out.push(`}`);
+      out.push(``);
+      // publish → named topic exchange.
+      out.push(
+        `export async function ${r.name}$publish(topic: string, message: unknown): Promise<void> {`,
+      );
+      out.push(`  const ch = await ${r.name}$channel();`);
+      out.push(`  await ch.assertExchange("${r.name}", "topic", { durable: true });`);
+      out.push(
+        `  ch.publish("${r.name}", topic, Buffer.from(JSON.stringify(message)), { persistent: true });`,
+      );
+      out.push(`}`);
       out.push(``);
     }
     return out;
@@ -89,28 +179,40 @@ export const restApiResourceAdapter: ResourceAdapter = {
     const out: string[] = [];
     for (const r of resources) {
       const baseUrl = cfg(storeOf(r, stores), "baseUrl") ?? "";
-      out.push(`// api '${r.name}' — typed client surface lands with the consumer (Phase 4).`);
+      out.push(`// api '${r.name}' — fetch-based client over the platform runtime.`);
       out.push(
         `export const ${r.name}BaseUrl = process.env.${envVar(r.name)} ?? ${JSON.stringify(baseUrl)};`,
       );
-      out.push(`export const ${r.name} = {`);
-      out.push(`  baseUrl: ${r.name}BaseUrl,`);
+      out.push(``);
+      out.push(`export async function ${r.name}$get(path: string): Promise<unknown> {`);
+      out.push(`  const res = await fetch(new URL(path, ${r.name}BaseUrl));`);
       out.push(
-        `  fetch: (path: string, init?: RequestInit) => fetch(new URL(path, ${r.name}BaseUrl), init),`,
+        `  if (!res.ok) throw new Error(\`${r.name} GET \${path} failed: \${res.status}\`);`,
       );
-      out.push(`};`);
+      out.push(`  return res.json();`);
+      out.push(`}`);
+      out.push(``);
+      out.push(
+        `export async function ${r.name}$post(path: string, body: unknown): Promise<unknown> {`,
+      );
+      out.push(`  const res = await fetch(new URL(path, ${r.name}BaseUrl), {`);
+      out.push(`    method: "POST",`);
+      out.push(`    headers: { "content-type": "application/json" },`);
+      out.push(`    body: JSON.stringify(body),`);
+      out.push(`  });`);
+      out.push(
+        `  if (!res.ok) throw new Error(\`${r.name} POST \${path} failed: \${res.status}\`);`,
+      );
+      out.push(`  return res.json();`);
+      out.push(`}`);
       out.push(``);
     }
     return out;
   },
 };
 
-function cap(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
-}
-
 const ADAPTERS: readonly ResourceAdapter[] = [
-  awsS3ResourceAdapter,
+  s3ResourceAdapter,
   rabbitmqResourceAdapter,
   restApiResourceAdapter,
 ];

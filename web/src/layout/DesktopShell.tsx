@@ -82,7 +82,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
       ? "output"
       : dockTabRaw;
 
-  const workspaceNodes = useWorkspaceFiles(workspace.vfs);
+  const workspaceNodes = useWorkspaceFiles(workspace.store);
   // main.ddd is the user's source; surface it even before the first
   // autosave has written it into the workspace VFS.
   const userNodes = useMemo<TreeNode[]>(() => {
@@ -105,10 +105,14 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
       setCenterView("source");
       return;
     }
-    const content = workspace.vfs?.read(`/workspace/${path}`);
-    if (content == null) return;
-    setSecondaryDoc({ source: "workspace", path, content });
-    setCenterView("secondary");
+    const store = workspace.store;
+    if (!store) return;
+    // git-backed reads are async — open the file once it resolves.
+    void store.readFile(`/workspace/${path}`).then((content) => {
+      if (content == null) return;
+      setSecondaryDoc({ source: "workspace", path, content });
+      setCenterView("secondary");
+    });
   };
 
   // Which row each Explorer view highlights as active.

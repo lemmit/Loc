@@ -12,12 +12,12 @@
 // ---------------------------------------------------------------------------
 
 import { ActionIcon, Badge, Group, Text, Tooltip } from "@mantine/core";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { LoomBuildClient } from "../build/client.js";
-import type { IdbVfs } from "../vfs/idb-vfs.js";
+import type { GitStore } from "./git/index.js";
 
 interface Props {
-  workspaceVfs: IdbVfs | null;
+  workspaceStore: GitStore | null;
   buildClient: LoomBuildClient | null;
 }
 
@@ -28,10 +28,10 @@ interface PackSummary {
 
 const DESIGN_PREFIX = "/workspace/design/";
 
-function summarisePacks(vfs: IdbVfs | null): PackSummary[] {
-  if (!vfs) return [];
+async function summarisePacks(store: GitStore | null): Promise<PackSummary[]> {
+  if (!store) return [];
   const grouped = new Map<string, string[]>();
-  for (const path of vfs.list(DESIGN_PREFIX)) {
+  for (const path of await store.list(DESIGN_PREFIX)) {
     const rest = path.slice(DESIGN_PREFIX.length);
     const slash = rest.indexOf("/");
     const name = slash < 0 ? rest : rest.slice(0, slash);
@@ -44,23 +44,36 @@ function summarisePacks(vfs: IdbVfs | null): PackSummary[] {
   );
 }
 
-export function WorkspaceTree({ workspaceVfs, buildClient }: Props): JSX.Element | null {
-  // Derive the pack list from the VFS.  Re-derive on every VFS
+export function WorkspaceTree({ workspaceStore, buildClient }: Props): JSX.Element | null {
+  // Derive the pack list from the store.  Rebuild on every store
   // mutation under /workspace/design/ via the subscribe hook —
-  // imports/deletes propagate without a manual refresh.
-  const [tick, setTick] = useState(0);
+  // imports/deletes propagate without a manual refresh.  Reads are
+  // async (git-backed), so the list lands in state.
+  const [packs, setPacks] = useState<PackSummary[]>([]);
   useEffect(() => {
-    if (!workspaceVfs) return;
-    return workspaceVfs.subscribe(DESIGN_PREFIX, () => setTick((t) => t + 1));
-  }, [workspaceVfs]);
-
-  const packs = useMemo(() => summarisePacks(workspaceVfs), [workspaceVfs, tick]);
+    if (!workspaceStore) {
+      setPacks([]);
+      return;
+    }
+    let cancelled = false;
+    const rebuild = (): void => {
+      void summarisePacks(workspaceStore).then((p) => {
+        if (!cancelled) setPacks(p);
+      });
+    };
+    rebuild();
+    const unsubscribe = workspaceStore.subscribe(DESIGN_PREFIX, rebuild);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [workspaceStore]);
 
   if (packs.length === 0) return null;
 
   async function removePack(name: string, paths: string[]): Promise<void> {
-    if (workspaceVfs) {
-      for (const p of paths) workspaceVfs.delete(p);
+    if (workspaceStore) {
+      for (const p of paths) await workspaceStore.deleteFile(p);
     }
     if (buildClient) {
       await buildClient.vfsDelete(paths);

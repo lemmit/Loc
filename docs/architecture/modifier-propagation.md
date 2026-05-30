@@ -2,7 +2,7 @@
 
 > Convention spec — no single `D-*` tag, but every governance proposal
 > relies on it. Status: `sensitive`/`provenanced`/`audited`/`persistedAs`/
-> `normalised` exist; their propagation rules are partly implemented and
+> `shape` exist; their propagation rules are partly implemented and
 > codified here so later phases extend one model instead of inventing
 > per-feature rules.
 
@@ -37,7 +37,7 @@ The four propagation axes:
 | `mask:` (sensitivity phase 3) | follows the masked field | **transforms** the wire value (redact/partial) per `RequestContext.currentUser` | masks the rendered form, not the stored value | DTO + React render layer |
 | `authorized(<tag>, …)` | expression-scoped declassification | n/a | narrows a sensitive value back to plain **within the authorized scope only** | the escape hatch for the sink constraint above |
 | `persistedAs(eventLog\|state)` | aggregate-level header (D-DOCUMENT-AXIS) | n/a — affects persistence, not wire | n/a | selects event-log vs state datasource; gates the applier body contract |
-| `normalised(true\|false)` | aggregate-level header | n/a | n/a | selects relational vs JSON-document saving shape |
+| `shape(relational\|embedded\|document)` | aggregate-level header | n/a | n/a | selects the saving shape — relational tables, embedded-children JSONB, or one opaque JSONB document |
 
 ## Binding rules
 
@@ -53,7 +53,7 @@ The four propagation axes:
   Backends never re-decide propagation.
 
 - **Containment inherits structural modifiers, not behavioural ones.** A
-  contained part shares the root's **tenancy** and **document/normalised
+  contained part shares the root's **tenancy** and **`shape(…)`
   saving shape** (they are storage-structural). It does **not** inherit
   the root's `audited` mode (audit is an action-level concern keyed to
   the aggregate's lifecycle operations).

@@ -6,6 +6,7 @@ import type {
   Aggregate,
   BaseType,
   BinaryChain,
+  Criterion,
   EntityPart,
   EnumDecl,
   Expression,
@@ -30,6 +31,7 @@ import {
   isCallSuffix,
   isComponent,
   isContainment,
+  isCriterion,
   isDecLit,
   isDerivedProp,
   isEntityPart,
@@ -423,7 +425,10 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
   }
   if (isNameRef(expr)) {
     const looked = env.resolve(expr.name);
-    return looked?.type ?? T.unknown;
+    if (looked) return looked.type;
+    // A bare reference to a parameterless criterion is a boolean predicate.
+    if (lookupCriterionByName(expr.name, env)) return T.prim("bool");
+    return T.unknown;
   }
   return T.unknown;
 }
@@ -579,6 +584,8 @@ function typeOfFreeCall(name: string, env: Env): DddType {
   if (fn) return resolveTypeRef(fn.returnType);
   const vo = lookupValueObjectByName(name, env);
   if (vo) return { kind: "valueobject", ref: vo };
+  // A parameterised criterion call (`InRegion("EU")`) is a boolean predicate.
+  if (lookupCriterionByName(name, env)) return T.prim("bool");
   return T.unknown;
 }
 
@@ -747,6 +754,21 @@ function lookupEntityByName(name: string, env: Env): Aggregate | EntityPart | un
         if (isEntityPart(inner) && inner.name === name) return inner;
       }
     }
+  }
+  return undefined;
+}
+
+/** Resolve a criterion by name against the enclosing bounded context.
+ *  Criteria are context-level predicate specifications (see
+ *  docs/criterion.md); a reference to one in expression position types
+ *  as `bool`. */
+function lookupCriterionByName(name: string, env: Env): Criterion | undefined {
+  const start = env.aggregate ?? env.part ?? env.valueObject;
+  if (!start) return undefined;
+  const ctx = AstUtils.getContainerOfType(start, isBoundedContext);
+  if (!ctx) return undefined;
+  for (const m of ctx.members) {
+    if (isCriterion(m) && m.name === name) return m;
   }
   return undefined;
 }
