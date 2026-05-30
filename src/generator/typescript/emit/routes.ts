@@ -14,11 +14,14 @@ export function renderHttpIndex(
   options?: { authRequired?: boolean },
 ): string {
   const authRequired = !!options?.authRequired;
-  const aggregateImports = ctx.aggregates.flatMap((a) => [
+  // Abstract bases (aggregate-inheritance.md) own only the shared TPH table —
+  // no domain module, repository, or routes — so they're never mounted here.
+  const aggregates = ctx.aggregates.filter((a) => !a.isAbstract);
+  const aggregateImports = aggregates.flatMap((a) => [
     `import { ${lowerFirst(a.name)}Routes } from "./${lowerFirst(a.name)}.routes";`,
     `import { ${a.name}Repository } from "../db/repositories/${lowerFirst(a.name)}-repository";`,
   ]);
-  const aggregateRoutes = ctx.aggregates.map((a) => {
+  const aggregateRoutes = aggregates.map((a) => {
     // Aggregates with an audited OR provenanced public operation also
     // receive `db` + `events` so the route can run its save + audit insert +
     // provenance flush in one transaction (matches the transactional router
@@ -30,7 +33,7 @@ export function renderHttpIndex(
     const args = needsTx ? `${repoArg}, db, events` : repoArg;
     return `  app.route("/${snake(plural(a.name))}", ${lowerFirst(a.name)}Routes(${args}));`;
   });
-  const externAggs = ctx.aggregates.filter((a) => a.operations.some((o) => o.extern));
+  const externAggs = aggregates.filter((a) => a.operations.some((o) => o.extern));
   const externImports = externAggs.map(
     (a) =>
       `import { verify${a.name}ExternHandlersRegistered } from "../domain/${lowerFirst(a.name)}-extern";`,

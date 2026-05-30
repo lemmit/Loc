@@ -50,6 +50,7 @@ export type DddKeywordNames =
     | "["
     | "[]"
     | "]"
+    | "abstract"
     | "against"
     | "aggregate"
     | "aggregates"
@@ -103,6 +104,7 @@ export type DddKeywordNames =
     | "every"
     | "expect"
     | "expectThrows"
+    | "extends"
     | "extern"
     | "false"
     | "favicon"
@@ -123,6 +125,7 @@ export type DddKeywordNames =
     | "implements"
     | "import"
     | "inMemory"
+    | "inheritanceUsing"
     | "instance"
     | "int"
     | "internal"
@@ -155,6 +158,7 @@ export type DddKeywordNames =
     | "onCreate"
     | "onUpdate"
     | "operation"
+    | "ownTable"
     | "page"
     | "parent"
     | "payload"
@@ -199,6 +203,7 @@ export type DddKeywordNames =
     | "service"
     | "shadcn"
     | "shape"
+    | "sharedTable"
     | "sidebar"
     | "slot"
     | "snapshot"
@@ -346,6 +351,12 @@ export type IdKind = 'guid' | 'int' | 'long' | 'string';
 
 export function isIdKind(item: unknown): item is IdKind {
     return item === 'guid' || item === 'int' || item === 'long' || item === 'string';
+}
+
+export type InheritanceLayout = 'ownTable' | 'sharedTable';
+
+export function isInheritanceLayout(item: unknown): item is InheritanceLayout {
+    return item === 'sharedTable' || item === 'ownTable';
 }
 
 export type IsolationLevel = 'readCommitted' | 'readUncommitted' | 'repeatableRead' | 'serializable';
@@ -558,10 +569,13 @@ export interface Aggregate extends AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'Aggregate';
     idKind?: IdKind;
+    inheritanceUsing?: InheritanceLayout;
+    isAbstract: boolean;
     members: Array<AggregateMember>;
     name: string;
     persistedAs?: TruthKind;
     shape?: SavingShape;
+    superType?: Reference<Aggregate>;
     withClause?: WithClause;
 }
 
@@ -2628,6 +2642,11 @@ export class DddAstReflection extends AbstractAstReflection {
     getReferenceType(refInfo: ReferenceInfo): string {
         const referenceId = `${refInfo.container.$type}:${refInfo.property}`;
         switch (referenceId) {
+            case 'Aggregate:superType':
+            case 'Repository:aggregate':
+            case 'View:source': {
+                return Aggregate;
+            }
             case 'Api:source': {
                 return Subdomain;
             }
@@ -2659,10 +2678,6 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case 'MenuLink:page': {
                 return Page;
-            }
-            case 'Repository:aggregate':
-            case 'View:source': {
-                return Aggregate;
             }
             case 'Requirement:parent':
             case 'Solution:requirement':
@@ -2698,10 +2713,13 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: Aggregate,
                     properties: [
                         { name: 'idKind' },
+                        { name: 'inheritanceUsing' },
+                        { name: 'isAbstract', defaultValue: false },
                         { name: 'members', defaultValue: [] },
                         { name: 'name' },
                         { name: 'persistedAs' },
                         { name: 'shape' },
+                        { name: 'superType' },
                         { name: 'withClause' }
                     ]
                 };
