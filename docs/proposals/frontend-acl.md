@@ -1,6 +1,8 @@
 # Frontend ACL — volatile state ↔ sealed payload, with bidirectional error hydration
 
-> Status: proposal. **Sister proposals**:
+> Status: **SEALED — ready to implement.** Three rounds of review converged on the layout below. Implementation plan: [`../plans/frontend-acl-implementation.md`](../plans/frontend-acl-implementation.md).
+>
+> **Sister proposals**:
 > - [`loom-forms.md`](./loom-forms.md) — supplies the form-binding model (action ⇒ field list) this proposal builds on top of. This doc fills `loom-forms.md`'s open items #3 (`option` rendering at the form layer) and #4 (RFC 7807 `pointer` → form field mapping) and adds the runtime that makes them work.
 > - [`payload-transport-layer.md`](./payload-transport-layer.md) — supplies the `payload` / `command` carriers and `wireShape` projection this proposal consumes. The two shapes here (form state vs command payload) are the on-the-frontend manifestation of the carrier-bounded transport story.
 > - [`exception-less.md`](./exception-less.md) — supplies the RFC 7807 ProblemDetails wire shape (with the `errors[]` extension and `pointer` field per error) that the runtime translator decodes back into form-field errors.
