@@ -1410,6 +1410,23 @@ export interface NeedIR {
 // validator enforces both.
 export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView";
 
+/** Saving shapes (D-DOCUMENT-AXIS `shape(…)`) each backend platform can
+ *  EMIT today — the single source of truth for the `supportedShapes`
+ *  capability check.  A `shape(…)` not listed for the target platform is
+ *  a hard error (the backend has no emitter for it yet).  Keyed by the
+ *  bareword family (a `family@version` pin resolves via `platformFamily`
+ *  in the validator).  Frontend platforms (`react`/`static`) own no
+ *  persistence and are omitted.  Consumed by both the IR validator
+ *  (`validateSavingShapeSupport`) and the generator persistence adapters
+ *  (`PersistenceAdapter.supportedShapes`). */
+export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingShape[]>> = {
+  dotnet: ["relational", "embedded", "document"],
+  hono: ["relational", "embedded", "document"],
+  // Phoenix/Ash emits relational today; embedded (Ash embedded
+  // resources) + document (single `:map`) are follow-ups.
+  phoenixLiveView: ["relational"],
+};
+
 export interface DeployableIR {
   name: string;
   /** The platform **family** (`"hono"`, `"dotnet"`, `"react"`, …) —

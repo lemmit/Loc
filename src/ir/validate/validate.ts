@@ -1,4 +1,7 @@
-import { platformOwnsBackend } from "../../language/validators/data/platform-rules.js";
+import {
+  platformOwnsBackend,
+  platformSavingShapes,
+} from "../../language/validators/data/platform-rules.js";
 import { allPlatforms, platformFor } from "../../platform/registry.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
 import { capabilitiesFor, configSchemaFor, supportsSurfaceKind } from "../source-types.js";
@@ -20,7 +23,11 @@ import type {
   TypeIR,
 } from "../types/loom-ir.js";
 import { allContexts, findUsesCurrentUser } from "../types/loom-ir.js";
-import { dataSourceKindForAggregate } from "../util/resolve-datasource.js";
+import {
+  dataSourceKindForAggregate,
+  effectiveSavingShape,
+  resolveDataSourceConfig,
+} from "../util/resolve-datasource.js";
 
 // ---------------------------------------------------------------------------
 // Loom IR validator — semantic checks that need the full IR (not just
@@ -58,6 +65,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
     validateDataSourceCoverage(sys, diags);
+    validateSavingShapeSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
@@ -894,6 +902,50 @@ function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): voi
           `remove it, or add an aggregate whose persistedAs needs kind: ${ds.kind}.`,
         source: `${sys.name}/${dep.name}`,
       });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Saving-shape capability (D-DOCUMENT-AXIS).  An aggregate's effective
+// `shape(…)` must be one the hosting backend can actually emit.  Today
+// the matrix is partial — .NET / Hono emit all three (relational /
+// embedded / document); Phoenix emits only relational — so a
+// `shape(document)` aggregate on a Phoenix deployable would otherwise
+// emit *relationally*, silently mismatching the per-shape migration.
+// This turns that footgun into a clear error (the capability tier).
+//
+// Per-projection: the effective shape is resolved binding-aware (a
+// `resource { shape: … }` override wins over the aggregate header), the
+// same way the migration + backend emitters resolve it, so the check
+// matches what would actually be produced.  Frontend platforms own no
+// persistence (platformSavingShapes → undefined) and are skipped.
+// ---------------------------------------------------------------------------
+function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+
+  for (const dep of sys.deployables) {
+    if (!platformOwnsBackend(dep.platform)) continue;
+    const supported = platformSavingShapes(dep.platform);
+    if (!supported) continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
+        if (supported.includes(shape)) continue;
+        diags.push({
+          severity: "error",
+          message:
+            `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
+            `'${ctxName}.${agg.name}' with shape(${shape}), but that backend can only ` +
+            `emit: ${supported.join(", ")}.  Use a supported shape, or host this ` +
+            `aggregate on a deployable whose platform emits shape(${shape}).`,
+          source: `${sys.name}/${dep.name}`,
+        });
+      }
     }
   }
 }
