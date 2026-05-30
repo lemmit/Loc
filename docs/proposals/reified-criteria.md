@@ -169,40 +169,74 @@ mechanism** but **keeps their semantics**:
 | `HasQueryFilter` for non-principal / injected accessor for principal (#767) | **Unified** — one factory-constructed spec, applied uniformly. |
 | `contextFilters` as anonymous inlined predicates | **Reified** — a capability `filter` becomes an (anonymous or named) spec applied by the consumer. |
 
-### Disposition of the open PRs
+### Disposition of the open PRs (decided)
 
-Two options; this proposal recommends the first:
+The inline filter work is a live three-PR stack: **#760** (Hono
+filter-capability, non-principal) → **#762** (Phoenix `base_filter`,
+non-principal, stacked on #760) → **#767** (.NET principal/tenancy via an
+injected `ICurrentUserAccessor`, stacked on #762). #767 is where the
+inline mechanism visibly cracks — the two-mechanisms split (find-param
+threading vs injected accessor) lives there.
 
-1. **Land #760 / #762 / #767 as the inline high-water mark, refactor on
-   top.** They are correct, tested, and tenant-safe *as output*; merging
-   them keeps the feature working while reification lands incrementally
-   behind them. Reification then deletes the inline paths it replaces.
-   Lower risk; the migration is a series of "replace inline render with
-   spec construction" changes, each gated by the existing tests.
-2. **Hold #767 (the one that cracks) and reify the principal case
-   directly.** Cleaner history, but larger first step and leaves tenancy
-   unshipped longer.
+**Decision: land #760 + #762, hold #767.**
 
-Recommendation: **option 1.** #767's *output* is right; its *mechanism* is
-the redundant one this proposal removes — and removing it is safer as a
-follow-up refactor against green tests than as a prerequisite.
+- **#760 / #762 ship.** They are non-principal (soft-delete / `filter
+  !this.isDeleted`), fix real latent bugs (the dropped bare-boolean
+  Drizzle predicate; Phoenix's silent filter no-op), and their *output*
+  is exactly what reification would emit for a closed criterion. Nothing
+  about them is the redundant mechanism — they're the baseline
+  reification builds on, not the part it removes.
+- **#767 is held.** Its *output* is right but its *mechanism* (inject the
+  principal at the .NET repo, threaded a second, different way from the
+  find path) is precisely the redundancy this proposal removes. Rather
+  than merge it and then delete it, the principal/tenancy case is
+  implemented **directly in reified form** — `currentUser.<field>` as a
+  constructor argument bound by the factory — so tenancy ships *once*,
+  the clean way, on every backend uniformly.
+
+Trade-off accepted: tenancy stays unshipped slightly longer (it rides
+the reification work instead of #767), in exchange for never landing —
+then unwinding — the two-mechanisms code. Soft-delete / non-principal
+filtering is unaffected: it ships now via #760 / #762.
+
 
 ## Implementation sketch (phased)
 
 This reverses a deliberate pipeline decision, so it lands in slices, each
 keeping the suite green.
 
-1. **Stop inlining; keep constructing.** Lower the criterion body once;
-   resolve a `current-user` operand to a recognized `principal` argument
-   kind (alongside `param`). Use-sites carry a *reference* to the
-   criterion + its argument expressions, not a substituted body.
-   (`src/ir/lower/lower-expr.ts`, `loom-ir.ts` — `CriterionIR` already
-   has the fields; add a `CriterionRefIR` use-site node.)
-2. **One backend end-to-end (.NET).** Emit spec + factory + consumer;
-   delete the inline `HasQueryFilter`/injected-accessor split and the
-   `usesUser` find threading. Prove `dotnet build /warnaserror` green.
+**Sequencing decision: `retrieval` first.** Rather than begin by tearing
+out the shipped inline paths, the work starts on the *greenfield*
+[`retrieval.md`](./retrieval.md) surface — a new keyword with no existing
+behaviour to preserve. Building `retrieval` end-to-end forces the
+`RetrievalIR` / `LoadPlanIR` / `CriterionRefIR` seam into existence
+against a clean target, proves the reified-consumption path on a feature
+that *only* has the reified path, and only *then* reuses that proven seam
+to migrate the inline criterion use-sites underneath. The risky
+inline-removal becomes "point the old use-sites at a seam that already
+works," not "invent the seam and remove the old code at once."
+
+0. **`retrieval` end-to-end (greenfield).** Grammar + scope + lower to a
+   named `RetrievalIR` (the `where` lowers through a *reified*
+   `CriterionRefIR` — the first real consumer) + `LoadPlanIR` (default
+   `whole(agg)`) + `Repo.run`; emit on all backends. No inline code
+   touched; nothing to keep green except the new tests. This stands up
+   the whole seam. (See `retrieval.md` §Phasing.)
+1. **Stop inlining; keep constructing.** With the seam proven, lower the
+   criterion body once and have *inline* use-sites carry a
+   `CriterionRefIR` (the same node `retrieval` already uses) instead of a
+   substituted body. Resolve a `current-user` operand to a recognized
+   `principal` argument kind (alongside `param`).
+   (`src/ir/lower/lower-expr.ts`, `loom-ir.ts`.)
+2. **Principal/tenancy directly in reified form (.NET first).** Emit spec
+   + factory + consumer; the held-#767 case (`currentUser.tenantId`)
+   lands here as a constructor argument bound by the factory — *not* the
+   injected-accessor mechanism #767 used. Delete the `usesUser` find
+   threading. Prove `dotnet build /warnaserror` green.
 3. **Hono, then Phoenix.** Same three pieces; retire their inline render
-   paths. Prove `hono-build` / `phoenix-build` gates.
+   paths (the non-principal #760 / #762 output stays byte-identical,
+   now produced by the reified path). Prove `hono-build` /
+   `phoenix-build` gates.
 4. **Selection/validation duality.** Emit `isSatisfiedBy` on each spec;
    route invariant/precondition/guard use-sites through it. Replace the
    selectability *validator* with the spec's `toExpression()`
@@ -310,8 +344,10 @@ reusable* one. Same node, two doors.
 4. **Composition across candidates.** `&&` over two `of Doc` specs is an
    `.And()`; the existing validator already forbids cross-candidate
    composition — keep that rule.
-5. **Migration ordering vs. the open PRs** — option 1 vs. 2 above;
-   pinned by the maintainer.
+5. **Migration ordering vs. the open PRs** — *decided* (see "Disposition
+   of the open PRs"): land #760 + #762, hold #767, reify the principal
+   case directly. Sequencing: `retrieval` first (see "Implementation
+   sketch").
 
 ## Cross-references
 
