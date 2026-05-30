@@ -1,13 +1,27 @@
 # Plan: TPH mixed-strategy `find all` (UNION-ALL) + `contains` on a TPH concrete
 
-Status: **proposed** — design note for the two TPH emission features deferred in
-PR #749. Both are currently *gated* by validator rules (the surface is honest
-today; this plan is about lifting the gates with real emission). Hono/Drizzle
-only, matching the rest of the TPH slice.
+Status: **partially shipped / partially dropped.**
+
+- **Feature 2 — `contains` on a TPH concrete (Pattern 4): SHIPPED** in PR #768.
+  The gate `loom.tph-contains-unsupported` is lifted; a TPH concrete's parts
+  emit their own tables FK'd to the shared base table. The fix was small (the
+  repository already keys parts on `parentId`, and a TPH concrete's id is the
+  shared-table row id, so only the schema/migration emitters changed).
+- **Feature 1 — UNION-ALL `find all Base` over a mixed hierarchy (Pattern 3):
+  DROPPED.** It exists only to unlock the per-concrete `ownTable` *override*,
+  which was deliberately gated as out-of-scope (`loom.tph-own-override-unsupported`
+  / `loom.polymorphic-id-ref-mixed-strategy`) — the override is a niche
+  "mixed-strategy" shape with confusing polymorphic-read semantics, not worth
+  the read-side complexity of a `unionAll` across the shared table + each
+  override's own table. If real demand appears, the design below is preserved
+  as a starting point; until then the gate stands and this is not planned work.
 
 Companion to [`docs/proposals/aggregate-inheritance.md`](../proposals/aggregate-inheritance.md)
 (Patterns 3 and 4). The single source of truth for TPH base/concrete resolution
 is `src/generator/typescript/tph.ts`; every emitter already consults it.
+
+The Feature 1 design notes below are retained for reference only (DROPPED — see
+status above). The Feature 2 notes describe what shipped.
 
 ---
 
