@@ -138,9 +138,7 @@ const rabbitmqPhoenixAdapter: PhoenixResourceAdapter = {
 
 const restApiPhoenixAdapter: PhoenixResourceAdapter = {
   name: "restApi",
-  // `:req` is already a base Phoenix dep — don't re-declare it (duplicate
-  // dep keys break `mix deps.get`).
-  hexDeps: () => ({}),
+  hexDeps: () => ({ req: '"~> 0.5"' }),
   emitClientModule(resources, stores, appModule): string {
     const lines: string[] = [
       "# Auto-generated.",

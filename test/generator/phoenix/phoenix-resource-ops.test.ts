@@ -51,12 +51,11 @@ describe("Phoenix resource emission", () => {
     expect(api).toMatch(/Req.get!/);
   });
 
-  it("adds the Hex deps to mix.exs (ex_aws + amqp; not a duplicate req)", async () => {
+  it("adds the Hex deps to mix.exs (ex_aws + amqp + req, each once)", async () => {
     const mix = (await gen()).get("api/mix.exs")!;
     expect(mix).toMatch(/\{:ex_aws, "~> 2.5"\}/);
     expect(mix).toMatch(/\{:ex_aws_s3, "~> 2.5"\}/);
     expect(mix).toMatch(/\{:amqp, "~> 4.0"\}/);
-    // req is a base dep — must appear exactly once
     expect((mix.match(/\{:req,/g) ?? []).length).toBe(1);
   });
 
