@@ -320,7 +320,7 @@ Out of scope for v1: the `then: <route>` clause on forms. v1 ships with hardcode
 
 3. **`option` field rendering.** `string option` (partial-update three-state) renders as text input + "leave unchanged" toggle. The toggle's UX is design-pack-specific; needs templates.
 
-4. **Validation error mapping.** RFC 7807 ProblemDetails has a `pointer` field (JSON pointer into the body). Mapping that to a specific form field requires the form to know its own field-to-pointer correspondence. Mostly mechanical but needs spelling out.
+4. **Validation error mapping.** ~~RFC 7807 ProblemDetails has a `pointer` field (JSON pointer into the body). Mapping that to a specific form field requires the form to know its own field-to-pointer correspondence. Mostly mechanical but needs spelling out.~~ **Addressed by [`frontend-acl.md`](./frontend-acl.md) Phases 1+2** (shipped in [#769](https://github.com/lemmit/Loc/pull/769), commit `25dba02`): every generated form's catch block calls `applyServerErrors({ error, setError, fieldMap })` which decodes `errors[].pointer` → flat dot-key → `setError`. The per-form `fieldMap` is an empty `{} as const` identity today (RHF's `Path<T>` accepts dot-paths directly); a populated FieldMap becomes meaningful only when the schema restructure lands (see frontend-acl's PARTIAL status). The runtime is fully wired across all 8 pack/versions; the per-field path stays dormant until backends grow the RFC 7807 §3.2 `errors[]` extension from `exception-less.md`.
 
 5. **Loading / pending states.** Default rendering shows a spinner on the submit button. Custom rendering (skeleton states, optimistic UI) is per-pack.
 
@@ -377,7 +377,9 @@ Total: ~5 days serialised; ~3 days with parallelism.
 
 - [`partial-update.md`](./partial-update.md) — `option`-typed fields in operations. The form layer needs to render the three-state field correctly (absent / cleared / value). Open item #3 above tracks this.
 
-- [`exception-less.md`](./exception-less.md) — RFC 7807 ProblemDetails-shaped errors. The form layer maps the `errors[]` array to fields. Open item #4 tracks this.
+- [`exception-less.md`](./exception-less.md) — RFC 7807 ProblemDetails-shaped errors. The form layer maps the `errors[]` array to fields via [`frontend-acl.md`](./frontend-acl.md)'s `applyServerErrors` runtime (shipped #769). The frontend ACL is wired and tested; the per-field path goes live the moment backends emit the `errors[]` extension from this proposal.
+
+- [`frontend-acl.md`](./frontend-acl.md) — supplies the runtime that closes the loop on this proposal's "On error" semantics. Phases 1+2 shipped; per-action `FieldMap` instances + schema restructure deferred.
 
 - [`criterion.md`](./criterion.md) — `when <Criterion>` guards generating `can-<op>` endpoints. Forms can use the can-op endpoint to disable the submit button when the criterion would reject the action. Out of scope for this proposal but worth coordinating in the criterion proposal's open items.
 
