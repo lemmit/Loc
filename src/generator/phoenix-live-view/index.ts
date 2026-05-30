@@ -7,7 +7,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
-import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
+import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx } from "../_adapters/index.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
@@ -383,12 +383,20 @@ function renderDomainModule(
   // (that was Ash 2.x; removed in 3.0).
   const resourceBlocks: string[] = [];
   const partResources = new Set<string>();
+  // Parts of `shape(embedded)` aggregates are Ash *embedded* resources —
+  // they are NOT domain-registered (Ash forbids an embedded resource in a
+  // domain's `resources` block); they live inline in the parent's jsonb.
+  const embeddedParts = new Set<string>();
   for (const agg of ctx.aggregates) {
+    const isEmbedded = effectiveSavingShape(agg as EnrichedAggregateIR) === "embedded";
     for (const part of agg.parts) {
-      partResources.add(`${contextModule}.${upperFirst(part.name)}`);
+      const mod = `${contextModule}.${upperFirst(part.name)}`;
+      partResources.add(mod);
+      if (isEmbedded) embeddedParts.add(mod);
     }
   }
   for (const r of resources) {
+    if (embeddedParts.has(r)) continue;
     const aggName = r.split(".").pop()!;
     // Locate the IR aggregate to enumerate its custom finds.
     const agg = ctx.aggregates.find((a) => upperFirst(a.name) === aggName);
