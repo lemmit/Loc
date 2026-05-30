@@ -10,9 +10,11 @@ export {
   LOOM_AUTHOR,
   type GitAuthor,
   type FileDiff,
+  type ListOpts,
   type MergeOutcome,
   type CommitInfo,
 } from "./git-store.js";
+export { startAutoCommit, type AutoCommitOptions } from "./auto-commit.js";
 export {
   commitOnSave,
   regenerateMerge,
