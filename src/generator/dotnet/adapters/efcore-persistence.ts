@@ -20,7 +20,7 @@ import type { EmitCtx, Lines, PersistenceAdapter } from "../../_adapters/index.j
 import { renderConfiguration, renderDbContext } from "../emit/efcore.js";
 import { emitDotnetMigrations } from "../emit/migrations.js";
 import { renderRepositoryImpl } from "../emit/repository.js";
-import { buildFindBodies } from "../find-emit.js";
+import { buildFindBodies, collectFindBodyUsings } from "../find-emit.js";
 
 /** Per-deployable namespace — every dotnet emit fn keys off it for
  *  `using` directives + class declarations.  Mirrors the `ns` parameter
@@ -114,14 +114,14 @@ export const efcorePersistenceAdapter: PersistenceAdapter = {
     // where it'll plug in.
     const ns = nsOf(ctx);
     const repo = findRepoFor(ctx, agg.name);
-    // The find-body builder threads usings back for filters using
-    // regex etc.  Mirrors the orchestrator's local Set<string>.
-    const extra = new Set<string>();
+    // Find filters using regex etc. declare their namespaces; mirrors
+    // the orchestrator's local Set<string>.
+    const extra = collectFindBodyUsings(repo);
     // EnrichedAggregateIR cast is safe: ctx.contexts are
     // EnrichedBoundedContextIR, so every aggregate the orchestrator
     // would pass through here is already enriched.
     const enriched = agg as import("../../../ir/types/loom-ir.js").EnrichedAggregateIR;
-    const findBodies = buildFindBodies(enriched, repo, extra);
+    const findBodies = buildFindBodies(enriched, repo);
     return splitLines(
       renderRepositoryImpl(enriched, repo, ns, findBodies, {
         extraUsings: [...extra].sort(),

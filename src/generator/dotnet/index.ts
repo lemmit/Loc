@@ -57,7 +57,7 @@ import {
   renderTestsFile,
   renderValueObject,
 } from "./emit.js";
-import { buildFindBodies } from "./find-emit.js";
+import { buildFindBodies, collectFindBodyUsings } from "./find-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
@@ -478,11 +478,11 @@ function emitAggregate(
     `Domain/${aggFolder}/I${agg.name}Repository.cs`,
     renderRepositoryInterface(agg, repoWithViews, ns),
   );
-  // Threaded into buildFindBodies so a find with a `where` expression
-  // that lowers to `Regex.IsMatch` declares its System.Text.RegularExpressions
-  // dependency; the repository impl emitter then adds the using.
-  const repoImplUsings = new Set<string>();
-  const findBodies = buildFindBodies(agg, repoWithViews, repoImplUsings);
+  // A find with a `where` expression that lowers to `Regex.IsMatch`
+  // declares its System.Text.RegularExpressions dependency; the
+  // repository impl emitter then adds the using.
+  const repoImplUsings = collectFindBodyUsings(repoWithViews);
+  const findBodies = buildFindBodies(agg, repoWithViews);
   out.set(
     `Infrastructure/Repositories/${agg.name}Repository.cs`,
     isDoc

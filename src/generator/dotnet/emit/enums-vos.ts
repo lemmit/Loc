@@ -1,7 +1,7 @@
 import type { EnumIR, ValueObjectIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
-import { renderCsExpr, renderCsType } from "../render-expr.js";
+import { collectCsExprUsings, renderCsExpr, renderCsType } from "../render-expr.js";
 
 // Enum → C# enum.  Value object → sealed record with explicit
 // constructors (so invariants always run; positional records would
@@ -23,11 +23,18 @@ export function renderEnum(e: EnumIR, ns: string): string {
 }
 
 export function renderValueObject(vo: ValueObjectIR, ns: string): string {
-  // Threaded through every renderCsExpr call below; renderers add
-  // non-implicit namespaces (e.g. System.Text.RegularExpressions for
-  // a value-object invariant using `value.matches(...)`).
+  // Non-implicit namespaces this value object's rendered expressions
+  // reach into (e.g. System.Text.RegularExpressions for an invariant
+  // using `value.matches(...)`), collected over the same invariant /
+  // derived / function bodies rendered below.
   const usings = new Set<string>();
-  const renderCtx = { thisName: "this", usings };
+  for (const inv of vo.invariants) {
+    collectCsExprUsings(inv.expr, usings);
+    if (inv.guard) collectCsExprUsings(inv.guard, usings);
+  }
+  for (const d of vo.derived) collectCsExprUsings(d.expr, usings);
+  for (const fn of vo.functions) collectCsExprUsings(fn.body, usings);
+  const renderCtx = { thisName: "this" };
   const propLines = vo.fields.map(
     (f) => `    public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; init; }`,
   );
