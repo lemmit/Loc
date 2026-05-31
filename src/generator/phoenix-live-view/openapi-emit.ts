@@ -833,11 +833,17 @@ function renderOperationRequestSchema(
 ): string {
   const schemaName = `${upperFirst(op.name)}${agg.name}Request`;
   const moduleName = `${webModule}.Api.Schemas.${schemaName}`;
+  // Optionality rides on the param's own type nullability — a nullable
+  // param (`description?` etc., as crudish's `update` carries through from
+  // a nullable field) is NOT required.  Hono derives the same from
+  // `zodFor` (nullable → `.nullish()` → optional in OpenAPI); hardcoding
+  // `false` here made Phoenix mark those params required and tripped the
+  // parity gate's required-set dimension (UpdateProjectRequest drift).
   const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = op.params.map(
     (p: ParamIR) => ({
       name: p.name,
       type: p.type,
-      optional: false,
+      optional: wireTypeInfo(p.type, "request").isNullable,
     }),
   );
   return renderSchemaModule(moduleName, schemaName, fields, `${webModule}.Api.Schemas`, true);
