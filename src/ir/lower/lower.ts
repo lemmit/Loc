@@ -832,10 +832,18 @@ function lowerDeployable(d: Deployable): DeployableIR {
   // an embedded React SPA when (and only when) the deployable declares
   // `ui:`; backend-only dotnet drops the field.  Other platforms
   // (`hono`) silently drop `design:` and the validator already warns.
+  // D-PHOENIX-SURFACE: `hosts:` declarations the deployable serves.
+  // Resolve the first hosted `Ui` node so `uiName`/`uiFramework` can
+  // fall back to it (and read its own declared framework) when the
+  // legacy `ui:` binding is absent.
+  const hostedUis = (d.hosts ?? []).map((r) => r.ref).filter((u): u is Ui => !!u);
+  const hostedUiNames = hostedUis.map((u) => u.name);
+  const firstHostedUi = hostedUis[0];
   const uiName =
     d.uiSugar?.ref?.ref?.name ??
     d.uiCompose?.ref?.ref?.name ??
     d.uiBlock?.ref?.ref?.name ??
+    firstHostedUi?.name ??
     undefined;
   const design = platformFor(platform).isFrontend
     ? qualifyDesign(d.design, "mantine")
@@ -856,8 +864,13 @@ function lowerDeployable(d: Deployable): DeployableIR {
   // from the platform.  Fullstack dotnet renders React; phoenixLiveView
   // renders LiveView; react/static render React.  Backends without a
   // `ui:` binding leave this undefined.
+  // Precedence: explicit `framework:` on the legacy block binding, then
+  // the framework declared on the `hosts:`-ed `ui` itself (D-PHOENIX-SURFACE
+  // phase 2 — the ui owns its framework), then the legacy platform-derived
+  // default.
   const uiFramework =
     d.uiBlock?.framework ??
+    firstHostedUi?.framework ??
     (uiName
       ? platform === "phoenixLiveView"
         ? "phoenixLiveView"
@@ -890,6 +903,7 @@ function lowerDeployable(d: Deployable): DeployableIR {
     design,
     uiName,
     uiFramework,
+    hostedUiNames,
     serves,
     uiBindings,
     favicon: d.favicon,
