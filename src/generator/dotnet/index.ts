@@ -52,6 +52,7 @@ import {
   renderProgram,
   renderRepositoryImpl,
   renderRepositoryInterface,
+  renderRequiredFromCtorParamFilter,
   renderSnapshots,
   renderTestCsproj,
   renderTestsFile,
@@ -238,6 +239,7 @@ function emitProjectFromContexts(
     "Api/ListResponseWrapperFilter.cs",
     renderListWrapperFilter(ns, listWrapperPairs(contexts)),
   );
+  out.set("Api/RequiredFromCtorParamFilter.cs", renderRequiredFromCtorParamFilter(ns));
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
@@ -575,6 +577,7 @@ function emitInfrastructure(
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set("Api/ListResponseWrapperFilter.cs", renderListWrapperFilter(ns, listWrapperPairs([ctx])));
+  out.set("Api/RequiredFromCtorParamFilter.cs", renderRequiredFromCtorParamFilter(ns));
 }
 
 function emitProject(

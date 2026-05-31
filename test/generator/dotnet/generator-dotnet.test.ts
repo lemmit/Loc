@@ -1240,6 +1240,24 @@ describe(".NET generator", () => {
     expect(program).toMatch(/c\.DocumentFilter<ListResponseWrapperFilter>\(\)/);
   });
 
+  it("emits a RequiredFromCtorParamFilter that marks request-DTO ctor [Required] params required (#779)", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    // Request DTOs carry parameter-targeted [Required], which Swashbuckle's
+    // DataAnnotations reader ignores; this schema filter restores
+    // request-body required-ness from the ctor params (cross-backend parity).
+    const filter = files.get("Api/RequiredFromCtorParamFilter.cs")!;
+    expect(filter).toMatch(/class RequiredFromCtorParamFilter : ISchemaFilter/);
+    // Reflects the primary ctor's [Required] params and adds the camelCase
+    // property name to schema.Required.
+    expect(filter).toMatch(/GetCustomAttribute<RequiredAttribute>\(\)/);
+    expect(filter).toMatch(/schema\.Required\.Add\(key\)/);
+    expect(filter).toMatch(/JsonNamingPolicy\.CamelCase\.ConvertName/);
+    // Registered as a Swashbuckle schema filter, after the NRT support call.
+    const program = files.get("Program.cs")!;
+    expect(program).toMatch(/c\.SchemaFilter<RequiredFromCtorParamFilter>\(\)/);
+  });
+
   it("DomainExceptionFilter catches unhandled exceptions as sanitized 500", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
