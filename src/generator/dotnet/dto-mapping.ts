@@ -96,15 +96,33 @@ export function wireType(
   return s;
 }
 
-/** A DTO record positional parameter, marked `[property: Required]` when
- *  the C# type is non-nullable.  Swashbuckle's `SupportNonNullableReference
- *  Types` does NOT reliably infer required-ness from positional-record NRT
- *  metadata (and never marks non-nullable *value* types required), so we
- *  drive it explicitly from the IR: a field is required iff `wireType` did
- *  not append `?` — exactly the optional→nullable mapping.  This matches
- *  Hono/Phoenix, which mark every non-optional field required.  `[property:
- *  Required]` targets the generated property (not the ctor param) so
- *  Swashbuckle's DataAnnotations reader picks it up.
+/** A DTO record positional parameter, marked required when the C# type is
+ *  non-nullable.  Swashbuckle's `SupportNonNullableReferenceTypes` does NOT
+ *  reliably infer required-ness from positional-record NRT metadata (and
+ *  never marks non-nullable *value* types required), so we drive it
+ *  explicitly from the IR: a field is required iff `wireType` did not append
+ *  `?` — exactly the optional→nullable mapping.  This matches Hono/Phoenix,
+ *  which mark every non-optional field required.
+ *
+ *  Attribute TARGET matters and differs by direction:
+ *   - REQUEST DTOs are model-bound + validated.  A bare `[Required]` on a
+ *     positional-record parameter targets the parameter (correct for the
+ *     model binder) — but Swashbuckle's DataAnnotations reader only picks up
+ *     the *property*-targeted form, so a bare `[Required]` would silently
+ *     drop required-ness from the OpenAPI request schema (breaking the
+ *     strict-parity `requiredDiffs` gate).  Conversely a lone `[property:
+ *     Required]` makes ASP.NET's record validation throw at model-binding
+ *     time (`ThrowIfRecordTypeHasValidationOnProperties` →
+ *     `InvalidOperationException`, a 500 on the FIRST POST with a required
+ *     field, before the controller/handler runs).  Neither target alone is
+ *     correct, so requests emit BOTH: `[property: Required, Required]` — the
+ *     property attribute feeds Swashbuckle, the parameter attribute feeds
+ *     the model binder, and ASP.NET no longer throws because the metadata
+ *     IS associated with the constructor parameter.
+ *   - RESPONSE DTOs are only serialized, never model-bound, so the throw
+ *     can't fire; they keep `[property: Required]` so Swashbuckle's
+ *     property-based DataAnnotations reader marks them required in the
+ *     response schema.
  *
  *  Exception: a non-nullable `bool` in a REQUEST is NOT required.  ASP.NET
  *  model-binding defaults an omitted bool to `false` (no error), matching
@@ -119,7 +137,12 @@ export function dtoParam(
 ): string {
   const optionalBoolRequest = dir === "request" && csType === "bool";
   const required = !csType.endsWith("?") && !optionalBoolRequest;
-  return `${required ? "[property: Required] " : ""}${csType} ${name}`;
+  if (!required) return `${csType} ${name}`;
+  // Request → parameter target (bare `[Required]`) so ASP.NET record
+  // validation doesn't throw at model-binding time; response → property
+  // target (`[property: Required]`).  See the doc comment above.
+  const attr = dir === "request" ? "[Required] " : "[property: Required] ";
+  return `${attr}${csType} ${name}`;
 }
 
 /** Map a wire-shaped expression to a domain-typed argument for a command. */

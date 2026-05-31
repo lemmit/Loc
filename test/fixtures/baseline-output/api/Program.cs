@@ -120,6 +120,13 @@ builder.Services.AddSwaggerGen(c =>
     // schema — matches Hono/Phoenix, which mark every non-optional field
     // required.  Without this Swashbuckle leaves the required set empty.
     c.SupportNonNullableReferenceTypes();
+    // Request DTOs carry [Required] on the record's CONSTRUCTOR PARAMETER
+    // (a property-targeted [property: Required] makes ASP.NET record
+    // validation throw at model-binding time), but Swashbuckle only reads
+    // property-targeted attributes — so it misses request-body required-ness.
+    // This filter marks those properties required from the ctor params,
+    // restoring cross-backend required-set parity.
+    c.SchemaFilter<RequiredFromCtorParamFilter>();
     // operationId parity: the generated controller action method names are
     // the PascalCase of the shared operationId (createProject, allProject,
     // getProjectById, …).  Lower-casing the first char yields the exact
