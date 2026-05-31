@@ -44,6 +44,20 @@ export function platformMountsUi(platform: string | undefined): boolean {
   }
 }
 
+/** The set of `ui { framework: … }` values this platform can host —
+ *  `PlatformSurface.hostableFrameworks` (D-PHOENIX-SURFACE).  Empty set
+ *  for unknown / typo'd platforms (the unknown-platform diagnostic
+ *  surfaces those separately).  Consulted by the deployable validator's
+ *  ui-framework host-compatibility check. */
+export function hostableFrameworksFor(platform: string | undefined): ReadonlySet<string> {
+  if (platform == null) return new Set();
+  try {
+    return platformFor(platform as Platform).hostableFrameworks;
+  } catch {
+    return new Set();
+  }
+}
+
 /** The bareword family of a `platform:` value — strips a
  *  `@version` pin so the predicate helpers + framework checks work
  *  on `platform: "hono@v4"` exactly as on `platform: hono`.
