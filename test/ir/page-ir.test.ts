@@ -530,4 +530,60 @@ describe("page metamodel — IR shape", () => {
       expect(ui.pages.map((p) => p.name)).toEqual(["Home"]);
     });
   });
+
+  // D-PHOENIX-SURFACE phase 4 — `hosts:` clause on the deployable.
+  describe("deployable hosts: (D-PHOENIX-SURFACE)", () => {
+    function deployableByName(loom: LoomModel, name: string) {
+      const d = firstSystem(loom).deployables.find((x) => x.name === name);
+      if (!d) throw new Error(`deployable '${name}' not found`);
+      return d;
+    }
+
+    it("lowers hosts: to hostedUiNames (a list)", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          subdomain M { context C { } }
+          ui WebApp { framework: react }
+          deployable api { platform: dotnet, contexts: [C], hosts: WebApp, port: 8080 }
+        }
+      `);
+      expect(deployableByName(loom, "api").hostedUiNames).toEqual(["WebApp"]);
+    });
+
+    it("hostedUiNames is empty when the deployable uses no hosts:", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          subdomain M { context C { } }
+          deployable api { platform: hono, contexts: [C], port: 3000 }
+        }
+      `);
+      expect(deployableByName(loom, "api").hostedUiNames).toEqual([]);
+    });
+
+    it("uiName/uiFramework fall back to the hosted ui's own declared framework", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          subdomain M { context C { } }
+          ui Admin { framework: phoenixLiveView }
+          deployable app { platform: phoenixLiveView, contexts: [C], hosts: Admin, port: 4000 }
+        }
+      `);
+      const d = deployableByName(loom, "app");
+      expect(d.uiName).toBe("Admin");
+      // The framework comes from the ui declaration, not platform-derivation.
+      expect(d.uiFramework).toBe("phoenixLiveView");
+    });
+
+    it("supports multiple hosts: entries (one-ui-many-frameworks ready)", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          subdomain M { context C { } }
+          ui Web { framework: react }
+          ui Admin { framework: phoenixLiveView }
+          deployable app { platform: phoenixLiveView, contexts: [C], hosts: Web, Admin, port: 4000 }
+        }
+      `);
+      expect(deployableByName(loom, "app").hostedUiNames).toEqual(["Web", "Admin"]);
+    });
+  });
 });

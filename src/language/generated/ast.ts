@@ -120,6 +120,7 @@ export type DddKeywordNames =
     | "header"
     | "helper"
     | "hono"
+    | "hosts"
     | "id"
     | "ids"
     | "immutable"
@@ -860,6 +861,7 @@ export interface Deployable extends AstNode {
     dataSourceRefs: Array<Reference<Resource>>;
     design?: DesignPack;
     favicon?: string;
+    hosts: Array<Reference<Ui>>;
     name: LooseName;
     platform: Platform;
     port?: number;
@@ -2683,6 +2685,12 @@ export class DddAstReflection extends AbstractAstReflection {
             case 'Deployable:dataSourceRefs': {
                 return Resource;
             }
+            case 'Deployable:hosts':
+            case 'UiBlockBinding:ref':
+            case 'UiComposeBinding:ref':
+            case 'UiSugarBinding:ref': {
+                return Ui;
+            }
             case 'Deployable:serves':
             case 'UiApiParam:apiRef': {
                 return Api;
@@ -2714,11 +2722,6 @@ export class DddAstReflection extends AbstractAstReflection {
             case 'TestBlock:verifies':
             case 'TestE2E:verifies': {
                 return TestCase;
-            }
-            case 'UiBlockBinding:ref':
-            case 'UiComposeBinding:ref':
-            case 'UiSugarBinding:ref': {
-                return Ui;
             }
             default: {
                 throw new Error(`${referenceId} is not a valid reference id.`);
@@ -2939,6 +2942,7 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'dataSourceRefs', defaultValue: [] },
                         { name: 'design' },
                         { name: 'favicon' },
+                        { name: 'hosts', defaultValue: [] },
                         { name: 'name' },
                         { name: 'platform' },
                         { name: 'port' },

@@ -139,6 +139,15 @@ Deployable:
         // value is one of the v0 allowed values, and every UI api
         // parameter has a binding when the UI declares any.
         (uiSugar=UiSugarBinding | uiCompose=UiComposeBinding | uiBlock=UiBlockBinding)?
+        // D-PHOENIX-SURFACE: `hosts:` is the host↔ui relation that
+        // supersedes the `ui:`/`ui {}` bindings above.  A deployable
+        // hosts one or more `ui` declarations; the framework lives on
+        // the `ui` (phase 2), not derived from the platform.  A list
+        // from day one (`hosts+=`) so the deferred one-ui-many-frameworks
+        // case needs no grammar change.  Additive in this phase — it
+        // parses and lowers alongside the legacy bindings; later phases
+        // make it the canonical form and retire the `ui:` bindings.
+        ('hosts' ':' hosts+=[Ui:ID] (',' hosts+=[Ui:ID])* ','?)?
         ('port' ':' port=INT ','?)?
         ('auth' ':' auth=AuthMode ','?)?
         ('design' ':' design=DesignPack ','?)?
