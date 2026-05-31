@@ -412,6 +412,12 @@
           "DialogTitle",
           "DialogTrigger"
         ]
+      },
+      {
+        "from": "../lib/apply-server-errors",
+        "named": [
+          "applyServerErrors"
+        ]
       }
     ],
     "form-default-onsubmit": [
@@ -419,6 +425,12 @@
         "from": "sonner",
         "named": [
           "toast"
+        ]
+      },
+      {
+        "from": "../lib/apply-server-errors",
+        "named": [
+          "applyServerErrors"
         ]
       }
     ]

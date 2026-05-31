@@ -11,6 +11,12 @@ export const CreateCustomerRequest = z.object({
 }).refine((data) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 export type CreateCustomerRequest = z.infer<typeof CreateCustomerRequest>;
 
+export const UpdateCustomerRequest = z.object({
+  username: z.string(),
+  email: z.string(),
+  age: z.number().int(),
+});
+export type UpdateCustomerRequest = z.infer<typeof UpdateCustomerRequest>;
 
 export const ByEmailQuery = z.object({
   email: z.string(),
@@ -57,6 +63,29 @@ export function useCreateCustomer() {
       return z.object({ id: z.string() }).parse(r);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["customers"] }),
+  });
+}
+
+export function useDeleteCustomer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/customers/${id}`);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customers"] }),
+  });
+}
+
+export function useUpdateCustomer(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: UpdateCustomerRequest) => {
+      await api.post(`/customers/${id}/update`, input);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customers", id] });
+      qc.invalidateQueries({ queryKey: ["customers"] });
+    },
   });
 }
 

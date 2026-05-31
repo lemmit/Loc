@@ -35,6 +35,7 @@ import {
 import {
   camelId,
   opCreate,
+  opDestroy,
   opFind,
   opGetById,
   opList,
@@ -191,8 +192,8 @@ export function buildRoutesFile(
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     lines.push(
       ...emitWireSchema(
-        `const ${upperFirst(op.name)}Request`,
-        `${upperFirst(op.name)}Request`,
+        `const ${upperFirst(op.name)}${agg.name}Request`,
+        `${upperFirst(op.name)}${agg.name}Request`,
         op.params.map((p) => ({ name: p.name, base: zodFor(p.type) })),
         preconditionsAsInvariants(op),
         new Set(op.params.map((p) => p.name)),
@@ -349,6 +350,57 @@ export function buildRoutesFile(
   lines.push(`  );`);
   lines.push("");
 
+  // Canonical destroy → DELETE /{id} (hard delete).  Gated on the IR
+  // lifecycle: emitted only when the aggregate has an unnamed `destroy`
+  // (declared or via `crudish`), so plain aggregates' route files are
+  // unchanged.  crudish's destroy is empty-bodied — load (404 guard),
+  // then hard-delete (children/join rows cascade via FK).
+  if (agg.canonicalDestroy) {
+    lines.push(`  app.openapi(`);
+    lines.push(`    createRoute({`);
+    lines.push(`      method: "delete",`);
+    lines.push(`      path: "/{id}",`);
+    lines.push(`      tags: ["${snake(plural(agg.name))}"],`);
+    lines.push(`      operationId: "${camelId(opDestroy(agg.name))}",`);
+    lines.push(`      request: { params: z.object({ id: z.string().uuid() }) },`);
+    lines.push(`      responses: {`);
+    lines.push(`        204: { description: "No Content" },`);
+    lines.push(
+      `        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+    // Deleting a still-referenced aggregate trips a Postgres
+    // foreign_key_violation (cross-aggregate `X id` FK is ON DELETE
+    // RESTRICT) → 409 Conflict.
+    lines.push(
+      `        409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+    lines.push(`      },`);
+    lines.push(`    }),`);
+    lines.push(`    async (c) => {`);
+    lines.push(`      const { id } = c.req.valid("param");`);
+    // getById throws AggregateNotFoundError (→ 404) when absent.
+    lines.push(`      await repo.getById(Ids.${agg.name}Id(id));`);
+    lines.push(`      try {`);
+    lines.push(`        await repo.delete(Ids.${agg.name}Id(id));`);
+    lines.push(`      } catch (err) {`);
+    // PG foreign_key_violation (SQLSTATE 23503) — the row is still
+    // referenced.  Map to a 409 problem locally so the shared onError
+    // (and every other route's behaviour) stays untouched.
+    lines.push(
+      `        if (err && typeof err === "object" && (err as { code?: string }).code === "23503") {`,
+    );
+    lines.push(
+      `          return c.body(JSON.stringify({ type: "about:blank", title: "Conflict", status: 409, detail: "${agg.name} is still referenced and cannot be deleted.", instance: c.req.path }), 409, { "content-type": "application/problem+json" });`,
+    );
+    lines.push(`        }`);
+    lines.push(`        throw err;`);
+    lines.push(`      }`);
+    lines.push(`      return c.body(null, 204);`);
+    lines.push(`    },`);
+    lines.push(`  );`);
+    lines.push("");
+  }
+
   // Operations.
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     lines.push(
@@ -487,7 +539,7 @@ function emitOperationRoute(
   out.push(`    request: {`);
   out.push(`      params: z.object({ id: z.string().uuid() }),`);
   out.push(
-    `      body: { content: { "application/json": { schema: ${upperFirst(op.name)}Request } } },`,
+    `      body: { content: { "application/json": { schema: ${upperFirst(op.name)}${agg.name}Request } } },`,
   );
   out.push(`    },`);
   out.push(`    responses: {`);

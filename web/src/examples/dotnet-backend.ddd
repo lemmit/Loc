@@ -26,21 +26,21 @@ system SalesBackend {
 
       event OrderConfirmed { order: Order id, at: datetime }
 
-      aggregate Customer {
+      aggregate Customer with crudish {
         name: string
         email: string
         invariant email.length > 0
         derived display: string = name
       }
 
-      aggregate Product {
+      aggregate Product with crudish {
         sku: string
         price: Money
         invariant sku.length > 0
         derived display: string = sku
       }
 
-      aggregate Order {
+      aggregate Order with crudish {
         customerId: Customer id
         status: OrderStatus
         placedAt: datetime

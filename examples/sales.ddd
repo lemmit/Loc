@@ -21,18 +21,18 @@ context Sales {
     quantity: int
   }
 
-  aggregate Customer {
+  aggregate Customer with crudish {
     name: string
     email: string
     invariant email.length > 0
   }
 
-  aggregate Product {
+  aggregate Product with crudish {
     sku: string
     price: Money
   }
 
-  aggregate Order {
+  aggregate Order with crudish {
     customerId: Customer id
     status: OrderStatus
     placedAt: datetime

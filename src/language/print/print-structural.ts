@@ -167,6 +167,8 @@ export function printStructural(node: AstNode): string {
       return printEntityPart(node as EntityPart);
     case "Operation":
       return printOperation(node as Operation);
+    case "Apply":
+      return printApply(node as import("../generated/ast.js").Apply);
     case "FunctionDecl":
       return printFunctionDecl(node as FunctionDecl);
     case "DerivedProp":
@@ -627,6 +629,11 @@ function printOperation(node: Operation): string {
     `${priv}operation ${node.name}(${params})${extern}${audited}`,
     node.body.map(printStmt),
   );
+}
+
+function printApply(node: import("../generated/ast.js").Apply): string {
+  const event = node.event.ref?.name ?? node.event.$refText;
+  return block(`apply(${node.param}: ${event})`, node.body.map(printStmt));
 }
 
 function printTestBlock(node: TestBlock): string {

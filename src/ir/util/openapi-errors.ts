@@ -32,6 +32,7 @@ export const PROBLEM_SCHEMA = "ProblemDetails";
 export type OpErrorKind =
   | "create"
   | "getById"
+  | "destroy"
   | "operation"
   | "workflow"
   | "findOptional"
@@ -47,6 +48,10 @@ export function errorStatuses(kind: OpErrorKind): number[] {
       return [400];
     case "getById":
       return [404];
+    // destroy (DELETE /<aggs>/{id}) → 404 (not found) + 409 (still
+    // referenced: cross-aggregate `X id` FK is ON DELETE RESTRICT).
+    case "destroy":
+      return [404, 409];
     case "operation":
       return [400, 404];
     case "workflow":
@@ -73,6 +78,8 @@ export function problemTitle(status: number): string {
       return "Forbidden";
     case 404:
       return "Not Found";
+    case 409:
+      return "Conflict";
     case 500:
       return "Internal Server Error";
     default:

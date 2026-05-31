@@ -249,6 +249,12 @@ AuthMode returns string:
 
 Ui:
     'ui' name=ID withClause=WithClause? '{'
+        // D-PHOENIX-SURFACE: the UI's framework is part of its own
+        // technical identity, not derived from the host backend.
+        // Optional + additive — existing sources omit it and keep the
+        // legacy "framework derived from the deployable's platform"
+        // path until the `hosts:` work consumes it.
+        ('framework' ':' framework=Framework ','?)?
         members+=UiMember*
     '}';
 
@@ -715,7 +721,7 @@ MacroArgValue:
 
 AggregateMember:
     Containment | DerivedProp | Invariant | FunctionDecl | Operation | Create | Destroy | EntityPart | TestBlock | Property
-    | FilterDecl | StampDecl | ImplementsDecl;
+    | FilterDecl | StampDecl | ImplementsDecl | Apply;
 
 // ---- capability source surface ----------------------------------
 //
@@ -943,6 +949,12 @@ Property:
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
     (access=FieldAccess)?
+    // Default value — `field: T = <expr>`.  Placed after the access
+    // modifier so the expression can't greedily swallow a trailing
+    // modifier keyword.  Enables synthesising a create when no explicit
+    // one is declared (see docs/proposals); for now it lowers onto the
+    // FieldIR and downstream phases may consume it.
+    ('=' default=Expression)?
     ('check' check=Expression)?;
 
 // Information-flow sensitivity tag(s) on a property.  Tags are bare
@@ -997,6 +1009,20 @@ Create:
 // `OperationIR` with `kind: "destroy"`.
 Destroy:
     'destroy' (name=ID)? ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? '{'
+        body+=Statement*
+    '}';
+
+// Applier — the event-fold body of an event-sourced aggregate
+// (`persistedAs(eventLog)`).  `apply(e: OrderPlaced) { … }` binds the
+// emitted event instance to `param` and mutates `this` to fold it into
+// state.  Under the event-log discipline the command bodies
+// (`operation`/`create`) may only `emit`; the actual state transition
+// lives here.  Applier bodies are pure folds — assignments (`:=`/`+=`/
+// `-=`) and derivations only, no `emit` and no side-effecting calls.
+// Lowers to `ApplyIR`; never joins `agg.operations`.  See
+// docs/proposals/workflow-and-applier.md.
+Apply:
+    'apply' '(' param=LooseName ':' event=[EventDecl:ID] ')' '{'
         body+=Statement*
     '}';
 

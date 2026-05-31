@@ -519,6 +519,12 @@
           "Button",
           "Text"
         ]
+      },
+      {
+        "from": "../lib/apply-server-errors",
+        "named": [
+          "applyServerErrors"
+        ]
       }
     ],
     "form-default-onsubmit": [
@@ -526,6 +532,12 @@
         "from": "@chakra-ui/react",
         "named": [
           "useToast"
+        ]
+      },
+      {
+        "from": "../lib/apply-server-errors",
+        "named": [
+          "applyServerErrors"
         ]
       }
     ],

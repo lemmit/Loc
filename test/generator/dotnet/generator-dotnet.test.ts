@@ -332,7 +332,7 @@ describe(".NET generator", () => {
     //    Application/<Aggregate>/Handlers/.
     const iface = files.get("Application/Orders/Handlers/IConfirmOrderHandler.cs")!;
     expect(iface).toMatch(
-      /Task HandleAsync\(Order aggregate, ConfirmRequest request, CancellationToken ct\)/,
+      /Task HandleAsync\(Order aggregate, ConfirmOrderRequest request, CancellationToken ct\)/,
     );
 
     // 2. The auto Mediator handler injects the user interface and
@@ -1047,7 +1047,7 @@ describe(".NET generator", () => {
     expect(handler).toMatch(/using Sales\.Application\.Orders\.Requests;/);
     // Body: CheckConfirm → new ConfirmRequest → user.HandleAsync → AssertInvariants.
     expect(handler).toMatch(/order\.CheckConfirm\(\);/);
-    expect(handler).toMatch(/var __confirmRequest = new ConfirmRequest\(\);/);
+    expect(handler).toMatch(/var __confirmRequest = new ConfirmOrderRequest\(\);/);
     expect(handler).toMatch(
       /await _confirmOrderHandler\.HandleAsync\(order, __confirmRequest, ct\);/,
     );
@@ -1085,7 +1085,7 @@ describe(".NET generator", () => {
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Orders/Commands/AddLineHandler.cs")!;
     expect(handler).toMatch(
-      /var request = new AddLineRequest\(cmd\.ProductId\.Value, cmd\.Qty, new MoneyRequest\(cmd\.Price\.Amount, cmd\.Price\.Currency\)\);/,
+      /var request = new AddLineOrderRequest\(cmd\.ProductId\.Value, cmd\.Qty, new MoneyRequest\(cmd\.Price\.Amount, cmd\.Price\.Currency\)\);/,
     );
   });
 
@@ -1117,7 +1117,7 @@ describe(".NET generator", () => {
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Workflows/ChargeOrderHandler.cs")!;
     expect(handler).toMatch(/order\.CheckDeduct\(cmd\.Amount\);/);
-    expect(handler).toMatch(/var __deductRequest = new DeductRequest\(cmd\.Amount\);/);
+    expect(handler).toMatch(/var __deductRequest = new DeductOrderRequest\(cmd\.Amount\);/);
     expect(handler).toMatch(
       /await _deductOrderHandler\.HandleAsync\(order, __deductRequest, ct\);/,
     );

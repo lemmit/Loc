@@ -10,3 +10,5 @@ public sealed record MoneyRequest([Required] decimal Amount, [Required] string C
 
 public sealed record CreateProductRequest([Required] string Sku, [Required] MoneyRequest Price);
 
+public sealed record UpdateProductRequest([Required] string Sku, [Required] MoneyRequest Price);
+

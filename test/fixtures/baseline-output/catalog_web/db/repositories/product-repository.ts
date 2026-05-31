@@ -57,6 +57,10 @@ export class ProductRepository {
     }
   }
 
+  async delete(id: Ids.ProductId): Promise<void> {
+    await this.db.delete(schema.products).where(eq(schema.products.id, id));
+  }
+
   async all(): Promise<Product[]> {
     const rootRows = await this.db.select().from(schema.products);
     if (rootRows.length === 0) {

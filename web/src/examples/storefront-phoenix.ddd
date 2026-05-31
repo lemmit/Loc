@@ -35,21 +35,21 @@ system StorefrontPhoenix {
       event WalletToppedUp { wallet: Wallet id, amount: Money, at: datetime }
       event WalletDebited { wallet: Wallet id, amount: Money, at: datetime }
 
-      aggregate Customer {
+      aggregate Customer with crudish {
         name: string
         email: string
         invariant email.length > 0
         derived display: string = name
       }
 
-      aggregate Product {
+      aggregate Product with crudish {
         sku: string
         price: Money
         invariant sku.length > 0
         derived display: string = sku
       }
 
-      aggregate Wallet {
+      aggregate Wallet with crudish {
         ownerId: Customer id
         status: WalletStatus
         balance: Money
@@ -81,7 +81,7 @@ system StorefrontPhoenix {
         }
       }
 
-      aggregate Order {
+      aggregate Order with crudish {
         customerId: Customer id
         status: OrderStatus
         placedAt: datetime

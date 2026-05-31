@@ -13,7 +13,7 @@ system ActionShowcase {
 
   subdomain Sales {
     context Sales {
-      aggregate Order {
+      aggregate Order with crudish {
         customerId: string
         status: string
         operation confirm() { }

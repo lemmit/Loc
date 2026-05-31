@@ -4,6 +4,7 @@ import {
   camelId,
   type OpIdTokens,
   opCreate,
+  opDestroy,
   opFind,
   opGetById,
   opOperation,
@@ -42,6 +43,9 @@ function producesProblem(kind: OpErrorKind, indent = "    "): string[] {
 interface ControllerShape {
   idClrType: string;
   createCmdArgs: string[];
+  /** When true, the aggregate has a canonical `destroy` — emit a
+   *  `DELETE /{id}` action dispatching `Destroy<Agg>Command`. */
+  destroyAction?: boolean;
   publicOps: Array<{ name: string; routeSlug?: string; cmdArgs: string[]; paramNames: string[] }>;
   finds: Array<{
     name: string;
@@ -118,7 +122,7 @@ export function renderController(
       // 2xx body from the action signature, so it must be spelled out.
       "    [ProducesResponseType(204)]",
       ...producesProblem("operation"),
-      `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}Request request)`,
+      `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}${agg.name}Request request)`,
       "    {",
       ...wireInLine,
       // Business-narrative line — what the controller was asked to do,
@@ -237,6 +241,33 @@ export function renderController(
       "        return response is null ? NotFound() : Ok(response);",
       "    }",
       "",
+      // Canonical destroy → DELETE /{id} (hard delete).  Gated; reuses the
+      // getById error shape (404).  crudish's destroy is empty-bodied, so
+      // the command carries only the id.
+      ...(shape.destroyAction
+        ? [
+            '    [HttpDelete("{id}")]',
+            "    [ProducesResponseType(204)]",
+            ...producesProblem("destroy"),
+            `    public async Task<IActionResult> ${actionName(opDestroy(agg.name))}([FromRoute] ${shape.idClrType} id)`,
+            "    {",
+            "        try",
+            "        {",
+            `            await _mediator.Send(new Destroy${agg.name}Command(new ${agg.name}Id(id)));`,
+            "        }",
+            // EF wraps a Postgres foreign_key_violation in DbUpdateException
+            // when the row is still referenced (cross-aggregate `X id` FK is
+            // ON DELETE RESTRICT) → 409 Conflict.  Caught locally so the
+            // shared DomainExceptionFilter stays untouched.
+            "        catch (Microsoft.EntityFrameworkCore.DbUpdateException)",
+            "        {",
+            `            return Conflict(new ProblemDetails { Title = "Conflict", Status = 409, Detail = "${agg.name} is still referenced and cannot be deleted." });`,
+            "        }",
+            "        return NoContent();",
+            "    }",
+            "",
+          ]
+        : []),
       ...opBlocks,
       ...findBlocks,
       "}",

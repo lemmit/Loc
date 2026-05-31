@@ -7,6 +7,7 @@ import {
 import type {
   Aggregate,
   Api,
+  Apply,
   BoundedContext,
   Component,
   ConfigEntry,
@@ -53,6 +54,7 @@ import type {
 } from "../../language/generated/ast.js";
 import {
   isAggregate,
+  isApply,
   isAssignOrCallStmt,
   isBoundedContext,
   isComponent,
@@ -101,6 +103,7 @@ import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
   ApiIR,
+  ApplyIR,
   BoundedContextIR,
   CodeRefIR,
   CodeRefKind,
@@ -977,6 +980,7 @@ function lowerUi(ui: Ui): UiIR {
   }
   return {
     name: ui.name,
+    framework: ui.framework,
     pages,
     components,
     menu,
@@ -1330,7 +1334,7 @@ function lowerValueObject(vo: ValueObject, env: Env): ValueObjectIR {
   const props = vo.members.filter(isProperty) as Property[];
   return {
     name: vo.name,
-    fields: props.map((p) => lowerField(p)),
+    fields: props.map((p) => lowerField(p, inner)),
     derived: vo.members.filter(isDerivedProp).map((d) => lowerDerived(d, inner)),
     invariants: [
       ...vo.members.filter(isInvariant).map((i) => lowerInvariant(i, inner)),
@@ -1396,6 +1400,7 @@ function lowerAggregate(
   const destroys = (agg.members.filter(isDestroy) as Destroy[]).map((d) => lowerDestroy(d, inner));
   const canonicalCreate = creates.find((c) => c.canonical) ?? null;
   const canonicalDestroy = destroys.find((d) => d.canonical) ?? null;
+  const appliers = (agg.members.filter(isApply) as Apply[]).map((a) => lowerApply(a, inner));
   const tests: TestIR[] = [];
   for (const m of agg.members) {
     if (isTestBlock(m)) tests.push(lowerTest(m, inner));
@@ -1413,7 +1418,7 @@ function lowerAggregate(
   return {
     name: agg.name,
     idValueType,
-    fields: props.map(lowerField),
+    fields: props.map((p) => lowerField(p, inner)),
     contains: containments,
     derived,
     invariants,
@@ -1430,12 +1435,37 @@ function lowerAggregate(
     implementsCapabilities: implementsCaps.length > 0 ? implementsCaps : undefined,
     persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,
     savingShape: (agg.shape as import("../types/loom-ir.js").SavingShape | undefined) ?? undefined,
+    appliers: appliers.length > 0 ? appliers : undefined,
     isAbstract: agg.isAbstract ? true : undefined,
     extendsAggregate: agg.superType?.ref?.name ?? agg.superType?.$refText ?? undefined,
     inheritanceUsing:
       (agg.inheritanceUsing as import("../types/loom-ir.js").InheritanceLayout | undefined) ??
       undefined,
   };
+}
+
+// Applier lowering — `apply(e: Event) { … }` folds one event type into
+// aggregate state.  The event param binds as a `refKind: "param"` local
+// over the aggregate env (so `this.x := e.y` resolves `this` against the
+// aggregate and `e` against the bound param).  The param's type carries
+// the event name as an entity-shaped marker; member access on it
+// (`e.field`) type-resolves through `findEventByName` / `memberOnEvent`
+// in lower-expr (events aren't a distinct TypeIR kind, so the entity
+// marker + a field-only fallback is the contained representation).  The
+// body's purity (assignments / derivations only; no `emit`, no
+// side-effecting calls) is enforced by the phase-⑦ discipline validator,
+// not here — lowering preserves source fidelity.
+function lowerApply(a: Apply, env: Env): ApplyIR {
+  const eventName = a.event.ref?.name ?? a.event.$refText;
+  const inner = withLocal(env, a.param, "param", { kind: "entity", name: eventName });
+  const statements: StmtIR[] = [];
+  let bodyEnv = inner;
+  for (const s of a.body) {
+    const result = lowerStatement(s, bodyEnv);
+    statements.push(result.stmt);
+    bodyEnv = result.envAfter;
+  }
+  return { event: eventName, param: a.param, statements };
 }
 
 // ---------------------------------------------------------------------------
@@ -1608,7 +1638,7 @@ function lowerEntityPart(part: EntityPart, agg: Aggregate, outer: Env): EntityPa
     name: part.name,
     parentName: agg.name,
     parentIdValueType: (agg.idKind ?? "guid") as IdValueType,
-    fields: props.map(lowerField),
+    fields: props.map((p) => lowerField(p, inner)),
     contains: part.members.filter(isContainment).map(lowerContainment),
     derived: part.members.filter(isDerivedProp).map((d) => lowerDerived(d, inner)),
     invariants: [
@@ -1812,10 +1842,16 @@ function idFollowPath(e: ExprIR): string[] | undefined {
 // Member lowerings
 // ---------------------------------------------------------------------------
 
-function lowerField(p: Property): FieldIR {
+function lowerField(p: Property, env?: Env): FieldIR {
   const sensitivity = fieldSensitivity(p);
   const baseType = lowerType(p.type);
   const declared = p.access as FieldIR["access"];
+  // Default value — lowered in the declaring scope so enum values / money
+  // literals resolve in the field's type context.  Only the constructible
+  // declarations (aggregate / entity-part / value object) pass an `env`;
+  // events / views never do, so a stray default there is dropped here (and
+  // flagged by the validator).
+  const defaultExpr = p.default && env ? lowerExprInContext(p.default, baseType, env) : undefined;
   return {
     name: p.name,
     // The field's `TypeIR` carries the same tag set as the field's
@@ -1830,6 +1866,7 @@ function lowerField(p: Property): FieldIR {
     // (input-shaping, view exposure) rather than a type property.
     // Enrichment fills in the default / inferred-from-type cases.
     ...(declared ? { access: declared, accessSource: "declared" as const } : {}),
+    ...(defaultExpr ? { default: defaultExpr } : {}),
   };
 }
 
@@ -1900,7 +1937,7 @@ function lowerFunction(f: FunctionDecl, env: Env): FunctionIR {
   let inner = env;
   const params: ParamIR[] = [];
   for (const p of f.params) {
-    const t = lowerType(p.type);
+    const t = lowerType(p.type, env);
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
@@ -1982,7 +2019,7 @@ function lowerActionBody(spec: ActionSpec, env: Env): OperationIR {
   let inner = env;
   const params: ParamIR[] = [];
   for (const p of spec.params) {
-    const t = lowerType(p.type);
+    const t = lowerType(p.type, env);
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
@@ -2026,7 +2063,7 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
   let inner = env;
   const params: ParamIR[] = [];
   for (const p of wf.params) {
-    const t = lowerType(p.type);
+    const t = lowerType(p.type, env);
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }

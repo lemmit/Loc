@@ -1666,7 +1666,7 @@ describe("typescript generator", () => {
       const orderRoutes = files.get("http/order.routes.ts")!;
       // `qty > 0` → recognised as min(1) on the int field.
       expect(orderRoutes).toMatch(
-        /AddLineRequest = z\.object\(\{[\s\S]*qty: z\.coerce\.number\(\)\.int\(\)\.min\(1\)/,
+        /AddLineOrderRequest = z\.object\(\{[\s\S]*qty: z\.coerce\.number\(\)\.int\(\)\.min\(1\)/,
       );
     });
 
@@ -1696,7 +1696,7 @@ describe("typescript generator", () => {
       // `this.status` via a helper-fn.  Must NOT appear as a refine
       // on AddLineRequest (and the refine can't read `this`).
       const addLineBlock = orderRoutes.match(
-        /const AddLineRequest = z\.object\(\{[\s\S]*?\}\)\.openapi\("AddLineRequest"\)([^;]*);/,
+        /const AddLineOrderRequest = z\.object\(\{[\s\S]*?\}\)\.openapi\("AddLineOrderRequest"\)([^;]*);/,
       )!;
       // Only the `qty > 0` precondition is wire-translatable, and it
       // was absorbed into the int chain — so no `.refine(` here.
@@ -1705,7 +1705,7 @@ describe("typescript generator", () => {
       // preconditions — both server-only — so the schema is empty +
       // unrefined.
       expect(orderRoutes).toMatch(
-        /const ConfirmRequest = z\.object\(\{\s*\}\)\.openapi\("ConfirmRequest"\);/,
+        /const ConfirmOrderRequest = z\.object\(\{\s*\}\)\.openapi\("ConfirmOrderRequest"\);/,
       );
     });
 

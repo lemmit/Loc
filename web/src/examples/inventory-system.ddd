@@ -27,7 +27,7 @@ system InventorySystem {
         qty: int
       }
 
-      aggregate Warehouse ids guid {
+      aggregate Warehouse ids guid with crudish {
         code: string
         contains stocks: Stock[]
 
