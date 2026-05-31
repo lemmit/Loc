@@ -30,14 +30,21 @@ declaration — `channel` — plus its physical binding `channelSource`,
 mirroring the existing `storage` / `dataSource` split (D-STORAGE-SPLIT).
 
 **One declaration, three orthogonal knobs.** A `channel` is a named
-transport+policy overlay over a set of event subjects:
+transport+policy overlay over a set of event subjects, declared **inside the
+context that owns those events** — one context normally has several (see
+[Granularity](#granularity--many-channels-per-context)):
 
 ```ddd
-channel OrderEvents from Sales {
-  carries:   OrderPlaced, OrderShipped, OrderCancelled
-  delivery:  broadcast        // broadcast | queue       (NATS "delivery group")
-  retention: log              // ephemeral | log | work  (NATS "stream retention")
-  key:       order            // ordering / partition key (a field on the carried events)
+context Orders {
+  event OrderPlaced { order: Order id, at: datetime }
+  // … OrderShipped, OrderCancelled …
+
+  channel OrderEvents {           // a context member — many per context
+    carries:   OrderPlaced, OrderShipped, OrderCancelled
+    delivery:  broadcast          // broadcast | queue       (NATS "delivery group")
+    retention: log                // ephemeral | log | work  (NATS "stream retention")
+    key:       order              // ordering / partition key (a field on the carried events)
+  }
 }
 ```
 
@@ -96,6 +103,7 @@ already has the `eventLog` persistence kind and `apply(…)` appliers
 | **Placement = visibility.** Context-level events published; aggregate-nested internal (`bounded-context-model.md`, `loom.cross-bc-internal-event`). | Unchanged. A `channel` may only `carries:` **published** (context-level) events; carrying an aggregate-internal event reuses that same error. |
 | **Consumer form** `on(e: Event)` + `projection` (`bounded-context-model.md` §"Pattern B", `workflow-and-applier.md` §Sagas). | Unchanged surface. We define the **transport** those consumers ride on and the delivery-group semantics (`queue`) that govern competing consumers. |
 | **`.loom/asyncapi.yaml` — "events as channels"** (`bounded-context-model.md`). | A `channel` declaration becomes the explicit AsyncAPI channel object (bindings, retention) instead of one synthesised per event. |
+| **`persistedAs(eventLog)` is a context/domain decision; `dataSource` is the system binding** (`docs/architecture.md`). | Exact precedent for the split here: `channel` (delivery/retention contract) lives **in the context**; `channelSource` (physical broker) lives at system scope. |
 | **Producer** `emit Event { … }` → `DomainEventDispatcher` (`docs/workflow.md`). | **Unchanged.** Producers never name a channel. Routing is derived: the dispatcher publishes each event to every channel that `carries:` it. |
 
 The net new surface is small: one declaration (`channel`), one binding
@@ -104,14 +112,18 @@ gets a transport; `projection` gets defined), and the UI realtime refs.
 
 ## Surface — the `channel` declaration
 
-A system-level declaration, sibling of `api` (a `channel` is a contract, not
-domain code). `from <Subdomain>` scopes which events it may carry, exactly as
-`api X from <Subdomain>` scopes which aggregates it may expose.
+A **context member**, declared alongside the events it carries. A channel is
+the publisher-side contract for *how a context's own events are transported* —
+so it lives with them, not at system scope. There is **no `from` clause**: the
+`carries:` list names events of the enclosing context, and a channel may only
+carry **published** (context-level) events of *that* context. (Cross-context
+fan-in is the consumer's job — a reactor/projection subscribes to several
+channels — never the publisher reaching across a boundary.)
 
 ```langium
-// SystemMember += Channel
+// ContextMember += Channel   (sibling of EventDecl / View, inside `context { … }`)
 Channel:
-    'channel' name=ID 'from' source=[Subdomain:ID] '{'
+    'channel' name=ID '{'
         ('carries'   ':' carries+=[EventDecl:ID] (',' carries+=[EventDecl:ID])* ','?)
         ('delivery'  ':' delivery=ChannelDelivery ','?)?
         ('retention' ':' retention=ChannelRetention ('(' retentionArg=RetentionArg ')')? ','?)?
@@ -129,6 +141,42 @@ Defaults (when a knob is omitted) reproduce **today's behaviour** so existing
 `.ddd` files are unaffected: `delivery: broadcast`, `retention: ephemeral`,
 no `key`, no `realtime`. An author who declares no `channel` at all keeps the
 current in-process no-op-able dispatcher.
+
+### Granularity — many channels per context
+
+`carries:` *selects a subset* of the context's events; it is not a 1:1 wrapper
+and it is not exhaustive. The common case is **several channels in one
+context**, each grouping events that share a delivery profile — and the *same*
+event may appear on more than one channel (e.g. a durable audit log **and** an
+ephemeral UI feed), in which case the dispatcher fans it out to each:
+
+```ddd
+context Orders {
+  event OrderPlaced    { order: Order id, at: datetime }
+  event OrderShipped   { order: Order id, at: datetime }
+  event StockLevel     { sku: string, onHand: int }          // high-volume telemetry
+  event PaymentCapture { order: Order id, amount: decimal }  // must-process-once
+
+  // durable, replayable lifecycle log — read models replay it
+  channel Lifecycle { carries: OrderPlaced, OrderShipped; retention: log; key: order }
+
+  // fire-and-forget metrics — also pushed live to a dashboard
+  channel Telemetry { carries: StockLevel; delivery: broadcast; retention: ephemeral; realtime: sse }
+
+  // competing-consumer work queue — one worker captures each payment
+  channel Payments  { carries: PaymentCapture; delivery: queue; retention: work; key: order }
+
+  // OrderPlaced also rides Lifecycle above AND this realtime feed — fan-out, two profiles
+  channel Board     { carries: OrderPlaced, OrderShipped; retention: ephemeral; realtime: websocket }
+}
+```
+
+A consumer that could match an event on more than one bound channel **must**
+disambiguate with `via <Channel>` (see below); `loom.reactor-channel-ambiguous`
+fires otherwise. This is why reactors name a channel rather than just an event.
+
+References elsewhere use the same name rule as every Loom cross-ref: bare when
+globally unique (`Lifecycle`), dotted when not (`Orders.Lifecycle`).
 
 **Validation** (`loom.channel-*`):
 
@@ -151,17 +199,17 @@ HTTP POST** — so it reuses the entire workflow body vocabulary and lowering
 context Shipping {
 
   // Reactor / policy — choreography. `on(e: Event)` is the form pinned by
-  // bounded-context-model.md; `via OrderEvents` selects the channel (and thus
-  // the delivery group); omitted ⇒ derived when exactly one bound channel
+  // bounded-context-model.md; `via Orders.Lifecycle` selects the channel (and
+  // thus the delivery group); omitted ⇒ derived when exactly one bound channel
   // carries the event. Body = workflow body (let / create / op-call / emit).
-  on(e: OrderPlaced) via OrderEvents {
+  on(e: OrderPlaced) via Orders.Lifecycle {
     let shipment = Shipment.create({ order: e.order, status: Pending })
     emit ShipmentRequested { shipment: shipment.id, at: now() }
   }
 
   // Projection — write side of a read model, folded from a channel.
   // Reuses apply()-style pure fold discipline (workflow-and-applier.md).
-  projection OrderBook from OrderEvents {
+  projection OrderBook from Orders.Lifecycle {
     on OrderPlaced(e)   { upsert { order: e.order, status: Placed } }
     on OrderShipped(e)  { set status = Shipped where order = e.order }
   }
@@ -183,8 +231,9 @@ only switch.
 
 **Validation:** `loom.reactor-event-uncarried` (the reacted event is carried
 by no channel the hosting deployable binds), `loom.reactor-channel-mismatch`
-(`via X` where `X` doesn't carry the event), plus the inherited
-`cross-bc-internal-event`.
+(`via X` where `X` doesn't carry the event), `loom.reactor-channel-ambiguous`
+(no `via` but the event is carried by more than one bound channel — name one),
+plus the inherited `cross-bc-internal-event`.
 
 ## Surface — transport binding (`channelSource`)
 
@@ -197,14 +246,15 @@ deployable.
 storage bus     { type: redis }       // ephemeral pub/sub + lightweight streams
 storage eventLog { type: kafka }      // durable, partitioned, replayable
 
-channelSource orderBus { for: OrderEvents, use: bus }      // or use: eventLog for retention: log
+channelSource lifecycleBus { for: Orders.Lifecycle, use: eventLog }  // qualified channel ref
+channelSource paymentsBus  { for: Orders.Payments,  use: bus      }
 
 deployable salesApi {
   platform:    hono
-  contexts:    [Sales]
+  contexts:    [Orders]
   serves:      SalesApi
-  dataSources: [salesState]
-  channels:    [orderBus]            // which channel transports this deployable wires
+  dataSources: [ordersState]
+  channels:    [lifecycleBus, paymentsBus]   // one binding per channel this deployable wires
   port:        3000
 }
 ```
@@ -242,7 +292,7 @@ handler.
 ```ddd
 ui WebApp {
   api     Sales:  SalesApi
-  channel Orders: OrderEvents          // subscribe over the channel's realtime transport
+  channel Orders: Orders.Lifecycle     // subscribe over the channel's realtime transport
 
   page OrderBoard {
     route: "/board"
@@ -284,13 +334,14 @@ Following the `view`/`criterion`/`workflow` vertical-slice recipe:
 // src/ir/types/loom-ir.ts
 export interface ChannelIR {
   name: string;
-  sourceSubdomain: string;
-  carries: string[];                 // event type names (resolved, published-only)
+  owningContext: string;             // the context this channel is declared in (carries its events)
+  carries: string[];                 // event type names (resolved, this context's published events)
   delivery: "broadcast" | "queue";
   retention: "ephemeral" | "log" | "work";
   key?: string;                      // field name common to carried events
   realtime?: "sse" | "websocket";
 }
+// stored on BoundedContextIR.channels: ChannelIR[]  (sibling of events / views)
 export interface ReactorIR {
   event: string; param: string;
   channel?: string;                  // resolved channel name (or derived)
@@ -348,41 +399,41 @@ system Acme {
         let o = Order.create({ customerId, status: Placed, placedAt: at })
         emit OrderPlaced { order: o.id, at }                 // producer — unchanged
       }
+
+      channel Lifecycle {                                    // context member, beside its events
+        carries: OrderPlaced, OrderShipped
+        delivery: broadcast
+        retention: log                // durable, replayable
+        key: order
+        realtime: sse                 // also pushed to the board UI
+      }
     }
   }
   subdomain Fulfilment {
     context Shipping {
       aggregate Shipment { order: Order id; status: ShipStatus }
       repository Shipments for Shipment {}
-      on(e: OrderPlaced) via OrderEvents {                   // reactor (choreography)
+      on(e: OrderPlaced) via Orders.Lifecycle {             // reactor (choreography)
         let s = Shipment.create({ order: e.order, status: Pending })
       }
     }
   }
 
-  channel OrderEvents from Sales {
-    carries: OrderPlaced, OrderShipped
-    delivery: broadcast
-    retention: log                  // durable, replayable
-    key: order
-    realtime: sse                   // also pushed to the board UI
-  }
-
   storage eventLog { type: kafka }
-  channelSource orderBus { for: OrderEvents, use: eventLog }
+  channelSource lifecycleBus { for: Orders.Lifecycle, use: eventLog }
 
   api SalesApi from Sales
   ui WebApp {
     api Sales: SalesApi
-    channel Orders: OrderEvents
+    channel Orders: Orders.Lifecycle
     page Board { route: "/board"
       body: For { Sales.Order.all.live, o => Card { o.id, o.status } } }
   }
 
   deployable salesApi  { platform: hono; contexts: [Orders];   serves: SalesApi
-                         dataSources: [ordersState]; channels: [orderBus]; port: 3000 }
+                         dataSources: [ordersState]; channels: [lifecycleBus]; port: 3000 }
   deployable shipApi   { platform: dotnet; contexts: [Shipping]
-                         dataSources: [shipState]; channels: [orderBus]; port: 8080 }
+                         dataSources: [shipState]; channels: [lifecycleBus]; port: 8080 }
   deployable webApp    { platform: static; targets: salesApi
                          ui: WebApp { Sales: salesApi }; port: 3002 }
 }
