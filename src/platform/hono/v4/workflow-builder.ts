@@ -6,6 +6,7 @@ import {
   type TypeIR,
   type WorkflowIR,
   type WorkflowStmtIR,
+  workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import { camelId, opWorkflow } from "../../../ir/util/openapi-ids.js";
@@ -267,6 +268,13 @@ function emitWorkflowRoute(
   out.push(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
+  // A `requires` guard denies with 403 (ForbiddenError → onError) — declare
+  // it so the published contract documents the authorization outcome.
+  if (workflowIsGuarded(wf)) {
+    out.push(
+      `      403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+  }
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);

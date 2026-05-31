@@ -1979,6 +1979,20 @@ export function operationUsesCurrentUser(op: OperationIR): boolean {
   return op.statements.some(stmtUsesCurrentUser);
 }
 
+/** True when the operation has at least one `requires` guard.  A guarded
+ *  op denies with HTTP 403 at runtime (ForbiddenError/Exception/
+ *  `:forbidden`), so every backend declares a 403 ProblemDetails response
+ *  for it in the generated OpenAPI. */
+export function operationIsGuarded(op: OperationIR): boolean {
+  return op.statements.some((s) => s.kind === "requires");
+}
+
+/** True when the workflow has at least one `requires` guard — same 403
+ *  contract as a guarded operation. */
+export function workflowIsGuarded(wf: WorkflowIR): boolean {
+  return wf.statements.some((s) => s.kind === "requires");
+}
+
 /** True when any of the workflow's statements (or a sub-expression
  *  inside one) references `currentUser`.  When true, a backend's
  *  workflow handler must materialise a `currentUser` binding (from the

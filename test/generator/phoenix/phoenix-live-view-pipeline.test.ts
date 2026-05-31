@@ -3283,4 +3283,15 @@ describe("authorization — requires guards emit Ash policies (403)", () => {
     const mix = files.get("phoenix_api/mix.exs")!;
     expect(mix).toMatch(/:simple_sat/);
   });
+
+  it("the OpenAPI spec declares 403 on guarded ops + workflows (matches Hono/.NET)", () => {
+    const spec = files.get("phoenix_api/lib/phoenix_api_web/api/projects_api_spec.ex")!;
+    // showcase guards Project.rename / archive / promote + the
+    // registerProject / promoteToProduction workflows — five 403 responses,
+    // each ProblemDetails under application/problem+json.
+    expect(spec).toMatch(
+      /403 => %OpenApiSpex\.Response\{[\s\S]*?"application\/problem\+json"[\s\S]*?Schemas\.ProblemDetails/,
+    );
+    expect((spec.match(/403 => %OpenApiSpex\.Response\{/g) ?? []).length).toBe(5);
+  });
 });
