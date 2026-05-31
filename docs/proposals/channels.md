@@ -197,6 +197,7 @@ globally unique (`Lifecycle`), dotted when not (`Orders.Lifecycle`).
 | `loom.channel-key-type` | the `key:` field has a different type across carried events (no common partition key). |
 | `loom.channel-retention-needs-key` | `retention: work` or `log` with `delivery: queue` requires a `key:` for stable per-key ordering (warning). |
 | `loom.ui-live-on-queue` | a UI goes `.live` on a `delivery: queue` channel (a browser can't join a competing-consumer group) — error: subscribe to a `broadcast` channel carrying the same event. Lives in the UI/realtime checks, not on the channel. |
+| `loom.ui-channel-target-not-subscribed` | a UI subscribes to channel `C`, but the backend its frontend `targets:` does not bind `C` — so no edge relay exists. Suggestion: add a `channelSource` for `C` to that backend's `channels:`. See [Realtime topology](#realtime-topology--the-edge-relay-browser-delivery-is-two-hop). |
 
 ## Surface — consumers (the transport under an already-pinned form)
 
@@ -362,6 +363,71 @@ same channel contract — all from the *same* `.live` IR. The wire format is a
 `PlatformSurface` capability (`realtimeWire: "sse" | "websocket"`), defaulted
 per platform and overridable on the deployable; the channel and the page body
 are identical regardless.
+
+### Realtime topology — the edge relay (browser delivery is two-hop)
+
+A subtle but load-bearing point: **a browser never connects to the broker.**
+It can't speak Kafka/AMQP/Redis, and exposing an internal broker to the public
+internet with per-user ACLs is a non-starter. A browser speaks SSE/WebSocket to
+exactly one backend — the one its frontend `targets:`. So when a UI in context
+B (deployable Y) wants a channel produced by context A (deployable X), delivery
+is unavoidably **two hops**:
+
+```
+emit (ctx A, in DU X) ─▶ broker channel  ─▶ [relay backend] ─▶ SSE/WS ─▶ browser (UI of ctx B)
+                         └ hop 1: backend↔backend ┘          └ hop 2: edge / trust boundary ┘
+```
+
+This is the "second channel" the topology seems to demand — but it is **not a
+second declaration**. There is deliberately **no domain-level channel→channel
+router**; that would leak network topology into the domain. Instead the edge
+relay is *derived*:
+
+- **The relay is the backend the UI's frontend `targets:`.** For it to relay
+  channel `C`, it must itself be a **subscriber** of `C` — i.e. bind `C`'s
+  `channelSource` (list it in `channels:`). It does **not** need to *host* `C`'s
+  owning context; subscribing to a *published* channel across DUs is the same
+  mechanism a cross-DU reactor/projection already uses (the broker is the shared
+  fabric; `channelSource.connection` says where it lives).
+- **The relay re-publishes a filtered, authorized view** of the channel's
+  events to connected browsers. Hop 1 is trusted backend-to-backend; **hop 2 is
+  the authorization boundary** — per-user / row-level filtering
+  (`frontend-acl.md`, `authorization.md`) is applied here, so a browser only
+  receives events it may see. The two-hop split is therefore a *feature*, not
+  just a transport limitation.
+- **Phoenix LiveView collapses the two hops** — backend and frontend are one
+  process, so it subscribes to the broker and pushes over its own socket with no
+  separate relay. A `static` React frontend has no server of its own, so its
+  relay *must* be the targeted backend. Two-hop is the general shape; Phoenix is
+  the degenerate one-hop case.
+
+**The one obligation the compiler enforces** to make the relay materialize:
+
+> If a UI `.live`-subscribes to (or takes a `channel` param of) channel `C`,
+> the UI's deployable `targets:` a backend deployable that **must** bind `C`.
+> Otherwise `loom.ui-channel-target-not-subscribed` fires:
+> *"frontend `webApp` subscribes to channel `Orders.Lifecycle`, but its target
+> backend `reportsApi` does not bind it — add a `channelSource` for
+> `Orders.Lifecycle` to `reportsApi.channels`."*
+
+That single rule turns the intuited "router" into derived infra: the targeted
+backend's broker subscription **is** the upstream, its generated SSE/WS endpoint
+**is** the downstream, and the frontend's client points at it automatically.
+
+```ddd
+// Cross-DU realtime: A produces, B's UI consumes, B's backend relays.
+deployable salesApi  { platform: hono;   contexts: [Orders]    // DU X — producer
+                       channels: [lifecycleBus]; serves: SalesApi; port: 3000 }
+deployable reportsApi{ platform: dotnet; contexts: [Reports]   // DU Y — hosts ctx B
+                       channels: [lifecycleBus]    // ← MUST subscribe to relay A's channel to B's UI
+                       serves: ReportsApi; port: 8080 }
+deployable reportsUi { platform: static; targets: reportsApi   // browser talks only to reportsApi
+                       ui: Dashboard { Reports: reportsApi }; port: 3009 }
+```
+
+`reportsApi` hosts context B, not A — but binding `lifecycleBus` makes it a
+subscriber of A's published `Lifecycle` channel (hop 1) and the SSE/WS relay for
+`reportsUi` (hop 2). One channel declared; the edge channel is generated.
 
 ## IR, lowering, enrichment (phase mapping)
 
