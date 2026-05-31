@@ -24,8 +24,8 @@ function actionName(tokens: OpIdTokens): string {
  *  responses for an operation kind (from the shared matrix).  A Swashbuckle
  *  operation filter (see Program.cs) rewrites their content-type to
  *  `application/problem+json` so the emitted spec matches Hono/Phoenix. */
-function producesProblem(kind: OpErrorKind, indent = "    "): string[] {
-  return errorStatuses(kind).map(
+function producesProblem(kind: OpErrorKind, guarded = false, indent = "    "): string[] {
+  return errorStatuses(kind, guarded).map(
     (s) => `${indent}[ProducesResponseType(typeof(ProblemDetails), ${s})]`,
   );
 }
@@ -46,7 +46,14 @@ interface ControllerShape {
   /** When true, the aggregate has a canonical `destroy` — emit a
    *  `DELETE /{id}` action dispatching `Destroy<Agg>Command`. */
   destroyAction?: boolean;
-  publicOps: Array<{ name: string; routeSlug?: string; cmdArgs: string[]; paramNames: string[] }>;
+  publicOps: Array<{
+    name: string;
+    routeSlug?: string;
+    cmdArgs: string[];
+    paramNames: string[];
+    /** Has a `requires` guard → declares 403 (authorization denied). */
+    guarded: boolean;
+  }>;
   finds: Array<{
     name: string;
     isRoot: boolean;
@@ -121,7 +128,7 @@ export function renderController(
       // [ProducesResponseType] is present, Swashbuckle stops inferring the
       // 2xx body from the action signature, so it must be spelled out.
       "    [ProducesResponseType(204)]",
-      ...producesProblem("operation"),
+      ...producesProblem("operation", op.guarded),
       `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}${agg.name}Request request)`,
       "    {",
       ...wireInLine,

@@ -6,8 +6,10 @@ import {
   type SystemIR,
   type WorkflowIR,
   type WorkflowStmtIR,
+  workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+import { errorStatuses } from "../../ir/util/openapi-errors.js";
 import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
@@ -543,12 +545,17 @@ function renderController(ctx: EnrichedBoundedContextIR, ns: string, routePrefix
     const cmdArgs = wf.params
       .map((p) => wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx))
       .join(",\n            ");
+    // Error responses from the shared matrix: 400 always, + 403 when the
+    // workflow has a `requires` guard (denies with ForbiddenException).
+    const errorAttrs = errorStatuses("workflow", workflowIsGuarded(wf))
+      .map((s) => `    [ProducesResponseType(typeof(ProblemDetails), ${s})]\n`)
+      .join("");
     blocks.push(
       `    [HttpPost("${snake(wf.name)}")]\n` +
         // Explicit success (NoContent → 204) so the added error
         // [ProducesResponseType] doesn't suppress Swashbuckle's 2xx inference.
         `    [ProducesResponseType(204)]\n` +
-        `    [ProducesResponseType(typeof(ProblemDetails), 400)]\n` +
+        errorAttrs +
         `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflow(wf.name)))}([FromBody] ${upperFirst(wf.name)}Request request)\n` +
         `    {\n` +
         `        var cmd = new ${upperFirst(wf.name)}Command(\n            ${cmdArgs});\n` +

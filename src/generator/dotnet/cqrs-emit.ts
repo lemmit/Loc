@@ -7,7 +7,11 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
-import { findUsesCurrentUser, operationUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import {
+  findUsesCurrentUser,
+  operationIsGuarded,
+  operationUsesCurrentUser,
+} from "../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import {
   aggregateResponseParams,
@@ -637,6 +641,7 @@ function emitController(
           // are lowerCamel in the IR — same form the JSON wire uses
           // (default ASP.NET JsonNamingPolicy.CamelCase).
           paramNames: op.params.map((p) => p.name),
+          guarded: operationIsGuarded(op),
         })),
       finds: (repo?.finds ?? []).map((find) => ({
         name: find.name,
