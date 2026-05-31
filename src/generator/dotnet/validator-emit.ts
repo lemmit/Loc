@@ -1,4 +1,11 @@
-import type { AggregateIR, ExprIR, InvariantIR, OperationIR } from "../../ir/types/loom-ir.js";
+import { forCreateInput } from "../../ir/enrich/wire-projection.js";
+import type {
+  AggregateIR,
+  ExprIR,
+  FieldIR,
+  InvariantIR,
+  OperationIR,
+} from "../../ir/types/loom-ir.js";
 import {
   type ClassifyContext,
   classifyForWire,
@@ -49,7 +56,7 @@ interface ValidatorEmission {
 
 /** Render the validator file for a Create<Agg>Command. */
 export function renderCreateValidator(
-  agg: { name: string; invariants: InvariantIR[]; fields: { name: string }[] },
+  agg: { name: string; invariants: InvariantIR[]; fields: FieldIR[] },
   ns: string,
 ): ValidatorEmission {
   return renderValidatorFile({
@@ -57,7 +64,11 @@ export function renderCreateValidator(
     aggName: agg.name,
     commandName: `Create${agg.name}Command`,
     invariants: agg.invariants,
-    available: new Set(agg.fields.map((f) => f.name)),
+    // Only create-input fields can be validated on the CreateRequest —
+    // an invariant over an excluded field (e.g. a `managed` collection)
+    // is enforced in the domain layer, not here, so it must not reference
+    // an absent request property.
+    available: new Set(forCreateInput(agg.fields).map((f) => f.name)),
   });
 }
 

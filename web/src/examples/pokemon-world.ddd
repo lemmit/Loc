@@ -28,7 +28,7 @@ system PokemonWorld {
             event PokemonLeveledUp { pokemon: Pokemon id, level: int }
             event PokemonEvolved   { pokemon: Pokemon id, fromSpecies: string, into: string }
 
-            aggregate Pokemon {
+            aggregate Pokemon with crudish {
                 species: string
                 nickname: string
                 element: PokemonType
@@ -97,16 +97,23 @@ system PokemonWorld {
             event PokemonCaught { trainer: Trainer id, pokemon: Pokemon id }
             event BadgeEarned   { trainer: Trainer id, badge: string }
 
-            aggregate Trainer {
+            aggregate Trainer with crudish {
                 name: string
                 hometown: string
                 rank: TrainerRank
-                money: int
+                // `coins` (not `money`: `money` is a soft keyword reserved for
+                // the Money value-object / money-literal, so it can't be
+                // referenced in expressions/assignments).
+                coins: int
                 badges: int
-                party: Pokemon id[]
-                caught: Pokemon id[]
+                // `party` / `caught` are built up through the catch/party
+                // operations, never supplied on create — `managed` keeps them
+                // out of the create/update wire input while still readable and
+                // mutable server-side.
+                party: Pokemon id[] managed
+                caught: Pokemon id[] managed
 
-                invariant money >= 0
+                invariant coins >= 0
                 invariant badges >= 0
                 invariant party.count <= 6
 
@@ -135,8 +142,8 @@ system PokemonWorld {
 
                 operation spend(amount: int) {
                     precondition amount > 0
-                    precondition amount <= money
-                    money := money - amount
+                    precondition amount <= coins
+                    coins := coins - amount
                 }
                 derived display: string = name
             }
@@ -161,7 +168,7 @@ system PokemonWorld {
 
             event BattleConcluded { battle: Battle id, winner: Trainer id }
 
-            aggregate Battle {
+            aggregate Battle with crudish {
                 challenger: Trainer id
                 opponent: Trainer id
                 challengerPokemon: Pokemon id
@@ -210,7 +217,7 @@ system PokemonWorld {
 
             event GymBadgeAwarded { gym: Gym id, trainer: Trainer id, badge: string }
 
-            aggregate Gym {
+            aggregate Gym with crudish {
                 name: string
                 city: string
                 leader: string
@@ -277,7 +284,7 @@ system PokemonWorld {
         })
         let t = api.trainers.create({
             name: "Ash", hometown: "Pallet Town", rank: "Novice",
-            money: 1000, badges: 0
+            coins: 1000, badges: 0
         })
         api.trainers.catchPokemon(t, { pokemon: pk.id })
         api.trainers.addToParty(t, { pokemon: pk.id })
@@ -309,11 +316,11 @@ system PokemonWorld {
         })
         let t1 = api.trainers.create({
             name: "Red", hometown: "Pallet Town", rank: "Ace",
-            money: 500, badges: 1
+            coins: 500, badges: 1
         })
         let t2 = api.trainers.create({
             name: "Blue", hometown: "Pallet Town", rank: "Ace",
-            money: 500, badges: 2
+            coins: 500, badges: 2
         })
         let b = api.battles.create({
             challenger: t1.id, opponent: t2.id,

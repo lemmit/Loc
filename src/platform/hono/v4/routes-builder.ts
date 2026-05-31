@@ -185,7 +185,12 @@ export function buildRoutesFile(
         `Create${agg.name}Request`,
         requiredFields.map((f) => ({ name: f.name, base: zodFor(f.type) })),
         agg.invariants,
-        new Set(agg.fields.map((f) => f.name)),
+        // Only fields present in the create input can be validated at the
+        // wire boundary — an invariant over a field excluded from create
+        // (e.g. a `managed` collection) is enforced in the domain layer,
+        // not here.  Passing the create-input set drops those refines so
+        // the schema never references an absent field.
+        new Set(requiredFields.map((f) => f.name)),
       ),
     );
     lines.push(

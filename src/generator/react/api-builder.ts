@@ -76,7 +76,10 @@ export function buildApiModule(
       `Create${agg.name}Request`,
       requiredFields.map((f) => ({ name: f.name, base: zodForRequest(f.type) })),
       agg.invariants,
-      new Set(agg.fields.map((f) => f.name)),
+      // Only create-input fields can be validated at the wire boundary —
+      // invariants over excluded fields (e.g. a `managed` collection) are
+      // enforced server-side, so they must not refine an absent field.
+      new Set(requiredFields.map((f) => f.name)),
     ),
   );
   lines.push(`export type Create${agg.name}Request = z.infer<typeof Create${agg.name}Request>;`);
