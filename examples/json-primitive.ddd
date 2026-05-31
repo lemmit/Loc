@@ -11,7 +11,7 @@
 
 context Webhooks {
 
-  aggregate Delivery {
+  aggregate Delivery with crudish {
     receivedAt: datetime
     payload: json
     headers: json

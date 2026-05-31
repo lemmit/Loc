@@ -18,6 +18,8 @@ import type {
   AggregateMember,
   AssignOrCallStmt,
   CallArg,
+  Create,
+  Destroy,
   Expression,
   FieldAccess,
   IdType,
@@ -39,6 +41,8 @@ import { isProperty, isSubdomain } from "../../language/generated/ast.js";
 import {
   mkAssignOrCallStmt,
   mkCallArg,
+  mkCreate,
+  mkDestroy,
   mkFilterDecl,
   mkIdType,
   mkImplementsDecl,
@@ -226,6 +230,40 @@ export function operation(
   params.forEach((p, i) => setContainer(p, op, "params", i));
   body.forEach((s, i) => setContainer(s, op, "body", i));
   return op;
+}
+
+/** A `create` lifecycle factory action.  Omit `name` for the
+ * canonical (unnamed) create — the one that lowers to the bare
+ * `POST /collection` route; pass a name for a secondary factory
+ * (`create place(...)` → `POST /collection/place`).  Mirrors
+ * `operation()` but builds a `Create` AST node. */
+export function create(
+  params: Parameter[],
+  body: Statement[],
+  opts: { name?: string } = {},
+): Create {
+  const origin = currentOrigin();
+  const node: Create = tag(mkCreate({ $type: "Create", name: opts.name, params, body }), origin);
+  params.forEach((p, i) => setContainer(p, node, "params", i));
+  body.forEach((s, i) => setContainer(s, node, "body", i));
+  return node;
+}
+
+/** A `destroy` lifecycle terminator action.  Omit `name` for the
+ * canonical destroy (`DELETE /collection/{id}`); the empty-body
+ * form is the conventional hard delete — the backend wires the
+ * actual removal.  Mirrors `operation()` but builds a `Destroy`
+ * AST node. */
+export function destroy(
+  body: Statement[] = [],
+  opts: { name?: string; params?: Parameter[] } = {},
+): Destroy {
+  const origin = currentOrigin();
+  const params = opts.params ?? [];
+  const node: Destroy = tag(mkDestroy({ $type: "Destroy", name: opts.name, params, body }), origin);
+  params.forEach((p, i) => setContainer(p, node, "params", i));
+  body.forEach((s, i) => setContainer(s, node, "body", i));
+  return node;
 }
 
 // ---------------------------------------------------------------------------

@@ -234,6 +234,24 @@ only code needed is the React `apiBaseUrl` `/api` branch + CORS from §2.1.
 > Ash/Ecto axis) recorded in [`../decisions.md`](../decisions.md).
 > **D-API-ONLY is resolved by §2.1**: API-only = absence of a `ui` mount,
 > no new platform name, no `apiOnly` emission flag.
+>
+> **Update — superseded by D-PHOENIX-SURFACE (PINNED).** Option B above (carry
+> the Ash/Ecto axis in the *platform name*: `phoenixLiveView`=Ash, `phoenix`=Ecto)
+> **collides** with `embedded-frontend-composition.md`, which frees a *second*
+> axis (LiveView vs embedded React) off that same `phoenixLiveView` name and
+> retires it. D-PHOENIX-SURFACE reconciles them: **one `phoenix` platform**, the
+> domain axis carried by the **D-ADAPTER-HOME `style:`/`persistence:` adapter
+> surface** (Option A's surface — *not* a platform name, *not* a new `domain:`
+> keyword), the framework axis by `ui { framework: }`. The pin's key reframe: the
+> Ash/Ecto axis is **universal, not Phoenix-special** — every backend freezes a
+> domain framework (hono→Drizzle, dotnet→EF); Phoenix is merely the first with a
+> menu of size > 1, so the first where the modifier is ever written. This means
+> **Option A is the axis, not a later factoring** — D-PHOENIX-SURFACE pins the
+> domain axis onto the adapter surface now; only the Ash-emit extraction behind
+> the adapter contract remains the implementation tail Phase 2 carries. Option B's
+> other conclusions survive (no `family@version`, no `apiOnly` platform); default
+> domain on bare `platform: phoenix` is **`ash`**. The exact adapter field
+> (`style:` vs `persistence:`) stays this note's Phase-2 call.
 
 ## 5. Conformance — the non-negotiable gate
 

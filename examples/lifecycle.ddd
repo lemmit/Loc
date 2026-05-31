@@ -1,0 +1,27 @@
+// Canonical CRUD lifecycle via `crudish`.
+//
+// `crudish` injects an `update(...)` operation plus a canonical (unnamed)
+// `create(...)` and `destroy { }`.  This example exists so the generated
+// hard-delete paths — Hono `DELETE /{id}` + repo `delete()`, .NET
+// `[HttpDelete]` + `Destroy<Agg>Command` + repo `DeleteAsync` — get real
+// compile coverage in the `generate ts` / `generate dotnet` build gates.
+// Every other example leaves lifecycle implicit, so they never exercise the
+// canonical-destroy emission.
+context Lifecycle {
+
+  aggregate Article with crudish {
+    headline: string
+    // `immutable` — settable at creation (kept on the create surface) but
+    // excluded from the update surface; exercises the writableCreateFields
+    // vs writableUpdateFields split in the generated create/update.
+    slug: string immutable
+    content: string
+  }
+
+  aggregate Tag with crudish {
+    label: string
+  }
+
+  repository Articles for Article { }
+  repository Tags for Tag { }
+}

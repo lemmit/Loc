@@ -1,6 +1,6 @@
   const run = use{{workflowPascal}}Workflow();
 {{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
-{{/each}}  const {{#if useController}}{ register, handleSubmit, control, formState: { errors } }{{else}}{ register, handleSubmit, formState: { errors } }{{/if}} = useForm<{{workflowPascal}}Request>({
+{{/each}}  const {{#if useController}}{ register, handleSubmit, setError, control, formState: { errors } }{{else}}{ register, handleSubmit, setError, formState: { errors } }{{/if}} = useForm<{{workflowPascal}}Request>({
     resolver: zodResolver({{workflowPascal}}Request),
     defaultValues: {{{defaultValuesTs}}},
   });

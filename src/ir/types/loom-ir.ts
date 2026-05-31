@@ -141,6 +141,12 @@ export interface FieldIR {
    * to phrase conflict messages and by the wire-spec diff to explain
    * the field's role.  Same nullability as `access`. */
   accessSource?: "declared" | "default";
+  /** Lowered default-value expression from `field: T = <expr>`.  Present
+   *  only on aggregate / entity-part / value-object fields that declared a
+   *  default (events / views never lower one).  Fully-resolved like any
+   *  other `ExprIR`; consumed when synthesising a create for an aggregate
+   *  with no explicit one. */
+  default?: ExprIR;
 }
 
 export interface ContainmentIR {
@@ -243,6 +249,28 @@ export interface OperationIR {
    * operations (no route) and on non-TS backends (no audit emission).
    * See `docs/proposals/audit-and-logging.md`. */
   audited: boolean;
+}
+
+/** Event-fold applier — the lowered form of an `apply(e: Event) { … }`
+ * member on an event-sourced (`persistedAs(eventLog)`) aggregate.  Folds
+ * one event type into aggregate state.  Under the event-log discipline
+ * the command bodies (`operation`/`create`) only `emit`; the actual
+ * state transition lives in the matching applier.  Bodies are pure folds
+ * — assignment statements and derivations only (enforced by
+ * `validateEventSourcedDiscipline` in phase ⑦); no `emit`, no
+ * side-effecting calls.  Not yet consumed by backends (emission is the
+ * deferred Phase A2; the event-store/fold/projection layer).  See
+ * docs/proposals/workflow-and-applier.md. */
+export interface ApplyIR {
+  /** The event type this applier folds, by name (resolved to a context
+   * `EventDecl`).  One applier per event type per aggregate. */
+  event: string;
+  /** The lambda-style parameter name the event instance is bound to in
+   * the body (e.g. `e` in `apply(e: OrderPlaced)`).  Resolves as
+   * `refKind: "param"` inside the body. */
+  param: string;
+  /** The fold body — assignments / derivations against `this`. */
+  statements: StmtIR[];
 }
 
 export interface EntityPartIR {
@@ -380,6 +408,14 @@ export interface AggregateIR {
    * (default `relational`); a per-projection `dataSource shape:` knob
    * can override it (see {@link effectiveSavingShape}). */
   savingShape?: SavingShape;
+  /** Event-fold appliers declared via `apply(e: Event) { … }` members.
+   * One per event type the aggregate folds.  Only meaningful on
+   * event-sourced aggregates (`persistedAs(eventLog)`); the discipline
+   * validator (phase ⑦) rejects appliers on state-sourced aggregates and
+   * requires a matching applier for every emitted event.  Omitted /
+   * empty when the aggregate declares none.  Not yet consumed by
+   * backends (deferred Phase A2). */
+  appliers?: ApplyIR[];
   /** Aggregate-inheritance (aggregate-inheritance.md, I1).  `true` for an
    * `abstract aggregate` base — never instantiated, no repository, emits no
    * table of its own.  Omitted (≡ false) for ordinary/concrete aggregates. */

@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import type { Page, Locator } from "@playwright/test";
 import { expect } from "@playwright/test";
-import type { CreateCustomerRequest, CustomerResponse } from "../../src/api/customer";
+import type { CreateCustomerRequest, UpdateCustomerRequest, CustomerResponse } from "../../src/api/customer";
 
 export class CustomerListPage {
   static readonly url = "/customers";
@@ -78,6 +78,25 @@ export class CustomerDetailPage {
   /** Locator for a primitive / enum field's value cell. */
   field<K extends keyof CustomerResponse>(name: K): Locator {
     return this.page.getByTestId(`customers-detail-${String(name)}`);
+  }
+
+  /** update — opens the modal, fills the form, submits. */
+  async update(input: UpdateCustomerRequest): Promise<this> {
+    await this.page.getByTestId("customers-op-update").click();
+    await this.page.getByTestId("customers-op-update-form").waitFor();
+    if (input.username !== undefined) {
+      await this.page.getByTestId("customers-op-update-input-username").fill(input.username!);
+    }
+    if (input.email !== undefined) {
+      await this.page.getByTestId("customers-op-update-input-email").fill(input.email!);
+    }
+    if (input.age !== undefined) {
+      await this.page.getByTestId("customers-op-update-input-age").fill(String(input.age));
+    }
+    await this.page.getByTestId("customers-op-update-submit").click();
+    await this.page.getByTestId("customers-op-update-form").waitFor({ state: "detached" });
+    await this.page.waitForLoadState("networkidle");
+    return this;
   }
 
 }

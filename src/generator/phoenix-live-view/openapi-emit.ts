@@ -30,6 +30,7 @@ import {
 import {
   camelId,
   opCreate,
+  opDestroy,
   opFind,
   opGetById,
   opList,
@@ -54,7 +55,10 @@ import type { ApiRoute } from "./api-emit.js";
 //   Entity part response:      <Part>Response
 //   Value object:              <Vo>
 //   Create request:            Create<Agg>Request
-//   Operation request:         <Op>Request   (Pascal-cased op name)
+//   Operation request:         <Op><Agg>Request  (aggregate-qualified — an
+//                              op name like `update` is shared across
+//                              aggregates, e.g. via crudish, so the DTO must
+//                              be qualified to avoid a schema-id collision)
 //   Workflow request:          <Wf>Request   (Pascal-cased workflow name)
 //   View response:             <View>Response
 // ---------------------------------------------------------------------------
@@ -190,7 +194,7 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     // Per-operation request schemas
     for (const op of agg.operations.filter((o) => o.visibility === "public")) {
       files.set(
-        `${schemaDir}/${snake(op.name)}_request.ex`,
+        `${schemaDir}/${snake(op.name)}_${snake(agg.name)}_request.ex`,
         renderOperationRequestSchema(agg, op, webModule),
       );
     }
@@ -398,6 +402,25 @@ function renderApiSpec(
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${respMod}}}
             }${errorResponseEntries("getById", schemasModule)}
           }
+        }${
+          // Canonical destroy → DELETE /<aggs>/{id}.  Gated on the IR
+          // lifecycle so the Phoenix spec matches the Hono/.NET destroy
+          // route (operationId + 404/409 error set from the shared matrix);
+          // the route + controller `def destroy` are emitted in api-emit.ts.
+          agg.canonicalDestroy
+            ? `,
+        delete: %OpenApiSpex.Operation{
+          summary: "Destroy ${agg.name}",
+          operationId: "${camelId(opDestroy(agg.name))}",
+          tags: ["${aggSlug}"],
+          parameters: [
+            %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
+          ],
+          responses: %{
+            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("destroy", schemasModule)}
+          }
+        }`
+            : ""
         }
       }`,
     );
@@ -407,7 +430,7 @@ function renderApiSpec(
       // Spec path must track the route's URL segment (routeSlug, D-URLSTYLE);
       // operationId + request module stay keyed on op.name.
       const opSnake = snake(op.routeSlug ?? op.name);
-      const opReqMod = `${schemasModule}.${upperFirst(op.name)}Request`;
+      const opReqMod = `${schemasModule}.${upperFirst(op.name)}${agg.name}Request`;
       pathEntries.push(
         `      "/${aggSlug}/{id}/${opSnake}" => %OpenApiSpex.PathItem{
         post: %OpenApiSpex.Operation{
@@ -808,16 +831,21 @@ function renderOperationRequestSchema(
   op: import("../../ir/types/loom-ir.js").OperationIR,
   webModule: string,
 ): string {
-  const schemaName = `${upperFirst(op.name)}Request`;
+  const schemaName = `${upperFirst(op.name)}${agg.name}Request`;
   const moduleName = `${webModule}.Api.Schemas.${schemaName}`;
+  // Optionality rides on the param's own type nullability — a nullable
+  // param (`description?` etc., as crudish's `update` carries through from
+  // a nullable field) is NOT required.  Hono derives the same from
+  // `zodFor` (nullable → `.nullish()` → optional in OpenAPI); hardcoding
+  // `false` here made Phoenix mark those params required and tripped the
+  // parity gate's required-set dimension (UpdateProjectRequest drift).
   const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = op.params.map(
     (p: ParamIR) => ({
       name: p.name,
       type: p.type,
-      optional: false,
+      optional: wireTypeInfo(p.type, "request").isNullable,
     }),
   );
-  void agg;
   return renderSchemaModule(moduleName, schemaName, fields, `${webModule}.Api.Schemas`, true);
 }
 

@@ -1,12 +1,75 @@
 // Auto-generated.  Do not edit by hand.
 import { useParams, Link as RouterLink } from "react-router";
+import { UpdateRequest, useUpdateProduct } from "../../api/product";
+import { applyServerErrors } from "../../lib/apply-server-errors";
 import { KeyValueRow } from "../../lib/format";
-import { Alert, Anchor, Breadcrumbs, Card, Group, Skeleton, Stack, Text, Title } from "@mantine/core";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Alert, Anchor, Breadcrumbs, Button, Card, Fieldset, Group, NumberInput, Skeleton, Stack, Text, TextInput, Title } from "@mantine/core";
+import { modals } from "@mantine/modals";
+import { notifications } from "@mantine/notifications";
+import { Controller, useForm } from "react-hook-form";
 import { useProductById } from "../../api/product";
+function openUpdateModal(mut: ReturnType<typeof useUpdateProduct>): void {
+  modals.open({
+    title: "Update",
+    children: <UpdateForm mut={mut} onClose={() => modals.closeAll()} />,
+  });
+}
+
+function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateProduct>; onClose: () => void }) {
+  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<UpdateRequest>({
+    resolver: zodResolver(UpdateRequest),
+    defaultValues: { sku: "", price: { amount: 0, currency: "" } },
+  });
+  return (
+    <form
+      data-testid="products-op-update-form"
+      onSubmit={handleSubmit(async (vals) => {
+        try {
+          await mut.mutateAsync(vals);
+          notifications.show({ color: "green", message: "Update succeeded" });
+          onClose();
+        } catch (e) {
+          const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+          if (outcome.kind === "global") {
+            notifications.show({ color: "red", message: outcome.title });
+          } else if (outcome.kind === "unhandled") {
+            notifications.show({ color: "red", message: (e as Error).message });
+          }
+        }
+      })}
+    >
+      <Stack>
+        <TextInput label="Sku" {...register("sku")} data-testid="products-op-update-input-sku" error={errors.sku?.message} />
+
+        <Fieldset legend="Price" variant="filled" radius="md" data-testid="products-op-update-input-price">
+          <Stack gap="sm">
+            <Controller
+          control={control}
+          name="price.amount"
+          render={({ field, fieldState }) => (
+            <NumberInput label="Amount" data-testid="products-op-update-input-price-amount" decimalScale={2} fixedDecimalScale value={field.value as number | "" | undefined} onChange={(v) => field.onChange(typeof v === "number" ? v : Number(v) || 0)} error={fieldState.error?.message} />
+          )}
+        />
+
+<TextInput label="Currency" {...register("price.currency")} data-testid="products-op-update-input-price-currency" error={errors.price?.currency?.message} />
+
+          </Stack>
+        </Fieldset>
+
+        <Group justify="flex-end" mt="sm">
+          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mut.isPending} data-testid="products-op-update-submit">Update</Button>
+        </Group>
+      </Stack>
+    </form>
+  );
+}
 
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
   const productById = useProductById(id);
+  const update = useUpdateProduct(id ?? "");
   return (
     <Stack data-testid="products-detail">
       <Breadcrumbs>
@@ -39,7 +102,10 @@ export default function ProductDetail() {
           </Card>
         ) }
       </>
-      <Group />
+      <Group>
+        <Button variant="filled" onClick={() => openUpdateModal(update)} data-testid="products-op-update">Update</Button>
+    
+      </Group>
     </Stack>
   );
 }

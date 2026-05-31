@@ -18,7 +18,12 @@ function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{
               enqueueSnackbar("{{humanOp}} succeeded", { variant: "success" });
               setOpen(false);
             } catch (e) {
-              enqueueSnackbar((e as Error).message, { variant: "error" });
+              const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+              if (outcome.kind === "global") {
+                enqueueSnackbar(outcome.title, { variant: "error" });
+              } else if (outcome.kind === "unhandled") {
+                enqueueSnackbar((e as Error).message, { variant: "error" });
+              }
             }
           })}
         >

@@ -2,6 +2,7 @@
 // sanity, aggregate / entity-part / value-object structural rules.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { writableCreateFields } from "../../macros/api/factories.js";
 import type {
   Aggregate,
   BoundedContext,
@@ -15,22 +16,31 @@ import type {
 } from "../generated/ast.js";
 import {
   isAggregate,
+  isApply,
   isAssignOrCallStmt,
   isContainment,
   isCreate,
   isDerivedProp,
   isDestroy,
+  isEmitStmt,
   isEntityPart,
   isFunctionDecl,
   isInvariant,
   isOperation,
+  isPreconditionStmt,
   isPrimitiveType,
   isProperty,
   isValueObject,
 } from "../generated/ast.js";
 import { envForAggregate, envForPart, envForValueObject } from "./_shared.js";
 import { checkCreate, checkDestroy, checkOperation } from "./statements.js";
-import { checkDerived, checkFunction, checkInvariant, checkPropertyCheck } from "./types.js";
+import {
+  checkDerived,
+  checkFunction,
+  checkInvariant,
+  checkPropertyCheck,
+  checkPropertyDefault,
+} from "./types.js";
 
 /** `slot` is a UI-only element-shaped param marker — meaningful only
  *  on a `component`'s parameter list (where the caller supplies JSX
@@ -127,7 +137,132 @@ export function checkContext(ctx: BoundedContext, accept: ValidationAcceptor): v
   }
 }
 
+// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers Phase A1).
+// `persistedAs(eventLog)` makes the event stream the source of truth, so
+// command bodies decide and `emit`, and state transitions live in
+// `apply(...)` folds.  This is the AST-level mirror of the IR validator
+// `validateEventSourcedDiscipline`; keeping both means the contract is
+// enforced both in the editor (LSP, AST) and at compile time (IR), with
+// the diagnostics here attached to the precise offending node.
+function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor): void {
+  const isEventSourced = agg.persistedAs === "eventLog";
+  const appliers = agg.members.filter(isApply);
+
+  // Rule 1 — appliers require an event-sourced aggregate.
+  if (!isEventSourced) {
+    for (const ap of appliers) {
+      accept(
+        "error",
+        `Aggregate '${agg.name}' declares apply(...) but is not event-sourced. ` +
+          `Appliers fold events into state; add 'persistedAs(eventLog)' to the aggregate header, or remove the applier.`,
+        { node: ap, code: "loom.applier-on-non-event-sourced" },
+      );
+    }
+    return;
+  }
+
+  // Rule 5 — one applier per event type.
+  const eventName = (a: (typeof appliers)[number]): string => a.event.ref?.name ?? a.event.$refText;
+  const seenApplier = new Map<string, number>();
+  for (const ap of appliers)
+    seenApplier.set(eventName(ap), (seenApplier.get(eventName(ap)) ?? 0) + 1);
+  for (const ap of appliers) {
+    if ((seenApplier.get(eventName(ap)) ?? 0) > 1) {
+      accept(
+        "error",
+        `Aggregate '${agg.name}' declares more than one applier for event '${eventName(ap)}'. ` +
+          `An event folds into state exactly one way — declare a single apply(${eventName(ap)}).`,
+        { node: ap, property: "event", code: "loom.duplicate-applier" },
+      );
+    }
+  }
+
+  const appliedEvents = new Set(appliers.map(eventName));
+
+  // Rules 2 + 3 — command bodies are emit-only; emitted events covered.
+  const commands = agg.members.filter(
+    (m) => isOperation(m) || isCreate(m) || isDestroy(m),
+  ) as Array<{ body: AstNode[] }>;
+  for (const cmd of commands) {
+    for (const stmt of cmd.body) {
+      if (isAssignOrCallStmt(stmt) && stmt.op) {
+        accept(
+          "error",
+          `Aggregate '${agg.name}' is event-sourced — a command body must not mutate 'this' directly. ` +
+            `Replace the assignment with an 'emit' and fold it in an apply(...) block.`,
+          { node: stmt, code: "loom.event-sourced-command-mutation" },
+        );
+      } else if (isEmitStmt(stmt)) {
+        const ev = stmt.event.ref?.name ?? stmt.event.$refText;
+        if (!appliedEvents.has(ev)) {
+          accept(
+            "error",
+            `Event '${ev}' is emitted but no applier folds it. ` +
+              `Add an apply(${ev}: ${ev}) block to aggregate '${agg.name}', or the event is recorded but never reflected in state.`,
+            { node: stmt, code: "loom.emitted-event-no-applier" },
+          );
+        }
+      }
+    }
+  }
+
+  // Rule 4 — applier bodies are pure, deterministic folds.
+  for (const ap of appliers) {
+    for (const stmt of ap.body) {
+      if (isEmitStmt(stmt)) {
+        accept(
+          "error",
+          `apply(${eventName(ap)}) must not emit — an applier reacts to an event by folding it into state. ` +
+            `Move the 'emit' to the command body that decides it.`,
+          { node: stmt, code: "loom.applier-impure" },
+        );
+      } else if (isAssignOrCallStmt(stmt) && !stmt.op) {
+        accept(
+          "error",
+          `apply(${eventName(ap)}) must not call out — applier bodies are deterministic, replayable folds (assignments and 'let' only).`,
+          { node: stmt, code: "loom.applier-impure" },
+        );
+      } else if (isPreconditionStmt(stmt)) {
+        accept(
+          "error",
+          `apply(${eventName(ap)}) must not guard — by the time an event is applied the decision is already made; put the guard in the command.`,
+          { node: stmt, code: "loom.applier-impure" },
+        );
+      }
+    }
+  }
+}
+
+/** Constructibility check (staged): an aggregate is constructible when it
+ * declares a `create` (explicit or via `crudish`) or every required
+ * create-input field has a default.  Otherwise — once the implicit
+ * hard-coded create is removed — there's no way to supply those fields.
+ * Emitted as a WARNING during the staged rollout; flips to an error in a
+ * later phase. */
+function checkConstructible(agg: Aggregate, accept: ValidationAcceptor): void {
+  const hasCreate = agg.members.some((m) => isCreate(m));
+  if (hasCreate) return;
+  const undefaulted = writableCreateFields(agg)
+    .filter((f) => !f.type?.optional && f.default == null)
+    .map((f) => f.name);
+  if (undefaulted.length === 0) return;
+  accept(
+    "warning",
+    `Aggregate '${agg.name}' is not constructible without the implicit create: it declares no 'create' and the required field(s) ${undefaulted
+      .map((n) => `'${n}'`)
+      .join(
+        ", ",
+      )} have no default. Add a 'create(...)' (or 'with crudish'), or give the field(s) a default value.`,
+    { node: agg, code: "loom.not-constructible" },
+  );
+}
+
 export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void {
+  checkConstructible(agg, accept);
+  // Event-sourcing body discipline — the AST-level mirror of
+  // `validateEventSourcedDiscipline` (ir/validate), so the contract shows
+  // live in the editor as you type, not only at `generate` time.
+  checkEventSourcedDiscipline(agg, accept);
   // Ensure unique part names within the aggregate
   const partNames = new Set<string>();
   let displayDerived: DerivedProp | undefined;
@@ -146,6 +281,7 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
     if (isContainment(m)) checkContainment(m, agg, accept);
     if (isInvariant(m)) checkInvariant(m, envForAggregate(agg), accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForAggregate(agg), accept);
+    if (isProperty(m) && m.default) checkPropertyDefault(m, envForAggregate(agg), accept);
     if (isDerivedProp(m)) {
       checkDerived(m, envForAggregate(agg), accept);
       // Reserved-name derived fields — `display` (user-facing label) and
@@ -274,6 +410,7 @@ export function checkEntityPart(
     if (isContainment(m)) checkContainment(m, agg, accept);
     if (isInvariant(m)) checkInvariant(m, envForPart(agg, part), accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForPart(agg, part), accept);
+    if (isProperty(m) && m.default) checkPropertyDefault(m, envForPart(agg, part), accept);
     if (isDerivedProp(m)) checkDerived(m, envForPart(agg, part), accept);
     if (isFunctionDecl(m)) checkFunction(m, agg, part, accept);
   }

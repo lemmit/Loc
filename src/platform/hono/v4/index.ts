@@ -18,7 +18,11 @@ import {
   stubAdapter,
 } from "../../../generator/_adapters/index.js";
 import type { LoomBackendManifest } from "../../manifest.js";
-import type { ComposeServiceShape, PlatformSurface } from "../../surface.js";
+import {
+  type ComposeServiceShape,
+  type PlatformSurface,
+  STATIC_BUNDLE_FRAMEWORKS,
+} from "../../surface.js";
 import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
 import { drizzlePersistenceAdapter } from "./adapters/drizzle-persistence.js";
 import { layeredStyleAdapter } from "./adapters/layered-style.js";
@@ -41,12 +45,15 @@ const honoPlatform: PlatformSurface = {
   needsDb: true,
   mountsUi: false,
   isFrontend: false,
+  // Static-asset host (static middleware): serves any static-bundle
+  // framework.  D-PHOENIX-SURFACE.
+  hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
   // Hono repository auto-emits these per aggregate — see
   // src/generator/typescript/repository-builder.ts (`async save`,
   // `async findById`, `async getById`).  A user-declared find with
   // one of these names would compile-error with TS2393 "Duplicate
   // function implementation".
-  reservedRepositoryFindNames: new Set(["save", "findById", "getById"]),
+  reservedRepositoryFindNames: new Set(["save", "findById", "getById", "delete"]),
   emitProject({ contexts, deployable, sys, migrations, emitTrace }): Map<string, string> {
     // The package supplies its own pins to the shared emitter —
     // edge points package → shared, never the reverse.

@@ -589,8 +589,17 @@ function renderActions(
 
   const opActions = ops.map((op) => renderOperationAction(op, renderCtx, ctxModule));
 
+  // Ash forbids two actions of the same name.  A mutate operation whose
+  // name collides with a default action (notably `crudish`'s `update`,
+  // which emits an explicit `update :update do`) shadows that default —
+  // drop it from the `defaults [...]` list so the explicit action stands
+  // alone.  The action name is unchanged, so the unconditional PATCH
+  // /<aggs>/{id} (action: :update) route still resolves.
+  const opActionNames = new Set(ops.map((op) => snake(op.name)));
+  const defaultActions = ["read", "update", "destroy"].filter((a) => !opActionNames.has(a));
+
   return `\n  actions do
-    defaults [:read, :update, :destroy]
+    defaults [${defaultActions.map((a) => `:${a}`).join(", ")}]
 
 ${defaultCreate}
 ${opActions.join("\n")}

@@ -16,6 +16,17 @@ shape-typing of aggregate values, guard narrowing (`is loaded`).
 Deferred — the inference + propagation machinery is genuinely
 complex; v1 ships with explicit annotations only.
 
+**Internal realisation**: the default-whole load is the zero-value of a
+derived IR structure, `LoadPlanIR` — `whole(agg)` (full owned tree,
+cross-aggregate refs as ids). Every retrieval carries one; explicit
+`loads:` *transforms* it (restrict ∩ / expand ∪). The default is
+enrich-phase structural (like `wireShape`); v2 inference *narrows* the
+same `LoadPlanIR` automatically. See
+[`reified-criteria.md`](./reified-criteria.md) §"The internal seam" for
+the `CriterionIR` + `LoadPlanIR` + `RetrievalIR` model, and
+[`retrieval.md`](./retrieval.md) for the named-bundle keyword that
+declares a load shape as part of a reusable query.
+
 ## Problem
 
 An operation that touches `order.lines[].product.price` needs those
@@ -213,6 +224,33 @@ inference (above) lands.
 - **Interaction with data-policy row/field filtering**, since both
   wrap `Repo.load` — see the supplementary note.
 
+## Per-backend eager-fetch realisation
+
+A `loads:` shape is each backend's eager-fetch configuration. The
+idiomatic mapping — *not* a hand-rolled query fragment:
+
+| Backend | Owned collection fetch | Cross-aggregate to-one expansion |
+|---|---|---|
+| **Hono / Drizzle** | the existing `findById` / `findManyByIds` bulk-load-by-ids pattern (already emitted) | an extra keyed load following the `X id` ref |
+| **.NET / EF Core** | `Query.Include(x => x.Children)` on the spec | `.Include(...).ThenInclude(...)` |
+| **JPA / Hibernate** | **`@BatchSize`** (or global `hibernate.default_batch_fetch_size`) on the `@OneToMany` — paginate roots cleanly, batch-load collections as `… where parent_id in (?,?,…)`; turns N+1 into N/batch+1 **without** breaking SQL pagination | **`@EntityGraph(attributePaths = …)`** on the repository method, **one annotated method per source-known load shape** (the `loads:` set is closed at compile time → static enumeration, no dynamic CriteriaBuilder) |
+
+**JPA gotchas this avoids by design:**
+
+- **No load shape ⇒ lazy.** A `@OneToMany` with no graph is not fetched;
+  accessing it either N+1s (session open) or throws
+  `LazyInitializationException` (session closed). `loads:` exists to make
+  that deterministic — `whole(agg)` fetches the owned tree.
+- **Collection-fetch + pagination.** An `@EntityGraph` that pulls a
+  *collection* together with a `Pageable` forces Hibernate to paginate
+  **in memory** (`HHH000104`). `@BatchSize` on owned collections sidesteps
+  it (page the roots, batch the children); reserve `@EntityGraph` for
+  to-one expansion where no in-memory-pagination penalty applies.
+- **restrict vs expand** maps to the graph *type*: `loads:` that restricts
+  → `jakarta.persistence.fetchgraph` (strict — unlisted attrs lazy);
+  `loads:` that expands → `jakarta.persistence.loadgraph` (listed eager,
+  rest follow mapped defaults).
+
 ## Feeds provenance
 
 This layer is designed to interoperate with
@@ -229,6 +267,10 @@ declared requirement and the realised access path.
   here.
 - [`exception-less.md`](./exception-less.md) — `?` propagation
   composes with `loads:` shape failures (compile-time diagnostic).
+- [`retrieval.md`](./retrieval.md) — a `retrieval` declaration carries a
+  `loads:` slot as part of the named bundle; `Repo.run` executes it.
+- [`reified-criteria.md`](./reified-criteria.md) — the `LoadPlanIR`
+  structure (default `whole(agg)`) this policy is realised by.
 - [`aggregate-inheritance.md`](./aggregate-inheritance.md) — load
   shapes over abstract aggregates: `loads Party { contact.email }`
   applies to every concrete subtype that shares the `contact` path.

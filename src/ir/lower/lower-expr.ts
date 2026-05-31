@@ -9,6 +9,7 @@ import type {
   Criterion,
   EntityPart,
   EntityPartMember,
+  EventDecl,
   Expression,
   FunctionDecl,
   LValue,
@@ -88,6 +89,7 @@ import {
   cstText,
   type Env,
   findEntityByName,
+  findEventByName,
   findFunctionInEnv,
   findValueObjectByName,
   inAggregate,
@@ -1250,6 +1252,10 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
   if (t.kind === "entity") {
     const target = findEntityByName(env, t.name);
     if (target) return memberOnEntity(target, name);
+    // Applier event params carry the event name as an entity marker —
+    // fall back to the event's field set when it isn't an aggregate/part.
+    const event = findEventByName(env, t.name);
+    if (event) return memberOnEvent(event, name);
   }
   if (t.kind === "valueobject") {
     const vo = findValueObjectByName(env, t.name);
@@ -1310,6 +1316,16 @@ function memberOnValueObject(vo: ValueObject, name: string): TypeIR {
     if (isDerivedProp(m) && m.name === name) {
       return lowerType(m.type);
     }
+  }
+  return { kind: "primitive", name: "string" };
+}
+
+/** Member type on an applier's event parameter (`apply(e: E) { … e.f … }`).
+ *  An event is a flat payload of `Property` fields (`event E { f: T, … }`),
+ *  so resolution is field-only — no `id`, containment, or derived members. */
+function memberOnEvent(event: EventDecl, name: string): TypeIR {
+  for (const f of event.fields) {
+    if (f.name === name) return lowerType(f.type);
   }
   return { kind: "primitive", name: "string" };
 }
@@ -1388,6 +1404,8 @@ function stepInto(t: TypeIR, name: string, env: Env): TypeIR {
   if (t.kind === "entity") {
     const target = findEntityByName(env, t.name);
     if (target) return memberOnEntity(target, name);
+    const event = findEventByName(env, t.name);
+    if (event) return memberOnEvent(event, name);
   }
   if (t.kind === "valueobject") {
     const vo = findValueObjectByName(env, t.name);

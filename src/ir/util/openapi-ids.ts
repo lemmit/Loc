@@ -41,6 +41,11 @@ export function opGetById(aggName: string): OpIdTokens {
   return ["get", aggName, "byId"];
 }
 
+/** `DELETE /<aggs>/{id}` — hard-delete an aggregate (canonical destroy). */
+export function opDestroy(aggName: string): OpIdTokens {
+  return ["destroy", aggName];
+}
+
 /** `GET /<aggs>` — list all aggregates (canonical stem is `all`, not `list`). */
 export function opList(aggName: string): OpIdTokens {
   return ["all", aggName];

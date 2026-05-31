@@ -72,7 +72,7 @@ system DevPlatform {
 
             event ProjectArchived { project: Project id, at: datetime }
 
-            aggregate Project ids guid {
+            aggregate Project ids guid with crudish {
                 name: string
                 description: string?
                 visibility: Visibility
@@ -206,7 +206,7 @@ system DevPlatform {
 
             event BuildPromoted { build: Build id, env: string, at: datetime }
 
-            aggregate Build {
+            aggregate Build with crudish {
                 commitSha: string
                 buildState: BuildState
                 total: int provenanced
@@ -244,7 +244,7 @@ system DevPlatform {
     subdomain Accounts {
         context People {
 
-            aggregate Engineer {
+            aggregate Engineer with crudish {
                 handle: string
                   check handle.length >= 3 && handle.length <= 32
                 email: string

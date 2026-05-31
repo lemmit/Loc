@@ -25,6 +25,13 @@ export class Customer {
   get inspect(): string { return "Customer(" + "id: " + String(this._id) + ", " + "username: " + "'" + this._username + "'" + ", " + "email: " + "'" + this._email + "'" + ", " + "age: " + String(this._age) + ")"; }
   toString(): string { return this.inspect; }
   [Symbol.for("nodejs.util.inspect.custom")](): string { return this.inspect; }
+  public update(username: string, email: string, age: number): void {
+    this._username = username;
+    this._email = email;
+    this._age = age;
+    this._assertInvariants();
+  }
+
   pullEvents(): Events.DomainEvent[] {
     const out = this._events;
     this._events = [];

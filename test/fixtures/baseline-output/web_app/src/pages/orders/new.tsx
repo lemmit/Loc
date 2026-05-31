@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { useNavigate, Link as RouterLink } from "react-router";
 import { CreateOrderRequest, useCreateOrder } from "../../api/order";
+import { applyServerErrors } from "../../lib/apply-server-errors";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Anchor, Breadcrumbs, Button, Card, Group, Select, Stack, Text, TextInput, Title } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -9,7 +10,7 @@ import { Controller, useForm } from "react-hook-form";
 export default function OrderNew() {
   const navigate = useNavigate();
   const create = useCreateOrder();
-  const { register, handleSubmit, control, formState: { errors } } = useForm<CreateOrderRequest>({
+  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<CreateOrderRequest>({
     resolver: zodResolver(CreateOrderRequest),
     defaultValues: { customerId: "", status: "Draft", placedAt: "" },
   });
@@ -28,7 +29,12 @@ export default function OrderNew() {
                     notifications.show({ color: "green", message: "Order created" });
                     navigate(`/orders/${out.id}`);
                   } catch (e) {
-                    notifications.show({ color: "red", message: (e as Error).message });
+                    const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+                    if (outcome.kind === "global") {
+                      notifications.show({ color: "red", message: outcome.title });
+                    } else if (outcome.kind === "unhandled") {
+                      notifications.show({ color: "red", message: (e as Error).message });
+                    }
                   }
                 })} data-testid="orders-new">
           <Stack gap="md">
