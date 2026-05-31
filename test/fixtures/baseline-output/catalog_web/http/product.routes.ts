@@ -1,5 +1,6 @@
 // Auto-generated.  Do not edit by hand.
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { ProblemDetails, newApp } from "./problem-details";
 import { Product } from "../domain/product";
 import type { ProductRepository } from "../db/repositories/product-repository";
 import * as Ids from "../domain/ids";
@@ -32,10 +33,9 @@ export const ProductResponse = z.object({
   display: z.string(),
 }).openapi("ProductResponse");
 export const ProductListResponse = z.array(ProductResponse).openapi("ProductListResponse");
-const ProblemDetails = z.object({ type: z.string().nullish(), title: z.string().nullish(), status: z.number().int().nullish(), detail: z.string().nullish(), instance: z.string().nullish() }).openapi("ProblemDetails");
 
 export function productRoutes(repo: ProductRepository): OpenAPIHono {
-  const app = new OpenAPIHono();
+  const app = newApp();
 
   app.openapi(
     createRoute({
