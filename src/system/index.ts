@@ -252,8 +252,15 @@ function collectContextsFor(
   const isHono = d.platform === "hono";
   const keepsTable = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
     !!a.isAbstract && isHono && (a.inheritanceUsing ?? "sharedTable") === "sharedTable";
+  // On Hono, a TPC (`ownTable`) base is also kept in the view — not for a table
+  // of its own (the per-aggregate emit loop skips abstract aggregates), but so
+  // the base-reader pass can see it and emit the polymorphic `find all <Base>`
+  // reader that delegates to the concrete repositories.  Other backends still
+  // drop it (no TPC base reader there yet).
+  const keepsForBaseReader = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
+    !!a.isAbstract && isHono && a.inheritanceUsing === "ownTable";
   const dropped = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
-    !!a.isAbstract && !keepsTable(a);
+    !!a.isAbstract && !keepsTable(a) && !keepsForBaseReader(a);
   for (const mod of modulesByName.values()) {
     for (const c of mod.contexts) {
       if (!want.has(c.name)) continue;

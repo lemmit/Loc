@@ -87,6 +87,12 @@ export function renderSchema(
   for (const agg of ctx.aggregates) {
     const schema = schemaFor(agg);
     const prefix = prefixFor(agg);
+    // An abstract base that is NOT a TPH base owns no table.  A TPC
+    // (`ownTable`) base is kept in the generation view only so the base-reader
+    // pass can emit its polymorphic `find all <Base>` reader — it must not emit
+    // a table of its own (each concrete is standalone).  The TPH base falls
+    // through to `emitTphTable` below; every other abstract base emits nothing.
+    if (agg.isAbstract && !isTphBase(agg, ctx.aggregates)) continue;
     // TPH (aggregate-inheritance.md, sharedTable): the whole hierarchy is one
     // table named for the abstract base.  A TPH concrete shares it, so it
     // emits no table of its own; the abstract base emits the shared table

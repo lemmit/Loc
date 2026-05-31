@@ -68,6 +68,11 @@ export function schemaFromModule(
   const tables: TableShape[] = [];
   const pool = collectAggregates(module);
   for (const agg of pool) {
+    // An abstract base that is NOT a TPH base owns no table — a TPC
+    // (`ownTable`) base emits nothing here (each concrete is standalone);
+    // mirrors the schema emitter (emit/schema.ts).  The TPH base falls through
+    // to `tphTableForAggregate` below.
+    if (agg.isAbstract && !isTphBase(agg, pool)) continue;
     // TPH (aggregate-inheritance.md, sharedTable): the hierarchy is one
     // shared table named for the abstract base.  A TPH concrete shares it
     // (emits no table); the base emits the shared table (base columns + every

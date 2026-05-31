@@ -12,6 +12,7 @@ import type { EmitCtx } from "../../../generator/_adapters/index.js";
 import {
   buildBaseReaderFile,
   buildBaseUnionFile,
+  buildTpcBaseReaderFile,
 } from "../../../generator/typescript/base-reader-builder.js";
 import { emitTypescriptMigrations } from "../../../generator/typescript/emit/migrations.js";
 import {
@@ -27,7 +28,12 @@ import { buildExternHandlersFile } from "../../../generator/typescript/extern-bu
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import { buildDocumentRepositoryFile } from "../../../generator/typescript/repository-document-builder.js";
 import { buildEmbeddedRepositoryFile } from "../../../generator/typescript/repository-embedded-builder.js";
-import { isTphBase, tphConcretesOf } from "../../../generator/typescript/tph.js";
+import {
+  isTpcBase,
+  isTphBase,
+  tpcConcretesOf,
+  tphConcretesOf,
+} from "../../../generator/typescript/tph.js";
 import { enrichLoomModel } from "../../../ir/enrich/enrichments.js";
 import { lowerModel } from "../../../ir/lower/lower.js";
 import {
@@ -313,6 +319,25 @@ export function generateTypeScriptForContexts(
       out.set(
         `db/repositories/${lowerFirst(base.name)}-repository.ts`,
         buildBaseReaderFile(base, concretes, ctx),
+      );
+    }
+    // TPC (aggregate-inheritance.md, ownTable): the base owns no table, but is
+    // the read home for the polymorphic `find all <Base>`.  Emit the `<Base>`
+    // discriminated union + a read-only `<Base>Repository` that delegates to
+    // the concrete repositories (findAll = union of each concrete's `all()`;
+    // findById tries each).  The concretes are full standalone tables, so this
+    // reuses their loaders rather than hand-rolling a column-aligned unionAll.
+    for (const base of ctx.aggregates) {
+      if (!isTpcBase(base, ctx.aggregates)) continue;
+      const concretes = tpcConcretesOf(base, ctx.aggregates) as typeof ctx.aggregates;
+      if (concretes.length === 0) continue;
+      out.set(
+        `domain/${lowerFirst(base.name)}.ts`,
+        buildBaseUnionFile(base, concretes, "ownTable"),
+      );
+      out.set(
+        `db/repositories/${lowerFirst(base.name)}-repository.ts`,
+        buildTpcBaseReaderFile(base, concretes),
       );
     }
   }

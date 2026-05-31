@@ -21,18 +21,25 @@ import { hydrateConcreteFromSharedRow } from "./repository-find-builder.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 
 /** The `<Base> = Concrete | …` discriminated-union type (TS structural union
- *  of the concrete domain classes). Lives in `domain/<base>.ts`. */
+ *  of the concrete domain classes). Lives in `domain/<base>.ts`.  `layout`
+ *  only tunes the explanatory comment: TPH discriminates on a shared `kind`
+ *  column; TPC discriminates structurally across per-concrete tables. */
 export function buildBaseUnionFile(
   base: EnrichedAggregateIR,
   concretes: EnrichedAggregateIR[],
+  layout: "sharedTable" | "ownTable" = "sharedTable",
 ): string {
   const imports = concretes.map((c) => `import type { ${c.name} } from "./${lowerFirst(c.name)}";`);
+  const discriminatorNote =
+    layout === "sharedTable"
+      ? "// (discriminated by the shared table's `kind` column at the data layer)."
+      : "// (each concrete is its own table; the union is resolved per-table by the base reader).";
   return lines(
     "// Auto-generated.  Do not edit by hand.",
     ...imports,
     "",
     `// Polymorphic ${base.name} — the tagged union of its concrete subtypes`,
-    `// (discriminated by the shared table's \`kind\` column at the data layer).`,
+    discriminatorNote,
     `export type ${base.name} = ${concretes.map((c) => c.name).join(" | ")};`,
     "",
   );
@@ -112,6 +119,65 @@ export function buildBaseReaderFile(
     `type Db = NodePgDatabase<typeof schema>;`,
     "",
     bodyStr,
+    "",
+  );
+}
+
+/** The read-only `<Base>Repository` for a TPC (`ownTable`) hierarchy.
+ *
+ *  Unlike TPH, a TPC base has NO table — each concrete is a standalone table
+ *  with its own fully-featured repository.  So rather than hand-roll a fragile
+ *  `unionAll` over differently-shaped concrete tables (which could only read
+ *  flat scalars and would silently drop contained parts / `X id[]`
+ *  associations), this reader DELEGATES to the per-concrete repositories and
+ *  concatenates: `findAll()` is the union of each concrete's `all()`,
+ *  `findById()` tries each concrete in turn.  Every aggregate therefore loads
+ *  its complete tree through the loader that already knows how.  It returns the
+ *  `Customer | Supplier` tagged union — the read home for `find all <Base>`.
+ *
+ *  N round-trips instead of one (one per concrete); the trade is correctness +
+ *  reuse over a single hand-aligned query.  Hono/Drizzle only (v1). */
+export function buildTpcBaseReaderFile(
+  base: EnrichedAggregateIR,
+  concretes: EnrichedAggregateIR[],
+): string {
+  const repoCtor = (c: EnrichedAggregateIR): string => `${c.name}Repository`;
+  const repoField = (c: EnrichedAggregateIR): string => `${lowerFirst(c.name)}Repo`;
+  return lines(
+    "// Auto-generated.  Do not edit by hand.",
+    `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
+    `import * as schema from "../schema";`,
+    `import type { DomainEventDispatcher } from "../../domain/events";`,
+    `import * as Ids from "../../domain/ids";`,
+    ...concretes.map((c) => `import { ${repoCtor(c)} } from "./${lowerFirst(c.name)}-repository";`),
+    `import type { ${base.name} } from "../../domain/${lowerFirst(base.name)}";`,
+    "",
+    `type Db = NodePgDatabase<typeof schema>;`,
+    "",
+    `// Polymorphic ${base.name} reader (TPC / ownTable): delegates to each`,
+    `// concrete repository so every aggregate loads its full tree, then unions`,
+    `// the results.  Read-only — writes go through the per-concrete repos.`,
+    `export class ${base.name}Repository {`,
+    ...concretes.map((c) => `  private readonly ${repoField(c)}: ${repoCtor(c)};`),
+    `  constructor(db: Db, events: DomainEventDispatcher) {`,
+    ...concretes.map((c) => `    this.${repoField(c)} = new ${repoCtor(c)}(db, events);`),
+    `  }`,
+    "",
+    `  async findById(id: Ids.${base.name}Id): Promise<${base.name} | null> {`,
+    ...concretes.flatMap((c) => [
+      `    const ${repoField(c)}Hit = await this.${repoField(c)}.findById(id as unknown as Ids.${c.name}Id);`,
+      `    if (${repoField(c)}Hit) return ${repoField(c)}Hit;`,
+    ]),
+    `    return null;`,
+    `  }`,
+    "",
+    `  async findAll(): Promise<${base.name}[]> {`,
+    `    const results = await Promise.all([`,
+    ...concretes.map((c) => `      this.${repoField(c)}.all(),`),
+    `    ]);`,
+    `    return results.flat();`,
+    `  }`,
+    `}`,
     "",
   );
 }
