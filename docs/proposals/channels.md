@@ -135,6 +135,8 @@ Channel:
         ('delivery'  ':' delivery=ChannelDelivery ','?)?
         ('retention' ':' retention=ChannelRetention ('(' retentionArg=RetentionArg ')')? ','?)?
         ('key'       ':' key=ID ','?)?            // partition/ordering key — a field common to carried events
+        ('scope'     ':' scope=Expression ','?)?  // subchannel/room predicate — see "Subchannels"
+        ('requires'  ':' requires=Expression ','?)?  // capability gate at connect (same shape as op `requires`)
     '}';
 
 ChannelDelivery  returns string: 'broadcast' | 'queue';
@@ -142,15 +144,19 @@ ChannelRetention returns string: 'ephemeral' | 'log' | 'work';
 // RetentionArg carries log limits: maxAge / maxBytes (deferred to a follow-up; parses as a knob list).
 ```
 
-The contract carries **delivery semantics only** — what's delivered, to a
-broadcast audience or a competing-consumer group, kept how long. It says
-nothing about the wire (in-process / Redis / Kafka / RabbitMQ for backends;
-SSE / WebSocket for browsers); that's `channelSource` + platform.
+The contract carries **delivery semantics and audience** — what's delivered,
+to a broadcast audience or a competing-consumer group, kept how long, and (via
+`scope:`/`requires:`) *which subset of subscribers may receive each event*. It
+says nothing about the wire (in-process / Redis / Kafka / RabbitMQ for backends;
+SSE / WebSocket for browsers); that's `channelSource` + platform. `scope:` is
+audience, not transport — it lowers to broker room keys, never to a wire choice
+(see [Subchannels](#subchannels--not-every-browser-gets-every-event)).
 
 Defaults (when a knob is omitted) reproduce **today's behaviour** so existing
 `.ddd` files are unaffected: `delivery: broadcast`, `retention: ephemeral`,
-no `key`. An author who declares no `channel` at all keeps the current
-in-process no-op-able dispatcher.
+no `key`, no `scope`/`requires` (with tenancy implicitly applied when the system
+declares `tenancy by …`). An author who declares no `channel` at all keeps the
+current in-process no-op-able dispatcher.
 
 ### Granularity — many channels per context
 
@@ -389,11 +395,13 @@ relay is *derived*:
   owning context; subscribing to a *published* channel across DUs is the same
   mechanism a cross-DU reactor/projection already uses (the broker is the shared
   fabric; `channelSource.connection` says where it lives).
-- **The relay re-publishes a filtered, authorized view** of the channel's
-  events to connected browsers. Hop 1 is trusted backend-to-backend; **hop 2 is
-  the authorization boundary** — per-user / row-level filtering
-  (`frontend-acl.md`, `authorization.md`) is applied here, so a browser only
-  receives events it may see. The two-hop split is therefore a *feature*, not
+- **The relay re-publishes a *scoped* view** of the channel's events to
+  connected browsers. Hop 1 is trusted backend-to-backend; **hop 2 is the
+  authorization boundary** — the relay subscribes each socket only to the
+  broker rooms its verified JWT claims permit (tenant + `scope:`), and rejects
+  the connection with 403 if `requires:` fails. A browser receives only the
+  events for its rooms — see [Subchannels](#subchannels--not-every-browser-gets-every-event).
+  The two-hop split is therefore a *feature* (the place scoping happens), not
   just a transport limitation.
 - **Phoenix LiveView collapses the two hops** — backend and frontend are one
   process, so it subscribes to the broker and pushes over its own socket with no
@@ -429,6 +437,80 @@ deployable reportsUi { platform: static; targets: reportsApi   // browser talks 
 subscriber of A's published `Lifecycle` channel (hop 1) and the SSE/WS relay for
 `reportsUi` (hop 2). One channel declared; the edge channel is generated.
 
+### Subchannels — not every browser gets every event
+
+`broadcast` + `ephemeral` describes the *delivery profile*, **not the
+audience**. Pushing every event to every connected browser and filtering
+client-side is a data leak: events cross the trust boundary to browsers that
+shouldn't see them. Real systems are multi-tenant and per-user, so the relay
+must scope **before** the byte leaves the server. Loom already scopes *reads*
+two ways — and the push path reuses both verbatim:
+
+| Scoping tier | Read-side (today) | Push-side (this proposal) |
+|---|---|---|
+| **Tenant** | every aggregate tenant-scoped by default, fail-closed (`tenancy by user.tenantId`, `multi-tenancy-design-note.md`) | channel auto-partitioned by tenant — one subchannel (room) per `tenantId` |
+| **Row / owner** | `find mine() where customerId == currentUser.customerId` (`docs/auth.md`) | `scope:` predicate, *same shape* — one subchannel per scope-key value |
+| **Capability** | `requires currentUser.permissions.contains(…)` (403) | the *same* `requires` evaluated at connect — rejects the SSE/WS handshake with 403 |
+
+A **subchannel** is a server-derived address (a "room") within a channel. The
+fan-out happens at the broker/relay by room key, so the relay never evaluates a
+per-connection predicate.
+
+```ddd
+context Orders {
+  // NOTE: the scope key must be IN the payload (customerId), so the relay can
+  // route without a DB lookup — see the validation rule below.
+  event OrderPlaced  { order: Order id, customerId: Customer id, at: datetime }
+  event OrderShipped { order: Order id, customerId: Customer id, at: datetime }
+
+  channel Lifecycle {
+    carries:  OrderPlaced, OrderShipped
+    delivery: broadcast
+    retention: log
+    key: order
+    // Per-customer rooms. Equality between a carried-event field and a
+    // currentUser field — identical to a `find ... where` row filter.
+    scope:    customerId == currentUser.customerId
+    // Capability gate at connect (optional) — same `requires` as an operation.
+    requires: currentUser.permissions.contains(permissions.ordersRead)
+  }
+}
+```
+
+**Two properties make this safe *and* cheap:**
+
+1. **The room key is derived from verified JWT claims, never client-supplied.**
+   The browser cannot ask for tenant `acme` or customer `123`; the relay
+   computes the room from `currentUser` at connect time and subscribes the
+   socket to exactly that room. Scoping holds even against a hostile client.
+   This is the NATS subject-token idea (`lifecycle.{tenant}.{customer}`) with
+   the wildcard **pinned by the verifier**, not chosen by the subscriber.
+2. **`scope:` is an equality, so it lowers to a room key — not a per-socket
+   scan.** Tenancy is always the leftmost token (automatic, from `tenancy by`);
+   `scope:` adds finer tokens. The broadcast fans out by hashed room; no
+   predicate runs per connection. *Fan-out-then-filter never happens.*
+
+Tenancy is implicit and fail-closed: with `tenancy by user.tenantId` declared,
+**every** channel is tenant-partitioned with no `scope:` needed — a tenant's
+browsers can never receive another tenant's events, exactly as a tenant's reads
+can never see another tenant's rows. `scope:` is only for *intra-tenant*
+narrowing (per-customer, per-team, per-owner).
+
+**The validation that makes it sound** (`loom.channel-scope-*`):
+
+| Code | Rule |
+|---|---|
+| `loom.channel-scope-field-not-carried` | the `scope:` predicate references an event field absent from a carried event's **payload** (e.g. `customerId` when `OrderPlaced` only carries `order: Order id`). The relay can't route without it. Suggestion: add the field to the event, or carry only events that have it. |
+| `loom.channel-scope-shape` | `scope:` is not an equality between a carried-event field and a `currentUser` field — anything requiring a per-event boolean scan (ranges, joins, negation) is rejected; it can't become a room key. |
+| `loom.channel-scope-without-user` | `scope:`/`requires:` reference `currentUser` but no `user { }` block / auth is configured. |
+| `loom.channel-scope-crosstenant` | a `crossTenant` channel (shared reference data) also declares a per-user `scope:` — contradictory; cross-tenant data is broadcast to all. |
+
+So the answer to "not all browsers should get all events" is: **subchannels are
+the room layer, keyed by the same tenancy + row-filter predicates Loom already
+uses for reads, derived server-side from the JWT.** No new authorization model —
+the push path inherits the read path's, lowered to broker rooms instead of SQL
+`WHERE`.
+
 ## IR, lowering, enrichment (phase mapping)
 
 Following the `view`/`criterion`/`workflow` vertical-slice recipe:
@@ -442,7 +524,14 @@ export interface ChannelIR {
   delivery: "broadcast" | "queue";
   retention: "ephemeral" | "log" | "work";
   key?: string;                      // field name common to carried events
+  scope?: RoomKeyIR;                 // subchannel predicate, validated to equality → room tokens
+  requires?: ExprIR;                 // capability gate evaluated at connect (reuses requires lowering)
   // NO realtime/transport field — the contract is wire-agnostic.
+}
+// Derived in enrich: the ordered room-token spec. Tenancy is auto-prepended as
+// the leftmost token when the system declares `tenancy by …` (fail-closed).
+export interface RoomKeyIR {
+  tokens: { eventField: string; claimField: string }[];  // each = `<eventField> == currentUser.<claimField>`
 }
 // stored on BoundedContextIR.channels: ChannelIR[]  (sibling of events / views)
 export interface ReactorIR {
@@ -459,10 +548,15 @@ export interface ChannelSourceIR { channel: string; storage: string; }
 - **⑤ lower** — `lowerChannel` (structural, in `lower.ts`); `lowerReactor`
   delegates to the **existing workflow body lowerer** in `lower-stmt.ts`
   (`e` bound as a `param` ref typed by the event). `projection` reuses the
-  applier fold lowering. No new expression machinery.
+  applier fold lowering. `scope:`/`requires:` lower through the *same* path as
+  a `find … where` filter and an operation `requires` — no new expression
+  machinery.
 - **⑥ enrich** — derive each event's *routing set* (channels carrying it) and
   attach it to the publish side, so the dispatcher emitter knows where each
-  `emit` goes. Derive, per frontend deployable, the resolved realtime wire
+  `emit` goes. Build each channel's `RoomKeyIR` (prepend the system tenancy
+  token when `tenancy by …` is set; append the `scope:` equality tokens),
+  which is what the room-publish (server) and room-subscribe (relay) emitters
+  consume. Derive, per frontend deployable, the resolved realtime wire
   (`realtimeWire` override ?? `PlatformSurface` default) and the set of
   channels any of its pages `.live`-subscribe. This is the natural sibling of
   the existing `migrationsOwner` enrichment.
@@ -484,12 +578,12 @@ The publish side already drains through `DomainEventDispatcher` /
 `IDomainEventDispatcher` — **the entire Phase-1 publish path is "give that
 hook a real, channel-driven implementation."** Producer code is untouched.
 
-| Backend | Publish (dispatcher impl) | Consume (`on` reactor) | Realtime |
+| Backend | Publish (dispatcher impl) | Consume (`on` reactor) | Realtime (relay + rooms) |
 |---|---|---|---|
-| **Hono** | `DomainEventDispatcher` that fans an event to each carrying channel's driver: in-proc `EventEmitter` / `ioredis` pub/sub / `kafkajs` producer / `amqplib`. | per-channel subscriber loop → reuses the generated **workflow handler** for the reactor body; `queue` ⇒ consumer-group / `BLPOP`; ack on success. | Hono SSE helper (`streamSSE`) or `ws` endpoint at `/channels/<name>`; pushes carried events to subscribed browsers. |
-| **.NET** | `IDomainEventDispatcher` → in-proc MediatR notification / MassTransit publish (Redis/RabbitMQ/Kafka transport) — DI-registered like the existing `AddScoped` repos. | `IConsumer<T>` / `INotificationHandler<T>` invoking the reactor's Mediator command (same handler the workflow controller calls). | ASP.NET SSE (`text/event-stream`) or a SignalR hub bound to the channel. |
-| **Phoenix LiveView** | `Phoenix.PubSub.broadcast` (ephemeral) / Broadway + Ash (durable). | an Ash reactor / `GenServer` `handle_info` running the reactor body as an Ash action. | **native** — LiveView `handle_info` + stream re-assign; no extra transport. |
-| **React** (consumer of realtime) | — | — | generated SSE/WS client; `.live` refs invalidate/patch React Query cache keyed by `channel.key`. |
+| **Hono** | `DomainEventDispatcher` that fans an event to each carrying channel's driver: in-proc `EventEmitter` / `ioredis` pub/sub / `kafkajs` producer / `amqplib`. Publishes to the **room** derived from the event's `RoomKeyIR` (e.g. `lifecycle:{tenant}:{customerId}`). | per-channel subscriber loop → reuses the generated **workflow handler** for the reactor body; `queue` ⇒ consumer-group / `BLPOP`; ack on success. | `streamSSE` / `ws` endpoint; on connect runs `requires:` (403 on fail) and joins the socket **only** to the rooms computed from `currentUser` claims — never a client-supplied room. |
+| **.NET** | `IDomainEventDispatcher` → in-proc MediatR notification / MassTransit publish (Redis/RabbitMQ/Kafka transport) — DI-registered like the existing `AddScoped` repos. Room from `RoomKeyIR`. | `IConsumer<T>` / `INotificationHandler<T>` invoking the reactor's Mediator command (same handler the workflow controller calls). | SSE (`text/event-stream`) or a SignalR hub; SignalR **Groups** *are* rooms — `Groups.AddToGroupAsync(conn, roomFromClaims)` after the `ICurrentUserAccessor` auth gate. |
+| **Phoenix LiveView** | `Phoenix.PubSub.broadcast(topic)` (ephemeral) / Broadway + Ash (durable), where `topic` is the room. | an Ash reactor / `GenServer` `handle_info` running the reactor body as an Ash action. | **native** — `subscribe` to the room topic derived from `socket.assigns.current_user`; `handle_info` re-assigns the stream. Rooms are just PubSub topics. |
+| **React** (consumer of realtime) | — | — | generated SSE/WS client; connects with its bearer token (server derives rooms); `.live` refs invalidate/patch React Query cache keyed by `channel.key`. |
 
 ## Worked example (end to end)
 
@@ -566,15 +660,20 @@ workflow slice trails.
    Hono + .NET. (`LOOM_TS_BUILD` / `dotnet-build` gates.)
 3. **Redis transport** — `channelSource use: redis`; pub/sub (`broadcast`)
    and `BLPOP`/streams (`queue`); compose service. Per-backend driver.
-4. **UI `.live` over SSE (React)** — derived SSE endpoint + generated client +
-   `.live` cache invalidation; `realtimeWire` defaulting on `PlatformSurface`.
-   No channel-contract change. (`LOOM_REACT_BUILD`.)
-5. **Phoenix-native realtime + WebSocket override** — `Phoenix.PubSub` +
-   LiveView `handle_info`; the optional `deployable realtime: websocket`
-   infra override. (`LOOM_PHOENIX_BUILD`.)
-6. **Kafka + `retention: log`** — durable streams, partition by `key`,
+4. **UI `.live` over SSE (React), broadcast to all** — derived SSE endpoint +
+   generated client + `.live` cache invalidation; `realtimeWire` defaulting on
+   `PlatformSurface`. **Single-tenant, no `scope:` yet.** (`LOOM_REACT_BUILD`.)
+5. **Subchannels — tenancy + `scope:` rooms** — `RoomKeyIR` derivation, the
+   `loom.channel-scope-*` validators, room-keyed publish, and the connect-time
+   `requires:` 403 gate. Tenancy token auto-prepended. This is the slice that
+   makes "not every browser gets every event" real; depends on the tenancy
+   slice from `multi-tenancy-design-note.md`. (`LOOM_E2E` with two tenants.)
+6. **Phoenix-native realtime + WebSocket override** — `Phoenix.PubSub` (rooms =
+   topics) + LiveView `handle_info`; the optional `deployable realtime:
+   websocket` infra override. (`LOOM_PHOENIX_BUILD`.)
+7. **Kafka + `retention: log`** — durable streams, partition by `key`,
    `projection` replay-from-cursor. (`LOOM_E2E`.)
-7. **RabbitMQ / `queue` + `work`** — competing consumers, ack semantics.
+8. **RabbitMQ / `queue` + `work`** — competing consumers, ack semantics.
 
 ## Deferred / out of scope
 
