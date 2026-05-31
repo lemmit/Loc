@@ -167,7 +167,11 @@ export function generateReactForContexts(
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
   out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
-  out.set("src/api/client.ts", renderShellFile("api-client", {}, pack));
+  // `api.delete` helper only when some served aggregate has a canonical
+  // destroy (declared or via `crudish`) — keeps the shared client
+  // byte-identical for projects without any hard-delete.
+  const hasDelete = aggregates.some((a) => !!a.agg.canonicalDestroy);
+  out.set("src/api/client.ts", renderShellFile("api-client", { hasDelete }, pack));
   out.set("src/api/config.ts", renderShellFile("api-config", { apiBaseUrl }, pack));
   // Frontend observability: a namespaced loglevel logger + a top-level
   // error boundary.  Both are pack-agnostic shared shell files; main.tsx

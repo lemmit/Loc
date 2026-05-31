@@ -943,6 +943,12 @@ Property:
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
     (access=FieldAccess)?
+    // Default value — `field: T = <expr>`.  Placed after the access
+    // modifier so the expression can't greedily swallow a trailing
+    // modifier keyword.  Enables synthesising a create when no explicit
+    // one is declared (see docs/proposals); for now it lowers onto the
+    // FieldIR and downstream phases may consume it.
+    ('=' default=Expression)?
     ('check' check=Expression)?;
 
 // Information-flow sensitivity tag(s) on a property.  Tags are bare

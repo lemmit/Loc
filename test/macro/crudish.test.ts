@@ -10,6 +10,8 @@ import type { Aggregate, Model } from "../../src/language/generated/ast.js";
 import {
   isAggregate,
   isAssignOrCallStmt,
+  isCreate,
+  isDestroy,
   isOperation,
   isProperty,
 } from "../../src/language/generated/ast.js";
@@ -184,6 +186,65 @@ describe("crudish stdlib macro", () => {
   });
 });
 
+describe("crudish create/destroy lifecycle", () => {
+  it("emits a canonical create whose params include immutable fields", async () => {
+    // `slug` is immutable: excluded from `update` (above) but settable
+    // at creation, so it belongs on the create surface.
+    const { model, errors } = await parseString(
+      wrap(`
+        subdomain M { context C {
+          aggregate Order with crudish {
+            subject: string
+            slug: string immutable
+          }
+        }}
+      `),
+    );
+    expect(errors).toEqual([]);
+    const agg = findAggregate(model, "Order");
+    const creates = (agg.members ?? []).filter(isCreate);
+    expect(creates.length).toBe(1);
+    // Canonical = unnamed.
+    expect(creates[0]!.name).toBeUndefined();
+    expect(creates[0]!.params.map((p) => p.name)).toEqual(["subject", "slug"]);
+    // The update operation omits the immutable field — the surfaces differ.
+    const update = (agg.members ?? []).filter(isOperation).find((o) => o.name === "update")!;
+    expect(update.params.map((p) => p.name)).toEqual(["subject"]);
+  });
+
+  it("emits a canonical (unnamed, empty-body) destroy", async () => {
+    const { model, errors } = await parseString(
+      wrap(`
+        subdomain M { context C {
+          aggregate Order with crudish { subject: string }
+        }}
+      `),
+    );
+    expect(errors).toEqual([]);
+    const agg = findAggregate(model, "Order");
+    const destroys = (agg.members ?? []).filter(isDestroy);
+    expect(destroys.length).toBe(1);
+    expect(destroys[0]!.name).toBeUndefined();
+    expect(destroys[0]!.params.length).toBe(0);
+    expect(destroys[0]!.body.length).toBe(0);
+  });
+
+  it("updateOnly: true suppresses create + destroy (softDeletable composition)", async () => {
+    const { model, errors } = await parseString(
+      wrap(`
+        subdomain M { context C {
+          aggregate Order with crudish(updateOnly: true) { subject: string }
+        }}
+      `),
+    );
+    expect(errors).toEqual([]);
+    const agg = findAggregate(model, "Order");
+    expect((agg.members ?? []).filter(isOperation).find((o) => o.name === "update")).toBeDefined();
+    expect((agg.members ?? []).filter(isCreate).length).toBe(0);
+    expect((agg.members ?? []).filter(isDestroy).length).toBe(0);
+  });
+});
+
 describe("crudish via IR lowering", () => {
   it("lowered AggregateIR contains the update operation", async () => {
     const { buildLoomModel } = await import("../_helpers/ir.js");
@@ -207,6 +268,19 @@ describe("crudish via IR lowering", () => {
             const op = a.operations.find((o) => o.name === "update");
             expect(op).toBeDefined();
             expect(op!.params.map((p) => p.name)).toEqual(["subject", "amount"]);
+            // Lifecycle actions land in their own arrays, surfaced as the
+            // canonical create/destroy.
+            expect(a.canonicalCreate).not.toBeNull();
+            expect(a.canonicalCreate!.kind).toBe("create");
+            expect(a.canonicalCreate!.canonical).toBe(true);
+            expect(a.canonicalCreate!.params.map((p) => p.name)).toEqual(["subject", "amount"]);
+            expect(a.canonicalDestroy).not.toBeNull();
+            expect(a.canonicalDestroy!.kind).toBe("destroy");
+            expect(a.canonicalDestroy!.canonical).toBe(true);
+            // `operations` stays mutate-only — create/destroy are NOT folded in.
+            expect(a.operations.some((o) => o.kind === "create" || o.kind === "destroy")).toBe(
+              false,
+            );
           }
         }
       }

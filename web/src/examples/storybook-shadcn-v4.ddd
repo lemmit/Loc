@@ -42,7 +42,7 @@ system Storybook {
       //   New form:  TextInput + DateInput
       //   Detail:    labelled key/value rows
       // ---------------------------------------------------------
-      aggregate Article {
+      aggregate Article with crudish {
         headline: string
         publishedAt: datetime
         derived display: string = headline
@@ -53,7 +53,7 @@ system Storybook {
       //   Cells right-align, decimals respect precision config
       //   New form: NumberInput, decimal mode
       // ---------------------------------------------------------
-      aggregate Counter {
+      aggregate Counter with crudish {
         label: string
         ticks: int
         rate: decimal
@@ -65,7 +65,7 @@ system Storybook {
       //   Cells: currency-aware formatter
       //   New form: nested controls (amount + currency)
       // ---------------------------------------------------------
-      aggregate Price {
+      aggregate Price with crudish {
         sku: string
         value: Money
         derived display: string = sku
@@ -76,7 +76,7 @@ system Storybook {
       //   Cells: checkmark or coloured badge
       //   New form: Switch / Toggle
       // ---------------------------------------------------------
-      aggregate Toggle {
+      aggregate Toggle with crudish {
         label: string
         enabled: bool
         derived display: string = label
@@ -87,7 +87,7 @@ system Storybook {
       //   Cells: coloured pill / badge
       //   New form: native or custom Select
       // ---------------------------------------------------------
-      aggregate StatusItem {
+      aggregate StatusItem with crudish {
         label: string
         status: TaskStatus
         derived display: string = label
@@ -101,12 +101,12 @@ system Storybook {
       //   Project's new-form shows the `id-select` input
       //   (dropdown of all Owners by display field).
       // ---------------------------------------------------------
-      aggregate Owner {
+      aggregate Owner with crudish {
         name: string
         derived display: string = name
       }
 
-      aggregate Project {
+      aggregate Project with crudish {
         name: string
         owner: Owner id
         derived display: string = name
@@ -117,7 +117,7 @@ system Storybook {
       //   Detail page shows a child table (Items) under the parent
       //   New form shows a dynamic-array input
       // ---------------------------------------------------------
-      aggregate Catalog {
+      aggregate Catalog with crudish {
         name: string
         contains entries: Entry[]
 
@@ -135,7 +135,7 @@ system Storybook {
       //   modal form.  `start` takes no args (single-button
       //   confirmation); `archive` takes a reason (form modal).
       // ---------------------------------------------------------
-      aggregate Task {
+      aggregate Task with crudish {
         name: string
         status: TaskStatus
 

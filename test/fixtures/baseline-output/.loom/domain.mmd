@@ -15,6 +15,7 @@ classDiagram
     +Money price
     +string /display
     +string /inspect
+    +update(sku, price)
   }
   class Products {
     <<repository>>
@@ -44,6 +45,7 @@ classDiagram
     +isMutable() bool
     +addLine(productId, qty)
     +confirm()
+    +update(customerId, status, placedAt)
   }
   class OrderLine {
     <<entity>>
@@ -70,6 +72,7 @@ classDiagram
     +int age
     +string /display
     +string /inspect
+    +update(username, email, age)
   }
   class Customers {
     <<repository>>

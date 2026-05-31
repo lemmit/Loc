@@ -49,6 +49,14 @@ public sealed class Order
         AssertInvariants();
     }
 
+    public void Update(string customerId, OrderStatus status, DateTime placedAt)
+    {
+        CustomerId = customerId;
+        Status = status;
+        PlacedAt = placedAt;
+        AssertInvariants();
+    }
+
 
     public IReadOnlyList<IDomainEvent> PullEvents()
     {

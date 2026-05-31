@@ -413,7 +413,7 @@ function renderStatement(
         .find((a) => a.name === st.aggName)
         ?.operations.find((o) => o.name === st.op);
       if (op?.extern) {
-        const reqName = `${upperFirst(st.op)}Request`;
+        const reqName = `${upperFirst(st.op)}${st.aggName}Request`;
         const handlerField = `_${st.op}${st.aggName}Handler`;
         // Construct the wire-typed request from the workflow's
         // domain-typed args.  Each arg renders via the regular

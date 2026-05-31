@@ -2,6 +2,7 @@
 // sanity, aggregate / entity-part / value-object structural rules.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { writableCreateFields } from "../../macros/api/factories.js";
 import type {
   Aggregate,
   BoundedContext,
@@ -33,7 +34,13 @@ import {
 } from "../generated/ast.js";
 import { envForAggregate, envForPart, envForValueObject } from "./_shared.js";
 import { checkCreate, checkDestroy, checkOperation } from "./statements.js";
-import { checkDerived, checkFunction, checkInvariant, checkPropertyCheck } from "./types.js";
+import {
+  checkDerived,
+  checkFunction,
+  checkInvariant,
+  checkPropertyCheck,
+  checkPropertyDefault,
+} from "./types.js";
 
 /** `slot` is a UI-only element-shaped param marker — meaningful only
  *  on a `component`'s parameter list (where the caller supplies JSX
@@ -226,7 +233,32 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
   }
 }
 
+/** Constructibility check (staged): an aggregate is constructible when it
+ * declares a `create` (explicit or via `crudish`) or every required
+ * create-input field has a default.  Otherwise — once the implicit
+ * hard-coded create is removed — there's no way to supply those fields.
+ * Emitted as a WARNING during the staged rollout; flips to an error in a
+ * later phase. */
+function checkConstructible(agg: Aggregate, accept: ValidationAcceptor): void {
+  const hasCreate = agg.members.some((m) => isCreate(m));
+  if (hasCreate) return;
+  const undefaulted = writableCreateFields(agg)
+    .filter((f) => !f.type?.optional && f.default == null)
+    .map((f) => f.name);
+  if (undefaulted.length === 0) return;
+  accept(
+    "warning",
+    `Aggregate '${agg.name}' is not constructible without the implicit create: it declares no 'create' and the required field(s) ${undefaulted
+      .map((n) => `'${n}'`)
+      .join(
+        ", ",
+      )} have no default. Add a 'create(...)' (or 'with crudish'), or give the field(s) a default value.`,
+    { node: agg, code: "loom.not-constructible" },
+  );
+}
+
 export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void {
+  checkConstructible(agg, accept);
   // Event-sourcing body discipline — the AST-level mirror of
   // `validateEventSourcedDiscipline` (ir/validate), so the contract shows
   // live in the editor as you type, not only at `generate` time.
@@ -249,6 +281,7 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
     if (isContainment(m)) checkContainment(m, agg, accept);
     if (isInvariant(m)) checkInvariant(m, envForAggregate(agg), accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForAggregate(agg), accept);
+    if (isProperty(m) && m.default) checkPropertyDefault(m, envForAggregate(agg), accept);
     if (isDerivedProp(m)) {
       checkDerived(m, envForAggregate(agg), accept);
       // Reserved-name derived fields — `display` (user-facing label) and
@@ -377,6 +410,7 @@ export function checkEntityPart(
     if (isContainment(m)) checkContainment(m, agg, accept);
     if (isInvariant(m)) checkInvariant(m, envForPart(agg, part), accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForPart(agg, part), accept);
+    if (isProperty(m) && m.default) checkPropertyDefault(m, envForPart(agg, part), accept);
     if (isDerivedProp(m)) checkDerived(m, envForPart(agg, part), accept);
     if (isFunctionDecl(m)) checkFunction(m, agg, part, accept);
   }

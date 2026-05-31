@@ -31,7 +31,7 @@ system AcmeOrderExplicit {
 
             enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
 
-            aggregate Order {
+            aggregate Order with crudish {
                 customerId: string
                 status:     OrderStatus
                 placedAt:   datetime

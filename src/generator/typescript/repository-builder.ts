@@ -128,6 +128,12 @@ export function buildRepositoryFile(
     "",
     saveMethod(agg, ctx, emitTrace),
     "",
+    // Hard delete — emitted only when the aggregate has a canonical
+    // `destroy` (declared or via `crudish`), so plain aggregates' repos are
+    // unchanged.  Containment children and join-table rows drop via
+    // `ON DELETE CASCADE`; a still-referenced aggregate (cross-aggregate
+    // `X id` FK is `restrict`) surfaces as a DB error the route maps to 409.
+    ...(agg.canonicalDestroy ? [deleteMethod(agg), ""] : []),
     ...(repo?.finds ?? []).flatMap((find) => [findQueryMethod(agg, find, ctx), ""]),
     ...viewFinds.flatMap((find) => [findQueryMethod(agg, find, ctx), ""]),
     // toWire — domain instance → wire DTO (plain object).  Used by the
@@ -188,6 +194,20 @@ export function buildRepositoryFile(
     "",
     bodyStr,
     "",
+  );
+}
+
+/** `async delete(id)` — hard-delete the aggregate root row.  A single
+ * `DELETE … WHERE id = …`; containment children and join-table rows are
+ * removed by their `ON DELETE CASCADE` foreign keys, so no per-child
+ * cleanup is needed here (unlike `save`, which diffs collections).  Only
+ * emitted when `agg.canonicalDestroy` is set. */
+function deleteMethod(agg: EnrichedAggregateIR): string {
+  const tableName = lowerFirst(plural(agg.name));
+  return lines(
+    `  async delete(id: Ids.${agg.name}Id): Promise<void> {`,
+    `    await this.db.delete(schema.${tableName}).where(eq(schema.${tableName}.id, id));`,
+    `  }`,
   );
 }
 

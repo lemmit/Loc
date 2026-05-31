@@ -22,14 +22,14 @@ context Banking {
   event MoneyDeposited { account: Account id, amount: Money, at: datetime }
   event MoneyWithdrawn { account: Account id, amount: Money, at: datetime }
 
-  aggregate Customer {
+  aggregate Customer with crudish {
     name: string
     email: string
     invariant name.length > 0
     invariant email.length > 0
   }
 
-  aggregate Account {
+  aggregate Account with crudish {
     holder: Customer id
     status: AccountStatus
     balance: Money

@@ -38,6 +38,10 @@ describe.skipIf(!ENABLED)(
       "examples/banking.ddd",
       "examples/inventory.ddd",
       "examples/roster.ddd",
+      // crudish lifecycle — the only example that emits a canonical
+      // destroy, so this cell is what compiles the .NET [HttpDelete] +
+      // Destroy<Agg>Command + repo DeleteAsync paths.
+      "examples/lifecycle.ddd",
       // Document-persistence path (`normalised(false)`): exercises the
       // STJ round-trip emit — `<Agg>Document` record, snapshot DTOs,
       // `ToSnapshot()`/`FromSnapshot(...)`, jsonb column.

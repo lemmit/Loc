@@ -46,7 +46,7 @@ const honoPlatform: PlatformSurface = {
   // `async findById`, `async getById`).  A user-declared find with
   // one of these names would compile-error with TS2393 "Duplicate
   // function implementation".
-  reservedRepositoryFindNames: new Set(["save", "findById", "getById"]),
+  reservedRepositoryFindNames: new Set(["save", "findById", "getById", "delete"]),
   emitProject({ contexts, deployable, sys, migrations, emitTrace }): Map<string, string> {
     // The package supplies its own pins to the shared emitter —
     // edge points package → shared, never the reverse.

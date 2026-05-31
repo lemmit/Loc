@@ -54,6 +54,12 @@ public sealed class OrderRepository : IOrderRepository
             await _events.DispatchAsync(ev, ct);
         }
     }
+
+    public async Task DeleteAsync(Order aggregate, CancellationToken ct = default)
+    {
+        _db.Orders.Remove(aggregate);
+        await _db.SaveChangesAsync(ct);
+    }
     public async Task<List<Order>> All(CancellationToken ct = default)
     {
         var result = await _db.Orders.ToListAsync(ct);

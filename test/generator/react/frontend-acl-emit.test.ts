@@ -143,12 +143,17 @@ describe("frontend ACL — wired into emitted form catch blocks (Phase 2)", () =
     expect(src).toMatch(
       /import \{ applyServerErrors \} from "\.\.\/\.\.\/lib\/apply-server-errors"/,
     );
-    // Two op-forms on this page (AddLine + Confirm) — both should be wired.
+    // Three op-forms on this page (AddLine + Confirm + crudish `update`) —
+    // all should be wired.
     const calls = src.match(/applyServerErrors\(\{/g) ?? [];
-    expect(calls.length).toBe(2);
-    // setError is destructured from useForm in both op-form components.
-    const setErrorDestructures = src.match(/\{\s*[^}]*setError[^}]*\}\s*=\s*useForm</g) ?? [];
-    expect(setErrorDestructures.length).toBe(2);
+    expect(calls.length).toBe(3);
+    // setError is destructured from useForm in every op-form component.
+    // The destructure can carry a nested `formState: { errors }` (the
+    // crudish `update` form does), so match the field list with `[^=]`
+    // rather than `[^}]` — `[^}]` stops at the first inner `}` and
+    // under-counts forms with nested destructuring.
+    const setErrorDestructures = src.match(/\{[^=]*\bsetError\b[^=]*\}\s*=\s*useForm</g) ?? [];
+    expect(setErrorDestructures.length).toBe(3);
   });
 
   it("workflows/place_order.tsx (form-runs) imports and uses applyServerErrors", async () => {

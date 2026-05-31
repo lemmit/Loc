@@ -14,6 +14,11 @@ export const CreateProductRequest = z.object({
 });
 export type CreateProductRequest = z.infer<typeof CreateProductRequest>;
 
+export const UpdateProductRequest = z.object({
+  sku: z.string(),
+  price: MoneySchema,
+});
+export type UpdateProductRequest = z.infer<typeof UpdateProductRequest>;
 
 export const BySkuQuery = z.object({
   sku: z.string(),
@@ -59,6 +64,29 @@ export function useCreateProduct() {
       return z.object({ id: z.string() }).parse(r);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["products"] }),
+  });
+}
+
+export function useDeleteProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/products/${id}`);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["products"] }),
+  });
+}
+
+export function useUpdateProduct(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: UpdateProductRequest) => {
+      await api.post(`/products/${id}/update`, input);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products", id] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+    },
   });
 }
 

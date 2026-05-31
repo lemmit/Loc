@@ -54,6 +54,12 @@ public sealed class CustomerRepository : ICustomerRepository
             await _events.DispatchAsync(ev, ct);
         }
     }
+
+    public async Task DeleteAsync(Customer aggregate, CancellationToken ct = default)
+    {
+        _db.Customers.Remove(aggregate);
+        await _db.SaveChangesAsync(ct);
+    }
     public async Task<List<Customer>> All(CancellationToken ct = default)
     {
         var result = await _db.Customers.ToListAsync(ct);

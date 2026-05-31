@@ -12,7 +12,7 @@
 // against the join table.
 context Roster {
 
-  aggregate Pokemon {
+  aggregate Pokemon with crudish {
     species: string
     level: int
     invariant level >= 1
@@ -20,7 +20,7 @@ context Roster {
     derived display: string = species
   }
 
-  aggregate Trainer {
+  aggregate Trainer with crudish {
     name: string
     party: Pokemon id[]
     caught: Pokemon id[]

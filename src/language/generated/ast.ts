@@ -1733,6 +1733,7 @@ export interface Property extends AstNode {
     readonly $type: 'Property';
     access?: FieldAccess;
     check?: Expression;
+    default?: Expression;
     name: 'canonical' | 'command' | 'config' | 'connection' | 'dataSources' | 'description' | 'env' | 'error' | 'eventLog' | 'every' | 'favicon' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'managed' | 'money' | 'objectStore' | 'ogImage' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'schema' | 'secret' | 'service' | 'snapshot' | 'tablePrefix' | 'token' | 'ttl' | 'use' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
@@ -3518,6 +3519,7 @@ export class DddAstReflection extends AbstractAstReflection {
                     properties: [
                         { name: 'access' },
                         { name: 'check' },
+                        { name: 'default' },
                         { name: 'name' },
                         { name: 'provenanced', defaultValue: false },
                         { name: 'sensitivity' },

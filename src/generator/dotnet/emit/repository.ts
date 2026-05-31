@@ -43,6 +43,11 @@ export function renderRepositoryInterface(
       `    Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken ct = default);`,
       `    Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default);`,
       `    Task SaveAsync(${agg.name} aggregate, CancellationToken ct = default);`,
+      // Hard delete — only when the aggregate has a canonical `destroy`
+      // (declared or via `crudish`); keeps plain repos unchanged.
+      ...(agg.canonicalDestroy
+        ? [`    Task DeleteAsync(${agg.name} aggregate, CancellationToken ct = default);`]
+        : []),
       ...findLines,
       "}",
     ) + "\n"
@@ -234,6 +239,19 @@ export function renderRepositoryImpl(
       "            await _events.DispatchAsync(ev, ct);",
       "        }",
       "    }",
+      // Hard delete — gated on a canonical `destroy`.  `Remove` + Save;
+      // containment children and join-table rows drop via the schema's
+      // ON DELETE CASCADE FKs (mirrors the Hono Drizzle delete).
+      ...(agg.canonicalDestroy
+        ? [
+            "",
+            `    public async Task DeleteAsync(${agg.name} aggregate, CancellationToken ct = default)`,
+            "    {",
+            `        _db.${setName}.Remove(aggregate);`,
+            "        await _db.SaveChangesAsync(ct);",
+            "    }",
+          ]
+        : []),
       ...findMethodLines,
       "}",
     ) + "\n"

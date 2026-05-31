@@ -45,4 +45,5 @@ export const api = {
   get: (path: string) => rawFetch(path, { method: "GET" }),
   post: (path: string, body: unknown) =>
     rawFetch(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
+  delete: (path: string) => rawFetch(path, { method: "DELETE" }),
 };
