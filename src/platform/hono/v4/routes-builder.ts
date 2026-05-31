@@ -220,7 +220,7 @@ export function buildRoutesFile(
       if (find.params.length === 0) continue;
       lines.push(`const ${upperFirst(find.name)}Query = z.object({`);
       for (const p of find.params) {
-        lines.push(`  ${p.name}: ${zodFor(p.type)},`);
+        lines.push(`  ${p.name}: ${zodFor(p.type, "query")},`);
       }
       lines.push(`}).openapi("${upperFirst(find.name)}Query");`);
     }
@@ -844,12 +844,21 @@ const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
   json: "z.unknown()",
 };
 
-export function zodFor(t: TypeIR): string {
+export function zodFor(t: TypeIR, context: "body" | "query" = "body"): string {
   const info = wireTypeInfo(t, "request");
-  if (info.isNullable) return `${zodFor(peelNullable(t))}.nullish()`;
-  if (info.isCollection) return `z.array(${zodFor(peelCollection(t))})`;
+  if (info.isNullable) return `${zodFor(peelNullable(t), context)}.nullish()`;
+  if (info.isCollection) return `z.array(${zodFor(peelCollection(t), context)})`;
   switch (info.refKind) {
     case "primitive":
+      // A non-nullable bool in a request *body* defaults to `false` when
+      // omitted — matching .NET model-binding and Phoenix, which both treat
+      // an absent request bool as false and drop it from `required`.  Without
+      // this Hono alone marks the bool required, tripping the cross-backend
+      // parity required-set (`required-only-honoApi=[<bool>]`).  Query params
+      // keep the plain coercion (Phoenix doesn't special-case query bools).
+      if (info.primitive === "bool" && context === "body") {
+        return "z.coerce.boolean().default(false)";
+      }
       return REQUEST_PRIMITIVE[info.primitive!];
     case "id":
       return "z.string()";
