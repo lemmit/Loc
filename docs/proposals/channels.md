@@ -50,10 +50,14 @@ context Orders {
 
 Flip `delivery` / `retention` and the *same* declaration expresses pub/sub,
 a work queue, or a durable replayable stream — the NATS insight that subject
-and stream are orthogonal, reduced to two knobs. The transport (in-process /
-Redis / Kafka / RabbitMQ / WebSocket / SSE) is chosen **at the binding**, not
-in the contract — so the same channel runs in-process under test and over
-Kafka in prod, exactly as a `context` runs over `inMemory` then `postgres`.
+and stream are orthogonal, reduced to two knobs. **The channel contract names
+no transport.** Whether an event reaches a peer backend over in-process calls,
+Redis, Kafka, or RabbitMQ — and whether it reaches a *browser* over SSE or a
+WebSocket — is chosen **at the binding / platform**, not in the contract, so
+the same channel runs in-process under test and over Kafka in prod, exactly as
+a `context` runs over `inMemory` then `postgres`. SSE-vs-WebSocket is the same
+kind of infrastructural choice as Redis-vs-Kafka; it never appears on the
+`channel`.
 
 ## The question, in Loom's terms
 
@@ -108,7 +112,10 @@ already has the `eventLog` persistence kind and `apply(…)` appliers
 
 The net new surface is small: one declaration (`channel`), one binding
 (`channelSource`), two consumer additions already foreshadowed (`on` reactor
-gets a transport; `projection` gets defined), and the UI realtime refs.
+gets a transport; `projection` gets defined), and a UI `.live` subscription
+ref. Realtime push to the browser needs **no** contract knob — it's derived
+from a UI subscribing to a channel, and the SSE-vs-WebSocket wire is platform
+infra (see [Realtime](#websockets--sse--an-infrastructural-concern-not-a-contract-knob)).
 
 ## Surface — the `channel` declaration
 
@@ -128,19 +135,22 @@ Channel:
         ('delivery'  ':' delivery=ChannelDelivery ','?)?
         ('retention' ':' retention=ChannelRetention ('(' retentionArg=RetentionArg ')')? ','?)?
         ('key'       ':' key=ID ','?)?            // partition/ordering key — a field common to carried events
-        ('realtime'  ':' realtime=RealtimeMode ','?)?   // sse | websocket — push to subscribed UIs
     '}';
 
 ChannelDelivery  returns string: 'broadcast' | 'queue';
 ChannelRetention returns string: 'ephemeral' | 'log' | 'work';
-RealtimeMode     returns string: 'sse' | 'websocket';
 // RetentionArg carries log limits: maxAge / maxBytes (deferred to a follow-up; parses as a knob list).
 ```
 
+The contract carries **delivery semantics only** — what's delivered, to a
+broadcast audience or a competing-consumer group, kept how long. It says
+nothing about the wire (in-process / Redis / Kafka / RabbitMQ for backends;
+SSE / WebSocket for browsers); that's `channelSource` + platform.
+
 Defaults (when a knob is omitted) reproduce **today's behaviour** so existing
 `.ddd` files are unaffected: `delivery: broadcast`, `retention: ephemeral`,
-no `key`, no `realtime`. An author who declares no `channel` at all keeps the
-current in-process no-op-able dispatcher.
+no `key`. An author who declares no `channel` at all keeps the current
+in-process no-op-able dispatcher.
 
 ### Granularity — many channels per context
 
@@ -160,14 +170,14 @@ context Orders {
   // durable, replayable lifecycle log — read models replay it
   channel Lifecycle { carries: OrderPlaced, OrderShipped; retention: log; key: order }
 
-  // fire-and-forget metrics — also pushed live to a dashboard
-  channel Telemetry { carries: StockLevel; delivery: broadcast; retention: ephemeral; realtime: sse }
+  // fire-and-forget metrics — ephemeral broadcast (a dashboard UI can go .live on it)
+  channel Telemetry { carries: StockLevel; delivery: broadcast; retention: ephemeral }
 
   // competing-consumer work queue — one worker captures each payment
   channel Payments  { carries: PaymentCapture; delivery: queue; retention: work; key: order }
 
-  // OrderPlaced also rides Lifecycle above AND this realtime feed — fan-out, two profiles
-  channel Board     { carries: OrderPlaced, OrderShipped; retention: ephemeral; realtime: websocket }
+  // OrderPlaced also rides Lifecycle above AND this ephemeral feed — fan-out, two profiles
+  channel Board     { carries: OrderPlaced, OrderShipped; retention: ephemeral }
 }
 ```
 
@@ -186,7 +196,7 @@ globally unique (`Lifecycle`), dotted when not (`Orders.Lifecycle`).
 | `loom.channel-key-missing-field` | `key:` names a field absent from one of the carried events. |
 | `loom.channel-key-type` | the `key:` field has a different type across carried events (no common partition key). |
 | `loom.channel-retention-needs-key` | `retention: work` or `log` with `delivery: queue` requires a `key:` for stable per-key ordering (warning). |
-| `loom.channel-realtime-conflict` | `realtime:` set together with `retention: work` (a browser can't ack-and-consume a work queue) — error with suggestion. |
+| `loom.ui-live-on-queue` | a UI goes `.live` on a `delivery: queue` channel (a browser can't join a competing-consumer group) — error: subscribe to a `broadcast` channel carrying the same event. Lives in the UI/realtime checks, not on the channel. |
 
 ## Surface — consumers (the transport under an already-pinned form)
 
@@ -271,28 +281,31 @@ domain.
 bound `storage.type`, the same way `dataSource` validates `kind` against
 `storage.type` today:
 
-| `delivery` | `retention` | Compatible `storage.type` | Realtime to UI |
+| `delivery` | `retention` | Compatible `storage.type` | UI-subscribable (`.live`) |
 |---|---|---|---|
-| `broadcast` | `ephemeral` | `inMemory`, `redis` | `sse`, `websocket` |
-| `broadcast` | `log`       | `kafka` | `sse` (replay-from-cursor) |
-| `queue`     | `ephemeral` | `redis`, `rabbitmq` | — |
-| `queue`     | `work`      | `redis`, `rabbitmq`, `kafka` | — |
+| `broadcast` | `ephemeral` | `inMemory`, `redis` | yes |
+| `broadcast` | `log`       | `kafka` | yes (replay-from-cursor) |
+| `queue`     | `ephemeral` | `redis`, `rabbitmq` | no — competing consumers |
+| `queue`     | `work`      | `redis`, `rabbitmq`, `kafka` | no — competing consumers |
 
 `loom.channelsource-incompatible` fires on a mismatch (e.g. `retention: work`
 bound to a bare `inMemory` with no durability), carrying the same
 suggestion-with-alternatives shape as the existing dataSource matrix error.
+Note the last column is a *semantic* property (a browser can't join a work
+group) — **not** a transport choice; SSE-vs-WebSocket doesn't appear here.
 
-## WebSockets / SSE — the realtime path to the UI
+## WebSockets / SSE — an infrastructural concern, not a contract knob
 
-A channel with a `realtime:` mode is delivered to subscribed **UIs**, not
-just backend consumers. The UI subscribes the way it already takes an `api`
-parameter; page bodies get a `.live` query modifier and an `on` notification
-handler.
+SSE and WebSocket are two wire formats for the same thing: pushing a
+`broadcast` channel's events to a browser. The delivery semantics are
+identical, so the **`channel` says nothing about which is used** — just as it
+says nothing about Redis-vs-Kafka. A channel becomes UI-observable simply
+because a UI *subscribes* to it; nothing is declared on the producer side.
 
 ```ddd
 ui WebApp {
   api     Sales:  SalesApi
-  channel Orders: Orders.Lifecycle     // subscribe over the channel's realtime transport
+  channel Orders: Orders.Lifecycle     // subscribe — wire format is derived, not stated
 
   page OrderBoard {
     route: "/board"
@@ -305,6 +318,28 @@ ui WebApp {
   on Orders.OrderShipped(e) { toast("Order " + e.order + " shipped") }
 }
 ```
+
+**Where the wire format is decided.** Derived from the frontend's platform,
+with an optional override at the *deployable* — the same tier as `port:`, an
+infra fact:
+
+| Frontend platform | Default wire | Why |
+|---|---|---|
+| React (`static` target) | **SSE** | one-way server→client fits `.live` invalidation; survives proxies; no upgrade handshake. |
+| Phoenix LiveView | **native WebSocket** | LiveView already holds a socket; reusing it is free. |
+
+```ddd
+deployable webApp {
+  platform: static
+  targets:  salesApi
+  ui:       WebApp { Sales: salesApi }
+  realtime: websocket        // optional infra override; default SSE for React. NOT on the channel.
+  port:     3002
+}
+```
+
+So `realtime:` exists in the grammar, but on the **deployable** (infra),
+never on the `channel` (contract). Most authors never write it.
 
 ```langium
 // UiMember += UiChannelParam ; plus a `.live` query suffix and `on Param.Event(p){…}` handler
@@ -321,10 +356,12 @@ Per-frontend lowering of the *same* `.live` IR:
 | **Phoenix LiveView** | **native** — `Phoenix.PubSub.subscribe` + `handle_info` | a `handle_info({:order_shipped, …}, socket)` that re-`assign`s the stream; LiveView diffs and pushes over its own WebSocket. No client code. |
 
 This is where the layering pays off: Phoenix LiveView's WebSocket fabric is
-*already* a channel transport, so `realtime: websocket` is nearly free there,
-while React gets an SSE/WS client generated against the same channel
-contract. `mountsUi` platforms that can't push (none today) would reject
-`realtime:` via the `PlatformSurface` contract.
+*already* a channel transport, so native WebSocket is free there, while React
+gets an SSE (or WS, if the deployable overrides) client generated against the
+same channel contract — all from the *same* `.live` IR. The wire format is a
+`PlatformSurface` capability (`realtimeWire: "sse" | "websocket"`), defaulted
+per platform and overridable on the deployable; the channel and the page body
+are identical regardless.
 
 ## IR, lowering, enrichment (phase mapping)
 
@@ -339,7 +376,7 @@ export interface ChannelIR {
   delivery: "broadcast" | "queue";
   retention: "ephemeral" | "log" | "work";
   key?: string;                      // field name common to carried events
-  realtime?: "sse" | "websocket";
+  // NO realtime/transport field — the contract is wire-agnostic.
 }
 // stored on BoundedContextIR.channels: ChannelIR[]  (sibling of events / views)
 export interface ReactorIR {
@@ -350,6 +387,7 @@ export interface ReactorIR {
 export interface ProjectionIR { /* target read model + per-event fold (reuse ApplyIR) */ }
 export interface ChannelSourceIR { channel: string; storage: string; }
 // DeployableIR += channelNames: string[]
+//             += realtimeWire?: "sse" | "websocket"   // infra override; defaulted by PlatformSurface
 ```
 
 - **⑤ lower** — `lowerChannel` (structural, in `lower.ts`); `lowerReactor`
@@ -358,8 +396,10 @@ export interface ChannelSourceIR { channel: string; storage: string; }
   applier fold lowering. No new expression machinery.
 - **⑥ enrich** — derive each event's *routing set* (channels carrying it) and
   attach it to the publish side, so the dispatcher emitter knows where each
-  `emit` goes. Derive per-deployable `realtime` endpoint presence. This is
-  the natural sibling of the existing `migrationsOwner` enrichment.
+  `emit` goes. Derive, per frontend deployable, the resolved realtime wire
+  (`realtimeWire` override ?? `PlatformSurface` default) and the set of
+  channels any of its pages `.live`-subscribe. This is the natural sibling of
+  the existing `migrationsOwner` enrichment.
 - **⑦ validate** — the `loom.channel-*` / `loom.reactor-*` /
   `loom.channelsource-*` cross-cutting checks above (needs the fully-resolved
   routing graph, so it lives in phase ⑦ like the eventSourced-discipline
@@ -402,10 +442,9 @@ system Acme {
 
       channel Lifecycle {                                    // context member, beside its events
         carries: OrderPlaced, OrderShipped
-        delivery: broadcast
+        delivery: broadcast           // ⇒ a UI may .live-subscribe; wire format is infra
         retention: log                // durable, replayable
         key: order
-        realtime: sse                 // also pushed to the board UI
       }
     }
   }
@@ -440,10 +479,11 @@ system Acme {
 ```
 
 What the reader gets from a single declaration: the `channel` tells you the
-events, delivery, durability, and that the board sees it live; the
-`channelSource` tells you it's Kafka; the `deployable channels:` tells you
-who's wired in — and the `compose` step adds a Kafka service and an SSE
-endpoint without any of those declarations naming a wire protocol.
+events, delivery, and durability (no wire protocol); the `ui` `.live` ref tells
+you the board observes it; the `channelSource` tells you it's Kafka; the
+`deployable channels:` tells you who's wired in. The `webApp` names no
+`realtime:`, so it defaults to SSE — and the `compose` step provisions a Kafka
+service and an SSE endpoint, neither named in the contract.
 
 ## Slice plan (incremental, dispatcher-first)
 
@@ -460,10 +500,12 @@ workflow slice trails.
    Hono + .NET. (`LOOM_TS_BUILD` / `dotnet-build` gates.)
 3. **Redis transport** — `channelSource use: redis`; pub/sub (`broadcast`)
    and `BLPOP`/streams (`queue`); compose service. Per-backend driver.
-4. **`realtime: sse` → React `.live`** — SSE endpoint + generated client +
-   `.live` cache invalidation. (`LOOM_REACT_BUILD`.)
-5. **Phoenix-native realtime** — `Phoenix.PubSub` + LiveView `handle_info`;
-   `realtime: websocket`. (`LOOM_PHOENIX_BUILD`.)
+4. **UI `.live` over SSE (React)** — derived SSE endpoint + generated client +
+   `.live` cache invalidation; `realtimeWire` defaulting on `PlatformSurface`.
+   No channel-contract change. (`LOOM_REACT_BUILD`.)
+5. **Phoenix-native realtime + WebSocket override** — `Phoenix.PubSub` +
+   LiveView `handle_info`; the optional `deployable realtime: websocket`
+   infra override. (`LOOM_PHOENIX_BUILD`.)
 6. **Kafka + `retention: log`** — durable streams, partition by `key`,
    `projection` replay-from-cursor. (`LOOM_E2E`.)
 7. **RabbitMQ / `queue` + `work`** — competing consumers, ack semantics.
