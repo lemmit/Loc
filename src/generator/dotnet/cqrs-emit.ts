@@ -1,4 +1,4 @@
-import { forCreateInput } from "../../ir/enrich/wire-projection.js";
+import { createInputFields } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -61,7 +61,7 @@ export function emitCqrs(
   // `forCreateInput` excludes `managed` / `token` / `internal` (server-
   // owned or domain-only), keeps `immutable` (settable at creation) and
   // `secret` (client supplies password hashes / API keys).
-  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
+  const requiredFields = createInputFields(agg);
 
   emitResponseDtos(agg, ctx, ns, aggFolder, out);
   emitRequestDtos(agg, ctx, ns, aggFolder, out);
@@ -140,7 +140,7 @@ function emitRequestDtos(
   // `forCreateInput` excludes `managed` / `token` / `internal` (server-
   // owned or domain-only), keeps `immutable` (settable at creation) and
   // `secret` (client supplies password hashes / API keys).
-  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
+  const requiredFields = createInputFields(agg);
   records.push({
     name: `Create${agg.name}Request`,
     params: requiredFields

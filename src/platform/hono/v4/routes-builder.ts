@@ -5,7 +5,7 @@ import {
   takeSingleFieldChain,
 } from "../../../generator/typescript/zod-refine.js";
 import { wireShapeFor } from "../../../ir/enrich/enrichments.js";
-import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import { createInputFields } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -174,7 +174,7 @@ export function buildRoutesFile(
   // `token`, `internal`) from the client-supplied payload, keeping
   // `immutable` (settable on create) and `secret` (client provides
   // password hashes / API keys).  Matches the .NET CreateRequest shape.
-  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
+  const requiredFields = createInputFields(agg);
   lines.push(
     ...emitWireSchema(
       `const Create${agg.name}Request`,

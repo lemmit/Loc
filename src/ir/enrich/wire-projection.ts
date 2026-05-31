@@ -6,7 +6,7 @@
 // duplicating the rules.  See `FieldAccess` in `src/ir/types/loom-ir.ts`
 // for the canonical role semantics this layer implements.
 
-import type { FieldAccess } from "../types/loom-ir.js";
+import type { AggregateIR, FieldAccess, FieldIR } from "../types/loom-ir.js";
 
 /** Any structure carrying a resolved access role.  Both `WireField`
  * and `FieldIR` satisfy this — backends choose the shape that suits
@@ -43,6 +43,25 @@ export function forCreateInput<T extends WithAccess>(items: readonly T[]): T[] {
   return items.filter(
     (f) => f.access !== "managed" && f.access !== "token" && f.access !== "internal",
   );
+}
+
+/** The fields that make up an aggregate's **create input** — the single
+ * source of truth every create surface (wire DTO, domain factory,
+ * page-object fill, parity) derives from.  Centralising it here means the
+ * Stage-4 flip from the legacy hard-coded field-walk to the declared
+ * `canonicalCreate` is a one-function change rather than a 6-site edit.
+ *
+ * TODAY (legacy parity): the non-optional, client-supplyable fields —
+ * `forCreateInput(fields)` (drops `managed`/`token`/`internal`) minus
+ * optionals.  This reproduces the pre-Stage-4 hard-coded create
+ * byte-for-byte; every current consumer matched this set.
+ *
+ * STAGE 4 (next commit): when `agg.canonicalCreate` is present, return its
+ * declared param field set instead — which INCLUDES optional fields (e.g.
+ * `description?`), changing the create wire contract.  The flip lives only
+ * here; all consumers route through this accessor. */
+export function createInputFields(agg: AggregateIR): FieldIR[] {
+  return forCreateInput(agg.fields).filter((f) => !f.optional);
 }
 
 /** Fields clients may modify in an **update** request's editable

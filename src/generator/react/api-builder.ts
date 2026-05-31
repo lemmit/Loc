@@ -1,5 +1,5 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { forApiRead, forCreateInput } from "../../ir/enrich/wire-projection.js";
+import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   aggregateUsesMoney,
@@ -70,7 +70,7 @@ export function buildApiModule(
   // keeping `immutable` (settable on create) and `secret` (client
   // provides password hashes / API keys).  Aligns with the Hono and
   // .NET CreateRequest shapes.
-  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
+  const requiredFields = createInputFields(agg);
   lines.push(
     ...emitObjectWithRefines(
       `Create${agg.name}Request`,
