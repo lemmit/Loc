@@ -18,17 +18,6 @@ import { joinDbSetName, joinFkPropName } from "./emit/join-entities.js";
 export interface CsRenderContext {
   /** Rendered name for the implicit receiver (`this` by default). */
   thisName: string;
-  /**
-   * Mutable accumulator for namespaces this rendering reaches into
-   * that aren't covered by the SDK's `<ImplicitUsings>` set
-   * (e.g. `System.Text.RegularExpressions` when `string.matches(...)`
-   * lowers to `Regex.IsMatch`).  The file-level emitter creates the
-   * Set, threads this ctx through every render call inside the file,
-   * and emits one `using <ns>;` per entry into the file header.
-   * Optional so callers that don't care about tracking
-   * (one-shot snippet rendering in tests etc.) can omit it.
-   */
-  usings?: Set<string>;
   /** Aggregate whose finds/derived bodies we're lowering.  Required
    * for `this.<refColl>.contains(param)` membership predicates, which
    * lower to a subquery against the field's join entity DbSet
@@ -47,6 +36,68 @@ export interface CsRenderContext {
 }
 
 const DEFAULT: CsRenderContext = { thisName: "this" };
+
+/** Namespaces a rendered domain expression reaches into beyond the SDK's
+ *  `<ImplicitUsings>` set.  Today the sole trigger is the
+ *  `string.matches(...)` → `Regex.IsMatch` lowering, which needs
+ *  `System.Text.RegularExpressions`.  This is the pure mirror of the
+ *  trigger in `renderMethodCall`: file emitters call it over the same
+ *  expressions they render to build their `using` header, instead of
+ *  threading a mutable Set through every render call.  Walking the whole
+ *  tree is safe — the renderer always renders the whole tree, so a
+ *  `matches` shape anywhere is rendered (and thus needs the namespace)
+ *  exactly when this finds it. */
+export function collectCsExprUsings(e: ExprIR, into: Set<string> = new Set()): Set<string> {
+  switch (e.kind) {
+    case "method-call":
+      if (
+        e.member === "matches" &&
+        e.receiverType.kind === "primitive" &&
+        e.receiverType.name === "string" &&
+        e.args.length === 1
+      ) {
+        into.add("System.Text.RegularExpressions");
+      }
+      collectCsExprUsings(e.receiver, into);
+      for (const a of e.args) collectCsExprUsings(a, into);
+      return into;
+    case "member":
+      return collectCsExprUsings(e.receiver, into);
+    case "binary":
+      collectCsExprUsings(e.left, into);
+      return collectCsExprUsings(e.right, into);
+    case "unary":
+      return collectCsExprUsings(e.operand, into);
+    case "paren":
+      return collectCsExprUsings(e.inner, into);
+    case "ternary":
+      collectCsExprUsings(e.cond, into);
+      collectCsExprUsings(e.then, into);
+      return collectCsExprUsings(e.otherwise, into);
+    case "call":
+      for (const a of e.args) collectCsExprUsings(a, into);
+      return into;
+    case "lambda":
+      if (e.body) collectCsExprUsings(e.body, into);
+      return into;
+    case "new":
+    case "object":
+      for (const f of e.fields) collectCsExprUsings(f.value, into);
+      return into;
+    case "convert":
+      return collectCsExprUsings(e.value, into);
+    case "match":
+      for (const arm of e.arms) {
+        collectCsExprUsings(arm.cond, into);
+        collectCsExprUsings(arm.value, into);
+      }
+      if (e.otherwise) collectCsExprUsings(e.otherwise, into);
+      return into;
+    default:
+      // literal | this | id | ref — leaves with no sub-expressions.
+      return into;
+  }
+}
 
 export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string {
   switch (e.kind) {
@@ -279,7 +330,6 @@ function renderMethodCall(
     e.receiverType.name === "string" &&
     args.length === 1
   ) {
-    ctx.usings?.add("System.Text.RegularExpressions");
     return `Regex.IsMatch(${recv}, ${args[0]})`;
   }
   return `${recv}.${upperFirst(e.member)}(${args.join(", ")})`;

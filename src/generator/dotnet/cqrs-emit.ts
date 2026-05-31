@@ -11,6 +11,7 @@ import { findUsesCurrentUser, operationUsesCurrentUser } from "../../ir/types/lo
 import { plural, upperFirst } from "../../util/naming.js";
 import {
   aggregateResponseParams,
+  collectWireUsings,
   csIdValueClrType,
   domainToRequestExpr,
   dtoParam,
@@ -604,19 +605,23 @@ function emitController(
   routePrefix?: string,
   emitTrace?: boolean,
 ): void {
-  // Threaded through every wireToCommandArgument call below.  When a
-  // datetime field is on the wire, the helper lowers to
-  // `DateTime.Parse(..., CultureInfo.InvariantCulture, …)` and adds
-  // `System.Globalization` to this set; the controller file imports
-  // it once, only when actually needed.
+  // Namespaces the wire→command conversions below reach into (e.g.
+  // System.Globalization for a datetime/money parse); collected over the
+  // same types those conversions consume so the controller file imports
+  // each once, only when actually needed.
+  const publicOps = agg.operations.filter((o) => o.visibility === "public");
   const usings = new Set<string>();
+  for (const f of requiredFields) collectWireUsings(f.type, ctx, usings);
+  for (const op of publicOps) for (const p of op.params) collectWireUsings(p.type, ctx, usings);
+  for (const find of repo?.finds ?? [])
+    for (const p of find.params) collectWireUsings(p.type, ctx, usings);
   out.set(
     `Api/${upperFirst(plural(agg.name))}Controller.cs`,
     renderController(agg, repo, ns, {
       idClrType: csIdValueClrType(agg.idValueType),
       destroyAction: !!agg.canonicalDestroy,
       createCmdArgs: requiredFields.map((f) =>
-        wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx, usings),
+        wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx),
       ),
       publicOps: agg.operations
         .filter((o) => o.visibility === "public")
@@ -626,7 +631,7 @@ function emitController(
           // for the C# action method + command type.
           routeSlug: op.routeSlug,
           cmdArgs: op.params.map((p) =>
-            wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx, usings),
+            wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx),
           ),
           // Wire-shape key set for --trace's wire_in line.  Param names
           // are lowerCamel in the IR — same form the JSON wire uses
@@ -651,7 +656,7 @@ function emitController(
           })
           .join(", "),
         queryConstructorArgs: find.params
-          .map((p) => wireToCommandArgument(p.name, p.type, ctx, usings))
+          .map((p) => wireToCommandArgument(p.name, p.type, ctx))
           .join(", "),
         returnShape: (find.returnType.kind === "array"
           ? "list"

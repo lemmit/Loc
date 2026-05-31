@@ -13,13 +13,14 @@ import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { dotnetResourceAdapterFor, resourceClassName } from "./adapters/resource-clients.js";
 import {
+  collectWireUsings,
   csIdValueClrType,
   domainToRequestExpr,
   dtoParam,
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
-import { renderCsExpr, renderCsType } from "./render-expr.js";
+import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // .NET workflow emission.
@@ -262,7 +263,13 @@ function renderHandler(
   const resourceClasses = buildResourceClasses(sys);
   if (resourceClasses.size > 0 && workflowUsesResourceOp(wf)) usings.add(`${ns}.Resources`);
   const renderArg = (e: import("../../ir/types/loom-ir.js").ExprIR): string => {
-    return renderExprWithCmdParams(e, paramNames, usings, resourceClasses);
+    // Collect the rendered expression's non-implicit namespaces adjacent
+    // to rendering (`renderArg` is the single choke point for every
+    // workflow expression the handler emits) instead of threading a Set
+    // through the renderer.  The cmd-param rewrite only renames refs, so
+    // the `matches` shape collectCsExprUsings keys off is unchanged.
+    collectCsExprUsings(e, usings);
+    return renderExprWithCmdParams(e, paramNames, resourceClasses);
   };
 
   for (const st of wf.statements) {
@@ -459,7 +466,6 @@ function renderStatement(
 function renderExprWithCmdParams(
   e: import("../../ir/types/loom-ir.js").ExprIR,
   paramNames: Set<string>,
-  usings?: Set<string>,
   resourceClasses?: Map<string, string>,
 ): string {
   // Substitute by rewriting the IR before renderCsExpr.
@@ -517,7 +523,7 @@ function renderExprWithCmdParams(
     }
     return e;
   };
-  return renderCsExpr(rewrite(e), { thisName: "this", usings, resourceClasses });
+  return renderCsExpr(rewrite(e), { thisName: "this", resourceClasses });
 }
 
 // ---------------------------------------------------------------------------
@@ -533,8 +539,9 @@ function renderController(ctx: EnrichedBoundedContextIR, ns: string, routePrefix
   const usings = new Set<string>();
   const blocks: string[] = [];
   for (const wf of ctx.workflows) {
+    for (const p of wf.params) collectWireUsings(p.type, ctx, usings);
     const cmdArgs = wf.params
-      .map((p) => wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx, usings))
+      .map((p) => wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx))
       .join(",\n            ");
     blocks.push(
       `    [HttpPost("${snake(wf.name)}")]\n` +

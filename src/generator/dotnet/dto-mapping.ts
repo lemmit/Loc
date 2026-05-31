@@ -150,14 +150,13 @@ export function wireToCommandArgument(
   expr: string,
   t: TypeIR,
   ctx: EnrichedBoundedContextIR,
-  usings?: Set<string>,
 ): string {
   const info = wireTypeInfo(t, "request");
   if (info.isNullable) {
-    return `(${expr} is null ? null : ${wireToCommandArgument(`${expr}!`, peelNullable(t), ctx, usings)})`;
+    return `(${expr} is null ? null : ${wireToCommandArgument(`${expr}!`, peelNullable(t), ctx)})`;
   }
   if (info.isCollection) {
-    return `${expr}.Select(__e => ${wireToCommandArgument("__e", peelCollection(t), ctx, usings)}).ToList()`;
+    return `${expr}.Select(__e => ${wireToCommandArgument("__e", peelCollection(t), ctx)}).ToList()`;
   }
   switch (info.refKind) {
     case "primitive":
@@ -165,14 +164,13 @@ export function wireToCommandArgument(
         // Wire is a string; coerce to UTC DateTime regardless of whether
         // the caller sent a Z-suffixed value or a naive datetime-local
         // string.  CultureInfo + DateTimeStyles live in
-        // System.Globalization, outside the SDK's implicit-usings set.
-        usings?.add("System.Globalization");
+        // System.Globalization, outside the SDK's implicit-usings set
+        // (declared via collectWireUsings on the emitter side).
         return `DateTime.Parse(${expr}, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)`;
       }
       if (info.primitive === "money") {
         // Wire string → System.Decimal.  InvariantCulture so a locale's
         // comma-vs-dot doesn't flip the parse.
-        usings?.add("System.Globalization");
         return `decimal.Parse(${expr}, CultureInfo.InvariantCulture)`;
       }
       return expr;
@@ -186,13 +184,40 @@ export function wireToCommandArgument(
       const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return expr;
       const args = vo.fields
-        .map((f) => wireToCommandArgument(`${expr}.${upperFirst(f.name)}`, f.type, ctx, usings))
+        .map((f) => wireToCommandArgument(`${expr}.${upperFirst(f.name)}`, f.type, ctx))
         .join(", ");
       return `new ${info.base}(${args})`;
     }
     case "entity":
       return expr;
   }
+}
+
+/** Namespaces the wire→command conversion of `t` reaches into beyond the
+ *  SDK's implicit usings — `System.Globalization` for the datetime/money
+ *  parse helpers `wireToCommandArgument` emits.  Pure mirror of that
+ *  function's recursion (nullable / collection peel, value-object field
+ *  recursion); emitters call it over the same types they convert to build
+ *  their `using` header. */
+export function collectWireUsings(
+  t: TypeIR,
+  ctx: EnrichedBoundedContextIR,
+  into: Set<string> = new Set(),
+): Set<string> {
+  const info = wireTypeInfo(t, "request");
+  if (info.isNullable) return collectWireUsings(peelNullable(t), ctx, into);
+  if (info.isCollection) return collectWireUsings(peelCollection(t), ctx, into);
+  if (info.refKind === "primitive") {
+    if (info.primitive === "datetime" || info.primitive === "money") {
+      into.add("System.Globalization");
+    }
+    return into;
+  }
+  if (info.refKind === "valueObject") {
+    const vo = ctx.valueObjects.find((v) => v.name === info.base);
+    if (vo) for (const f of vo.fields) collectWireUsings(f.type, ctx, into);
+  }
+  return into;
 }
 
 /** Project a domain expression to its wire-shape Response. */
