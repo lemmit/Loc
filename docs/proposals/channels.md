@@ -39,7 +39,7 @@ context Orders {
   event OrderPlaced { order: Order id, at: datetime }
   // … OrderShipped, OrderCancelled …
 
-  channel OrderEvents {           // a context member — many per context
+  channel Lifecycle {             // a context member — many per context
     carries:   OrderPlaced, OrderShipped, OrderCancelled
     delivery:  broadcast          // broadcast | queue       (NATS "delivery group")
     retention: log                // ephemeral | log | work  (NATS "stream retention")
