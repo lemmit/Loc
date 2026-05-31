@@ -1,5 +1,5 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { forApiRead, forCreateInput } from "../../ir/enrich/wire-projection.js";
+import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -808,15 +808,15 @@ end
 
 function renderCreateRequestSchema(agg: AggregateIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.Create${agg.name}Request`;
-  // Create request carries required (non-optional) fields that the
-  // client may supply.  `forCreateInput` drops server-controlled fields
-  // (`managed`, `token`, `internal`); keeps `immutable` and `secret`.
-  // Matches the .NET / Hono / React CreateRequest shapes.
-  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = forCreateInput(
-    agg.fields,
-  )
-    .filter((f: FieldIR) => !f.optional)
-    .map((f: FieldIR) => ({ name: f.name, type: f.type, optional: false }));
+  // Create request carries the canonical create-input set the client may
+  // supply.  `createInputFields` = `forCreateInput` (drops `managed`,
+  // `token`, `internal`; keeps `immutable` and `secret`) INCLUDING
+  // optionals — which ride their own type nullability into the `required`
+  // list (see `renderProperties`).  Matches the .NET / Hono / React
+  // CreateRequest shapes so the parity gate's property + required sets agree.
+  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = createInputFields(
+    agg,
+  ).map((f: FieldIR) => ({ name: f.name, type: f.type, optional: f.optional }));
   return renderSchemaModule(
     moduleName,
     `Create${agg.name}Request`,

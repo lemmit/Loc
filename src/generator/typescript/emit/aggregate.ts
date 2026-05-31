@@ -1,3 +1,4 @@
+import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -362,15 +363,26 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
     ].join("\n");
   });
 
-  const requiredFields = e.fields.filter((f) => !f.optional);
+  // Create-factory input — the canonical create-input set (`forCreateInput`,
+  // INCLUDING optionals).  Matches the wire `Create<Agg>Request` DTO the
+  // route validates and the args it forwards, so the generated
+  // `Agg.create({ ... })` call type-checks against this signature.  Optional
+  // members are accepted (`name?`) and persisted (`input.name ?? null`);
+  // server-owned fields (managed/token/internal, outside the set) stay
+  // server-initialised to `null` here.
+  const createInputs = forCreateInput(e.fields);
+  const createInputNames = new Set(createInputs.map((f) => f.name));
   const createFactory = e.isRoot
     ? [
-        `  static create(input: { ${requiredFields
-          .map((f) => `${f.name}: ${renderTsType(f.type)}`)
+        `  static create(input: { ${createInputs
+          .map((f) => `${f.name}${f.optional ? "?" : ""}: ${renderTsType(f.type)}`)
           .join("; ")} }): ${e.name} {`,
         `    return new ${e.name}({`,
         `      id: Ids.new${e.name}Id(),`,
-        ...e.fields.map((f) => `      ${f.name}: ${f.optional ? "null" : `input.${f.name}`},`),
+        ...e.fields.map((f) => {
+          if (!createInputNames.has(f.name)) return `      ${f.name}: null,`;
+          return `      ${f.name}: ${f.optional ? `input.${f.name} ?? null` : `input.${f.name}`},`;
+        }),
         ...provFields.map((f) => `      ${f.name}_provenance: null,`),
         ...e.contains.map((c) => `      ${c.name}: ${c.collection ? "[]" : "null"},`),
         "    });",

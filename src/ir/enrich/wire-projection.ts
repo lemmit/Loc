@@ -48,20 +48,20 @@ export function forCreateInput<T extends WithAccess>(items: readonly T[]): T[] {
 /** The fields that make up an aggregate's **create input** — the single
  * source of truth every create surface (wire DTO, domain factory,
  * page-object fill, parity) derives from.  Centralising it here means the
- * Stage-4 flip from the legacy hard-coded field-walk to the declared
- * `canonicalCreate` is a one-function change rather than a 6-site edit.
+ * create-input contract is defined once rather than re-derived per site.
  *
- * TODAY (legacy parity): the non-optional, client-supplyable fields —
- * `forCreateInput(fields)` (drops `managed`/`token`/`internal`) minus
- * optionals.  This reproduces the pre-Stage-4 hard-coded create
- * byte-for-byte; every current consumer matched this set.
- *
- * STAGE 4 (next commit): when `agg.canonicalCreate` is present, return its
- * declared param field set instead — which INCLUDES optional fields (e.g.
- * `description?`), changing the create wire contract.  The flip lives only
- * here; all consumers route through this accessor. */
+ * The full client-suppliable set: `forCreateInput` (drops
+ * `managed`/`token`/`internal`, keeps `immutable`/`secret`) **including
+ * optional fields**.  For a crudish/declared aggregate this is exactly
+ * `canonicalCreate.params` — crudish builds those params from
+ * `writableCreateFields`, the same access matrix `forCreateInput`
+ * applies — so backends consuming this set consume the canonical create.
+ * Optionals (`description?`) are part of the create contract; their
+ * optionality rides their own type nullability through each backend's
+ * optionality derivation (`zodFor`/`wireTypeInfo`/`renderCsType`), so no
+ * consumer needs the `optional` flag re-passed. */
 export function createInputFields(agg: AggregateIR): FieldIR[] {
-  return forCreateInput(agg.fields).filter((f) => !f.optional);
+  return forCreateInput(agg.fields);
 }
 
 /** Fields clients may modify in an **update** request's editable

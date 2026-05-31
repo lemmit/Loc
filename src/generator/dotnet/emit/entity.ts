@@ -1,3 +1,4 @@
+import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -53,7 +54,13 @@ export function renderEntity(
   const isAgg = (e: typeof entity): e is EnrichedAggregateIR => "operations" in e;
   const idValueType = isAgg(entity) ? entity.idValueType : "guid";
   const operations = isAgg(entity) ? entity.operations : [];
-  const requiredFields = entity.fields.filter((f) => !f.optional);
+  // Public `Create(...)` factory params — the canonical create-input set
+  // (`forCreateInput`, INCLUDING optionals).  Matches the CreateCommand /
+  // handler call order + the wire DTO, so `Agg.Create(cmd.Field, ...)`
+  // binds positionally.  Optionals arrive as nullable params and are
+  // assigned through; server-owned fields stay at their `= default;`
+  // property initialiser.
+  const createInputFieldList = isAgg(entity) ? forCreateInput(entity.fields) : [];
   const hasExtern = operations.some((o) => o.extern);
   const setterVisibility = hasExtern ? "internal" : "private";
   // Threaded through every render call below.  Renderers add the
@@ -277,13 +284,13 @@ export function renderEntity(
 
   const createPublicLines = isRoot
     ? [
-        `    public static ${entity.name} Create(${requiredFields
+        `    public static ${entity.name} Create(${createInputFieldList
           .map((f) => `${renderCsType(f.type)} ${f.name}`)
           .join(", ")})`,
         "    {",
         `        var e = new ${entity.name}();`,
         `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
-        ...requiredFields.map((f) => `        e.${upperFirst(f.name)} = ${f.name};`),
+        ...createInputFieldList.map((f) => `        e.${upperFirst(f.name)} = ${f.name};`),
         // Public Create factory — same "<init>" label as the hydration path.
         emitTrace ? `        e.AssertInvariants("<init>");` : "        e.AssertInvariants();",
         "        return e;",
