@@ -1,4 +1,8 @@
-import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
+import {
+  forCreateInput,
+  hasCreate,
+  isSynthesizedCreate,
+} from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -29,10 +33,15 @@ import { renderTsStatements } from "../render-stmt.js";
 interface EntityShape {
   name: string;
   isRoot: boolean;
-  /** Whether the root aggregate declares a canonical create (explicit or
-   *  via `crudish`).  Gates the public `create(...)` factory; always false
-   *  for entity parts (they have no factory). */
+  /** Whether the root aggregate is constructible — declares a canonical
+   *  create (explicit/`crudish`) or is all-defaulted (synthesised create).
+   *  Gates the public `create(...)` factory; always false for entity parts
+   *  (they have no factory). */
   hasCreate: boolean;
+  /** Whether the create is the synthesised parameterless one (no declared
+   *  create, every required field defaulted).  Drives the factory's
+   *  default-initialisation branch.  Always false for entity parts. */
+  synthesizedCreate: boolean;
   rootName?: string;
   fields: FieldIR[];
   contains: ContainmentIR[];
@@ -139,6 +148,7 @@ function rootShape(a: AggregateIR): EntityShape {
     name: a.name,
     isRoot: true,
     hasCreate: hasCreate(a),
+    synthesizedCreate: isSynthesizedCreate(a),
     fields: a.fields,
     contains: a.contains,
     derived: a.derived,
@@ -153,6 +163,7 @@ function partShape(p: EntityPartIR, root: AggregateIR): EntityShape {
     name: p.name,
     isRoot: false,
     hasCreate: false,
+    synthesizedCreate: false,
     rootName: root.name,
     fields: p.fields,
     contains: p.contains,
@@ -369,18 +380,25 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
     ].join("\n");
   });
 
-  // Create-factory input — the canonical create-input set (`forCreateInput`,
-  // INCLUDING optionals).  Matches the wire `Create<Agg>Request` DTO the
-  // route validates and the args it forwards, so the generated
-  // `Agg.create({ ... })` call type-checks against this signature.  Optional
-  // members are accepted (`name?`) and persisted (`input.name ?? null`);
-  // server-owned fields (managed/token/internal, outside the set) stay
-  // server-initialised to `null` here.
-  const createInputs = forCreateInput(e.fields);
+  // Create-factory input.  Canonical create → the create-input set
+  // (`forCreateInput`, incl. optionals) matching the wire DTO.  A
+  // synthesised create is parameterless (`input: {}`): the client supplies
+  // nothing and each defaulted field is initialised from its default.
+  const createInputs = e.synthesizedCreate ? [] : forCreateInput(e.fields);
   const createInputNames = new Set(createInputs.map((f) => f.name));
-  // Public `create(...)` factory gated on a canonical create — a
-  // non-constructible aggregate (no explicit/`crudish` create) exposes no
-  // factory; it is reconstructed only via `_create` (repository hydration).
+  const fieldInit = (f: FieldIR): string => {
+    if (createInputNames.has(f.name)) {
+      return f.optional ? `input.${f.name} ?? null` : `input.${f.name}`;
+    }
+    // Outside the create input: a synthesised create initialises a
+    // defaulted field from its default expression; everything else is
+    // server-initialised to null.
+    if (e.synthesizedCreate && f.default !== undefined) return renderTsExpr(f.default);
+    return "null";
+  };
+  // Public `create(...)` factory gated on a canonical OR synthesised create
+  // — a non-constructible aggregate exposes no factory; it is reconstructed
+  // only via `_create` (repository hydration).
   const createFactory =
     e.isRoot && e.hasCreate
       ? [
@@ -389,10 +407,7 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
             .join("; ")} }): ${e.name} {`,
           `    return new ${e.name}({`,
           `      id: Ids.new${e.name}Id(),`,
-          ...e.fields.map((f) => {
-            if (!createInputNames.has(f.name)) return `      ${f.name}: null,`;
-            return `      ${f.name}: ${f.optional ? `input.${f.name} ?? null` : `input.${f.name}`},`;
-          }),
+          ...e.fields.map((f) => `      ${f.name}: ${fieldInit(f)},`),
           ...provFields.map((f) => `      ${f.name}_provenance: null,`),
           ...e.contains.map((c) => `      ${c.name}: ${c.collection ? "[]" : "null"},`),
           "    });",

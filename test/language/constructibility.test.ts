@@ -1,10 +1,11 @@
-// Constructibility check (staged).
+// Constructibility check (staged warning).
 //
-// An aggregate should be constructible: either it declares a `create`
-// (explicit or via `crudish`) or every required create-input field has a
-// default.  Emitted as a WARNING during the staged rollout (the implicit
-// hard-coded create still backs these aggregates); it flips to an error
-// once examples are migrated and the hard-coded create is removed.
+// An aggregate is constructible when it declares a `create` (explicit or
+// via `crudish`) or every required create-input field has a default.  Now
+// that Stage 4 removed the implicit hard-coded create, a non-constructible
+// aggregate emits no create surface — but that's a legitimate shape (an
+// aggregate created only via events / seed data / as a child), so this is
+// a WARNING that guides rather than an error that blocks.
 
 import { describe, expect, it } from "vitest";
 import { parseString } from "../_helpers/index.js";

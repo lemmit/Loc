@@ -1,4 +1,8 @@
-import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import {
+  forCreateInput,
+  hasCreate,
+  isSynthesizedCreate,
+} from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -54,13 +58,15 @@ export function renderEntity(
   const isAgg = (e: typeof entity): e is EnrichedAggregateIR => "operations" in e;
   const idValueType = isAgg(entity) ? entity.idValueType : "guid";
   const operations = isAgg(entity) ? entity.operations : [];
-  // Public `Create(...)` factory params — the canonical create-input set
-  // (`forCreateInput`, INCLUDING optionals).  Matches the CreateCommand /
-  // handler call order + the wire DTO, so `Agg.Create(cmd.Field, ...)`
-  // binds positionally.  Optionals arrive as nullable params and are
-  // assigned through; server-owned fields stay at their `= default;`
-  // property initialiser.
-  const createInputFieldList = isAgg(entity) ? forCreateInput(entity.fields) : [];
+  // Public `Create(...)` factory params.  Canonical create → the
+  // create-input set (`forCreateInput`, incl. optionals), matching the
+  // CreateCommand/handler call order + wire DTO, so `Agg.Create(cmd.Field,
+  // ...)` binds positionally.  A synthesised create is parameterless: the
+  // client supplies nothing and each defaulted field is initialised from
+  // its default in the body.
+  const synthesizedCreate = isAgg(entity) && isSynthesizedCreate(entity);
+  const createInputFieldList =
+    isAgg(entity) && !synthesizedCreate ? forCreateInput(entity.fields) : [];
   const hasExtern = operations.some((o) => o.extern);
   const setterVisibility = hasExtern ? "internal" : "private";
   // Threaded through every render call below.  Renderers add the
@@ -282,11 +288,18 @@ export function renderEntity(
   createInternalLines.push("        return e;");
   createInternalLines.push("    }");
 
-  // Public `Create(...)` factory gated on a canonical create — a
-  // non-constructible aggregate (no explicit/`crudish` create) exposes no
-  // public factory; it is reconstructed only via `_Create` (hydration).
+  // Public `Create(...)` factory gated on a canonical OR synthesised create
+  // — a non-constructible aggregate exposes no public factory; it is
+  // reconstructed only via `_Create` (hydration).  Canonical assigns from
+  // params; synthesised assigns each defaulted field from its default.
+  const createAssignments =
+    isAgg(entity) && synthesizedCreate
+      ? entity.fields
+          .filter((f) => f.default !== undefined)
+          .map((f) => `        e.${upperFirst(f.name)} = ${renderCsExpr(f.default!, renderCtx)};`)
+      : createInputFieldList.map((f) => `        e.${upperFirst(f.name)} = ${f.name};`);
   const createPublicLines =
-    isRoot && isAgg(entity) && entity.canonicalCreate != null
+    isRoot && isAgg(entity) && hasCreate(entity)
       ? [
           `    public static ${entity.name} Create(${createInputFieldList
             .map((f) => `${renderCsType(f.type)} ${f.name}`)
@@ -294,7 +307,7 @@ export function renderEntity(
           "    {",
           `        var e = new ${entity.name}();`,
           `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
-          ...createInputFieldList.map((f) => `        e.${upperFirst(f.name)} = ${f.name};`),
+          ...createAssignments,
           // Public Create factory — same "<init>" label as the hydration path.
           emitTrace ? `        e.AssertInvariants("<init>");` : "        e.AssertInvariants();",
           "        return e;",

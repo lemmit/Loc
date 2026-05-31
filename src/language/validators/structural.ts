@@ -235,10 +235,11 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
 
 /** Constructibility check (staged): an aggregate is constructible when it
  * declares a `create` (explicit or via `crudish`) or every required
- * create-input field has a default.  Otherwise — once the implicit
- * hard-coded create is removed — there's no way to supply those fields.
- * Emitted as a WARNING during the staged rollout; flips to an error in a
- * later phase. */
+ * create-input field has a default.  Otherwise — now that the implicit
+ * hard-coded create is removed (Stage 4) — there's no way to supply those
+ * fields and no create surface is emitted.  Emitted as a WARNING: a
+ * non-constructible aggregate (created only via events / seed data /
+ * as a child) is a legitimate shape, so this guides rather than blocks. */
 function checkConstructible(agg: Aggregate, accept: ValidationAcceptor): void {
   const hasCreate = agg.members.some((m) => isCreate(m));
   if (hasCreate) return;
@@ -248,11 +249,11 @@ function checkConstructible(agg: Aggregate, accept: ValidationAcceptor): void {
   if (undefaulted.length === 0) return;
   accept(
     "warning",
-    `Aggregate '${agg.name}' is not constructible without the implicit create: it declares no 'create' and the required field(s) ${undefaulted
+    `Aggregate '${agg.name}' is not constructible: it declares no 'create' and the required field(s) ${undefaulted
       .map((n) => `'${n}'`)
       .join(
         ", ",
-      )} have no default. Add a 'create(...)' (or 'with crudish'), or give the field(s) a default value.`,
+      )} have no default — no create surface is emitted. Add a 'create(...)' (or 'with crudish'), or give the field(s) a default value.`,
     { node: agg, code: "loom.not-constructible" },
   );
 }
