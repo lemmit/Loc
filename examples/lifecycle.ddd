@@ -22,6 +22,18 @@ context Lifecycle {
     label: string
   }
 
+  // Synthesised parameterless create: declares no `create`, but every
+  // required field is defaulted, so it's constructible — the generated
+  // create is `POST /` with an empty body + a factory that applies the
+  // defaults.  Gives the synthesised-create path compile coverage in the
+  // `generate ts` / `generate dotnet` build gates.
+  aggregate Counter {
+    count: int = 0
+    label: string = "untitled"
+    operation bump() { count := count + 1 }
+  }
+
   repository Articles for Article { }
   repository Tags for Tag { }
+  repository Counters for Counter { }
 }

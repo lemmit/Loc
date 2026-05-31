@@ -1,4 +1,4 @@
-import { forCreateInput } from "../../ir/enrich/wire-projection.js";
+import { createInputFields, hasCreate } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -66,11 +66,15 @@ export function emitCqrs(
   // `forCreateInput` excludes `managed` / `token` / `internal` (server-
   // owned or domain-only), keeps `immutable` (settable at creation) and
   // `secret` (client supplies password hashes / API keys).
-  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
+  const requiredFields = createInputFields(agg);
 
   emitResponseDtos(agg, ctx, ns, aggFolder, out);
   emitRequestDtos(agg, ctx, ns, aggFolder, out);
-  emitCreateCommandAndHandler(agg, requiredFields, ns, aggFolder, out);
+  // Create command/handler gated on the IR lifecycle (`canonicalCreate`),
+  // mirroring the destroy gate below: an aggregate that declares no create
+  // is not constructible over HTTP and emits no Create command/handler,
+  // request DTO, response, or controller action.
+  if (hasCreate(agg)) emitCreateCommandAndHandler(agg, requiredFields, ns, aggFolder, out);
   // Canonical destroy → Delete command + handler (gated on the IR
   // lifecycle, so plain aggregates emit no extra CQRS files).
   if (agg.canonicalDestroy) emitDestroyCommandAndHandler(agg, ns, aggFolder, out);
@@ -111,10 +115,13 @@ function emitResponseDtos(
     name: `${agg.name}Response`,
     params: aggregateResponseParams(agg, ctx),
   });
-  records.push({
-    name: `Create${agg.name}Response`,
-    params: dtoParam(csIdValueClrType(agg.idValueType), "Id"),
-  });
+  // Create-response (the new id) only when the aggregate is constructible.
+  if (hasCreate(agg)) {
+    records.push({
+      name: `Create${agg.name}Response`,
+      params: dtoParam(csIdValueClrType(agg.idValueType), "Id"),
+    });
+  }
   out.set(
     `Application/${aggFolder}/Responses/${agg.name}Responses.cs`,
     renderResponseDtos({ ns, aggName: agg.name, records }),
@@ -144,14 +151,17 @@ function emitRequestDtos(
   // Create-request payload: required + access-permitted client input.
   // `forCreateInput` excludes `managed` / `token` / `internal` (server-
   // owned or domain-only), keeps `immutable` (settable at creation) and
-  // `secret` (client supplies password hashes / API keys).
-  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
-  records.push({
-    name: `Create${agg.name}Request`,
-    params: requiredFields
-      .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name), "request"))
-      .join(", "),
-  });
+  // `secret` (client supplies password hashes / API keys).  Gated on
+  // `hasCreate`: a non-constructible aggregate emits no CreateRequest.
+  if (hasCreate(agg)) {
+    const requiredFields = createInputFields(agg);
+    records.push({
+      name: `Create${agg.name}Request`,
+      params: requiredFields
+        .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name), "request"))
+        .join(", "),
+    });
+  }
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     records.push({
       name: `${upperFirst(op.name)}${agg.name}Request`,
@@ -623,6 +633,7 @@ function emitController(
     `Api/${upperFirst(plural(agg.name))}Controller.cs`,
     renderController(agg, repo, ns, {
       idClrType: csIdValueClrType(agg.idValueType),
+      createAction: hasCreate(agg),
       destroyAction: !!agg.canonicalDestroy,
       createCmdArgs: requiredFields.map((f) =>
         wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx),

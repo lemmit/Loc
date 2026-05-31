@@ -1,3 +1,8 @@
+import {
+  forCreateInput,
+  hasCreate,
+  isSynthesizedCreate,
+} from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -28,6 +33,15 @@ import { renderTsStatements } from "../render-stmt.js";
 interface EntityShape {
   name: string;
   isRoot: boolean;
+  /** Whether the root aggregate is constructible — declares a canonical
+   *  create (explicit/`crudish`) or is all-defaulted (synthesised create).
+   *  Gates the public `create(...)` factory; always false for entity parts
+   *  (they have no factory). */
+  hasCreate: boolean;
+  /** Whether the create is the synthesised parameterless one (no declared
+   *  create, every required field defaulted).  Drives the factory's
+   *  default-initialisation branch.  Always false for entity parts. */
+  synthesizedCreate: boolean;
   rootName?: string;
   fields: FieldIR[];
   contains: ContainmentIR[];
@@ -133,6 +147,8 @@ function rootShape(a: AggregateIR): EntityShape {
   return {
     name: a.name,
     isRoot: true,
+    hasCreate: hasCreate(a),
+    synthesizedCreate: isSynthesizedCreate(a),
     fields: a.fields,
     contains: a.contains,
     derived: a.derived,
@@ -146,6 +162,8 @@ function partShape(p: EntityPartIR, root: AggregateIR): EntityShape {
   return {
     name: p.name,
     isRoot: false,
+    hasCreate: false,
+    synthesizedCreate: false,
     rootName: root.name,
     fields: p.fields,
     contains: p.contains,
@@ -362,21 +380,40 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
     ].join("\n");
   });
 
-  const requiredFields = e.fields.filter((f) => !f.optional);
-  const createFactory = e.isRoot
-    ? [
-        `  static create(input: { ${requiredFields
-          .map((f) => `${f.name}: ${renderTsType(f.type)}`)
-          .join("; ")} }): ${e.name} {`,
-        `    return new ${e.name}({`,
-        `      id: Ids.new${e.name}Id(),`,
-        ...e.fields.map((f) => `      ${f.name}: ${f.optional ? "null" : `input.${f.name}`},`),
-        ...provFields.map((f) => `      ${f.name}_provenance: null,`),
-        ...e.contains.map((c) => `      ${c.name}: ${c.collection ? "[]" : "null"},`),
-        "    });",
-        "  }",
-      ]
-    : [];
+  // Create-factory input.  Canonical create → the create-input set
+  // (`forCreateInput`, incl. optionals) matching the wire DTO.  A
+  // synthesised create is parameterless (`input: {}`): the client supplies
+  // nothing and each defaulted field is initialised from its default.
+  const createInputs = e.synthesizedCreate ? [] : forCreateInput(e.fields);
+  const createInputNames = new Set(createInputs.map((f) => f.name));
+  const fieldInit = (f: FieldIR): string => {
+    if (createInputNames.has(f.name)) {
+      return f.optional ? `input.${f.name} ?? null` : `input.${f.name}`;
+    }
+    // Outside the create input: a synthesised create initialises a
+    // defaulted field from its default expression; everything else is
+    // server-initialised to null.
+    if (e.synthesizedCreate && f.default !== undefined) return renderTsExpr(f.default);
+    return "null";
+  };
+  // Public `create(...)` factory gated on a canonical OR synthesised create
+  // — a non-constructible aggregate exposes no factory; it is reconstructed
+  // only via `_create` (repository hydration).
+  const createFactory =
+    e.isRoot && e.hasCreate
+      ? [
+          `  static create(input: { ${createInputs
+            .map((f) => `${f.name}${f.optional ? "?" : ""}: ${renderTsType(f.type)}`)
+            .join("; ")} }): ${e.name} {`,
+          `    return new ${e.name}({`,
+          `      id: Ids.new${e.name}Id(),`,
+          ...e.fields.map((f) => `      ${f.name}: ${fieldInit(f)},`),
+          ...provFields.map((f) => `      ${f.name}_provenance: null,`),
+          ...e.contains.map((c) => `      ${c.name}: ${c.collection ? "[]" : "null"},`),
+          "    });",
+          "  }",
+        ]
+      : [];
 
   // History drain — the route handler calls this inside the save
   // transaction and inserts one `provenance_records` row per lineage.

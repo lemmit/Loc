@@ -1,5 +1,5 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { forApiRead, forCreateInput } from "../../ir/enrich/wire-projection.js";
+import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   aggregateUsesMoney,
@@ -70,13 +70,16 @@ export function buildApiModule(
   // keeping `immutable` (settable on create) and `secret` (client
   // provides password hashes / API keys).  Aligns with the Hono and
   // .NET CreateRequest shapes.
-  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
+  const requiredFields = createInputFields(agg);
   lines.push(
     ...emitObjectWithRefines(
       `Create${agg.name}Request`,
       requiredFields.map((f) => ({ name: f.name, base: zodForRequest(f.type) })),
       agg.invariants,
-      new Set(agg.fields.map((f) => f.name)),
+      // Only create-input fields can be validated at the wire boundary —
+      // invariants over excluded fields (e.g. a `managed` collection) are
+      // enforced server-side, so they must not refine an absent field.
+      new Set(requiredFields.map((f) => f.name)),
     ),
   );
   lines.push(`export type Create${agg.name}Request = z.infer<typeof Create${agg.name}Request>;`);

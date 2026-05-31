@@ -1689,6 +1689,7 @@ describe(".NET generator", () => {
               email: string
               derived display: string = email
               invariant email.matches("^[^@]+@.+$")
+              create(email: string) { email := email }
             }
             repository Users for User { }
           }
@@ -1760,6 +1761,7 @@ describe(".NET generator", () => {
               fromTime: int
               toTime:   int
               invariant fromTime < toTime
+              create(fromTime: int, toTime: int) { fromTime := fromTime  toTime := toTime }
             }
             repository Reservations for Reservation { }
           }

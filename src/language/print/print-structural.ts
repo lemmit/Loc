@@ -167,6 +167,10 @@ export function printStructural(node: AstNode): string {
       return printEntityPart(node as EntityPart);
     case "Operation":
       return printOperation(node as Operation);
+    case "Create":
+      return printCreate(node as import("../generated/ast.js").Create);
+    case "Destroy":
+      return printDestroy(node as import("../generated/ast.js").Destroy);
     case "Apply":
       return printApply(node as import("../generated/ast.js").Apply);
     case "FunctionDecl":
@@ -629,6 +633,23 @@ function printOperation(node: Operation): string {
     `${priv}operation ${node.name}(${params})${extern}${audited}`,
     node.body.map(printStmt),
   );
+}
+
+function printCreate(node: import("../generated/ast.js").Create): string {
+  // Lifecycle factory.  Unnamed (`create(...)`) is the canonical creator;
+  // a name is optional.  Parens are always present in the grammar.
+  const name = node.name ? ` ${node.name}` : "";
+  const params = node.params.map(printParameter).join(", ");
+  return block(`create${name}(${params})`, node.body.map(printStmt));
+}
+
+function printDestroy(node: import("../generated/ast.js").Destroy): string {
+  // Lifecycle terminator.  Both the name and the parameter list are
+  // optional — the canonical hard delete reads `destroy { }`.
+  const name = node.name ? ` ${node.name}` : "";
+  const params = node.params.map(printParameter).join(", ");
+  const paramClause = node.params.length > 0 || node.name ? `(${params})` : "";
+  return block(`destroy${name}${paramClause}`, node.body.map(printStmt));
 }
 
 function printApply(node: import("../generated/ast.js").Apply): string {
