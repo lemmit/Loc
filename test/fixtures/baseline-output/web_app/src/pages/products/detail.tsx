@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { useParams, Link as RouterLink } from "react-router";
 import { UpdateRequest, useUpdateProduct } from "../../api/product";
+import { applyServerErrors } from "../../lib/apply-server-errors";
 import { KeyValueRow } from "../../lib/format";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Alert, Anchor, Breadcrumbs, Button, Card, Fieldset, Group, NumberInput, Skeleton, Stack, Text, TextInput, Title } from "@mantine/core";
@@ -16,7 +17,7 @@ function openUpdateModal(mut: ReturnType<typeof useUpdateProduct>): void {
 }
 
 function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateProduct>; onClose: () => void }) {
-  const { register, handleSubmit, control, formState: { errors } } = useForm<UpdateRequest>({
+  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<UpdateRequest>({
     resolver: zodResolver(UpdateRequest),
     defaultValues: { sku: "", price: { amount: 0, currency: "" } },
   });
@@ -29,7 +30,12 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateProduct>
           notifications.show({ color: "green", message: "Update succeeded" });
           onClose();
         } catch (e) {
-          notifications.show({ color: "red", message: (e as Error).message });
+          const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+          if (outcome.kind === "global") {
+            notifications.show({ color: "red", message: outcome.title });
+          } else if (outcome.kind === "unhandled") {
+            notifications.show({ color: "red", message: (e as Error).message });
+          }
         }
       })}
     >

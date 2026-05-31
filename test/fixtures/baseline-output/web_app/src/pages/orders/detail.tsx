@@ -114,7 +114,7 @@ function openUpdateModal(mut: ReturnType<typeof useUpdateOrder>): void {
 }
 
 function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateOrder>; onClose: () => void }) {
-  const { register, handleSubmit, control, formState: { errors } } = useForm<UpdateRequest>({
+  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<UpdateRequest>({
     resolver: zodResolver(UpdateRequest),
     defaultValues: { customerId: "", status: "Draft", placedAt: "" },
   });
@@ -127,7 +127,12 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateOrder>; 
           notifications.show({ color: "green", message: "Update succeeded" });
           onClose();
         } catch (e) {
-          notifications.show({ color: "red", message: (e as Error).message });
+          const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+          if (outcome.kind === "global") {
+            notifications.show({ color: "red", message: outcome.title });
+          } else if (outcome.kind === "unhandled") {
+            notifications.show({ color: "red", message: (e as Error).message });
+          }
         }
       })}
     >
