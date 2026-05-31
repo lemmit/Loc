@@ -282,21 +282,25 @@ export function renderEntity(
   createInternalLines.push("        return e;");
   createInternalLines.push("    }");
 
-  const createPublicLines = isRoot
-    ? [
-        `    public static ${entity.name} Create(${createInputFieldList
-          .map((f) => `${renderCsType(f.type)} ${f.name}`)
-          .join(", ")})`,
-        "    {",
-        `        var e = new ${entity.name}();`,
-        `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
-        ...createInputFieldList.map((f) => `        e.${upperFirst(f.name)} = ${f.name};`),
-        // Public Create factory — same "<init>" label as the hydration path.
-        emitTrace ? `        e.AssertInvariants("<init>");` : "        e.AssertInvariants();",
-        "        return e;",
-        "    }",
-      ]
-    : [];
+  // Public `Create(...)` factory gated on a canonical create — a
+  // non-constructible aggregate (no explicit/`crudish` create) exposes no
+  // public factory; it is reconstructed only via `_Create` (hydration).
+  const createPublicLines =
+    isRoot && isAgg(entity) && entity.canonicalCreate != null
+      ? [
+          `    public static ${entity.name} Create(${createInputFieldList
+            .map((f) => `${renderCsType(f.type)} ${f.name}`)
+            .join(", ")})`,
+          "    {",
+          `        var e = new ${entity.name}();`,
+          `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
+          ...createInputFieldList.map((f) => `        e.${upperFirst(f.name)} = ${f.name};`),
+          // Public Create factory — same "<init>" label as the hydration path.
+          emitTrace ? `        e.AssertInvariants("<init>");` : "        e.AssertInvariants();",
+          "        return e;",
+          "    }",
+        ]
+      : [];
 
   // Document-shape (shape(document)) round-trip mapping.  Emitted
   // ONLY for entities inside a document aggregate.  Both methods live

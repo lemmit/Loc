@@ -51,6 +51,7 @@ const LEGACY_SRC = `
 context Orders {
   aggregate Order {
     name: string
+    create(name: string) { name := name }
   }
   repository Orders for Order {}
 }

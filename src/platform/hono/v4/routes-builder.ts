@@ -5,7 +5,7 @@ import {
   takeSingleFieldChain,
 } from "../../../generator/typescript/zod-refine.js";
 import { wireShapeFor } from "../../../ir/enrich/enrichments.js";
-import { createInputFields } from "../../../ir/enrich/wire-projection.js";
+import { createInputFields, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -170,24 +170,29 @@ export function buildRoutesFile(
   lines.push("");
 
   // Request schemas — Create, per-public-operation, per-find query.
-  // `forCreateInput` excludes server-controlled fields (`managed`,
-  // `token`, `internal`) from the client-supplied payload, keeping
-  // `immutable` (settable on create) and `secret` (client provides
-  // password hashes / API keys).  Matches the .NET CreateRequest shape.
+  // The create schema + route are gated on `hasCreate`: an aggregate
+  // that declares no create (explicit/`crudish` → `canonicalCreate`) is
+  // not constructible over HTTP and emits neither.  `forCreateInput`
+  // excludes server-controlled fields (`managed`, `token`, `internal`)
+  // from the client-supplied payload, keeping `immutable` (settable on
+  // create) and `secret`.  Matches the .NET CreateRequest shape.
+  const emitCreate = hasCreate(agg);
   const requiredFields = createInputFields(agg);
-  lines.push(
-    ...emitWireSchema(
-      `const Create${agg.name}Request`,
-      `Create${agg.name}Request`,
-      requiredFields.map((f) => ({ name: f.name, base: zodFor(f.type) })),
-      agg.invariants,
-      new Set(agg.fields.map((f) => f.name)),
-    ),
-  );
-  lines.push(
-    `const Create${agg.name}Response = z.object({ id: z.string() }).openapi("Create${agg.name}Response");`,
-  );
-  lines.push("");
+  if (emitCreate) {
+    lines.push(
+      ...emitWireSchema(
+        `const Create${agg.name}Request`,
+        `Create${agg.name}Request`,
+        requiredFields.map((f) => ({ name: f.name, base: zodFor(f.type) })),
+        agg.invariants,
+        new Set(agg.fields.map((f) => f.name)),
+      ),
+    );
+    lines.push(
+      `const Create${agg.name}Response = z.object({ id: z.string() }).openapi("Create${agg.name}Response");`,
+    );
+    lines.push("");
+  }
 
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     lines.push(
@@ -260,57 +265,59 @@ export function buildRoutesFile(
   lines.push(`  const app = new OpenAPIHono();`);
   lines.push("");
 
-  // Create.
-  lines.push(`  app.openapi(`);
-  lines.push(`    createRoute({`);
-  lines.push(`      method: "post",`);
-  lines.push(`      path: "/",`);
-  lines.push(`      tags: ["${snake(plural(agg.name))}"],`);
-  lines.push(`      operationId: "${camelId(opCreate(agg.name))}",`);
-  lines.push(`      request: {`);
-  lines.push(
-    `        body: { content: { "application/json": { schema: Create${agg.name}Request } } },`,
-  );
-  lines.push(`      },`);
-  lines.push(`      responses: {`);
-  lines.push(`        201: {`);
-  lines.push(`          description: "Created",`);
-  lines.push(`          content: { "application/json": { schema: Create${agg.name}Response } },`);
-  lines.push(`        },`);
-  // create → 400 (domain / validation), per the shared error matrix.
-  lines.push(
-    `        400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-  );
-  lines.push(`      },`);
-  lines.push(`    }),`);
-  lines.push(`    async (c) => {`);
-  lines.push(`      const body = c.req.valid("json");`);
-  // Wrap each wire-shape field into the typed factory argument (brand
-  // ids, instantiate value objects).  Avoids `as never` and lets
-  // strict tsc catch shape drift between Zod and the domain class.
-  const createArgs = requiredFields
-    .map((f) => `${f.name}: ${wireToDomainExpr(`body.${f.name}`, f.type, ctx)}`)
-    .join(", ");
-  lines.push(`      const created = ${agg.name}.create({ ${createArgs} });`);
-  lines.push(`      await repo.save(created);`);
-  lines.push(
-    `      ${renderHonoLogCall("aggregateCreated", `aggregate: "${agg.name}", id: created.id as string`)}`,
-  );
-  if (emitTrace) {
-    // wire_out — outbound payload shape (keys only).  Bound to a const
-    // so `c.json` doesn't re-evaluate the payload expression alongside
-    // Object.keys.  See docs/proposals/observability.md.
-    lines.push(`      const out = { id: created.id as string };`);
+  // Create — gated on `hasCreate` (no canonical create ⇒ no POST route).
+  if (emitCreate) {
+    lines.push(`  app.openapi(`);
+    lines.push(`    createRoute({`);
+    lines.push(`      method: "post",`);
+    lines.push(`      path: "/",`);
+    lines.push(`      tags: ["${snake(plural(agg.name))}"],`);
+    lines.push(`      operationId: "${camelId(opCreate(agg.name))}",`);
+    lines.push(`      request: {`);
     lines.push(
-      `      ${renderHonoLogCall("wireOut", "keys: Object.keys(out as Record<string, unknown>)")}`,
+      `        body: { content: { "application/json": { schema: Create${agg.name}Request } } },`,
     );
-    lines.push(`      return c.json(out, 201);`);
-  } else {
-    lines.push(`      return c.json({ id: created.id as string }, 201);`);
+    lines.push(`      },`);
+    lines.push(`      responses: {`);
+    lines.push(`        201: {`);
+    lines.push(`          description: "Created",`);
+    lines.push(`          content: { "application/json": { schema: Create${agg.name}Response } },`);
+    lines.push(`        },`);
+    // create → 400 (domain / validation), per the shared error matrix.
+    lines.push(
+      `        400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+    lines.push(`      },`);
+    lines.push(`    }),`);
+    lines.push(`    async (c) => {`);
+    lines.push(`      const body = c.req.valid("json");`);
+    // Wrap each wire-shape field into the typed factory argument (brand
+    // ids, instantiate value objects).  Avoids `as never` and lets
+    // strict tsc catch shape drift between Zod and the domain class.
+    const createArgs = requiredFields
+      .map((f) => `${f.name}: ${wireToDomainExpr(`body.${f.name}`, f.type, ctx)}`)
+      .join(", ");
+    lines.push(`      const created = ${agg.name}.create({ ${createArgs} });`);
+    lines.push(`      await repo.save(created);`);
+    lines.push(
+      `      ${renderHonoLogCall("aggregateCreated", `aggregate: "${agg.name}", id: created.id as string`)}`,
+    );
+    if (emitTrace) {
+      // wire_out — outbound payload shape (keys only).  Bound to a const
+      // so `c.json` doesn't re-evaluate the payload expression alongside
+      // Object.keys.  See docs/proposals/observability.md.
+      lines.push(`      const out = { id: created.id as string };`);
+      lines.push(
+        `      ${renderHonoLogCall("wireOut", "keys: Object.keys(out as Record<string, unknown>)")}`,
+      );
+      lines.push(`      return c.json(out, 201);`);
+    } else {
+      lines.push(`      return c.json({ id: created.id as string }, 201);`);
+    }
+    lines.push(`    },`);
+    lines.push(`  );`);
+    lines.push("");
   }
-  lines.push(`    },`);
-  lines.push(`  );`);
-  lines.push("");
 
   // Get by id.
   lines.push(`  app.openapi(`);

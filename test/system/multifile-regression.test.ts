@@ -100,6 +100,7 @@ describe("multi-file regression — byte-identical with the single-file baseline
               aggregate Product {
                 sku: string
                 price: Money
+                create(sku: string, price: Money) { sku := sku  price := price }
               }
               repository Products for Product { }
             }

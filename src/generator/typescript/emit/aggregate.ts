@@ -1,4 +1,4 @@
-import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -29,6 +29,10 @@ import { renderTsStatements } from "../render-stmt.js";
 interface EntityShape {
   name: string;
   isRoot: boolean;
+  /** Whether the root aggregate declares a canonical create (explicit or
+   *  via `crudish`).  Gates the public `create(...)` factory; always false
+   *  for entity parts (they have no factory). */
+  hasCreate: boolean;
   rootName?: string;
   fields: FieldIR[];
   contains: ContainmentIR[];
@@ -134,6 +138,7 @@ function rootShape(a: AggregateIR): EntityShape {
   return {
     name: a.name,
     isRoot: true,
+    hasCreate: hasCreate(a),
     fields: a.fields,
     contains: a.contains,
     derived: a.derived,
@@ -147,6 +152,7 @@ function partShape(p: EntityPartIR, root: AggregateIR): EntityShape {
   return {
     name: p.name,
     isRoot: false,
+    hasCreate: false,
     rootName: root.name,
     fields: p.fields,
     contains: p.contains,
@@ -372,23 +378,27 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
   // server-initialised to `null` here.
   const createInputs = forCreateInput(e.fields);
   const createInputNames = new Set(createInputs.map((f) => f.name));
-  const createFactory = e.isRoot
-    ? [
-        `  static create(input: { ${createInputs
-          .map((f) => `${f.name}${f.optional ? "?" : ""}: ${renderTsType(f.type)}`)
-          .join("; ")} }): ${e.name} {`,
-        `    return new ${e.name}({`,
-        `      id: Ids.new${e.name}Id(),`,
-        ...e.fields.map((f) => {
-          if (!createInputNames.has(f.name)) return `      ${f.name}: null,`;
-          return `      ${f.name}: ${f.optional ? `input.${f.name} ?? null` : `input.${f.name}`},`;
-        }),
-        ...provFields.map((f) => `      ${f.name}_provenance: null,`),
-        ...e.contains.map((c) => `      ${c.name}: ${c.collection ? "[]" : "null"},`),
-        "    });",
-        "  }",
-      ]
-    : [];
+  // Public `create(...)` factory gated on a canonical create — a
+  // non-constructible aggregate (no explicit/`crudish` create) exposes no
+  // factory; it is reconstructed only via `_create` (repository hydration).
+  const createFactory =
+    e.isRoot && e.hasCreate
+      ? [
+          `  static create(input: { ${createInputs
+            .map((f) => `${f.name}${f.optional ? "?" : ""}: ${renderTsType(f.type)}`)
+            .join("; ")} }): ${e.name} {`,
+          `    return new ${e.name}({`,
+          `      id: Ids.new${e.name}Id(),`,
+          ...e.fields.map((f) => {
+            if (!createInputNames.has(f.name)) return `      ${f.name}: null,`;
+            return `      ${f.name}: ${f.optional ? `input.${f.name} ?? null` : `input.${f.name}`},`;
+          }),
+          ...provFields.map((f) => `      ${f.name}_provenance: null,`),
+          ...e.contains.map((c) => `      ${c.name}: ${c.collection ? "[]" : "null"},`),
+          "    });",
+          "  }",
+        ]
+      : [];
 
   // History drain — the route handler calls this inside the save
   // transaction and inserts one `provenance_records` row per lineage.

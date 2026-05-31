@@ -64,6 +64,17 @@ export function createInputFields(agg: AggregateIR): FieldIR[] {
   return forCreateInput(agg.fields);
 }
 
+/** Whether a backend emits a create surface (route + request DTO +
+ * factory) for this aggregate.  An aggregate is constructible — and so
+ * gets a create — iff it declares one (explicit `create(...)` or via
+ * `crudish`), which lowering records as `canonicalCreate`.  Aggregates
+ * with neither (and no all-defaulted synthesis) emit no create: they are
+ * constructed only through their own operations or seed data.  This
+ * replaces the pre-Stage-4 unconditional hard-coded create. */
+export function hasCreate(agg: AggregateIR): boolean {
+  return agg.canonicalCreate != null;
+}
+
 /** Fields clients may modify in an **update** request's editable
  * payload.  Excludes:
  *   - `managed`  — server lifecycle.

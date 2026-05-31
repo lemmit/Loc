@@ -43,6 +43,11 @@ function producesProblem(kind: OpErrorKind, indent = "    "): string[] {
 interface ControllerShape {
   idClrType: string;
   createCmdArgs: string[];
+  /** When true, the aggregate has a canonical `create` — emit a
+   *  `POST /` action dispatching `Create<Agg>Command`.  A non-constructible
+   *  aggregate (no explicit/`crudish` create) emits no create action,
+   *  request DTO, command, or response. */
+  createAction?: boolean;
   /** When true, the aggregate has a canonical `destroy` — emit a
    *  `DELETE /{id}` action dispatching `Destroy<Agg>Command`. */
   destroyAction?: boolean;
@@ -212,26 +217,32 @@ export function renderController(
       `    private readonly ILogger<${className}> _log;`,
       `    public ${className}(IMediator mediator, ILogger<${className}> log) { _mediator = mediator; _log = log; }`,
       "",
-      "    [HttpPost]",
-      `    [ProducesResponseType(typeof(Create${agg.name}Response), 201)]`,
-      ...producesProblem("create"),
-      `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
-      "    {",
-      `        var cmd = new Create${agg.name}Command(`,
-      ...createBody,
-      "        );",
-      "        var id = await _mediator.Send(cmd);",
-      // aggregate_created — business narrative, after the Mediator
-      // command's Send resolves with the new id.  Mirrors the Hono
-      // emission so cross-backend log consumers see the same event +
-      // fields ({Aggregate}, {Id}).
-      `        ${renderDotnetLogCall("aggregateCreated", [
-        { name: "aggregate", valueExpr: `"${agg.name}"` },
-        { name: "id", valueExpr: "id.Value" },
-      ])}`,
-      `        return CreatedAtAction(nameof(${actionName(opGetById(agg.name))}), new { id = id.Value }, new Create${agg.name}Response(id.Value));`,
-      "    }",
-      "",
+      // Create — POST / (gated on a canonical create; non-constructible
+      // aggregates emit no create action/command/DTO/response).
+      ...(shape.createAction !== false
+        ? [
+            "    [HttpPost]",
+            `    [ProducesResponseType(typeof(Create${agg.name}Response), 201)]`,
+            ...producesProblem("create"),
+            `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
+            "    {",
+            `        var cmd = new Create${agg.name}Command(`,
+            ...createBody,
+            "        );",
+            "        var id = await _mediator.Send(cmd);",
+            // aggregate_created — business narrative, after the Mediator
+            // command's Send resolves with the new id.  Mirrors the Hono
+            // emission so cross-backend log consumers see the same event +
+            // fields ({Aggregate}, {Id}).
+            `        ${renderDotnetLogCall("aggregateCreated", [
+              { name: "aggregate", valueExpr: `"${agg.name}"` },
+              { name: "id", valueExpr: "id.Value" },
+            ])}`,
+            `        return CreatedAtAction(nameof(${actionName(opGetById(agg.name))}), new { id = id.Value }, new Create${agg.name}Response(id.Value));`,
+            "    }",
+            "",
+          ]
+        : []),
       '    [HttpGet("{id}")]',
       `    [ProducesResponseType(typeof(${agg.name}Response), 200)]`,
       ...producesProblem("getById"),
