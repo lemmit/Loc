@@ -444,7 +444,7 @@ audience**. Pushing every event to every connected browser and filtering
 client-side is a data leak: events cross the trust boundary to browsers that
 shouldn't see them. Real systems are multi-tenant and per-user, so the relay
 must scope **before** the byte leaves the server. Loom already scopes *reads*
-two ways — and the push path reuses both verbatim:
+three ways — and the push path reuses all three verbatim:
 
 | Scoping tier | Read-side (today) | Push-side (this proposal) |
 |---|---|---|
@@ -495,6 +495,48 @@ Tenancy is implicit and fail-closed: with `tenancy by user.tenantId` declared,
 browsers can never receive another tenant's events, exactly as a tenant's reads
 can never see another tenant's rows. `scope:` is only for *intra-tenant*
 narrowing (per-customer, per-team, per-owner).
+
+#### What `currentUser` actually binds to here
+
+`scope: customerId == currentUser.customerId` reuses the read-side syntax, but
+the two sides resolve **on opposite ends of the wire, at different moments** —
+this is the one place the channel meaning departs from a `find … where`, and
+it's worth being exact:
+
+| Side of `==` | Whose data | Resolved when | Lowers to |
+|---|---|---|---|
+| `customerId` (left — a carried-event field) | the **producer's** payload (the order's owner) | at **`emit`** time, in the backend hosting context A | the room an event is *published to* |
+| `currentUser.customerId` (right — a claim) | the **subscriber** — the browser holding the socket | at **connect** time, from *its* bearer JWT | the room(s) a socket is *joined to* |
+
+So in a `find`, `currentUser` is the single caller of that request, resolved
+once → a SQL bind. In a channel `scope:`, `currentUser` is **the subscriber**,
+and the equality is a *rendezvous*: the compiler splits it into two pure
+projections that never evaluate together at runtime —
+
+```
+publish:    roomOf(event)        = [ event.tenantId?, event.customerId ]      // from the emitted payload
+subscribe:  roomsOf(currentUser) = [ claims.tenantId, claims.customerId ]     // from the JWT at handshake
+            socket gets event   ⟺  roomOf(event) ∈ roomsOf(currentUser)       // a key match, not a scan
+```
+
+That decomposition is *why* the field must be in the payload (the publish side
+has only the event) and *why* the RHS must be a `currentUser` claim (the
+subscribe side has only the JWT). They share no runtime context — only the room
+string.
+
+**Where the subscriber identity comes from is the existing auth plumbing**, not
+anything new — the SSE/WS connect is an authenticated request like any other:
+
+| Backend | Subscriber `currentUser` at connect | Room join |
+|---|---|---|
+| **Hono** | the same verifier middleware runs on the SSE/WS route; `c.get("currentUser")` is populated from the bearer token before the handler | handler computes `roomsOf(c.get("currentUser"))` and subscribes the stream to exactly those Redis/in-proc topics |
+| **.NET** | `ICurrentUserAccessor.User` on the hub/SSE connection (the SignalR hub auth runs `UserMiddleware` first) | `Groups.AddToGroupAsync(connId, room)` per derived room, in `OnConnectedAsync` |
+| **Phoenix LiveView** | `socket.assigns.current_user`, set in the LiveView `mount/3` from the session — identical to how a page already authenticates | `Phoenix.PubSub.subscribe(topic)` for each derived room topic |
+
+In every case the browser presents **only its token**; the server derives the
+rooms. The browser never names a room, a tenant, or a customer id — which is
+the whole point (property 1 above). Anonymous/unauthenticated connections get
+the tenant-or-public room only, and are rejected outright if `requires:` is set.
 
 **The validation that makes it sound** (`loom.channel-scope-*`):
 
