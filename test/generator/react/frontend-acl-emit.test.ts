@@ -148,7 +148,11 @@ describe("frontend ACL — wired into emitted form catch blocks (Phase 2)", () =
     const calls = src.match(/applyServerErrors\(\{/g) ?? [];
     expect(calls.length).toBe(3);
     // setError is destructured from useForm in every op-form component.
-    const setErrorDestructures = src.match(/\{\s*[^}]*setError[^}]*\}\s*=\s*useForm</g) ?? [];
+    // The destructure can carry a nested `formState: { errors }` (the
+    // crudish `update` form does), so match the field list with `[^=]`
+    // rather than `[^}]` — `[^}]` stops at the first inner `}` and
+    // under-counts forms with nested destructuring.
+    const setErrorDestructures = src.match(/\{[^=]*\bsetError\b[^=]*\}\s*=\s*useForm</g) ?? [];
     expect(setErrorDestructures.length).toBe(3);
   });
 
