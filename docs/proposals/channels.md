@@ -497,6 +497,21 @@ browsers can never receive another tenant's events, exactly as a tenant's reads
 can never see another tenant's rows. `scope:` is only for *intra-tenant*
 narrowing (per-customer, per-team, per-owner).
 
+> **Don't invent a parallel key — reuse `DataKey`.** The flat
+> `field == currentUser.field` equality above is the *simple* form. Loom's
+> authorization model already defines **`DataKey`** — a hierarchical
+> materialized path `{rootTenantId}.{parentId}.…` on `currentUser.dataKey`
+> ([`authorization.md`](./authorization.md) §2) whose whole purpose is that
+> reachability is *prefix arithmetic*. That is exactly a room-address prefix.
+> So the authz segment of a room key **is** the subscriber's `DataKey` (its
+> leftmost segment is the `TenantId` multi-tenancy auto-stamps), and a channel
+> needs an explicit `scope:` only for the flat per-owner case that isn't an
+> org-hierarchy prefix. Hierarchical channels carry no `scope:` at all — the
+> relay subscribes the socket to the `dataKey.*` subtree, and the policy
+> `data { reachable when … }` predicate decides membership, identically to the
+> read path. One key model (`DataKey`), two surfaces (SQL prefix filter on
+> read; room prefix on push).
+
 #### What `currentUser` actually binds to here
 
 `scope: customerId == currentUser.customerId` reuses the read-side syntax, but
@@ -613,6 +628,34 @@ within the authz prefix. Validation `loom.live-interest-unkeyed` fires if a
 page tries an instance-scoped `.live` (`byId(x)`) on a channel whose `key:`
 doesn't match that aggregate's id — there'd be no leaf to subscribe to.
 
+### One key, three consumers — the room key *is* the cache-invalidation key
+
+This room-key structure is not channels-specific; it's the **same key** three
+features need, and the corpus already says so. `production-readiness.md` §3.4
+("Caching & invalidation") states the cache "reuses [messaging's] event stream:
+a mutation publishes an event, the cache layer invalidates the affected
+query-key prefix … the generated React Query keys already form the invalidation
+prefixes," and `multi-tenancy-design-note.md` says "magic caching" routes
+change-tickets to the per-tenant room. So rather than mint a channels-only key,
+this proposal **derives one canonical key** that all three read off:
+
+| Consumer | Uses the key as | Operation |
+|---|---|---|
+| **Channel room** (this doc) | broker subject / room a socket joins | subscribe by prefix; publish to the fully-qualified leaf |
+| **Cache invalidation** (`production-readiness.md` §3.4) | the cache-entry prefix to evict | a save's event → evict `key.*` |
+| **React Query** (today, `api-builder.ts`) | the client cache key | `["orders", id]` / `["orders"]`; `invalidateQueries` is prefix eviction |
+
+All three are the same shape — `[aggregate, …DataKey segments…, interestLeaf]`
+— and all three invalidate/deliver by **prefix**. The React Query keys the
+frontend already emits (`["orders"]` ⊃ `["orders", 42]`) *are* the leaf of this
+hierarchy; the server room/cache key is that same path with the `DataKey` authz
+prefix prepended. The unifying type below (`DataKeyPathIR`) is therefore named
+to signal it is **not** a channels invention — it's the shared address the
+caching proposal, when written, should consume rather than redefine. The honest
+boundary: this proposal *derives and emits* the key for the push path; wiring it
+into a read-through cache is `production-readiness.md` §3.4's job and stays out
+of scope here — but it will find the key already built, not have to invent it.
+
 ## IR, lowering, enrichment (phase mapping)
 
 Following the `view`/`criterion`/`workflow` vertical-slice recipe:
@@ -625,22 +668,29 @@ export interface ChannelIR {
   carries: string[];                 // event type names (resolved, this context's published events)
   delivery: "broadcast" | "queue";
   retention: "ephemeral" | "log" | "work";
-  key?: string;                      // field name common to carried events
-  scope?: RoomKeyIR;                 // subchannel predicate, validated to equality → room tokens
+  key?: string;                      // field name common to carried events (= the interest leaf)
+  scope?: ExprIR;                    // OPTIONAL flat per-owner authz (field == currentUser.field);
+                                     // omitted when the DataKey prefix already scopes (the common case)
   requires?: ExprIR;                 // capability gate evaluated at connect (reuses requires lowering)
   // NO realtime/transport field — the contract is wire-agnostic.
 }
-// Derived in enrich: the ordered room-token spec, in two segments.
-//   authz  — pinned by the subscriber's JWT; the browser cannot widen these.
-//            Tenancy is auto-prepended as the leftmost authz token when the
-//            system declares `tenancy by …` (fail-closed).
-//   interest — the `key:` field; the leaf the page's .live binding selects
-//            (a concrete value for byId(x), a wildcard for all). Subscribe-time
-//            only; the publish side always emits the concrete leaf from payload.
-export interface RoomKeyIR {
-  authz:    { eventField: string; claimField: string }[];  // each = `<eventField> == currentUser.<claimField>`
-  interest?: { eventField: string };                        // = channel `key:`; wildcard-able by the subscriber
+
+// The SHARED address — not a channels type. Named to signal reuse by the
+// future caching proposal (production-readiness.md §3.4) and aligned with
+// React Query's client key. A materialized path; reachability/eviction/
+// delivery are all PREFIX operations over it.
+//   authz    — the subscriber's `DataKey` segments (leftmost = TenantId).
+//              Pinned by the JWT; the client cannot widen them. From
+//              currentUser.dataKey (authorization.md), NOT re-derived here.
+//   interest — the `key:` field: the leaf a page's .live binding selects
+//              (concrete for byId(x); wildcard for all). Publish always emits
+//              the concrete leaf from payload; subscribe may wildcard it.
+export interface DataKeyPathIR {
+  authz:    DataKeySegment[];        // the DataKey segments from authorization.md (tenancy = segment 0);
+                                     // reused, not redefined here
+  interest?: { eventField: string }; // = channel `key:`
 }
+// ChannelIR gains (derived in enrich): roomKey: DataKeyPathIR
 // stored on BoundedContextIR.channels: ChannelIR[]  (sibling of events / views)
 export interface ReactorIR {
   event: string; param: string;
@@ -661,10 +711,11 @@ export interface ChannelSourceIR { channel: string; storage: string; }
   machinery.
 - **⑥ enrich** — derive each event's *routing set* (channels carrying it) and
   attach it to the publish side, so the dispatcher emitter knows where each
-  `emit` goes. Build each channel's `RoomKeyIR` (prepend the system tenancy
-  token when `tenancy by …` is set; append the `scope:` equality tokens),
-  which is what the room-publish (server) and room-subscribe (relay) emitters
-  consume. Derive, per frontend deployable, the resolved realtime wire
+  `emit` goes. Build each channel's `DataKeyPathIR` (authz segments from the
+  subscriber's `DataKey` — leftmost = `TenantId` — plus the `key:` interest
+  leaf; an explicit flat `scope:` only when there's no hierarchical prefix),
+  which is what the room-publish (server), room-subscribe (relay), and (later)
+  cache-eviction emitters all consume. Derive, per frontend deployable, the resolved realtime wire
   (`realtimeWire` override ?? `PlatformSurface` default) and the set of
   channels any of its pages `.live`-subscribe. This is the natural sibling of
   the existing `migrationsOwner` enrichment.
@@ -688,8 +739,8 @@ hook a real, channel-driven implementation."** Producer code is untouched.
 
 | Backend | Publish (dispatcher impl) | Consume (`on` reactor) | Realtime (relay + rooms) |
 |---|---|---|---|
-| **Hono** | `DomainEventDispatcher` that fans an event to each carrying channel's driver: in-proc `EventEmitter` / `ioredis` pub/sub / `kafkajs` producer / `amqplib`. Publishes to the **room** derived from the event's `RoomKeyIR` (e.g. `lifecycle:{tenant}:{customerId}`). | per-channel subscriber loop → reuses the generated **workflow handler** for the reactor body; `queue` ⇒ consumer-group / `BLPOP`; ack on success. | `streamSSE` / `ws` endpoint; on connect runs `requires:` (403 on fail) and joins the socket **only** to the rooms computed from `currentUser` claims — never a client-supplied room. |
-| **.NET** | `IDomainEventDispatcher` → in-proc MediatR notification / MassTransit publish (Redis/RabbitMQ/Kafka transport) — DI-registered like the existing `AddScoped` repos. Room from `RoomKeyIR`. | `IConsumer<T>` / `INotificationHandler<T>` invoking the reactor's Mediator command (same handler the workflow controller calls). | SSE (`text/event-stream`) or a SignalR hub; SignalR **Groups** *are* rooms — `Groups.AddToGroupAsync(conn, roomFromClaims)` after the `ICurrentUserAccessor` auth gate. |
+| **Hono** | `DomainEventDispatcher` that fans an event to each carrying channel's driver: in-proc `EventEmitter` / `ioredis` pub/sub / `kafkajs` producer / `amqplib`. Publishes to the **room** derived from the event's `DataKeyPathIR` (e.g. `orders:{dataKey}:{order}`). | per-channel subscriber loop → reuses the generated **workflow handler** for the reactor body; `queue` ⇒ consumer-group / `BLPOP`; ack on success. | `streamSSE` / `ws` endpoint; on connect runs `requires:` (403 on fail) and joins the socket **only** to the rooms computed from `currentUser` claims — never a client-supplied room. |
+| **.NET** | `IDomainEventDispatcher` → in-proc MediatR notification / MassTransit publish (Redis/RabbitMQ/Kafka transport) — DI-registered like the existing `AddScoped` repos. Room from `DataKeyPathIR`. | `IConsumer<T>` / `INotificationHandler<T>` invoking the reactor's Mediator command (same handler the workflow controller calls). | SSE (`text/event-stream`) or a SignalR hub; SignalR **Groups** *are* rooms — `Groups.AddToGroupAsync(conn, roomFromClaims)` after the `ICurrentUserAccessor` auth gate. |
 | **Phoenix LiveView** | `Phoenix.PubSub.broadcast(topic)` (ephemeral) / Broadway + Ash (durable), where `topic` is the room. | an Ash reactor / `GenServer` `handle_info` running the reactor body as an Ash action. | **native** — `subscribe` to the room topic derived from `socket.assigns.current_user`; `handle_info` re-assigns the stream. Rooms are just PubSub topics. |
 | **React** (consumer of realtime) | — | — | generated SSE/WS client; connects with its bearer token (server derives rooms); `.live` refs invalidate/patch React Query cache keyed by `channel.key`. |
 
@@ -771,7 +822,7 @@ workflow slice trails.
 4. **UI `.live` over SSE (React), broadcast to all** — derived SSE endpoint +
    generated client + `.live` cache invalidation; `realtimeWire` defaulting on
    `PlatformSurface`. **Single-tenant, no `scope:` yet.** (`LOOM_REACT_BUILD`.)
-5. **Subchannels — authz rooms + interest leaf** — `RoomKeyIR` derivation
+5. **Subchannels — authz rooms + interest leaf** — `DataKeyPathIR` derivation
    (authz tokens from `scope:`/tenancy; interest token from `key:`), the
    `loom.channel-scope-*` validators, room-keyed publish, the connect-time
    `requires:` 403 gate, and the **`.live` interest lowering** (`byId(x)` →
@@ -816,3 +867,9 @@ the same honest line NATS draws.
 - [`docs/workflow.md`](../workflow.md) — the `emit` producer + dispatcher seam.
 - [`deployable-networking.md`](./deployable-networking.md) — inter-deployable
   wiring (the synchronous peer to this proposal's async channels).
+- [`authorization.md`](./authorization.md) + [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md)
+  — `DataKey` / `tenancy by` / `currentUser.dataKey`: the authz prefix the room
+  key **reuses** rather than redefines.
+- [`production-readiness.md`](./production-readiness.md) §3.4 — the (unwritten)
+  caching proposal that consumes the *same* `DataKeyPathIR` for prefix
+  invalidation; this proposal builds the key, that one evicts by it.
