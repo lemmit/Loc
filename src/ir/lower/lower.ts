@@ -980,6 +980,7 @@ function lowerUi(ui: Ui): UiIR {
   }
   return {
     name: ui.name,
+    framework: ui.framework,
     pages,
     components,
     menu,

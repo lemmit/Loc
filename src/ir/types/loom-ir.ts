@@ -1178,6 +1178,13 @@ export interface TestE2EIR {
  *  page is a first-class PageIR with no special-cased provenance. */
 export interface UiIR {
   name: string;
+  /** D-PHOENIX-SURFACE: the framework this UI renders against, declared
+   *  on the `ui { framework: … }` block itself rather than derived from
+   *  the hosting deployable's platform.  `undefined` when the source
+   *  omits it (the legacy path: the deployable's `uiFramework` still
+   *  derives from its platform).  Values are `Framework` grammar
+   *  strings (`react` | `phoenixLiveView`). */
+  framework?: string;
   pages: PageIR[];
   components: ComponentIR[];
   /** Optional ui-level menu block.  When undefined the sidebar is

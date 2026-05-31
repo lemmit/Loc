@@ -249,6 +249,12 @@ AuthMode returns string:
 
 Ui:
     'ui' name=ID withClause=WithClause? '{'
+        // D-PHOENIX-SURFACE: the UI's framework is part of its own
+        // technical identity, not derived from the host backend.
+        // Optional + additive — existing sources omit it and keep the
+        // legacy "framework derived from the deployable's platform"
+        // path until the `hosts:` work consumes it.
+        ('framework' ':' framework=Framework ','?)?
         members+=UiMember*
     '}';
 

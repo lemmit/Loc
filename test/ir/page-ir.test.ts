@@ -486,4 +486,48 @@ describe("page metamodel — IR shape", () => {
     const platforms = firstSystem(loom).deployables.map((d) => d.platform);
     expect(platforms).toContain("static");
   });
+
+  // D-PHOENIX-SURFACE phase 2 — `framework` on the `ui` declaration.
+  describe("ui framework (D-PHOENIX-SURFACE)", () => {
+    it("lowers a declared `framework:` onto UiIR", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          ui WebApp { framework: react }
+        }
+      `);
+      expect(uiByName(loom, "WebApp").framework).toBe("react");
+    });
+
+    it("accepts `phoenixLiveView` as a ui framework", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          ui Admin { framework: phoenixLiveView }
+        }
+      `);
+      expect(uiByName(loom, "Admin").framework).toBe("phoenixLiveView");
+    });
+
+    it("leaves `framework` undefined when the source omits it (legacy path)", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          ui Plain { }
+        }
+      `);
+      expect(uiByName(loom, "Plain").framework).toBeUndefined();
+    });
+
+    it("coexists with page members after the framework line", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          ui WebApp {
+            framework: react
+            page Home { route: "/" }
+          }
+        }
+      `);
+      const ui = uiByName(loom, "WebApp");
+      expect(ui.framework).toBe("react");
+      expect(ui.pages.map((p) => p.name)).toEqual(["Home"]);
+    });
+  });
 });
