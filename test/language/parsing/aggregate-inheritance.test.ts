@@ -333,7 +333,7 @@ system Sys {
     expect(errors.length).toBeGreaterThan(0);
   });
 
-  it("drops the abstract base from the generation view — no parties table/repo, concretes emit", async () => {
+  it("drops the abstract base's TABLE from the generation view (concretes are standalone)", async () => {
     const model = await parseValid(OWN_TABLE);
     const { files } = generateSystems(model);
     const all = [...files.values()].join("\n");
@@ -345,10 +345,36 @@ system Sys {
     // Inherited base fields ride along on the concrete's table.
     expect(all).toMatch(/text\("email"\)/);
     expect(all).toMatch(/numeric\("credit_limit"\)/);
-    // The abstract base emits no domain / repository / routes files either.
+    // The abstract base contributes no TABLE and no HTTP routes/mount…
     const paths = [...files.keys()];
     expect(paths.some((p) => /customer/i.test(p))).toBe(true);
-    expect(paths.some((p) => /domain\/party|party-repository|party\.routes/i.test(p))).toBe(false);
+    expect(paths.some((p) => /party\.routes/i.test(p))).toBe(false);
+    const idx = files.get("api/http/index.ts") ?? "";
+    expect(idx).not.toMatch(/app\.route\("\/parties"/);
+    // …but on Hono it DOES emit the polymorphic read home: the `Party` union
+    // + a read-only `PartyRepository` that delegates to the concrete repos
+    // (the `find all Party` reader — covered in detail below).
+    expect(paths).toContain("api/domain/party.ts");
+    expect(paths).toContain("api/db/repositories/party-repository.ts");
+  });
+
+  it("emits a TPC base reader: `find all Party` delegates to each concrete repo", async () => {
+    const { files } = generateSystems(await parseValid(OWN_TABLE));
+    const union = files.get("api/domain/party.ts") ?? "";
+    expect(union).toMatch(/export type Party = Customer/);
+    // Not a `kind`-discriminated shared table — resolved per-table.
+    expect(union).toMatch(/each concrete is its own table/);
+    const reader = files.get("api/db/repositories/party-repository.ts") ?? "";
+    expect(reader).toMatch(/export class PartyRepository/);
+    // Constructs the concrete repos and delegates.
+    expect(reader).toMatch(/new CustomerRepository\(db, events\)/);
+    expect(reader).toMatch(/async findAll\(\): Promise<Party\[\]>/);
+    expect(reader).toMatch(/this\.customerRepo\.all\(\)/);
+    // findById tries each concrete in turn.
+    expect(reader).toMatch(/async findById\(id: Ids\.PartyId\): Promise<Party \| null>/);
+    expect(reader).toMatch(/this\.customerRepo\.findById\(/);
+    // Read-only: no save/delete.
+    expect(reader).not.toMatch(/async save\(/);
   });
 
   it("rejects a polymorphic 'Base id' reference to an abstract base (loom.polymorphic-id-ref-unsupported)", async () => {
