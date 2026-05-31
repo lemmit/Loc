@@ -1,5 +1,6 @@
 // Auto-generated.  Do not edit by hand.
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { ProblemDetails, newApp } from "./problem-details";
 import { Customer } from "../domain/customer";
 import type { CustomerRepository } from "../db/repositories/customer-repository";
 import * as Ids from "../domain/ids";
@@ -30,10 +31,9 @@ export const CustomerResponse = z.object({
   display: z.string(),
 }).openapi("CustomerResponse");
 export const CustomerListResponse = z.array(CustomerResponse).openapi("CustomerListResponse");
-const ProblemDetails = z.object({ type: z.string().nullish(), title: z.string().nullish(), status: z.number().int().nullish(), detail: z.string().nullish(), instance: z.string().nullish() }).openapi("ProblemDetails");
 
 export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
-  const app = new OpenAPIHono();
+  const app = newApp();
 
   app.openapi(
     createRoute({
@@ -50,6 +50,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
           content: { "application/json": { schema: CreateCustomerResponse } },
         },
         400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
+        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {
@@ -122,6 +123,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
       responses: {
         204: { description: "No content" },
         400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
+        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
         404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),

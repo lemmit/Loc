@@ -97,6 +97,86 @@ export class ExternHandlerError extends Error {
 }
 `;
 
+/** Shared HTTP error shape — RFC 7807 ProblemDetails with the §3.2 `errors[]`
+ *  extension for per-field validation failures.  See
+ *  docs/proposals/validation-error-extension.md.
+ *
+ *  Emitted once per project at `http/problem-details.ts`; the three router
+ *  files (`http/<agg>.ts`, `http/workflows.ts`, `http/views.ts`) import the
+ *  `ProblemDetails` Zod schema (for OpenAPI declarations) and the
+ *  `defaultHook` (passed to `new OpenAPIHono({ defaultHook })` so Zod parse
+ *  failures translate to 422 ProblemDetails with per-field `errors[]`
+ *  consumed by the frontend ACL's `applyServerErrors`). */
+const PROBLEM_DETAILS_TS = `// Auto-generated.  Do not edit by hand.
+import { z } from "zod";
+import { OpenAPIHono } from "@hono/zod-openapi";
+import type { Context } from "hono";
+
+/** RFC 7807 ProblemDetails body, including the §3.2 \`errors[]\` extension
+ *  used by the validation-failure path.  All fields optional (matching the
+ *  base spec); \`errors\` is only present on 422 validation failures.
+ *  Consumed by the frontend ACL's \`applyServerErrors\` runtime. */
+export const ProblemDetails = z.object({
+  type: z.string().nullish(),
+  title: z.string().nullish(),
+  status: z.number().int().nullish(),
+  detail: z.string().nullish(),
+  instance: z.string().nullish(),
+  errors: z.array(z.object({ pointer: z.string(), message: z.string() })).nullish(),
+}).openapi("ProblemDetails");
+
+/** RFC 6901 JSON pointer from a Zod issue path.  Empty path → empty
+ *  pointer (\`""\`, "the whole document").  Segments are slash-joined;
+ *  literal \`~\` and \`/\` inside a segment are escaped to \`~0\` / \`~1\`. */
+function pointerOf(path: ReadonlyArray<string | number>): string {
+  if (path.length === 0) return "";
+  return "/" + path.map((seg) =>
+    typeof seg === "number"
+      ? String(seg)
+      : seg.replace(/~/g, "~0").replace(/\\//g, "~1"),
+  ).join("/");
+}
+
+/** Default Zod-validation hook.  When a route's request validator
+ *  rejects input, this fires before the handler runs and produces a 422
+ *  ProblemDetails with the per-field \`errors[]\` extension.  The shape
+ *  is the contract consumed by the frontend ACL — see
+ *  docs/proposals/frontend-acl.md and apply-server-errors.ts in the
+ *  generated React project.
+ *
+ *  Validation failures get 422 (Unprocessable Entity, RFC 7807 standard
+ *  for input-shape errors).  Domain-rule violations carried by
+ *  DomainError continue to emit 400 via the router's \`app.onError\`
+ *  catch-all (different fault class, different code). */
+export function defaultHook(result: { success: boolean; error?: { issues: ReadonlyArray<{ path: ReadonlyArray<string | number>; message: string }> } }, c: Context): Response | undefined {
+  if (result.success) return undefined;
+  const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
+  const errors = (result.error?.issues ?? []).map((issue) => ({
+    pointer: pointerOf(issue.path),
+    message: issue.message,
+  }));
+  return c.body(
+    JSON.stringify({
+      type: "about:blank",
+      title: "Validation failed",
+      status: 422,
+      detail: "One or more fields are invalid.",
+      instance: c.req.path,
+      errors,
+    }),
+    422,
+    { "content-type": "application/problem+json", "x-request-id": trace_id },
+  );
+}
+
+/** Factory: \`new OpenAPIHono()\` with the validation \`defaultHook\` pre-wired.
+ *  Routers import this instead of constructing OpenAPIHono directly so the
+ *  hook is always installed without per-router boilerplate. */
+export function newApp(): OpenAPIHono {
+  return new OpenAPIHono({ defaultHook });
+}
+`;
+
 /** Provenance lineage types — emitted only when the model declares at
  *  least one `provenanced` field that is actually written.  Each
  *  provenanced write builds a `ProvLineage` referencing the compile-time
@@ -192,6 +272,7 @@ export function generateTypeScriptForContexts(
   out.set("domain/value-objects.ts", renderEnumsAndValueObjects(merged));
   out.set("domain/events.ts", renderEvents(merged));
   out.set("domain/errors.ts", ERRORS_TS);
+  out.set("http/problem-details.ts", PROBLEM_DETAILS_TS);
   if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);
   // Per-aggregate dataSource lookup — feeds `pgSchema(...)` /
   // `<schema>.table(...)` / `tablePrefix` routing in `renderSchema`.

@@ -108,17 +108,19 @@ export function buildWorkflowsFile(
     }
     body.push(`}).openapi("${upperFirst(wf.name)}Request");`);
   }
-  // Shared RFC 7807 error body (deduped by name across router files).
-  body.push(
-    `const ProblemDetails = z.object({ type: z.string().nullish(), title: z.string().nullish(), status: z.number().int().nullish(), detail: z.string().nullish(), instance: z.string().nullish() }).openapi("ProblemDetails");`,
-  );
+  // RFC 7807 ProblemDetails (with §3.2 `errors[]` extension for validation
+  // failures) lives in `http/problem-details.ts` — imported at the top of
+  // this file.  Same Zod schema instance referenced in every router so
+  // OpenAPI dedupes the component definition.
   body.push("");
 
   body.push(`export function workflowsRoutes(`);
   body.push(`  db: NodePgDatabase<typeof schema>,`);
   body.push(`  events: DomainEventDispatcher,`);
   body.push(`): OpenAPIHono {`);
-  body.push(`  const app = new OpenAPIHono();`);
+  // `newApp()` from `./problem-details` pre-wires the validation hook
+  // that maps Zod parse failures to 422 ProblemDetails with `errors[]`.
+  body.push(`  const app = newApp();`);
   body.push("");
 
   for (const wf of ctx.workflows) {
@@ -184,6 +186,7 @@ export function buildWorkflowsFile(
   const imports: string[] = [];
   imports.push("// Auto-generated.  Do not edit by hand.");
   imports.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
+  imports.push(`import { ProblemDetails, newApp } from "./problem-details";`);
   if (usesIds) imports.push(`import * as Ids from "../domain/ids";`);
   if (errorClasses.length > 0) {
     imports.push(`import { ${errorClasses.join(", ")} } from "../domain/errors";`);
@@ -263,9 +266,13 @@ function emitWorkflowRoute(
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
-  // workflow → 400 (domain / validation), per the shared error matrix.
+  // workflow → 400 (domain) + 422 (input validation → ProblemDetails with
+  // `errors[]`), per the matrix + docs/proposals/validation-error-extension.md.
   out.push(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  out.push(
+    `      422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   out.push(`    },`);
   out.push(`  }),`);
