@@ -379,7 +379,7 @@ ui WebApp {
   page OrderBoard {
     route: "/board"
     // A live READ — just a cached query; auto-fresh while on screen. No marker;
-    // its freshness semantics are caching.md's, it rides the wire below.
+    // its freshness semantics are Part II's; it rides the wire below.
     body: For { Sales.Order.all, o => Card { o.id, o.status } }
   }
 }
@@ -409,7 +409,7 @@ never on the `channel` (contract). Most authors never write it.
 
 ```langium
 // UiMember += UiChannelParam  +  an `on Param.Event(p){…}` live-event handler.
-// (Live READS need no UI syntax — a cached query is auto-fresh; see caching.md.)
+// (Live READS need no UI syntax — a cached query is auto-fresh; see Part II.)
 UiChannelParam: 'channel' name=ID ':' channel=[Channel:ID];
 UiNotification:  'on' param=[UiChannelParam:ID] '.' event=[EventDecl:ID]
                  '(' bind=ID ')' '{' body+=Statement* '}';
@@ -419,7 +419,7 @@ Per-frontend lowering of the realtime wire (both planes ride it):
 
 | Platform | Realtime mechanism | Lowers to |
 |---|---|---|
-| **React** (`hono`/`static` target) | `EventSource` (SSE) or `WebSocket` client in the generated `api/` client | one subscription; an **event** ticket → render via the `on` handler; an **invalidation** ticket → `queryClient.invalidateQueries([...])` (caching.md). |
+| **React** (`hono`/`static` target) | `EventSource` (SSE) or `WebSocket` client in the generated `api/` client | one subscription; an **event** ticket → render via the `on` handler; an **invalidation** ticket → `queryClient.invalidateQueries([...])` (Part II). |
 | **Phoenix LiveView** | **native** — `Phoenix.PubSub.subscribe` + `handle_info` | a `handle_info({:order_shipped, …}, socket)` re-`assign`s the stream; LiveView diffs and pushes over its own WebSocket. No client code. |
 
 This is where the layering pays off: Phoenix LiveView's WebSocket fabric is
@@ -1139,9 +1139,9 @@ export interface ChannelIR {
 //   admission predicate (the same read-side authz that gates GET /orders/42).
 //
 //   INTEREST — the React Query key (what changed / what to refetch). Defined and
-//   used in caching.md (cache key = invalidation key = room-routing key). The
+//   used in Part II (cache key = invalidation key = room-routing key). The
 //   delivery side only needs the resource room; the client maps it to its query
-//   keys. So `InvalidationRuleIR` / `QueryKeyIR` live in caching.md, not here.
+//   keys. So `InvalidationRuleIR` / `QueryKeyIR` live in Part II, not here.
 //
 // ChannelIR gains (derived in enrich):
 //   visibility: DataKeyRef   — room namespace + admission, from authorization.md (reused)
@@ -1169,7 +1169,7 @@ export interface ChannelSourceIR { channel: string; storage: string; }
   subscribe-time admission). For *delivery*, a pushed event goes to the resource
   room `{tenant}:{resource}` and the relay joins a socket to the rooms its claims
   admit. (The *what-to-refetch* map — `InvalidationRuleIR`, `save`-driven — is enriched in
-  caching.md, reusing this same routing seam.) Derive, per frontend deployable,
+  Part II, reusing this same routing seam.) Derive, per frontend deployable,
   the resolved realtime wire (`realtimeWire` override ?? `PlatformSurface`
   default) and the set of channels its pages subscribe to (live events) or read live (cached queries). Sibling of the
   existing `migrationsOwner` enrichment.
