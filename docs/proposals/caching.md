@@ -50,7 +50,7 @@ arbitrary.
    *no* interest; the **query key** is interest and is *also* the cache key and
    invalidation key. Conflating them was the root error.
 5. **Realisation 3 — the magic-caching link.** Because interest *is* the React
-   Query key, `.live` realtime and cache-invalidation are the **same mechanism**:
+   Query key, realtime cache-freshness and cache-invalidation are the **same mechanism**:
    a change publishes an invalidation ticket for the affected query keys; the
    server cache evicts them and every live client refetches through the already
    authorized read. → **invalidation rides `save`** (type+id always known), not
@@ -92,23 +92,24 @@ first:
 | | **Live read** (this doc) | **Live event** (`channels.md`, plane 2/3) |
 |---|---|---|
 | What's shown | *current state* — a query result that stays fresh | *the events themselves* — a feed of "Order #42 shipped", a toast |
-| UI construct | `.live` on a **query** (`Order.all.live`) | **subscribe to an event channel**, render its payloads |
+| UI construct | **an ordinary cached query** (`cached: tagged`); no special marker | **subscribe to an event channel**, render its payloads |
 | Fed by | the **invalidation stream**, derived from **`save`** (any state change) | the **event channel** (`channel { carries: OrderShipped }`), driven by **`emit`** |
 | Payload | **ticket** (no data) → client refetches the authorized read | **event data** (rendered directly) |
 | Backed by | **persisted** state (a table / view) | often **ephemeral** (transient notification, presence) |
 
-`.live` is therefore a **cache-freshness** construct — it keeps a *persisted
-read* current, driven by `save`. Displaying the event stream itself is the
+A live read is therefore not a special query — it's **a cached query that's
+on-screen while the client receives invalidation signals** ("live" is emergent;
+see "Automatic invalidation" below). Displaying the event stream itself is the
 *separate* live-event construct in `channels.md` (plane 2/3), which carries event
 payloads and is scoped at delivery. The boundary is simply: **is the displayed
-thing persisted state or an ephemeral event stream?** Persisted → `.live` (here);
-ephemeral → event subscription (`channels.md`).
+thing persisted state or an ephemeral event stream?** Persisted → a cached query
+(here); ephemeral → event subscription (`channels.md`).
 
 Two consequences worth stating, because the previous draft blurred them:
 
 - **Cache invalidation is `save`-driven, not event-driven.** A `save` (any
   aggregate state change, including a projection's own read-model save) is what
-  busts the cache and refreshes a `.live` read. Domain events (`emit`) are for
+  busts the cache and refreshes any cached on-screen read. Domain events (`emit`) are for
   *display* (live events) and *choreography* (reactors) — **not** a cache trigger.
 - **Most "show events on the frontend" is actually a live read over a persisted
   log** (a Notifications / activity table that grows by `save`), not an ephemeral
@@ -123,22 +124,29 @@ query key is *already* the React Query cache key:
 
 | Page binding | Query key | Interest |
 |---|---|---|
-| `Order.all.live` | `["orders"]` | the collection |
-| `Order.byId(42).live` | `["orders", 42]` | one instance |
-| `Order.mine().live` | `["orders","find","mine",args]` | a named find |
+| `Order.all` | `["orders"]` | the collection |
+| `Order.byId(42)` | `["orders", 42]` | one instance |
+| `Order.mine()` | `["orders","find","mine",args]` | a named find |
 
 The interest key is **not declared** on a channel or a read — it's the key the
 frontend already emits. So nothing new is invented; the cache layer reads what's
 there.
 
-## `.live` and the save→query-keys map
+## Automatic invalidation — there is no special "live" query
 
-`.live` on a query means: **"keep this React Query entry live — on an
-invalidation ticket for its key, refetch (or patch); the same ticket the server
-cache evicts by."** The one piece of derived logic is the **save → query-keys
-map**: *which cached queries does a state change invalidate?* — driven by `save`
-(not by domain events; those are display/choreography, see "Live reads vs live
-events"):
+There is **no per-query `.live` marker** (and React Query has no such concept —
+it has `useQuery` + manual `invalidateQueries`; server-push is wired by hand).
+Instead: **any `cached: tagged` read is invalidated automatically when its
+resources change.** "Live" is *emergent*, not a query type:
+
+- an **active** (mounted, on-screen) cached query refetches **immediately** on
+  invalidation — React Query's default — so it updates live with no marker;
+- an **inactive** (cached but unmounted) query is marked stale and refetched
+  lazily on its next mount.
+
+The one piece of derived logic is the **save → query-keys map**: *which cached
+queries does a state change invalidate?* — driven by `save` (not by domain
+events; those are display/choreography, see "Live reads vs live events"):
 
 ```
 save(Order 42)        →  invalidates  ["orders"], ["orders", 42], (finds whose result it could change)
@@ -150,9 +158,24 @@ evicts the keys, the CDN purges the tags, the realtime relay publishes a ticket
 to each key's room, and the client `invalidateQueries` them. Derived from the
 read/view AST, so it can't drift.
 
+### How the signal reaches the client — eager vs lazy (a coarse knob, not per query)
+
+Invalidation is automatic; the only choice is *how the "changed" signal arrives*,
+and it's a single per-UI/deployment setting, not a per-query keyword:
+
+| Delivery | Mechanism | Cost |
+|---|---|---|
+| **Eager (push)** | one SSE/WS connection per client, subscribed to its resource scope; a ticket → `invalidateQueries` → active queries refetch instantly | one connection per client |
+| **Lazy** | revalidate on access — ETag/`If-None-Match` → `304` on next mount/focus, or `staleTime` | no socket |
+
+Eager push is what makes on-screen reads "live"; lazy is plain
+stale-while-revalidate. Default to lazy unless the app already holds a realtime
+connection (e.g. for live events), then reuse it. Either way the *correctness* —
+never serving knowingly-stale data — is the same; only the latency differs.
+
 ## Tickets vs payloads — the default that makes scoping a non-problem
 
-A `.live` push **does not need to carry the data** — it needs to carry "your key
+An invalidation push **does not need to carry the data** — it needs to carry "your key
 changed, refetch":
 
 - **Default — invalidation ticket (no payload).** The client refetches through
@@ -384,7 +407,7 @@ export interface ReadCacheIR {
 3. **Per-user tier (below the gate)** — effective-scope key (`tenant + DataKey +
    perms`); depends on `authorization.md` + `multi-tenancy`. (`LOOM_E2E`, two
    principals: assert no cross-principal hit.)
-4. **Client `.live` invalidation** — tag → queryKeys registry + `predicate`
+4. **Client invalidation subscription** — tag → queryKeys registry + `predicate`
    invalidation; coalescing; ETag/304 refetch. Rides `channels.md`'s realtime
    delivery. (`LOOM_REACT_BUILD`.)
 5. **Edge tier** — CDN `Surrogate-Key` headers + purge; optional ASP.NET
@@ -401,7 +424,7 @@ export interface ReadCacheIR {
 - **Transition invalidation needs old+new** in the change signal for discrete
   param tags; requires the `save` seam to carry a before-image. Deferred (falls
   back to type tag meanwhile).
-- **Reconnect/replay** for `.live` over a `retention: log` channel — resume from
+- **Reconnect/replay** for an eager invalidation subscription over a `retention: log` channel — resume from
   cursor vs rejoin live (per-room cursor). Shared with `channels.md`'s deferred
   list.
 - **Cross-aggregate consistency** of a cached read vs the events that built it

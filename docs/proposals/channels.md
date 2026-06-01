@@ -112,8 +112,8 @@ already has the `eventLog` persistence kind and `apply(…)` appliers
 
 The net new surface is small: one declaration (`channel`), one binding
 (`channelSource`), two consumer additions already foreshadowed (`on` reactor
-gets a transport; `projection` gets defined), and a UI `.live` subscription
-ref. Realtime push to the browser needs **no** contract knob — it's derived
+gets a transport; `projection` gets defined), and a UI live-event subscription
+(`on Param.Event`). Realtime push to the browser needs **no** contract knob — it's derived
 from a UI subscribing to a channel, and the SSE-vs-WebSocket wire is platform
 infra (see [Realtime](#websockets--sse--an-infrastructural-concern-not-a-contract-knob)).
 
@@ -176,7 +176,7 @@ context Orders {
   // durable, replayable lifecycle log — read models replay it
   channel Lifecycle { carries: OrderPlaced, OrderShipped; retention: log; key: order }
 
-  // fire-and-forget metrics — ephemeral broadcast (a dashboard UI can go .live on it)
+  // fire-and-forget metrics — ephemeral broadcast (a dashboard UI can subscribe for live events)
   channel Telemetry { carries: StockLevel; delivery: broadcast; retention: ephemeral }
 
   // competing-consumer work queue — one worker captures each payment
@@ -286,7 +286,7 @@ domain.
 bound `storage.type`, the same way `dataSource` validates `kind` against
 `storage.type` today:
 
-| `delivery` | `retention` | Compatible `storage.type` | UI-subscribable (`.live`) |
+| `delivery` | `retention` | Compatible `storage.type` | UI live-event subscribable |
 |---|---|---|---|
 | `broadcast` | `ephemeral` | `inMemory`, `redis` | yes |
 | `broadcast` | `log`       | `kafka` | yes (replay-from-cursor) |
@@ -307,20 +307,26 @@ identical, so the **`channel` says nothing about which is used** — just as it
 says nothing about Redis-vs-Kafka. A channel becomes UI-observable simply
 because a UI *subscribes* to it; nothing is declared on the producer side.
 
+The channels-owned UI surface is the **live-event subscription** (a `channel`
+param + an `on Param.Event(...)` handler). A live *read* — a list/detail kept
+fresh — needs **no marker**: an ordinary cached query is auto-invalidated (see
+[`caching.md`](./caching.md)); it rides this same wire but carries tickets, not
+payloads.
+
 ```ddd
 ui WebApp {
   api     Sales:  SalesApi
-  channel Orders: Orders.Lifecycle     // subscribe — wire format is derived, not stated
+  channel Orders: Orders.Lifecycle     // subscribe to events — wire format derived, not stated
+
+  // A live EVENT — render the event itself (toast / feed / badge).
+  on Orders.OrderShipped(e) { toast("Order " + e.order + " shipped") }
 
   page OrderBoard {
     route: "/board"
-    // .live: the list re-fetches / patches its cache when Orders carries a
-    // relevant event — instead of polling.
-    body: For { Sales.Order.all.live, o => Card { o.id, o.status } }
+    // A live READ — just a cached query; auto-fresh while on screen. No marker;
+    // its freshness semantics are caching.md's, it rides the wire below.
+    body: For { Sales.Order.all, o => Card { o.id, o.status } }
   }
-
-  // Explicit notification handler (toast, badge, navigate).
-  on Orders.OrderShipped(e) { toast("Order " + e.order + " shipped") }
 }
 ```
 
@@ -330,7 +336,7 @@ infra fact:
 
 | Frontend platform | Default wire | Why |
 |---|---|---|
-| React (`static` target) | **SSE** | one-way server→client fits `.live` invalidation; survives proxies; no upgrade handshake. |
+| React (`static` target) | **SSE** | one-way server→client fits both invalidation tickets and event payloads; survives proxies; no upgrade handshake. |
 | Phoenix LiveView | **native WebSocket** | LiveView already holds a socket; reusing it is free. |
 
 ```ddd
@@ -347,26 +353,26 @@ So `realtime:` exists in the grammar, but on the **deployable** (infra),
 never on the `channel` (contract). Most authors never write it.
 
 ```langium
-// UiMember += UiChannelParam ; plus a `.live` query suffix and `on Param.Event(p){…}` handler
+// UiMember += UiChannelParam  +  an `on Param.Event(p){…}` live-event handler.
+// (Live READS need no UI syntax — a cached query is auto-fresh; see caching.md.)
 UiChannelParam: 'channel' name=ID ':' channel=[Channel:ID];
 UiNotification:  'on' param=[UiChannelParam:ID] '.' event=[EventDecl:ID]
                  '(' bind=ID ')' '{' body+=Statement* '}';
 ```
 
-Per-frontend lowering of the *same* `.live` IR:
+Per-frontend lowering of the realtime wire (both planes ride it):
 
-| Platform | Realtime mechanism | `.live` lowers to |
+| Platform | Realtime mechanism | Lowers to |
 |---|---|---|
-| **React** (`hono`/`static` target) | `EventSource` (SSE) or `WebSocket` client in the generated `api/` client | subscribe in a `useEffect`; on event → `queryClient.invalidateQueries([...])` (or a targeted `setQueryData` patch keyed by `channel.key`). |
-| **Phoenix LiveView** | **native** — `Phoenix.PubSub.subscribe` + `handle_info` | a `handle_info({:order_shipped, …}, socket)` that re-`assign`s the stream; LiveView diffs and pushes over its own WebSocket. No client code. |
+| **React** (`hono`/`static` target) | `EventSource` (SSE) or `WebSocket` client in the generated `api/` client | one subscription; an **event** ticket → render via the `on` handler; an **invalidation** ticket → `queryClient.invalidateQueries([...])` (caching.md). |
+| **Phoenix LiveView** | **native** — `Phoenix.PubSub.subscribe` + `handle_info` | a `handle_info({:order_shipped, …}, socket)` re-`assign`s the stream; LiveView diffs and pushes over its own WebSocket. No client code. |
 
 This is where the layering pays off: Phoenix LiveView's WebSocket fabric is
 *already* a channel transport, so native WebSocket is free there, while React
 gets an SSE (or WS, if the deployable overrides) client generated against the
-same channel contract — all from the *same* `.live` IR. The wire format is a
-`PlatformSurface` capability (`realtimeWire: "sse" | "websocket"`), defaulted
-per platform and overridable on the deployable; the channel and the page body
-are identical regardless.
+same channel contract. The wire format is a `PlatformSurface` capability
+(`realtimeWire: "sse" | "websocket"`), defaulted per platform and overridable on
+the deployable; the channel and the page body are identical regardless.
 
 ### Realtime topology — the edge relay (browser delivery is two-hop)
 
@@ -409,9 +415,9 @@ relay is *derived*:
 
 **The one obligation the compiler enforces** to make the relay materialize:
 
-> If a UI `.live`-subscribes to (or takes a `channel` param of) channel `C`,
-> the UI's deployable `targets:` a backend deployable that **must** bind `C`.
-> Otherwise `loom.live-target-not-subscribed` fires:
+> If a UI subscribes to channel `C` (a `channel` param / `on` handler, or a
+> cached read it serves), the UI's deployable `targets:` a backend deployable
+> that **must** bind `C`. Otherwise `loom.relay-target-not-subscribed` fires:
 > *"frontend `webApp` subscribes to channel `Orders.Lifecycle`, but its target
 > backend `reportsApi` does not bind it — add a `channelSource` for
 > `Orders.Lifecycle` to `reportsApi.channels`."*
@@ -493,9 +499,9 @@ admission     =   may currentUser read ["orders", 42]?   <- the SAME read-side a
                   (DataKey reachability / row filter / policy data { reachable when })
 ```
 
-- **Interest (routing) is the query key**, verbatim — `Order.byId(42).live` →
-  room for `["orders", 42]`; `Order.all.live` → room for `["orders"]`;
-  `Order.mine().live` → room for `["orders","find","mine",…]`. The page already
+- **Interest (routing) is the query key**, verbatim — `Order.byId(42)` →
+  key `["orders", 42]`; `Order.all` → key `["orders"]`;
+  `Order.mine()` → key `["orders","find","mine",…]`. The page already
   names it (it's the React Query key), so **nothing new is declared** on the
   channel or the page.
 - **Tenant** is the hard namespace prefix on the room so keys can't collide or
@@ -541,14 +547,14 @@ over-broadcast-safe vs must-be-scoped — so they do not share a mechanism. The
 **addressing mode** (resource / recipient / topic / correlation) is the
 realtime-layer analogue of `delivery`×`retention`.
 
-**`.live` is not the same thing as a live event feed.** `.live` on a *query*
-(`Order.all.live`) is a **live read** — current *state* kept fresh by `save`-
-driven invalidation; it carries tickets, not data, and lives in
+**A live read is not the same thing as a live event feed.** A **live read** —
+a cached on-screen query kept fresh by `save`-driven invalidation — needs no
+marker and carries tickets, not data; its semantics live in
 [`caching.md`](./caching.md). Showing the *events themselves* — a feed of
 "Order #42 shipped", a toast — is a **live event** (plane 2/3): subscribe to an
-event channel and render its payloads, here. The rule of thumb: persisted state
-→ `.live` (caching); ephemeral event stream → event subscription (this doc). And
-most "show events" UIs are actually a `.live` read over a persisted log table.
+event channel and render its payloads, here. Rule of thumb: persisted state →
+cached query (caching); ephemeral event stream → event subscription (this doc).
+And most "show events" UIs are actually a cached read over a persisted log table.
 
 The split this proposal turns on: **who may *receive* a pushed event** is
 delivery scoping — the [Subchannels](#subchannels--not-every-browser-gets-every-event)
@@ -562,7 +568,7 @@ resource key for *what changed* + `DataKey` for *who may see it*), defined once
 and reused on both sides.
 
 > **Read-side summary** (see [`caching.md`](./caching.md) for the full design):
-> a `.live` page subscribes to its query key's room; a `save` publishes an
+> a cached on-screen query is auto-invalidated: a `save` publishes an
 > *invalidation ticket* (not data) for the affected query keys; the client
 > refetches through the already-authorized read (so per-user filtering never
 > enters the push layer); the *same* ticket evicts the server cache and purges
@@ -630,7 +636,7 @@ export interface ChannelSourceIR { channel: string; storage: string; }
   admit. (The *what-to-refetch* map — `InvalidationRuleIR`, `save`-driven — is enriched in
   caching.md, reusing this same routing seam.) Derive, per frontend deployable,
   the resolved realtime wire (`realtimeWire` override ?? `PlatformSurface`
-  default) and the set of channels its pages `.live`-subscribe. Sibling of the
+  default) and the set of channels its pages subscribe to (live events) or read live (cached queries). Sibling of the
   existing `migrationsOwner` enrichment.
 - **⑦ validate** — the `loom.channel-*` / `loom.reactor-*` /
   `loom.channelsource-*` cross-cutting checks above (needs the fully-resolved
@@ -674,7 +680,7 @@ system Acme {
 
       channel Lifecycle {                                    // context member, beside its events
         carries: OrderPlaced, OrderShipped
-        delivery: broadcast           // ⇒ a UI may .live-subscribe; wire format is infra
+        delivery: broadcast           // ⇒ a UI may subscribe (live events / live reads); wire is infra
         retention: log                // durable, replayable
         key: order
       }
@@ -698,7 +704,7 @@ system Acme {
     api Sales: SalesApi
     channel Orders: Orders.Lifecycle
     page Board { route: "/board"
-      body: For { Sales.Order.all.live, o => Card { o.id, o.status } } }
+      body: For { Sales.Order.all, o => Card { o.id, o.status } } }   // cached query, auto-fresh
   }
 
   deployable salesApi  { platform: hono; contexts: [Orders];   serves: SalesApi
@@ -711,7 +717,7 @@ system Acme {
 ```
 
 What the reader gets from a single declaration: the `channel` tells you the
-events, delivery, and durability (no wire protocol); the `ui` `.live` ref tells
+events, delivery, and durability (no wire protocol); the `ui` read binding tells
 you the board observes it; the `channelSource` tells you it's Kafka; the
 `deployable channels:` tells you who's wired in. The `webApp` names no
 `realtime:`, so it defaults to SSE — and the `compose` step provisions a Kafka
@@ -734,8 +740,8 @@ workflow slice trails.
    and `BLPOP`/streams (`queue`); compose service. Per-backend driver.
 4. **UI realtime delivery (the wire + edge relay)** — derived SSE/WS endpoint,
    the two-hop edge relay, room subscribe with subscribe-time admission;
-   `realtimeWire` defaulting on `PlatformSurface`. The *push transport*; what a
-   `.live` page does on receipt (refetch/patch) is slice 1 of
+   `realtimeWire` defaulting on `PlatformSurface`. The *push transport*; what a cached on-screen
+   query does on receipt (refetch/patch) is slice 1 of
    [`caching.md`](./caching.md). (`LOOM_REACT_BUILD`.)
 5. **Plane 2/3 — live view + notification** — explicit `emit`, payload-carrying,
    addressing mode resource/recipient/topic; subscribe-time scoping; delivery to
