@@ -83,6 +83,7 @@ arbitrary.
 | **server keys by resource** | Rooms/tags are keyed by resource (type/id); clients fan out to their own query keys via prefix invalidation. |
 | **two cache modes only** | `cached: none` (default) and `cached: tagged`. A projection is a *read*, not a cache mode. |
 | **cache tier ← authz shape** | public/tenant → edge/output cache; per-user → in-handler read-through below the auth gate. OutputCache is not the primary mechanism. |
+| **invalidation channel: total coverage, explicit binding** | Coverage of the save-derived invalidation stream is automatic/total (correctness); but it is a synthesized, *nameable* `<Context>.changes` channel bound and consumed explicitly via the normal `channelSource` / `deployable.channels` machinery. |
 
 ## Live reads vs live events — two different things
 
@@ -172,6 +173,51 @@ Eager push is what makes on-screen reads "live"; lazy is plain
 stale-while-revalidate. Default to lazy unless the app already holds a realtime
 connection (e.g. for live events), then reuse it. Either way the *correctness* —
 never serving knowingly-stale data — is the same; only the latency differs.
+
+## The invalidation channel — synthesized, total, but explicitly bound
+
+The invalidation stream is generated from **every** `repo.save`, so it *feels*
+global — and at the level of *coverage* it must be. If invalidation were opt-in
+per aggregate, you could cache a read whose aggregate forgot to ticket → a silent
+stale-data bug; a cache you can't trust to be fresh is worse than none. **So
+coverage stays automatic and total.** But the parts that are real decisions —
+*which broker carries it*, *who consumes it*, *whether it reaches the browser* —
+should be **explicit, exactly like any other channel.** The split mirrors Loom
+everywhere: contract derived, infra declared.
+
+| Aspect | Implicit (derived) — contract | Explicit (declared) — infra / composition |
+|---|---|---|
+| What it carries | every aggregate's **save-tickets** (total coverage) | — (never hand-written) |
+| Transport | — | which broker (`channelSource`) |
+| Consumers | — | `deployable.channels`; which UIs run the invalidation connection |
+| Scope | per-tenant rooms (from `tenancy by`) | — |
+
+So model it as **a channel Loom synthesizes** — a per-context `<Context>.changes`
+carrying that context's aggregate save-tickets — whose `carries:` is *derived*
+but which is **bound and subscribed through the same machinery as any declared
+channel** (`channels.md`):
+
+```ddd
+// synthesized — you never write the carries:
+//   channel Orders.changes { carries: <all Orders aggregates' save-tickets>; delivery: broadcast }
+
+channelSource ordersChanges { for: Orders.changes, use: bus }              // EXPLICIT transport
+deployable salesApi { contexts: [Orders]; channels: [ordersChanges]; … }   // EXPLICIT: who carries it
+deployable webApp   { targets: salesApi; realtime: invalidation; … }       // EXPLICIT: frontend reach
+```
+
+This gives the legibility the global feel was missing — you can *see* the change
+feed, where it's bound, and who consumes it — without the ceremony (and
+stale-data risk) of per-aggregate change declarations. It need not be separate
+infra: save-tickets and `emit` events both flow through the one
+`DomainEventDispatcher` seam, so the invalidation channel can ride the **same
+transport** as event channels (it's the *ticket kind* of message). A joined view
+that depends on two contexts subscribes to **both** `<Ctx>.changes` — consistent
+with the dependency-set tagging below.
+
+A `cached: tagged` read therefore implies its context's `changes` channel must be
+bound wherever it's served (`loom.cache-changes-unbound` if not) — the one
+obligation that keeps "automatic coverage" honest across deployables.
 
 ## Tickets vs payloads — the default that makes scoping a non-problem
 
@@ -352,7 +398,10 @@ dependency set exceeds a threshold → suggest a projection);
 `loom.cache-uncacheable` (a `tagged` read has no stable query key — e.g. a
 nondeterministic body — so it can't be keyed/invalidated);
 `loom.cache-continuous-param` (a `tagged` read keys on a range/search param that
-can't be tagged → falls back to type tag or projection; warn).
+can't be tagged → falls back to type tag or projection; warn);
+`loom.cache-changes-unbound` (a `tagged` read is served by a deployable that does
+not bind its context's `<Context>.changes` channel — coverage would be silently
+incomplete; add a `channelSource` for it to that deployable's `channels:`).
 
 ## IR, lowering, enrichment
 
