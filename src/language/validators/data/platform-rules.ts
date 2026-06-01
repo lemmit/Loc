@@ -178,9 +178,7 @@ const ADAPTER_KIND_BY_AXIS: Partial<Record<RealizationAxis, "persistence" | "sty
   directoryLayout: "layout",
 };
 
-export function adapterKindForAxis(
-  axis: RealizationAxis,
-): "persistence" | "style" | "layout" | undefined {
+function adapterKindForAxis(axis: RealizationAxis): "persistence" | "style" | "layout" | undefined {
   return ADAPTER_KIND_BY_AXIS[axis];
 }
 
