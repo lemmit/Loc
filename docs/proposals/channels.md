@@ -655,6 +655,40 @@ flagged hot/wide (`loom.live-wide-dependency`). And recall this whole tier is a
 **payload** concern: **invalidation** never needs it — it tolerates over-delivery
 and lets the refetch gate (use A/B/C only if the side-channel itself must close).
 
+#### Ambient / time-dependent conditions — a fourth kind, not a room at all
+
+Some policy conditions are **none** of the above — they depend on the *clock or
+context*, not on the resource or a stable claim, and they **change with no save to
+announce them**. "During working hours", "while the subscription is active",
+"while the sale window is open", "if the feature flag is on". The whole rooms +
+tickets machinery is **save-triggered**, so it cannot react to 17:00 arriving —
+nothing was written, so nothing fires, and an open live view would just sit there
+showing access it no longer has.
+
+These need a complementary mechanism: a **validity horizon + client re-check**.
+The read tells the client how long its answer is valid ("authorized until
+17:00"); the client sets a timer and re-checks at the boundary (refetch /
+re-auth), at which point the policy re-evaluates against the new current time and
+returns empty/403 off-hours. (Equivalently: fold the window into session/token
+validity so the connection re-auths at 17:00.) It's the cache-TTL / token-expiry
+idea — clock-driven re-evaluation, complementary to the save-driven tickets.
+A save-triggered push *can* also include the ambient check (don't nudge an
+off-hours user when an order does change — B's filter), but the boundary itself
+is only caught by the horizon.
+
+So the full taxonomy of policy dimensions:
+
+| Dimension | Example | Handled by |
+|---|---|---|
+| equality (resource × user) | `department` | **room key** (cheap, row 1) |
+| resource-only filter | `total > 100` | **refetch `WHERE`** (over-delivers) |
+| relationship / ACL | `shared with me` | **trilemma A / B / C** |
+| **ambient / temporal** | `during working hours`, "subscription active" | **validity horizon + client re-check** (clock-triggered, *not* save-triggered) |
+
+So "orders for my department during working hours" splits cleanly: `department` is
+a room key; `working hours` is an ambient condition the rooms can't see — it rides
+a validity horizon, enforced (as always) at the refetch.
+
 ### Subchannels — not every browser gets every event
 
 `broadcast` + `ephemeral` describes the *delivery profile*, **not the
