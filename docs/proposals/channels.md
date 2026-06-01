@@ -533,11 +533,13 @@ form the invalidation prefixes"). The one piece of derived logic both need is th
 invalidate?* → `["orders"]`, `["orders", 42]`, and any `find` whose result the
 event could change.
 
-`.live` is then exactly: **"keep this query's React Query entry live by
-subscribing to its query-key room; on an invalidation ticket, refetch or patch —
-the same ticket the server cache evicts by."** So three things share **one map
-and one key**, with `DataKey` as the orthogonal visibility envelope around all of
-them:
+`.live` is then exactly: **"keep this query's React Query entry live; on an
+invalidation ticket, refetch or patch — the same ticket the server cache evicts
+by."** So three things share **one map and one key**, with `DataKey` as the
+orthogonal visibility envelope around all of them (with one refinement the next
+section makes: the *server* room is keyed by **resource**, and the client maps
+that to its query keys via prefix invalidation — a list query key can't be a
+server room):
 
 | Consumer | Reads the **query key** as | On an event |
 |---|---|---|
@@ -564,6 +566,85 @@ The honest boundary: this proposal *defines and emits* the event→query-key map
 and routes realtime by it. Wiring it into a read-through server cache is
 `production-readiness.md` §3.4's job and stays out of scope here — but that
 proposal will find the map already built, not have to invent it.
+
+### Realtime is not one feature — at least three planes
+
+> **Design note (open).** Working through the keying above surfaced that
+> "realtime" is *not* a single mechanism. Cache-invalidation and a live
+> dashboard look similar but are **opposites** on every axis, and forcing them
+> through one path is the root of the earlier confusion. The surface below is a
+> reframe still to be ratified, not yet pinned grammar.
+
+| # | Plane | Room keyed by | Payload | Source | Scoping / leak risk |
+|---|---|---|---|---|---|
+| **1** | **Cache invalidation** (freshness) | **resource** (type / id) | **ticket** — no data | implicit, from **`save`** | *none* — refetch is authz'd; over-broadcast is harmless |
+| **2** | **Live view / feed** (dashboard, activity stream) | resource or topic | **event data** | explicit `emit` | **high** — data crosses to the browser; must be scoped at subscribe |
+| **3** | **Targeted notification** ("your order shipped") | **recipient** (user id) | event data | explicit event w/ recipient field | inherent — the address *is* the scope |
+| 4 | Presence / typing / cursors (deferred) | topic, ephemeral | ephemeral state | not events | session-scoped |
+| 5 | Job / export progress (deferred) | correlation / job id | progress | extern / job | single recipient |
+
+Planes 1 and 2 are **opposites**: #1 carries no data, tolerates over-broadcast,
+is automatic and invisible, and is safe *by construction* (a ticket can leak
+only "something changed"); #2 carries data, must be scoped correctly, is
+explicit and designed. They should **not** share a mechanism — different
+default, different source, different payload.
+
+Two consequences that correct earlier sections:
+
+- **The list query key is a client identity, not a server room.** `["orders"]`
+  means *"my* orders" — a different authorized projection per user and per
+  filter (`mine`, `status:open`, …). The server cannot enumerate which filtered
+  list keys an event touches without running every user's filter (fan-out-then-
+  filter again). **So the server keys rooms by *resource* (`tenant.orders`,
+  optionally `tenant.orders.42`), not by query key.** The client receives
+  "orders changed" and runs React Query **prefix invalidation** locally —
+  `invalidateQueries(["orders"])` already covers `["orders"]`, `["orders",42]`,
+  `["orders","find","mine"]` — refetching each through the **authz'd read
+  endpoint**. Per-user list filtering never enters the push layer.
+- **Invalidation rides `save`, not events.** Event→aggregate isn't always
+  derivable (events may be context-level or cross-aggregate). But every
+  `repo.save(agg)` already knows the type and id, so **"order 42 changed" is
+  free from the save** — no DSL, no event→aggregate map. Explicit `emit` is the
+  *richer* layer (planes 2/3) for when you want semantics, not just "it changed."
+
+This makes **addressing mode** (resource / recipient / topic / correlation) the
+realtime-layer analogue of `delivery`×`retention` for the queue layer — a small
+closed set, each with its scoping discipline baked in. Build order: plane 1
+first (implicit, ticket-only, no events, no per-user push logic), then plane 2/3
+(explicit, payload, scoped). Planes 4–5 deferred.
+
+### Won't broad invalidation storm the server? — the standard mitigations
+
+Invalidating `["orders"]` on every order change *sounds* like a refetch storm.
+It isn't, for four well-established reasons — and the third is exactly why
+invalidation and caching are one feature:
+
+1. **Only *active* queries refetch.** React Query's default: invalidating a key
+   **marks inactive (unmounted) queries stale and refetches them lazily on next
+   mount** — it does *not* refetch every cached list. The herd is bounded by
+   what's *on screen right now*, not everything ever cached. The dashboard user
+   refetches; the 10 000 users not looking at orders do nothing.
+2. **Coalesce tickets.** A burst of 50 saves in 200 ms must yield **one**
+   refetch, not 50. Debounce per-room on the relay (and/or per-key on the
+   client) over a small window (50–250 ms). Change streams are bursty;
+   coalescing is mandatory.
+3. **The server read-through cache absorbs the fan-in.** When N clients refetch
+   the same invalidated key, the same ticket already evicted the server cache,
+   so the first refetch is **one** DB read and the other N−1 are cache hits.
+   **N client refetches → 1 database query.** The storm hits warm cache, not
+   Postgres — this is the magic-caching payoff, and the reason §3.4 and this
+   proposal are the same feature.
+4. **Make the refetch cheap.** Conditional GET (ETag / `If-None-Match` →
+   `304 Not Modified`), or a version/sequence in the ticket so a client already
+   current skips entirely. A 304 is nearly free.
+
+The escape hatch for genuinely hot lists is **patch, don't invalidate**: push
+the delta and `setQueryData` it into the cache (no refetch at all). That's
+plane 2 — it costs the per-user filtering correctness (you're now pushing data,
+so it must be scoped), which is *why* it's the explicit feature, not the
+default. So: **broad invalidation is fine — bounded by active queries,
+coalesced, absorbed by cache; reserve payload-patching for paths where even a
+coalesced cache-hit refetch is too slow.**
 
 ## IR, lowering, enrichment (phase mapping)
 
@@ -743,21 +824,23 @@ workflow slice trails.
 4. **UI `.live` over SSE (React), broadcast to all** — derived SSE endpoint +
    generated client + `.live` cache invalidation; `realtimeWire` defaulting on
    `PlatformSurface`. **Single-tenant, no `scope:` yet.** (`LOOM_REACT_BUILD`.)
-5. **Subchannels — visibility + query-key interest** — the `EventInvalidationIR`
-   map (event → query keys), `DataKey` visibility (tenant namespace + the
-   subscribe-time admission check), room-keyed publish to `{tenant}:{queryKey}`,
-   the connect-time `requires:` 403 gate, and the **`.live` → query-key room**
-   lowering (`byId(42)` → `["orders",42]`, `all` → `["orders"]`). This is
-   the slice that makes both "not every browser gets every event" *and* "a
-   detail page gets one aggregate, not the firehose" real; depends on the
-   tenancy slice from `multi-tenancy-design-note.md`. (`LOOM_E2E`, two tenants,
-   a list page and a detail page.)
-6. **Phoenix-native realtime + WebSocket override** — `Phoenix.PubSub` (rooms =
+5. **Plane 1 — invalidation (tickets from saves)** — implicit `save` → resource
+   ticket on `tenant.<type>` (+ `tenant.<type>.<id>`), `DataKey` tenant namespace
+   + subscribe-time admission, ticket coalescing, and the client `.live` →
+   **prefix invalidation + authz'd refetch** (no server-side list keys). Plane 1
+   from the multi-plane reframe; needs no events. (`LOOM_E2E`, two tenants, a
+   list page and a detail page; assert no cross-tenant ticket and one DB read
+   under N refetches.)
+6. **Plane 2/3 — live view + notification** — explicit `emit`, payload-carrying,
+   addressing mode resource/recipient/topic; subscribe-time scoping; the
+   `setQueryData` patch path for hot lists. The explicit "live dashboard"
+   feature. Depends on slice 5.
+7. **Phoenix-native realtime + WebSocket override** — `Phoenix.PubSub` (rooms =
    topics) + LiveView `handle_info`; the optional `deployable realtime:
    websocket` infra override. (`LOOM_PHOENIX_BUILD`.)
-7. **Kafka + `retention: log`** — durable streams, partition by `key`,
+8. **Kafka + `retention: log`** — durable streams, partition by `key`,
    `projection` replay-from-cursor. (`LOOM_E2E`.)
-8. **RabbitMQ / `queue` + `work`** — competing consumers, ack semantics.
+9. **RabbitMQ / `queue` + `work`** — competing consumers, ack semantics.
 
 ## Deferred / out of scope
 
