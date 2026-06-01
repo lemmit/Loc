@@ -11,10 +11,10 @@
 >   `migrationsOwner` enrichment
 >   (`src/ir/enrich/enrichments.ts`). Seeding reuses that owner verbatim —
 >   it does not introduce a second ownership rule.
-> - Requests two new decision tags: **D-SEED-PATH** (seed through the
->   domain `create` vs. raw table insert) and **D-SEED-IDEMPOTENCY**
->   (v1 = ship-once applied-marker; per-row upsert-by-natural-key
->   deferred until reference data needs it).
+> - Two decisions are now **PINNED** in [`../decisions.md`](../decisions.md):
+>   **D-SEED-PATH** (seed through the domain `create`; `raw` opt-out) and
+>   **D-SEED-IDEMPOTENCY** (v1 = ship-once applied-marker; per-row
+>   upsert-by-natural-key deferred until reference data needs it).
 
 ## TL;DR
 
@@ -419,14 +419,13 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
 
 ## 10. Open questions
 
-1. **D-SEED-PATH** — domain-create default vs. raw default. (Recommend
-   domain; `raw` opt-out.)
-2. **D-SEED-IDEMPOTENCY** — confirm ship-once-marker for v1, with
-   per-row natural-key upsert deferred. The deferred path adds a `key
-   Aggregate.field` clause and an `upsert`/`onConflict` emission branch
-   per backend; it earns its keep only once a model has *reference*
-   data that ships once but is corrected in place. Until then the
-   marker covers every case the quick-start needs.
+1. ~~**D-SEED-PATH**~~ — **PINNED**: domain-create default, `raw`
+   opt-out. See [`../decisions.md`](../decisions.md#d-seed-path--seed-rows-go-through-the-domain-create).
+2. ~~**D-SEED-IDEMPOTENCY**~~ — **PINNED**: ship-once dataset marker for
+   v1; per-row natural-key upsert deferred (the deferred path adds a
+   `key Aggregate.field` clause and an `upsert`/`onConflict` emission
+   branch per backend, earning its keep only once a model has
+   *reference* data corrected in place). See [`../decisions.md`](../decisions.md#d-seed-idempotency--v1-is-ship-once-via-a-dataset-marker).
 3. **Event emission.** Should the domain path *emit* the events a
    `create` would (populating an event-log aggregate's stream), or
    suppress them? Lean: **suppress by default** (seeding is state, not
