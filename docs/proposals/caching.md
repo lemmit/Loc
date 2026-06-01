@@ -311,7 +311,10 @@ save(Order 42, owner = customer X)  →  ticket room  tenant.X.orders.42
 So it's tenant-wide **only for tenant-wide (admin) views**, which is right —
 that audience genuinely sees everything. An owner-scoped list hears only its
 owner's changes, and the side-channel closes (a customer never receives a ticket
-for another's order). Same prefix machinery, third use.
+for another's order). Same prefix machinery, third use. These per-owner rooms are
+**relay-registry entries, not per-user broker objects** — see `channels.md` §"How
+rooms are realized" (the durable broker stays coarse; only the edge relay keys by
+`DataKey`).
 
 Two boundaries to be honest about:
 

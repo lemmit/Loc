@@ -441,6 +441,36 @@ deployable reportsUi { platform: static; targets: reportsApi   // browser talks 
 subscriber of A's published `Lifecycle` channel (hop 1) and the SSE/WS relay for
 `reportsUi` (hop 2). One channel declared; the edge channel is generated.
 
+#### How rooms are realized — a relay registry, not per-user broker objects
+
+A "room" (e.g. `tenant.X.orders`) is **not an allocated object** — it's a key in
+the relay's in-memory connection registry, exactly like Socket.IO rooms,
+**Phoenix.PubSub topics**, and **SignalR Groups**. It exists implicitly while a
+connection is in it:
+
+- **on connect**, the relay reads the JWT, computes the rooms from the `DataKey`
+  scope, and `registry[room].add(conn)` — O(1), torn down on disconnect;
+- **on a ticket/event**, it publishes to the **fixed set of scope levels** the
+  payload belongs to (`tenant.X.orders` for owner subscribers *and*
+  `tenant.orders` for admins) and pushes to `registry[room]` — a constant
+  fan-out, never per-subscriber iteration. Total work = O(interested connections).
+
+So "a room per user/owner" is just inserting a connection into a hash bucket
+keyed by its `DataKey` — what every websocket server already does; Loom merely
+*derives* the room key instead of you hand-writing `socket.join("user:"+id)`. The
+**durable broker stays coarse** — one stream per resource type, partitioned by
+owner key; per-owner rooms live **only at the edge relay**, never as per-user
+Kafka topics / SQS queues (which would not scale):
+
+| Layer | Granularity |
+|---|---|
+| Durable broker (Kafka / Redis stream) | coarse — one stream per resource type, partitioned by owner key |
+| Edge relay (holds the sockets) | fine — in-memory rooms keyed by `DataKey`; the per-owner routing |
+
+Horizontal scale across relay instances is the standard **pub/sub backplane**
+(Redis / NATS, the Phoenix.PubSub adapter, the SignalR backplane) — the room key
+is the routing key there too. No new mechanism.
+
 ### Subchannels — not every browser gets every event
 
 `broadcast` + `ephemeral` describes the *delivery profile*, **not the
