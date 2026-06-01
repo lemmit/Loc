@@ -38,11 +38,22 @@ ui WebApp {
 }
 ```
 
-Loom generates a **typed props file** from the params' wire shape and a
-**write-once stub** the user fills in; the call site marshals domain data into
-the component; `tsc` against the generated project is the fail-fast gate. The
-declared param list is the contract, exactly as the `extern` operation's
-parameter list is the contract for its request DTO.
+Loom generates **one thing** — a typed props interface derived from the
+params' wire shape — and **imports the user's component from the declared
+path**, a file Loom never writes (exactly like an `import helper` target). The
+call site marshals domain data into the component; `tsc` against the generated
+project is the fail-fast gate (a missing or mismatched component is a compile
+error). The declared param list is the contract, exactly as the `extern`
+operation's parameter list is the contract for its request DTO.
+
+**No stub, no write-once, no first-run magic.** Loom's regen contract is
+*"every file Loom generates is overwritten on every run"* (`docs/tools.md:96`),
+and the companion principle is that there is deliberately no "written the first
+time, skipped the second" mode (`docs/tools.md:119`). A write-once stub would
+violate exactly that, so this design has none: the only generated artefact (the
+props type) is *always* regenerated, and the user's component is *never*
+generated — it is ordinary hand-written code Loom resolves by import. The
+type-checker, not a seeded file, is what tells you the component is missing.
 
 ## 1. The defect — a closed library with three half-hatches
 
@@ -87,19 +98,27 @@ below) reveals a four-part shape worth copying wholesale:
    `register…Handler` helper, and a `verify…Registered()` gate
    (`src/generator/typescript/extern-builder.ts:1–120`); .NET emits an
    `I<Op><Agg>Handler` interface (`dotnet/cqrs-emit.ts:404–475`).
-4. **A fail-fast check + a dev stub** so the project boots empty but screams
-   on a missing impl — TS `verify…Registered()` called at startup, .NET a
-   Scrutor scan + `Program.cs` resolution check
-   (`dotnet/emit/program.ts:84–114`), each shipped with a `DevStub` so nothing
-   is required to merely compile.
+4. **A runtime fail-fast check** that screams on a missing impl — TS
+   `verify…Registered()` called at startup, .NET a Scrutor scan + `Program.cs`
+   resolution check (`dotnet/emit/program.ts:84–114`).
 
-The frontend analogue maps cleanly: **(1)** an `extern` modifier on
-`component`; **(2)** the body constraint becomes "an extern component declares
-*no* `body:`"; **(3)** the typed seam is a generated props interface (from the
-params' wire shape); **(4)** the fail-fast is `tsc` on the generated project
-plus a write-once stub. The one structural difference — discussed in §6 — is
-that a frontend component is a compile-time import, so the "registration
-check" is the type-checker, not a runtime registry.
+   Note what the backend does *not* do here: the `DevStub`/no-op handlers are
+   **regenerated every run** into machine-owned locations, and **DI/registry
+   indirection** (Scrutor picking the user's `[ExternHandler]` class; a
+   `register…Handler` call overriding the no-op after import) selects the user's
+   real implementation over the stub. The stub is not a write-once seed — it is
+   an always-regenerated default that an indirection layer routes around.
+
+The frontend analogue maps cleanly, with one deliberate simplification:
+**(1)** an `extern` modifier on `component`; **(2)** the body constraint
+becomes "an extern component declares *no* `body:`"; **(3)** the typed seam is
+a generated props interface (from the params' wire shape). For **(4)** the
+frontend has **no DI/registry indirection** — an `import` resolves to exactly
+one file — so there is nothing for a regenerated stub to be routed around.
+Rather than invent an indirection layer just to host a stub, we drop the stub:
+the component is a compile-time import, and **the type-checker is the
+fail-fast** (`tsc`/`mix` errors on a missing or mismatched component). This is
+strictly simpler than the backend and avoids any first-run-magic file (§7).
 
 ## 3. The design space
 
@@ -115,12 +134,13 @@ or stubs the file; it only imports it.
 - **Pros:** smallest surface; reuses the helper-import plumbing
   (`tsx-target.ts:164` already renders imports; `body-walker.ts` already routes
   user-component call sites to `emitUserComponent` in
-  `walker/primitives/controls.ts:343`). No new file-emission path.
-- **Cons:** no generated props type, so the user hand-types the props
-  interface and keeps it in sync manually; no stub, so a fresh project doesn't
-  compile until the user writes the file (no "boots empty" story).
+  `walker/primitives/controls.ts:343`). No new file-emission path at all — Loom
+  writes nothing.
+- **Cons:** no generated props type, so the user hand-types the props interface
+  and keeps it in sync with the domain manually — a domain change won't surface
+  as a type error at the component boundary.
 
-### Option B — `component … extern` with generated props + write-once stub (the extern-op mirror) — **recommended**
+### Option B — `component … extern` with a generated props interface (the extern-op mirror, no stub) — **recommended**
 
 Declare it like a component (so params type-check identically), mark it
 `extern`, point it at a path:
@@ -129,25 +149,34 @@ Declare it like a component (so params type-check identically), mark it
 component PriceChart(series: Order[], height: int) extern from "./widgets/price-chart"
 ```
 
-Loom emits **three** things and owns two of them:
+Loom owns and emits **exactly one** file, and writes nothing the user owns:
 
 - `src/components/extern/PriceChart.props.ts` — `export interface
   PriceChartProps { series: OrderWire[]; height: number }`, **derived from the
   params' `wireShape`** and regenerated every run (machine-owned, like the
-  extern-op `Request` type).
-- `src/components/price-chart.tsx` — a **write-once stub** (emitted only if
-  absent; pinned via `.loomignore`, see §7) — `export function
-  PriceChart(props: PriceChartProps) { return <div data-testid="price-chart-todo" /> }`.
-  This is the frontend `DevStub`: the project compiles and boots before the
-  user writes a line.
+  extern-op `Request` type). This is the contract.
+- the user's `./widgets/price-chart` is **never generated** — Loom imports it
+  (`import { PriceChart } from "../extern/PriceChart.props"` for the type,
+  `import { PriceChart } from "./widgets/price-chart"` for the component), and
+  the user writes it as ordinary code: `export function PriceChart(props:
+  PriceChartProps) { … }`.
 - call sites render `<PriceChart series={…} height={…} />` with props typed by
   the generated interface.
 
-- **Pros:** truest analogue to `operation extern`; the props interface tracks
-  the IR/`wireShape` so a domain change surfaces as a `tsc` error in the user's
-  component (fail-fast, type-safe); boots empty via the stub.
-- **Cons:** a real new emission path (props file + stub-if-absent) per
-  framework.
+- **Pros:** truest *spirit* of `operation extern` — a generated, regenerated,
+  IR-tracking typed seam — without the stub. The props interface tracks
+  `wireShape`, so a domain change surfaces as a `tsc` error in the user's
+  component (fail-fast, type-safe). Respects the no-first-run-magic contract:
+  one always-regenerated file, nothing user-owned ever written (§7).
+- **Cons:** one real new emission path (the props file) per framework. No
+  "boots empty" — but that's a feature, not a gap: a missing component is a
+  compile error, which is precisely the fail-fast we want, and seeding a file to
+  paper over it would reintroduce the first-run magic the user explicitly
+  rejected.
+
+Option B is **Option A plus the generated props file** — same grammar, same
+call-site dispatch, same zero user-owned writes; the only delta is that Loom
+emits the typed contract instead of asking the user to hand-maintain it.
 
 ### Option C — `raw tsx` / `raw heex` literal block (the trapdoor)
 
@@ -182,16 +211,18 @@ user touching `fetch`. Best layered on top of B, not v0.
 ## 4. Recommended shape
 
 Adopt **B** as the destination, ship **A as its first increment** (B minus the
-generated props file and stub — i.e. import-only), and treat **D** as the
-follow-on. **C is rejected.**
+generated props file — i.e. import-only), and treat **D** as the follow-on.
+**C is rejected.** Neither A nor B generates anything the user owns, so there
+is no stub and no first-run magic in any shipped step.
 
-Rationale: B is the only option that reproduces all four properties that make
-`operation extern` good (typed seam, body constraint, generated contract,
-fail-fast + boots-empty), and A is literally B with two emission steps removed,
-so shipping A first costs nothing that B then throws away — it's the same
-grammar and the same call-site dispatch, just without the generated
-props/stub. C loses type-safety and framework neutrality, the two invariants
-the whole metamodel exists to protect.
+Rationale: B reproduces the properties that make `operation extern` good that
+*translate* to a compile-time import — a typed seam, a body constraint, and a
+generated IR-tracking contract — while dropping the one that doesn't (a
+regenerated stub behind DI indirection, which the frontend has no place to put;
+see §2.4). A is literally B with the props emission removed, so shipping A first
+costs nothing B throws away — same grammar, same call-site dispatch, same
+zero-user-files-written. C loses type-safety and framework neutrality, the two
+invariants the whole metamodel exists to protect.
 
 ## 5. The data contract — props are `wireShape`-typed
 
@@ -250,21 +281,30 @@ becomes a one-line membership check against the ui's framework.
 
 ## 7. File ownership across regeneration
 
-Loom's contract is *"every file Loom generates is overwritten on every run"*
-(`docs/tools.md:96`). The user's extern component file must survive that. The
-mechanism **already exists**: `.loomignore` (gitignore syntax, pinned at the
-output root, `docs/tools.md:94–117`). The design splits ownership cleanly:
+Loom's contract is *"every file Loom generates is overwritten on every run"*,
+with a deliberate *"no seed / no first-run magic"* corollary
+(`docs/tools.md:96, 119`). This design honours both by **never writing a
+user-owned file at all** — the ownership split is total, not negotiated:
 
-- **Machine-owned, always regenerated:** `…/extern/PriceChart.props.ts` (the
-  contract — must track the IR).
-- **User-owned, written once then pinned:** `…/price-chart.tsx`. The generator
-  emits it **only if absent** (the `write`/`skip` plan already distinguishes
-  these, `docs/tools.md:152`), and `ddd generate` adds the path to a suggested
-  `.loomignore` line so the user's edits are never clobbered — the frontend
-  twin of the `Program.cs` pin example (`docs/tools.md:135`).
+- **Machine-owned, always regenerated:** `…/extern/PriceChart.props.ts` — the
+  props interface. It lives *inside* the generated tree and is overwritten
+  every run, exactly as the contract demands. The user never edits it.
+- **User-owned, never generated:** `…/widgets/price-chart.tsx` — Loom only
+  *imports* this path; it is not in Loom's write set, so there is nothing to
+  pin, nothing to skip, and no `write`-vs-`skip` decision to make. It is in
+  precisely the same position as an `import helper` target today: a path the
+  user owns and Loom references.
 
-This keeps the "no first-run magic" principle (`docs/tools.md:119`): the props
-file is *always* generated, the component is *always* skip-if-present.
+So `.loomignore` is **not needed for the component** (there is no generated
+file to exempt). The only thing Loom writes is the always-regenerated props
+type — which is correct to overwrite — so there is no first-run-magic file
+anywhere in the design. If the import path points at nothing, `tsc`/`mix`
+fails: the fail-fast, with zero seeded state.
+
+> A starting template, if ever wanted, must come from a **deliberate** action —
+> e.g. a `ddd scaffold-extern <Name>` CLI command the user runs on purpose
+> (the `ddd snapshot` model: explicit, not a side effect of `generate`) — never
+> from `generate` silently seeding a file on first run.
 
 ## 8. Implementation sketch (the `docs/technical.md` recipe)
 
@@ -287,26 +327,31 @@ Following the canonical "adding a language feature" recipe
    resolution (no expression lowering — extern has no body).
 5. **React generator:**
    - `pages-emitter.ts`: when `component.extern`, **skip**
-     `renderUserComponentFile` (`page-shell.ts:502`); instead emit the props
-     file from `wireShape`, and the write-once stub.
+     `renderUserComponentFile` (`page-shell.ts:502`) — Loom emits no component
+     body. Instead emit **only** the props interface from `wireShape` into
+     `…/extern/<Name>.props.ts`. Nothing user-owned is written; there is no
+     stub.
    - `body-walker.ts` (`:670–692`) + `controls.ts` `emitUserComponent`
      (`:343`): **already** emit `<Name .../>` JSX and register the import for
-     user components — extern reuses this path verbatim, pointing the import at
-     the declared path instead of `src/components/<Name>`.
+     user components — extern reuses this path verbatim, pointing the component
+     import at the declared path instead of `src/components/<Name>`, and adding
+     the props-type import.
 6. **Phoenix generator** (`src/generator/phoenix-live-view/`): emit
    `<.live_component>` for an extern with a `liveview` binding; the
-   `heex-target` import seam (`:100`) handles the alias. Reject (or stub) a
-   React-only extern under LiveView.
+   `heex-target` import seam (`:100`) handles the alias. **Reject** a
+   React-only extern reached by a LiveView ui (validator, §9) rather than
+   emit a placeholder.
 7. **Tests** (`CLAUDE.md` test layout): one parsing test; negative validator
-   tests (§9); one React generator test (import emitted, props file shape, stub
-   written-once / not overwritten); a `LOOM_REACT_BUILD=1` run proving the
-   generated project `tsc`s with a real hand-written component; a Phoenix
-   variant gated on `LOOM_PHOENIX_BUILD=1`.
+   tests (§9); one React generator test (component + props imports emitted,
+   props file shape, **no user-owned file written** — assert the generator's
+   output `Map` contains the props path and *not* the component path); a
+   `LOOM_REACT_BUILD=1` run proving the generated project `tsc`s with a real
+   hand-written component; a Phoenix variant gated on `LOOM_PHOENIX_BUILD=1`.
 
 The heavy lifting (JSX call-site emission, import registration, per-framework
 import rendering) **already exists** — this feature is mostly a new
-*declaration shape* plus a *props-file + stub emitter*, not new walker
-machinery.
+*declaration shape* plus a *props-interface emitter*, not new walker
+machinery and not a new file-protection path.
 
 ## 9. Validation rules
 
@@ -335,10 +380,11 @@ machinery.
 
 ## 11. Open questions
 
-1. **Stub regeneration semantics.** Write-once-if-absent + `.loomignore`
-   (§7), or always-regenerate-into-`extern/` and require the user to import
-   *from* a sibling they own? The former matches `.loomignore`'s philosophy;
-   the latter avoids ever touching a user path. Leaning former.
+1. **Props-file location & import shape.** `…/extern/<Name>.props.ts`
+   (sibling-of-`components`) keeps the one machine-owned file clearly inside
+   Loom's write set, away from the user's path. Confirm the relative-import math
+   from a page (`src/pages/…`) to both the props type and the user component
+   resolves cleanly under the generated `tsconfig`'s path setup.
 2. **Props nullability / optional params.** `T?` → `TWire | undefined`; does
    the marshalling pass `undefined` or omit the prop? Match the wire-DTO
    convention already used by `Form`/`Detail` emitters.
@@ -346,8 +392,9 @@ machinery.
    (component-library `.ddd` files, like ordinary components,
    `docs/page-metamodel.md:174–188`)? Top-level extern + import graph would let
    a shared widget library be declared once.
-4. **Page-object testability.** A stub ships a `data-testid`; should the
-   contract *require* the user component to render a known testid so scaffolded
+4. **Page-object testability.** With no stub, there's no Loom-emitted
+   `data-testid`. Should the contract *require* the user component to render a
+   known testid (and the validator/docs state the convention) so scaffolded
    Playwright page objects keep working? (`page-objects-builder.ts` is
    testid-driven.)
 5. **`design`-pack interplay.** Should an extern component receive the active
@@ -356,9 +403,11 @@ machinery.
 
 ## 12. Relationship to other proposals
 
-- **`docs/extern.md`** — the backend hatch this note mirrors; the four-part
-  shape (modifier → body constraint → typed seam → fail-fast + stub) is lifted
-  directly from it.
+- **`docs/extern.md`** — the backend hatch this note mirrors. Three of its four
+  parts (modifier → body constraint → generated typed seam) are lifted directly;
+  the fourth (regenerated dev stub behind DI indirection) is **deliberately
+  dropped** — a compile-time import has no indirection layer to host a stub, so
+  the type-checker alone is the fail-fast (§2.4).
 - **`embedded-frontend-composition.md`** — moves `framework` onto `ui`. §6's
   framework-binding rule becomes a clean membership check once that lands; the
   two compose without conflict.
