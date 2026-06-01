@@ -275,9 +275,15 @@ props boundary and walked in the caller's scope. That symmetry is the whole of
 Tier 2.
 
 Tier 1 is fully specified by existing slot semantics. Tier 2's only genuinely
-new surface is **how the param declares the lambda's argument types** (`onPick:
-action` with inference from call sites, vs an explicit `onPick: (Order) =>
-action`); that spelling is the one open question (§11) — the *mechanism* is the
+new surface is **how the param declares the lambda's argument types** — and it
+is declared **explicitly**, never inferred from call sites: Loom types
+declarations and checks uses against them (lambda param types flow *forward*
+from the expected type, `type-system.ts:417` — *"Lambda type is contextual;
+without a target type it's unknown"*), so a component param's signature cannot
+depend on its callers. The behaviour's arg types are therefore written on the
+param, e.g. `onPick: action(Order)` (an `action` type constructor parameterised
+by its args, paralleling bare `slot`) or the arrow `onPick: (Order) => action`.
+That token choice is the only open question (§11); the *mechanism* is the
 already-shipped block-body-lambda + action-hoisting path.
 
 ## 4. Recommended shape
@@ -481,12 +487,15 @@ machinery and not a new file-protection path.
 ## 11. Open questions
 
 1. **`action` argument-type spelling (the one real open question).** The
-   behaviour itself is just a passed lambda (no op-binding form), but how does
-   the *param* declare what arguments the component must call it with? Candidates:
-   bare `onPick: action` with the signature **inferred** from how the body lambda
-   binds at call sites; or an explicit arrow `onPick: (Order) => action`. The
-   *mechanism* (walk the lambda + hoist whatever it does, in caller scope) is
-   settled; only this surface is open.
+   behaviour is just a passed lambda (no op-binding form), and its arg types are
+   declared **explicitly on the param** — *not* inferred from call sites, which
+   Loom does not do anywhere (declarations are typed, uses checked against them;
+   lambda param types flow forward from the expected type, `type-system.ts:417`).
+   So the only choice is the token shape: a parameterised `action` type
+   constructor, `onPick: action(Order)` (mirrors bare `slot`), versus an arrow
+   `onPick: (Order) => action`. Both are explicit; pick the one that reads best
+   beside the existing `TypeRef` forms. The *mechanism* (walk the lambda + hoist
+   whatever it does, in caller scope) is settled.
 2. **Props-file location & import shape.** `…/extern/<Name>.props.ts`
    (sibling-of-`components`) keeps the one machine-owned file clearly inside
    Loom's write set, away from the user's path. Confirm the relative-import math
