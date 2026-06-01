@@ -1013,6 +1013,22 @@ So integration is: **Loom emits the channel-list-in-JWT and/or one
 shape via capability tokens + an auth-callback; SignalR/Phoenix authorize in the
 hub/`mount`.) The relay is bought; only the policy check is generated.
 
+**Note the subscribe proxy authorizes *once, at subscribe* — there is no
+per-event check.** After a member joins, every message on the channel is fanned
+out unconditionally. This is sound **only if the channel is a unit of *uniform*
+visibility** (everyone who may subscribe may see every message on it) — which is
+exactly what correct room granularity (`publishRoomsFor` keyed by the equi-join /
+`dataKey` / per-resource key) guarantees. Channel relays do **not** filter
+per-subscriber *within* a channel (the publish proxy authorizes a publisher, not
+per-recipient delivery) — so heterogeneous-within-a-channel visibility isn't the
+channel model. The fix is never "add a per-event check"; it's to **carve finer,
+uniform rooms** (the per-event decision lives in `publishRoomsFor`'s *room
+selection*, not in per-recipient filtering), and where the residual can't be
+roomed, fall back to **tickets + authz'd refetch** (over-delivery is safe) rather
+than push a payload through a non-uniform channel. So the channel relay is
+fundamentally an **option-A machine**; the whole craft is making rooms uniform so
+subscribe-time auth suffices.
+
 **Different architecture — DB-coupled sync engines** (note them, but they're the
 wrong layer here): **Supabase Realtime** (Postgres-changes/RLS), **ElectricSQL**
 (Postgres shapes), **PowerSync** (sync rules over Postgres/Mongo), **Rocicorp
