@@ -25,7 +25,7 @@ The whole design rides on **two keys that do different jobs** — the same split
 | **Interest** | "Which data does this read want?" | the **React Query key** (`["orders",42]`) | the cache key, the invalidation key, and the realtime room — *what changed* |
 | **Visibility** | "May this principal see it?" | **`DataKey`** (tenant + org reachability) | the cache *partition* and the *tier* the cache may live on — *who may share* |
 
-One derived artifact ties it together — the **event → query-keys map** (which
+One derived artifact ties it together — the **save → query-keys map** (which
 cached queries a change invalidates). The server cache evicts by it, the CDN
 purges by it (surrogate keys / cache tags), the realtime layer routes by it, and
 the React Query client invalidates by it. **One key vocabulary, four consumers,
@@ -84,13 +84,36 @@ arbitrary.
 | **two cache modes only** | `cached: none` (default) and `cached: tagged`. A projection is a *read*, not a cache mode. |
 | **cache tier ← authz shape** | public/tenant → edge/output cache; per-user → in-handler read-through below the auth gate. OutputCache is not the primary mechanism. |
 
-## What this owns: plane 1 (and the substrate planes 2/3 reuse)
+## Live reads vs live events — two different things
 
-`channels.md` defines the realtime **planes**. This proposal owns **plane 1 —
-cache invalidation**: automatic, ticket-only, over-broadcast-safe, sourced from
-`save`. Planes 2/3 (live view, notification) carry *data* and are scoped at
-delivery — `channels.md`'s job — but they reuse this proposal's **query-key /
-EventInvalidationIR** vocabulary to know *what changed*.
+These are easy to conflate and must be kept apart; this proposal owns only the
+first:
+
+| | **Live read** (this doc) | **Live event** (`channels.md`, plane 2/3) |
+|---|---|---|
+| What's shown | *current state* — a query result that stays fresh | *the events themselves* — a feed of "Order #42 shipped", a toast |
+| UI construct | `.live` on a **query** (`Order.all.live`) | **subscribe to an event channel**, render its payloads |
+| Fed by | the **invalidation stream**, derived from **`save`** (any state change) | the **event channel** (`channel { carries: OrderShipped }`), driven by **`emit`** |
+| Payload | **ticket** (no data) → client refetches the authorized read | **event data** (rendered directly) |
+| Backed by | **persisted** state (a table / view) | often **ephemeral** (transient notification, presence) |
+
+`.live` is therefore a **cache-freshness** construct — it keeps a *persisted
+read* current, driven by `save`. Displaying the event stream itself is the
+*separate* live-event construct in `channels.md` (plane 2/3), which carries event
+payloads and is scoped at delivery. The boundary is simply: **is the displayed
+thing persisted state or an ephemeral event stream?** Persisted → `.live` (here);
+ephemeral → event subscription (`channels.md`).
+
+Two consequences worth stating, because the previous draft blurred them:
+
+- **Cache invalidation is `save`-driven, not event-driven.** A `save` (any
+  aggregate state change, including a projection's own read-model save) is what
+  busts the cache and refreshes a `.live` read. Domain events (`emit`) are for
+  *display* (live events) and *choreography* (reactors) — **not** a cache trigger.
+- **Most "show events on the frontend" is actually a live read over a persisted
+  log** (a Notifications / activity table that grows by `save`), not an ephemeral
+  event subscription. The genuinely-ephemeral case (toast, presence, "X is
+  typing") is the smaller, distinct plane in `channels.md`.
 
 ## Interest is the query key — not `DataKey`, not the channel `key:`
 
@@ -108,19 +131,21 @@ The interest key is **not declared** on a channel or a read — it's the key the
 frontend already emits. So nothing new is invented; the cache layer reads what's
 there.
 
-## `.live` and the event→query-keys map
+## `.live` and the save→query-keys map
 
 `.live` on a query means: **"keep this React Query entry live — on an
 invalidation ticket for its key, refetch (or patch); the same ticket the server
-cache evicts by."** The one piece of derived logic is the **event → query-keys
-map**: *which cached queries does a change invalidate?*
+cache evicts by."** The one piece of derived logic is the **save → query-keys
+map**: *which cached queries does a state change invalidate?* — driven by `save`
+(not by domain events; those are display/choreography, see "Live reads vs live
+events"):
 
 ```
-save(Order 42)        →  invalidates  ["orders"], ["orders", 42]
-OrderShipped{order:42}→  invalidates  ["orders"], ["orders", 42], (finds whose result it could change)
+save(Order 42)        →  invalidates  ["orders"], ["orders", 42], (finds whose result it could change)
+save(Projection P)    →  invalidates  [P's own key]   ← a projection's read-model save
 ```
 
-This map (`EventInvalidationIR`) is the single shared artifact: the server cache
+This map (`InvalidationRuleIR`) is the single shared artifact: the server cache
 evicts the keys, the CDN purges the tags, the realtime relay publishes a ticket
 to each key's room, and the client `invalidateQueries` them. Derived from the
 read/view AST, so it can't drift.
@@ -318,10 +343,10 @@ export interface QueryKeyIR {
   idField?: string;                        // instance shape
   find?: { name: string; argFields: string[] };
 }
-// The event→query-keys map (the magic-caching rule), shared with channels' routing.
-export interface EventInvalidationIR {
-  trigger: { kind: "save"; aggregate: string } | { kind: "event"; event: string };
-  invalidates: QueryKeyIR[];               // tags this trigger evicts / pushes a ticket to
+// The save->query-keys map (the magic-caching rule), shared with channels' routing.
+export interface InvalidationRuleIR {        // save -> the query keys it invalidates
+  trigger: { kind: "save"; aggregate: string };  // SAVE-driven only; events are display/choreography
+  invalidates: QueryKeyIR[];               // tags this save evicts / pushes a ticket to
 }
 // Per cacheable read:
 export interface ReadCacheIR {
@@ -335,7 +360,7 @@ export interface ReadCacheIR {
 
 - **⑥ enrich** — derive each read's **dependency set** (walk source aggregates →
   type/instance/param tags), its **tier** (from the read's authz shape), and the
-  **`EventInvalidationIR`** per `save`/event. Sibling of the `migrationsOwner` /
+  **`InvalidationRuleIR`** per `save`. Sibling of the `migrationsOwner` /
   channel-routing enrichments.
 - **⑦ validate** — `loom.cache-*` checks (need the resolved dependency + authz
   graph).
@@ -350,7 +375,7 @@ export interface ReadCacheIR {
 ## Slice plan
 
 1. **`cached:` surface + dependency-set derivation** — grammar, `ReadCacheIR`,
-   `EventInvalidationIR` from `save`, `loom.cache-*` validators,
+   `InvalidationRuleIR` from `save`, `loom.cache-*` validators,
    `.loom/cache-tags.md`. No runtime change. (parse + negative-validator + IR
    tests.)
 2. **In-handler read-through, tenant tier** — Redis (Hono) / HybridCache (.NET)

@@ -541,6 +541,15 @@ over-broadcast-safe vs must-be-scoped — so they do not share a mechanism. The
 **addressing mode** (resource / recipient / topic / correlation) is the
 realtime-layer analogue of `delivery`×`retention`.
 
+**`.live` is not the same thing as a live event feed.** `.live` on a *query*
+(`Order.all.live`) is a **live read** — current *state* kept fresh by `save`-
+driven invalidation; it carries tickets, not data, and lives in
+[`caching.md`](./caching.md). Showing the *events themselves* — a feed of
+"Order #42 shipped", a toast — is a **live event** (plane 2/3): subscribe to an
+event channel and render its payloads, here. The rule of thumb: persisted state
+→ `.live` (caching); ephemeral event stream → event subscription (this doc). And
+most "show events" UIs are actually a `.live` read over a persisted log table.
+
 The split this proposal turns on: **who may *receive* a pushed event** is
 delivery scoping — the [Subchannels](#subchannels--not-every-browser-gets-every-event)
 and [Authorization vs interest](#authorization-vs-interest--two-different-keys-not-one)
@@ -591,7 +600,7 @@ export interface ChannelIR {
 //   INTEREST — the React Query key (what changed / what to refetch). Defined and
 //   used in caching.md (cache key = invalidation key = room-routing key). The
 //   delivery side only needs the resource room; the client maps it to its query
-//   keys. So `EventInvalidationIR` / `QueryKeyIR` live in caching.md, not here.
+//   keys. So `InvalidationRuleIR` / `QueryKeyIR` live in caching.md, not here.
 //
 // ChannelIR gains (derived in enrich):
 //   visibility: DataKeyRef   — room namespace + admission, from authorization.md (reused)
@@ -618,7 +627,7 @@ export interface ChannelSourceIR { channel: string; storage: string; }
   `emit` goes; and each channel's **visibility** `DataKey` ref (room namespace +
   subscribe-time admission). For *delivery*, a pushed event goes to the resource
   room `{tenant}:{resource}` and the relay joins a socket to the rooms its claims
-  admit. (The *what-to-refetch* map — `EventInvalidationIR` — is enriched in
+  admit. (The *what-to-refetch* map — `InvalidationRuleIR`, `save`-driven — is enriched in
   caching.md, reusing this same routing seam.) Derive, per frontend deployable,
   the resolved realtime wire (`realtimeWire` override ?? `PlatformSurface`
   default) and the set of channels its pages `.live`-subscribe. Sibling of the
