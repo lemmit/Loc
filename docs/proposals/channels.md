@@ -719,6 +719,59 @@ its own key** once the dependency set is too wide or too hot to invalidate
 wholesale. The compiler can even *warn* (`loom.live-wide-dependency`) when a
 cached `.live` read's dependency set exceeds a threshold, suggesting a projection.
 
+### Parametrized reads — linking frontend params to server tags
+
+A view/projection knows what it's built from, but it can also be *parametrized*
+(`OrdersByStatus(status)`), and the parameter is supplied on the **frontend**.
+They link the **same way the room key does**, one tier up: when the parameter is
+a **discrete equality on a field the event carries**, the value is baked into
+the tag, and both sides render the *same string* independently —
+
+```
+view OrdersByStatus(status)  →  response tag  orders.status.open
+frontend ["orders","byStatus","open"]  →  same tag  orders.status.open
+```
+
+Neither side knows the other; they meet on the string. The correctness subtlety:
+when a row's filter field **changes**, the row *moves between partitions*, so the
+save must purge **both** the old and the new tag — `OrderStatusChanged{old, new}`
+busts `orders.status.open` *and* `orders.status.closed`. That **transition
+invalidation** needs old+new in the event, and is only derivable for **discrete,
+enumerable** params.
+
+It **does not work** for continuous / range / full-text params
+(`OrdersByTotal(min,max)`, `OrdersSearch(q)`) — you can't mint a tag per range or
+query string. Those fall back to the **type tag** (`orders`, bust-all) or
+graduate to a **projection** (a maintained range/search index keyed by its own
+identity). This is the honest line: **discrete param → tight tag; continuous
+param → coarse type tag or projection.** And it confirms the instinct that *some
+reads get busted constantly under aggressive caching* — which is why **caching is
+opt-in per read, and the correct default for hot/wide/continuous reads is `cached:
+none` (or a debounce), not cache-and-thrash.** The compiler picks the regime from
+the dependency set + param shape; the author can override.
+
+### What tag-invalidation actually looks like, per tier
+
+The claim "one ticket busts every tier" only holds if each tier *supports*
+tag/surrogate-key purging. Honest status — two tiers are first-class, the rest
+use a standard pattern, and one (React Query) is where Loom's compile-time
+dependency set genuinely earns its keep:
+
+| Tier | Native tag-purge? | Mechanism Loom emits |
+|---|---|---|
+| **CDN / reverse proxy** | **Yes, first-class** | `Surrogate-Key:` header + purge-by-key (Fastly); `Cache-Tag` + purge (Cloudflare); `xkey` vmod (Varnish). Emit the header on reads; POST the purge on the ticket. |
+| **ASP.NET Core** | **Yes, in-box** | Output Caching (.NET 7+): `[OutputCache(Tags=[…])]` + `IOutputCacheStore.EvictByTagAsync(tag)`; HybridCache (.NET 9) `RemoveByTagAsync`. The ticket handler calls evict-by-tag. |
+| **Redis** | **No native tags** — *standard* pattern | Reverse-index set per tag: on store `SADD tag:orders <key>`; on purge `SMEMBERS tag:orders` → `UNLINK` each + the set. Exactly Symfony `RedisTagAwareAdapter` / Laravel cache-tags. |
+| **Hono / Node, Phoenix** | No native | Same Redis reverse-index, or rely on the CDN / ASP.NET tier in front. |
+| **React Query (client)** | **No tag concept — the key *is* the tag** | `invalidateQueries({queryKey})` prefix-matches a **single hierarchical path**. It *cannot* natively express "depends on `orders` **and** `customers`" (the joined-view case). So Loom emits a **tag → queryKeys registry** and the `.live` handler invalidates via `predicate` against it. |
+
+The takeaway: surrogate-key invalidation is a **mature, supported pattern** at
+the CDN and ASP.NET tiers and a **well-trodden** one on Redis — Loom isn't
+inventing a cache, it's *emitting the tags and purge calls* into mechanisms that
+already exist. The one real gap is **React Query's single-path key**, which can't
+represent a multi-dependency response; that map is normally hand-maintained and
+drifts, and is precisely what Loom can derive from the query/view AST for free.
+
 ## IR, lowering, enrichment (phase mapping)
 
 Following the `view`/`criterion`/`workflow` vertical-slice recipe:
