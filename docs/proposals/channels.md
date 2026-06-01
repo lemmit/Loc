@@ -621,6 +621,18 @@ are feasible at moderate user counts. This is the materialized-feed model
 (fan-out-on-write, like a timeline). It **converts a non-equi policy back into
 cheap routing on the read model's key.**
 
+In plain terms: instead of working out *who may see this* every time something
+changes, you keep a **ready-made list per group** — e.g. *Open orders in Region
+A* — and keep it current. The complicated rule is checked **once, when a change
+updates a list** (and only for the item that changed), not on every read or every
+notification. After that, both reading and notifying are trivial because each list
+has one simple name (`region-A`) that its group already watches — so you ping that
+one room and they refetch a dumb "give me list A." It's exactly a social-media
+timeline (prepare the feed at post time vs. compute it at read time), and Loom
+already has `projection` to build it. The catch: you now **store and maintain
+those lists**, which only stays sane while the number of lists is bounded
+(per-region/team fine; per-user-with-arbitrary-sharing is a lot).
+
 **Choosing:** A for instance/detail; B for lists with volatile authz or modest
 interest; **C (projection)** for hot lists / expensive policy / many subscribers —
 the classic fan-out-on-read (B) vs fan-out-on-write (C) trade, with A the special
