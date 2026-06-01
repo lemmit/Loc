@@ -61,11 +61,16 @@ A backend turns the *same* platform-neutral IR into source. Each knob picks how
 |---|---|---|
 | `platform:` | host runtime / web framework (the family) | shipping |
 | **`foundation:`** | opinionated domain/app framework — or `vanilla` | **new here** |
-| `style:` | application architecture (command/query shape) | designed (storage doc) |
+| **`application:`** | application architecture (command/query shape) | designed as `style:`; **renamed here** (§2) |
 | `persistence:` | data-access library (the ORM / query layer) | designed; **narrowed to data layer only** (§2) |
-| `layout:` | file / project organization | designed (storage doc) |
+| **`directoryLayout:`** | source-tree / file organization | designed as `layout:`; **renamed here** (§2) |
 | **`transport:`** | HTTP surface (endpoint style) | **new here** |
 | **`runtime:`** | aggregate execution / concurrency model | **new here** |
+
+The knob-naming rule: **name the axis after the layer it realizes** —
+`persistence:` (data), `transport:` (HTTP), `runtime:` (execution),
+`application:` (the application layer). That rule is why `style:` → `application:`
+and not `layering:` (see §2).
 
 There is no `domain:` knob — the domain is the source. `foundation:` names the
 *framework hosting* the domain, which is a realization choice.
@@ -74,13 +79,14 @@ There is no `domain:` knob — the domain is the source. `foundation:` names the
 
 | Knob | Verdict | Notes |
 |---|---|---|
-| `style:` | **keep** | Architectural pattern: `cqrs` \| `layered`. This *is* "CQRS vs service layer" — already designed. Locked when a `foundation:` owns it (§6 R4). |
-| `layout:` | **keep** | `byLayer` \| `byFeature`. Clear, well-scoped. |
+| `style:` → **`application:`** | **rename** | "style" is too vague. The axis configures the **application layer** (`cqrs` \| `layered`) — so name it for that layer, matching `persistence:`/`transport:`/`runtime:`. **Not** `layering:`: that collides with its own value `layered` and miscasts `cqrs` (CQRS is command/query separation, not a layering scheme). `application: layered` has no such self-collision. (`serviceLayer` is a fine value spelling if you prefer it to the storage doc's `layered`.) Locked when a `foundation:` owns it (§7 R4). |
+| `layout:` → **`directoryLayout:`** | **rename** | Make it explicit — and it disambiguates from the **page-level `layout:`** (the UI layout-wrapper selector), a real collision. Values `byLayer` \| `byFeature`. (`sourceLayout:`/`fileLayout:` are equivalent.) |
 | `persistence:` | **keep — but narrow it** | Data-access library only: `efcore`/`dapper`/`marten`/`drizzle`/`ecto`/`ashPostgres`/… **Not** the domain framework (that's `foundation:`). This is the §0.1 amendment: prefer it over "dal" (dated acronym), but it carries *only* the data layer. |
 | `framework:` (backend) | **retire** (already pinned) | D-PHOENIX-SURFACE freed `framework:` to the **UI** axis. Its old "minimal API vs controllers" duty is rehomed as `transport:` (§4). |
 
-So three names stay; `persistence:` narrows; the domain-framework axis becomes
-`foundation:` rather than overloading `persistence:`.
+So `persistence:` narrows and keeps its name; `style:`/`layout:` are renamed to
+the layer-named, collision-free `application:`/`directoryLayout:`; the
+domain-framework axis becomes `foundation:` rather than overloading `persistence:`.
 
 ## 3. New knob #1 — `foundation:` (the domain/app framework)
 
@@ -90,8 +96,8 @@ none. A spectrum of *how much of the stack the framework owns*:
 | Rung | Owns | Example values |
 |---|---|---|
 | `vanilla` (default) | nothing — you assemble it via the other knobs | — |
-| app framework (rung 3) | application + transport; **persistence stays open** | `nestjs` (node) |
-| metamodel framework (rung 4) | application + transport **+ the data-layer flavor** | `ash` (phoenix), `abp` (dotnet) |
+| app framework (rung 3) | `application:` + `transport:`; **persistence stays open** | `nestjs` (node) |
+| metamodel framework (rung 4) | `application:` + `transport:` **+ the data-layer flavor** | `ash` (phoenix), `abp` (dotnet) |
 
 `vanilla` was chosen deliberately: it reads as "raw platform, no domain-modelling
 framework" ("vanilla ASP.NET", "vanilla Phoenix" are idiomatic) — clearer than
@@ -126,8 +132,8 @@ What unifies Orleans grains, Akka.NET persistent actors, and Phoenix GenServers-
 per-aggregate is *how the aggregate is hosted and executed at runtime* — a
 long-lived, single-threaded-per-entity, message-driven process, versus a
 stateless object rehydrated from the repository per request. That is a
-**runtime / concurrency** choice, distinct from `style:` (a read/write *shape*),
-`persistence:` (the data layer), and `foundation:` (the framework).
+**runtime / concurrency** choice, distinct from `application:` (a read/write
+*shape*), `persistence:` (the data layer), and `foundation:` (the framework).
 
 Recommended name: **`runtime:`** (alternatives: `concurrency:` — most precise;
 `hosting:` — leans deployment). Avoid `actors:` (bakes the answer in) and
@@ -152,7 +158,7 @@ Each backend's `PlatformSurface` exposes its menu + default (D-ADAPTER-HOME). A
 **bare** `platform: <name>` equals the full default block — byte-identical to
 today's output (`storage-and-platform-config.md:881`).
 
-| Platform | `foundation:` | `style:` | `persistence:` | `layout:` | `transport:` | `runtime:` |
+| Platform | `foundation:` | `application:` | `persistence:` | `directoryLayout:` | `transport:` | `runtime:` |
 |---|---|---|---|---|---|---|
 | `dotnet` | `vanilla`* · `abp` | `cqrs`* · `layered` | `efcore`* · `dapper` · `marten` | `byLayer`* · `byFeature` | `minimalApi`* · `controllers` | `pooled`* · `orleans` · `akka` |
 | `node` (hono) | `vanilla`* · `nestjs` | `cqrs`* · `layered` | `drizzle`* (+1 ES-capable, TBD) | `byLayer`* · `byFeature` | `hono`* (fixed) | `pooled`* (fixed) |
@@ -171,24 +177,25 @@ R1–R3 are from the storage doc (§574–578); R4–R6 are added here.
 `loom.platform-knob-out-of-menu`
 > `runtime: orleans` is not available on platform `phoenix`. Available: `pooled`, `genserver`.
 
-**R2 — layout meaningless for layered.** `layout: byFeature` × `style: layered`
-→ **warning**, treated as `byLayer`. `loom.platform-layout-meaningless-for-style`
+**R2 — directoryLayout meaningless for layered.** `directoryLayout: byFeature` ×
+`application: layered` → **warning**, treated as `byLayer`.
+`loom.platform-layout-meaningless-for-application`
 
-**R3 — layered can't event-source.** `style: layered` × any contained aggregate
-with `persistenceStrategy: eventSourced` → **error**.
+**R3 — layered can't event-source.** `application: layered` × any contained
+aggregate with `persistenceStrategy: eventSourced` → **error**.
 `loom.platform-layered-with-event-sourcing`
 
 **R4 — foundation owns layers (the clean version).** Each `foundation:` value
-declares which of `{style, transport, persistence-flavor}` it owns. Setting an
-owned knob is an **error**; `foundation: vanilla` owns nothing.
+declares which of `{application, transport, persistence-flavor}` it owns. Setting
+an owned knob is an **error**; `foundation: vanilla` owns nothing.
 `loom.platform-knob-owned-by-foundation`
-> `foundation: ash` owns the application architecture and API surface. Remove `style:` / `transport:` (Ash supplies them).
+> `foundation: ash` owns the application architecture and API surface. Remove `application:` / `transport:` (Ash supplies them).
 
 This is exactly why the axes coexist *and* sometimes conflict, and it reads far
 more cleanly as `foundation:` than as "some `persistence:` values secretly lock
-other knobs": a `vanilla` foundation leaves `style`/`transport`/`persistence`
-fully open; a rung-3 foundation (`nestjs`) locks `style`/`transport` but leaves
-`persistence` open; a rung-4 foundation (`ash`/`abp`) also constrains the
+other knobs": a `vanilla` foundation leaves `application`/`transport`/`persistence`
+fully open; a rung-3 foundation (`nestjs`) locks `application`/`transport` but
+leaves `persistence` open; a rung-4 foundation (`ash`/`abp`) also constrains the
 `persistence` menu to its compatible data layers.
 
 **R5 — actor runtime needs a compatible store.** `runtime: akka` (persistent
@@ -196,20 +203,22 @@ actors) requires an event-journal-capable `persistence:`; `runtime: orleans`
 requires a configured grain-storage provider. Incompatible pair → **error**.
 `loom.platform-runtime-persistence-incompatible`
 
-**R6 — runtime ⟂ style is allowed.** `runtime:` and `style:` are independent
-(`cqrs + orleans`, `layered + genserver` all legal). Noted so nobody adds a
-spurious rule.
+**R6 — runtime ⟂ application is allowed.** `runtime:` and `application:` are
+independent (`cqrs + orleans`, `layered + genserver` all legal). Noted so nobody
+adds a spurious rule.
 
 ## 8. Defaults, normalization, round-trip
 
-- Every realization knob (`foundation`, `style`, `persistence`, `layout`,
-  `transport`, `runtime`) is **optional**; the common path writes none.
+- Every realization knob (`foundation`, `application`, `persistence`,
+  `directoryLayout`, `transport`, `runtime`) is **optional**; the common path
+  writes none.
 - Lowering normalizes each omitted knob to the platform default, so the IR field
   is always a concrete value — codegen dispatches on a value, errors enumerate a
   vocabulary, and `ddd snapshot` / the unfold-macro printer round-trip the
   normalized form (same treatment `design:` gets via `BUILTIN_PACK_LATEST`).
-- IR shape: extend `DeployableIR` with `foundation?`, `style?`, `persistence?`,
-  `layout?`, `transport?`, `runtime?`, mirroring how `design?` is handled.
+- IR shape: extend `DeployableIR` with `foundation?`, `application?`,
+  `persistence?`, `directoryLayout?`, `transport?`, `runtime?`, mirroring how
+  `design?` is handled.
 
 ## 9. What's pinned vs proposed
 
