@@ -9,6 +9,7 @@ import {
   packFormatForBuiltin,
   parseBuiltinDesignRef,
 } from "../../generator/_packs/builtin-formats.js";
+import type { Platform } from "../../ir/types/loom-ir.js";
 import {
   backendVersionsForFamily,
   isRegisteredBackendRef,
@@ -21,10 +22,14 @@ import {
   canonicalFramework,
   expectedFrameworkFor,
   expectedPackFormatFor,
+  FOUNDATION_OWNED_AXES,
   FRONTEND_KEYWORDS,
   hostableFrameworksFor,
+  isReservedStub,
   platformMountsUi,
   platformOwnsBackend,
+  type RealizationAxis,
+  realizationAxisMenu,
 } from "./data/platform-rules.js";
 
 void BUILTIN_PACK_LATEST;
@@ -60,6 +65,7 @@ export function checkDeployable(
   //          for the bulk-CRUD case.  Diagnostic code
   //          `loom.react-deployable-missing-ui`.
   checkDeployablePlatform(d, accept);
+  checkDeployableRealizationAxes(d, accept);
   // D-PHOENIX-SURFACE: `hosts:` is a UI mount on equal footing with the
   // legacy `ui:` bindings — it satisfies the "must declare a UI" rules
   // (4/4b) and is subject to the same platform-mounts-UI check (3).
@@ -248,6 +254,64 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
       `Platform '${raw}' on deployable '${d.name}' — no version '${parsed.version}' of backend '${parsed.family}'. Available: ${available.map((v) => `'${parsed.family}@${v}'`).join(", ")}.`,
       { node: d, property: "platform" },
     );
+  }
+}
+
+/** Resolve a `platform:` value to its canonical family (`phoenix` →
+ *  `phoenixLiveView`, `hono@v4` → `hono`), falling back to the raw value
+ *  for frontends (`react`/`static`).  Mirrors how lowering canonicalises. */
+function resolveAxisFamily(platform: string): Platform {
+  return (parseBuiltinPlatformRef(platform)?.family ?? platform) as Platform;
+}
+
+/** D-REALIZATION-AXES gating.  This PR ships **R1** (out-of-menu) and
+ *  **R4** (foundation owns layers); R2/R3/R5/R7 have no reachable trigger
+ *  until the menus grow (stubs become real / actor runtimes land) and are
+ *  deferred to the PRs that add those values (see
+ *  `docs/proposals/platform-realization-axes.md` §7). */
+export function checkDeployableRealizationAxes(d: Deployable, accept: ValidationAcceptor): void {
+  if (d.platform == null) return;
+  const family = resolveAxisFamily(d.platform);
+  const axes: { name: RealizationAxis; value: string | undefined }[] = [
+    { name: "foundation", value: d.foundation },
+    { name: "application", value: d.application },
+    { name: "persistence", value: d.persistence },
+    { name: "directoryLayout", value: d.directoryLayout },
+    { name: "transport", value: d.transport },
+    { name: "runtime", value: d.runtime },
+  ];
+
+  // R1 — every set axis value must be in its platform menu.
+  for (const { name, value } of axes) {
+    if (value == null) continue;
+    const menu = realizationAxisMenu(family, name);
+    if (menu.includes(value)) continue;
+    const reason = isReservedStub(family, name, value)
+      ? `is reserved on platform '${family}' but not yet implemented`
+      : `is not available on platform '${family}'`;
+    const avail = menu.length
+      ? `Available: ${menu.map((v) => `'${v}'`).join(", ")}.`
+      : `Platform '${family}' exposes no '${name}:' choices (realization axes apply to backend deployables).`;
+    accept("error", `'${name}: ${value}' on deployable '${d.name}' ${reason}. ${avail}`, {
+      node: d,
+      property: name,
+      code: "loom.platform-knob-out-of-menu",
+    });
+  }
+
+  // R4 — a `foundation:` framework owns some axes; setting an owned axis
+  // alongside it is an error (the framework supplies it).
+  if (d.foundation != null) {
+    const owned = FOUNDATION_OWNED_AXES[d.foundation] ?? [];
+    for (const axis of owned) {
+      const set = axes.find((a) => a.name === axis)?.value;
+      if (set == null) continue;
+      accept(
+        "error",
+        `'foundation: ${d.foundation}' owns the ${axis} layer — remove '${axis}:' (the framework supplies it).`,
+        { node: d, property: axis, code: "loom.platform-knob-owned-by-foundation" },
+      );
+    }
   }
 }
 

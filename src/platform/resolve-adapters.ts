@@ -18,6 +18,7 @@
 // ---------------------------------------------------------------------------
 
 import {
+  ADAPTER_IS_STUB,
   AdapterNotImplementedError,
   type LayoutAdapter,
   type PersistenceAdapter,
@@ -41,6 +42,49 @@ export function adaptersFor(platform: Platform): PlatformAdapters | undefined {
 /** Defaults for a platform, or undefined for frontend / unknown. */
 export function defaultsFor(platform: Platform): PlatformAdapterDefaults | undefined {
   return platformFor(platform).adapterDefaults?.();
+}
+
+/** The DSL-selectable adapter names for one axis on a platform — i.e. the
+ *  REAL (implemented) adapters only, stubs excluded.  Pure lookup: reads
+ *  capability fields off the menu, never invokes an `emit*` method (so no
+ *  stub throws).  Powers the validator's realization-axis menu
+ *  (D-REALIZATION-AXES R1): a stub key parses but must be rejected with
+ *  "reserved but not yet implemented", not silently accepted.  Returns
+ *  `[]` for frontend / unknown platforms (no adapter menu). */
+export function availableAdapterNames(
+  platform: Platform,
+  kind: "persistence" | "style" | "layout",
+): string[] {
+  const adapters = adaptersFor(platform);
+  if (!adapters) return [];
+  const bag: Record<string, object> =
+    kind === "persistence"
+      ? adapters.persistence
+      : kind === "style"
+        ? adapters.styles
+        : adapters.layouts;
+  return Object.entries(bag)
+    .filter(([, adapter]) => (adapter as Record<symbol, unknown>)[ADAPTER_IS_STUB] !== true)
+    .map(([name]) => name)
+    .sort();
+}
+
+/** Every adapter name in a platform's menu for one axis — REAL and STUB.
+ *  Used to distinguish "reserved but unimplemented" (a registered stub)
+ *  from "unknown" in validator diagnostics.  `[]` for frontends. */
+export function allAdapterNames(
+  platform: Platform,
+  kind: "persistence" | "style" | "layout",
+): string[] {
+  const adapters = adaptersFor(platform);
+  if (!adapters) return [];
+  const bag =
+    kind === "persistence"
+      ? adapters.persistence
+      : kind === "style"
+        ? adapters.styles
+        : adapters.layouts;
+  return Object.keys(bag).sort();
 }
 
 /** Resolve a persistence adapter by platform + name.  Falls back to the

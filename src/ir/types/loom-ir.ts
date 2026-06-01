@@ -1512,6 +1512,24 @@ export interface NeedIR {
 // validator enforces both.
 export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView";
 
+// D-REALIZATION-AXES — the `application:` axis is the one axis whose DSL
+// spelling differs from its backing D-ADAPTER-HOME adapter key: the
+// decision renamed the service-layer value to `serviceLayer`, while the
+// `style` adapter key stays `layered`.  `cqrs`/`flat` map to themselves.
+// Lives here (not in the validator) so lowering AND the validator share
+// one source of truth — the lowered `DeployableIR.application` carries the
+// resolved ADAPTER key, ready for `resolveStyle`.
+
+/** DSL `application:` value → `style` adapter key. */
+export function applicationDslToAdapter(v: string): string {
+  return v === "serviceLayer" ? "layered" : v;
+}
+
+/** `style` adapter key → DSL `application:` value (for menus / display). */
+export function applicationAdapterToDsl(v: string): string {
+  return v === "layered" ? "serviceLayer" : v;
+}
+
 /** Saving shapes (D-DOCUMENT-AXIS `shape(…)`) each backend platform can
  *  EMIT today — the single source of truth for the `supportedShapes`
  *  capability check.  A `shape(…)` not listed for the target platform is
@@ -1580,6 +1598,25 @@ export interface DeployableIR {
    *  `ui` a keyword in the deployable block would shadow the test-DSL
    *  accessor and break parsing of existing examples. */
   design?: string;
+  /** Realization axes (D-REALIZATION-AXES).  Each decomposes the
+   *  platform bundle into one orthogonal concern.  All optional in the
+   *  type but **always concrete on backend deployables post-lowering**
+   *  (normalized to the platform's default, mirroring how `design` is
+   *  resolved via `BUILTIN_PACK_LATEST`); left `undefined` on frontend
+   *  (`react`/`static`) deployables, which carry no domain realization.
+   *  This PR is DSL-surface-only: the fields are carried through lowering
+   *  and validated, but no generator consumes them yet.
+   *
+   *  `application`/`directoryLayout` map onto the existing
+   *  D-ADAPTER-HOME adapter kinds `style`/`layout`; `persistence` onto
+   *  the `persistence` adapter; `foundation`/`transport`/`runtime` are
+   *  greenfield (no adapter infra yet, single default value each). */
+  foundation?: string;
+  application?: string;
+  persistence?: string;
+  directoryLayout?: string;
+  transport?: string;
+  runtime?: string;
   /** Per-deployable auth opt-in.  Populated when the source declares
    *  `auth: required` on the deployable.  Backends with
    *  `auth.required === true` emit JWT-decode middleware + a verifier

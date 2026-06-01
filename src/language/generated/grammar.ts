@@ -823,6 +823,206 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 }
               },
               {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "{"
+                  },
+                  {
+                    "$type": "Alternatives",
+                    "elements": [
+                      {
+                        "$type": "Group",
+                        "elements": [
+                          {
+                            "$type": "Keyword",
+                            "value": "foundation"
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ":"
+                          },
+                          {
+                            "$type": "Assignment",
+                            "feature": "foundation",
+                            "operator": "=",
+                            "terminal": {
+                              "$type": "RuleCall",
+                              "rule": {
+                                "$ref": "#/rules@117"
+                              },
+                              "arguments": []
+                            }
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ",",
+                            "cardinality": "?"
+                          }
+                        ]
+                      },
+                      {
+                        "$type": "Group",
+                        "elements": [
+                          {
+                            "$type": "Keyword",
+                            "value": "application"
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ":"
+                          },
+                          {
+                            "$type": "Assignment",
+                            "feature": "application",
+                            "operator": "=",
+                            "terminal": {
+                              "$type": "RuleCall",
+                              "rule": {
+                                "$ref": "#/rules@117"
+                              },
+                              "arguments": []
+                            }
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ",",
+                            "cardinality": "?"
+                          }
+                        ]
+                      },
+                      {
+                        "$type": "Group",
+                        "elements": [
+                          {
+                            "$type": "Keyword",
+                            "value": "persistence"
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ":"
+                          },
+                          {
+                            "$type": "Assignment",
+                            "feature": "persistence",
+                            "operator": "=",
+                            "terminal": {
+                              "$type": "RuleCall",
+                              "rule": {
+                                "$ref": "#/rules@117"
+                              },
+                              "arguments": []
+                            }
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ",",
+                            "cardinality": "?"
+                          }
+                        ]
+                      },
+                      {
+                        "$type": "Group",
+                        "elements": [
+                          {
+                            "$type": "Keyword",
+                            "value": "directoryLayout"
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ":"
+                          },
+                          {
+                            "$type": "Assignment",
+                            "feature": "directoryLayout",
+                            "operator": "=",
+                            "terminal": {
+                              "$type": "RuleCall",
+                              "rule": {
+                                "$ref": "#/rules@117"
+                              },
+                              "arguments": []
+                            }
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ",",
+                            "cardinality": "?"
+                          }
+                        ]
+                      },
+                      {
+                        "$type": "Group",
+                        "elements": [
+                          {
+                            "$type": "Keyword",
+                            "value": "transport"
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ":"
+                          },
+                          {
+                            "$type": "Assignment",
+                            "feature": "transport",
+                            "operator": "=",
+                            "terminal": {
+                              "$type": "RuleCall",
+                              "rule": {
+                                "$ref": "#/rules@117"
+                              },
+                              "arguments": []
+                            }
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ",",
+                            "cardinality": "?"
+                          }
+                        ]
+                      },
+                      {
+                        "$type": "Group",
+                        "elements": [
+                          {
+                            "$type": "Keyword",
+                            "value": "runtime"
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ":"
+                          },
+                          {
+                            "$type": "Assignment",
+                            "feature": "runtime",
+                            "operator": "=",
+                            "terminal": {
+                              "$type": "RuleCall",
+                              "rule": {
+                                "$ref": "#/rules@117"
+                              },
+                              "arguments": []
+                            }
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ",",
+                            "cardinality": "?"
+                          }
+                        ]
+                      }
+                    ],
+                    "cardinality": "*"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": "}"
+                  }
+                ],
+                "cardinality": "?"
+              },
+              {
                 "$type": "Keyword",
                 "value": ",",
                 "cardinality": "?"
@@ -9282,6 +9482,34 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "error"
+          },
+          {
+            "$type": "Keyword",
+            "value": "foundation"
+          },
+          {
+            "$type": "Keyword",
+            "value": "application"
+          },
+          {
+            "$type": "Keyword",
+            "value": "persistence"
+          },
+          {
+            "$type": "Keyword",
+            "value": "directoryLayout"
+          },
+          {
+            "$type": "Keyword",
+            "value": "transport"
+          },
+          {
+            "$type": "Keyword",
+            "value": "runtime"
+          },
+          {
+            "$type": "Keyword",
+            "value": "transactional"
           }
         ]
       },
