@@ -707,17 +707,24 @@ cover the hard cases you'd hit:
   aggregates, emit one tag per type (instance tags only when the read is
   parameterized by that id).
 
-**When the dependency set gets too wide — graduate to a projection.** Tagging a
-dashboard with 25 high-write types means any of 25 saves busts it; correct, but
-churny. Past some fan-in, broad invalidation is the wrong tool: that read should
-be a **maintained read-model / `projection`** (plane 2; `bounded-context-model.md`,
-`workflow-and-applier.md`) — updated incrementally from the event stream and
-cached under **its own single key**, so 25 upstream types collapse to one
-projection tag. So the key structure scales in two regimes: **tag-by-dependency-
-set** for ordinary reads (cheap, exact, auto-derived), and **a projection with
-its own key** once the dependency set is too wide or too hot to invalidate
-wholesale. The compiler can even *warn* (`loom.live-wide-dependency`) when a
-cached `.live` read's dependency set exceeds a threshold, suggesting a projection.
+**When the dependency set gets too wide — restructure the read, don't add a
+cache mode.** Tagging a dashboard with 25 high-write types means any of 25 saves
+busts it; correct, but churny. Past some fan-in, broad invalidation is the wrong
+tool: that read should be a **maintained read-model / `projection`** (plane 2;
+`bounded-context-model.md`, `workflow-and-applier.md`) — updated incrementally
+from the event stream so 25 upstream types collapse to one resource. **A
+projection is *not* a cache mode** — it's a different read whose *output* is
+cached with tags like any other (its single resource tag instead of 25). So
+there are exactly **two cache modes** — `none` and `tagged` — and "graduate to a
+projection" is advice about restructuring the read, not a third mode. The
+compiler can *warn* (`loom.live-wide-dependency`) when a `cached: tagged` read's
+dependency set exceeds a threshold, suggesting a projection.
+
+```ddd
+// The only cache surface — per read (find / view / projection output):
+cached: none      // default for hot / wide / continuous-param reads
+cached: tagged    // surrogate-key invalidation; optional `ttl:` as a backstop
+```
 
 ### Parametrized reads — linking frontend params to server tags
 
@@ -760,7 +767,7 @@ dependency set genuinely earns its keep:
 | Tier | Native tag-purge? | Mechanism Loom emits |
 |---|---|---|
 | **CDN / reverse proxy** | **Yes, first-class** | `Surrogate-Key:` header + purge-by-key (Fastly); `Cache-Tag` + purge (Cloudflare); `xkey` vmod (Varnish). Emit the header on reads; POST the purge on the ticket. |
-| **ASP.NET Core** | **Yes, in-box** | Output Caching (.NET 7+): `[OutputCache(Tags=[…])]` + `IOutputCacheStore.EvictByTagAsync(tag)`; HybridCache (.NET 9) `RemoveByTagAsync`. The ticket handler calls evict-by-tag. |
+| **ASP.NET Core** | **Engine yes; tags must be runtime** | Output Caching (.NET 7+) + `IOutputCacheStore.EvictByTagAsync(tag)`. But `[OutputCache(Tags=[…])]` takes **compile-time constants only** — fine for `orders`, useless for `orders.{id}`. Loom emits a custom **`IOutputCachePolicy`** that adds `{type}.{id}` + param tags from route values at request time (see below). |
 | **Redis** | **No native tags** — *standard* pattern | Reverse-index set per tag: on store `SADD tag:orders <key>`; on purge `SMEMBERS tag:orders` → `UNLINK` each + the set. Exactly Symfony `RedisTagAwareAdapter` / Laravel cache-tags. |
 | **Hono / Node, Phoenix** | No native | Same Redis reverse-index, or rely on the CDN / ASP.NET tier in front. |
 | **React Query (client)** | **No tag concept — the key *is* the tag** | `invalidateQueries({queryKey})` prefix-matches a **single hierarchical path**. It *cannot* natively express "depends on `orders` **and** `customers`" (the joined-view case). So Loom emits a **tag → queryKeys registry** and the `.live` handler invalidates via `predicate` against it. |
@@ -771,6 +778,39 @@ inventing a cache, it's *emitting the tags and purge calls* into mechanisms that
 already exist. The one real gap is **React Query's single-path key**, which can't
 represent a multi-dependency response; that map is normally hand-maintained and
 drifts, and is precisely what Loom can derive from the query/view AST for free.
+
+**Tags are runtime values — so an attribute can't carry them.** This is general,
+not an ASP.NET quirk: the instance tag `orders.42` and a param tag
+`orders.status.open` come from the **request** (route values / claims), so they
+must be computed *per request*, not declared statically. The type tag `orders` is
+the only constant. So on every tier Loom sets tags at request time:
+
+- **CDN**: the read handler writes `Surrogate-Key: orders orders.42` into the
+  response headers (computed from route + the resolved aggregate).
+- **ASP.NET Core**: a generated `IOutputCachePolicy` — *not* the attribute —
+  adds the dynamic tags in `ServeRequestAsync` and partitions the entry by tenant:
+
+  ```csharp
+  sealed class AggregateTagPolicy : IOutputCachePolicy {           // generated once
+    public ValueTask ServeRequestAsync(OutputCacheContext ctx, CancellationToken ct) {
+      var rv = ctx.HttpContext.Request.RouteValues;
+      ctx.Tags.Add("orders");                                       // constant type tag
+      if (rv.TryGetValue("id", out var id)) ctx.Tags.Add($"orders.{id}");  // runtime instance tag
+      ctx.CacheVaryByRules.VaryByValues["tenant"] = /* currentUser.tenantId */;  // shared-cache safety
+      return ValueTask.CompletedTask;
+    }
+    /* ServeResponseAsync / EvaluatePolicyAsync: defaults */
+  }
+  ```
+  endpoints get `.CacheOutput<AggregateTagPolicy>()`; the dispatcher/ticket
+  handler calls `await store.EvictByTagAsync("orders.42", ct)` on `save`.
+- **Redis / Hono / Phoenix**: the reverse-index `SADD tag:orders.42 <key>` is
+  likewise written at store time from the runtime tag set.
+
+So the `[OutputCache(Tags=…)]` attribute is used (if at all) only for the bare
+type tag; everything instance- or param-relative goes through the policy — which
+is exactly why tags are "aggregate-relative" and live in generated code, not in a
+static annotation.
 
 ## IR, lowering, enrichment (phase mapping)
 
