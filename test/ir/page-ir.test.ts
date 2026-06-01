@@ -574,13 +574,65 @@ describe("page metamodel — IR shape", () => {
       expect(d.uiFramework).toBe("phoenixLiveView");
     });
 
-    it("supports multiple hosts: entries (one-ui-many-frameworks ready)", async () => {
+    it("supports multiple hosts: entries via the bracketed form (one-ui-many-frameworks ready)", async () => {
       const loom = await buildLoom(`
         system Acme {
           subdomain M { context C { } }
           ui Web { framework: react }
           ui Admin { framework: phoenixLiveView }
-          deployable app { platform: phoenixLiveView, contexts: [C], hosts: Web, Admin, port: 4000 }
+          deployable app { platform: phoenixLiveView, contexts: [C], hosts: [Web, Admin], port: 4000 }
+        }
+      `);
+      expect(deployableByName(loom, "app").hostedUiNames).toEqual(["Web", "Admin"]);
+    });
+  });
+
+  // D-PHOENIX-SURFACE phase 5 — `phoenix`/`liveview` aliases canonicalise.
+  describe("phoenix/liveview aliases (D-PHOENIX-SURFACE)", () => {
+    function deployableByName(loom: LoomModel, name: string) {
+      const d = firstSystem(loom).deployables.find((x) => x.name === name);
+      if (!d) throw new Error(`deployable '${name}' not found`);
+      return d;
+    }
+
+    it("platform: phoenix canonicalises to the phoenixLiveView family", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          subdomain M { context C { } }
+          ui Admin { framework: liveview }
+          deployable app { platform: phoenix, contexts: [C], hosts: Admin, port: 4000 }
+        }
+      `);
+      expect(deployableByName(loom, "app").platform).toBe("phoenixLiveView");
+    });
+
+    it("framework: liveview canonicalises to phoenixLiveView on the ui", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          ui Admin { framework: liveview }
+        }
+      `);
+      expect(uiByName(loom, "Admin").framework).toBe("phoenixLiveView");
+    });
+
+    it("the hosted ui's liveview framework flows to the deployable's uiFramework as phoenixLiveView", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          subdomain M { context C { } }
+          ui Admin { framework: liveview }
+          deployable app { platform: phoenix, contexts: [C], hosts: Admin, port: 4000 }
+        }
+      `);
+      expect(deployableByName(loom, "app").uiFramework).toBe("phoenixLiveView");
+    });
+
+    it("bracketed multi-host parses and lowers (hosts: [Web, Admin])", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          subdomain M { context C { } }
+          ui Web { framework: react }
+          ui Admin { framework: liveview }
+          deployable app { platform: phoenix, contexts: [C], hosts: [Web, Admin], port: 4000 }
         }
       `);
       expect(deployableByName(loom, "app").hostedUiNames).toEqual(["Web", "Admin"]);

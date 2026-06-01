@@ -1148,30 +1148,73 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "value": ":"
               },
               {
-                "$type": "Assignment",
-                "feature": "hosts",
-                "operator": "+=",
-                "terminal": {
-                  "$type": "CrossReference",
-                  "type": {
-                    "$ref": "#/rules@25"
-                  },
-                  "terminal": {
-                    "$type": "RuleCall",
-                    "rule": {
-                      "$ref": "#/rules@171"
-                    },
-                    "arguments": []
-                  },
-                  "deprecatedSyntax": false
-                }
-              },
-              {
-                "$type": "Group",
+                "$type": "Alternatives",
                 "elements": [
                   {
-                    "$type": "Keyword",
-                    "value": ","
+                    "$type": "Group",
+                    "elements": [
+                      {
+                        "$type": "Keyword",
+                        "value": "["
+                      },
+                      {
+                        "$type": "Assignment",
+                        "feature": "hosts",
+                        "operator": "+=",
+                        "terminal": {
+                          "$type": "CrossReference",
+                          "type": {
+                            "$ref": "#/rules@25"
+                          },
+                          "terminal": {
+                            "$type": "RuleCall",
+                            "rule": {
+                              "$ref": "#/rules@171"
+                            },
+                            "arguments": []
+                          },
+                          "deprecatedSyntax": false
+                        }
+                      },
+                      {
+                        "$type": "Group",
+                        "elements": [
+                          {
+                            "$type": "Keyword",
+                            "value": ","
+                          },
+                          {
+                            "$type": "Assignment",
+                            "feature": "hosts",
+                            "operator": "+=",
+                            "terminal": {
+                              "$type": "CrossReference",
+                              "type": {
+                                "$ref": "#/rules@25"
+                              },
+                              "terminal": {
+                                "$type": "RuleCall",
+                                "rule": {
+                                  "$ref": "#/rules@171"
+                                },
+                                "arguments": []
+                              },
+                              "deprecatedSyntax": false
+                            }
+                          }
+                        ],
+                        "cardinality": "*"
+                      },
+                      {
+                        "$type": "Keyword",
+                        "value": ",",
+                        "cardinality": "?"
+                      },
+                      {
+                        "$type": "Keyword",
+                        "value": "]"
+                      }
+                    ]
                   },
                   {
                     "$type": "Assignment",
@@ -1192,8 +1235,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                       "deprecatedSyntax": false
                     }
                   }
-                ],
-                "cardinality": "*"
+                ]
               },
               {
                 "$type": "Keyword",
@@ -2165,6 +2207,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "phoenixLiveView"
+          },
+          {
+            "$type": "Keyword",
+            "value": "liveview"
           }
         ]
       },
@@ -2201,6 +2247,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "phoenixLiveView"
+          },
+          {
+            "$type": "Keyword",
+            "value": "phoenix"
           },
           {
             "$type": "RuleCall",

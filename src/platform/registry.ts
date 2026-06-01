@@ -149,14 +149,33 @@ export interface ParsedBuiltinPlatformRef {
   qualified: string;
 }
 
+/** D-PHOENIX-SURFACE platform aliases → canonical family name.
+ *  `phoenix` is the host-platform spelling that decouples the name from
+ *  the LiveView framework; it resolves to the (still-canonical)
+ *  `phoenixLiveView` family.  Strips/re-applies a `@version` pin so
+ *  `phoenix@v1` aliases too.  The literal-rename cleanup phase will
+ *  flip canonical ↔ alias. */
+function aliasPlatform(s: string): string {
+  const at = s.indexOf("@");
+  const family = at === -1 ? s : s.slice(0, at);
+  if (family !== "phoenix") return s;
+  return at === -1 ? "phoenixLiveView" : `phoenixLiveView${s.slice(at)}`;
+}
+
 /** Parse a `platform:` value.  Mirrors `parseBuiltinDesignRef`
  *  (builtin-formats.ts): bareword backend → default version;
  *  `family@version` → that pin; frontend / unknown → `null`.
  *  Pure; exported so the validator + lowering share one
  *  resolution authority. */
 export function parseBuiltinPlatformRef(s: string): ParsedBuiltinPlatformRef | null {
-  const at = s.indexOf("@");
-  const family = (at === -1 ? s : s.slice(0, at)) as BackendFamily;
+  // D-PHOENIX-SURFACE: `phoenix` is the host-platform alias for the
+  // (still-canonical) `phoenixLiveView` family.  Canonicalise here, the
+  // shared resolution authority, so validator + lowering + `platformFor`
+  // all accept the new spelling identically.  The literal-rename cleanup
+  // phase flips which name is canonical.
+  const canonical = aliasPlatform(s);
+  const at = canonical.indexOf("@");
+  const family = (at === -1 ? canonical : canonical.slice(0, at)) as BackendFamily;
   if (!(family in BUILTIN_PLATFORM_LATEST)) return null;
   const version = at === -1 ? BUILTIN_PLATFORM_LATEST[family] : s.slice(at + 1);
   return { family, version, qualified: `${family}@${version}` };

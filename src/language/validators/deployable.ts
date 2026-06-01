@@ -18,6 +18,7 @@ import {
 import type { Deployable } from "../generated/ast.js";
 import {
   builtinPackNamesForFormat,
+  canonicalFramework,
   expectedFrameworkFor,
   expectedPackFormatFor,
   FRONTEND_KEYWORDS,
@@ -135,7 +136,7 @@ export function checkDeployable(
   if (hasUiBinding && platformMountsUi(d.platform)) {
     const hostable = hostableFrameworksFor(d.platform);
     for (const ui of mountedUis) {
-      const uiFramework = ui?.framework;
+      const uiFramework = canonicalFramework(ui?.framework);
       if (!uiFramework || hostable.has(uiFramework)) continue;
       const menu = [...hostable].sort().join(", ") || "none";
       accept(

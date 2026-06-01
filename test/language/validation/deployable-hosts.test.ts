@@ -78,7 +78,7 @@ describe("validator: deployable hosts: clause (D-PHOENIX-SURFACE)", () => {
         subdomain M { context C { aggregate A { x: int } } }
         ui Web { framework: react }
         ui Admin { framework: phoenixLiveView }
-        deployable app { platform: dotnet, contexts: [C], hosts: Web, Admin, port: 8080 }
+        deployable app { platform: dotnet, contexts: [C], hosts: [Web, Admin], port: 8080 }
       }
     `);
     // Web (react) is fine on dotnet; Admin (LiveView) is not.

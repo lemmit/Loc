@@ -217,11 +217,30 @@ function qualifyPlatform(raw: string | undefined): {
   family: Platform;
   ref: string;
 } {
-  const value = raw ?? "hono";
+  // D-PHOENIX-SURFACE: `phoenix` is the host-platform spelling that
+  // decouples the name from the LiveView framework.  Canonicalise it to
+  // `phoenixLiveView` at this boundary so every downstream consumer (13
+  // call sites keyed on the literal) stays unchanged until the rename
+  // cleanup phase.
+  const value = canonicalPlatform(raw ?? "hono");
   const parsed = parseBuiltinPlatformRef(value);
   return parsed
     ? { family: parsed.family as Platform, ref: parsed.qualified }
     : { family: value as Platform, ref: value };
+}
+
+/** Canonicalise a D-PHOENIX-SURFACE platform alias to the IR's stable
+ *  family name.  `phoenix` → `phoenixLiveView`; everything else passes
+ *  through.  Boundary-only: the alias never reaches the IR or any
+ *  generator. */
+function canonicalPlatform(value: string): string {
+  return value === "phoenix" ? "phoenixLiveView" : value;
+}
+
+/** Canonicalise a D-PHOENIX-SURFACE framework alias.  `liveview` →
+ *  `phoenixLiveView`; everything else passes through. */
+function canonicalFramework(value: string | undefined): string | undefined {
+  return value === "liveview" ? "phoenixLiveView" : value;
 }
 
 // ---------------------------------------------------------------------------
@@ -869,8 +888,8 @@ function lowerDeployable(d: Deployable): DeployableIR {
   // phase 2 — the ui owns its framework), then the legacy platform-derived
   // default.
   const uiFramework =
-    d.uiBlock?.framework ??
-    firstHostedUi?.framework ??
+    canonicalFramework(d.uiBlock?.framework) ??
+    canonicalFramework(firstHostedUi?.framework) ??
     (uiName
       ? platform === "phoenixLiveView"
         ? "phoenixLiveView"
@@ -994,7 +1013,7 @@ function lowerUi(ui: Ui): UiIR {
   }
   return {
     name: ui.name,
-    framework: ui.framework,
+    framework: canonicalFramework(ui.framework),
     pages,
     components,
     menu,
