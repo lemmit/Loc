@@ -93,6 +93,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // bundled in a system's modules or sits at the top level.
   for (const c of allContexts(loom)) {
     validateQueryableWheres(c, diags);
+    validateRetrievals(c, diags);
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);
     validateExternOperations(c, diags);
@@ -735,6 +736,97 @@ function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagnostic[])
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Retrieval validation (retrieval.md).  A `retrieval`'s `where` is a
+// selection position — same queryable-subset contract as a `find …
+// where` (reuses the oracle above).  Its `sort` and `loads` slots carry
+// structural paths that must resolve against the candidate aggregate.
+// `page` cannot appear here (the grammar forbids a page slot), so there
+// is nothing to check for it.
+// ---------------------------------------------------------------------------
+
+function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  for (const r of ctx.retrievals) {
+    const targetName = r.targetType.kind === "entity" ? r.targetType.name : undefined;
+    const agg = targetName ? ctx.aggregates.find((a) => a.name === targetName) : undefined;
+    const src = `${ctx.name}/retrieval ${r.name}`;
+
+    // `where` — same queryable-subset enforcement as find filters.
+    const offending = firstNonQueryableNode(r.where);
+    if (offending) {
+      diags.push({
+        severity: "error",
+        message:
+          `retrieval '${r.name}': where-clause is not queryable (${offending}). ` +
+          `Allowed: comparisons, &&/||/!, parens, 'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
+        source: src,
+      });
+    } else if (agg) {
+      const unknown = firstUnknownColumnRef(r.where, agg, ctx);
+      if (unknown) {
+        diags.push({
+          severity: "error",
+          message: `retrieval '${r.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
+          source: src,
+        });
+      }
+      const bothCols = firstColumnVsColumn(r.where);
+      if (bothCols) {
+        diags.push({
+          severity: "error",
+          message:
+            `retrieval '${r.name}': comparison between two columns (${bothCols}) is not queryable. ` +
+            `eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
+          source: src,
+        });
+      }
+    }
+
+    if (!agg) continue;
+
+    // `sort` — each term's path must start at a real aggregate field.
+    for (const term of r.sort) {
+      const head = term.path[0];
+      if (head && !aggregateHasMember(agg, head.name)) {
+        diags.push({
+          severity: "error",
+          message: `retrieval '${r.name}': sort references unknown field '${head.name}' on aggregate '${agg.name}'.`,
+          source: src,
+        });
+      }
+    }
+
+    // `loads` — each path's first segment must resolve on the aggregate
+    // (a stored field, a containment, or a cross-aggregate reference
+    // field).  Deeper path resolution across parts / referenced
+    // aggregates is the v2 load-inference concern (load-specifications.md);
+    // v1 validates the entry point only.
+    if (r.loadPlan.kind === "explicit") {
+      for (const path of r.loadPlan.paths) {
+        const head = path[0];
+        if (head && !aggregateHasMember(agg, head.name)) {
+          diags.push({
+            severity: "error",
+            message: `retrieval '${r.name}': loads references unknown field '${head.name}' on aggregate '${agg.name}'.`,
+            source: src,
+          });
+        }
+      }
+    }
+  }
+}
+
+/** True when `name` is a stored field, containment, or derived property
+ *  of the aggregate — the set of members a `sort` / `loads` path may
+ *  root at. */
+function aggregateHasMember(agg: AggregateIR, name: string): boolean {
+  return (
+    agg.fields.some((f) => f.name === name) ||
+    agg.contains.some((c) => c.name === name) ||
+    agg.derived.some((d) => d.name === name)
+  );
 }
 
 /** Walk an already-queryable expression and return the first
