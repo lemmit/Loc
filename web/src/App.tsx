@@ -58,7 +58,7 @@ import {
   type UnsupportedPlatform,
 } from "./layout/ctx";
 import type { OutputStream } from "./layout/OutputPanel";
-import { useGeneratedConflicts } from "./layout/generated-conflicts";
+import { useGeneratedConflicts } from "./layout/use-generated-conflicts";
 import type { TestResult } from "./testing/harness";
 import type { LogLine } from "./util/log-line";
 
