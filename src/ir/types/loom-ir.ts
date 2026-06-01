@@ -149,6 +149,25 @@ export interface FieldIR {
   default?: ExprIR;
 }
 
+/** One entry in an aggregate's reified **create-input contract** — the
+ *  single source of truth every create surface derives from (wire DTO,
+ *  domain factory, page-object fill, OpenAPI, cross-backend parity).
+ *  Built once by `enrichLoomModel` (see `buildCreateInput`) so every
+ *  backend reads the same field set AND the same per-field required-ness,
+ *  instead of each re-deriving it — the divergence the per-backend
+ *  required-set hacks papered over. */
+export interface CreateInputFieldIR {
+  field: FieldIR;
+  /** Whether the client MUST supply this field on create.  A field is
+   *  required input iff it is non-optional, carries no explicit default,
+   *  and has no language-defined implicit default (a bare `bool` defaults
+   *  to `false`).  A default — explicit or implicit — collapses a field
+   *  onto the same "client may omit" axis as `optional`; whether the
+   *  *aggregate* gets a create at all is a separate, invariant-based
+   *  decision and does not consult this flag. */
+  requiredInput: boolean;
+}
+
 export interface ContainmentIR {
   name: string;
   partName: string;
@@ -345,6 +364,11 @@ export interface AggregateIR {
   /** Canonical JSON-on-the-wire field list.  Populated by
    * `enrichLoomModel`. */
   wireShape?: WireField[];
+  /** Reified create-input contract — the client-suppliable field set with
+   * per-field required-ness.  Populated by `enrichLoomModel`
+   * (`buildCreateInput`); the single source backends consume instead of
+   * re-deriving the create payload.  See {@link CreateInputFieldIR}. */
+  createInput?: CreateInputFieldIR[];
   /** Many-to-many associations derived from `Target id[]` fields.
    * Populated by `enrichLoomModel`; one entry per reference-collection
    * field.  Empty array when the aggregate has none. */
@@ -801,6 +825,9 @@ export type EnrichedAggregateIR = AggregateIR & {
   wireShape: WireField[];
   /** Always populated by `enrichLoomModel` (empty when none derived). */
   associations: AssociationIR[];
+  /** Always populated by `enrichLoomModel` (empty when the aggregate has
+   * no client-suppliable create fields). */
+  createInput: CreateInputFieldIR[];
   parts: EnrichedEntityPartIR[];
 };
 

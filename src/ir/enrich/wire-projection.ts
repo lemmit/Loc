@@ -6,7 +6,13 @@
 // duplicating the rules.  See `FieldAccess` in `src/ir/types/loom-ir.ts`
 // for the canonical role semantics this layer implements.
 
-import type { AggregateIR, FieldAccess, FieldIR } from "../types/loom-ir.js";
+import type {
+  AggregateIR,
+  CreateInputFieldIR,
+  FieldAccess,
+  FieldIR,
+  TypeIR,
+} from "../types/loom-ir.js";
 
 /** Any structure carrying a resolved access role.  Both `WireField`
  * and `FieldIR` satisfy this — backends choose the shape that suits
@@ -67,7 +73,47 @@ export function forCreateInput<T extends WithAccess>(items: readonly T[]): T[] {
  * field defaults, so the input set is empty. */
 export function createInputFields(agg: AggregateIR): FieldIR[] {
   if (agg.canonicalCreate == null && isSynthesizedCreate(agg)) return [];
-  return forCreateInput(agg.fields);
+  // Read the reified contract when present (post-enrichment); fall back to
+  // deriving it for any pre-enrichment caller so the function stays total.
+  return (agg.createInput ?? buildCreateInput(agg)).map((c) => c.field);
+}
+
+/** Build an aggregate's reified create-input contract: the client-
+ *  suppliable field set (`forCreateInput`) paired with each field's
+ *  required-ness.  Called once by `enrichLoomModel`; the result is stored
+ *  on `agg.createInput` and consumed by every create surface so the
+ *  field set and the required-set are defined here, once, rather than
+ *  re-derived per backend.  See {@link CreateInputFieldIR}. */
+export function buildCreateInput(agg: AggregateIR): CreateInputFieldIR[] {
+  return forCreateInput(agg.fields).map((field) => ({
+    field,
+    requiredInput: isRequiredCreateInput(field),
+  }));
+}
+
+/** A create-input field is **required** (client must supply it) unless it
+ *  can be omitted: nullable fields, fields with an explicit `= default`,
+ *  and fields whose type carries a language-defined implicit default all
+ *  collapse onto the "may omit" side.  This is the canonical rule the
+ *  per-backend required-set derivations should consume in place of each
+ *  re-deciding from type nullability alone. */
+function isRequiredCreateInput(f: FieldIR): boolean {
+  if (f.optional) return false; // nullable → client may omit
+  if (f.default !== undefined) return false; // explicit default → may omit
+  if (hasImplicitDefault(f.type)) return false; // implicit default → may omit
+  return true;
+}
+
+/** Whether a type has a language-defined implicit default, so an omitted
+ *  value is well-defined without an explicit `= default`.  Only `bool`
+ *  qualifies: an absent request bool is treated as `false` (the behaviour
+ *  .NET model-binding and Phoenix already apply, and the Hono request
+ *  schema approximates with `.default(false)`).  No other primitive has a
+ *  domain-safe omission — `""`/`0` are not valid stand-ins for an absent
+ *  `name`/`age`. */
+function hasImplicitDefault(t: TypeIR): boolean {
+  const base = t.kind === "optional" ? t.inner : t;
+  return base.kind === "primitive" && base.name === "bool";
 }
 
 /** Whether every required (non-optional) create-input field carries a
