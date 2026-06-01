@@ -718,7 +718,12 @@ validity so the connection re-auths at 17:00.) It's the cache-TTL / token-expiry
 idea — clock-driven re-evaluation, complementary to the save-driven tickets.
 A save-triggered push *can* also include the ambient check (don't nudge an
 off-hours user when an order does change — B's filter), but the boundary itself
-is only caught by the horizon.
+is only caught by the horizon. The horizon is **boundary-granular** (a small leak
+window around 17:00); for **exact** enforcement of a clock-varying rule on a
+*payload* stream you need the precise option — a **per-event check** — which is
+the one place this design genuinely does require per-event policy evaluation
+(rooms handle resource/identity visibility without it; tickets dodge it via the
+authz'd refetch; only the ambient/temporal dimension on payloads forces it).
 
 So the full taxonomy of policy dimensions:
 
@@ -1021,13 +1026,25 @@ exactly what correct room granularity (`publishRoomsFor` keyed by the equi-join 
 `dataKey` / per-resource key) guarantees. Channel relays do **not** filter
 per-subscriber *within* a channel (the publish proxy authorizes a publisher, not
 per-recipient delivery) — so heterogeneous-within-a-channel visibility isn't the
-channel model. The fix is never "add a per-event check"; it's to **carve finer,
-uniform rooms** (the per-event decision lives in `publishRoomsFor`'s *room
-selection*, not in per-recipient filtering), and where the residual can't be
-roomed, fall back to **tickets + authz'd refetch** (over-delivery is safe) rather
-than push a payload through a non-uniform channel. So the channel relay is
-fundamentally an **option-A machine**; the whole craft is making rooms uniform so
-subscribe-time auth suffices.
+channel model. For the **resource/identity** dimension the fix is not a per-event
+check but **finer, uniform rooms** (the per-event decision lives in
+`publishRoomsFor`'s *room selection*, not in per-recipient filtering); where the
+residual can't be roomed, fall back to **tickets + authz'd refetch**
+(over-delivery is safe) rather than push a payload through a non-uniform channel.
+So for that dimension the channel relay is an **option-A machine** — no per-event
+check.
+
+**The one exception: ambient / temporal conditions.** "During working hours" (and
+kin) is *not* a resource/identity dimension — time isn't a room key, and
+subscribe-time auth **goes stale** (a member authorized at 3pm still receives
+fan-out at 6pm). Rooms can't encode it. So this dimension genuinely needs
+re-evaluation, by one of two means: a **validity horizon** (token `exp` + a
+scheduled re-check at the boundary — Centrifugo's sub-refresh proxy; no per-event
+cost, but boundary-granular with a small leak window) **or**, for exact
+enforcement of a clock-varying rule on a *payload* stream, a **per-event check**.
+So "no per-event checks" holds for resource/identity visibility, **not** for the
+ambient/temporal dimension — which dodges the issue only for tickets
+(over-deliver + refetch), and otherwise needs the horizon or a per-event check.
 
 **Different architecture — DB-coupled sync engines** (note them, but they're the
 wrong layer here): **Supabase Realtime** (Postgres-changes/RLS), **ElectricSQL**
