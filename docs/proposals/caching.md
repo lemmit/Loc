@@ -1,0 +1,397 @@
+# Reads, freshness & caching
+
+> Status: **PROPOSAL** — not adopted. The read-side companion to
+> [`channels.md`](./channels.md) (the messaging/transport tier). Fills the
+> "Caching & invalidation" gap named in
+> [`production-readiness.md`](./production-readiness.md) §3.4. Consumes:
+> `channels.md`'s event/`save` stream and realtime delivery; `authorization.md`
+> (`DataKey`); `multi-tenancy-design-note.md` (`tenancy by`). Reuses, never
+> redefines, the keys those pin.
+
+## TL;DR
+
+Loom is the rare system whose origin **knows exactly when data changes** (every
+`repo.save` and every `emit` flow through one seam). That single fact flips
+caching from **expiration-based** (TTL, guess, revalidate) to
+**invalidation-based** (cache forever, purge the instant it changes) — aggressive
+caching with zero staleness. The hard half of caching, *knowing when to bust*, is
+already built by the messaging tier.
+
+The whole design rides on **two keys that do different jobs** — the same split
+`channels.md` draws for delivery:
+
+| Key | Question | Carried by | Used for |
+|---|---|---|---|
+| **Interest** | "Which data does this read want?" | the **React Query key** (`["orders",42]`) | the cache key, the invalidation key, and the realtime room — *what changed* |
+| **Visibility** | "May this principal see it?" | **`DataKey`** (tenant + org reachability) | the cache *partition* and the *tier* the cache may live on — *who may share* |
+
+One derived artifact ties it together — the **event → query-keys map** (which
+cached queries a change invalidates). The server cache evicts by it, the CDN
+purges by it (surrogate keys / cache tags), the realtime layer routes by it, and
+the React Query client invalidates by it. **One key vocabulary, four consumers,
+all by prefix.**
+
+## Background — how this design was reached
+
+This proposal and `channels.md` were derived together over a long design
+discussion; this section is the condensed trail so the decisions don't read as
+arbitrary.
+
+1. **Start:** a "good queueing abstraction (websockets too)." → the `channel`
+   transport tier (`channels.md`): events already publish through a pluggable
+   dispatcher; what was missing was the contract + transport + consumer.
+2. **Realtime to the UI** raised "who gets which events?" → scoping. First
+   attempt overloaded one `scope:` predicate.
+3. **Realisation 1 — realtime is not one feature.** Cache-invalidation and a
+   live dashboard are *opposites* (ticket vs payload, implicit-`save` vs
+   explicit-`emit`, over-broadcast-safe vs must-be-scoped). They must not share a
+   mechanism → the **planes** taxonomy (`channels.md`).
+4. **Realisation 2 — two keys, not one.** `DataKey` is **visibility** and carries
+   *no* interest; the **query key** is interest and is *also* the cache key and
+   invalidation key. Conflating them was the root error.
+5. **Realisation 3 — the magic-caching link.** Because interest *is* the React
+   Query key, `.live` realtime and cache-invalidation are the **same mechanism**:
+   a change publishes an invalidation ticket for the affected query keys; the
+   server cache evicts them and every live client refetches through the already
+   authorized read. → **invalidation rides `save`** (type+id always known), not
+   events (event→aggregate isn't always derivable).
+6. **Realisation 4 — the list key is a client identity, not a server room.** A
+   list is a per-user, per-filter projection; the server can't enumerate which
+   list keys an event touches. So the **server keys rooms/tags by *resource***;
+   the client does React Query **prefix invalidation** locally. Per-user list
+   filtering never enters the push/invalidation layer.
+7. **Realisation 5 — invalidation-based HTTP caching.** Knowing exactly when to
+   bust means surrogate-key / cache-tag purging (Fastly/Cloudflare/Varnish) at
+   the edge and tag-eviction in the server cache, all on the same key.
+8. **Realisation 6 — multi-source reads key by a *dependency set*.** A joined or
+   25-aggregate read is tagged with the **union** of its source resource tags;
+   any source's `save` busts it. Too-wide sets graduate to a **projection** (its
+   own single key) — not a new cache mode.
+9. **Realisation 7 — auth decides the cache *tier*.** If auth runs in the
+   handler pipeline (below the controller), an HTTP/output cache *above* it would
+   bypass the gate. So per-user reads must cache **below the gate**, keyed by the
+   authorized effective scope; output/edge caching is a public/tenant-only
+   optimization.
+
+### Decisions that emerged (candidate D-tags)
+
+| Tag | Decision |
+|---|---|
+| **interest = query key** | The cache/invalidation/realtime-routing key is the React Query key (resource + params), *not* `DataKey`. |
+| **visibility = `DataKey`** | Who-may-see is `DataKey`/tenant, reused from `authorization.md`; it partitions the cache and selects the tier, never carries interest. |
+| **invalidation rides `save`** | Cache freshness is driven by the implicit per-aggregate change signal, not by declared domain events. |
+| **server keys by resource** | Rooms/tags are keyed by resource (type/id); clients fan out to their own query keys via prefix invalidation. |
+| **two cache modes only** | `cached: none` (default) and `cached: tagged`. A projection is a *read*, not a cache mode. |
+| **cache tier ← authz shape** | public/tenant → edge/output cache; per-user → in-handler read-through below the auth gate. OutputCache is not the primary mechanism. |
+
+## What this owns: plane 1 (and the substrate planes 2/3 reuse)
+
+`channels.md` defines the realtime **planes**. This proposal owns **plane 1 —
+cache invalidation**: automatic, ticket-only, over-broadcast-safe, sourced from
+`save`. Planes 2/3 (live view, notification) carry *data* and are scoped at
+delivery — `channels.md`'s job — but they reuse this proposal's **query-key /
+EventInvalidationIR** vocabulary to know *what changed*.
+
+## Interest is the query key — not `DataKey`, not the channel `key:`
+
+`DataKey` answers visibility (tenant + org reachability); it says **nothing**
+about *which* order a page is looking at. That is the **query key's** job, and the
+query key is *already* the React Query cache key:
+
+| Page binding | Query key | Interest |
+|---|---|---|
+| `Order.all.live` | `["orders"]` | the collection |
+| `Order.byId(42).live` | `["orders", 42]` | one instance |
+| `Order.mine().live` | `["orders","find","mine",args]` | a named find |
+
+The interest key is **not declared** on a channel or a read — it's the key the
+frontend already emits. So nothing new is invented; the cache layer reads what's
+there.
+
+## `.live` and the event→query-keys map
+
+`.live` on a query means: **"keep this React Query entry live — on an
+invalidation ticket for its key, refetch (or patch); the same ticket the server
+cache evicts by."** The one piece of derived logic is the **event → query-keys
+map**: *which cached queries does a change invalidate?*
+
+```
+save(Order 42)        →  invalidates  ["orders"], ["orders", 42]
+OrderShipped{order:42}→  invalidates  ["orders"], ["orders", 42], (finds whose result it could change)
+```
+
+This map (`EventInvalidationIR`) is the single shared artifact: the server cache
+evicts the keys, the CDN purges the tags, the realtime relay publishes a ticket
+to each key's room, and the client `invalidateQueries` them. Derived from the
+read/view AST, so it can't drift.
+
+## Tickets vs payloads — the default that makes scoping a non-problem
+
+A `.live` push **does not need to carry the data** — it needs to carry "your key
+changed, refetch":
+
+- **Default — invalidation ticket (no payload).** The client refetches through
+  the **normal authorized read endpoint**. Per-row/per-user visibility is enforced
+  by the read path *which already does it correctly* — the push layer never
+  reimplements it, and a ticket can leak only "something changed." Safe by
+  construction.
+- **Opt-in — payload patch.** For a hot path, push the delta and `setQueryData`
+  it (no refetch). This carries data, so it must be scoped at delivery (plane 2,
+  `channels.md`). That cost is *why* it's opt-in, not the default.
+
+So the list-filtering problem dissolves: the server publishes a coarse "resource
+changed" ticket; each client refetches its own authorized view.
+
+## Won't broad invalidation storm the server?
+
+Naïvely "order 42 changed → every client refetches every orders list" is a
+thundering herd. Four standard mitigations make it a non-issue; the third is the
+payoff of unifying caching and invalidation:
+
+1. **Only *active* queries refetch.** React Query marks *inactive* (unmounted)
+   queries stale and refetches them lazily on next mount — it does *not* refetch
+   every cached list. The herd is bounded by what's *on screen now*.
+2. **Coalesce tickets.** 50 saves in 200 ms → **one** refetch (debounce per
+   room/key over a small window). Change streams are bursty; coalescing is
+   mandatory.
+3. **The read-through cache absorbs the fan-in.** N clients refetch the same
+   invalidated key → the ticket already evicted the cache → first refetch is
+   **one** DB read, the rest are cache hits. **N refetches → 1 query.** The storm
+   hits warm cache, not the database.
+4. **Cheap refetch.** ETag/`If-None-Match` → `304`, or a version/sequence in the
+   ticket so an already-current client skips.
+
+So broad invalidation is fine — bounded by active queries, coalesced, absorbed by
+cache. Patch-don't-invalidate is reserved for paths where even a coalesced
+cache-hit refetch is too slow.
+
+## Invalidation-based HTTP caching — surrogate keys / cache tags
+
+Ordinary HTTP caching is **expiration-based** (`max-age=30`, hope, revalidate)
+because the origin can't know when data changed. Loom is **invalidation-based**:
+long `max-age` **and** an explicit purge the instant the aggregate changes. The
+mechanism exists in every CDN/proxy — **surrogate keys** (Fastly), **cache tags**
+(Cloudflare), **xkey** (Varnish): tag a response with the resource keys it
+depends on, **purge by tag** on change. One ticket cascades through every tier:
+
+| Tier | Keyed by | Busted by |
+|---|---|---|
+| Browser HTTP cache | `ETag: orders/42@v7` (aggregate version) | conditional GET → `304` |
+| CDN / reverse proxy | `Surrogate-Key: orders.42` | purge-by-tag |
+| Server read-through cache | `orders.42` | evict |
+| Client React Query | `["orders", 42]` | prefix invalidate |
+
+The ETag is the aggregate's **version/sequence** — the same number wanted in the
+ticket for "skip if current."
+
+## Structuring the keys — a read carries a *set* of tags (its dependency set)
+
+A response's key is **not one tag — it's the set of resources it depends on**,
+derived from the query/view AST (the enrich-phase walk that builds
+`wireShape`/`findAll`/associations). Two rules cover the hard cases:
+
+- **List vs detail — type tag vs instance tag.** A *detail* read (`byId(42)`)
+  depends on one instance → `Surrogate-Key: orders.42`. A *list* depends on the
+  **type, not specific ids** (a row appearing/disappearing changes the list, and
+  which id triggers it isn't known ahead) → `Surrogate-Key: orders`. A `save`
+  publishes both `orders` and `orders.42` tickets, covering both.
+- **Joined / multi-source views — union of dependency types.** `Order ⋈ Customer`
+  changes when **either** side changes → `Surrogate-Key: orders customers`; a
+  save to *either* purges it (surrogate keys are a *set*; a purge of any member
+  evicts the entry). A 25-aggregate dashboard → 25 type tags. Derivation is
+  mechanical: walk the read's source aggregates, one tag per type (instance tags
+  only when the read is parameterized by that id).
+
+**When the dependency set is too wide — restructure the read, not the cache.**
+Tagging a dashboard with 25 high-write types means any of 25 saves busts it;
+correct but churny. Past some fan-in the read should be a **maintained
+`projection`** (`bounded-context-model.md`, `workflow-and-applier.md`) — updated
+incrementally from the event stream, so 25 upstream types collapse to one
+resource. **A projection is not a cache mode** — it's a different read whose
+*output* is cached with tags like any other (one tag instead of 25). The compiler
+can *warn* (`loom.cache-wide-dependency`) when a `cached: tagged` read's
+dependency set exceeds a threshold, suggesting a projection.
+
+## Parametrized reads — linking frontend params to server tags
+
+A parametrized read (`OrdersByStatus(status)`) takes its parameter from the
+**frontend**. It links to a server tag the same way the room key does — but only
+when the parameter is a **discrete equality on a field the event carries**:
+
+```
+view OrdersByStatus(status)             → tag  orders.status.open
+frontend ["orders","byStatus","open"]   → same tag  orders.status.open
+```
+
+Both sides render the same string independently. The subtlety: when a row's
+filter field **changes**, the row *moves between partitions*, so the save must
+purge **both** the old and new tag — `OrderStatusChanged{old,new}` busts
+`orders.status.open` *and* `.closed`. This **transition invalidation** needs
+old+new in the change signal and is derivable only for **discrete, enumerable**
+params.
+
+It does **not** work for continuous / range / full-text params
+(`OrdersByTotal(min,max)`, `OrdersSearch(q)`) — you can't mint a tag per range.
+Those fall back to the **type tag** (bust-all) or a **projection** (a maintained
+range/search index keyed by its own identity). The honest line: **discrete param
+→ tight tag; continuous param → coarse type tag or projection** — which is why
+**caching is opt-in per read** and the default for hot/wide/continuous reads is
+`cached: none`, not cache-and-thrash.
+
+## Does each tier actually support tag-invalidation?
+
+| Tier | Native tag-purge? | Mechanism |
+|---|---|---|
+| **CDN / proxy** | **Yes, first-class** | Fastly `Surrogate-Key` + purge; Cloudflare `Cache-Tag` + purge; Varnish `xkey`. Built for this. |
+| **In-handler read-through (canonical)** | Yes | .NET `HybridCache` (.NET 9) `GetOrCreateAsync(…, tags)` + `RemoveByTagAsync`; Redis reverse-index (`SADD tag:orders <key>` → `SMEMBERS`+`UNLINK`) — exactly Symfony `RedisTagAwareAdapter` / Laravel cache-tags. Backend-uniform (Hono/.NET/Phoenix). |
+| **ASP.NET OutputCache** (public only) | Engine yes, **above the gate** | `IOutputCachePolicy` (the `[OutputCache(Tags=…)]` attribute takes compile-time constants only, so the runtime `orders.{id}` tag needs a generic route-driven policy). Admissible only for public/tenant-no-gate; a CDN does it better. |
+| **React Query (client)** | **No tag concept — key *is* the tag** | `invalidateQueries({queryKey})` prefix-matches a single hierarchical path; it *cannot* natively express "depends on `orders` **and** `customers`". So Loom emits a **tag → queryKeys registry** + `predicate` invalidation — the one place the compile-time dependency set genuinely earns its keep. |
+
+Loom isn't inventing a cache; it *emits tags and purge calls* into mechanisms
+that already exist. **Tags are runtime values** (instance/param come from the
+request), so they're built per request in code, not in a static annotation.
+
+## Where the cache may live — auth decides the tier, and OutputCache mostly can't
+
+If authorization (`requires`, policy, row-filter) runs as a **pipeline behavior**
+below the controller, then an HTTP/output cache *above* it is hit **before auth
+runs** — serving one principal's response to another. So:
+
+> **A cache may live above the auth boundary only if the response is identical
+> for everyone who passes it.** Otherwise it lives *below* the gate, keyed by the
+> authorized effective scope.
+
+The **canonical** cache is therefore a read-through **inside the handler, below
+the auth behavior** — also the one shape uniform across backends (HybridCache /
+Redis). The auth behavior always runs (a cheap predicate), produces the
+**effective scope** (`tenant + DataKey + relevant perms`), and that is part of
+the cache key `(effectiveScope, query, params)`, evicted by the same tags.
+
+| Read's authz | Varies by | Cache tier | Mechanism |
+|---|---|---|---|
+| **public** (`crossTenant`) | nothing | edge, above auth | CDN (+ optionally OutputCache) |
+| **tenant, no gate** | tenant | edge, above auth, `VaryBy` tenant | CDN per-tenant / OutputCache |
+| **`requires` / row-level / per-user** | `DataKey` + perms | **below auth, in-handler** | HybridCache / Redis read-through. **Not OutputCache.** |
+
+Two invariants: the **`requires` 403 gate is never cache-served** (only the data
+it admits is); and **edge caching pays off only for public + tenant reads** —
+per-user reads can't be shared at the edge, their win is the in-handler cache
+(one user's N requests → 1 DB read across their session).
+
+## The `cached:` surface
+
+```ddd
+repository Orders for Order {
+  find recent(): Order[] cached: tagged          // surrogate-key invalidation
+}
+view ActiveDashboard cached: tagged(ttl: 300)    // + a ttl backstop
+view HotSearch       cached: none                // explicit opt-out (default for hot/wide/continuous)
+```
+
+```langium
+// On FindDecl / View / projection output:
+('cached' ':' mode=CacheMode ('(' 'ttl' ':' ttl=INT ')')?)?
+CacheMode returns string: 'none' | 'tagged';
+```
+
+Default is `none`. `tagged` opts a read into surrogate-key invalidation; the
+**tier** (edge vs in-handler) and the **tag set** (dependency set) are *derived*,
+not declared — the author only chooses *whether* to cache. Optional `ttl` is a
+safety backstop, not the primary mechanism.
+
+**Validation** (`loom.cache-*`): `loom.cache-wide-dependency` (a `tagged` read's
+dependency set exceeds a threshold → suggest a projection);
+`loom.cache-uncacheable` (a `tagged` read has no stable query key — e.g. a
+nondeterministic body — so it can't be keyed/invalidated);
+`loom.cache-continuous-param` (a `tagged` read keys on a range/search param that
+can't be tagged → falls back to type tag or projection; warn).
+
+## IR, lowering, enrichment
+
+```ts
+// src/ir/types/loom-ir.ts  (read-side; the messaging IR lives in channels.md)
+
+// INTEREST — the React Query key; the cache / invalidation / room-routing address.
+export interface QueryKeyIR {
+  aggregate: string;                       // "orders"
+  shape: "collection" | "instance" | "find";
+  idField?: string;                        // instance shape
+  find?: { name: string; argFields: string[] };
+}
+// The event→query-keys map (the magic-caching rule), shared with channels' routing.
+export interface EventInvalidationIR {
+  trigger: { kind: "save"; aggregate: string } | { kind: "event"; event: string };
+  invalidates: QueryKeyIR[];               // tags this trigger evicts / pushes a ticket to
+}
+// Per cacheable read:
+export interface ReadCacheIR {
+  mode: "none" | "tagged";
+  ttl?: number;
+  tags: string[];                          // DERIVED dependency set: type / instance / param tags
+  tier: "edge" | "in-handler";             // DERIVED from authz shape
+  // visibility partition reuses DataKey from authorization.md — not redefined here
+}
+```
+
+- **⑥ enrich** — derive each read's **dependency set** (walk source aggregates →
+  type/instance/param tags), its **tier** (from the read's authz shape), and the
+  **`EventInvalidationIR`** per `save`/event. Sibling of the `migrationsOwner` /
+  channel-routing enrichments.
+- **⑦ validate** — `loom.cache-*` checks (need the resolved dependency + authz
+  graph).
+- **⑧ codegen** — per backend: the in-handler read-through (HybridCache / Redis
+  reverse-index) keyed by effective scope + tags; the tag headers / OutputCache
+  policy for the public/tenant edge slice; the React Query **tag → queryKeys
+  registry** + `predicate` invalidation on the client.
+- **⑨ compose** — the eviction wiring shares `channels.md`'s dispatcher seam: the
+  same `save`/event that publishes a realtime ticket also evicts the cache by the
+  same tags. Emit a `.loom/cache-tags.md` view of the dependency graph.
+
+## Slice plan
+
+1. **`cached:` surface + dependency-set derivation** — grammar, `ReadCacheIR`,
+   `EventInvalidationIR` from `save`, `loom.cache-*` validators,
+   `.loom/cache-tags.md`. No runtime change. (parse + negative-validator + IR
+   tests.)
+2. **In-handler read-through, tenant tier** — Redis (Hono) / HybridCache (.NET)
+   keyed by `(tenant, query, params)`, tag eviction on `save`. (`LOOM_TS_BUILD` /
+   `dotnet-build`.)
+3. **Per-user tier (below the gate)** — effective-scope key (`tenant + DataKey +
+   perms`); depends on `authorization.md` + `multi-tenancy`. (`LOOM_E2E`, two
+   principals: assert no cross-principal hit.)
+4. **Client `.live` invalidation** — tag → queryKeys registry + `predicate`
+   invalidation; coalescing; ETag/304 refetch. Rides `channels.md`'s realtime
+   delivery. (`LOOM_REACT_BUILD`.)
+5. **Edge tier** — CDN `Surrogate-Key` headers + purge; optional ASP.NET
+   OutputCache policy for the public/tenant slice.
+6. **Projection-backed reads** — wide dependency sets → maintained projection
+   with its own key (joins with `workflow-and-applier.md`).
+
+## Open questions / deferred
+
+- **Field-level masking.** This covers *whether* a principal receives/refetches a
+  read, not *which fields* are returned. Field masking (`authorization.md`) is a
+  read-path concern; the cache key must include the masking profile if cached
+  shared. Deferred.
+- **Transition invalidation needs old+new** in the change signal for discrete
+  param tags; requires the `save` seam to carry a before-image. Deferred (falls
+  back to type tag meanwhile).
+- **Reconnect/replay** for `.live` over a `retention: log` channel — resume from
+  cursor vs rejoin live (per-room cursor). Shared with `channels.md`'s deferred
+  list.
+- **Cross-aggregate consistency** of a cached read vs the events that built it
+  (read-your-writes after a coalesced invalidation window). Deferred.
+
+## See also
+
+- [`channels.md`](./channels.md) — the messaging/transport tier this consumes:
+  `channel`, `channelSource`, reactors/projections, realtime delivery + the
+  planes, delivery-side visibility scoping.
+- [`authorization.md`](./authorization.md) — `DataKey` (the visibility key reused
+  here) + the auth gate that decides the cache tier.
+- [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md) — `tenancy by`,
+  the leftmost `DataKey` segment / cache partition.
+- [`production-readiness.md`](./production-readiness.md) §3.4 — the gap this fills.
+- [`bounded-context-model.md`](./bounded-context-model.md),
+  [`workflow-and-applier.md`](./workflow-and-applier.md) — `projection`, the
+  graduation target for wide dependency sets.

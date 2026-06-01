@@ -202,7 +202,6 @@ globally unique (`Lifecycle`), dotted when not (`Orders.Lifecycle`).
 | `loom.channel-key-missing-field` | `key:` names a field absent from one of the carried events. |
 | `loom.channel-key-type` | the `key:` field has a different type across carried events (no common partition key). |
 | `loom.channel-retention-needs-key` | `retention: work` or `log` with `delivery: queue` requires a `key:` for stable per-key ordering (warning). |
-| `loom.live-uncacheable` | a `.live` binding doesn't resolve to a stable React Query key (the interest/cache key) — so there's nothing to route or invalidate by. See [Authorization vs interest](#authorization-vs-interest--two-different-keys-not-one). |
 
 ## Surface — consumers (the transport under an already-pinned form)
 
@@ -522,372 +521,46 @@ when there's no `DataKey`. Neither carries interest.
 > auto-stamps. Channels neither define nor extend it — they read it for the room
 > namespace and the admission check, identically to the read path.
 
-### `.live` ⇒ subscribe to the query key's invalidations — the magic-caching link
+### Realtime is not one feature — the delivery planes
 
-This is the link the realtime `.live` ref leans on, made concrete. The frontend
-already turns a local mutation into `queryClient.invalidateQueries(queryKey)`;
-"magic caching" (`production-readiness.md` §3.4) turns a *server-side* event into
-eviction of the **same** query keys ("the generated React Query keys already
-form the invalidation prefixes"). The one piece of derived logic both need is the
-**event → query-keys map**: *which cached queries does `OrderShipped{order:42}`
-invalidate?* → `["orders"]`, `["orders", 42]`, and any `find` whose result the
-event could change.
+"Realtime" is not a single mechanism. The planes below differ on every axis;
+this proposal (messaging/transport) owns the **delivery** of planes 2–5, while
+plane 1 and everything about read-freshness live in the companion proposal
+[`caching.md`](./caching.md).
 
-`.live` is then exactly: **"keep this query's React Query entry live; on an
-invalidation ticket, refetch or patch — the same ticket the server cache evicts
-by."** So three things share **one map and one key**, with `DataKey` as the
-orthogonal visibility envelope around all of them (with one refinement the next
-section makes: the *server* room is keyed by **resource**, and the client maps
-that to its query keys via prefix invalidation — a list query key can't be a
-server room):
-
-| Consumer | Reads the **query key** as | On an event |
-|---|---|---|
-| **Server cache** (`production-readiness.md` §3.4) | cache-entry key | evict matching query-key prefixes |
-| **Channel room** (this doc) | broker room / subject | publish a ticket to `{tenant}:{queryKey}` |
-| **`.live` (client)** | React Query key | `invalidateQueries` → refetch / patch |
-
-The event→query-key map is therefore **derived once and shared**: the publisher
-computes the invalidated query keys for an emitted event (this *is* the magic-
-caching rule), publishes a ticket to each `{tenant}:{queryKey}` room, the server
-cache evicts those keys, and every `.live` socket admitted to those rooms
-refetches. **The interest/cache/realtime key is the query key; the visibility
-key is `DataKey`. Two keys, each doing its own job.**
-
-**Validation** (`loom.live-*`):
-
-| Code | Rule |
-|---|---|
-| `loom.live-uncacheable` | a `.live` binding doesn't resolve to a stable React Query key (the interest/cache key) — nothing to route or invalidate by. See [Authorization vs interest](#authorization-vs-interest--two-different-keys-not-one). |
-| `loom.live-on-queue` | a UI goes `.live` on a `delivery: queue` channel — a browser can't join a competing-consumer group. Subscribe to a `broadcast` channel carrying the same event. |
-| `loom.live-target-not-subscribed` | the backend the UI `targets:` doesn't bind the channel, so no edge relay exists. Add a `channelSource` to that backend's `channels:`. |
-
-The honest boundary: this proposal *defines and emits* the event→query-key map
-and routes realtime by it. Wiring it into a read-through server cache is
-`production-readiness.md` §3.4's job and stays out of scope here — but that
-proposal will find the map already built, not have to invent it.
-
-### Realtime is not one feature — at least three planes
-
-> **Design note (open).** Working through the keying above surfaced that
-> "realtime" is *not* a single mechanism. Cache-invalidation and a live
-> dashboard look similar but are **opposites** on every axis, and forcing them
-> through one path is the root of the earlier confusion. The surface below is a
-> reframe still to be ratified, not yet pinned grammar.
-
-| # | Plane | Room keyed by | Payload | Source | Scoping / leak risk |
+| # | Plane | Room keyed by | Payload | Source | Home |
 |---|---|---|---|---|---|
-| **1** | **Cache invalidation** (freshness) | **resource** (type / id) | **ticket** — no data | implicit, from **`save`** | *none* — refetch is authz'd; over-broadcast is harmless |
-| **2** | **Live view / feed** (dashboard, activity stream) | resource or topic | **event data** | explicit `emit` | **high** — data crosses to the browser; must be scoped at subscribe |
-| **3** | **Targeted notification** ("your order shipped") | **recipient** (user id) | event data | explicit event w/ recipient field | inherent — the address *is* the scope |
-| 4 | Presence / typing / cursors (deferred) | topic, ephemeral | ephemeral state | not events | session-scoped |
-| 5 | Job / export progress (deferred) | correlation / job id | progress | extern / job | single recipient |
+| 1 | **Cache invalidation** | resource (type / id) | **ticket** (no data) | implicit `save` | [`caching.md`](./caching.md) |
+| 2 | **Live view / feed** (dashboard) | resource / topic | **event data** | explicit `emit` | this doc (delivery) |
+| 3 | **Targeted notification** | **recipient** (user id) | event data | explicit event | this doc (delivery) |
+| 4 | Presence / typing (deferred) | topic, ephemeral | ephemeral | not events | — |
+| 5 | Job / progress (deferred) | correlation id | progress | extern / job | — |
 
-Planes 1 and 2 are **opposites**: #1 carries no data, tolerates over-broadcast,
-is automatic and invisible, and is safe *by construction* (a ticket can leak
-only "something changed"); #2 carries data, must be scoped correctly, is
-explicit and designed. They should **not** share a mechanism — different
-default, different source, different payload.
+Planes 1 and 2 are **opposites** — ticket vs payload, implicit vs explicit,
+over-broadcast-safe vs must-be-scoped — so they do not share a mechanism. The
+**addressing mode** (resource / recipient / topic / correlation) is the
+realtime-layer analogue of `delivery`×`retention`.
 
-Two consequences that correct earlier sections:
+The split this proposal turns on: **who may *receive* a pushed event** is
+delivery scoping — the [Subchannels](#subchannels--not-every-browser-gets-every-event)
+and [Authorization vs interest](#authorization-vs-interest--two-different-keys-not-one)
+sections above (visibility = `DataKey`, rooms, subscribe-time admission). **What
+*changed* and how reads stay fresh** — interest = the query key, invalidation
+tickets, the event→query-keys map, surrogate-key HTTP caching, dependency-set
+tagging, the cache tier — is the *read-freshness* concern, fully developed in
+[`caching.md`](./caching.md). The two proposals share **one key vocabulary** (the
+resource key for *what changed* + `DataKey` for *who may see it*), defined once
+and reused on both sides.
 
-- **The list query key is a client identity, not a server room.** `["orders"]`
-  means *"my* orders" — a different authorized projection per user and per
-  filter (`mine`, `status:open`, …). The server cannot enumerate which filtered
-  list keys an event touches without running every user's filter (fan-out-then-
-  filter again). **So the server keys rooms by *resource* (`tenant.orders`,
-  optionally `tenant.orders.42`), not by query key.** The client receives
-  "orders changed" and runs React Query **prefix invalidation** locally —
-  `invalidateQueries(["orders"])` already covers `["orders"]`, `["orders",42]`,
-  `["orders","find","mine"]` — refetching each through the **authz'd read
-  endpoint**. Per-user list filtering never enters the push layer.
-- **Invalidation rides `save`, not events.** Event→aggregate isn't always
-  derivable (events may be context-level or cross-aggregate). But every
-  `repo.save(agg)` already knows the type and id, so **"order 42 changed" is
-  free from the save** — no DSL, no event→aggregate map. Explicit `emit` is the
-  *richer* layer (planes 2/3) for when you want semantics, not just "it changed."
-
-This makes **addressing mode** (resource / recipient / topic / correlation) the
-realtime-layer analogue of `delivery`×`retention` for the queue layer — a small
-closed set, each with its scoping discipline baked in. Build order: plane 1
-first (implicit, ticket-only, no events, no per-user push logic), then plane 2/3
-(explicit, payload, scoped). Planes 4–5 deferred.
-
-### Won't broad invalidation storm the server? — the standard mitigations
-
-Invalidating `["orders"]` on every order change *sounds* like a refetch storm.
-It isn't, for four well-established reasons — and the third is exactly why
-invalidation and caching are one feature:
-
-1. **Only *active* queries refetch.** React Query's default: invalidating a key
-   **marks inactive (unmounted) queries stale and refetches them lazily on next
-   mount** — it does *not* refetch every cached list. The herd is bounded by
-   what's *on screen right now*, not everything ever cached. The dashboard user
-   refetches; the 10 000 users not looking at orders do nothing.
-2. **Coalesce tickets.** A burst of 50 saves in 200 ms must yield **one**
-   refetch, not 50. Debounce per-room on the relay (and/or per-key on the
-   client) over a small window (50–250 ms). Change streams are bursty;
-   coalescing is mandatory.
-3. **The server read-through cache absorbs the fan-in.** When N clients refetch
-   the same invalidated key, the same ticket already evicted the server cache,
-   so the first refetch is **one** DB read and the other N−1 are cache hits.
-   **N client refetches → 1 database query.** The storm hits warm cache, not
-   Postgres — this is the magic-caching payoff, and the reason §3.4 and this
-   proposal are the same feature.
-4. **Make the refetch cheap.** Conditional GET (ETag / `If-None-Match` →
-   `304 Not Modified`), or a version/sequence in the ticket so a client already
-   current skips entirely. A 304 is nearly free.
-
-The escape hatch for genuinely hot lists is **patch, don't invalidate**: push
-the delta and `setQueryData` it into the cache (no refetch at all). That's
-plane 2 — it costs the per-user filtering correctness (you're now pushing data,
-so it must be scoped), which is *why* it's the explicit feature, not the
-default. So: **broad invalidation is fine — bounded by active queries,
-coalesced, absorbed by cache; reserve payload-patching for paths where even a
-coalesced cache-hit refetch is too slow.**
-
-### The same ticket caches the HTTP layer — invalidation-based, not expiration-based
-
-> **Design note (open).** A consequence worth stating: because the origin
-> **knows exactly when a resource changes** (the `save` → ticket), Loom can cache
-> *aggressively* with **zero staleness** — the regime almost no system can use.
-
-Ordinary HTTP caching is **expiration-based**: `max-age=30`, hope, revalidate —
-because the origin can't know when data changed, so it guesses with a clock
-(stale windows *and* wasted refetches). Loom is invalidation-based: `max-age`
-long **and** an explicit purge the instant the aggregate changes. The expensive,
-normally-impossible half of caching — *knowing when to bust* — is exactly what
-the invalidation map already provides.
-
-The mechanism already exists in every CDN/proxy: **surrogate keys** (Fastly),
-**cache tags** (Cloudflare), **xkey** (Varnish). Tag each response with the
-resource keys it depends on; **purge by tag** on change. That *is* Loom's
-aggregate key + invalidation ticket, so the generator emits the tagging and the
-purge for free, and **one ticket cascades through every tier**:
-
-| Tier | Keyed by | Busted by the ticket via |
-|---|---|---|
-| Browser HTTP cache | `ETag: orders/42@v7` | conditional GET → `304` |
-| **CDN / reverse proxy** | `Surrogate-Key: orders.42` | **purge-by-tag** |
-| Server read-through cache (§3.4) | `orders.42` | evict |
-| Client React Query | `["orders", 42]` | prefix invalidate |
-
-The ETag writes itself — it's the aggregate's **version/sequence**, the same
-number you already wanted in the ticket for "skip if current."
-
-**The two keys again — surrogate key vs cache partition.** A *shared* cache must
-never serve user A's response to user B, so the HTTP cache needs the *same two
-dimensions* we derived for rooms: **interest** = the surrogate key (`orders.42`,
-*what to purge*) and **visibility** = the cache partition (`DataKey`/tenant via
-`Vary`/keyed cache, *who may share it*). Tenant-wide/public reads → shared,
-high-hit, CDN-cacheable; per-user (`mine`) reads → `private` or partitioned by
-the full `DataKey`. The compiler knows which, because it knows whether the
-read's authz is tenant-level or row-level.
-
-### Structuring the keys — a read carries a *set* of tags (its dependency set)
-
-A response key is **not one tag — it's the set of resources the read depends
-on**, and that set is statically derivable from the query/view AST (the same
-enrich-phase walk that builds `wireShape`/`findAll`/associations). Two rules
-cover the hard cases you'd hit:
-
-- **List vs detail — type tag vs instance tag.** A *detail* read (`byId(42)`)
-  depends on one instance → `Surrogate-Key: orders.42`. A *list* read depends on
-  the **type, not specific ids** — a row appearing/disappearing changes the list
-  and you can't know which id ahead of time → `Surrogate-Key: orders` (the
-  collection tag). A save to *any* order purges every orders list; a save to
-  order 42 also purges `orders.42`. (`save` publishes both `orders` and
-  `orders.42` tickets, so both tiers are covered by one event.)
-- **Joined / multi-source views — union of dependency types.** A view joining
-  `Order ⋈ Customer` changes when **either** side changes, so its response is
-  tagged with **both** type keys: `Surrogate-Key: orders customers`. A save to
-  *either* purges it — surrogate keys are a *set*, and a purge of any member
-  evicts the entry. A 25-aggregate dashboard read → 25 type tags; any of the 25
-  saves busts it. Derivation is mechanical: walk the view/query's source
-  aggregates, emit one tag per type (instance tags only when the read is
-  parameterized by that id).
-
-**When the dependency set gets too wide — restructure the read, don't add a
-cache mode.** Tagging a dashboard with 25 high-write types means any of 25 saves
-busts it; correct, but churny. Past some fan-in, broad invalidation is the wrong
-tool: that read should be a **maintained read-model / `projection`** (plane 2;
-`bounded-context-model.md`, `workflow-and-applier.md`) — updated incrementally
-from the event stream so 25 upstream types collapse to one resource. **A
-projection is *not* a cache mode** — it's a different read whose *output* is
-cached with tags like any other (its single resource tag instead of 25). So
-there are exactly **two cache modes** — `none` and `tagged` — and "graduate to a
-projection" is advice about restructuring the read, not a third mode. The
-compiler can *warn* (`loom.live-wide-dependency`) when a `cached: tagged` read's
-dependency set exceeds a threshold, suggesting a projection.
-
-```ddd
-// The only cache surface — per read (find / view / projection output):
-cached: none      // default for hot / wide / continuous-param reads
-cached: tagged    // surrogate-key invalidation; optional `ttl:` as a backstop
-```
-
-### Parametrized reads — linking frontend params to server tags
-
-A view/projection knows what it's built from, but it can also be *parametrized*
-(`OrdersByStatus(status)`), and the parameter is supplied on the **frontend**.
-They link the **same way the room key does**, one tier up: when the parameter is
-a **discrete equality on a field the event carries**, the value is baked into
-the tag, and both sides render the *same string* independently —
-
-```
-view OrdersByStatus(status)  →  response tag  orders.status.open
-frontend ["orders","byStatus","open"]  →  same tag  orders.status.open
-```
-
-Neither side knows the other; they meet on the string. The correctness subtlety:
-when a row's filter field **changes**, the row *moves between partitions*, so the
-save must purge **both** the old and the new tag — `OrderStatusChanged{old, new}`
-busts `orders.status.open` *and* `orders.status.closed`. That **transition
-invalidation** needs old+new in the event, and is only derivable for **discrete,
-enumerable** params.
-
-It **does not work** for continuous / range / full-text params
-(`OrdersByTotal(min,max)`, `OrdersSearch(q)`) — you can't mint a tag per range or
-query string. Those fall back to the **type tag** (`orders`, bust-all) or
-graduate to a **projection** (a maintained range/search index keyed by its own
-identity). This is the honest line: **discrete param → tight tag; continuous
-param → coarse type tag or projection.** And it confirms the instinct that *some
-reads get busted constantly under aggressive caching* — which is why **caching is
-opt-in per read, and the correct default for hot/wide/continuous reads is `cached:
-none` (or a debounce), not cache-and-thrash.** The compiler picks the regime from
-the dependency set + param shape; the author can override.
-
-### What tag-invalidation actually looks like, per tier
-
-The claim "one ticket busts every tier" only holds if each tier *supports*
-tag/surrogate-key purging. Honest status — two tiers are first-class, the rest
-use a standard pattern, and one (React Query) is where Loom's compile-time
-dependency set genuinely earns its keep:
-
-| Tier | Native tag-purge? | Mechanism Loom emits |
-|---|---|---|
-| **CDN / reverse proxy** | **Yes, first-class** | `Surrogate-Key:` header + purge-by-key (Fastly); `Cache-Tag` + purge (Cloudflare); `xkey` vmod (Varnish). Emit the header on reads; POST the purge on the ticket. |
-| **.NET — in-handler (canonical)** | **Yes** | `HybridCache` (.NET 9) `GetOrCreateAsync(key, …, tags)` + `RemoveByTagAsync`, **inside the MediatR handler** (below the auth gate). This is the real cache for authenticated reads — see "Where the cache may live". |
-| **.NET — OutputCache (public only)** | Engine yes, but **above the gate** | `IOutputCachePolicy` (the attribute can't carry runtime `orders.{id}` tags) — admissible **only** for public / tenant-no-gate reads; a CDN does this better. Not the primary mechanism. |
-| **Redis (Hono / .NET / Phoenix)** | **No native tags** — *standard* pattern | Reverse-index set per tag: on store `SADD tag:orders <key>`; on purge `SMEMBERS tag:orders` → `UNLINK` each + the set. Exactly Symfony `RedisTagAwareAdapter` / Laravel cache-tags. The backend-uniform in-handler store. |
-| **React Query (client)** | **No tag concept — the key *is* the tag** | `invalidateQueries({queryKey})` prefix-matches a **single hierarchical path**. It *cannot* natively express "depends on `orders` **and** `customers`" (the joined-view case). So Loom emits a **tag → queryKeys registry** and the `.live` handler invalidates via `predicate` against it. |
-
-The takeaway: surrogate-key invalidation is a **mature, supported pattern** — a
-backend-uniform **in-handler read-through** (HybridCache / Redis reverse-index)
-keyed by tag, with the CDN as a public-only edge layer. Loom isn't inventing a
-cache, it's *emitting the tags and purge calls* into mechanisms that already
-exist. The one real gap is **React Query's single-path key**, which can't
-represent a multi-dependency response; that map is normally hand-maintained and
-drifts, and is precisely what Loom can derive from the query/view AST for free.
-
-**Tags are runtime values — so a static annotation can't carry them.** The
-instance tag `orders.42` and a param tag `orders.status.open` come from the
-**request** (route values / claims), so they're computed *per request*; the type
-tag `orders` is the only constant. In the **in-handler** cache (the canonical
-case) the tag set is just built in code from the resolved scope + ids — no
-ceremony. The *edge* tiers, used only for the public/tenant slice, set the same
-tags at request time:
-
-- **CDN**: the read handler writes `Surrogate-Key: orders orders.42` into the
-  response headers (computed from route + the resolved aggregate).
-- **ASP.NET OutputCache** (public/tenant-no-gate only): because
-  `[OutputCache(Tags=[…])]` takes compile-time constants, the runtime
-  `{type}.{id}` tag needs **one generic** `IOutputCachePolicy` — *not* the
-  attribute, and not one class per aggregate — configured per endpoint with the
-  type tag, deriving the instance tag from the route in `ServeRequestAsync`:
-
-  ```csharp
-  sealed class AggregateTagPolicy : IOutputCachePolicy {           // generated ONCE, generic
-    private readonly string _type;                                 // injected per endpoint: "orders"
-    public AggregateTagPolicy(string type) => _type = type;
-    public ValueTask ServeRequestAsync(OutputCacheContext ctx, CancellationToken ct) {
-      var rv = ctx.HttpContext.Request.RouteValues;
-      ctx.Tags.Add(_type);                                          // constant type tag
-      if (rv.TryGetValue("id", out var id)) ctx.Tags.Add($"{_type}.{id}");  // runtime instance tag
-      ctx.CacheVaryByRules.VaryByValues["tenant"] = /* currentUser.tenantId */;  // shared-cache safety
-      return ValueTask.CompletedTask;
-    }
-    /* ServeResponseAsync / EvaluatePolicyAsync: defaults */
-  }
-  ```
-  endpoints get `.CacheOutput(p => p.AddPolicy<AggregateTagPolicy>().Tag("orders"))`
-  — per-aggregate *configuration*, one shared class; the dispatcher/ticket handler
-  calls `await store.EvictByTagAsync("orders.42", ct)` on `save`.
-- **Redis / Hono / Phoenix**: the reverse-index `SADD tag:orders.42 <key>` is
-  likewise written at store time from the runtime tag set.
-
-So the `[OutputCache(Tags=…)]` attribute is used (if at all) only for the bare
-type tag; everything instance- or param-relative goes through the policy — which
-is exactly why tags are "aggregate-relative" and live in generated code, not in a
-static annotation.
-
-### Where the cache may live — auth decides the tier, and OutputCache mostly can't
-
-A subtle but **load-bearing** constraint that rules out the obvious tool. ASP.NET
-middleware order is:
-
-```
-UseAuthentication   ← sets HttpContext.User                       (above)
-UseOutputCache      ← a cache HIT short-circuits the request HERE  (above)
-   └─ endpoint → MediatR pipeline → [auth behavior: requires / row-filter] → handler   (below)
-```
-
-A cache hit returns **before MediatR runs**, so any authorization in the pipeline
-is skipped. **OutputCache is therefore safe only when the *entire* authz decision
-is already a vary key from middleware-available claims** — i.e. public, or
-tenant-scoped *with no capability gate and no row-level reachability*. The moment
-there's a `requires` gate or a per-row `DataKey` check, the deciding logic lives
-*below* the short-circuit and OutputCache would serve a 200 to someone the gate
-would 403, or one principal's rows to another. That's a vulnerability, not a perf
-detail. So for the bulk of authenticated reads, **OutputCache is the wrong
-primitive.**
-
-> **A cache may live above the auth boundary only if the response is identical
-> for everyone who passes that boundary.** Otherwise it must live *below* the
-> gate, keyed by the authorized effective scope.
-
-**The canonical Loom cache is a read-through *inside the handler*, below the auth
-behavior** — which is also the one shape that's uniform across backends:
-
-- **.NET**: `HybridCache` (.NET 9) `GetOrCreateAsync(key, …, tags)` +
-  `RemoveByTagAsync(tag)` — **inside the MediatR handler**, so the auth behavior
-  has already run and produced the effective scope.
-- **Hono**: `ioredis` read-through + the tag reverse-index, inside the route
-  handler after the auth check.
-- **Phoenix**: `Cachex` / Nebulex keyed the same way.
-
-This is *correct by construction* — the cache physically sits below the gate, so
-it cannot bypass it; the gate always runs and only the **data it admits** is
-cached. `cached: tagged` resolves to a **tier the compiler picks from the read's
-authz shape** (same analysis as the room visibility key):
-
-| Read's authz | Response varies by | Cache tier | Mechanism |
-|---|---|---|---|
-| **public** (`crossTenant`) | nothing | edge, **above** auth | CDN — and *optionally* OutputCache. The only place OutputCache is safe. |
-| **tenant-scoped, no gate** | tenant | edge, **above** auth, `VaryBy` tenant | CDN per-tenant / OutputCache `VaryBy` — admissible but narrow |
-| **`requires` gate / row-level / per-user** | `DataKey` + perms | **below** auth, in-handler | `HybridCache` / Redis read-through keyed by effective scope. **Not OutputCache.** |
-
-For the below-the-gate case the auth behavior always runs (a cheap predicate over
-claims), produces the **effective scope** (`tenant + DataKey + relevant perms`),
-and *that* is part of the cache key — `(effectiveScope, query, params)` —
-populated and evicted by the same tags. Two invariants:
-
-- **The capability gate (`requires` → 403) is never cache-served.** It re-runs
-  every request; only the *data* it admits is cached. This is *why* OutputCache
-  (which caches the whole response, gate included) is inadmissible past the
-  public/tenant slice.
-- **The visibility key reappears** — the same `DataKey`/tenant split from the
-  room design now decides *which tier the cache can sit on* and forms the
-  per-principal key below the gate.
-
-Honest consequences: **OutputCache is a narrow, public-only optimization** (and a
-CDN does that better anyway); the **real cache is the in-handler read-through**,
-which is backend-uniform and matches Loom's cross-platform philosophy far better
-than an ASP.NET-specific middleware. And **edge caching pays off only for
-public + tenant reads** — per-user reads can't be shared at the edge at all;
-their win is the in-handler cache (that user's N requests → 1 DB read, reused
-across their session). "Cache aggressively" is true **per tier**, gated by authz
-shape — not uniformly.
+> **Read-side summary** (see [`caching.md`](./caching.md) for the full design):
+> a `.live` page subscribes to its query key's room; a `save` publishes an
+> *invalidation ticket* (not data) for the affected query keys; the client
+> refetches through the already-authorized read (so per-user filtering never
+> enters the push layer); the *same* ticket evicts the server cache and purges
+> CDN surrogate keys. Caching is invalidation-based (cache hard, purge exactly),
+> tag sets are derived dependency sets (joins/lists key by type, wide sets
+> graduate to a `projection`), and the cache tier is chosen by the read's authz
+> shape (per-user reads cache in-handler below the gate, not in OutputCache).
 
 ## IR, lowering, enrichment (phase mapping)
 
@@ -907,33 +580,21 @@ export interface ChannelIR {
   // NO realtime/transport field — the contract is wire-agnostic.
 }
 
-// TWO orthogonal keys (see "Authorization vs interest — two different keys"):
+// TWO orthogonal keys (see "Authorization vs interest — two different keys").
+// This proposal owns the DELIVERY half:
 //
 //   VISIBILITY — `DataKey` from authorization.md (tenancy = segment 0). Answers
-//   "may this user see this at all?". JWT-pinned; the client cannot widen it.
-//   Reused, NOT redefined here. Serves both as the room's isolation namespace
-//   and as the subscribe-time admission predicate (the same read-side authz that
-//   gates GET /orders/42).
+//   "may this principal RECEIVE this pushed event?". JWT-pinned. Reused, NOT
+//   redefined. Serves as the room's isolation namespace + the subscribe-time
+//   admission predicate (the same read-side authz that gates GET /orders/42).
 //
-//   INTEREST — the React Query key. Answers "which data does this page want?".
-//   It is ALSO the cache key and the invalidation key — the magic-caching link.
-//   Derived from the page's `.live` binding; nothing new is declared.
+//   INTEREST — the React Query key (what changed / what to refetch). Defined and
+//   used in caching.md (cache key = invalidation key = room-routing key). The
+//   delivery side only needs the resource room; the client maps it to its query
+//   keys. So `EventInvalidationIR` / `QueryKeyIR` live in caching.md, not here.
 //
-// Room address = {tenantNamespace} : {queryKey}. Realtime delivery, cache
-// eviction, and client invalidateQueries are all PREFIX matches over it.
-export interface QueryKeyIR {            // = React Query key; the interest/cache/invalidation address
-  aggregate: string;                     // "orders"
-  shape: "collection" | "instance" | "find";
-  idField?: string;                      // instance shape: the aggregate id field
-  find?: { name: string; argFields: string[] };
-}
-export interface EventInvalidationIR {   // the magic-caching rule, SHARED with production-readiness §3.4
-  event: string;                         // e.g. "OrderShipped"
-  invalidates: QueryKeyIR[];             // query keys this event evicts / pushes a realtime ticket to
-}
 // ChannelIR gains (derived in enrich):
-//   visibility:      DataKeyRef            — namespace + admission, from authorization.md (reused)
-//   invalidationMap: EventInvalidationIR[] — one entry per carried event
+//   visibility: DataKeyRef   — room namespace + admission, from authorization.md (reused)
 // stored on BoundedContextIR.channels: ChannelIR[]  (sibling of events / views)
 export interface ReactorIR {
   event: string; param: string;
@@ -954,16 +615,14 @@ export interface ChannelSourceIR { channel: string; storage: string; }
   machinery.
 - **⑥ enrich** — derive each event's *routing set* (channels carrying it) and
   attach it to the publish side, so the dispatcher emitter knows where each
-  `emit` goes. Build each carried event's **`EventInvalidationIR`** (the
-  query keys it invalidates — the magic-caching rule) and each channel's
-  **visibility** `DataKey` ref (tenant namespace + admission). The room a ticket
-  is published to is `{tenant}:{queryKey}`; the room a socket joins is the same,
-  with admission by the read-side authz. This map is what the room-publish
-  (server), room-subscribe (relay), and (later §3.4) cache-eviction emitters all
-  consume. Derive, per frontend deployable, the resolved realtime wire
-  (`realtimeWire` override ?? `PlatformSurface` default) and the set of
-  channels any of its pages `.live`-subscribe. This is the natural sibling of
-  the existing `migrationsOwner` enrichment.
+  `emit` goes; and each channel's **visibility** `DataKey` ref (room namespace +
+  subscribe-time admission). For *delivery*, a pushed event goes to the resource
+  room `{tenant}:{resource}` and the relay joins a socket to the rooms its claims
+  admit. (The *what-to-refetch* map — `EventInvalidationIR` — is enriched in
+  caching.md, reusing this same routing seam.) Derive, per frontend deployable,
+  the resolved realtime wire (`realtimeWire` override ?? `PlatformSurface`
+  default) and the set of channels its pages `.live`-subscribe. Sibling of the
+  existing `migrationsOwner` enrichment.
 - **⑦ validate** — the `loom.channel-*` / `loom.reactor-*` /
   `loom.channelsource-*` cross-cutting checks above (needs the fully-resolved
   routing graph, so it lives in phase ⑦ like the eventSourced-discipline
@@ -984,10 +643,10 @@ hook a real, channel-driven implementation."** Producer code is untouched.
 
 | Backend | Publish (dispatcher impl) | Consume (`on` reactor) | Realtime (relay + rooms) |
 |---|---|---|---|
-| **Hono** | `DomainEventDispatcher` that fans an event to each carrying channel's driver: in-proc `EventEmitter` / `ioredis` pub/sub / `kafkajs` producer / `amqplib`. Publishes an invalidation ticket to each `{tenant}:{queryKey}` room the event's `EventInvalidationIR` names (e.g. `acme:["orders"]` and `acme:["orders",42]`). | per-channel subscriber loop → reuses the generated **workflow handler** for the reactor body; `queue` ⇒ consumer-group / `BLPOP`; ack on success. | `streamSSE` / `ws` endpoint; on connect runs `requires:` (403 on fail) and joins the socket **only** to the rooms computed from `currentUser` claims — never a client-supplied room. |
-| **.NET** | `IDomainEventDispatcher` → in-proc MediatR notification / MassTransit publish (Redis/RabbitMQ/Kafka transport) — DI-registered like the existing `AddScoped` repos. Rooms from the event's `EventInvalidationIR` (`{tenant}:{queryKey}`). | `IConsumer<T>` / `INotificationHandler<T>` invoking the reactor's Mediator command (same handler the workflow controller calls). | SSE (`text/event-stream`) or a SignalR hub; SignalR **Groups** *are* rooms — `Groups.AddToGroupAsync(conn, roomFromClaims)` after the `ICurrentUserAccessor` auth gate. |
+| **Hono** | `DomainEventDispatcher` that fans an event to each carrying channel's driver: in-proc `EventEmitter` / `ioredis` pub/sub / `kafkajs` producer / `amqplib`. Publishes to the resource room `{tenant}:{resource}`. | per-channel subscriber loop → reuses the generated **workflow handler** for the reactor body; `queue` ⇒ consumer-group / `BLPOP`; ack on success. | `streamSSE` / `ws` endpoint; on connect runs `requires:` (403 on fail) and joins the socket **only** to the rooms computed from `currentUser` claims — never a client-supplied room. |
+| **.NET** | `IDomainEventDispatcher` → in-proc MediatR notification / MassTransit publish (Redis/RabbitMQ/Kafka transport) — DI-registered like the existing `AddScoped` repos. Publishes to the resource room. | `IConsumer<T>` / `INotificationHandler<T>` invoking the reactor's Mediator command (same handler the workflow controller calls). | SSE (`text/event-stream`) or a SignalR hub; SignalR **Groups** *are* rooms — `Groups.AddToGroupAsync(conn, roomFromClaims)` after the `ICurrentUserAccessor` auth gate. |
 | **Phoenix LiveView** | `Phoenix.PubSub.broadcast(topic)` (ephemeral) / Broadway + Ash (durable), where `topic` is the room. | an Ash reactor / `GenServer` `handle_info` running the reactor body as an Ash action. | **native** — `subscribe` to the room topic derived from `socket.assigns.current_user`; `handle_info` re-assigns the stream. Rooms are just PubSub topics. |
-| **React** (consumer of realtime) | — | — | generated SSE/WS client; connects with its bearer token (server derives rooms); on a ticket, `.live` runs `invalidateQueries(queryKey)` — the same key the server cache evicts. |
+| **React** (consumer of realtime) | — | — | generated SSE/WS client; connects with its bearer token (server derives rooms). For *plane-1 invalidation* refetch semantics (`invalidateQueries`), see [`caching.md`](./caching.md). |
 
 ## Worked example (end to end)
 
@@ -1064,26 +723,21 @@ workflow slice trails.
    Hono + .NET. (`LOOM_TS_BUILD` / `dotnet-build` gates.)
 3. **Redis transport** — `channelSource use: redis`; pub/sub (`broadcast`)
    and `BLPOP`/streams (`queue`); compose service. Per-backend driver.
-4. **UI `.live` over SSE (React), broadcast to all** — derived SSE endpoint +
-   generated client + `.live` cache invalidation; `realtimeWire` defaulting on
-   `PlatformSurface`. **Single-tenant, no `scope:` yet.** (`LOOM_REACT_BUILD`.)
-5. **Plane 1 — invalidation (tickets from saves)** — implicit `save` → resource
-   ticket on `tenant.<type>` (+ `tenant.<type>.<id>`), `DataKey` tenant namespace
-   + subscribe-time admission, ticket coalescing, and the client `.live` →
-   **prefix invalidation + authz'd refetch** (no server-side list keys). Plane 1
-   from the multi-plane reframe; needs no events. (`LOOM_E2E`, two tenants, a
-   list page and a detail page; assert no cross-tenant ticket and one DB read
-   under N refetches.)
-6. **Plane 2/3 — live view + notification** — explicit `emit`, payload-carrying,
-   addressing mode resource/recipient/topic; subscribe-time scoping; the
-   `setQueryData` patch path for hot lists. The explicit "live dashboard"
-   feature. Depends on slice 5.
-7. **Phoenix-native realtime + WebSocket override** — `Phoenix.PubSub` (rooms =
+4. **UI realtime delivery (the wire + edge relay)** — derived SSE/WS endpoint,
+   the two-hop edge relay, room subscribe with subscribe-time admission;
+   `realtimeWire` defaulting on `PlatformSurface`. The *push transport*; what a
+   `.live` page does on receipt (refetch/patch) is slice 1 of
+   [`caching.md`](./caching.md). (`LOOM_REACT_BUILD`.)
+5. **Plane 2/3 — live view + notification** — explicit `emit`, payload-carrying,
+   addressing mode resource/recipient/topic; subscribe-time scoping; delivery to
+   the browser. The explicit "live dashboard"/notification feature. (Plane 1,
+   invalidation, is [`caching.md`](./caching.md).)
+6. **Phoenix-native realtime + WebSocket override** — `Phoenix.PubSub` (rooms =
    topics) + LiveView `handle_info`; the optional `deployable realtime:
    websocket` infra override. (`LOOM_PHOENIX_BUILD`.)
-8. **Kafka + `retention: log`** — durable streams, partition by `key`,
+7. **Kafka + `retention: log`** — durable streams, partition by `key`,
    `projection` replay-from-cursor. (`LOOM_E2E`.)
-9. **RabbitMQ / `queue` + `work`** — competing consumers, ack semantics.
+8. **RabbitMQ / `queue` + `work`** — competing consumers, ack semantics.
 
 ## Deferred / out of scope
 
@@ -1114,9 +768,12 @@ the same honest line NATS draws.
 - [`docs/workflow.md`](../workflow.md) — the `emit` producer + dispatcher seam.
 - [`deployable-networking.md`](./deployable-networking.md) — inter-deployable
   wiring (the synchronous peer to this proposal's async channels).
+- [`caching.md`](./caching.md) — **the read-side companion**: reads, freshness &
+  invalidation. Owns the interest/query-key model, the event→query-keys map,
+  HTTP surrogate-key cache tiers, and the `cached:` surface. Consumes this
+  proposal's `save`/event stream and realtime delivery.
 - [`authorization.md`](./authorization.md) + [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md)
-  — `DataKey` / `tenancy by` / `currentUser.dataKey`: the authz prefix the room
-  key **reuses** rather than redefines.
-- [`production-readiness.md`](./production-readiness.md) §3.4 — the (unwritten)
-  caching proposal that consumes the *same* `EventInvalidationIR` / query-key map for prefix
-  invalidation; this proposal builds the key, that one evicts by it.
+  — `DataKey` / `tenancy by` / `currentUser.dataKey`: the visibility prefix the
+  room **reuses** rather than redefines.
+- [`production-readiness.md`](./production-readiness.md) §3.4 — the caching gap,
+  now addressed by [`caching.md`](./caching.md).
