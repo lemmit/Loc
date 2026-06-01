@@ -1599,6 +1599,15 @@ export interface DeployableIR {
    *  Future LiveView / Blazor backends extend this enum without
    *  breaking the deployable IR. */
   uiFramework?: string;
+  /** D-PHOENIX-SURFACE: the `ui` declarations this deployable `hosts:`.
+   *  The host↔ui relation that supersedes `uiName` (the legacy single
+   *  `ui:` binding).  A list from day one so a deployable can host
+   *  several UIs (the deferred one-ui-many-frameworks case).  Empty
+   *  when the source uses the legacy `ui:` binding instead.  When
+   *  present and the legacy binding is absent, `uiName`/`uiFramework`
+   *  fall back to the first entry (the framework comes from the `ui`
+   *  declaration itself, not the platform). */
+  hostedUiNames: string[];
   /** Apis this backend deployable serves.  Each
    *  entry references an `Api` declared at system scope.  Empty
    *  for frontend deployables and for backends that haven't yet
