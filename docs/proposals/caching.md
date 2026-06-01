@@ -337,6 +337,53 @@ Two boundaries to be honest about:
   (tenant-wide, mitigated by active-only refetch + coalescing) or graduate to a
   **projection** — the same discrete-vs-continuous line as parametrized tags.
 
+### What a "coarse room" is, and how a client joins rooms
+
+A **coarse room** is keyed by resource *type* (+ tenant) only — `tenant:acme:orders`
+— so any connection viewing any order joins it and any order save tickets it.
+It's the simplest routing but its **delivery** cost is O(tenant users with that
+type open) per save; cheap to implement, but it does **not** scale to large
+tenants × high write rate. So coarse is the default, not the scalable answer — at
+scale you move down the granularity ladder:
+
+| Room | Key | Joined by | Over-delivery |
+|---|---|---|---|
+| coarse | `tenant:acme:orders` | anyone viewing any order | tenant-wide |
+| owner-scoped | `tenant:acme:orders:owner:X` | viewers of X's orders | your scope only |
+| instance | `tenant:acme:orders:42` | viewers of order 42 | one resource |
+
+**How a client joins — its active React Query keys *are* its subscription set.**
+The generated realtime client hooks the query cache; each active query maps to a
+room, joined on mount and left when the query is GC'd:
+
+```ts
+queryClient.getQueryCache().subscribe((ev) => {
+  const room = roomOf(ev.query.queryKey, claims);   // ["orders",42] → tenant:X:orders:42
+  if (ev.type === "added")   relay.join(room);
+  if (ev.type === "removed") relay.leave(room);
+});
+```
+
+So the subscription set is **automatic and self-maintaining** — it tracks exactly
+what's on screen, because React Query already tracks that; no manual `subscribe()`
+calls. Concretely:
+
+- **When** you join: on query **mount** (you access the resource), not at login;
+  you leave on unmount/GC.
+- **Based on what:** the **React Query key** → `roomOf(key, claims)` —
+  `["orders",42]` → instance room; `["orders"]` → your owner-scope room (or coarse).
+- **Join authorization** (the trilemma's subscribe-time row): a **detail** page
+  already loaded order 42 through the authz'd read, so the join *rides that same
+  authorization* (you read it ⇒ you may watch it); ACL cases do a one-time
+  membership check at join. A **list** joins its owner-scope room and defers
+  per-row authz to the refetch (the invalidation escape).
+
+Net: **detail views → instance room, joined on mount, authorized once, zero
+over-delivery; list views → scope/coarse room, per-row authz at refetch,
+over-delivery bounded by scope (or tenant, for coarse).** (Live-event
+subscriptions instead join via their explicit `channel` param — same relay rooms,
+but authorized as payload delivery, not deferred to a refetch.)
+
 ## Tickets vs payloads — the default that makes scoping a non-problem
 
 An invalidation push **does not need to carry the data** — it needs to carry "your key
