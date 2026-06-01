@@ -296,20 +296,66 @@ dispatch before the props emitter. **C is rejected.** Nothing in any shipped
 step generates a user-owned file, so there is no stub and no first-run magic.
 
 Concretely, v0 = B's grammar/props/dispatch **+ D Tier 1** (slot props →
-`ReactNode`, fully specified by existing slot semantics). **D Tier 2**
-(operation/navigation callback props) ships in the same line of work — its
-mechanism already exists (action hoisting); only the param spelling is open
-(§11) — so it is in-scope for v0, not deferred.
+`ReactNode`, fully specified by existing slot semantics, React only). **D Tier
+2** (`action` behaviour params) is **designed here but deliberately deferred** —
+see the staging subsection below for why; the short version is that it would add
+the *first function type* to Loom's type system, a real investment that should
+be pulled by a concrete widget rather than built speculatively.
 
 Rationale: B reproduces the properties that make `operation extern` good that
 *translate* to a compile-time import — a typed seam, a body constraint, and a
 generated IR-tracking contract — while dropping the one that doesn't (a
 regenerated stub behind DI indirection, which the frontend has no place to put;
-see §2.4). D is what makes the hatch *useful*: without it you can render bespoke
-output but can't act on the domain, which is exactly the wall users hit. Both
-tiers of D reuse the same action-hoisting path the closed `Action` primitive
-already rides, so interactivity costs new *typing*, not new *machinery*. C loses
-type-safety and framework neutrality, the two invariants the metamodel protects.
+see §2.4). Tier 1 is what makes the hatch *useful* on day one: a caller passes a
+fully-wired `Action{…}` into a slot, so the hand-written component hosts a real,
+clickable, domain-wired control with **zero new machinery**. That is genuine
+interactivity, not a read-only widget. C loses type-safety and framework
+neutrality, the two invariants the metamodel protects.
+
+### Recommended delivery (staging)
+
+The design above is the destination. The advice on *how to get there* — and what
+to resist — is:
+
+1. **Pressure-test on paper first.** Before any code, hand-write both the `.ddd`
+   declaration and the hand-authored `.tsx` for **one real widget** (a revenue
+   chart is the obvious candidate). This 20-minute exercise validates the props
+   shape and, crucially, reveals whether **slot-only is already enough** — which
+   is what decides how near or far Tier 2 really is.
+2. **Ship Tier 1, React only, as the v0 PR.** `extern` on `component` + the
+   `wireShape` props-interface emitter + the import redirect + slot pass-through.
+   This reuses `slot`, block-body lambdas, and action hoisting wholesale; the
+   only genuinely new code is the props emitter and the import wiring.
+3. **Gate it on the right test.** The feature's whole value is *"rename
+   `Order.placedAt` in `.ddd` ⇒ the user's `.tsx` fails to compile."* A
+   `LOOM_REACT_BUILD=1` test asserting exactly that — a domain change breaks the
+   build at the extern component's props boundary — is the gate that matters far
+   more than the parse/validator tests. If that link is loose, the props type
+   goes silently stale and the hatch degrades into a ceremonious `import helper`.
+4. **Do not ship Option A as the end state.** A (no generated props, user
+   hand-types the interface) discards the `wireShape` type — the type-safety that
+   is the entire reason to do this inside a typed DSL. Use it only as a
+   grammar-derisking step if needed; B-Tier-1 is close enough in effort to go to
+   directly.
+5. **Defer Tier 2 (`action`) until a widget demands it.** It introduces Loom's
+   first function-typed value (rippling into the type system, validator, printer,
+   lowering) and only buys the narrower "component fires it with computed args"
+   case (chart hit-test, canvas, shortcut). Build it holding the real widget that
+   needs it — that widget also settles the `action(Order)` vs `(Order) => action`
+   token (lean `action(Order)`: Loom has no arrow *types*, and a void behaviour
+   has no return slot to spell). Until then, leave the grammar designed but
+   unimplemented and reject an `action` param with a clear "not yet" diagnostic.
+6. **Defer LiveView (§6) the same way.** The per-framework binding is designed,
+   but a second `<.live_component>` backend is a real implementation for a much
+   smaller payoff. v0 is React-only; a `liveview`-reached extern is a clean
+   validator error (`loom.extern-component-framework-mismatch`), not a
+   half-emitted stub.
+
+The meta-point: the spec is no longer where the risk lives — the cuts made
+during review (no stub, no `action of`, no call-site inference) removed it. The
+remaining risk is purely one of *scope discipline*: ship the cheap, high-value
+80% (Tier 1, React) and let real usage pull the expensive 20% (Tier 2, LiveView)
+rather than building all of it up front.
 
 ## 5. The data contract — props are `wireShape`-typed
 
@@ -478,11 +524,15 @@ machinery and not a new file-protection path.
   a *named, typed* component, not inline source.
 - **Non-goal: Loom-authored component internals.** Loom never reads or
   type-checks the body of the foreign file — only its props boundary.
-- **In scope (v0): interactivity (Option D).** `slot` props (Tier 1, elements)
-  and `action` props (Tier 2, behaviours — passed lambdas) ship with the core —
-  an extern component is a wired control, not a read-only widget. The only
-  deferred slice is the *argument-type spelling* of an `action` param (§11 Q1),
-  not the capability, and there is **no** op-specific binding form.
+- **In scope (v0): interactivity via `slot` (Tier 1).** A caller passes a
+  fully-wired `Action{…}` into a slot, so an extern component is a wired control
+  on day one — not a read-only widget — with no new machinery.
+- **Deferred (designed, not built): `action` behaviour params (Tier 2) and
+  LiveView.** Tier 2 adds Loom's first function type and is pulled by a concrete
+  widget, not built speculatively; LiveView is a second backend for a smaller
+  payoff. Both are React-only-rejected in v0 with clear diagnostics. See §4
+  "Recommended delivery" for the staging rationale. There is **no** op-specific
+  binding form in either tier.
 
 ## 11. Open questions
 
