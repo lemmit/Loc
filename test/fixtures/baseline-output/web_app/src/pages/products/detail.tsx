@@ -1,6 +1,6 @@
 // Auto-generated.  Do not edit by hand.
 import { useParams, Link as RouterLink } from "react-router";
-import { UpdateRequest, useUpdateProduct } from "../../api/product";
+import { UpdateProductRequest, useUpdateProduct } from "../../api/product";
 import { applyServerErrors } from "../../lib/apply-server-errors";
 import { KeyValueRow } from "../../lib/format";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,8 +17,8 @@ function openUpdateModal(mut: ReturnType<typeof useUpdateProduct>): void {
 }
 
 function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateProduct>; onClose: () => void }) {
-  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<UpdateRequest>({
-    resolver: zodResolver(UpdateRequest),
+  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<UpdateProductRequest>({
+    resolver: zodResolver(UpdateProductRequest),
     defaultValues: { sku: "", price: { amount: 0, currency: "" } },
   });
   return (

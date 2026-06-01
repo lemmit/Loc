@@ -1,8 +1,8 @@
 function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}> }) {
   const [open, setOpen] = useState(false);
 {{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
-{{/each}}  const form = useForm<{{opPascal}}Request>({
-    resolver: zodResolver({{opPascal}}Request),
+{{/each}}  const form = useForm<{{opPascal}}{{aggregateName}}Request>({
+    resolver: zodResolver({{opPascal}}{{aggregateName}}Request),
     defaultValues: {{{defaultValuesTs}}},
   });
   return (
