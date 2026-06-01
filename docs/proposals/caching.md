@@ -219,6 +219,74 @@ A `cached: tagged` read therefore implies its context's `changes` channel must b
 bound wherever it's served (`loom.cache-changes-unbound` if not) — the one
 obligation that keeps "automatic coverage" honest across deployables.
 
+### How it's wired on the frontend
+
+Gated by `realtime: invalidation` on the deployable. Without it, no connection is
+generated and freshness falls back to lazy ETag revalidation; with it, the
+generated frontend opens **one** connection to the backend it `targets:` and
+turns tickets into cache invalidation. The shape differs sharply by platform.
+
+**React — one connection + a generated tag→queryKeys map.**
+
+```ts
+// api/realtime.ts (generated)
+// Derived inverse of the dependency sets: resource tag → the query-key prefixes
+// that depend on it. This is the one thing React Query can't express itself —
+// its key is a single path, so a joined view's key must be invalidated by BOTH
+// its sources.
+const INVALIDATES: Record<string, ReadonlyArray<readonly unknown[]>> = {
+  orders:    [["orders"]],
+  customers: [["customers"], ["orderSummary"]],   // OrderSummary joins Order ⋈ Customer
+};
+
+export function connectRealtime(qc: QueryClient) {
+  const es = new EventSource(`${API_BASE_URL}/changes`, { withCredentials: true });
+  es.addEventListener("invalidate", (e) => {
+    const { tag, id } = JSON.parse(e.data);                 // { tag:"orders", id:"42" }
+    qc.invalidateQueries({ queryKey: [tag] });
+    if (id) qc.invalidateQueries({ queryKey: [tag, id] });
+    for (const k of INVALIDATES[tag] ?? []) qc.invalidateQueries({ queryKey: k });
+  });
+  es.addEventListener("event", (e) => dispatchLiveEvent(JSON.parse(e.data)));  // → on Param.Event
+  return () => es.close();
+}
+// mounted once at the app root:  useEffect(() => connectRealtime(queryClient), [queryClient])
+```
+
+- **The client names no rooms.** It connects with its bearer token; the *server*
+  derives the rooms from the JWT (tenant + `DataKey` scope) and subscribes the
+  socket. The client just `invalidateQueries` the tickets it receives (a no-op for
+  keys it doesn't currently hold — harmless). Default subscription is the user's
+  whole scope; narrowing to only mounted resources is an optional fan-out
+  optimization.
+- **`invalidateQueries` refetches only *active* queries** (inactive ones go stale,
+  refetch on next mount), so this one connection + handler is the entire "live"
+  mechanism — no per-component code.
+- **Auth wrinkle:** native `EventSource` can't set an `Authorization` header, so
+  the `/changes` endpoint authenticates by **cookie** (`withCredentials`), or via
+  a fetch-based SSE client that can send headers, or a **WebSocket** (auth in the
+  first frame). Loom picks per the deployable's auth/wire; the `static`+SSE
+  default uses the cookie the app already holds.
+
+**Phoenix LiveView — no client code.** There is no React Query and no client JS:
+the LiveView process holds the socket, subscribes server-side from
+`socket.assigns.current_user`, and on a ticket re-runs the query and re-`assign`s;
+LiveView diffs and patches the DOM over its own WebSocket.
+
+```elixir
+def mount(_p, _s, socket) do
+  if connected?(socket), do: subscribe_rooms(socket.assigns.current_user)
+  {:ok, assign_orders(socket)}
+end
+def handle_info({:invalidate, "orders", _id}, socket), do: {:noreply, assign_orders(socket)}
+```
+
+What ties it together: the **connection/wire** (SSE/WS, edge relay, server-derived
+rooms) is `channels.md`'s — *shared* by invalidation tickets and live-event
+payloads on one socket; the **invalidation handler + the tag→queryKeys map** are
+this proposal's; both are off unless the deployable opts into
+`realtime: invalidation`.
+
 ## Tickets vs payloads — the default that makes scoping a non-problem
 
 An invalidation push **does not need to carry the data** — it needs to carry "your key
