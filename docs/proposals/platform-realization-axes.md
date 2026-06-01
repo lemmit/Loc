@@ -2,9 +2,13 @@
 
 > Status: **proposal**. Builds on `storage-and-platform-config.md` and the
 > pinned decisions **D-ADAPTER-HOME**, **D-PHOENIX-SURFACE**, **D-STORAGE-SPLIT**
-> (`docs/decisions.md`). Nothing here contradicts a pin; it (a) reviews the
-> existing knob names, (b) adds two axes the pins leave homeless, and (c)
-> consolidates the cross-axis **gating matrix** with validator codes.
+> (`docs/decisions.md`). It (a) reviews the existing knob names, (b) adds the
+> axes the current design leaves homeless, and (c) consolidates the cross-axis
+> **gating matrix** with validator codes.
+>
+> **It also amends D-PHOENIX-SURFACE** on one point — see §0.1 and §8. The
+> domain-framework axis gets its own keyword, `foundation:`, rather than being
+> folded into `persistence:`.
 
 ## 0. The question this answers
 
@@ -12,55 +16,101 @@
 with no exposed knobs (`storage-and-platform-config.md:58`). The plan is to
 decompose that bundle into orthogonal, optional, validator-gated config — the
 `platform: <name> { … }` block. Most of that decomposition is already designed
-as the **D-ADAPTER-HOME** adapter surface (`style:` / `layout:` / `persistence:`,
-each a menu+default exposed off the backend's `PlatformSurface`). This note
-closes the two remaining gaps:
+as the **D-ADAPTER-HOME** adapter surface (`style:` / `layout:` / `persistence:`).
+This note closes the remaining gaps:
 
+- the **domain-framework** axis (Ash vs plain Phoenix, ABP vs vanilla .NET) —
+  given its own keyword `foundation:` (§0.1, §3);
 - the **API-surface** axis (minimal API vs controllers), orphaned when
-  D-PHOENIX-SURFACE retired backend `framework:`;
-- the **aggregate-runtime** axis (Orleans / Akka.NET / GenServer actors), which
-  no existing axis covers.
+  D-PHOENIX-SURFACE retired backend `framework:` — rehomed as `transport:` (§4);
+- the **aggregate-runtime** axis (Orleans / Akka.NET / GenServer actors) —
+  named `runtime:` (§5).
+
+### 0.1 The amendment: `foundation:` is its own axis, not a `persistence:` value
+
+D-PHOENIX-SURFACE folds "Ash vs Ecto" into the `persistence:` surface, reasoning
+that *every backend freezes a domain framework* (hono→Drizzle, dotnet→EF). That
+conflates two different categories:
+
+- **`persistence:`** — a *data-access library* (Drizzle, EF Core, Dapper, Ecto).
+  It persists; it does not model the domain or own the application layer.
+  (Rung 1–2.)
+- **`foundation:`** — an *opinionated domain/application framework* (Ash, ABP,
+  NestJS) that owns domain modelling + application + API, and then sits **on top
+  of** a data layer. (Rung 3–4.) Default: **`vanilla`** — no domain-modelling
+  framework; the raw platform plus libraries you pick on the other axes.
+
+Folding them collapses expressiveness: `persistence: ash` cannot say *what Ash
+persists to*. As two axes, `foundation: ash` + `persistence: ashSqlite` (or
+`foundation: abp` + `persistence: dapper`) stays expressible — the data layer
+remains pickable *underneath* the framework.
+
+This keeps D-PHOENIX-SURFACE's correct instinct (no `domain:` keyword — the
+domain is the `.ddd` input, not a knob) while fixing the conflation:
+`foundation:` does not vary the domain, it varies *which framework hosts* it.
+All other D-PHOENIX-SURFACE conclusions stand (one `phoenix` platform, no
+`family@version`, no `apiOnly` platform, `framework:` is UI-only).
 
 ## 1. The one-concern-per-knob principle
 
 A backend turns the *same* platform-neutral IR into source. Each knob picks how
 **one layer** is realized; they compose freely. Keep them orthogonal — a single
-"app layer" knob would force a combinatorial value explosion
-(`cqrs-actors-dapper-minimal`…). The full set:
+"app layer" knob would force a combinatorial value explosion. The full set:
 
 | Axis (knob) | Layer it realizes | Status |
 |---|---|---|
 | `platform:` | host runtime / web framework (the family) | shipping |
+| **`foundation:`** | opinionated domain/app framework — or `vanilla` | **new here** |
 | `style:` | application architecture (command/query shape) | designed (storage doc) |
-| `persistence:` | domain + data framework (the ORM / resource framework) | designed; **absorbs the Ash/Ecto axis per D-PHOENIX-SURFACE** |
+| `persistence:` | data-access library (the ORM / query layer) | designed; **narrowed to data layer only** (§2) |
 | `layout:` | file / project organization | designed (storage doc) |
-| **`transport:`** | HTTP surface (endpoint style) | **new here** (rehomes orphaned backend `framework:`) |
+| **`transport:`** | HTTP surface (endpoint style) | **new here** |
 | **`runtime:`** | aggregate execution / concurrency model | **new here** |
 
-The domain is the `.ddd` source — the invariant every axis orbits. There is no
-`domain:` knob; "Ash vs Ecto" is a `persistence:` value, not a domain variant
-(D-PHOENIX-SURFACE: *"No `domain:` keyword, and nothing Phoenix-only."*).
+There is no `domain:` knob — the domain is the source. `foundation:` names the
+*framework hosting* the domain, which is a realization choice.
 
 ## 2. Naming review of the existing knobs
 
 | Knob | Verdict | Notes |
 |---|---|---|
-| `style:` | **keep** | Good name for the architectural pattern: `cqrs` \| `layered`. This *is* "CQRS vs service layer" — already designed, no new knob needed. |
-| `layout:` | **keep** | `byLayer` \| `byFeature`. Clear, orthogonal, well-scoped. |
-| `persistence:` | **keep** — and prefer it over "dal" | "DAL" is a dated, ambiguous acronym; `persistence:` is the established term and already carries `efcore`/`dapper`/`marten`. Per D-PHOENIX-SURFACE it also carries `ash`/`ecto`. So your "dal" *and* my earlier "foundation" both collapse into `persistence:`. |
-| `framework:` (backend) | **retire** (already pinned) | D-PHOENIX-SURFACE freed `framework:` to the **UI** axis (`ui { framework: react \| liveview }`) and ruled out a second backend `framework:`. The "minimal API vs controllers" axis it used to carry is rehomed below as `transport:`. |
+| `style:` | **keep** | Architectural pattern: `cqrs` \| `layered`. This *is* "CQRS vs service layer" — already designed. Locked when a `foundation:` owns it (§6 R4). |
+| `layout:` | **keep** | `byLayer` \| `byFeature`. Clear, well-scoped. |
+| `persistence:` | **keep — but narrow it** | Data-access library only: `efcore`/`dapper`/`marten`/`drizzle`/`ecto`/`ashPostgres`/… **Not** the domain framework (that's `foundation:`). This is the §0.1 amendment: prefer it over "dal" (dated acronym), but it carries *only* the data layer. |
+| `framework:` (backend) | **retire** (already pinned) | D-PHOENIX-SURFACE freed `framework:` to the **UI** axis. Its old "minimal API vs controllers" duty is rehomed as `transport:` (§4). |
 
-So three of the four names you have are good and stay; only backend `framework:`
-needed to move — and the pins already moved it. The Ash-vs-Ecto choice you asked
-about is **not a new knob**: it is a `persistence:` value on `phoenix`
-(`persistence: ash` default, `persistence: ecto` for plain Phoenix contexts).
+So three names stay; `persistence:` narrows; the domain-framework axis becomes
+`foundation:` rather than overloading `persistence:`.
 
-## 3. New knob #1 — `transport:` (the API surface)
+## 3. New knob #1 — `foundation:` (the domain/app framework)
+
+Names the opinionated framework that owns multiple layers — or `vanilla` for
+none. A spectrum of *how much of the stack the framework owns*:
+
+| Rung | Owns | Example values |
+|---|---|---|
+| `vanilla` (default) | nothing — you assemble it via the other knobs | — |
+| app framework (rung 3) | application + transport; **persistence stays open** | `nestjs` (node) |
+| metamodel framework (rung 4) | application + transport **+ the data-layer flavor** | `ash` (phoenix), `abp` (dotnet) |
+
+`vanilla` was chosen deliberately: it reads as "raw platform, no domain-modelling
+framework" ("vanilla ASP.NET", "vanilla Phoenix" are idiomatic) — clearer than
+`none`/`plain`/`raw`. Like the other knobs, `foundation:` is **optional**;
+lowering normalizes absence to the platform default.
+
+**The deep payoff.** `foundation:` decides *what kind of artifact Loom emits*. A
+`vanilla` foundation → Loom renders **imperative implementation** (Ecto schemas +
+context functions, service methods) and `render-stmt.ts` does full work. A
+rung-4 foundation → Loom emits **declarations** (Ash resources/actions/policies,
+ABP entities + app-services) and hands the metamodel job to the framework's
+runtime. This is why `foundation: ash` and `foundation: vanilla` need different
+`render-expr`/`render-stmt` paths on Phoenix.
+
+## 4. New knob #2 — `transport:` (the API surface)
 
 The "minimal APIs vs full ASP.NET controllers" axis. `framework:` can't host it
 (now UI-only) and `api:` collides with the `api` declaration keyword. Recommended
-name: **`transport:`** (the HTTP surface the backend exposes). Alternatives
-considered: `endpoints:` (fine), `http:` (too low-level), `apiStyle:` (verbose).
+name: **`transport:`** (the HTTP surface the backend exposes).
 
 ```
 transport:  minimalApi (default) | controllers      # dotnet
@@ -68,23 +118,20 @@ transport:  minimalApi (default) | controllers      # dotnet
             phoenixRouter (default, fixed)           # phoenix
 ```
 
-On platforms with a single legal value the author never writes it (same
-size-1-menu rule the pins use for `persistence: hono`).
+On platforms with a single legal value the author never writes it.
 
-## 4. New knob #2 — `runtime:` (the actor / aggregate-execution axis)
+## 5. New knob #3 — `runtime:` (the actor / aggregate-execution axis)
 
-**This is the knob your question opened with.** What unifies Orleans grains,
-Akka.NET persistent actors, and Phoenix GenServers-per-aggregate is *how the
-aggregate is hosted and executed at runtime* — a long-lived, single-threaded-
-per-entity, message-driven process, versus a stateless object rehydrated from
-the repository per request. That is a **runtime / concurrency** choice, distinct
-from `style:` (a read/write *shape*) and `persistence:` (the data framework).
+What unifies Orleans grains, Akka.NET persistent actors, and Phoenix GenServers-
+per-aggregate is *how the aggregate is hosted and executed at runtime* — a
+long-lived, single-threaded-per-entity, message-driven process, versus a
+stateless object rehydrated from the repository per request. That is a
+**runtime / concurrency** choice, distinct from `style:` (a read/write *shape*),
+`persistence:` (the data layer), and `foundation:` (the framework).
 
-Recommended name: **`runtime:`**. Alternatives: `concurrency:` (most precise —
-the actor model is fundamentally a concurrency+consistency model; slightly
-academic), `hosting:` (leans toward deployment). Avoid `actors:`/`actorModel:`
-(bakes the answer into the question — bad when one value is "no actors") and
-`model:` (hopelessly overloaded in a DDD tool).
+Recommended name: **`runtime:`** (alternatives: `concurrency:` — most precise;
+`hosting:` — leans deployment). Avoid `actors:` (bakes the answer in) and
+`model:` (overloaded).
 
 ```
 runtime:  pooled (default) | orleans | akka          # dotnet
@@ -94,34 +141,31 @@ runtime:  pooled (default) | orleans | akka          # dotnet
 
 **Value naming.** Name the default after what the standard impl *is*, not
 "not-actors". `pooled` = the aggregate is reconstituted on demand from the
-repository and concurrency is handled by the DB (transactions / optimistic
-concurrency). (`transactional` is an equally good default name if you prefer to
-foreground the consistency model; pick one and use it everywhere.) The actor
-values name the concrete realization and are gated per family — exactly the
-`design: mantine` precedent. Like `design:`, `runtime:` is **optional**, and
-lowering normalizes absence → `pooled` so backends `switch` on a concrete value
-rather than `undefined`.
+repository, concurrency handled by the DB (transactions / optimistic
+concurrency). (`transactional` is an equally good default if you prefer to
+foreground the consistency model; pick one project-wide.) Optional; lowering
+normalizes absence → `pooled`.
 
-## 5. Per-platform menus (the gating matrix)
+## 6. Per-platform menus (the gating matrix)
 
 Each backend's `PlatformSurface` exposes its menu + default (D-ADAPTER-HOME). A
 **bare** `platform: <name>` equals the full default block — byte-identical to
 today's output (`storage-and-platform-config.md:881`).
 
-| Platform | `style:` | `persistence:` | `layout:` | `transport:` | `runtime:` |
-|---|---|---|---|---|---|
-| `dotnet` | `cqrs`* · `layered` | `efcore`* · `dapper` · `marten` | `byLayer`* · `byFeature` | `minimalApi`* · `controllers` | `pooled`* · `orleans` · `akka` |
-| `node` (hono) | `cqrs`* · `layered` | `drizzle`* (+1 ES-capable, TBD) | `byLayer`* · `byFeature` | `hono`* (fixed) | `pooled`* (fixed) |
-| `phoenix` | `layered`* (Ecto only — see §6) | `ash`* · `ecto` | `byFeature`* · `byLayer` | `phoenixRouter`* (fixed) | `pooled`* · `genserver` |
+| Platform | `foundation:` | `style:` | `persistence:` | `layout:` | `transport:` | `runtime:` |
+|---|---|---|---|---|---|---|
+| `dotnet` | `vanilla`* · `abp` | `cqrs`* · `layered` | `efcore`* · `dapper` · `marten` | `byLayer`* · `byFeature` | `minimalApi`* · `controllers` | `pooled`* · `orleans` · `akka` |
+| `node` (hono) | `vanilla`* · `nestjs` | `cqrs`* · `layered` | `drizzle`* (+1 ES-capable, TBD) | `byLayer`* · `byFeature` | `hono`* (fixed) | `pooled`* (fixed) |
+| `phoenix` | `ash`* · `vanilla` | `layered`* (vanilla only) | `ashPostgres`*/`ashSqlite` (ash) · `ecto` (vanilla) | `byFeature`* · `byLayer` | `phoenixRouter`* (fixed) | `pooled`* · `genserver` |
 
-`*` = default. `phoenix` defaults to `persistence: ash` per D-PHOENIX-SURFACE
-open-item 2 (PINNED).
+`*` = default. `phoenix` defaults to `foundation: ash` (matches today's
+`phoenixLiveView` after desugar — D-PHOENIX-SURFACE open-item 2, PINNED, now
+expressed on `foundation:` instead of `persistence:`).
 
-## 6. Cross-axis gating rules + validator codes
+## 7. Cross-axis gating rules + validator codes
 
-Validation codes follow the `loom.<kebab>` convention (cf.
-`loom.bare-aggregate-in-type`). Rules R1–R3 are already in the storage doc
-(§574–578); R4–R6 are added here for the new axes and the framework-lock insight.
+Codes follow the `loom.<kebab>` convention (cf. `loom.bare-aggregate-in-type`).
+R1–R3 are from the storage doc (§574–578); R4–R6 are added here.
 
 **R1 — out-of-menu.** Any knob value not in the platform's menu → **error**.
 `loom.platform-knob-out-of-menu`
@@ -129,77 +173,75 @@ Validation codes follow the `loom.<kebab>` convention (cf.
 
 **R2 — layout meaningless for layered.** `layout: byFeature` × `style: layered`
 → **warning**, treated as `byLayer`. `loom.platform-layout-meaningless-for-style`
-> `layout: byFeature` has no effect with `style: layered` (one artifact set per aggregate, not per feature). Ignoring; using `byLayer`.
 
 **R3 — layered can't event-source.** `style: layered` × any contained aggregate
 with `persistenceStrategy: eventSourced` → **error**.
 `loom.platform-layered-with-event-sourcing`
-> `style: layered` has no command/event flow for the event-sourced aggregate `Orders.Order`. Use `style: cqrs`.
 
-**R4 — owning-framework lock (the "foundation" insight).** Some `persistence:`
-values are *opinionated frameworks* that own the application + transport layers
-(Ash owns resources+actions+API; a future `abp` would own app-services+API).
-When such a value is chosen, the knobs it owns must not also be set → **error**.
-`loom.platform-knob-owned-by-framework`
-> `persistence: ash` owns the application architecture and API surface. Remove `style:` / `transport:` (Ash supplies them).
+**R4 — foundation owns layers (the clean version).** Each `foundation:` value
+declares which of `{style, transport, persistence-flavor}` it owns. Setting an
+owned knob is an **error**; `foundation: vanilla` owns nothing.
+`loom.platform-knob-owned-by-foundation`
+> `foundation: ash` owns the application architecture and API surface. Remove `style:` / `transport:` (Ash supplies them).
 
-This is why `persistence:` and `style:`/`transport:` coexist *and* sometimes
-conflict: a rung-1/2 persistence (`dapper`, `ecto`, `drizzle`) leaves the other
-knobs open; a rung-4 framework (`ash`) locks them. Each surface declares, per
-value, which axes it owns — the validator reads that off the menu.
+This is exactly why the axes coexist *and* sometimes conflict, and it reads far
+more cleanly as `foundation:` than as "some `persistence:` values secretly lock
+other knobs": a `vanilla` foundation leaves `style`/`transport`/`persistence`
+fully open; a rung-3 foundation (`nestjs`) locks `style`/`transport` but leaves
+`persistence` open; a rung-4 foundation (`ash`/`abp`) also constrains the
+`persistence` menu to its compatible data layers.
 
-**R5 — actor runtime needs a compatible store.** State-persisting actor runtimes
-need a journal/grain-store. `runtime: akka` (persistent actors) requires an
-ES-capable `persistence:` (`marten`, or an event-journal adapter); `runtime:
-orleans` requires a configured grain-storage provider. Incompatible pair →
-**error**. `loom.platform-runtime-persistence-incompatible`
-> `runtime: akka` needs an event-journal-capable persistence. `persistence: dapper` provides none. Use `persistence: marten` or an event-store adapter.
+**R5 — actor runtime needs a compatible store.** `runtime: akka` (persistent
+actors) requires an event-journal-capable `persistence:`; `runtime: orleans`
+requires a configured grain-storage provider. Incompatible pair → **error**.
+`loom.platform-runtime-persistence-incompatible`
 
 **R6 — runtime ⟂ style is allowed.** `runtime:` and `style:` are independent
-(`cqrs + orleans`, `layered + genserver` are all legal). No rule needed — noted
-so nobody adds a spurious one.
+(`cqrs + orleans`, `layered + genserver` all legal). Noted so nobody adds a
+spurious rule.
 
-## 7. Defaults, normalization, round-trip
+## 8. Defaults, normalization, round-trip
 
-- Every realization knob is **optional**. The common path writes none.
+- Every realization knob (`foundation`, `style`, `persistence`, `layout`,
+  `transport`, `runtime`) is **optional**; the common path writes none.
 - Lowering normalizes each omitted knob to the platform default, so the IR field
-  is always a concrete value (`runtime: "pooled"`, `style: "cqrs"`, …) — codegen
-  dispatches on a value, error messages enumerate a vocabulary, and `ddd
-  snapshot` / the unfold-macro printer round-trip the normalized form. (Same
-  treatment `design:` already gets via `BUILTIN_PACK_LATEST`.)
-- IR shape: extend `DeployableIR` with `style?`, `layout?`, `persistence?`,
-  `transport?`, `runtime?` (pre-normalization optional; post-normalization the
-  enriched model carries concrete values), mirroring how `design?` is handled.
+  is always a concrete value — codegen dispatches on a value, errors enumerate a
+  vocabulary, and `ddd snapshot` / the unfold-macro printer round-trip the
+  normalized form (same treatment `design:` gets via `BUILTIN_PACK_LATEST`).
+- IR shape: extend `DeployableIR` with `foundation?`, `style?`, `persistence?`,
+  `layout?`, `transport?`, `runtime?`, mirroring how `design?` is handled.
 
-## 8. What's pinned vs proposed
+## 9. What's pinned vs proposed
 
-- **Pinned (do not relitigate):** the adapter surface and its home
-  (D-ADAPTER-HOME); Ash/Ecto rides `persistence:`/`style:`, no `domain:` keyword,
-  one `phoenix` platform, `framework:` is UI-only, default `persistence: ash`
-  (D-PHOENIX-SURFACE); `storage`/`dataSource`/`deployable` split (D-STORAGE-SPLIT).
-- **Proposed here:** the name `transport:` for the rehomed API-surface axis; the
-  name `runtime:` (default `pooled`) for the actor axis; rules R4–R6 and their
-  codes; the consolidated per-platform menu in §5.
+- **Pinned and kept:** the adapter surface and its home (D-ADAPTER-HOME); one
+  `phoenix` platform, no `family@version`, no `apiOnly`, `framework:` is UI-only,
+  Phoenix defaults to Ash (D-PHOENIX-SURFACE); the
+  `storage`/`dataSource`/`deployable` split (D-STORAGE-SPLIT).
+- **Pinned and AMENDED — needs a decisions.md update:** D-PHOENIX-SURFACE's
+  *mechanism* for the domain axis ("rides `persistence:`/`style:`, no new
+  keyword"). This proposal gives it the dedicated keyword **`foundation:`**
+  (default `vanilla`) so the data layer stays pickable under a framework (§0.1).
+  D-PHOENIX-SURFACE open-item 1 (`style:` vs `persistence:` for Ash/Ecto) is
+  thereby **resolved/retired** — it's neither; it's `foundation:`.
+- **Proposed here:** `foundation:` (and `vanilla`); `transport:` for the API
+  surface; `runtime:` (default `pooled`) for the actor axis; rules R4–R6; the
+  per-platform menu in §6.
 
-## 9. Open questions
+## 10. Open questions
 
-1. **`persistence:` vs `style:` for the Ash/Ecto field** — D-PHOENIX-SURFACE
-   open-item 1 leaves this to the Ecto note's Phase 2. This proposal recommends
-   **`persistence:`** (Ash is a data+domain framework, sibling to `marten`),
-   which keeps `style:` meaning exactly one thing universally (`cqrs`|`layered`)
-   and lets R4 express the framework-lock cleanly. If `style:` is chosen instead,
-   R4 moves to the `style:` surface unchanged.
-2. **`pooled` vs `transactional`** as the `runtime:` default name — pick one
-   project-wide. `pooled` foregrounds "reconstituted from the repo";
-   `transactional` foregrounds the consistency model.
-3. **`node`/`hono` actor story** — left `pooled`-only for v1; an XState/worker
-   actor option is conceivable but has no real consumer yet ("consolidate the
-   present, don't design for the future", D-ADAPTER-HOME).
+1. **`pooled` vs `transactional`** as the `runtime:` default name — pick one
+   project-wide.
+2. **`node`/`hono` actor story** — `pooled`-only for v1; no real consumer for a
+   worker/XState actor option yet ("consolidate the present", D-ADAPTER-HOME).
+3. **Decision record** — fold §0.1 into `docs/decisions.md` as an amendment to
+   D-PHOENIX-SURFACE (or a new D-FOUNDATION-AXIS entry that supersedes its
+   domain-axis mechanism). Pending owner sign-off.
 
 ## Related
 
-- `docs/proposals/storage-and-platform-config.md` — the adapter surface, the
-  `style:`/`layout:`/`persistence:` menus, the v1 adapter list.
-- `docs/proposals/elixir-ecto-and-api-only-backends.md` — the Ash/Ecto axis this
-  builds on; its Phase 2 picks the §9.1 field.
+- `docs/proposals/storage-and-platform-config.md` — the adapter surface and the
+  `style:`/`layout:`/`persistence:` menus.
+- `docs/proposals/elixir-ecto-and-api-only-backends.md` — the Ash/Ecto axis; its
+  Phase 2 is now answered by `foundation:` rather than a `persistence:`/`style:`
+  field choice.
 - `docs/decisions.md` — D-ADAPTER-HOME, D-PHOENIX-SURFACE, D-STORAGE-SPLIT.
