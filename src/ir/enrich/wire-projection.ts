@@ -13,6 +13,7 @@ import type {
   FieldIR,
   TypeIR,
 } from "../types/loom-ir.js";
+import { satisfiableAtConstruction } from "../validate/invariant-classify.js";
 
 /** Any structure carrying a resolved access role.  Both `WireField`
  * and `FieldIR` satisfy this — backends choose the shape that suits
@@ -127,6 +128,26 @@ export function isSynthesizedCreate(agg: AggregateIR): boolean {
   const required = forCreateInput(agg.fields).filter((f) => !f.optional);
   if (required.length === 0) return false;
   return required.every((f) => f.default !== undefined);
+}
+
+/** Whether an aggregate is **constructible** under the Stage-4 invariant
+ * gate: it declares a create (explicit / `crudish`), or — having none —
+ * every one of its invariants can be satisfied from the create input
+ * alone (`satisfiableAtConstruction` with `available` = the create-input
+ * field names).  An aggregate whose invariant references state outside the
+ * create payload (a managed field, a derived getter, a helper, post-create
+ * state) is NOT constructible by a plain create: it is built via an
+ * operation / event / seed instead.
+ *
+ * This replaces the defaults-based `isSynthesizedCreate` gate — whether a
+ * field has a default no longer decides constructibility (a default only
+ * makes that field optional *input*; see `CreateInputFieldIR`).  Not yet
+ * consumed by `hasCreate` / the backends; the swap lands in the follow-up
+ * (gated by the cross-backend parity CI). */
+export function isConstructible(agg: AggregateIR): boolean {
+  if (agg.canonicalCreate != null) return true;
+  const available = new Set(forCreateInput(agg.fields).map((f) => f.name));
+  return agg.invariants.every((inv) => satisfiableAtConstruction(inv, available));
 }
 
 /** Whether a backend emits a create surface (route + request DTO +
