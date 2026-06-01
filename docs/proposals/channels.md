@@ -993,6 +993,26 @@ refetch through the authorized read.** The DB appears only at the very end,
 *behind* the authorized read, as where the refetch gets its data — incidental,
 not the mechanism.
 
+**How the generated authz plugs in (Centrifugo as the worked example).** A
+turnkey relay owns connections/rooms/fan-out but not your rules, so it exposes a
+seam for *your* authorization — and that seam is exactly where Loom's generated
+policy goes. Centrifugo offers two, matching our cheap-vs-non-cheap split:
+
+- **token** — your backend signs a JWT listing the channels the user may join.
+  Loom fills it from `roomOf(claims)` (the equi-join / `dataKey` rooms) — no
+  per-subscribe callback. Fits the cheap case.
+- **subscribe proxy** — on *each* subscription attempt Centrifugo calls your
+  backend over HTTP/GRPC ("may user U subscribe to channel X?"); your endpoint
+  runs the policy live and returns allow/deny. This is the **trilemma's
+  subscribe-time authorization (option A) as a product feature** — Loom generates
+  that endpoint (the compiled `maySee`); Centrifugo does everything else. Fits the
+  relationship/ACL/dynamic case.
+
+So integration is: **Loom emits the channel-list-in-JWT and/or one
+`may-subscribe?` endpoint; the relay owns the rest.** (Ably/Pusher have the same
+shape via capability tokens + an auth-callback; SignalR/Phoenix authorize in the
+hub/`mount`.) The relay is bought; only the policy check is generated.
+
 **Different architecture — DB-coupled sync engines** (note them, but they're the
 wrong layer here): **Supabase Realtime** (Postgres-changes/RLS), **ElectricSQL**
 (Postgres shapes), **PowerSync** (sync rules over Postgres/Mongo), **Rocicorp
