@@ -1542,7 +1542,7 @@ export function isNullLit(item: unknown): item is NullLit {
 export interface ObjectFieldInit extends AstNode {
     readonly $container: ObjectLit;
     readonly $type: 'ObjectFieldInit';
-    name: string;
+    name: LooseName;
     value: Expression;
 }
 
