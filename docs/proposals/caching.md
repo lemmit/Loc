@@ -485,12 +485,15 @@ aggregate is stamped with a **`dataKey`** (the materialized path from
 3. **Refetch time** — the same policy runs as the SQL `WHERE` on the authz'd
    refetch: the actual gate. The room match only decides *who to nudge*.
 
-At delivery it is pure room-membership matching — no policy predicate per ticket.
-(Hierarchical-containment policies only; relationship/ACL policies fall to the
-trilemma's subscribe-/publish-time rows — `channels.md` §"The limit of
+At delivery there is **no per-ticket *policy* evaluation** — but be precise about
+what that buys: room-membership matching *authorizes correctly* **only** when the
+visibility relation **is** the room key (the dataKey-ancestor case above). For any
+other policy the room is a **coarse pre-filter, not an authorizer** — see "When
+the policy isn't a clean prefix" next. (Relationship/ACL policies fall further, to
+the trilemma's subscribe-/publish-time rows — `channels.md` §"The limit of
 routing-by-key".)
 
-**The whole flow, technically:**
+**The whole flow, technically** (the clean dataKey-ancestor case):
 
 ```
 ① COMPILE   policy { data { Order reachable when currentUser.dataKey isAncestorOf this.dataKey } }
@@ -520,7 +523,56 @@ routing-by-key".)
 So: the **resource's `dataKey` drives publish-to-ancestors; the user's `dataKey`
 (JWT) is the room it joins; they meet iff the user is at-or-above the resource** —
 the reachability policy compiled into room topology, with the authz'd refetch as
-the real gate. No per-ticket policy evaluation.
+the real gate. No per-ticket policy evaluation. **This clean matching holds only
+because here the visibility relation *is* the dataKey ancestry.** When it isn't,
+the next section.
+
+### When the policy isn't a clean prefix — the refetch is the gate, rooms only pre-filter
+
+The honest case. Say user **U** sees `Order where status == "open" AND region ∈
+U.regions`, `U.regions = {A,B}` — a policy **not** reducible to dataKey ancestry.
+A new order is created: how does it reach exactly the right users? It **doesn't**,
+by routing alone — and there is no magic. **The room is a coarse pre-filter; the
+*refetch* is where authorization actually happens** (the same SQL `WHERE` the list
+endpoint always runs). Over-nudging is safe *because* the refetch re-authorizes,
+so nothing is authorized "for free": every policy dimension is either a **room
+key** (a cheap pre-filter that avoids wasted refetches) or a **refetch `WHERE`**
+(the real gate).
+
+The compiler splits the predicate into the part it can express as a room key (a
+discrete/equality dimension) and the rest (left in the `WHERE`):
+
+```
+① COMPILE   visible when status="open" AND region ∈ currentUser.regions
+            room-able = region (discrete)   → room key      |   status → refetch WHERE only
+            publish(o) → "orders:region:"+o.region
+            subscribe(u) → { "orders:region:"+r | r ∈ u.regions }   ← a SET of rooms
+
+② SUBSCRIBE U (regions {A,B}) → join "orders:region:A", "orders:region:B"   (bounded by U's scope)
+
+③ WRITE     create Order#99 { region:A, status:open } → ticket {orders,99}
+            → publish to "orders:region:A"   (routed by REGION only; the room knows nothing of status)
+
+④ DELIVER   "orders:region:A" = { connU, connW(regs{A}), connAdmin }
+            connU ◀ nudge → refetch GET /orders
+                            WHERE status='open' AND region IN ('A','B')   ← THE GATE (full policy)
+                            → #99 appears                                       ✓
+            connV (regs {C}) NOT in room → never nudged, never sees #99         ✓ (precise on region)
+
+   over-delivery: create Order#100 { region:A, status:DRAFT } → "orders:region:A"
+            connU ◀ nudge → refetch → WHERE status='open' → #100 EXCLUDED → list unchanged
+                          (a wasted refetch — status wasn't a room key — but no leak; the WHERE caught it)
+```
+
+So **region** (a room key) is precise — V is never even nudged; **status** (left
+in the `WHERE`) over-delivers — U is nudged for a draft it can't see, refetches,
+and the `WHERE` excludes it. You *could* also room on status to kill that, but
+each roomed dimension multiplies rooms and the publish fan-out. So the rule:
+**room on the high-selectivity / security-relevant dimensions, refetch-filter the
+rest; the refetch is always the correctness boundary.** And this is *only* safe
+because tickets carry no data — over-delivery on un-roomed dimensions can't leak,
+the refetch re-authorizes. (Payload delivery can't do this; it must room on every
+dimension or pay per-ticket eval — the trilemma.)
 
 ## Tickets vs payloads — the default that makes scoping a non-problem
 
