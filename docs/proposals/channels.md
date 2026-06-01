@@ -884,6 +884,22 @@ query-cache hook + `invalidateQueries` + a couple of timers; and **the gate is
 always the refetch** — rooms/`maySee` only decide *who to nudge*, the authorized
 read's `WHERE` decides *what they get*, every time.
 
+**This is the router.** `publishRoomsFor` (addressing — derive the destination
+rooms from the resource's own fields) + `roomOf` (the subscribe-side address —
+derive from verified claims) + the relay (the routing table `room→{connections}`
+and the forward) together *are* a content-and-identity-derived publish/subscribe
+router — the shape of a RabbitMQ topic exchange / NATS subject routing. The one
+twist: **both addresses are *derived*, not chosen** — the publisher can't
+mis-address (room computed from the resource), the subscriber can't forge one
+(room computed from the JWT), and they match exactly when the policy says so,
+because **the address-derivation *is* the compiled authorization policy**. There
+are two stacked routers — the **broker** (backbone, between backend processes, by
+room key) and the **relay** (edge / last-mile, room key → sockets) — both fed by
+`publishRoomsFor`. So "the router" the realtime topology needs is not hand-wired
+rules: it's **two generated addressing functions + one stock relay component +
+the broker**, which is exactly why it can be a derived DSL feature rather than
+per-app plumbing.
+
 ## IR, lowering, enrichment (phase mapping)
 
 Following the `view`/`criterion`/`workflow` vertical-slice recipe:
