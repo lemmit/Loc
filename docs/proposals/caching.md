@@ -617,6 +617,40 @@ is a hash lookup, not a nested-loop scan**; the room is the hash bucket, the
 the `WHERE`, with the room saving refetches when the equi-join part already says
 "not yours."
 
+#### Yes, residual over-delivery remains — what it is and what it costs
+
+So tickets *do* still reach some users who can't see the resource — **over-delivery
+is present for every policy dimension not encoded as a room key.** It's zero
+*only* when the entire policy is equi-join-roomable (e.g. pure dataKey-ancestor);
+the moment there's a non-equi residual (`total > 100`, `now()-7d`, full-text) or
+an un-roomed equi dimension, some matched-but-unauthorized users get nudged. It's
+a spectrum: coarse → tenant-wide; partial rooming → bounded; full equi-join
+rooming → zero. What it costs:
+
+| Aspect | Impact |
+|---|---|
+| **Data security** | **none** — tickets carry no payload; the refetch re-authorizes; the unauthorized user's list is unchanged |
+| **Side-channel** | a faint existence/timing leak ("*something in my bucket changed*"), for a resource they can't see — negligible for most apps, a real small consideration for high-sensitivity data |
+| **Cost** | **wasted refetches** by the over-delivered active users |
+
+The cost is mitigated, not zero: a wasted refetch is a conditional GET →
+`304 Not Modified` (the authorized result is unchanged, ETag matches — no DB hit,
+no payload, just a round-trip); **active-only** limits it to on-screen users;
+**coalescing** collapses bursts. So the practical residual is "a 304 per
+over-delivered on-screen user per coalesced burst." The *side-channel* is the one
+part 304s don't fix — it closes only by rooming that dimension.
+
+**The fundamental limit:** no independent-key routing achieves zero over-delivery
+for an arbitrary policy — routing *is* "compute a key from each side and match,"
+which captures exactly equi-join authorization and nothing more. Zero
+over-delivery for a non-equi policy requires leaving cheap routing for the
+trilemma: per-ticket eval (publish-time) or per-resource membership
+(subscribe-time). Which is why the ticket/payload split is load-bearing:
+**invalidation** tolerates the residual (refetch re-authorizes), so tightening is
+optional; **payload delivery** cannot over-deliver, so for any non-equi policy it
+*must* pay the trilemma — or not push payloads under that policy and route through
+invalidation + refetch instead.
+
 ## Tickets vs payloads — the default that makes scoping a non-problem
 
 An invalidation push **does not need to carry the data** — it needs to carry "your key
