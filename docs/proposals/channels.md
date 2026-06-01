@@ -921,6 +921,42 @@ index, or backplane — those are exactly what these provide. It generates
 allowed rooms" + `save → publish` glue, and **wires them to the platform's native
 relay** (or a sidecar). The novel infrastructure surface is ~zero.
 
+### Optimizing the per-event routing — the part that *isn't* the relay
+
+The relay is bought; the **per-event routing computation** — `publishRoomsFor`
+(which rooms does this change touch?) and, for payloads, the per-push `maySee`
+filter — is the custom hot path. It's rich in optimizations, and the leverage is
+that **most are compiler-derivable** (Loom has the dependency sets, the dimension
+selectivity, and the target broker's capabilities), so they ship as generated
+code, not per-app tuning:
+
+- **Dead-room skip.** Don't publish to a room with no subscribers; the relay knows
+  which rooms are live, so per-event publish cost ≈ O(*live* rooms touched) — near
+  zero when few are connected.
+- **Irrelevant-save skip.** If the changed fields are neither a room key nor in
+  any cached read's dependency set, emit **no ticket** (the dependency sets are
+  already computed).
+- **Wildcard subscription vs publish-to-ancestors.** On brokers that support it
+  (NATS `>`, Redis `PSUBSCRIBE`, MQTT `#`) publish once to the leaf and let
+  subscribers match ancestors — kills the O(depth) fan-out; exact-match brokers
+  (Kafka / SignalR / Phoenix.PubSub) keep publish-to-levels.
+- **Coalesce per transaction.** Dedupe rooms; one publish per room per flush.
+- **Invalidation needs no per-push check at all** — over-deliver the payload-free
+  ticket, the refetch gates. `maySee`-at-relay is a **payload-only** cost; and
+  even then, load the resource's authz inputs **once per event** and check the
+  (already room-narrowed) connections in-memory, memoized — never a DB query per
+  connection.
+- **Move it off the hot path** — a `projection` (C) pays the routing complexity at
+  write-time and routes cheap after; selectivity-tier the rooms (room only the
+  high-selectivity dimensions); start coarse and split a room only when its
+  fan-out is measured to hurt.
+
+This is the part that's genuinely Loom's to get right — and the argument for
+*generating* it: the optimal choice ("room on region? skip dead rooms? NATS
+wildcards?") is **workload-dependent** (write rate × connections × policy shape),
+so the compiler emitting a sensible default + knobs beats every team re-deriving
+it by hand.
+
 ## IR, lowering, enrichment (phase mapping)
 
 Following the `view`/`criterion`/`workflow` vertical-slice recipe:
