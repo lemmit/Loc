@@ -288,16 +288,46 @@ bound `storage.type`, the same way `dataSource` validates `kind` against
 
 | `delivery` | `retention` | Compatible `storage.type` | UI live-event subscribable |
 |---|---|---|---|
-| `broadcast` | `ephemeral` | `inMemory`, `redis` | yes |
-| `broadcast` | `log`       | `kafka` | yes (replay-from-cursor) |
-| `queue`     | `ephemeral` | `redis`, `rabbitmq` | no — competing consumers |
-| `queue`     | `work`      | `redis`, `rabbitmq`, `kafka` | no — competing consumers |
+| `broadcast` | `ephemeral` | `inMemory`, `redis`, `nats` | yes |
+| `broadcast` | `log`       | `kafka`, `nats` (JetStream) | yes (replay-from-cursor) |
+| `queue`     | `ephemeral` | `redis`, `rabbitmq`, `nats` | no — competing consumers |
+| `queue`     | `work`      | `redis`, `rabbitmq`, `kafka`, `nats` | no — competing consumers |
 
 `loom.channelsource-incompatible` fires on a mismatch (e.g. `retention: work`
 bound to a bare `inMemory` with no durability), carrying the same
 suggestion-with-alternatives shape as the existing dataSource matrix error.
 Note the last column is a *semantic* property (a browser can't join a work
 group) — **not** a transport choice; SSE-vs-WebSocket doesn't appear here.
+
+#### Choosing the broker — NATS vs Redis vs Kafka vs RabbitMQ
+
+They are different designs, and for *this* proposal the **routing model** (the
+hierarchical `dataKey`-ancestor rooms) splits them: "publish to the leaf,
+subscribe to ancestors" needs **subject/topic wildcards**, which NATS (`>`/`*`),
+RabbitMQ topic (`#`/`*`), and Redis (`PSUBSCRIBE *`) have but **Kafka does not**
+(topic+partition; it's a *log*, not a router).
+
+| | sweet spot | wildcards | persistence | ops |
+|---|---|---|---|---|
+| **NATS (+JetStream)** | pub/sub + queue + stream + req/reply in one light binary; subjects map *directly* onto our ancestor rooms | **yes** | JetStream | light |
+| **Redis** (Pub/Sub + Streams) | ephemeral fan-out; relay backplane; **already run for the cache** | yes (pattern) | Streams only (memory-bound) | light |
+| **Kafka** | durable, replayable, high-throughput **log** (event-sourcing, projection replay) | **no** | yes, long retention | heavy |
+| **RabbitMQ** | reliable **work queues**, rich routing, DLQ/delay | yes (topic) | queues no / Streams plugin | moderate |
+
+So, by role:
+- **router / invalidation fan-out / fine rooms** → **NATS** (best routing fit) or
+  **Redis** (pragmatic — cache + invalidation + relay backplane share one system;
+  ticket loss doesn't matter, tickets are disposable);
+- **durable event log** (`retention: log`) → **Kafka** (or JetStream);
+- **work queues** (`queue`/`work`) → **RabbitMQ** (or JetStream / Redis Streams).
+
+Not exclusive — each channel binds its own `channelSource`, so a system can run
+**Redis for cache+invalidation, Kafka for the durable log, RabbitMQ for work
+queues** at once. And note **NATS is the one broker that covers the whole matrix
+*with* the wildcards our routing wants** — fitting, since NATS's "one system for
+every messaging pattern" thesis is where this proposal's framing began; it's the
+strongest single choice if you want one transport for the realtime tier, while
+Redis is the lower-friction start if you're already Redis-heavy.
 
 ## WebSockets / SSE — an infrastructural concern, not a contract knob
 
