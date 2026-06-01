@@ -92,9 +92,29 @@ domain-framework axis becomes `foundation:` rather than overloading `persistence
 invariants). Under `flat` that logic renders *inline in the route/endpoint
 handler* — mutate the entity, call `dbContext.SaveChanges()` / `Repo.update()`
 directly — instead of in a service method (`serviceLayer`) or command handler
-(`cqrs`). It is `flat` ≈ Fowler's Transaction Script collapsed into the handler:
-deliberately the least structure, for the simplest apps. It gets unwieldy for
-rich aggregates, which is exactly why it is opt-in and not the default.
+(`cqrs`). It is deliberately the least structure, for the simplest apps; it gets
+unwieldy for rich aggregates, which is why it is opt-in and not the default.
+
+**Why the value is `flat`, not `transactionScript`.** The three values vary by
+*orchestration topology* — where the per-request logic lives: inline in the
+handler (`flat`) → an application-service class (`serviceLayer`) → mediator
+command/query handlers (`cqrs`). "Transaction Script" (Fowler PoEAA) is a
+*different*, orthogonal dimension — *how* the per-request logic is organized (a
+procedure per request) — and it cuts across all three: a `serviceLayer` built as
+one method per operation is itself a set of transaction scripts ("layered
+transaction scripts"); Fowler notes a Service Layer can be "operation scripts" or
+a thin facade over a domain model. So `transactionScript` would label one point
+on the axis with a term that spans the whole axis. `flat` names the topology it
+actually picks out (the antonym of "layered").
+
+**The orthogonal axis we deliberately don't expose.** Transaction-Script vs
+Domain-Model (logic in procedures over anemic data vs. logic on rich entities) is
+a real axis — but Loom is **domain-model by construction** (an operation body is
+behavior on a rich aggregate), so every backend emits domain-model code and the
+axis is pinned. An anemic/transaction-script *emission* mode, if ever wanted,
+would be its own future axis — **not** a value of `application:`. Keeping them
+separate is what avoids conflating "where orchestration lives" with "how domain
+logic is organized."
 
 ## 3. New knob #1 — `foundation:` (the domain/app framework)
 
