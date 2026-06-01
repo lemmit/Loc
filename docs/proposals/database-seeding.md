@@ -151,7 +151,41 @@ carries a dependency edge on the Customer row. (`now()` and the other
 pure stdlib builtins already legal in default-value position are legal
 here.)
 
-### 3.2 Imperative form (relational graphs)
+### 3.2 Record shape and id resolution
+
+A seed record is the aggregate's **`create`-parameter shape, not its
+wire shape** — so it has **no `id` field**. The framework owns id
+minting (the lifecycle-operations rule), so the author never writes
+one. For `Product with crudish` the canonical create is
+`create({ sku, price })`, hence `Product { sku, price }`. Value objects
+nest as object literals (`price: { amount, currency }`), enums are bare
+values (`status: Draft`), and optional params may be omitted.
+
+Object graphs assembled by *operations* rather than create params —
+`Order.contains lines: OrderLine[]` populated through `addLine` — are
+deliberately **out of reach for the declarative form**; that is exactly
+what the imperative body (§3.3) is for.
+
+**Id access is therefore never a literal — it flows through the
+`@handle`** — and whether a handle yields a *known, stable* id depends
+on the aggregate's `ids` kind:
+
+| `ids` kind | Id source | Handle resolution |
+|---|---|---|
+| `guid` (default) | app-minted before insert | deterministic **UUIDv5(`dataset`, `aggregate`, `handle`)** — same id every run; safe to reference from stable URLs / e2e assertions |
+| `string` | author-supplied natural key (a create param) | the id *is* a written field; the handle is that value |
+| `int` / `long` | DB sequence/identity, unknown until insert | the handle binds to the id **captured at runtime** from `create`'s return — consistent within a run, not stable across fresh DBs; an id cannot be hard-coded (use `guid` if a stable id is needed) |
+
+The payoff: for the two kinds where the app knows the id before insert
+(`guid`, `string`), cross-row *and* cross-block references resolve to a
+deterministic id, so deep links and test fixtures get a stable, known
+id for free. For DB-generated `int`/`long`, an id is inherently
+unknowable until insert, so a runtime-captured handle is the correct
+(and only possible) answer — `SeedRef` lowers to "look up the id minted
+for `@acme` in this run", which every backend already expresses (a
+local variable in `db/seed.ts`, the `ISeeder`, and `seeds.exs`).
+
+### 3.3 Imperative form (relational graphs)
 
 When a seed needs control flow or multi-step aggregate operations, the
 block takes a **workflow-shaped body** instead of a record list — the
@@ -173,7 +207,7 @@ verbatim so that doc's example keeps compiling. The parser picks the
 form by lookahead: a `{`-body whose first token is a record head
 (`TypeName {`) is declarative; anything else is a statement body.
 
-### 3.3 Datasets and environments
+### 3.4 Datasets and environments
 
 The name after `seed` is the **dataset** (default: `default`). Datasets
 gate *when* a set runs:
