@@ -921,6 +921,43 @@ index, or backplane — those are exactly what these provide. It generates
 allowed rooms" + `save → publish` glue, and **wires them to the platform's native
 relay** (or a sidecar). The novel infrastructure surface is ~zero.
 
+### Prior art — and what to build on vs. build
+
+The relay is off-the-shelf, but so, largely, is the **whole routing problem** —
+"subscribe to a query → detect changes → route to the right authorized clients →
+keep their cache fresh" is a recognized product category (the **sync engine /
+reactive backend**). Two groups of existing solutions:
+
+**Realtime messaging servers** (route *events* to authorized subscribers; you feed
+them): **Centrifugo** (OSS; JWT subscription tokens + a proxy that authorizes subs
+against your backend), **Ably** (capability tokens), **Pusher** (auth'd
+private/presence channels). These own the relay + topic routing + subscription
+auth; you decide `save → which channel`.
+
+**Sync engines** (the *whole* job — query subscription + change detection +
+authorized routing + client cache):
+
+| Tool | Closeness |
+|---|---|
+| **Convex** | reactive queries; server tracks which queries read which data and re-pushes affected subscribers on write — our dependency-set + invalidation, built in |
+| **Rocicorp Zero** | queries + client cache + server push + **read-permission rules** gating sync — our "interest = query, authz at the read" |
+| **ElectricSQL** | Postgres **shapes** (subscribed query subsets) + partial replication; gate shape access — per-scope subsets like rooms |
+| **PowerSync** | **sync rules** → per-user buckets from Postgres/Mongo, keyed off JWT — buckets ≈ per-scope rooms |
+| **Supabase Realtime** | DB changes over channels with **authorization tied to RLS** — "the policy *is* the routing" (built on Phoenix Channels) |
+| **Triplit / InstantDB** | full-stack reactive DBs with subscriptions + permission rules |
+
+So a large part of this design *is* the sync-engine problem, and these implement
+its hard parts. Realistic build options: **use a sync engine** (Convex / Zero /
+Electric / PowerSync / Supabase Realtime) and let it own routing + cache; or
+**generate against a messaging server** (Centrifugo / Ably) for the fan-out, doing
+`save → channel` + auth yourself; or build the relay+router only if none fits.
+Tradeoff: each ties you to its stack/DB and its own auth-rule DSL, and most do
+**full data sync** rather than this proposal's payload-free **invalidation +
+authz'd-refetch** model — so none is a drop-in for "policy-derived rooms over the
+existing Hono/.NET/Phoenix backends." Closest in spirit: **Convex / Zero**
+(query+deps+authz+cache) and **Supabase Realtime / PowerSync** (rules → per-scope
+routing).
+
 ### Optimizing the per-event routing — the part that *isn't* the relay
 
 The relay is bought; the **per-event routing computation** — `publishRoomsFor`
