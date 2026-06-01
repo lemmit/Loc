@@ -646,6 +646,79 @@ default. So: **broad invalidation is fine — bounded by active queries,
 coalesced, absorbed by cache; reserve payload-patching for paths where even a
 coalesced cache-hit refetch is too slow.**
 
+### The same ticket caches the HTTP layer — invalidation-based, not expiration-based
+
+> **Design note (open).** A consequence worth stating: because the origin
+> **knows exactly when a resource changes** (the `save` → ticket), Loom can cache
+> *aggressively* with **zero staleness** — the regime almost no system can use.
+
+Ordinary HTTP caching is **expiration-based**: `max-age=30`, hope, revalidate —
+because the origin can't know when data changed, so it guesses with a clock
+(stale windows *and* wasted refetches). Loom is invalidation-based: `max-age`
+long **and** an explicit purge the instant the aggregate changes. The expensive,
+normally-impossible half of caching — *knowing when to bust* — is exactly what
+the invalidation map already provides.
+
+The mechanism already exists in every CDN/proxy: **surrogate keys** (Fastly),
+**cache tags** (Cloudflare), **xkey** (Varnish). Tag each response with the
+resource keys it depends on; **purge by tag** on change. That *is* Loom's
+aggregate key + invalidation ticket, so the generator emits the tagging and the
+purge for free, and **one ticket cascades through every tier**:
+
+| Tier | Keyed by | Busted by the ticket via |
+|---|---|---|
+| Browser HTTP cache | `ETag: orders/42@v7` | conditional GET → `304` |
+| **CDN / reverse proxy** | `Surrogate-Key: orders.42` | **purge-by-tag** |
+| Server read-through cache (§3.4) | `orders.42` | evict |
+| Client React Query | `["orders", 42]` | prefix invalidate |
+
+The ETag writes itself — it's the aggregate's **version/sequence**, the same
+number you already wanted in the ticket for "skip if current."
+
+**The two keys again — surrogate key vs cache partition.** A *shared* cache must
+never serve user A's response to user B, so the HTTP cache needs the *same two
+dimensions* we derived for rooms: **interest** = the surrogate key (`orders.42`,
+*what to purge*) and **visibility** = the cache partition (`DataKey`/tenant via
+`Vary`/keyed cache, *who may share it*). Tenant-wide/public reads → shared,
+high-hit, CDN-cacheable; per-user (`mine`) reads → `private` or partitioned by
+the full `DataKey`. The compiler knows which, because it knows whether the
+read's authz is tenant-level or row-level.
+
+### Structuring the keys — a read carries a *set* of tags (its dependency set)
+
+A response key is **not one tag — it's the set of resources the read depends
+on**, and that set is statically derivable from the query/view AST (the same
+enrich-phase walk that builds `wireShape`/`findAll`/associations). Two rules
+cover the hard cases you'd hit:
+
+- **List vs detail — type tag vs instance tag.** A *detail* read (`byId(42)`)
+  depends on one instance → `Surrogate-Key: orders.42`. A *list* read depends on
+  the **type, not specific ids** — a row appearing/disappearing changes the list
+  and you can't know which id ahead of time → `Surrogate-Key: orders` (the
+  collection tag). A save to *any* order purges every orders list; a save to
+  order 42 also purges `orders.42`. (`save` publishes both `orders` and
+  `orders.42` tickets, so both tiers are covered by one event.)
+- **Joined / multi-source views — union of dependency types.** A view joining
+  `Order ⋈ Customer` changes when **either** side changes, so its response is
+  tagged with **both** type keys: `Surrogate-Key: orders customers`. A save to
+  *either* purges it — surrogate keys are a *set*, and a purge of any member
+  evicts the entry. A 25-aggregate dashboard read → 25 type tags; any of the 25
+  saves busts it. Derivation is mechanical: walk the view/query's source
+  aggregates, emit one tag per type (instance tags only when the read is
+  parameterized by that id).
+
+**When the dependency set gets too wide — graduate to a projection.** Tagging a
+dashboard with 25 high-write types means any of 25 saves busts it; correct, but
+churny. Past some fan-in, broad invalidation is the wrong tool: that read should
+be a **maintained read-model / `projection`** (plane 2; `bounded-context-model.md`,
+`workflow-and-applier.md`) — updated incrementally from the event stream and
+cached under **its own single key**, so 25 upstream types collapse to one
+projection tag. So the key structure scales in two regimes: **tag-by-dependency-
+set** for ordinary reads (cheap, exact, auto-derived), and **a projection with
+its own key** once the dependency set is too wide or too hot to invalidate
+wholesale. The compiler can even *warn* (`loom.live-wide-dependency`) when a
+cached `.live` read's dependency set exceeds a threshold, suggesting a projection.
+
 ## IR, lowering, enrichment (phase mapping)
 
 Following the `view`/`criterion`/`workflow` vertical-slice recipe:
