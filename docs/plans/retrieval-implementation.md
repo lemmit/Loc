@@ -33,12 +33,39 @@ reified ref — not just a new declaration.
 Too big for one PR. Mirror how #765 landed ("surface + IR + validation,
 no emission" — CI-safe because nothing consumes the new IR yet).
 
-1. **PR1 — surface + IR + lowering** (no backend emission; CI-safe).
-2. **PR2 — validation** (selectability, sort/path checks).
-3. **PR3 — Hono/Drizzle emission + `Repo.run` lowering** + `LOOM_TS_BUILD` gate.
+1. **PR1 — surface + IR + lowering** (no backend emission; CI-safe). ✅ **DONE** (commit `a417946f`).
+2. **PR2 — validation** (selectability, sort/path checks). ✅ **DONE** (commit `d9c085e0`).
+3. **PR3 — `Repo.run` lowering + Hono/Drizzle emission** + `LOOM_TS_BUILD` gate. ← **next**
 4. **PR4 — .NET/EF Core emission** + `dotnet-build` gate.
 5. **PR5 — Phoenix/Ash emission** + `phoenix-build` gate.
-6. **PR6 — explicit `loads` / LoadPlanIR + loads-sufficiency** (if deferred from PR1).
+6. **PR6 — explicit `loads` / LoadPlanIR fetch realisation + loads-sufficiency** (the actual eager-fetch wiring; PR1 carries the plan, backends honour `whole` only until here).
+
+### PR3 grounding (what the `Repo.run` lowering must reuse)
+
+- **Repo-call recognition already exists**: `matchRepoCall`
+  (`lower.ts:2446`) recognises `<Repo>.<method>(args)` postfix chains in
+  workflow bodies and resolves the repository.  `Repo.run` is a new
+  `method` value handled alongside `getById` / `findAll`; the **first
+  arg is a retrieval reference** (`ActiveInRegion(region)`) and an
+  **optional trailing `page:` named arg** — so `matchRepoCall` (or its
+  caller around `lower.ts:2284`) needs to special-case `run` to pull the
+  retrieval name + its args + the page arg, rather than treating them as
+  plain positional find args.
+- **CallKind**: add a `repo-run` discriminator (`CallKind`,
+  `loom-ir.ts:1776`) so the Hono builder can dispatch.
+- **Hono emission**: model the `run<Name>` method on `findQueryMethod`
+  (`repository-find-builder.ts`) — `where` → `lowerToDrizzle`; `sort` →
+  `.orderBy(asc/desc(col))` (add `asc`/`desc` to the drizzle import set
+  the way #760 added `not`); `page` (from the run call) →
+  `.limit().offset()`; `whole` loadPlan → reuse the existing
+  containment bulk-load (`bulkLoadContainmentLines`).  Explicit `loads`
+  shapes stay deferred to PR6 (PR3 honours `whole` only).
+- **Note**: PR1 lowered the retrieval `where` as a plain inlined
+  `ExprIR` (criterion composition already inlines at lower-expr), *not*
+  a `CriterionRefIR`.  That keeps PR3 simple — the Hono builder feeds
+  `where` straight into `lowerToDrizzle`, exactly like a find filter.
+  The `CriterionRefIR` reification (reified-criteria.md) is a later,
+  separate refactor and is **not** a prerequisite for retrieval shipping.
 
 ---
 
