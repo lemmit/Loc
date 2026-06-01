@@ -787,23 +787,27 @@ the only constant. So on every tier Loom sets tags at request time:
 
 - **CDN**: the read handler writes `Surrogate-Key: orders orders.42` into the
   response headers (computed from route + the resolved aggregate).
-- **ASP.NET Core**: a generated `IOutputCachePolicy` — *not* the attribute —
-  adds the dynamic tags in `ServeRequestAsync` and partitions the entry by tenant:
+- **ASP.NET Core**: **one generic** `IOutputCachePolicy` — *not* the attribute,
+  and not one class per aggregate — configured per endpoint with the type tag,
+  deriving the instance tag from the route in `ServeRequestAsync`:
 
   ```csharp
-  sealed class AggregateTagPolicy : IOutputCachePolicy {           // generated once
+  sealed class AggregateTagPolicy : IOutputCachePolicy {           // generated ONCE, generic
+    private readonly string _type;                                 // injected per endpoint: "orders"
+    public AggregateTagPolicy(string type) => _type = type;
     public ValueTask ServeRequestAsync(OutputCacheContext ctx, CancellationToken ct) {
       var rv = ctx.HttpContext.Request.RouteValues;
-      ctx.Tags.Add("orders");                                       // constant type tag
-      if (rv.TryGetValue("id", out var id)) ctx.Tags.Add($"orders.{id}");  // runtime instance tag
+      ctx.Tags.Add(_type);                                          // constant type tag
+      if (rv.TryGetValue("id", out var id)) ctx.Tags.Add($"{_type}.{id}");  // runtime instance tag
       ctx.CacheVaryByRules.VaryByValues["tenant"] = /* currentUser.tenantId */;  // shared-cache safety
       return ValueTask.CompletedTask;
     }
     /* ServeResponseAsync / EvaluatePolicyAsync: defaults */
   }
   ```
-  endpoints get `.CacheOutput<AggregateTagPolicy>()`; the dispatcher/ticket
-  handler calls `await store.EvictByTagAsync("orders.42", ct)` on `save`.
+  endpoints get `.CacheOutput(p => p.AddPolicy<AggregateTagPolicy>().Tag("orders"))`
+  — per-aggregate *configuration*, one shared class; the dispatcher/ticket handler
+  calls `await store.EvictByTagAsync("orders.42", ct)` on `save`.
 - **Redis / Hono / Phoenix**: the reverse-index `SADD tag:orders.42 <key>` is
   likewise written at store time from the runtime tag set.
 
@@ -811,6 +815,49 @@ So the `[OutputCache(Tags=…)]` attribute is used (if at all) only for the bare
 type tag; everything instance- or param-relative goes through the policy — which
 is exactly why tags are "aggregate-relative" and live in generated code, not in a
 static annotation.
+
+### Where the cache may live — auth decides the tier, not preference
+
+A subtle but **load-bearing** constraint: if authorization (`requires`, policy,
+row-filter) runs as a **MediatR pipeline behavior** — *below* the controller —
+then ASP.NET **OutputCache sits in front of it**, and a cache *hit
+short-circuits the pipeline entirely*. OutputCaching a per-user read would serve
+user A's response to user B and **never run the auth behavior**. That's not a
+perf detail; it's a vulnerability. So:
+
+> **A cache may live above the auth boundary only if the response is identical
+> for everyone who passes that boundary.** Otherwise it must live *below* the
+> gate, keyed by the authorized effective scope.
+
+`cached: tagged` therefore resolves to a **tier the compiler picks from the
+read's authz shape** (it already knows it — same analysis as the room visibility
+key):
+
+| Read's authz | Response varies by | Cache tier | Mechanism |
+|---|---|---|---|
+| **public** (`crossTenant`) | nothing | **above** auth | CDN + OutputCache — fully shared, the big win |
+| **tenant-scoped** | tenant | **above** auth, keyed by tenant | OutputCache `VaryBy` tenant / CDN per-tenant |
+| **row-level / per-user** | the principal's `DataKey` + perms | **below** auth only | server read-through *inside* the handler, keyed by effective scope |
+
+For the row-level case the read-through cache lives **below the gate**: the auth
+behavior always runs (it's a cheap predicate over claims), produces the
+**effective scope** (`tenant + DataKey + relevant perms`), and *that* is part of
+the cache key — `(effectiveScope, query, params)` — populated and evicted by the
+same tags. Two invariants:
+
+- **The capability gate (`requires` → 403) is never cache-served.** It re-runs
+  every request; only the *data* it admits is cached. (So OutputCache, which
+  caches the whole response, is admissible *only* for the public/tenant rows;
+  per-user reads cache below the gate.)
+- **The visibility key reappears** — the same `DataKey`/tenant split from the
+  room design now decides *which tier the cache can sit on* and forms the
+  per-principal key below the gate.
+
+Honest consequence: **edge/HTTP caching pays off only for public + tenant
+reads.** Per-user reads can't be shared at the edge at all — their win is the
+server read-through (that user's N requests → 1 DB read, reused across their
+session), not the CDN. "Cache aggressively" is true **per tier**, gated by authz
+shape — not uniformly.
 
 ## IR, lowering, enrichment (phase mapping)
 
