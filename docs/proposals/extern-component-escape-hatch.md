@@ -231,29 +231,54 @@ page OrderDetail(order: Order) {
 ```
 → props gain `primaryAction: React.ReactNode; footer?: React.ReactNode`.
 
-**Tier 2 — action / navigation callback props (the component fires it).** When
+**Tier 2 — `action` props: pass a *behaviour* (the component fires it).** When
 the *component* decides when and with what arguments to act — a custom canvas
-where clicking a region confirms that order — a slot isn't enough; the component
-needs a callable. An operation-bound param lowers to a typed
-`(req) => Promise<void>` prop whose body is the **same** op lifecycle `Action`
-emits, hoisted via the existing `renderApiHoisting` / `buildHookUse` seams
-(`target.ts:169–217`) and `emitUserComponent`'s aggregate-op hoisting
-(`controls.ts:343`). The request type is the op's wire request — the **same DTO
-the backend `extern` op uses** (`extern-builder.ts`), so the two escape hatches
-share one contract:
+where clicking a region confirms that order, a chart with selectable points, a
+keyboard shortcut — a slot isn't enough: the component needs a **callable**, not
+a rendered element. The temptation is an operation-bound param like `confirm:
+action of Order.confirm`, but that invents a new, op-specific binding form that
+nothing else in the language uses, and it only reaches operations (not
+navigation, toasts, state writes, or a sequence of them).
+
+The general primitive **already exists**: a **block-body lambda** — the very
+`onSubmit: c => { draft.x := c.x; step := 1 }` form the page metamodel ships
+(`docs/page-metamodel.md:290–304`, §8). Its body is the ordinary statement
+grammar (`call`, `o.confirm()`, `navigate(…)`, `toast(…)`, `state := …`), walked
+and **hoisted in the caller's scope** exactly as `onSubmit` is. So Tier 2 is not
+a new binding syntax — it is just *"a lambda is a passable prop."* We add one
+generic param type, `action` (the function-valued sibling of `slot`'s
+element-valued), and the caller hands it any lambda:
 
 ```ddd
-component OrderGrid(orders: Order[], confirm: action of Order.confirm) extern from "./widgets/order-grid"
-```
-→ props gain `confirm: (order: OrderWire) => Promise<void>`; the component calls
-`props.confirm(o)` from its own click handler. Navigation params lower the same
-way to `(args) => void` calling the router (`target.ts:244–267`).
+component OrderGrid(orders: Order[], onPick: action) extern from "./widgets/order-grid"
 
-Tier 1 is fully specified by existing slot semantics and ships with the v0 core.
-Tier 2's only genuinely new surface is the **param spelling** for binding a
-callback to an operation/navigation target (the `action of …` form above is a
-sketch); that grammar choice is the one open question (§11), not the mechanism,
-which is the already-shipped action-hoisting path.
+page Orders {
+  body: OrderGrid {
+    orders: Sales.Order.all,
+    onPick: o => { o.confirm() }     // block-body lambda; Loom hoists confirm's mutation hook
+  }
+}
+```
+→ props gain `onPick: (order: OrderWire) => void`; the component calls
+`props.onPick(o)` from its own handler. Whatever the lambda body contains —
+an op call (lifecycle hoisted via `renderApiHoisting` / `buildHookUse`,
+`target.ts:169–217`; `controls.ts:343`), a `navigate(…)` (`target.ts:244–267`),
+a `toast(…)`, a `state :=`, or a sequence — resolves by the **same rules that
+already type-check `onSubmit`**. Nothing op-specific, nothing new but the param
+type and its argument-type spelling.
+
+This is strictly more general than `action of …` *and* less new surface — it
+reaches every behaviour the statement grammar can express, not just operations,
+and reuses the block-body-lambda path verbatim. `slot` carries elements;
+`action` carries behaviours; both are walker expressions marshalled across the
+props boundary and walked in the caller's scope. That symmetry is the whole of
+Tier 2.
+
+Tier 1 is fully specified by existing slot semantics. Tier 2's only genuinely
+new surface is **how the param declares the lambda's argument types** (`onPick:
+action` with inference from call sites, vs an explicit `onPick: (Order) =>
+action`); that spelling is the one open question (§11) — the *mechanism* is the
+already-shipped block-body-lambda + action-hoisting path.
 
 ## 4. Recommended shape
 
@@ -296,15 +321,16 @@ kinds and their props types:
 | `T` / `T[]` (aggregate) | `TWire` / `TWire[]` (the wire DTO) | the loaded record / query result |
 | `T id` | the id's wire type | route param / state field |
 | value object | its wire shape | object literal |
-| `slot` / `slot?` (D Tier 1) | `React.ReactNode` (`?` → optional) | caller's walker expression — incl. a wired `Action{…}` — walked in caller scope (`loom-ir.ts:99` slot semantics) |
-| `action of <Agg>.<op>` (D Tier 2) | `(req: <Op>Request) => Promise<void>` — the op's wire request, same DTO as the backend `extern` op (`extern-builder.ts`) | a hoisted mutation closure (`buildHookUse` / `renderApiHoisting`, `target.ts:169–217`) running load→check→dispatch→assert→save |
-| `nav to <Page>` (D Tier 2) | `(args: <Page>Params) => void` | a router-push closure (`target.ts:244–267`) |
+| `slot` / `slot?` (D Tier 1) | `React.ReactNode` (`?` → optional) | an **element** — any walker expr, incl. a wired `Action{…}`, walked in caller scope (`loom-ir.ts:99` slot semantics) |
+| `action` / `action?` (D Tier 2) | `(args) => void` | a **behaviour** — a (block-body) lambda; its statements (`o.confirm()` / `navigate` / `toast` / `state :=`) walked & hoisted in caller scope, exactly as `onSubmit` (`docs/page-metamodel.md:290`) |
 
-The first four rows are pure *data in*; the last three are *interaction out* —
-and both halves lower through machinery that already exists, so the user's
-hand-written component receives ordinary wire DTOs and ordinary typed callbacks.
-This is exactly the discipline backends already follow — *"Backends never
-re-resolve… read `agg.wireShape` directly"* (`CLAUDE.md`).
+The first four rows are pure *data in*; `slot` and `action` are *interaction
+out* — and both lower through machinery that already exists (slots; block-body
+lambdas; action hoisting), so the user's hand-written component receives
+ordinary wire DTOs, ordinary `ReactNode`s, and ordinary typed callbacks. This
+is exactly the discipline backends already follow — *"Backends never
+re-resolve… read `agg.wireShape` directly"* (`CLAUDE.md`) — and the same
+element-vs-behaviour split React's own props model uses.
 
 ## 6. Cross-framework — react vs liveview
 
@@ -382,12 +408,13 @@ Following the canonical "adding a language feature" recipe
 3. **IR** (`src/ir/types/loom-ir.ts`): `ComponentIR` (`:1351`) gains `extern?:
    boolean`, `externBindings?: { framework: string; path: string }[]`. Body
    becomes optional for extern. Params already carry `slot` (`TypeIR` `:99`);
-   add an action/nav-callback param kind for D Tier 2.
+   add one generic `action` (behaviour/lambda) param kind for D Tier 2 — not an
+   op-specific binding.
 4. **Lower** (`src/ir/lower/lower.ts` `lowerUi`/component lowering, ~`:1000`):
    thread the flag + bindings; type-check params via the existing param
-   resolution (no expression lowering — extern has no body). Slot args and
-   action/nav args are lowered in the **caller's** scope exactly as slots and
-   `Action` already are — no new lowering path.
+   resolution (no expression lowering — extern has no body). `slot` args and
+   `action` (lambda) args are lowered in the **caller's** scope exactly as slots
+   and block-body lambdas already are — no new lowering path.
 5. **React generator:**
    - `pages-emitter.ts`: when `component.extern`, **skip**
      `renderUserComponentFile` (`page-shell.ts:502`) — Loom emits no component
@@ -425,10 +452,10 @@ machinery and not a new file-protection path.
   `loom.slot-out-of-position` / `loom.slot-member-access` rules
   (`docs/page-metamodel.md:224`) still apply unchanged: a slot is valid only as
   a component param, and member access on a slot ref stays forbidden.
-- An `action of <Agg>.<op>` / `nav to <Page>` callback param (D Tier 2) must
-  resolve to a real public operation / page reachable through the deployable's
-  `targets` chain — same reachability rule scaffold and `Action` already obey.
-  Code: `loom.extern-callback-unresolved`.
+- `action` (behaviour) params (D Tier 2) need **no new rule**: the lambda the
+  caller supplies is type-checked by the existing block-body-lambda rules in the
+  caller's scope — an `o.confirm()` / `navigate(P)` inside it resolves exactly as
+  it does in an `onSubmit:` lambda today, including `targets`-chain reachability.
 - An extern component reached by a `ui` whose framework has no binding is an
   error. Code: `loom.extern-component-framework-mismatch`.
 - The declared `path` is preserved verbatim (like `UiHelperImportIR.path`,
@@ -445,20 +472,21 @@ machinery and not a new file-protection path.
   a *named, typed* component, not inline source.
 - **Non-goal: Loom-authored component internals.** Loom never reads or
   type-checks the body of the foreign file — only its props boundary.
-- **In scope (v0): interactivity (Option D).** Slot props (Tier 1) and
-  operation/navigation callback props (Tier 2) ship with the core — an extern
-  component is a wired control, not a read-only widget. The only deferred slice
-  is the *exact grammar* for Tier-2 callback params (§11 Q1), not the capability.
+- **In scope (v0): interactivity (Option D).** `slot` props (Tier 1, elements)
+  and `action` props (Tier 2, behaviours — passed lambdas) ship with the core —
+  an extern component is a wired control, not a read-only widget. The only
+  deferred slice is the *argument-type spelling* of an `action` param (§11 Q1),
+  not the capability, and there is **no** op-specific binding form.
 
 ## 11. Open questions
 
-1. **Tier-2 callback param spelling (the one real open question).** How does a
-   param bind to an operation / page? Candidates: `confirm: action of
-   Order.confirm`, `onConfirm: Order.confirm` (bare op ref, like `Action`'s
-   argument), or a function-type `onConfirm: (Order) => confirm`. It should read
-   like `Action`'s existing operation reference so there's one mental model.
-   The *mechanism* (hoist the op lifecycle into a callback) is settled; only the
-   surface syntax is open.
+1. **`action` argument-type spelling (the one real open question).** The
+   behaviour itself is just a passed lambda (no op-binding form), but how does
+   the *param* declare what arguments the component must call it with? Candidates:
+   bare `onPick: action` with the signature **inferred** from how the body lambda
+   binds at call sites; or an explicit arrow `onPick: (Order) => action`. The
+   *mechanism* (walk the lambda + hoist whatever it does, in caller scope) is
+   settled; only this surface is open.
 2. **Props-file location & import shape.** `…/extern/<Name>.props.ts`
    (sibling-of-`components`) keeps the one machine-owned file clearly inside
    Loom's write set, away from the user's path. Confirm the relative-import math
