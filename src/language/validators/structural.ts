@@ -2,7 +2,6 @@
 // sanity, aggregate / entity-part / value-object structural rules.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
-import { writableCreateFields } from "../../macros/api/factories.js";
 import type {
   Aggregate,
   BoundedContext,
@@ -233,33 +232,14 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
   }
 }
 
-/** Constructibility check (staged): an aggregate is constructible when it
- * declares a `create` (explicit or via `crudish`) or every required
- * create-input field has a default.  Otherwise — now that the implicit
- * hard-coded create is removed (Stage 4) — there's no way to supply those
- * fields and no create surface is emitted.  Emitted as a WARNING: a
- * non-constructible aggregate (created only via events / seed data /
- * as a child) is a legitimate shape, so this guides rather than blocks. */
-function checkConstructible(agg: Aggregate, accept: ValidationAcceptor): void {
-  const hasCreate = agg.members.some((m) => isCreate(m));
-  if (hasCreate) return;
-  const undefaulted = writableCreateFields(agg)
-    .filter((f) => !f.type?.optional && f.default == null)
-    .map((f) => f.name);
-  if (undefaulted.length === 0) return;
-  accept(
-    "warning",
-    `Aggregate '${agg.name}' is not constructible: it declares no 'create' and the required field(s) ${undefaulted
-      .map((n) => `'${n}'`)
-      .join(
-        ", ",
-      )} have no default — no create surface is emitted. Add a 'create(...)' (or 'with crudish'), or give the field(s) a default value.`,
-    { node: agg, code: "loom.not-constructible" },
-  );
-}
+// Constructibility is no longer a defaults-based AST warning (Stage 4):
+// under the invariant gate an aggregate with required, undefaulted fields
+// is constructible — those fields just become required create params (see
+// `isConstructible`).  The remaining non-constructible case (an invariant
+// referencing state outside the create input) is an IR-level concern; a
+// dedicated diagnostic there is a follow-up.
 
 export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void {
-  checkConstructible(agg, accept);
   // Event-sourcing body discipline — the AST-level mirror of
   // `validateEventSourcedDiscipline` (ir/validate), so the contract shows
   // live in the editor as you type, not only at `generate` time.

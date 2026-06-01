@@ -12,8 +12,12 @@
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../_helpers/index.js";
 
-// `Product` is crudish (constructible); `Ledger` declares only a mutating
-// operation and a required field with no default (not constructible).
+// `Product` is crudish (constructible).  `Ledger` is non-constructible
+// under the Stage-4 invariant gate: its invariant (`balance >= 0`)
+// references a `managed` field that isn't in the create input, so it can't
+// be satisfied by a plain create — Ledger is built only via its `adjust`
+// operation.  (A required, undefaulted field alone no longer blocks a
+// create; that field would just become a required create param.)
 const FIXTURE = `
 system Demo {
   subdomain Shop {
@@ -25,7 +29,8 @@ system Demo {
       repository Products for Product { }
 
       aggregate Ledger {
-        balance: decimal
+        balance: decimal managed
+        invariant balance >= 0
         operation adjust(delta: decimal) { balance := balance + delta }
       }
       repository Ledgers for Ledger { }

@@ -68,12 +68,11 @@ export function forCreateInput<T extends WithAccess>(items: readonly T[]): T[] {
  * optionality derivation (`zodFor`/`wireTypeInfo`/`renderCsType`), so no
  * consumer needs the `optional` flag re-passed.
  *
- * For a **synthesised** create (no declared create, but every required
- * field is defaulted — see `isSynthesizedCreate`) the create is
- * parameterless: clients supply nothing and the factory applies the
- * field defaults, so the input set is empty. */
+ * Every constructible aggregate's create is parameterized by this set —
+ * there is no parameterless special case (a defaulted field is a create
+ * param like any other; that a default could let the client omit it is the
+ * separate required-ness axis, see `CreateInputFieldIR.requiredInput`). */
 export function createInputFields(agg: AggregateIR): FieldIR[] {
-  if (agg.canonicalCreate == null && isSynthesizedCreate(agg)) return [];
   // Read the reified contract when present (post-enrichment); fall back to
   // deriving it for any pre-enrichment caller so the function stays total.
   return (agg.createInput ?? buildCreateInput(agg)).map((c) => c.field);
@@ -117,19 +116,6 @@ function hasImplicitDefault(t: TypeIR): boolean {
   return base.kind === "primitive" && base.name === "bool";
 }
 
-/** Whether every required (non-optional) create-input field carries a
- * default — so the aggregate can be constructed with no client input by
- * applying those defaults.  This is the constructibility-via-defaults
- * case the validator's constructibility check also recognises. */
-export function isSynthesizedCreate(agg: AggregateIR): boolean {
-  // Only meaningful when no create is declared; a declared create
-  // (explicit/`crudish`) always wins.
-  if (agg.canonicalCreate != null) return false;
-  const required = forCreateInput(agg.fields).filter((f) => !f.optional);
-  if (required.length === 0) return false;
-  return required.every((f) => f.default !== undefined);
-}
-
 /** Whether an aggregate is **constructible** under the Stage-4 invariant
  * gate: it declares a create (explicit / `crudish`), or — having none —
  * every one of its invariants can be satisfied from the create input
@@ -141,9 +127,9 @@ export function isSynthesizedCreate(agg: AggregateIR): boolean {
  *
  * This replaces the defaults-based `isSynthesizedCreate` gate — whether a
  * field has a default no longer decides constructibility (a default only
- * makes that field optional *input*; see `CreateInputFieldIR`).  Not yet
- * consumed by `hasCreate` / the backends; the swap lands in the follow-up
- * (gated by the cross-backend parity CI). */
+ * makes that field optional *input*; see `CreateInputFieldIR`).  An
+ * aggregate with required, undefaulted fields but no blocking invariant is
+ * now constructible: those fields become required create params. */
 export function isConstructible(agg: AggregateIR): boolean {
   if (agg.canonicalCreate != null) return true;
   const available = new Set(forCreateInput(agg.fields).map((f) => f.name));
@@ -151,15 +137,12 @@ export function isConstructible(agg: AggregateIR): boolean {
 }
 
 /** Whether a backend emits a create surface (route + request DTO +
- * factory) for this aggregate.  An aggregate is constructible — and so
- * gets a create — iff it declares one (explicit `create(...)` or via
- * `crudish`, recorded as `canonicalCreate`) **or** every required
- * create-input field is defaulted (a synthesised parameterless create).
- * Aggregates with neither emit no create: they are constructed only
- * through their own operations or seed data.  This replaces the
- * pre-Stage-4 unconditional hard-coded create. */
+ * factory) for this aggregate — i.e. whether it is {@link isConstructible}.
+ * A constructible aggregate gets a parameterized create over its
+ * create-input fields (`forCreateInput`); a non-constructible one emits no
+ * create and is reached only through its own operations / events / seed. */
 export function hasCreate(agg: AggregateIR): boolean {
-  return agg.canonicalCreate != null || isSynthesizedCreate(agg);
+  return isConstructible(agg);
 }
 
 /** Fields clients may modify in an **update** request's editable
