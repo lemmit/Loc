@@ -601,8 +601,12 @@ function printProperty(node: Property): string {
       ? ` sensitive(${node.sensitivity.tags.join(", ")})`
       : "";
   const access = node.access ? ` ${node.access}` : "";
+  // `= <expr>` default clause — grammar places it after the access modifier
+  // and before `check` (ddd.langium Property rule), so the expression can't
+  // greedily swallow a trailing modifier keyword.
+  const def = node.default ? ` = ${printExpr(node.default)}` : "";
   const check = node.check ? ` check ${printExpr(node.check)}` : "";
-  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${sensitivity}${access}${check}`;
+  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${sensitivity}${access}${def}${check}`;
 }
 
 function printContainment(node: Containment): string {
