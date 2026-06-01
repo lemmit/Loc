@@ -11,6 +11,7 @@ import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/res
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx } from "../_adapters/index.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
+import { generateReactForContexts } from "../react/index.js";
 import { ashStyleAdapter } from "./adapters/ash-style.js";
 import { emitPhoenixResourceFiles } from "./adapters/resource-clients.js";
 import { type ApiRoute, emitApiControllers } from "./api-emit.js";
@@ -88,6 +89,18 @@ export function generatePhoenixLiveViewProject(
   const appName = toSnakeApp(deployable.name);
   const appModule = toModulePrefix(appName);
 
+  // D-PHOENIX-SURFACE phase 6: a Phoenix deployable whose hosted `ui`
+  // declares `framework: react` is a JSON-API backend that *embeds* a
+  // React SPA (served from `priv/static`), not a LiveView/HEEx app.  In
+  // that mode the LiveView pages + HEEx sidebar are not emitted; the
+  // React project is generated under `assets/` instead (phase 6a wires
+  // the emit; the endpoint/router/Dockerfile serve-wiring is phase 6b).
+  // Dormant until an example uses it: no current source pairs
+  // `platform: phoenix` with a `framework: react` ui, so output is
+  // unchanged.  The Ash domain + `/api` controllers + OpenAPI are
+  // emitted in either mode.
+  const embedReact = deployable.uiFramework === "react";
+
   // Per-aggregate dataSource lookup — feeds `postgres do schema "…"
   // end` + `tablePrefix` routing in each Ash.Resource's `postgres`
   // block.  Returns `undefined` for systems without a matching
@@ -121,14 +134,17 @@ export function generatePhoenixLiveViewProject(
   // --- LiveView pages --------------------------------------------
   // Per PageIR in the deployable's `ui:` block: one
   // lib/<app>_web/live/<page>_live.ex module + a router entry the
-  // shell renderer splices into router.ex.
-  const { files: liveFiles, routes: liveRoutes } = emitLiveViewPages({
-    contexts,
-    deployable,
-    sys,
-    appName,
-    appModule,
-  });
+  // shell renderer splices into router.ex.  Skipped in embedded-react
+  // mode — the SPA owns the UI; no HEEx pages or live routes.
+  const { files: liveFiles, routes: liveRoutes } = embedReact
+    ? { files: new Map<string, string>(), routes: [] as LiveRoute[] }
+    : emitLiveViewPages({
+        contexts,
+        deployable,
+        sys,
+        appName,
+        appModule,
+      });
   for (const [path, content] of liveFiles) out.set(path, content);
 
   // --- API controllers -------------------------------------------
@@ -171,8 +187,9 @@ export function generatePhoenixLiveViewProject(
   // --- Sidebar component -----------------------------------------
   // Emitted when the deployable mounts a `ui:` — derived from
   // MenuBlockIR or per-page menuMeta, identical structure to the
-  // React generator's sidebar.
-  if (deployable.uiName) {
+  // React generator's sidebar.  Skipped in embedded-react mode (the
+  // HEEx sidebar belongs to the LiveView shell, which the SPA replaces).
+  if (deployable.uiName && !embedReact) {
     const ui = sys.uis.find((u) => u.name === deployable.uiName);
     if (ui) {
       out.set(
@@ -180,6 +197,35 @@ export function generatePhoenixLiveViewProject(
         renderSidebarComponent({ ui, appName, appModule }),
       );
     }
+  }
+
+  // --- Embedded React SPA (D-PHOENIX-SURFACE phase 6a) ------------
+  // When the hosted ui is `framework: react`, generate the React
+  // project under `assets/` (its own Vite build), calling the same
+  // `/api` surface this backend serves.  Mirrors the .NET fullstack
+  // embed (`dotnet/index.ts`): same React generator, same
+  // `apiBaseUrl: "/api"`, same skip of duplicate shell files the
+  // Phoenix project owns.  The endpoint/router/Dockerfile wiring that
+  // *serves* the built bundle from `priv/static` is phase 6b.
+  if (embedReact) {
+    const spaFiles = generateReactForContexts(contexts, sys, deployable, {
+      apiBaseUrl: "/api",
+      pathPrefix: "assets/",
+    });
+    for (const [path, content] of spaFiles) {
+      // Skip the standalone-react shell files the Phoenix project owns
+      // (Dockerfile / .dockerignore / certs) or that don't apply in
+      // embedded mode (the e2e harness).  Mirrors the dotnet filter.
+      if (
+        path === "assets/Dockerfile" ||
+        path === "assets/.dockerignore" ||
+        path === "assets/certs/.gitkeep" ||
+        path.startsWith("assets/e2e/")
+      )
+        continue;
+      out.set(path, content);
+    }
+    out.set("assets/.gitignore", "node_modules\ndist\n");
   }
 
   // --- Theme CSS -------------------------------------------------
