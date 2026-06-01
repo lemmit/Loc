@@ -636,7 +636,7 @@ BoundedContext:
 
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
-    | Criterion | FilterDecl | StampDecl | ImplementsDecl;
+    | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -917,6 +917,57 @@ Criterion:
       | '{' 'where' ':' body=Expression '}'
     );
 
+// Retrieval — a named query *bundle*: a composed predicate (`where`,
+// the same expression position as `criterion`/`find … where`, so it
+// references criteria and `this.<field>` candidate refs) plus the
+// shaping a real query carries — `sort` ordering and a `loads` fetch
+// shape.  Pagination is NOT a slot here: `page` is a call-site argument
+// on `Repo.run(R(args), page?)`, never part of the declaration.  See
+// docs/proposals/retrieval.md.  Lowers to RetrievalIR
+// (docs/proposals/reified-criteria.md).
+//
+//   retrieval AllActive of Customer = ActiveCustomer
+//   retrieval HighValueInRegion(region: string) of Order {
+//     where: InRegion(region) && OrderTotalAtLeast(1000)
+//     sort:  [total desc, createdAt asc]
+//     loads: [this.lines[].product]
+//   }
+//
+// `sort` / `loads` admit the `sort`/`loads`/`asc`/`desc` keywords as
+// soft keywords (LooseName / NameRefIdent) so user code naming a field
+// `sort` / `loads` / `asc` / `desc` keeps parsing.
+Retrieval:
+    'retrieval' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? 'of' target=TypeRef
+    (
+        '=' where=Expression
+      | '{' 'where' ':' where=Expression
+            ('sort'  ':' '[' (sort+=SortItem (',' sort+=SortItem)*)? ']')?
+            ('loads' ':' '[' (loads+=LoadPath (',' loads+=LoadPath)*)? ']')?
+        '}'
+    );
+
+// A single sort term — a candidate path and a direction.  `direction`
+// is a discriminator field (not an `{infer}` action) per the grammar
+// convention; defaults to ascending when omitted.
+SortItem:
+    path=LoadPath (direction=SortDirection)?;
+
+SortDirection returns string:
+    'asc' | 'desc';
+
+// A structural path through the candidate aggregate for `sort` / `loads`
+// — flat-list rule (head + dotted tail), with an optional `[]` marker on
+// any segment meaning "across the collection" (mirrors `contains`
+// syntax).  Not an Expression: load-specifications.md restricts these to
+// structural paths (no filters / lambdas).  A leading `this` is admitted
+// and stripped at lowering so `this.lines[].product` and
+// `lines[].product` are equivalent.
+LoadPath:
+    ('this' '.')? segments+=LoadSegment ('.' segments+=LoadSegment)*;
+
+LoadSegment:
+    name=LooseName (collection?='[]')?;
+
 // ---------------------------------------------------------------------------
 // Members
 // ---------------------------------------------------------------------------
@@ -965,7 +1016,11 @@ Property:
         // `query`, etc. (e.g. `event Foo { payload: string }`) keep parsing.
         // They act as hard keywords only at `ContextMember` position, where
         // `PayloadDecl` (`kind=PayloadKind name=ID '{'`) begins.
-        | 'payload' | 'command' | 'query' | 'response' | 'error')
+        | 'payload' | 'command' | 'query' | 'response' | 'error'
+        // Retrieval keywords (retrieval.md) — soft in property position so
+        // user-declared fields named `sort` / `loads` / `asc` / `desc` /
+        // `retrieval` keep parsing.  Hard only inside the `Retrieval` slots.
+        | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1114,7 +1169,11 @@ LooseName returns string:
     // Payload-family keywords (payload-transport-layer.md, P1) admitted as
     // soft in loose-name positions; hard only at `ContextMember`
     // (`PayloadDecl`).
-    | 'payload' | 'command' | 'query' | 'response' | 'error';
+    | 'payload' | 'command' | 'query' | 'response' | 'error'
+    // Retrieval keywords (retrieval.md) admitted as soft so user code can
+    // still name a field `retrieval` / `sort` / `loads` / `asc` / `desc`.
+    // Hard only inside the `Retrieval` rule's slots.
+    | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1502,7 +1561,11 @@ NameRefIdent returns string:
        // Payload-family keywords (payload-transport-layer.md, P1) admitted as
        // bare NameRefs so expressions can read a field named `payload`,
        // `error`, `query`, etc.  Hard only at `ContextMember` (`PayloadDecl`).
-       | 'payload' | 'command' | 'query' | 'response' | 'error';
+       | 'payload' | 'command' | 'query' | 'response' | 'error'
+       // Retrieval keywords (retrieval.md) admitted as bare NameRefs so an
+       // expression can read a field named `retrieval` / `sort` / `loads` /
+       // `asc` / `desc`.  Hard only inside the `Retrieval` rule's slots.
+       | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc';
 
 // ---------------------------------------------------------------------------
 // Terminals

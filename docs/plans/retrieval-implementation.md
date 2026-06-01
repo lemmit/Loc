@@ -1,0 +1,200 @@
+# Retrieval — implementation plan (PR-sliced)
+
+> Status: **plan, not yet implemented.** Captures the grounded
+> file-by-file plan for the `retrieval` keyword
+> ([`../proposals/retrieval.md`](../proposals/retrieval.md)). Companion:
+> [`../proposals/reified-criteria.md`](../proposals/reified-criteria.md)
+> (the `RetrievalIR` / `LoadPlanIR` / `CriterionRefIR` seam) and the
+> shipped [`../criterion.md`](../criterion.md).
+
+## The one correction to the mental model
+
+`retrieval` is **not** "compose existing pieces." A codebase sweep
+confirms that **none** of these exist today and the feature builds them:
+
+- **No `sort` / `orderBy`** anywhere (grammar, IR, or any backend).
+  Repository `find` is `find <name>(<params>): <Return> where <expr>`
+  only — no ordering/paging/loads clauses despite what `criterion.md`'s
+  "extended find" section imagines.
+- **No `Repo.findAll` builtin machinery.** Repositories expose
+  author-declared finds + the enrichment auto-`findAll`. `Repo.run` is
+  entirely new repo-builtin-call machinery.
+- **No `loads` / LoadPlanIR.** `load-specifications.md` is unimplemented;
+  `LoadPlanIR` is greenfield.
+- **Criteria are inlined.** `lowerCriterionReference` substitutes the
+  body; `CriterionRefIR` does not exist. `retrieval` is intended to be
+  the **first consumer** of a reified criterion reference.
+
+So budget for building sort + loads + pagination + a repo-builtin + the
+reified ref — not just a new declaration.
+
+## PR slicing (each keeps `npm test` green)
+
+Too big for one PR. Mirror how #765 landed ("surface + IR + validation,
+no emission" — CI-safe because nothing consumes the new IR yet).
+
+1. **PR1 — surface + IR + lowering** (no backend emission; CI-safe). ✅ **DONE** (commit `a417946f`).
+2. **PR2 — validation** (selectability, sort/path checks). ✅ **DONE** (commit `d9c085e0`).
+3. **PR3 — `Repo.run` lowering + Hono/Drizzle emission** + `LOOM_TS_BUILD` gate. ← **next**
+4. **PR4 — .NET/EF Core emission** + `dotnet-build` gate.
+5. **PR5 — Phoenix/Ash emission** + `phoenix-build` gate.
+6. **PR6 — explicit `loads` / LoadPlanIR fetch realisation + loads-sufficiency** (the actual eager-fetch wiring; PR1 carries the plan, backends honour `whole` only until here).
+
+### PR3 grounding (what the `Repo.run` lowering must reuse)
+
+- **Repo-call recognition already exists**: `matchRepoCall`
+  (`lower.ts:2446`) recognises `<Repo>.<method>(args)` postfix chains in
+  workflow bodies and resolves the repository.  `Repo.run` is a new
+  `method` value handled alongside `getById` / `findAll`; the **first
+  arg is a retrieval reference** (`ActiveInRegion(region)`) and an
+  **optional trailing `page:` named arg** — so `matchRepoCall` (or its
+  caller around `lower.ts:2284`) needs to special-case `run` to pull the
+  retrieval name + its args + the page arg, rather than treating them as
+  plain positional find args.
+- **CallKind**: add a `repo-run` discriminator (`CallKind`,
+  `loom-ir.ts:1776`) so the Hono builder can dispatch.
+- **Hono emission**: model the `run<Name>` method on `findQueryMethod`
+  (`repository-find-builder.ts`) — `where` → `lowerToDrizzle`; `sort` →
+  `.orderBy(asc/desc(col))` (add `asc`/`desc` to the drizzle import set
+  the way #760 added `not`); `page` (from the run call) →
+  `.limit().offset()`; `whole` loadPlan → reuse the existing
+  containment bulk-load (`bulkLoadContainmentLines`).  Explicit `loads`
+  shapes stay deferred to PR6 (PR3 honours `whole` only).
+- **Note**: PR1 lowered the retrieval `where` as a plain inlined
+  `ExprIR` (criterion composition already inlines at lower-expr), *not*
+  a `CriterionRefIR`.  That keeps PR3 simple — the Hono builder feeds
+  `where` straight into `lowerToDrizzle`, exactly like a find filter.
+  The `CriterionRefIR` reification (reified-criteria.md) is a later,
+  separate refactor and is **not** a prerequisite for retrieval shipping.
+
+---
+
+## PR1 — Grammar + parse + IR + lowering
+
+### Grammar — `src/language/ddd.langium`
+
+- Register `Retrieval` in the `ContextMember` alternation (~line 611,
+  next to `Criterion`).
+- Add the `Retrieval` rule after `Criterion` (~line 888). Model on
+  `Criterion`:
+  ```
+  Criterion:
+    'criterion' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? 'of' target=TypeRef
+    ('=' body=Expr | '{' 'where' ':' body=Expr '}');
+  ```
+  Retrieval adds two optional ordered slots after `where`:
+  ```
+  Retrieval:
+    'retrieval' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? 'of' target=TypeRef
+    ( '=' where=Expr
+    | '{' 'where' ':' where=Expr
+          ('sort'  ':' '[' (sort+=SortItem  (',' sort+=SortItem)*)?  ']')?
+          ('loads' ':' '[' (loads+=PathExpr (',' loads+=PathExpr)*)? ']')?
+      '}' );
+  ```
+  Plus `SortItem` (path + direction discriminator field — **not** an
+  `{infer}` action, per CLAUDE.md), and a lightweight structural
+  `PathExpr` (`head=ID ('.' seg)*` with a `[]` collection marker) — do
+  **not** reuse `Expr` for paths (load-specifications.md: "just
+  structural paths"). Use flat-list rules, discriminator fields.
+- `npm run langium:generate` then `npm run build`; verify the
+  `langium-generated.yml` determinism gate (committed parser matches).
+
+### IR types — `src/ir/types/loom-ir.ts`
+
+After `CriterionIR` (~line 546) add: `CriterionRefIR { criterionName,
+args }`, `SortTermIR { path[], direction }`, `LoadPlanIR { kind:
+"whole"|"explicit", paths? }`, `RetrievalIR { name, params, targetType,
+where, sort?, loadPlan }` — **no `page` field** (page is a call-site arg
+on `Repo.run`). Add `retrievals: RetrievalIR[]` to `BoundedContextIR`
+(next to `criteria`, ~line 564). Add a `callKind` value (`"repo-run"`)
+for the run builtin call.
+
+### Lowering — `src/ir/lower/lower.ts` + `lower-expr.ts`
+
+- `lowerRetrieval(r, env): RetrievalIR` — model on `lowerCriterion`
+  (~line 1306). Bind `self` to the `of <T>` candidate exactly as the
+  criterion lowerer does. Lower `where` via the expression lowerer;
+  build `CriterionRefIR` for direct criterion references (the
+  reified-seam goal), inline-lower bare predicates. Lower `sort` paths;
+  `LoadPlanIR` = `{kind:"whole"}` when no `loads:`, else
+  `{kind:"explicit", paths}`.
+- Collect retrievals in the context lowering where
+  `criteria.push(lowerCriterion(...))` is (~line 1278); include
+  `retrievals` in the returned `BoundedContextIR` (~line 1295).
+- `lower-expr.ts`: lower `Repo.run(Retrieval(args), page?)` — find where
+  repo method calls (`Customers.getById(...)`) lower; add `.run(...)`
+  recognition producing a CallIR with the `repo-run` callKind carrying
+  `{ repoName, retrievalName, args, page? }`.
+
+### Tests
+
+- `test/language/retrieval-parse.test.ts` — single-line form; full block
+  (3 slots); `where`-only block; params; `of <Aggregate>`.
+- `test/ir/retrieval.test.ts` — parse→lower: `RetrievalIR` shape,
+  `LoadPlanIR` default `whole`, sort terms, `CriterionRefIR` in `where`,
+  the run-call CallIR.
+
+---
+
+## PR2 — Validation (`src/language/validators/retrieval.ts`, model on `criterion.ts`)
+
+- `where` selectability: reuse the `firstNonQueryableNode` oracle (the
+  one #760 wired for contextFilters). `loom.criterion-not-selectable`.
+- sort fields exist on T: `loom.invalid-sort-field`.
+- loads paths exist: `loom.invalid-path`.
+- cross-candidate composition in `where` already forbidden by the
+  criterion validator — route the retrieval `where` through it.
+- `loom.retrieval-loads-insufficient` at `Repo.run` consumers
+  (`src/ir/validate/validate.ts`) — can defer with PR6.
+- Negatives in `test/language/validation/retrieval-validator.test.ts`.
+
+---
+
+## PR3–PR5 — Backends (one at a time; closest precedent = the just-merged contextFilters #760/#762 + existing `findQueryMethod`)
+
+- **Hono first** (`repository-find-builder.ts` `findQueryMethod` +
+  `lowerToDrizzle`; `repository-builder.ts`): emit `run<Name>` method —
+  `where`→`lowerToDrizzle`; `sort`→`.orderBy(asc/desc(col))` (add
+  `asc`/`desc` to the drizzle import set, the way #760 added `not`);
+  `page`→`.limit().offset()`; `whole` loadPlan→reuse
+  `bulkLoadContainmentLines` (#745). Run-call renders to
+  `repo.run<Name>(args, page)`.
+- **.NET** (`find-emit.ts` `buildFindBodies` + `emit/repository.ts`):
+  `IQueryable` method — `where` via LINQ render, `sort`→
+  `OrderBy/ThenBy[Descending]`, `page`→`Skip/Take`, `whole`→`Include`.
+  (Ardalis `Specification<T>` framing is the Java-backend payoff,
+  deferrable; direct `IQueryable` is fine for v1.)
+- **Phoenix** (`repository-emit.ts`, per #762 `base_filter`): Ash read
+  action — `where` as an Ash filter (**bare attribute names, no
+  `record.` prefix** — the #762 gotcha), `sort`→Ash sort, `page`→Ash
+  pagination, loads→Ash `load`.
+- **React**: consumer only; relevant only if a `Repo.run`-using workflow
+  is auto-exposed as an api route — confirm against api auto-exposure;
+  likely defer for v1.
+- Each backend: a `test/generator/<platform>/retrieval-emit.test.ts`,
+  then the real build gate (`LOOM_TS_BUILD` / `dotnet-build` /
+  `phoenix-build`). Add a `retrieval` + `Repo.run` to an example `.ddd`
+  so the build-gate matrix exercises it (re-baselines byte fixtures via
+  `scripts/capture-baseline-fixture.mjs`).
+
+---
+
+## Decisions already pinned (from the design thread)
+
+- `Repo.run` (distinct builtin, **not** a `findAll` overload).
+- `page` is **call-site only**; `where`/`sort`/`loads` are sealed by the
+  declaration (open Q3 leaned "sealed").
+- v1 `Repo.run` returns `T[]`; the paged carrier (`T page`) waits on
+  `payload-transport-layer.md`.
+- "Specification" never enters Loom source/IR names — backend-local only
+  (see `reified-criteria.md` §Naming).
+
+## Open decisions for the implementer
+
+- Reify `where` now (build `CriterionRefIR`) vs inline-first. Recommend
+  reify for direct criterion refs (the "prove the seam" goal), inline
+  bare predicates.
+- `Repo.run` machinery has no `Repo.findAll` precedent to copy — study
+  the auto-`findAll` enrichment + `getById` call flow for the closest
+  analog.
