@@ -900,6 +900,27 @@ rules: it's **two generated addressing functions + one stock relay component +
 the broker**, which is exactly why it can be a derived DSL feature rather than
 per-app plumbing.
 
+**The relay is off-the-shelf — Loom generates only the derivation layer.** A relay
+is "a websocket/SSE server with rooms + a backplane," one of the most well-trodden
+pieces of infrastructure there is, and for two backends it is *native*:
+
+| Backend | Relay primitive (rooms + backplane) |
+|---|---|
+| **Phoenix** | **Phoenix Channels / `Phoenix.PubSub` / Presence** — topics = rooms, PG/Redis adapter = backplane. *This is the relay.* |
+| **.NET** | **ASP.NET SignalR** — `Groups` = rooms, Redis backplane (`AddStackExchangeRedis`) = scale-out. In-box. |
+| **Hono / Node** | **Socket.IO** (rooms + `@socket.io/redis-adapter`), or a sidecar / managed service |
+
+Turnkey / managed options if you don't self-host: **Centrifugo** and **Mercure**
+(open-source; the **JWT carries the channels/topics you may subscribe to** —
+almost exactly this proposal's "subscription pinned by the verifier"),
+**Supabase Realtime** (ties **RLS policies to channels** — "the policy *is* the
+routing", productized), **Pusher / Ably** (capability-token channel auth),
+**Azure SignalR Service**. So Loom does **not** build a connection registry, room
+index, or backplane — those are exactly what these provide. It generates
+`roomOf` / `publishRoomsFor` (from the policy) and the connect-time "join my
+allowed rooms" + `save → publish` glue, and **wires them to the platform's native
+relay** (or a sidecar). The novel infrastructure surface is ~zero.
+
 ## IR, lowering, enrichment (phase mapping)
 
 Following the `view`/`criterion`/`workflow` vertical-slice recipe:
