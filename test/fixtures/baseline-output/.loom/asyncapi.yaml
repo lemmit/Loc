@@ -1,0 +1,5 @@
+asyncapi: 3.0.0
+info:
+  title: "Acme channels"
+  version: 0.0.0
+channels: {}

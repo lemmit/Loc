@@ -520,6 +520,23 @@ export interface EventIR {
   fields: FieldIR[];
 }
 
+/** A channel — the publisher-side contract for how a context's events are
+ *  transported (channels.md, Slice 1).  Declared as a context member; its
+ *  `carries` list names events of the enclosing context, and the orthogonal
+ *  `delivery` x `retention` knobs select pub/sub vs work-queue vs durable
+ *  stream.  The contract is transport-neutral — a `ChannelSourceIR` binds it
+ *  to a physical storage at system scope.  Defaults (when a knob is omitted)
+ *  reproduce today's in-process broadcast/ephemeral behaviour. */
+export interface ChannelIR {
+  name: string;
+  /** Carried event type names (resolved). */
+  carries: string[];
+  delivery: "broadcast" | "queue";
+  retention: "ephemeral" | "log" | "work";
+  /** Partition/ordering key — a field common to the carried events. */
+  key?: string;
+}
+
 /** The payload-family discriminator (payload-transport-layer.md, P1).
  *  `payload` is the umbrella; `event` / `command` / `query` / `response`
  *  / `error` are sugar subtypes carrying the same structural-record wire
@@ -598,6 +615,9 @@ export interface BoundedContextIR {
   views: ViewIR[];
   /** Named predicate specifications declared in this context. */
   criteria: CriterionIR[];
+  /** Channel declarations in this context (channels.md, Slice 1) — the
+   *  publisher-side transport contracts over this context's events. */
+  channels: ChannelIR[];
 }
 
 /** A saved, strongly-typed query over one source aggregate.  Two
@@ -1029,11 +1049,25 @@ export interface SystemIR {
    *  …).  Deployables list which dataSources they host via the
    *  `dataSources:` clause. */
   dataSources: DataSourceIR[];
+  /** ChannelSource declarations at system scope (channels.md, Slice 1) —
+   *  the physical binding of a `channel` to a `storage`, the messaging twin
+   *  of `dataSource`.  Deployables will list which they wire in a later
+   *  slice; Slice 1 carries the bindings and emits `.loom/asyncapi.yaml`. */
+  channelSources: ChannelSourceIR[];
   /** Named `layout <Name> { … }` SystemMembers (Phase 8).  Pages
    *  reference one via `layout: <Name>` — the React generator emits
    *  one `<Name>Layout` wrapper component per entry and routes
    *  matching pages through it. */
   layouts: LayoutIR[];
+}
+
+/** Physical binding of a `channel` to a `storage` (channels.md, Slice 1).
+ *  System-scope, mirroring `DataSourceIR`.  `channelName` is the bare
+ *  channel name; `storageName` the bound storage instance. */
+export interface ChannelSourceIR {
+  name: string;
+  channelName: string;
+  storageName: string;
 }
 
 /** A single typed storage instance.  v0 type enum covers the

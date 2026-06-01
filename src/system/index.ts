@@ -12,6 +12,7 @@ import type {
 import type { MigrationsIR } from "../ir/types/migrations-ir.js";
 import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
+import { renderAsyncApi } from "./asyncapi.js";
 import { renderDataSourcesMd } from "./datasources.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderC4Model, renderC4SpecJson } from "./likec4.js";
@@ -159,6 +160,9 @@ function emitSystem(
   // declarations route domain contexts to physical storage.  Pairs
   // with the Phase B / C / D validators.  See `datasources.ts`.
   out.set(".loom/datasources.md", renderDataSourcesMd(sys));
+  // AsyncAPI view of `channel` declarations (channels.md, Slice 1).
+  // Realises the BC-model's "events as channels" placeholder.
+  out.set(".loom/asyncapi.yaml", renderAsyncApi(sys));
 
   // E2E test scaffolding — emitted only when the system declares
   // `test e2e` blocks.  Lives at the system root so it can run against

@@ -34,7 +34,7 @@ System:
     '}';
 
 SystemMember:
-    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | Resource | Layout;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -335,7 +335,7 @@ StorageType returns string:
     | 'elastic' | 'meilisearch'
     | 'kafka'
     | 'clickhouse' | 'bigquery'
-    | 's3' | 'rabbitmq' | 'restApi';
+    | 's3' | 'rabbitmq' | 'nats' | 'restApi';
 
 ConnectionSource:
       {infer ServiceConnectionSource} 'service' '(' service=ID ')'
@@ -615,7 +615,7 @@ BoundedContext:
 
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
-    | Criterion | FilterDecl | StampDecl | ImplementsDecl;
+    | Criterion | FilterDecl | StampDecl | ImplementsDecl | Channel;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -792,6 +792,34 @@ EntityPartMember:
 EventDecl:
     'event' name=ID '{'
         (fields+=Property (','? fields+=Property)* ','?)?
+    '}';
+
+// Channel — the publisher-side contract for how a context's events are
+// transported (channels.md, Slice 1).  A context member, declared beside
+// its events; `carries:` selects a subset of the context's events, and the
+// orthogonal `delivery` x `retention` knobs express pub/sub vs work-queue
+// vs durable stream.  The contract names no transport — `channelSource`
+// (system scope) binds it to a physical `storage`.  `key:` is the
+// partition/ordering field (validated to exist on the carried events).
+Channel:
+    'channel' name=ID '{'
+        ('carries'   ':' carries+=[EventDecl:ID] (',' carries+=[EventDecl:ID])* ','?)
+        ('delivery'  ':' delivery=ChannelDelivery ','?)?
+        ('retention' ':' retention=ChannelRetention ','?)?
+        ('key'       ':' key=ID ','?)?
+    '}';
+
+ChannelDelivery  returns string: 'broadcast' | 'queue';
+ChannelRetention returns string: 'ephemeral' | 'log' | 'work';
+
+// ChannelSource — the physical binding for a channel, system-scope, the
+// messaging twin of `dataSource`/`Resource`.  `for:` names the channel
+// (bare name; Slice 1), `use:` the `storage` that realises it.  The
+// channel<->storage compatibility matrix is enforced by the validator.
+ChannelSource:
+    'channelSource' name=LooseName '{'
+        ('for' ':' channel=ID ','?)
+        ('use' ':' use=[Storage:LooseName] ','?)?
     '}';
 
 // Payload — a structured-data carrier crossing a boundary
