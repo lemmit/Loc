@@ -103,4 +103,50 @@ describe("Phoenix embeds React (D-PHOENIX-SURFACE phase 6a)", () => {
     // No embedded React source tree.
     expect(ks.some((k) => k.includes("/assets/src/") && k.endsWith(".tsx"))).toBe(false);
   });
+
+  // --- Phase 6b: serve-wiring (endpoint / router / Dockerfile / controller) ---
+
+  function get(files: Map<string, string>, suffix: string): string {
+    const k = [...files.keys()].find((x) => x.endsWith(suffix));
+    expect(k, `${suffix} not emitted`).toBeDefined();
+    return files.get(k!)!;
+  }
+
+  it("endpoint serves the SPA from priv/static/app in embedded-react mode (6b)", async () => {
+    const endpoint = get(await generate(EMBED_REACT_SRC), "_web/endpoint.ex");
+    expect(endpoint).toContain('at: "/app"');
+    expect(endpoint).toContain('"priv/static/app"');
+  });
+
+  it("router adds the /app SPA fallback catch-all in embedded-react mode (6b)", async () => {
+    const router = get(await generate(EMBED_REACT_SRC), "_web/router.ex");
+    expect(router).toContain('scope "/app"');
+    expect(router).toContain('get "/*path", SpaController, :index');
+  });
+
+  it("emits the SpaController in embedded-react mode (6b)", async () => {
+    const files = await generate(EMBED_REACT_SRC);
+    const ctrl = get(files, "_web/controllers/spa_controller.ex");
+    expect(ctrl).toContain("def index(conn");
+    expect(ctrl).toContain("static/app/index.html");
+  });
+
+  it("Dockerfile gains the spa-build stage + copies dist to priv/static/app (6b)", async () => {
+    const dockerfile = get(await generate(EMBED_REACT_SRC), "Dockerfile");
+    expect(dockerfile).toContain("AS spa-build");
+    expect(dockerfile).toContain("npm run build");
+    expect(dockerfile).toContain("COPY --from=spa-build /spa/dist priv/static/app");
+  });
+
+  it("the legacy liveview shell files carry NO SPA serve-wiring (6b output-neutral)", async () => {
+    const files = await generate(LIVEVIEW_SRC);
+    const endpoint = get(files, "_web/endpoint.ex");
+    const router = get(files, "_web/router.ex");
+    const dockerfile = get(files, "Dockerfile");
+    expect(endpoint).not.toContain('at: "/app"');
+    expect(router).not.toContain("SpaController");
+    expect(dockerfile).not.toContain("spa-build");
+    // And no SpaController file at all.
+    expect([...files.keys()].some((k) => k.endsWith("spa_controller.ex"))).toBe(false);
+  });
 });
