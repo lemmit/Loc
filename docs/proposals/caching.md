@@ -384,6 +384,80 @@ over-delivery bounded by scope (or tenant, for coarse).** (Live-event
 subscriptions instead join via their explicit `channel` param — same relay rooms,
 but authorized as payload delivery, not deferred to a refetch.)
 
+### Owner-scoped rooms — the update flow end to end
+
+An owner-scoped room `tenant:acme:orders:owner:X` is "orders owned by X." A "my
+orders" list (the viewer *is* X) joins it and is nudged on **any change to any
+order owned by X** — and nothing about other customers. The update kinds:
+
+| Update | Tickets which room(s) |
+|---|---|
+| **create** order for X | `…orders:owner:X` (X's list grows) + coarse `…orders` (admins) |
+| **update** order 42 (owner X) | `…orders:owner:X` + instance `…orders:42` (detail watchers) + coarse |
+| **delete** order of X | `…orders:owner:X` (X's list shrinks) + coarse |
+| **transition** — order 42 reassigned X→Y | **both** `…owner:X` (it left) **and** `…owner:Y` (it joined) — needs the save's before+after owner |
+
+The transition is the subtle one: a reassign affects two owners' lists, so the
+save tickets **both** owner rooms — which is *why* scoped invalidation needs the
+old+new value of the scope field (a before-image on the save).
+
+**Server (normal update):**
+
+```
+  Customer X (or staff) ──POST /orders/42/ship──▶ Order#42.ship()   [order.customerId = X]
+                                                       │
+                                                       ▼  repo.save(order#42)
+                          DomainEventDispatcher — derive ticket from the save (no payload)
+                                   ticket = { tag:"orders", id:"42" }
+                  publish-to-levels  (one save → the fixed scope rooms it belongs to)
+          ┌──────────────────┬──────────────────────┬───────────────────────┐
+          ▼                  ▼                       ▼                       ▼
+    …orders:owner:X     …orders:42            …orders (coarse)        [broker backplane,
+    (owner lists)       (detail watchers)     (admin/tenant-wide)      if relay is sharded]
+          │                  │                       │
+          ▼                  ▼                       ▼
+        RELAY (edge backend holding the sockets) — look up registry[room], push
+          registry[…owner:X] = {connA(X), connC(X)}   registry[…orders:42] = {connD}
+          connA ◀ ticket   connC ◀ ticket   connD ◀ ticket   connAdmin ◀ ticket
+                              (O(recipients); no per-connection predicate)
+```
+
+The ticket carries **only `{tag,id}`** — the *owner* is used server-side to pick
+the room, never sent to the client; and `connA` can only be in `…owner:X` where
+X is its own JWT claim, so it structurally can't receive another owner's tickets.
+
+**Client (connA = X's "my orders" list):**
+
+```
+  mount useQuery(["orders","find","mine"]) → roomOf(key,claims)=…owner:{X}
+        └▶ relay.join("…orders:owner:X")   (authorized by the read that loaded the list)
+  ── ticket {tag:"orders",id:"42"} ─▶ qc.invalidateQueries(["orders"])   (prefix)
+        └▶ active "my orders" query stale → refetch GET /orders/mine
+              (authz'd: WHERE customerId = currentUser → only X's rows)
+        └▶ React Query cache updated → list re-renders (42's new status)
+  unmount → relay.leave("…orders:owner:X")
+```
+
+**Transition (reassign X→Y) — both rooms fire:**
+
+```
+  repo.save(order#42)  [before owner=X, after owner=Y]
+     ├─▶ …owner:Y   (joined → appears in Y's list)   ← new
+     ├─▶ …owner:X   (left   → leaves X's list)        ← OLD (the transition)
+     ├─▶ …orders:42 (the order changed)   └─▶ …orders (admins)
+
+  X's list: ticket → refetch /orders/mine → order 42 GONE
+  Y's list: ticket → refetch /orders/mine → order 42 APPEARS
+```
+
+Three properties this makes concrete: **the ticket is a nudge, the refetch is the
+truth** (and it's authz'd, so even an over-broad nudge can't leak); **the owner
+room bounds the nudge to the people who care** (X's list, not the tenant); and
+**transitions fan to both old and new owner rooms** — the reason scoped
+invalidation needs the save's before-image (a `cached:`-driven obligation; see
+Open questions). Bursts coalesce: 50 of X's orders changing → one refetch of
+`/orders/mine`.
+
 ## Tickets vs payloads — the default that makes scoping a non-problem
 
 An invalidation push **does not need to carry the data** — it needs to carry "your key
