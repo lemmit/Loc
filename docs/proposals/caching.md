@@ -297,9 +297,20 @@ refetches its own authorized read), but a tenant-wide *nudge* plus a faint
 side-channel ("*some* order changed" leaks existence/timing to users who can't
 see it).
 
-The fix is to scope the notification room by the **view's audience** — the same
-`DataKey`/visibility prefix used for delivery and the cache partition. Publish the
-ticket at the changed aggregate's `DataKey`/owner path; each view subscribes to
+**Why this is safe to route coarsely** — and why invalidation, unlike payload
+delivery, **never needs per-ticket authorization**: a ticket carries no data, so
+the routing only has to be a *superset* of the authorized set. Correctness is the
+**authz'd refetch**, not the routing. So even arbitrary relationship/ACL
+authorization (which can't be reduced to a room key — see `channels.md` §"The
+limit of routing-by-key") is fine for invalidation: route to the coarse room, let
+the refetch enforce per-row authz. Scoping the room (below) is therefore a pure
+*optimization* (less refetch noise, tighter side-channel), never a correctness
+requirement.
+
+The optimization is to scope the notification room by the **view's audience** —
+the same `DataKey`/visibility prefix used for delivery and the cache partition.
+Publish the ticket at the changed aggregate's `DataKey`/owner path; each view
+subscribes to
 the prefix matching *its* scope:
 
 ```

@@ -514,6 +514,56 @@ the coarse type room (or graduates to a projection). The compiler knows which
 case a read is in, so it picks the granularity — or warns that a read can't be
 scoped and will be tenant-wide.
 
+#### The limit of routing-by-key — and the trilemma behind it
+
+Routing-by-key (`DataKey`, or a generalized `ResourceKey` for owner/team/region)
+works **only when authorization is an equality/prefix on a key the resource and
+the principal both carry** — then both sides compute the same room string
+independently and a match *means* authorized, with no evaluation. **Relationship /
+ACL authorization does not reduce to such a key**: "Y may see order 42 because a
+`Share(42, Y)` row exists / Y is on the assigned team" — the authorized set is an
+arbitrary set in a join table, and no field on the order lets Y compute a
+matching room. For that class the key trick fails, and you face an
+**information-theoretic trilemma** — you pay the authz cost at exactly one of
+three times:
+
+| When you pay | Mechanism | Cost | Use when |
+|---|---|---|---|
+| **never** (reduce to key) | `DataKey`/`ResourceKey` room; both sides compute it | zero at delivery | authz is equality/prefix on a shared attribute |
+| **subscribe-time** (materialize) | per-resource room, membership **= the ACL** (loaded on join, updated when shares change) | at join + on ACL change; delivery O(recipients) | authz changes rarely vs. events (the Slack-channel model) |
+| **publish-time** (per ticket) | evaluate "who is authorized for R?" over the **interested** (connected, subscribed) set | per ticket, but only over watchers of R — *not* all users | few watchers per resource (detail views), or rare events |
+
+There is no fourth option. The earlier "zero per-ticket authz" claim is true for
+the first row only.
+
+**The escape that makes invalidation always cheap — over-delivery is harmless.**
+An invalidation ticket carries **no data**, so routing only needs to be a
+*superset* of the authorized set: correctness comes from the **authz'd refetch**,
+not the routing. A ticket reaching an unauthorized user just makes them refetch
+and get back only their authorized rows — worst case leaked is the faint
+"something changed" signal. So **cache invalidation never needs per-ticket authz**
+(route on the coarse `tenant.<type>` room, always correct); `ResourceKey` rooms
+are a pure *optimization* to cut refetch noise and tighten that signal — opt-in,
+and only when the key is expressible.
+
+**Payload delivery (live events) cannot over-deliver**, so for non-prefix authz
+it *must* pay — `subscribe-time` (per-resource room, ACL-as-membership, the usual
+right choice) or `publish-time` (eval over watchers). Or restrict live-event
+payloads to prefix-expressible authz and route everything else through
+invalidation + authz'd refetch.
+
+So the rule that resolves the distinction:
+
+| | Routing must be… | Non-prefix authz handled by |
+|---|---|---|
+| **Invalidation (tickets)** | a **superset** is fine | nothing — coarse room + authz'd refetch; `ResourceKey` only to reduce noise |
+| **Live events (payloads)** | **exact / a subset** | per-resource room with ACL-membership, or per-ticket eval over watchers |
+
+"Interested" is *which rooms a connection joined* (its mounted queries /
+subscriptions); "authorized" is decided by whichever trilemma row applies —
+baked into the key, checked once at join, evaluated at publish, or (for tickets)
+deferred to the refetch.
+
 ### Subchannels — not every browser gets every event
 
 `broadcast` + `ephemeral` describes the *delivery profile*, **not the
