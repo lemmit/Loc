@@ -699,43 +699,36 @@ flagged hot/wide (`loom.live-wide-dependency`). And recall this whole tier is a
 **payload** concern: **invalidation** never needs it — it tolerates over-delivery
 and lets the refetch gate (use A/B/C only if the side-channel itself must close).
 
-#### Ambient / time-dependent conditions — a fourth kind, not a room at all
+#### Policies are arbitrary — rooms capture only the equality part
 
-Some policy conditions are **none** of the above — they depend on the *clock or
-context*, not on the resource or a stable claim, and they **change with no save to
-announce them**. "During working hours", "while the subscription is active",
-"while the sale window is open", "if the feature flag is on". The whole rooms +
-tickets machinery is **save-triggered**, so it cannot react to 17:00 arriving —
-nothing was written, so nothing fires, and an open live view would just sit there
-showing access it no longer has.
+Don't assume authorization is a simple equality. A policy is an **arbitrary
+predicate over domain state** — relationships, computed values, and sometimes
+time (`shared with me`, `total > 100`, `during working hours`, `while the
+subscription is active`). Only the part that's an **equality on a shared key**
+(`department == currentUser.department`, a `dataKey` prefix) becomes a **room**;
+**everything else is residual** and is just `maySee` (the policy as a function),
+evaluated at the **refetch** for tickets or **per-event** for payloads. There's no
+special handling per kind of residual — relational, computed, and temporal are all
+"evaluate the policy."
 
-These need a complementary mechanism: a **periodic re-check** (there's no general
-way to compute the exact next boundary). The read/connection carries a **short
-fixed validity** (a TTL); when it lapses the client re-checks (refetch / re-auth),
-re-running the policy against the current time and returning empty/403 off-hours.
-It's the cache-TTL / token-expiry idea — interval-driven re-evaluation,
-complementary to the save-driven tickets. A save-triggered push *can* also include
-the ambient check (don't nudge an off-hours user when an order does change — B's
-filter), but a pure clock crossing is only caught by the periodic re-check. That
-re-check is **interval-granular** (lag up to the TTL); for **exact** enforcement
-of a clock-varying rule on a *payload* stream you need the precise option — a
-**per-event check** — which is
-the one place this design genuinely does require per-event policy evaluation
-(rooms handle resource/identity visibility without it; tickets dodge it via the
-authz'd refetch; only the ambient/temporal dimension on payloads forces it).
+| Part of the policy | Handled by |
+|---|---|
+| equality on a shared key (`department`, `dataKey` prefix) | **room key** (cheap pre-filter) |
+| everything else — relational / computed / temporal residual | **`maySee`** — at the refetch (tickets) or per-event (payloads) |
 
-So the full taxonomy of policy dimensions:
+So "orders for my department during working hours" splits: `department` is a room
+key; `during working hours` is residual — evaluated by `maySee` like any other
+predicate.
 
-| Dimension | Example | Handled by |
-|---|---|---|
-| equality (resource × user) | `department` | **room key** (cheap, row 1) |
-| resource-only filter | `total > 100` | **refetch `WHERE`** (over-delivers) |
-| relationship / ACL | `shared with me` | **trilemma A / B / C** |
-| **ambient / temporal** | `during working hours`, "subscription active" | **validity horizon + client re-check** (clock-triggered, *not* save-triggered) |
-
-So "orders for my department during working hours" splits cleanly: `department` is
-a room key; `working hours` is an ambient condition the rooms can't see — it rides
-a validity horizon, enforced (as always) at the refetch.
+**One honest wrinkle with time-dependent policies.** Rooms + tickets are
+**save-triggered**, so a policy whose truth depends on the *clock* (not on data)
+can flip with **no save to announce it** — at 17:01 nothing was written, so
+nothing fires, and an open live view would keep showing access it no longer has.
+There is **no general way to compute that boundary**, so the only options are a
+**periodic re-check** (re-evaluate on some cadence; interval-granular lag) or a
+**per-event `maySee`** (precise, payload-only cost). This is a genuine limitation,
+not a feature — there's no elegant mechanism; tickets sidestep it (the refetch
+re-evaluates whenever it runs), payloads under a clock-dependent rule don't.
 
 ### Subchannels — not every browser gets every event
 
@@ -1033,36 +1026,19 @@ residual can't be roomed, fall back to **tickets + authz'd refetch**
 So for that dimension the channel relay is an **option-A machine** — no per-event
 check.
 
-**The one exception: ambient / temporal conditions.** "During working hours" (and
-kin) is *not* a resource/identity dimension — time isn't a room key, and
-subscribe-time auth **goes stale** (a member authorized at 3pm still receives
-fan-out at 6pm). Rooms can't encode it, and **there is no general way to "compile"
-the next boundary** — an arbitrary predicate over time + changing data has no
-precomputable flip point. So enforcement on a *payload* stream is honestly one of:
-**per-event `maySee`** (precise, per-event cost — the baseline) or a **periodic
-re-auth** (fixed short token TTL → re-check every N minutes; coarse, lag up to N,
-no per-event cost — *not* an exact boundary). Data-driven changes still arrive as
-**saves** (edit the `Shift` → a save → re-evaluate, via the dependency set), but
-the clock crossing itself is not precomputable. There is no exact *and* cheap
-option.
-
-**Optimization — push as much of the policy into subchannels as you can.** A
-policy is a conjunction; extract every **roomable** conjunct (equi-join on
-resource × identity) into a room key, so per-event `maySee` runs only for the
-**residual** (temporal/computed) conjuncts, and only over the connections the
-rooms already narrowed. Room maximally → the per-event candidate set shrinks
-toward nothing.
-
-**The real escape is data-less tickets.** For invalidation you skip per-event
-`maySee` entirely: over-deliver a payload-free ticket within the roomed pre-filter
-and let the **authz'd refetch** apply the *full* policy (temporal included).
-Per-event `maySee` is then the **payload-only** path — the price of putting real
-data on the wire under a non-roomable policy.
-
-So "no per-event checks" holds for resource/identity visibility, **not** for the
-ambient/temporal dimension — which dodges the issue only for tickets
-(over-deliver + refetch), and otherwise needs per-event `maySee` (or coarse
-periodic re-auth) for payloads.
+**The residual policy, and the time wrinkle.** Subscribe-time auth only covers
+what the room key captures (the equality part). The **residual** policy — the
+arbitrary rest (relational, computed, temporal) — is evaluated by `maySee`: at the
+**refetch** for tickets, **per-event** for payloads. Two practical notes: push as
+much of the policy into room keys as you can, so per-event `maySee` runs only on
+the residual over the room-narrowed candidates; and for tickets you skip
+per-event `maySee` entirely — over-deliver a payload-free ticket and let the
+authz'd refetch apply the full policy. The one wrinkle is a **time-dependent**
+residual: its truth can flip with **no save**, so neither the room nor a
+save-ticket catches 17:01 — you either re-check on a cadence (coarse; a short
+token TTL + refresh, which Centrifugo/Ably do off-the-shelf) or `maySee` per event
+(precise, payload-only). No general boundary-compilation, no elegant fix; tickets
+sidestep it because the refetch re-evaluates whenever it runs.
 
 **On over-sending — rethink whether lists should be live at all.** Tickets are
 cheap but not free, and **list views are where over-sending bites** (broad rooms,
@@ -1074,19 +1050,6 @@ work queues, collaboration), and there room them as tightly as the roomable
 dimensions allow (per-owner/per-scope, never tenant-wide). Detail views and
 counters (one resource, one room) are the cheap, usually-worth-it live cases;
 broad live lists usually aren't.
-
-**What's off-the-shelf for it:** the **periodic re-auth** is ready-made —
-Centrifugo's subscription-token `exp` + **sub-refresh proxy**, or Ably's token TTL
-+ `authCallback`, re-run your `maySee` each time the (short, fixed-TTL) token
-lapses and deny off-hours; JWT-native relays (SignalR/Phoenix/NATS) give the
-coarser whole-connection-`exp` version. This is a *fixed-interval* re-check, **not**
-a computed exact boundary — so it has lag up to the TTL, but no per-event cost and
-no custom relay code, which is acceptable for most temporal rules. The **precise
-per-event** path has **no turnkey option** — no channel relay does per-subscriber,
-per-message dynamic filtering (rich-plugin brokers like EMQX expose a per-*publish*
-hook, but
-the per-recipient part stays custom) — so you'd build it, and only for the rare
-case where seconds of boundary leak are unacceptable.
 
 **Different architecture — DB-coupled sync engines** (note them, but they're the
 wrong layer here): **Supabase Realtime** (Postgres-changes/RLS), **ElectricSQL**
