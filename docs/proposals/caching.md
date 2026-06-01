@@ -835,6 +835,40 @@ can't be tagged → falls back to type tag or projection; warn);
 not bind its context's `<Context>.changes` channel — coverage would be silently
 incomplete; add a `channelSource` for it to that deployable's `channels:`).
 
+## Developer experience — safe default, progressive disclosure
+
+The author must never see the machinery (rooms, `maySee`, the trilemma,
+payload-vs-ticket, over-send) — it's the *compiler's* problem. The load-bearing
+DX rule: **correctness never depends on the author's tuning.** Over-send is safe
+*because the refetch is the gate*, so the simplest choice can't open a hole;
+tightening only ever changes *cost*, never *correctness*. That's what lets the
+default be "just over-send."
+
+Progressive disclosure — each level optional, reached only when a real problem
+pushes you there:
+
+| Level | Author writes | Gets | When |
+|---|---|---|---|
+| **0. nothing** | (default) | normal reads; refetch on focus/nav | most reads — *not everything is live* |
+| **1. live** | one word on a view | **safe over-send**: coarse resource-keyed tickets + authz'd refetch; zero thought about rooms/policy/payloads | the common live case |
+| **2. (automatic)** | still just `live` | compiler **tightens the room for free** where the read's authz is a clean equality / `dataKey` prefix; over-send otherwise | derived — author does nothing |
+| **3. payload / projection** | `live(patch)` / a `projection` | push the delta (no refetch) for hot paths; or a maintained read-model for wide/expensive views | only when a default *bites* |
+| **4. escape hatch** | raw channel / relay | bespoke control | rare |
+
+Level 1 answers almost everything: write `live`, get correct over-send, move on.
+The compiler silently does Level 2; Levels 3–4 are for measured cost problems, and
+the compiler *flags* when you might be there (`loom.cache-wide-dependency`,
+`loom.live-on-queue`) rather than making you decide up front.
+
+**Declared (intent) vs derived (mechanism):** the author declares only *is it
+live? is it cached? push or just nudge? is it a projection?* — everything else
+(the rooms, `maySee`, the dependency-set tags, the tag→queryKey map,
+over-send-vs-tight, the broker wiring) is **derived**. So "sometimes it's obvious
+to just over-send" *is the default behavior of `live`*, and the whole apparatus in
+this proposal is what makes that default both **correct** (the refetch gates) and
+**affordable** (active-only refetch + coalescing + `304`s + free room-tightening).
+One-word feature; the compiler spends the design.
+
 ## IR, lowering, enrichment
 
 ```ts
