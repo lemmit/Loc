@@ -612,8 +612,10 @@ expensive / many-subscriber cases):
 ```
   maintain the authorized result per BOUNDED scope (region / team / user) as a
   read model; the projection's own resource key is equi-join-routable → updates
-  route by the cheap row-1 rooms. The non-equi eval happens ONCE, incrementally,
-  while maintaining the projection (fan-out-on-write).
+  route by the cheap row-1 rooms. The complicated visibility rule (the part that
+  is NOT a simple equality — ranges, relationships, multi-condition) is actually
+  evaluated ONCE, when a change updates a list, and only for the item that
+  changed — not per read, not per user (fan-out-on-write).
 ```
 
 Bounded when the scope dimension is bounded (regions/teams); per-user projections
