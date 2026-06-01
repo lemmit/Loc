@@ -767,29 +767,34 @@ dependency set genuinely earns its keep:
 | Tier | Native tag-purge? | Mechanism Loom emits |
 |---|---|---|
 | **CDN / reverse proxy** | **Yes, first-class** | `Surrogate-Key:` header + purge-by-key (Fastly); `Cache-Tag` + purge (Cloudflare); `xkey` vmod (Varnish). Emit the header on reads; POST the purge on the ticket. |
-| **ASP.NET Core** | **Engine yes; tags must be runtime** | Output Caching (.NET 7+) + `IOutputCacheStore.EvictByTagAsync(tag)`. But `[OutputCache(Tags=[…])]` takes **compile-time constants only** — fine for `orders`, useless for `orders.{id}`. Loom emits a custom **`IOutputCachePolicy`** that adds `{type}.{id}` + param tags from route values at request time (see below). |
-| **Redis** | **No native tags** — *standard* pattern | Reverse-index set per tag: on store `SADD tag:orders <key>`; on purge `SMEMBERS tag:orders` → `UNLINK` each + the set. Exactly Symfony `RedisTagAwareAdapter` / Laravel cache-tags. |
-| **Hono / Node, Phoenix** | No native | Same Redis reverse-index, or rely on the CDN / ASP.NET tier in front. |
+| **.NET — in-handler (canonical)** | **Yes** | `HybridCache` (.NET 9) `GetOrCreateAsync(key, …, tags)` + `RemoveByTagAsync`, **inside the MediatR handler** (below the auth gate). This is the real cache for authenticated reads — see "Where the cache may live". |
+| **.NET — OutputCache (public only)** | Engine yes, but **above the gate** | `IOutputCachePolicy` (the attribute can't carry runtime `orders.{id}` tags) — admissible **only** for public / tenant-no-gate reads; a CDN does this better. Not the primary mechanism. |
+| **Redis (Hono / .NET / Phoenix)** | **No native tags** — *standard* pattern | Reverse-index set per tag: on store `SADD tag:orders <key>`; on purge `SMEMBERS tag:orders` → `UNLINK` each + the set. Exactly Symfony `RedisTagAwareAdapter` / Laravel cache-tags. The backend-uniform in-handler store. |
 | **React Query (client)** | **No tag concept — the key *is* the tag** | `invalidateQueries({queryKey})` prefix-matches a **single hierarchical path**. It *cannot* natively express "depends on `orders` **and** `customers`" (the joined-view case). So Loom emits a **tag → queryKeys registry** and the `.live` handler invalidates via `predicate` against it. |
 
-The takeaway: surrogate-key invalidation is a **mature, supported pattern** at
-the CDN and ASP.NET tiers and a **well-trodden** one on Redis — Loom isn't
-inventing a cache, it's *emitting the tags and purge calls* into mechanisms that
-already exist. The one real gap is **React Query's single-path key**, which can't
+The takeaway: surrogate-key invalidation is a **mature, supported pattern** — a
+backend-uniform **in-handler read-through** (HybridCache / Redis reverse-index)
+keyed by tag, with the CDN as a public-only edge layer. Loom isn't inventing a
+cache, it's *emitting the tags and purge calls* into mechanisms that already
+exist. The one real gap is **React Query's single-path key**, which can't
 represent a multi-dependency response; that map is normally hand-maintained and
 drifts, and is precisely what Loom can derive from the query/view AST for free.
 
-**Tags are runtime values — so an attribute can't carry them.** This is general,
-not an ASP.NET quirk: the instance tag `orders.42` and a param tag
-`orders.status.open` come from the **request** (route values / claims), so they
-must be computed *per request*, not declared statically. The type tag `orders` is
-the only constant. So on every tier Loom sets tags at request time:
+**Tags are runtime values — so a static annotation can't carry them.** The
+instance tag `orders.42` and a param tag `orders.status.open` come from the
+**request** (route values / claims), so they're computed *per request*; the type
+tag `orders` is the only constant. In the **in-handler** cache (the canonical
+case) the tag set is just built in code from the resolved scope + ids — no
+ceremony. The *edge* tiers, used only for the public/tenant slice, set the same
+tags at request time:
 
 - **CDN**: the read handler writes `Surrogate-Key: orders orders.42` into the
   response headers (computed from route + the resolved aggregate).
-- **ASP.NET Core**: **one generic** `IOutputCachePolicy` — *not* the attribute,
-  and not one class per aggregate — configured per endpoint with the type tag,
-  deriving the instance tag from the route in `ServeRequestAsync`:
+- **ASP.NET OutputCache** (public/tenant-no-gate only): because
+  `[OutputCache(Tags=[…])]` takes compile-time constants, the runtime
+  `{type}.{id}` tag needs **one generic** `IOutputCachePolicy` — *not* the
+  attribute, and not one class per aggregate — configured per endpoint with the
+  type tag, deriving the instance tag from the route in `ServeRequestAsync`:
 
   ```csharp
   sealed class AggregateTagPolicy : IOutputCachePolicy {           // generated ONCE, generic
@@ -816,47 +821,72 @@ type tag; everything instance- or param-relative goes through the policy — whi
 is exactly why tags are "aggregate-relative" and live in generated code, not in a
 static annotation.
 
-### Where the cache may live — auth decides the tier, not preference
+### Where the cache may live — auth decides the tier, and OutputCache mostly can't
 
-A subtle but **load-bearing** constraint: if authorization (`requires`, policy,
-row-filter) runs as a **MediatR pipeline behavior** — *below* the controller —
-then ASP.NET **OutputCache sits in front of it**, and a cache *hit
-short-circuits the pipeline entirely*. OutputCaching a per-user read would serve
-user A's response to user B and **never run the auth behavior**. That's not a
-perf detail; it's a vulnerability. So:
+A subtle but **load-bearing** constraint that rules out the obvious tool. ASP.NET
+middleware order is:
+
+```
+UseAuthentication   ← sets HttpContext.User                       (above)
+UseOutputCache      ← a cache HIT short-circuits the request HERE  (above)
+   └─ endpoint → MediatR pipeline → [auth behavior: requires / row-filter] → handler   (below)
+```
+
+A cache hit returns **before MediatR runs**, so any authorization in the pipeline
+is skipped. **OutputCache is therefore safe only when the *entire* authz decision
+is already a vary key from middleware-available claims** — i.e. public, or
+tenant-scoped *with no capability gate and no row-level reachability*. The moment
+there's a `requires` gate or a per-row `DataKey` check, the deciding logic lives
+*below* the short-circuit and OutputCache would serve a 200 to someone the gate
+would 403, or one principal's rows to another. That's a vulnerability, not a perf
+detail. So for the bulk of authenticated reads, **OutputCache is the wrong
+primitive.**
 
 > **A cache may live above the auth boundary only if the response is identical
 > for everyone who passes that boundary.** Otherwise it must live *below* the
 > gate, keyed by the authorized effective scope.
 
-`cached: tagged` therefore resolves to a **tier the compiler picks from the
-read's authz shape** (it already knows it — same analysis as the room visibility
-key):
+**The canonical Loom cache is a read-through *inside the handler*, below the auth
+behavior** — which is also the one shape that's uniform across backends:
+
+- **.NET**: `HybridCache` (.NET 9) `GetOrCreateAsync(key, …, tags)` +
+  `RemoveByTagAsync(tag)` — **inside the MediatR handler**, so the auth behavior
+  has already run and produced the effective scope.
+- **Hono**: `ioredis` read-through + the tag reverse-index, inside the route
+  handler after the auth check.
+- **Phoenix**: `Cachex` / Nebulex keyed the same way.
+
+This is *correct by construction* — the cache physically sits below the gate, so
+it cannot bypass it; the gate always runs and only the **data it admits** is
+cached. `cached: tagged` resolves to a **tier the compiler picks from the read's
+authz shape** (same analysis as the room visibility key):
 
 | Read's authz | Response varies by | Cache tier | Mechanism |
 |---|---|---|---|
-| **public** (`crossTenant`) | nothing | **above** auth | CDN + OutputCache — fully shared, the big win |
-| **tenant-scoped** | tenant | **above** auth, keyed by tenant | OutputCache `VaryBy` tenant / CDN per-tenant |
-| **row-level / per-user** | the principal's `DataKey` + perms | **below** auth only | server read-through *inside* the handler, keyed by effective scope |
+| **public** (`crossTenant`) | nothing | edge, **above** auth | CDN — and *optionally* OutputCache. The only place OutputCache is safe. |
+| **tenant-scoped, no gate** | tenant | edge, **above** auth, `VaryBy` tenant | CDN per-tenant / OutputCache `VaryBy` — admissible but narrow |
+| **`requires` gate / row-level / per-user** | `DataKey` + perms | **below** auth, in-handler | `HybridCache` / Redis read-through keyed by effective scope. **Not OutputCache.** |
 
-For the row-level case the read-through cache lives **below the gate**: the auth
-behavior always runs (it's a cheap predicate over claims), produces the
-**effective scope** (`tenant + DataKey + relevant perms`), and *that* is part of
-the cache key — `(effectiveScope, query, params)` — populated and evicted by the
-same tags. Two invariants:
+For the below-the-gate case the auth behavior always runs (a cheap predicate over
+claims), produces the **effective scope** (`tenant + DataKey + relevant perms`),
+and *that* is part of the cache key — `(effectiveScope, query, params)` —
+populated and evicted by the same tags. Two invariants:
 
 - **The capability gate (`requires` → 403) is never cache-served.** It re-runs
-  every request; only the *data* it admits is cached. (So OutputCache, which
-  caches the whole response, is admissible *only* for the public/tenant rows;
-  per-user reads cache below the gate.)
+  every request; only the *data* it admits is cached. This is *why* OutputCache
+  (which caches the whole response, gate included) is inadmissible past the
+  public/tenant slice.
 - **The visibility key reappears** — the same `DataKey`/tenant split from the
   room design now decides *which tier the cache can sit on* and forms the
   per-principal key below the gate.
 
-Honest consequence: **edge/HTTP caching pays off only for public + tenant
-reads.** Per-user reads can't be shared at the edge at all — their win is the
-server read-through (that user's N requests → 1 DB read, reused across their
-session), not the CDN. "Cache aggressively" is true **per tier**, gated by authz
+Honest consequences: **OutputCache is a narrow, public-only optimization** (and a
+CDN does that better anyway); the **real cache is the in-handler read-through**,
+which is backend-uniform and matches Loom's cross-platform philosophy far better
+than an ASP.NET-specific middleware. And **edge caching pays off only for
+public + tenant reads** — per-user reads can't be shared at the edge at all;
+their win is the in-handler cache (that user's N requests → 1 DB read, reused
+across their session). "Cache aggressively" is true **per tier**, gated by authz
 shape — not uniformly.
 
 ## IR, lowering, enrichment (phase mapping)
