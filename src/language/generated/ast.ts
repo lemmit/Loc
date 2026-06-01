@@ -141,6 +141,7 @@ export type DddKeywordNames =
     | "let"
     | "link"
     | "literal"
+    | "liveview"
     | "long"
     | "main"
     | "managed"
@@ -166,6 +167,7 @@ export type DddKeywordNames =
     | "payload"
     | "permissions"
     | "persistedAs"
+    | "phoenix"
     | "phoenixLiveView"
     | "platform"
     | "port"
@@ -343,10 +345,10 @@ export function isFieldAccess(item: unknown): item is FieldAccess {
     return item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret';
 }
 
-export type Framework = 'phoenixLiveView' | 'react';
+export type Framework = 'liveview' | 'phoenixLiveView' | 'react';
 
 export function isFramework(item: unknown): item is Framework {
-    return item === 'react' || item === 'phoenixLiveView';
+    return item === 'react' || item === 'phoenixLiveView' || item === 'liveview';
 }
 
 export type IdKind = 'guid' | 'int' | 'long' | 'string';
@@ -451,10 +453,10 @@ export function isPayloadKind(item: unknown): item is PayloadKind {
     return item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error';
 }
 
-export type Platform = 'dotnet' | 'hono' | 'phoenixLiveView' | 'react' | 'static' | string;
+export type Platform = 'dotnet' | 'hono' | 'phoenix' | 'phoenixLiveView' | 'react' | 'static' | string;
 
 export function isPlatform(item: unknown): item is Platform {
-    return item === 'dotnet' || item === 'hono' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'dotnet' || item === 'hono' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export type PostfixSuffix = CallSuffix | MemberSuffix;

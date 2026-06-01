@@ -142,12 +142,19 @@ Deployable:
         // D-PHOENIX-SURFACE: `hosts:` is the host↔ui relation that
         // supersedes the `ui:`/`ui {}` bindings above.  A deployable
         // hosts one or more `ui` declarations; the framework lives on
-        // the `ui` (phase 2), not derived from the platform.  A list
-        // from day one (`hosts+=`) so the deferred one-ui-many-frameworks
-        // case needs no grammar change.  Additive in this phase — it
-        // parses and lowers alongside the legacy bindings; later phases
-        // make it the canonical form and retire the `ui:` bindings.
-        ('hosts' ':' hosts+=[Ui:ID] (',' hosts+=[Ui:ID])* ','?)?
+        // the `ui` (phase 2), not derived from the platform.  Two forms:
+        // bare single (`hosts: WebApp`) and bracketed multi
+        // (`hosts: [Web, Admin]`) — the bracketed form mirrors
+        // `contexts:`/`dataSources:` and avoids the unbracketed-comma
+        // ambiguity where a following soft-keyword clause (`design`)
+        // would be swallowed as another ref.  A list type from day one
+        // so the deferred one-ui-many-frameworks case needs no grammar
+        // change.  Additive in this phase — parses alongside the legacy
+        // bindings; later phases make it canonical and retire `ui:`.
+        ('hosts' ':' (
+            '[' hosts+=[Ui:ID] (',' hosts+=[Ui:ID])* ','? ']'
+          | hosts+=[Ui:ID]
+        ) ','?)?
         ('port' ':' port=INT ','?)?
         ('auth' ':' auth=AuthMode ','?)?
         ('design' ':' design=DesignPack ','?)?
@@ -209,19 +216,24 @@ UiBlockBinding:
 // Frameworks the `ui:` mount lowers against.  `react` renders TSX
 // against a design pack (`mantine`/`shadcn`); `phoenixLiveView`
 // renders HEEx against the `ashPhoenix` pack as part of a fullstack
-// Elixir/Ash deployable.  Future values (`blazor-wasm`,
-// `blazor-server`, …) extend this enum when their codegen backends
-// land.
+// Elixir/Ash deployable.  `liveview` is the D-PHOENIX-SURFACE spelling
+// of `phoenixLiveView` (the framework, decoupled from the host
+// platform name); lowering canonicalises it to `phoenixLiveView`.
+// Future values (`blazor-wasm`, `blazor-server`, …) extend this enum
+// when their codegen backends land.
 Framework returns string:
-    'react' | 'phoenixLiveView';
+    'react' | 'phoenixLiveView' | 'liveview';
 
 // Backend platforms accept a quoted `family@version` pin
 // (`platform: "hono@v4"`) via the STRING alternative — symmetric
 // with `DesignPack` below.  Bareword keywords are unchanged so
 // every existing source parses identically; the validator + lowering
 // (`parseBuiltinPlatformRef`) are the resolution authority.
+// `phoenix` is the D-PHOENIX-SURFACE host-platform name; lowering
+// canonicalises it to `phoenixLiveView` until the literal-rename
+// cleanup phase.
 Platform returns string:
-    'dotnet' | 'hono' | 'react' | 'static' | 'phoenixLiveView' | STRING;
+    'dotnet' | 'hono' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,
