@@ -564,6 +564,72 @@ subscriptions); "authorized" is decided by whichever trilemma row applies —
 baked into the key, checked once at join, evaluated at publish, or (for tickets)
 deferred to the refetch.
 
+#### Non-cheap routing, concretely — the two rows + the projection escape
+
+When the policy is **not** equi-join (relationship / ACL / attribute) *and* you
+can't tolerate over-delivery (payload live-events, or zero-leak invalidation), you
+leave cheap routing. Both non-cheap rows reuse two Loom-derivable pieces: the
+policy compiled to an **in-memory predicate** `maySee(claims, resource)` (the same
+policy, as a function rather than SQL), and the **dependency set** (which saves
+affect a resource's visibility).
+
+**A. Subscribe-time — per-resource room with authorized membership** (for
+*instance / detail* subscriptions):
+
+```
+  join:    client mounts order#42 → relay runs maySee(claims, #42) ONCE
+           → if true, registry["order:42"].add(conn)
+           (a detail page already loaded #42 via the authz'd read → the join rides it)
+  deliver: save(#42) → publish "order:42" → all members already authorized → push
+           (NO per-ticket authz)
+  upkeep:  Share(#42, Z) added → that's a save on the ACL aggregate; its dependency
+           set says it changes #42's visibility → ticket "membership:order:42" →
+           relay repairs membership (add Z / drop W)
+```
+
+This is the Slack-channel / authorized-join model. Cost: O(1) authz per join +
+membership repair on ACL change; **no per-ticket authz**. Limit: a **list** can't
+join a room per row — use B or C.
+
+**B. Publish-time — relay-side authorized fan-out** (for *lists / collections*
+under non-equi authz):
+
+```
+  a coarse room ("orders", or a scope room) defines the INTERESTED set
+  save(#42) → relay loads #42's authz inputs ONCE (payload-carried, else 1 lookup)
+            → for each interested conn:  maySee(conn.claims, #42)?   (in-memory)
+            → push to those who pass
+```
+
+Cost per ticket: **O(interested) in-memory predicate evals + O(1) resource load** —
+bounded by *connected interested* users, not all users, and no DB-per-connection
+(load once, check in memory). Requires the authz inputs reachable by the relay.
+This is "fan-out-on-read" / authorized edge filtering.
+
+**C. Projection — pay once at write, then route cheap** (the escape for hot /
+expensive / many-subscriber cases):
+
+```
+  maintain the authorized result per BOUNDED scope (region / team / user) as a
+  read model; the projection's own resource key is equi-join-routable → updates
+  route by the cheap row-1 rooms. The non-equi eval happens ONCE, incrementally,
+  while maintaining the projection (fan-out-on-write).
+```
+
+Bounded when the scope dimension is bounded (regions/teams); per-user projections
+are feasible at moderate user counts. This is the materialized-feed model
+(fan-out-on-write, like a timeline). It **converts a non-equi policy back into
+cheap routing on the read model's key.**
+
+**Choosing:** A for instance/detail; B for lists with volatile authz or modest
+interest; **C (projection)** for hot lists / expensive policy / many subscribers —
+the classic fan-out-on-read (B) vs fan-out-on-write (C) trade, with A the special
+case where the resource *is* the subscription unit. Loom can scaffold the choice:
+detail → A, equi-join list → row-1 rooms, non-equi list → B by default and C when
+flagged hot/wide (`loom.live-wide-dependency`). And recall this whole tier is a
+**payload** concern: **invalidation** never needs it — it tolerates over-delivery
+and lets the refetch gate (use A/B/C only if the side-channel itself must close).
+
 ### Subchannels — not every browser gets every event
 
 `broadcast` + `ephemeral` describes the *delivery profile*, **not the
