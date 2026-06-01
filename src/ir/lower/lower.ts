@@ -1184,6 +1184,13 @@ function lowerComponent(c: Component): ComponentIR {
     name: param.name,
     type: lowerType(param.type),
   }));
+  // An `extern` component declares only its typed param contract —
+  // no body, no state to walk.  Carry the flag + src-relative module
+  // path; the React generator emits a `<Name>.props.ts` interface and
+  // imports the user's module at call sites.
+  if (c.extern) {
+    return { name: c.name, params, state: [], extern: true, externPath: c.externPath };
+  }
   // Component-scoped env: params + state bind so `inferExprType`
   // resolves refs to their declared types (same reason as
   // `lowerPage`; see comment there).
@@ -1200,7 +1207,9 @@ function lowerComponent(c: Component): ComponentIR {
       }
     }
   }
-  const body = lowerExpr(c.body, env);
+  // Non-extern components always carry a body (validator-enforced);
+  // guard defensively so lowering an invalid model can't crash.
+  const body = c.body ? lowerExpr(c.body, env) : undefined;
   return { name: c.name, params, state, body };
 }
 

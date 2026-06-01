@@ -774,8 +774,10 @@ export function isCanonicalProp(item: unknown): item is CanonicalProp {
 export interface Component extends AstNode {
     readonly $container: Model | Ui;
     readonly $type: 'Component';
-    body: Expression;
+    body?: Expression;
     decls: Array<ComponentDecl>;
+    extern: boolean;
+    externPath?: string;
     name: string;
     params: Array<Parameter>;
 }
@@ -2881,6 +2883,8 @@ export class DddAstReflection extends AbstractAstReflection {
                     properties: [
                         { name: 'body' },
                         { name: 'decls', defaultValue: [] },
+                        { name: 'extern', defaultValue: false },
+                        { name: 'externPath' },
                         { name: 'name' },
                         { name: 'params', defaultValue: [] }
                     ]

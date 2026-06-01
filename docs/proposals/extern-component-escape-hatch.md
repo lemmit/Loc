@@ -1,11 +1,16 @@
 # Extern components — an escape hatch for hand-written frontend code
 
-> Status: **proposal / problem-framing.** Nothing here is implemented. This
-> note designs a UI-side analogue of the backend's `operation … extern`
-> escape hatch: a way to drop a **hand-written React/TSX (or HEEx) component**
-> into a Loom page body, type-checked against the domain, wired into routing /
-> state / data, without forking the generator. It catalogues the design space,
-> recommends one shape, and sketches the pipeline work against the real code.
+> Status: **PARTIAL — Tier 1 (React) implemented.** The `component …
+> extern from "<path>"` surface, IR/lowering, validator, and the React
+> generator (props-interface emit + re-export shim) ship on branch
+> `claude/extern-component-escape-hatch-4vobH` (see §8 "What shipped").
+> Tier 2 (`action` behaviour params) and LiveView remain designed-only
+> per §4's staging. This note designs a UI-side analogue of the backend's
+> `operation … extern` escape hatch: a way to drop a **hand-written
+> React/TSX (or HEEx) component** into a Loom page body, type-checked
+> against the domain, wired into routing / state / data, without forking
+> the generator. It catalogues the design space, recommends one shape,
+> and sketches the pipeline work against the real code.
 
 ## TL;DR
 
@@ -495,6 +500,43 @@ The heavy lifting (JSX call-site emission, import registration, per-framework
 import rendering) **already exists** — this feature is mostly a new
 *declaration shape* plus a *props-interface emitter*, not new walker
 machinery and not a new file-protection path.
+
+### What shipped (Tier 1, React)
+
+The implementation took one deliberate simplification over the sketch above:
+**instead of redirecting the call-site import** (which would thread an
+`externComponents` map through every emitter signature), Loom emits a tiny
+**re-export shim** at the component's normal `src/components/<Name>.tsx` slot:
+
+```ts
+// AUTO-GENERATED extern component shim.
+export { default } from "../widgets/order-chart";   // ← the `from` path, src-relative
+export type { OrderChartProps } from "./OrderChart.props";
+```
+
+Call sites (pages, components, layouts) therefore keep importing
+`components/<Name>` **unchanged**, the walker stays **completely untouched**, and
+the shim forwards to the hand-written module. This also decouples the stable
+internal name (`components/<Name>`) from the user's file location. Loom owns the
+shim **and** `<Name>.props.ts` (both always regenerated); the user owns the
+target module (never written — a missing target is a `tsc` error, the
+fail-fast). Concretely on the branch:
+
+- **Grammar** — `(extern?='extern' 'from' externPath=STRING)?` on `Component`,
+  with the whole `{ … }` block made optional (`src/language/ddd.langium`).
+- **IR / lower** — `ComponentIR.{extern, externPath}`, `body` optional;
+  `lowerComponent` returns early for extern (no body/state walk).
+- **Validator** — `checkComponent` (`validators/ui.ts`): `loom.extern-component-has-body`
+  + `loom.component-missing-body`; slot params admitted.
+- **React** — `renderExternComponentShim` + `renderExternComponentProps`
+  (`walker/page-shell.ts`), branched in `emitPagesForUi` (`pages-emitter.ts`).
+- **Printer** — `printComponent` renders `extern from "<path>"` with no body.
+- **Tests** — `test/language/validation/extern-component.test.ts` +
+  `test/generator/react/walker-extern-components.test.ts`.
+
+Still open per §4 staging: Tier 2 (`action`), LiveView, the
+`loom.extern-component-framework-mismatch` framework guard, and a
+`LOOM_REACT_BUILD` end-to-end "domain rename breaks the user's `.tsx`" gate.
 
 ## 9. Validation rules
 

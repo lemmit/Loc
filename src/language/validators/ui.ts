@@ -3,6 +3,7 @@
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type {
   Api,
+  Component,
   Layout,
   MenuBlock,
   Model,
@@ -14,7 +15,7 @@ import type {
   UiApiParam,
   UiHelperImport,
 } from "../generated/ast.js";
-import { isMemberSuffix, isPostfixChain } from "../generated/ast.js";
+import { isComponent, isMemberSuffix, isPostfixChain } from "../generated/ast.js";
 import {
   WALKER_LAYOUT_PRIMITIVES,
   WALKER_SCAFFOLD_PRIMITIVES,
@@ -72,6 +73,39 @@ export function checkUiHelperImports(model: Model, accept: ValidationAcceptor): 
           seen.set(h.name, h);
         }
       }
+    }
+  }
+}
+
+/** `component` declarations — enforce the `extern` ↔ `body`
+ *  exclusivity that the grammar admits but cannot constrain:
+ *
+ *   - An `extern` component hands rendering to a hand-written file, so
+ *     it must declare **no** `body:` (mirror of "extern op bodies are
+ *     preconditions-only").
+ *   - A non-extern component is a walked region tree, so it **must**
+ *     declare a `body:`.
+ *
+ *  Covers both ui-scope and top-level components (one stream over the
+ *  whole model). */
+export function checkComponent(model: Model, accept: ValidationAcceptor): void {
+  for (const c of AstUtils.streamAllContents(model)) {
+    if (!isComponent(c)) continue;
+    const comp = c as Component;
+    if (comp.extern) {
+      if (comp.body) {
+        accept(
+          "error",
+          `Extern component '${comp.name}' must not declare a 'body:' — its rendering is owned by the hand-written module at '${comp.externPath ?? "?"}'. Remove the body, or drop 'extern from' to make it a normal component.`,
+          { node: comp, property: "body", code: "loom.extern-component-has-body" },
+        );
+      }
+    } else if (!comp.body) {
+      accept(
+        "error",
+        `Component '${comp.name}' requires a 'body:' (or mark it 'extern from "<path>"' to hand rendering to a hand-written module).`,
+        { node: comp, property: "name", code: "loom.component-missing-body" },
+      );
     }
   }
 }

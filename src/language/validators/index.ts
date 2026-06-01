@@ -47,6 +47,7 @@ export {
 } from "./types.js";
 export {
   checkApiBodyRefs,
+  checkComponent,
   checkLayout,
   checkMenuBlock,
   checkPage,

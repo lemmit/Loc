@@ -1352,7 +1352,17 @@ export interface ComponentIR {
   name: string;
   params: ParamIR[];
   state: StateFieldIR[];
-  body: ExprIR;
+  /** Walked region tree.  Absent for an `extern` component, whose
+   *  rendering is owned by a hand-written file. */
+  body?: ExprIR;
+  /** True when the component is `extern` — the generator emits a
+   *  typed `<Name>.props.ts` interface and imports the user's module
+   *  at call sites instead of generating a body. */
+  extern?: boolean;
+  /** Module specifier for the hand-written component, relative to the
+   *  generated project's `src/` root (the `from "<path>"` clause).
+   *  Always present when `extern` is true. */
+  externPath?: string;
 }
 
 /** One reactive local field, inside a `page` or `component`. */
