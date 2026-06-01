@@ -864,13 +864,6 @@ function lowerDeployable(d: Deployable): DeployableIR {
     d.uiBlock?.ref?.ref?.name ??
     firstHostedUi?.name ??
     undefined;
-  const design = platformFor(platform).isFrontend
-    ? qualifyDesign(d.design, "mantine")
-    : platform === "phoenixLiveView"
-      ? qualifyDesign(d.design, "ashPhoenix")
-      : platform === "dotnet" && uiName
-        ? qualifyDesign(d.design, "mantine")
-        : undefined;
   // Page-metamodel UI binding.  The grammar accepts two
   // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
   // (full block).  Both lower to the same `uiName` + optional
@@ -886,7 +879,8 @@ function lowerDeployable(d: Deployable): DeployableIR {
   // Precedence: explicit `framework:` on the legacy block binding, then
   // the framework declared on the `hosts:`-ed `ui` itself (D-PHOENIX-SURFACE
   // phase 2 — the ui owns its framework), then the legacy platform-derived
-  // default.
+  // default.  Computed before `design` so the pack default can branch on
+  // it (a phoenix host embedding react needs a tsx pack, not ashPhoenix).
   const uiFramework =
     canonicalFramework(d.uiBlock?.framework) ??
     canonicalFramework(firstHostedUi?.framework) ??
@@ -897,6 +891,19 @@ function lowerDeployable(d: Deployable): DeployableIR {
           ? "react"
           : undefined
       : undefined);
+  // Design pack default depends on what actually renders:
+  //  - frontend platforms + fullstack-dotnet render React → `mantine`;
+  //  - phoenixLiveView renders HEEx → `ashPhoenix`, UNLESS it embeds a
+  //    `framework: react` ui (D-PHOENIX-SURFACE), in which case the SPA
+  //    needs a tsx pack → `mantine`;
+  //  - backends without a `ui:` mount carry no design.
+  const design = platformFor(platform).isFrontend
+    ? qualifyDesign(d.design, "mantine")
+    : platform === "phoenixLiveView"
+      ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
+      : platform === "dotnet" && uiName
+        ? qualifyDesign(d.design, "mantine")
+        : undefined;
   // Explicit api composition.
   const serves = (d.serves ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
   const uiBindings = (d.uiCompose?.bindings ?? []).map(
