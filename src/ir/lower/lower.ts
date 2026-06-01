@@ -27,6 +27,7 @@ import type {
   Layout,
   LayoutMainSlot,
   LayoutNamedSlot,
+  LoadPath,
   MenuBlock,
   Model,
   Operation,
@@ -37,6 +38,7 @@ import type {
   Repository,
   Requirement,
   Resource,
+  Retrieval,
   Solution,
   StateField,
   Statement,
@@ -86,6 +88,7 @@ import {
   isRequirement,
   isRequiresStmt,
   isResource,
+  isRetrieval,
   isSolution,
   isSubdomain,
   isSystem,
@@ -126,6 +129,8 @@ import type {
   IdValueType,
   InvariantIR,
   LayoutIR,
+  LoadPlanIR,
+  LoadSegmentIR,
   MenuBlockIR,
   MenuLinkIR,
   MenuMetaIR,
@@ -144,7 +149,9 @@ import type {
   RequirementIR,
   RequirementStatus,
   RequirementType,
+  RetrievalIR,
   SolutionIR,
+  SortTermIR,
   StateFieldIR,
   StmtIR,
   StorageIR,
@@ -1304,6 +1311,7 @@ function lowerContext(
   const workflows: WorkflowIR[] = [];
   const views: ViewIR[] = [];
   const criteria: CriterionIR[] = [];
+  const retrievals: RetrievalIR[] = [];
   // Context-level capabilities propagate to every aggregate inside.
   // Lower them here in the context env (no `this` binding); each
   // aggregate's lowering re-uses the lowered IR directly.  The `this`
@@ -1320,6 +1328,7 @@ function lowerContext(
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
     else if (isView(m)) views.push(lowerView(m, env));
     else if (isCriterion(m)) criteria.push(lowerCriterion(m, env));
+    else if (isRetrieval(m)) retrievals.push(lowerRetrieval(m, env));
   }
   return {
     name: ctx.name,
@@ -1337,6 +1346,7 @@ function lowerContext(
     workflows,
     views,
     criteria,
+    retrievals,
   };
 }
 
@@ -1363,6 +1373,48 @@ function lowerCriterion(c: Criterion, env: Env): CriterionIR {
     targetType,
     body: lowerExpr(c.body, bodyEnv),
   };
+}
+
+/** Lower a `retrieval <Name>(params) of <T> { where: … sort: … loads: … }`
+ *  declaration to RetrievalIR.  The `where` predicate is lowered in the
+ *  retrieval's own scope exactly like a criterion body (aggregate
+ *  candidate binds `this` + bare field names; parameters become `param`
+ *  locals), so it composes criteria and bare predicates the same way a
+ *  `find … where` does.  `sort` / `loads` are structural paths, not
+ *  expressions — lowered to segment lists.  No `page` (call-site only). */
+function lowerRetrieval(r: Retrieval, env: Env): RetrievalIR {
+  const targetType = lowerType(r.target);
+  let bodyEnv: Env = { ...env, locals: new Map() };
+  if (targetType.kind === "entity") {
+    const candidate = findEntityByName(env, targetType.name);
+    if (candidate && isAggregate(candidate)) bodyEnv = inAggregate(bodyEnv, candidate);
+  }
+  for (const p of r.params) {
+    bodyEnv = withLocal(bodyEnv, p.name, "param", lowerType(p.type));
+  }
+  const sort: SortTermIR[] = r.sort.map((s) => ({
+    path: lowerLoadPath(s.path),
+    direction: (s.direction ?? "asc") as "asc" | "desc",
+  }));
+  const loadPlan: LoadPlanIR =
+    r.loads.length > 0
+      ? { kind: "explicit", paths: r.loads.map(lowerLoadPath) }
+      : { kind: "whole" };
+  return {
+    name: r.name,
+    params: r.params.map((p) => ({ name: p.name, type: lowerType(p.type) })),
+    targetType,
+    where: lowerExpr(r.where, bodyEnv),
+    sort,
+    loadPlan,
+  };
+}
+
+/** Lower a structural `LoadPath` AST node (`this.lines[].product`) to its
+ *  candidate-rooted segment list (`this` already stripped by the grammar
+ *  optionality). */
+function lowerLoadPath(p: LoadPath): LoadSegmentIR[] {
+  return p.segments.map((seg) => ({ name: seg.name, collection: !!seg.collection }));
 }
 
 function lowerEnum(e: EnumDecl): EnumIR {

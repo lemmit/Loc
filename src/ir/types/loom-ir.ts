@@ -581,6 +581,51 @@ export interface CriterionIR {
   body: ExprIR;
 }
 
+/** One `sort` term of a retrieval — a structural path through the
+ *  candidate aggregate plus an ordering direction. */
+export interface SortTermIR {
+  /** Dotted path segments, candidate-rooted (`this` stripped).  A
+   *  segment flagged `collection` carried a `[]` marker. */
+  path: LoadSegmentIR[];
+  direction: "asc" | "desc";
+}
+
+/** One segment of a structural `loads` / `sort` path. */
+export interface LoadSegmentIR {
+  name: string;
+  /** True when the segment carried a `[]` collection marker. */
+  collection: boolean;
+}
+
+/** The fetch shape for a retrieval (load-specifications.md /
+ *  reified-criteria.md §"The internal seam").  `kind: "whole"` is the
+ *  default-whole load (full owned aggregate tree, cross-aggregate refs
+ *  as ids) — structural, no analysis.  `kind: "explicit"` carries the
+ *  author's `loads:` paths, which restrict or expand the default. */
+export type LoadPlanIR = { kind: "whole" } | { kind: "explicit"; paths: LoadSegmentIR[][] };
+
+/** A named query *bundle* (retrieval.md): a composed predicate plus the
+ *  shaping a real query carries — ordering and a load shape.  Lowered
+ *  from a `retrieval` declaration; the source-level realisation of the
+ *  RetrievalIR bundle node (reified-criteria.md).
+ *
+ *  No `page` field — pagination is a call-site argument on
+ *  `Repo.run(R(args), page?)`, never part of the declaration. */
+export interface RetrievalIR {
+  name: string;
+  params: ParamIR[];
+  /** The `of <T>` candidate type (entity aggregate). */
+  targetType: TypeIR;
+  /** The lowered `where` predicate, in the retrieval's own scope
+   *  (parameters as `param` refs, candidate fields as `this-prop`).
+   *  Composes criteria + bare predicates like a `find … where`. */
+  where: ExprIR;
+  /** Ordering terms, in declaration order.  Empty when no `sort:`. */
+  sort: SortTermIR[];
+  /** Fetch shape; `{ kind: "whole" }` when no `loads:` clause. */
+  loadPlan: LoadPlanIR;
+}
+
 export interface BoundedContextIR {
   name: string;
   enums: EnumIR[];
@@ -598,6 +643,8 @@ export interface BoundedContextIR {
   views: ViewIR[];
   /** Named predicate specifications declared in this context. */
   criteria: CriterionIR[];
+  /** Named query bundles declared in this context (retrieval.md). */
+  retrievals: RetrievalIR[];
 }
 
 /** A saved, strongly-typed query over one source aggregate.  Two
