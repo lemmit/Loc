@@ -329,6 +329,20 @@ every messaging pattern" thesis is where this proposal's framing began; it's the
 strongest single choice if you want one transport for the realtime tier, while
 Redis is the lower-friction start if you're already Redis-heavy.
 
+**Honest caveat — they've converged.** On a feature checklist these are now
+largely the same (all four do pub/sub *and* durable streams *and* consumer
+groups *and* some replay). What still differs is **not the feature list** but the
+*tradeoff point* (latency vs throughput vs durability — feature present ≠
+fit-for-purpose at the extreme; Redis Streams is memory-bound, Kafka can't do
+fine-grained wildcard routing), the **operational weight** (Kafka heavy,
+NATS/Redis light), and the **grain of the core abstraction** (partition vs subject
+vs exchange — which fixes ordering/routing/retention no matter how many features
+are bolted on). So for a **typical** workload any of them works and the choice
+collapses to "what you already run"; the table's sweet spots bite mainly at the
+**extremes** and in ops cost. This *strengthens* the transport-neutral contract —
+if brokers are largely swappable for common cases, deferring the choice to a
+per-binding `channelSource` is exactly right.
+
 ## WebSockets / SSE — an infrastructural concern, not a contract knob
 
 SSE and WebSocket are two wire formats for the same thing: pushing a
