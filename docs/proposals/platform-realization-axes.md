@@ -1,12 +1,12 @@
 # Platform realization axes — naming review + the gating matrix
 
-> Status: **proposal**. Builds on `storage-and-platform-config.md` and the
-> pinned decisions **D-ADAPTER-HOME**, **D-PHOENIX-SURFACE**, **D-STORAGE-SPLIT**
-> (`docs/decisions.md`). It (a) reviews the existing knob names, (b) adds the
-> axes the current design leaves homeless, and (c) consolidates the cross-axis
-> **gating matrix** with validator codes.
+> Status: **PINNED** as **D-REALIZATION-AXES** (`docs/decisions.md`). Builds on
+> **D-ADAPTER-HOME**, **D-PHOENIX-SURFACE**, **D-STORAGE-SPLIT**. It (a) reviews
+> the existing knob names, (b) adds the axes the current design leaves homeless,
+> (c) consolidates the cross-axis **gating matrix** with validator codes, and
+> (d) gives worked `.ddd` examples (§11) and a grammar sketch (§12).
 >
-> **It also amends D-PHOENIX-SURFACE** on one point — see §0.1 and §8. The
+> **It amends D-PHOENIX-SURFACE** on one point — see §0.1 and §9: the
 > domain-framework axis gets its own keyword, `foundation:`, rather than being
 > folded into `persistence:`.
 
@@ -201,7 +201,7 @@ expressed on `foundation:` instead of `persistence:`).
 ## 7. Cross-axis gating rules + validator codes
 
 Codes follow the `loom.<kebab>` convention (cf. `loom.bare-aggregate-in-type`).
-R1–R3 are from the storage doc (§574–578); R4–R6 are added here.
+R1–R3 are from the storage doc (§574–578); R4–R7 are added here.
 
 **R1 — out-of-menu.** Any knob value not in the platform's menu → **error**.
 `loom.platform-knob-out-of-menu`
@@ -269,31 +269,191 @@ the idiomatic path. `loom.platform-flat-with-actor-runtime`
   `phoenix` platform, no `family@version`, no `apiOnly`, `framework:` is UI-only,
   Phoenix defaults to Ash (D-PHOENIX-SURFACE); the
   `storage`/`dataSource`/`deployable` split (D-STORAGE-SPLIT).
-- **Pinned and AMENDED — needs a decisions.md update:** D-PHOENIX-SURFACE's
+- **Pinned and AMENDED (recorded as D-REALIZATION-AXES):** D-PHOENIX-SURFACE's
   *mechanism* for the domain axis ("rides `persistence:`/`style:`, no new
-  keyword"). This proposal gives it the dedicated keyword **`foundation:`**
+  keyword") is superseded — the axis gets the dedicated keyword **`foundation:`**
   (default `vanilla`) so the data layer stays pickable under a framework (§0.1).
   D-PHOENIX-SURFACE open-item 1 (`style:` vs `persistence:` for Ash/Ecto) is
-  thereby **resolved/retired** — it's neither; it's `foundation:`.
-- **Proposed here:** `foundation:` (and `vanilla`); `application: flat` (the
-  third, zero-structure value); `transport:` for the API surface; `runtime:`
-  (default `transactional`) for the actor axis; rules R4–R7; the per-platform
-  menu in §6.
+  thereby **resolved** — it's neither; it's `foundation:`. Every other
+  D-PHOENIX-SURFACE conclusion stands.
+- **Pinned by D-REALIZATION-AXES:** the six-axis vocabulary and defaults; the
+  `style:`→`application:` and `layout:`→`directoryLayout:` renames; the
+  `application: flat` value; `transport:`; `runtime:` (default `transactional`);
+  rules R4–R7; the per-platform menu in §6.
 
 ## 10. Open questions
 
 1. **`node`/`hono` actor story** — `transactional`-only for v1; no real consumer
    for a worker/XState actor option yet ("consolidate the present",
    D-ADAPTER-HOME).
-2. **Decision record** — fold §0.1 into `docs/decisions.md` as an amendment to
-   D-PHOENIX-SURFACE (or a new D-FOUNDATION-AXIS entry that supersedes its
-   domain-axis mechanism). Pending owner sign-off.
+2. **`abp` / `nestjs` menus** — listed as the rung-3/4 exemplars; their exact
+   sub-menus (what each owns vs leaves open) firm up when a real consumer lands.
+
+## 11. Worked examples
+
+All examples assume the `storage`/`dataSource` decls from D-STORAGE-SPLIT exist.
+The realization knobs live in the `platform: <name> { … }` block on a
+`deployable`.
+
+**1 — Bare platform (the 99% path).** No knob written; every axis takes its
+default. Byte-identical to today's output.
+
+```ddd
+deployable api {
+  contexts: [Orders]
+  platform: dotnet            # ≡ { foundation: vanilla, application: cqrs,
+                              #     persistence: efcore, directoryLayout: byLayer,
+                              #     transport: minimalApi, runtime: transactional }
+}
+```
+
+**2 — Simplest possible app.** Flat handlers straight to EF Core, controllers,
+one folder per feature.
+
+```ddd
+deployable api {
+  contexts: [Catalog]
+  platform: dotnet {
+    application:     flat
+    transport:       controllers
+    directoryLayout: byFeature
+  }
+}
+```
+
+**3 — Dapper instead of EF, classic service layer.**
+
+```ddd
+deployable api {
+  contexts: [Billing]
+  platform: dotnet {
+    application: serviceLayer
+    persistence: dapper
+  }
+}
+```
+
+**4 — Actor-hosted aggregates (Orleans grains over EF, state-stored).** Legal:
+`runtime: orleans` + non-journal `persistence:` is the valid non-ES mode (R5).
+
+```ddd
+deployable api {
+  contexts: [Orders]
+  platform: dotnet {
+    application: cqrs
+    runtime:     orleans
+    persistence: efcore        # grain state persisted via EF; not event-sourced
+  }
+}
+```
+
+**5 — Akka.NET persistent actors with event sourcing (idiomatic).** `marten`
+supplies the event journal; the `Order` aggregate is `eventSourced`.
+
+```ddd
+aggregate Order { persistenceStrategy: eventSourced /* … */ }
+
+deployable api {
+  contexts: [Orders]
+  platform: dotnet {
+    application: cqrs           # only cqrs may event-source (R3)
+    runtime:     akka
+    persistence: marten
+  }
+}
+```
+
+**6 — Opinionated framework (`foundation: abp`).** ABP owns `application:` and
+`transport:`; setting them is an error (R4). The data layer underneath stays
+pickable.
+
+```ddd
+deployable api {
+  contexts: [Hr]
+  platform: dotnet {
+    foundation:  abp
+    persistence: efcore         # the data layer ABP rides — still your choice
+    # application:/transport: would be loom.platform-knob-owned-by-foundation
+  }
+}
+```
+
+**7 — Phoenix, plain Ecto (non-Ash).** `foundation: vanilla` opens the
+application axis; default `foundation` on bare `platform: phoenix` would be `ash`.
+
+```ddd
+deployable web {
+  contexts: [Orders]
+  platform: phoenix {
+    foundation:  vanilla        # plain Phoenix contexts + Ecto (not Ash)
+    application: serviceLayer    # Phoenix context modules
+    persistence: ecto
+  }
+  hosts: [OrdersUi]             # LiveView UI (framework on the `ui` decl)
+}
+```
+
+**8 — Phoenix, Ash on SQLite.** The combination the old "fold into `persistence:`"
+mechanism could not express — `foundation:` keeps the data layer pickable.
+
+```ddd
+deployable web {
+  contexts: [Orders]
+  platform: phoenix {
+    foundation:  ash
+    persistence: ashSqlite      # Ash's data layer flavor
+    # application:/transport: owned by Ash (R4)
+  }
+}
+```
+
+**Diagnostics these would raise:**
+
+```ddd
+platform: phoenix { runtime: orleans }            # loom.platform-knob-out-of-menu
+platform: dotnet  { foundation: abp, application: cqrs }  # loom.platform-knob-owned-by-foundation
+platform: dotnet  { application: serviceLayer }   # + eventSourced aggg → loom.platform-application-cannot-event-source
+platform: dotnet  { application: flat, runtime: akka }    # warning: loom.platform-flat-with-actor-runtime
+```
+
+## 12. Grammar sketch
+
+A non-normative shape for the `platform:` block, following the repo's grammar
+conventions (discriminator-free flat optional clauses, `LooseName` for values so
+the menu is enforced by the validator, not the parser — same pattern as
+`design:`/`auth:` on `Deployable`). Replaces the bare `platform=Platform` clause
+in the `Deployable` rule:
+
+```langium
+DeployablePlatform:
+    'platform' ':' family=Platform ('{'
+        ('foundation'      ':' foundation=LooseName ','?)?
+        ('application'     ':' application=LooseName ','?)?
+        ('persistence'     ':' persistence=LooseName ','?)?
+        ('directoryLayout' ':' directoryLayout=LooseName ','?)?
+        ('transport'       ':' transport=LooseName ','?)?
+        ('runtime'         ':' runtime=LooseName ','?)?
+    '}')?;
+```
+
+- `family=Platform` reuses the existing `Platform` enum (`dotnet`/`hono`/
+  `phoenix`/`react`/`static` + `STRING` pins).
+- Each axis is an optional `LooseName`; `checkDeployable` validates the value
+  against the platform's menu (R1) and runs the cross-axis rules (R2–R7).
+- The block is itself optional — `platform: dotnet` with no `{ … }` is the
+  all-defaults form (example 1).
+
+**IR.** `DeployableIR` gains `foundation?`, `application?`, `persistence?`,
+`directoryLayout?`, `transport?`, `runtime?` (optional pre-normalization). The
+enrichment pass normalizes each to the platform default, so downstream phases see
+concrete values (mirrors how `design?` is defaulted via `BUILTIN_PACK_LATEST`).
 
 ## Related
 
+- `docs/decisions.md` — **D-REALIZATION-AXES** (this proposal, pinned),
+  D-ADAPTER-HOME, D-PHOENIX-SURFACE, D-STORAGE-SPLIT.
 - `docs/proposals/storage-and-platform-config.md` — the adapter surface and the
-  `style:`/`layout:`/`persistence:` menus.
+  original `style:`/`layout:`/`persistence:` menus (renamed per D-REALIZATION-AXES).
 - `docs/proposals/elixir-ecto-and-api-only-backends.md` — the Ash/Ecto axis; its
   Phase 2 is now answered by `foundation:` rather than a `persistence:`/`style:`
   field choice.
-- `docs/decisions.md` — D-ADAPTER-HOME, D-PHOENIX-SURFACE, D-STORAGE-SPLIT.
