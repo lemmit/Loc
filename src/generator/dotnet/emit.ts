@@ -10,6 +10,7 @@ export {
   renderRequiredFromCtorParamFilter,
 } from "./emit/api.js";
 export { renderAuditableInterceptor } from "./emit/auditable-interceptor.tpl.js";
+export { renderBaseReaderImpl, renderBaseReaderInterface } from "./emit/base-reader.js";
 export { renderCommon, renderNoopDispatcher } from "./emit/common.js";
 export {
   renderCommand,
@@ -24,7 +25,7 @@ export {
 } from "./emit/document.js";
 export { renderRequestDtos, renderResponseDtos } from "./emit/dto.js";
 export { renderConfiguration, renderDbContext } from "./emit/efcore.js";
-export { renderEntity } from "./emit/entity.js";
+export { renderAbstractBaseEntity, renderEntity } from "./emit/entity.js";
 export { renderEnum, renderValueObject } from "./emit/enums-vos.js";
 export { renderEvent, renderIDomainEvent } from "./emit/events.js";
 export { renderId } from "./emit/ids.js";

@@ -57,6 +57,11 @@ export function emitAggregateResources(
   const ctxSnake = snake(ctx.name);
 
   for (const agg of ctx.aggregates) {
+    // An abstract TPC (`ownTable`) base owns no table and is never
+    // instantiated — it emits no Ash.Resource (the polymorphic read home is a
+    // function on the context domain module; see renderDomainModule).  Each
+    // concrete subtype is a standalone resource carrying the merged base fields.
+    if (agg.isAbstract) continue;
     const ds = options.resolveDataSource?.(agg);
     // `shape(embedded)`: contained parts fold into a jsonb column on the
     // root via Ash embedded resources (`attribute :items, {:array,

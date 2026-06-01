@@ -388,36 +388,78 @@ system Sys {
     expect(codes(errors)).toContain("loom.polymorphic-id-ref-unsupported");
   });
 
-  // The abstract-base exclusion lives in the shared system orchestrator
+  // The abstract-base handling lives in the shared system orchestrator
   // (collectContextsFor), upstream of every platform's emitProject — so
-  // ownTable/TPC is complete cross-backend, not just for Hono. A concrete
-  // `extends` subtype is a normal aggregate carrying the merged base fields,
-  // and the abstract base emits nothing on any backend.
-  for (const [platform, port] of [
-    ["dotnet", 5000],
-    ["phoenixLiveView", 4000],
-  ] as const) {
-    it(`drops the abstract base on the ${platform} backend (concretes still emit)`, async () => {
-      const model = await parseValid(`
+  // ownTable/TPC (including the polymorphic `find all <Base>` read home) is
+  // complete cross-backend, not just for Hono. A concrete `extends` subtype is
+  // a normal aggregate carrying the merged base fields; the abstract base owns
+  // no table/repo/routes but anchors the per-backend polymorphic reader.
+  const TPC_TWO_CONCRETE = (platform: string, port: number) => `
 system Sys {
   subdomain Parties {
     context Parties {
       abstract aggregate Party inheritanceUsing(ownTable) { name: string email: string }
       aggregate Customer extends Party inheritanceUsing(ownTable) { creditLimit: decimal }
+      aggregate Supplier extends Party inheritanceUsing(ownTable) { rating: int }
     }
   }
   storage primary { type: postgres }
   resource partiesState { for: Parties, kind: state, use: primary }
   deployable api { platform: ${platform} contexts: [Parties] dataSources: [partiesState] port: ${port} }
-}`);
-      const { files } = generateSystems(model);
-      const paths = [...files.keys()];
-      // Concrete subtype emits its files; the abstract base emits none of
-      // its own (no file named for `Party` that isn't a `Customer` file).
-      expect(paths.some((p) => /customer/i.test(p))).toBe(true);
-      expect(paths.some((p) => /\bparty\b/i.test(p) && !/customer/i.test(p))).toBe(false);
-    });
-  }
+}`;
+
+  it("emits a .NET polymorphic reader: abstract Party base + delegating PartyRepository", async () => {
+    const { files } = generateSystems(await parseValid(TPC_TWO_CONCRETE("dotnet", 5000)));
+    const get = (suffix: string) =>
+      [...files.entries()].find(([p]) => p.endsWith(suffix))?.[1] ?? "";
+    // Concrete subtypes emit as standalone entities/tables.
+    expect([...files.keys()].some((p) => p.endsWith("Domain/Customers/Customer.cs"))).toBe(true);
+    expect([...files.keys()].some((p) => p.endsWith("Domain/Suppliers/Supplier.cs"))).toBe(true);
+    // The abstract base emits an abstract C# class carrying the shared fields,
+    // and the concretes inherit it instead of re-declaring them.
+    const party = get("Domain/Parties/Party.cs");
+    expect(party).toMatch(/public abstract class Party/);
+    expect(party).toMatch(/public string Name \{ get; internal set; \}/);
+    const customer = get("Domain/Customers/Customer.cs");
+    expect(customer).toMatch(/public sealed class Customer : Party/);
+    // The inherited base field is NOT re-declared as a mutable entity property
+    // on the concrete (would shadow → CS0108).  (The nested `State` hydration
+    // carrier still lists it as `{ get; init; }`, which is expected.)
+    expect(customer).not.toMatch(/public string Name \{ get; (private|internal) set;/);
+    // The own field IS declared on the concrete.
+    expect(customer).toMatch(/public decimal CreditLimit \{ get; private set;/);
+    // The base keeps no Id of its own (identity stays per-concrete).
+    expect([...files.keys()].some((p) => p.endsWith("Domain/Ids/PartyId.cs"))).toBe(false);
+    // Read-only polymorphic reader: interface + delegating impl.
+    expect(get("Domain/Parties/IPartyRepository.cs")).toMatch(
+      /Task<IReadOnlyList<Party>> FindAllAsync/,
+    );
+    const reader = get("Infrastructure/Repositories/PartyRepository.cs");
+    expect(reader).toMatch(/public sealed class PartyRepository : IPartyRepository/);
+    expect(reader).toMatch(/ICustomerRepository/);
+    expect(reader).toMatch(/ISupplierRepository/);
+    expect(reader).toMatch(/result\.AddRange\(await _customerRepo\.All\(ct\)\)/);
+    expect(reader).not.toMatch(/SaveAsync/);
+    // EF excludes the base from the model so each concrete maps standalone.
+    expect(get("Infrastructure/Persistence/AppDbContext.cs")).toMatch(
+      /modelBuilder\.Ignore<Party>\(\);/,
+    );
+    // No Party table/DbSet leaks.
+    expect(get("Infrastructure/Persistence/AppDbContext.cs")).not.toMatch(/DbSet<Party>/);
+  });
+
+  it("emits a Phoenix polymorphic reader: list_parties! on the domain module", async () => {
+    const { files } = generateSystems(await parseValid(TPC_TWO_CONCRETE("phoenixLiveView", 4000)));
+    const paths = [...files.keys()];
+    // Concrete subtypes emit Ash resources; the abstract base emits none.
+    expect(paths.some((p) => p.endsWith("parties/customer.ex"))).toBe(true);
+    expect(paths.some((p) => p.endsWith("parties/supplier.ex"))).toBe(true);
+    expect(paths.some((p) => p.endsWith("parties/party.ex"))).toBe(false);
+    // The context domain module gains the polymorphic read function.
+    const domain = [...files.entries()].find(([p]) => p.endsWith("parties.ex"))?.[1] ?? "";
+    expect(domain).toMatch(/def list_parties!, do: list_customers!\(\) \+\+ list_suppliers!\(\)/);
+    expect(domain).toMatch(/def list_parties, do: \{:ok, list_parties!\(\)\}/);
+  });
 });
 
 describe("aggregate inheritance — sharedTable/TPH emission on Hono (I2)", () => {
