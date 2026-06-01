@@ -458,6 +458,70 @@ invalidation needs the save's before-image (a `cached:`-driven obligation; see
 Open questions). Bursts coalesce: 50 of X's orders changing → one refetch of
 `/orders/mine`.
 
+### Precisely: "owner" is the resource's `dataKey`, and where policy applies
+
+"Owner" above was shorthand — there is **no separate owner concept**. Every
+aggregate is stamped with a **`dataKey`** (the materialized path from
+`authorization.md` / tenancy) at create; for a customer-owned order that path's
+*leaf* is the customer, hence "owner." The precise model:
+
+- the **resource** carries a `dataKey` (`order#42 → t.acme.custX`, stamped on create);
+- the **subscriber** carries a `dataKey` in its JWT (`currentUser.dataKey`);
+- the **room a client joins is its own** `dataKey`: `t.acme.custX:orders`;
+- an **update publishes to every *ancestor* `dataKey`** of the resource's:
+  `t:orders`, `t.acme:orders`, `t.acme.custX:orders`;
+- **match ⟺ `currentUser.dataKey` is an ancestor-or-equal of the resource's** —
+  which *is* the reachability policy, compiled. (The "owner room" is just the leaf
+  case where the two `dataKey`s are equal.)
+
+**Where the policy is applied — compiled, never per-ticket:**
+
+1. **Compile time** — the compiler reads the policy's reachability *direction*
+   (`reachable when currentUser.dataKey isAncestorOf this.dataKey`) and emits the
+   routing rule (`publish → ancestor rooms`; `subscribe → own room`). The policy
+   *becomes* the room topology.
+2. **Stamp/issue time** — the resource's `dataKey` is set on create; the user's is
+   in the JWT. The policy's inputs are materialized once.
+3. **Refetch time** — the same policy runs as the SQL `WHERE` on the authz'd
+   refetch: the actual gate. The room match only decides *who to nudge*.
+
+At delivery it is pure room-membership matching — no policy predicate per ticket.
+(Hierarchical-containment policies only; relationship/ACL policies fall to the
+trilemma's subscribe-/publish-time rows — `channels.md` §"The limit of
+routing-by-key".)
+
+**The whole flow, technically:**
+
+```
+① COMPILE   policy { data { Order reachable when currentUser.dataKey isAncestorOf this.dataKey } }
+            → routing rule:  publish(o) → { a+":orders" | a ∈ ancestors(o.dataKey) }
+                             subscribe(u) → u.dataKey+":orders"
+                             match ⟺ u.dataKey ∈ ancestors(o.dataKey)        (= the policy)
+
+② SUBSCRIBE mount useQuery(["orders"])   [JWT.dataKey = "t.acme.custX"]
+            → relay.join("t.acme.custX:orders")
+              (structural authz: X can only build a room from its OWN JWT dataKey,
+               cannot forge "t.acme.custY")
+
+③ WRITE     POST /orders/42/ship → save(#42)   [#42.dataKey="t.acme.custX", stamped at create]
+            → ticket {tag:"orders", id:"42"}   (no payload, dataKey NOT sent to client)
+            → publish to ancestor rooms of "t.acme.custX":
+                 "t:orders" (platform)   "t.acme:orders" (tenant/managers)
+                 "t.acme.custX:orders" (X)   + instance "orders:42"
+              (O(depth) rooms — path depth ~3–5, fixed, not per-user)
+
+④ DELIVER   relay: push ticket to registry[room]  (O(recipients))
+            connX ◀ ticket → qc.invalidateQueries(["orders"])
+                           → refetch GET /orders  (SAME policy as SQL WHERE → only X's rows)
+                           → re-render
+            connY (room "t.acme.custY:orders") was never in the publish set → no nudge, no leak
+```
+
+So: the **resource's `dataKey` drives publish-to-ancestors; the user's `dataKey`
+(JWT) is the room it joins; they meet iff the user is at-or-above the resource** —
+the reachability policy compiled into room topology, with the authz'd refetch as
+the real gate. No per-ticket policy evaluation.
+
 ## Tickets vs payloads — the default that makes scoping a non-problem
 
 An invalidation push **does not need to carry the data** — it needs to carry "your key
