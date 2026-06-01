@@ -2,8 +2,8 @@ function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{
   const { isOpen, onOpen, onClose } = useDisclosure();
   const toast = useToast();
 {{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
-{{/each}}  const {{{destructured}}} = useForm<{{opPascal}}Request>({
-    resolver: zodResolver({{opPascal}}Request),
+{{/each}}  const {{{destructured}}} = useForm<{{opPascal}}{{aggregateName}}Request>({
+    resolver: zodResolver({{opPascal}}{{aggregateName}}Request),
     defaultValues: {{{defaultValuesTs}}},
   });
   return (
