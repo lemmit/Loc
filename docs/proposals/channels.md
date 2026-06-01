@@ -566,6 +566,17 @@ deferred to the refetch.
 
 #### Non-cheap routing, concretely — the two rows + the projection escape
 
+**First, the invariant:** all of this is *still* rooms + pushing tickets — change
+→ push to a room → members refetch. Cheap routing, A, B, and C differ **only in
+how room membership is decided**, not in the transport:
+
+| | How membership is decided | Room keyed by |
+|---|---|---|
+| cheap (equi) | a label match | the resource's own value (`region:A`) |
+| **A** | an explicit authorized set, resolved once at join | the resource itself (`order:42`) |
+| **B** | a coarse room + a per-push filter | the type (`orders`), filtered at push |
+| **C** | route on a *pre-built list* instead of the raw resource | the **projection's** key (`openOrders:region:A`) |
+
 When the policy is **not** equi-join (relationship / ACL / attribute) *and* you
 can't tolerate over-delivery (payload live-events, or zero-leak invalidation), you
 leave cheap routing. Both non-cheap rows reuse two Loom-derivable pieces: the
