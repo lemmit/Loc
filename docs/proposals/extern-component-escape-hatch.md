@@ -197,32 +197,88 @@ body: Stack {[
   walker refactor was built on (`CLAUDE.md` → the WalkerTarget seam history).
   Documented here only to be explicitly declined.
 
-### Option D — interactive extern components (orthogonal add-on)
+### Option D — interactive extern components (**required, in v0**)
 
-Independently of A/B/C: let an extern component accept **`slot` params** (for
-JSX children) and **operation/navigation callbacks** so it can be interactive
-while Loom still owns domain dispatch. The component calls `props.onConfirm()`;
-Loom wires that prop to the aggregate-operation mutation hook using the
-**existing action-hoisting machinery** (`controls.ts` `emitUserComponent`
-already hoists aggregate-op mutations; `target.ts` `renderApiHoisting`). This
-turns the hatch from "read-only widget" into "fully wired control" without the
-user touching `fetch`. Best layered on top of B, not v0.
+A read-only widget is not enough — an escape hatch must let hand-written
+components *drive domain interactions*, while Loom still owns dispatch (the user
+never writes `fetch`, never re-derives a request shape, never hand-rolls the
+load→check→mutate→assert→save lifecycle). So D is **not** an add-on layered on
+B; it is part of the v0 design. It comes in two tiers, both built on machinery
+that **already exists**.
+
+**Tier 1 — `slot` props (fully specified; reuses slots verbatim).** The page
+metamodel already lets a `slot` param receive *any* walker expression —
+including a **fully-wired `Action { order.confirm, then: navigate(…) }`** — and
+walks it in the **caller's** scope (`docs/page-metamodel.md:194–222`,
+`loom-ir.ts:99`). The only gap for an *extern* component is the last inch:
+instead of the walker rendering the slot inline, Loom emits the walked slot as a
+`React.ReactNode` prop the hand-written component drops wherever it likes
+(`{props.primaryAction}`). Because the slot is walked before it's handed over,
+it arrives **already wired** — the mutation hook, the `then:` navigation, the
+toast are all Loom's, inherited for free. This alone covers most interactivity:
+"here is my custom card; put *this* confirmed-and-then-navigate button in it."
+
+```ddd
+component OrderCard(order: Order, primaryAction: slot, footer: slot?) extern from "./widgets/order-card"
+
+page OrderDetail(order: Order) {
+  route: "/orders/:id"
+  body: OrderCard {
+    order,
+    primaryAction: Action { order.confirm, then: navigate(Home) },  // Loom-wired, passed as a node
+  }
+}
+```
+→ props gain `primaryAction: React.ReactNode; footer?: React.ReactNode`.
+
+**Tier 2 — action / navigation callback props (the component fires it).** When
+the *component* decides when and with what arguments to act — a custom canvas
+where clicking a region confirms that order — a slot isn't enough; the component
+needs a callable. An operation-bound param lowers to a typed
+`(req) => Promise<void>` prop whose body is the **same** op lifecycle `Action`
+emits, hoisted via the existing `renderApiHoisting` / `buildHookUse` seams
+(`target.ts:169–217`) and `emitUserComponent`'s aggregate-op hoisting
+(`controls.ts:343`). The request type is the op's wire request — the **same DTO
+the backend `extern` op uses** (`extern-builder.ts`), so the two escape hatches
+share one contract:
+
+```ddd
+component OrderGrid(orders: Order[], confirm: action of Order.confirm) extern from "./widgets/order-grid"
+```
+→ props gain `confirm: (order: OrderWire) => Promise<void>`; the component calls
+`props.confirm(o)` from its own click handler. Navigation params lower the same
+way to `(args) => void` calling the router (`target.ts:244–267`).
+
+Tier 1 is fully specified by existing slot semantics and ships with the v0 core.
+Tier 2's only genuinely new surface is the **param spelling** for binding a
+callback to an operation/navigation target (the `action of …` form above is a
+sketch); that grammar choice is the one open question (§11), not the mechanism,
+which is the already-shipped action-hoisting path.
 
 ## 4. Recommended shape
 
-Adopt **B** as the destination, ship **A as its first increment** (B minus the
-generated props file — i.e. import-only), and treat **D** as the follow-on.
-**C is rejected.** Neither A nor B generates anything the user owns, so there
-is no stub and no first-run magic in any shipped step.
+The v0 design is **B + D**: the generated-props import hatch (B) **with
+interactivity built in** (D) — extern components are wired controls from day
+one, not read-only widgets. **A** (import-only, no generated props) is a useful
+*first increment* on the way to B if we want to land the grammar and call-site
+dispatch before the props emitter. **C is rejected.** Nothing in any shipped
+step generates a user-owned file, so there is no stub and no first-run magic.
+
+Concretely, v0 = B's grammar/props/dispatch **+ D Tier 1** (slot props →
+`ReactNode`, fully specified by existing slot semantics). **D Tier 2**
+(operation/navigation callback props) ships in the same line of work — its
+mechanism already exists (action hoisting); only the param spelling is open
+(§11) — so it is in-scope for v0, not deferred.
 
 Rationale: B reproduces the properties that make `operation extern` good that
 *translate* to a compile-time import — a typed seam, a body constraint, and a
 generated IR-tracking contract — while dropping the one that doesn't (a
 regenerated stub behind DI indirection, which the frontend has no place to put;
-see §2.4). A is literally B with the props emission removed, so shipping A first
-costs nothing B throws away — same grammar, same call-site dispatch, same
-zero-user-files-written. C loses type-safety and framework neutrality, the two
-invariants the whole metamodel exists to protect.
+see §2.4). D is what makes the hatch *useful*: without it you can render bespoke
+output but can't act on the domain, which is exactly the wall users hit. Both
+tiers of D reuse the same action-hoisting path the closed `Action` primitive
+already rides, so interactivity costs new *typing*, not new *machinery*. C loses
+type-safety and framework neutrality, the two invariants the metamodel protects.
 
 ## 5. The data contract — props are `wireShape`-typed
 
@@ -240,11 +296,15 @@ kinds and their props types:
 | `T` / `T[]` (aggregate) | `TWire` / `TWire[]` (the wire DTO) | the loaded record / query result |
 | `T id` | the id's wire type | route param / state field |
 | value object | its wire shape | object literal |
-| `slot` (Option D) | `React.ReactNode` | caller's walker expression, walked in caller scope (`loom-ir.ts:99` slot semantics) |
+| `slot` / `slot?` (D Tier 1) | `React.ReactNode` (`?` → optional) | caller's walker expression — incl. a wired `Action{…}` — walked in caller scope (`loom-ir.ts:99` slot semantics) |
+| `action of <Agg>.<op>` (D Tier 2) | `(req: <Op>Request) => Promise<void>` — the op's wire request, same DTO as the backend `extern` op (`extern-builder.ts`) | a hoisted mutation closure (`buildHookUse` / `renderApiHoisting`, `target.ts:169–217`) running load→check→dispatch→assert→save |
+| `nav to <Page>` (D Tier 2) | `(args: <Page>Params) => void` | a router-push closure (`target.ts:244–267`) |
 
+The first four rows are pure *data in*; the last three are *interaction out* —
+and both halves lower through machinery that already exists, so the user's
+hand-written component receives ordinary wire DTOs and ordinary typed callbacks.
 This is exactly the discipline backends already follow — *"Backends never
-re-resolve… read `agg.wireShape` directly"* (`CLAUDE.md`). The user's
-hand-written component receives ordinary, already-documented wire DTOs.
+re-resolve… read `agg.wireShape` directly"* (`CLAUDE.md`).
 
 ## 6. Cross-framework — react vs liveview
 
@@ -321,21 +381,25 @@ Following the canonical "adding a language feature" recipe
    a stdlib primitive. Add the rules in §9.
 3. **IR** (`src/ir/types/loom-ir.ts`): `ComponentIR` (`:1351`) gains `extern?:
    boolean`, `externBindings?: { framework: string; path: string }[]`. Body
-   becomes optional for extern.
+   becomes optional for extern. Params already carry `slot` (`TypeIR` `:99`);
+   add an action/nav-callback param kind for D Tier 2.
 4. **Lower** (`src/ir/lower/lower.ts` `lowerUi`/component lowering, ~`:1000`):
    thread the flag + bindings; type-check params via the existing param
-   resolution (no expression lowering — extern has no body).
+   resolution (no expression lowering — extern has no body). Slot args and
+   action/nav args are lowered in the **caller's** scope exactly as slots and
+   `Action` already are — no new lowering path.
 5. **React generator:**
    - `pages-emitter.ts`: when `component.extern`, **skip**
      `renderUserComponentFile` (`page-shell.ts:502`) — Loom emits no component
-     body. Instead emit **only** the props interface from `wireShape` into
-     `…/extern/<Name>.props.ts`. Nothing user-owned is written; there is no
-     stub.
+     body. Instead emit **only** the props interface from `wireShape` (plus the
+     D Tier-1 `ReactNode` and D Tier-2 callback prop types) into
+     `…/extern/<Name>.props.ts`. Nothing user-owned is written; there is no stub.
    - `body-walker.ts` (`:670–692`) + `controls.ts` `emitUserComponent`
-     (`:343`): **already** emit `<Name .../>` JSX and register the import for
-     user components — extern reuses this path verbatim, pointing the component
-     import at the declared path instead of `src/components/<Name>`, and adding
-     the props-type import.
+     (`:343`): **already** emit `<Name .../>` JSX, register the import, walk slot
+     args in caller scope, and hoist aggregate-op mutations — extern reuses this
+     path verbatim, pointing the component import at the declared path instead of
+     `src/components/<Name>`, adding the props-type import, and passing walked
+     slots / hoisted callbacks as props instead of inlining them.
 6. **Phoenix generator** (`src/generator/phoenix-live-view/`): emit
    `<.live_component>` for an extern with a `liveview` binding; the
    `heex-target` import seam (`:100`) handles the alias. **Reject** a
@@ -357,8 +421,14 @@ machinery and not a new file-protection path.
 
 - An `extern` component declares **no `body:`** (analogue of "extern op bodies
   are preconditions-only", `validate.ts:362`). Code: `loom.extern-component-has-body`.
-- `slot` params on a v0 (non-D) extern component are rejected until the
-  callback-wiring of §D lands. Code: `loom.extern-component-slot-unsupported`.
+- `slot` params **are supported** (D Tier 1) — the existing
+  `loom.slot-out-of-position` / `loom.slot-member-access` rules
+  (`docs/page-metamodel.md:224`) still apply unchanged: a slot is valid only as
+  a component param, and member access on a slot ref stays forbidden.
+- An `action of <Agg>.<op>` / `nav to <Page>` callback param (D Tier 2) must
+  resolve to a real public operation / page reachable through the deployable's
+  `targets` chain — same reachability rule scaffold and `Action` already obey.
+  Code: `loom.extern-callback-unresolved`.
 - An extern component reached by a `ui` whose framework has no binding is an
   error. Code: `loom.extern-component-framework-mismatch`.
 - The declared `path` is preserved verbatim (like `UiHelperImportIR.path`,
@@ -375,12 +445,21 @@ machinery and not a new file-protection path.
   a *named, typed* component, not inline source.
 - **Non-goal: Loom-authored component internals.** Loom never reads or
   type-checks the body of the foreign file — only its props boundary.
-- **Non-goal (v0): callbacks / interactivity (Option D).** Read-shaped props
-  first; wired operations second.
+- **In scope (v0): interactivity (Option D).** Slot props (Tier 1) and
+  operation/navigation callback props (Tier 2) ship with the core — an extern
+  component is a wired control, not a read-only widget. The only deferred slice
+  is the *exact grammar* for Tier-2 callback params (§11 Q1), not the capability.
 
 ## 11. Open questions
 
-1. **Props-file location & import shape.** `…/extern/<Name>.props.ts`
+1. **Tier-2 callback param spelling (the one real open question).** How does a
+   param bind to an operation / page? Candidates: `confirm: action of
+   Order.confirm`, `onConfirm: Order.confirm` (bare op ref, like `Action`'s
+   argument), or a function-type `onConfirm: (Order) => confirm`. It should read
+   like `Action`'s existing operation reference so there's one mental model.
+   The *mechanism* (hoist the op lifecycle into a callback) is settled; only the
+   surface syntax is open.
+2. **Props-file location & import shape.** `…/extern/<Name>.props.ts`
    (sibling-of-`components`) keeps the one machine-owned file clearly inside
    Loom's write set, away from the user's path. Confirm the relative-import math
    from a page (`src/pages/…`) to both the props type and the user component
