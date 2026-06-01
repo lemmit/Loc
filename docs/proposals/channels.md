@@ -452,8 +452,14 @@ connection is in it:
   scope, and `registry[room].add(conn)` — O(1), torn down on disconnect;
 - **on a ticket/event**, it publishes to the **fixed set of scope levels** the
   payload belongs to (`tenant.X.orders` for owner subscribers *and*
-  `tenant.orders` for admins) and pushes to `registry[room]` — a constant
-  fan-out, never per-subscriber iteration. Total work = O(interested connections).
+  `tenant.orders` for admins) and pushes to `registry[room]`.
+
+**Cost, precisely** (correcting a sloppy earlier phrasing): delivery *is*
+per-recipient — you write to each interested socket, so it's **O(recipients)**,
+unavoidably. What the room index buys is the *other* two costs: you do **not**
+scan the tenant's uninterested connections, and you **never evaluate a predicate
+per connection per ticket** (room membership was decided once, at connect). So:
+**O(recipients), not O(all tenant connections), and zero per-ticket authz.**
 
 So "a room per user/owner" is just inserting a connection into a hash bucket
 keyed by its `DataKey` — what every websocket server already does; Loom merely
@@ -470,6 +476,43 @@ Kafka topics / SQS queues (which would not scale):
 Horizontal scale across relay instances is the standard **pub/sub backplane**
 (Redis / NATS, the Phoenix.PubSub adapter, the SignalR backplane) — the room key
 is the routing key there too. No new mechanism.
+
+#### When to scope rooms, and what they route on
+
+Scoped (per-owner) rooms are an **opt-in optimization, not the default** — the
+default is the coarse `tenant.<type>` room (everyone in the tenant viewing that
+type refetches; active-only + coalescing absorb it). Reach for per-owner rooms
+only when the coarse room actually hurts:
+
+| Coarse `tenant.orders` (default) | Per-owner `tenant.X.orders` (opt-in) |
+|---|---|
+| small / low-traffic tenants | large tenant × high write rate → refetch storm |
+| tenant-uniform / admin views (everyone sees all) | per-owner views where most users can't see most changes |
+| the "something changed" signal is harmless | the existence/timing side-channel is sensitive |
+
+It's a cost knob, so it's infra (a `realtime:` / per-read opt-in), not something
+every read pays for — same stance as `cached: none` being the default.
+
+**What it routes on:** the key is `(resource type, DataKey prefix)`, and **both
+sides compute it without any per-ticket policy evaluation**:
+
+- *publish:* the changed aggregate's own owner / `DataKey` path (a field already
+  on the row) → ticket room `tenant.X.orders`;
+- *subscribe:* the connection's `DataKey` scope from its JWT → joins
+  `tenant.X.orders` at connect;
+- *match:* prefix containment (realized by publishing to the fixed scope-levels,
+  so exact-match registries like SignalR Groups need no prefix scan).
+
+So routing **reuses the visibility key** (`DataKey`, from `authorization.md` /
+`tenancy by`) — it is *not* a second routing policy, and the relay never runs
+`data { reachable when … }` per ticket; the policy ran once to mint the
+`DataKey`, and routing is string-prefix matching on it. The honest limit (the
+same discrete-vs-continuous line as parametrized tags): scoped rooms are
+derivable only when the view's scope **is** a clean `DataKey`/owner prefix. A view
+with an arbitrary filter (`where total > 100`) has no `DataKey` room → it stays on
+the coarse type room (or graduates to a projection). The compiler knows which
+case a read is in, so it picks the granularity — or warns that a read can't be
+scoped and will be tenant-wide.
 
 ### Subchannels — not every browser gets every event
 
