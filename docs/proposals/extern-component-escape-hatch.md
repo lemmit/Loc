@@ -534,6 +534,37 @@ machinery and not a new file-protection path.
   "Recommended delivery" for the staging rationale. There is **no** op-specific
   binding form in either tier.
 
+### Why not `extern page`
+
+`extern` earns its place on **operations** and **components** because each is a
+*leaf with a typed contract Loom otherwise generates a body for*. A `page` is
+not a leaf — it is a composition point (*route + URL-bound params + `requires`
+auth + `menu` entry + body*), and only the body half is foreign. An `extern
+page` is therefore **coherent but redundant**: the render-handoff is already
+covered two ways, with no new grammar.
+
+| You want… | Use | Loom still owns |
+|---|---|---|
+| custom render, keep route/params/auth/menu declarative | `page { route, requires, menu, body: <extern component> }` (Tier 1, exists) | route registration, URL→param binding, auth guard, menu entry, page-object route metadata |
+| custom render **and** skip Loom's (inert) page shell | a later thin-shell optimisation — emit a minimal wrapper when a page body is a *single* extern component — **not** a keyword | same as above |
+| own the **entire route module** (own shell, data loading, outlet) | `.loomignore` the generated route/page file and hand-write it (`docs/tools.md:94`) | nothing — and at that point it is no longer a Loom page |
+
+```ddd
+// The "extern page" use case, expressed today — no new construct:
+page OrderMap(id: Order id) {
+  route:   "/orders/:id/map"
+  requires currentUser.permissions.contains(sales.viewOrders)
+  menu     { section: "Sales", label: "Map" }
+  body:    OrderMapWidget { orderId: id }     // ← extern component owns the render
+}
+```
+
+So `page … extern` is **explicitly declined**: a page's body already has an
+escape hatch (an extern component), the only delta (`skip the shell`) is an
+optimisation rather than a new surface, and owning the whole route module is
+precisely what the file-level `.loomignore` hatch is for. Minting a third
+spelling would be the speculative-surface trap §4 warns against.
+
 ## 11. Open questions
 
 1. **`action` argument-type spelling (the one real open question).** The
