@@ -1046,6 +1046,18 @@ So "no per-event checks" holds for resource/identity visibility, **not** for the
 ambient/temporal dimension — which dodges the issue only for tickets
 (over-deliver + refetch), and otherwise needs the horizon or a per-event check.
 
+**What's off-the-shelf for it:** the **validity horizon is ready-made** —
+Centrifugo's subscription-token `exp` + **sub-refresh proxy**, or Ably's token TTL
++ `authCallback`, re-check at the boundary and deny off-hours (the refresh
+endpoint is just the generated `maySee`); JWT-native relays (SignalR/Phoenix/NATS)
+give the coarser whole-connection-`exp` version. Pin `exp` to the boundary and the
+leak window is seconds — sufficient for essentially all real temporal rules, with
+**no per-event checks and no custom relay code**. The **precise per-event** path
+has **no turnkey option** — no channel relay does per-subscriber, per-message
+dynamic filtering (rich-plugin brokers like EMQX expose a per-*publish* hook, but
+the per-recipient part stays custom) — so you'd build it, and only for the rare
+case where seconds of boundary leak are unacceptable.
+
 **Different architecture — DB-coupled sync engines** (note them, but they're the
 wrong layer here): **Supabase Realtime** (Postgres-changes/RLS), **ElectricSQL**
 (Postgres shapes), **PowerSync** (sync rules over Postgres/Mongo), **Rocicorp
