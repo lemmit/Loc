@@ -1042,6 +1042,19 @@ re-evaluation, by one of two means: a **validity horizon** (token `exp` + a
 scheduled re-check at the boundary — Centrifugo's sub-refresh proxy; no per-event
 cost, but boundary-granular with a small leak window) **or**, for exact
 enforcement of a clock-varying rule on a *payload* stream, a **per-event check**.
+
+The horizon's expiry is **not a constant** — the boundary is itself
+policy-driven and relational (17:00 weekdays / 15:00 weekends / minus holidays /
+per the user's `Shift`). So the policy compiles to *two* functions: `maySee` **and**
+`nextBoundary(user)` = the next time its truth flips, a function of the same
+domain data, evaluated at **subscribe/refresh, not per event**. Set `exp =
+nextBoundary(user)`. And a boundary changes two ways, each already handled: the
+**clock** reaching it → the horizon; the **data** behind it changing (a shift
+edited, a holiday added) → a **`save`** → the normal ticket re-evaluates (`Shift`/
+`Holiday` is in the dependency set). So relational-temporal folds into the
+existing two mechanisms (save-tickets + a *computed* horizon); a per-event check
+is forced only when `nextBoundary` is genuinely uncomputable (a continuous/opaque
+condition with no predictable next flip).
 So "no per-event checks" holds for resource/identity visibility, **not** for the
 ambient/temporal dimension — which dodges the issue only for tickets
 (over-deliver + refetch), and otherwise needs the horizon or a per-event check.
