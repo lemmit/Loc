@@ -13,7 +13,8 @@
 >   it does not introduce a second ownership rule.
 > - Requests two new decision tags: **D-SEED-PATH** (seed through the
 >   domain `create` vs. raw table insert) and **D-SEED-IDEMPOTENCY**
->   (applied-marker table vs. upsert-by-natural-key).
+>   (v1 = ship-once applied-marker; per-row upsert-by-natural-key
+>   deferred until reference data needs it).
 
 ## TL;DR
 
@@ -89,13 +90,16 @@ Two tensions fall out, and they become the two requested decisions:
   modifier opts into table-level inserts for bulk fixtures where the
   domain pass is too slow or deliberately bypassed.
 - **D-SEED-IDEMPOTENCY.** Re-running a seed must not duplicate rows.
-  Two mechanisms: (a) a **natural key** declared on the seed set →
-  upsert; (b) an **applied-marker** table (`__loom_seed`) keyed by
-  `dataset + content-hash`, the data twin of `__drizzle_migrations`.
-  **Recommendation: marker by default** (zero per-row ceremony, matches
-  migrations' snapshot/version model), with an **optional `key:`
-  clause** that upgrades a set to per-row upsert when rows evolve over
-  time (reference data) rather than ship once (demo data).
+  **Recommendation for v1: ship-once via an applied-marker** — a
+  `__loom_seed` table holding one row per applied dataset, the data
+  twin of `__drizzle_migrations`. On boot: "has dataset `demo` been
+  seeded? if yes, skip the whole set." Zero per-row ceremony, mirrors
+  the Rails `db:seed` / Ecto `seeds.exs` contract, and needs no natural
+  key on the rows. The richer **per-row upsert by a declared natural
+  key** (for *reference* data that ships once but is later corrected in
+  place) is deliberately **deferred** — it's a second idempotency
+  mechanism serving a secondary case, and the marker covers the
+  quick-start demo entirely. See §10.
 
 ---
 
@@ -124,18 +128,6 @@ context Catalog {
   seed demo {
     Product { sku: "DEMO-1", price: { amount: 9.99,  currency: "USD" } }
     Product { sku: "DEMO-2", price: { amount: 19.99, currency: "USD" } }
-  }
-}
-```
-
-**Reference data** that evolves wants a natural key so re-seeding
-upserts in place rather than relying on the marker:
-
-```ddd
-context Geo {
-  seed reference key Country.code {
-    Country { code: "US", name: "United States" }
-    Country { code: "PL", name: "Poland" }
   }
 }
 ```
@@ -210,16 +202,16 @@ ContextMember:
     | Criterion | FilterDecl | StampDecl | ImplementsDecl;
 
 Seed:
-    'seed' (dataset=ID)? ('key' key=KeyRef)? (raw?='raw')? '{'
+    'seed' (dataset=ID)? (raw?='raw')? '{'
         ( rows+=SeedRow* | body+=Statement* )
     '}';
 
 SeedRow:
     aggregate=[Aggregate:ID] ('@' handle=ID)? value=ObjectLit ;
-
-KeyRef:
-    aggregate=[Aggregate:ID] '.' field=ID ;
 ```
+
+(A future `key Country.code` clause for the deferred upsert path — §10
+— slots in after `dataset` without touching the row rule.)
 
 `@handle` reuses the `SeedRef` resolution noted below; `ObjectLit` and
 `Statement` are existing rules — no new expression syntax. `seed` is a
@@ -244,16 +236,11 @@ export interface SeedIR {
   dataset: string;
   /** Through the domain `create` (default) or straight to tables. */
   path: "domain" | "raw";
-  /** Optional natural key → per-row upsert; absent ⇒ marker-guarded. */
-  key?: { table: string; column: string };
   /** Ordered records, topologically sorted by SeedRef edges. */
   rows: SeedRowIR[];
   /** Imperative form: lowered workflow statements (mutually exclusive
    *  with rows). */
   body?: StmtIR[];
-  /** Content hash of (rows|body) → the __loom_seed marker value, so a
-   *  changed seed re-applies and an unchanged one is a no-op. */
-  contentHash: string;
 }
 
 export interface SeedRowIR {
@@ -280,8 +267,7 @@ called from `emitSystem` in `src/system/index.ts` right after
    dataset, concatenates in declaration order.
 3. Topologically sorts rows by `SeedRef` edges (cycle ⇒ a validation
    error, same class as the FK-cycle guards).
-4. Computes `contentHash` for the marker.
-5. Returns `SeedIR[]`, distributed per deployable by the existing
+4. Returns `SeedIR[]`, distributed per deployable by the existing
    `migrationsForDeployable` machinery (renamed conceptually to "DB
    artifacts for deployable").
 
@@ -305,9 +291,8 @@ quick-start) the container entrypoint after `db:migrate`.
 
 - **domain path** → calls the generated repository `create` per row
   inside a transaction; `@handle` ids captured in a local map.
-- **raw path** → Drizzle `insert(...).values(...)` with
-  `.onConflictDoUpdate({ target: key, set })` when `key:` present, else
-  guarded by the `__loom_seed` marker row (`dataset + contentHash`).
+- **raw path** → Drizzle `insert(...).values(...)`, guarded by the
+  `__loom_seed` marker row for the dataset.
 
 ### 6.2 .NET / EF Core
 
@@ -317,8 +302,8 @@ a migration on every data edit). The seeder:
 
 - **domain path** → dispatches the aggregate's create command through
   the existing Mediator pipeline (invariants + handlers run).
-- **raw path** → `context.Set<T>().AddRange(...)` guarded by the marker
-  or an `AnyAsync()` natural-key check.
+- **raw path** → `context.Set<T>().AddRange(...)` guarded by the
+  dataset marker.
 
 ### 6.3 Phoenix / Ash
 
@@ -326,8 +311,7 @@ a migration on every data edit). The seeder:
 
 - **domain path** → `Ash.create!/2` per row (the changeset enforces the
   resource's validations — Ash's native seed idiom).
-- **`key:` present** → `upsert?: true, upsert_identity: :<key>`.
-- **raw path** → `Repo.insert_all/3` with `on_conflict`.
+- **raw path** → `Repo.insert_all/3`, marker-guarded.
 
 ### 6.4 React / static
 
@@ -345,15 +329,21 @@ dedicated `<deployable>-seed` init service that exits 0), reading
 
 ## 7. Idempotency & re-seeding semantics
 
-| Mechanism | When | Behaviour on re-boot |
-|---|---|---|
-| `__loom_seed` marker (`dataset`, `content_hash`) | default (no `key:`) | unchanged set ⇒ skip; changed set ⇒ re-apply (new hash row); old rows **not** retracted (forward-only, like migrations `Down` being a no-op in v1) |
-| natural-key upsert (`key:`) | reference data | every boot upserts each row in place; safe to evolve names/attrs over time |
+**v1 is ship-once per dataset.** A `__loom_seed` table holds one row
+per applied dataset; the seeder checks it on boot and skips the whole
+set if present. First boot seeds; every subsequent boot is a no-op.
+
+Editing an already-applied seed therefore has **no effect** on a DB
+that has seen it — you re-seed by clearing the marker (a `ddd seed
+--reset <dataset>`, §10) or against a fresh DB. This matches the Rails
+`db:seed` / Ecto `seeds.exs` contract and keeps v1 free of content
+hashing, per-row upsert, and any retraction logic.
 
 The marker table is created by the same migration pass that owns the
-module (a synthetic `createTable` step), so no manual DDL. This keeps
-seeding **forward-only** in v1, matching the migrations stance; a
-`seed --reset` CLI affordance and retraction are open questions (§10).
+module (a synthetic `createTable` step), so no manual DDL. Seeding is
+**forward-only**, matching the migrations stance. Per-row upsert by a
+declared natural key — the path for reference data corrected in place —
+is the deferred follow-up (§10).
 
 ---
 
@@ -365,7 +355,6 @@ seeding **forward-only** in v1, matching the migrations stance; a
 | Record field set fails the aggregate `create` param type-check | Error, reusing the call-arg type checker. `loom.seed-shape-mismatch` |
 | `@handle` referenced before it is bound, or unknown | Error. `loom.seed-unresolved-ref` |
 | `SeedRef` cycle across rows | Error: "seed rows form a dependency cycle." `loom.seed-cycle` |
-| `key:` field is not a unique/declared field of the aggregate | Error. `loom.seed-bad-key` |
 | `raw` + a value that an invariant would reject | **Warning** (raw deliberately bypasses the domain). `loom.seed-raw-unchecked` |
 | `seed` in a context whose module has no `migrationsOwner` (frontend-only) | Error: "nothing to seed — no database-owning deployable hosts this context." `loom.seed-no-db` |
 
@@ -398,8 +387,12 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
 
 1. **D-SEED-PATH** — domain-create default vs. raw default. (Recommend
    domain; `raw` opt-out.)
-2. **D-SEED-IDEMPOTENCY** — marker default vs. key default. (Recommend
-   marker; `key:` opt-in.)
+2. **D-SEED-IDEMPOTENCY** — confirm ship-once-marker for v1, with
+   per-row natural-key upsert deferred. The deferred path adds a `key
+   Aggregate.field` clause and an `upsert`/`onConflict` emission branch
+   per backend; it earns its keep only once a model has *reference*
+   data that ships once but is corrected in place. Until then the
+   marker covers every case the quick-start needs.
 3. **Event emission.** Should the domain path *emit* the events a
    `create` would (populating an event-log aggregate's stream), or
    suppress them? Lean: **suppress by default** (seeding is state, not
@@ -427,7 +420,8 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
 5. `seed-spec.json` artifact + compose seed step + `LOOM_SEED`
    dataset gating; quick-start `saas` template consumes it (closes the
    quickstart proposal's §5.4 dependency).
-6. `key:` upsert path; `ddd seed` runner; reset/retraction (§10).
+6. `ddd seed` runner + `--reset`; then (only on demand) the `key:`
+   upsert path for evolving reference data (§10).
 
 A model with no `seed` block emits byte-identically at every phase —
 the existing fixtures and conformance baselines do not move until a
