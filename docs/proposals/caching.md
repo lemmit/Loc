@@ -287,6 +287,42 @@ payloads on one socket; the **invalidation handler + the tag→queryKeys map** a
 this proposal's; both are off unless the deployable opts into
 `realtime: invalidation`.
 
+### Is invalidation tenant-wide? — scope the notification room by the view's audience
+
+With **type-keyed** rooms it *is*: a list page subscribes to the collection room
+`tenant.orders` (it can't predict which instance ids it'll show), so every user
+with any orders list open gets a ticket on **every** order save in the tenant.
+That's tenant-wide fan-out — no data leak (tickets carry no payload; each client
+refetches its own authorized read), but a tenant-wide *nudge* plus a faint
+side-channel ("*some* order changed" leaks existence/timing to users who can't
+see it).
+
+The fix is to scope the notification room by the **view's audience** — the same
+`DataKey`/visibility prefix used for delivery and the cache partition. Publish the
+ticket at the changed aggregate's `DataKey`/owner path; each view subscribes to
+the prefix matching *its* scope:
+
+```
+save(Order 42, owner = customer X)  →  ticket room  tenant.X.orders.42
+  customer X's "my orders" list     →  subscribes   tenant.X.orders.*    ← only its own
+  admin "all orders" list           →  subscribes   tenant.*.orders.*    ← tenant-wide (correct: sees all)
+```
+
+So it's tenant-wide **only for tenant-wide (admin) views**, which is right —
+that audience genuinely sees everything. An owner-scoped list hears only its
+owner's changes, and the side-channel closes (a customer never receives a ticket
+for another's order). Same prefix machinery, third use.
+
+Two boundaries to be honest about:
+
+- **Two granularities, two purposes.** The *server cache eviction* can stay
+  coarse (type tag — cheap, and the read-through absorbs the re-reads); only the
+  *frontend notification room* is narrowed to the audience. They needn't match.
+- **Clean prefix only.** Narrowing works when the view's scope is a `DataKey`/
+  owner prefix. For an arbitrary filter that isn't, fall back to the type room
+  (tenant-wide, mitigated by active-only refetch + coalescing) or graduate to a
+  **projection** — the same discrete-vs-continuous line as parametrized tags.
+
 ## Tickets vs payloads — the default that makes scoping a non-problem
 
 An invalidation push **does not need to carry the data** — it needs to carry "your key
