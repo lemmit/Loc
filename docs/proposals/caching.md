@@ -523,7 +523,8 @@ routing-by-key".)
 So: the **resource's `dataKey` drives publish-to-ancestors; the user's `dataKey`
 (JWT) is the room it joins; they meet iff the user is at-or-above the resource** —
 the reachability policy compiled into room topology, with the authz'd refetch as
-the real gate. No per-ticket policy evaluation. **This clean matching holds only
+the real gate. No per-ticket × per-connection evaluation (see "What 'no per-ticket
+evaluation' means" below). **This clean matching holds only
 because here the visibility relation *is* the dataKey ancestry.** When it isn't,
 the next section.
 
@@ -573,6 +574,48 @@ rest; the refetch is always the correctness boundary.** And this is *only* safe
 because tickets carry no data — over-delivery on un-roomed dimensions can't leak,
 the refetch re-authorizes. (Payload delivery can't do this; it must room on every
 dimension or pay per-ticket eval — the trilemma.)
+
+#### How the compiler decides the split — equi-join key vs residual
+
+The policy is a predicate over `(resource fields, currentUser fields)`. The
+compiler walks its conjuncts and classifies each — and it is the *same* decision a
+SQL planner makes choosing hash-join keys vs filter residuals:
+
+| Conjunct shape | Becomes | Why |
+|---|---|---|
+| `f(resource) == g(currentUser)` — equality / membership / dataKey-prefix (an **equi-join**) | a **room dimension** | both sides independently compute a matching key |
+| `resource.field == <const>` (the view's own fixed filter) | a **room dimension** (or `WHERE`) | a fixed key both sides know |
+| range / computed / function — `total > 100`, `createdAt > now()-7d`, full-text | the **refetch `WHERE`** (residual) | no discrete key to match on |
+| equi-join but **huge cardinality** | demoted to `WHERE` (cost) | too many rooms |
+
+So there's no guesswork: an **equality** condition can become a hash key (the
+room); an **inequality/function** condition can't, so it stays a filter. That's
+why **some part must live in the `WHERE`** — a range/computed/full-text predicate
+has *no* room representation (a range isn't a key, `now()` moves), so it can only
+be evaluated at query time. The `WHERE` is the non-equi residual, and the
+always-correct full check rooms merely pre-filter.
+
+#### What "no per-ticket evaluation" means — it's a hash lookup, not a scan
+
+You're right that there *is* evaluation — the precise claim is **no per-ticket ×
+per-connection evaluation**. Three different evaluations happen, at three scales:
+
+| Evaluation | Scale | What |
+|---|---|---|
+| resource's room key(s) from **its own fields** | **O(1) per ticket** | `order#99.region → "orders:region:A"` — tests no user |
+| user's rooms from **its claims** | **O(1) per connection** (at connect) | `U.regions {A,B} → join those rooms` |
+| delivery | O(recipients) per ticket | hash lookup + socket write; no predicate |
+| the **`WHERE`** | once per **refetch**, at the DB | the real authorization |
+
+What the room eliminates is the **O(tickets × connections)** nested loop — "for
+each ticket, test every connection against the policy." It does so by being a
+**hash index on the equi-join key**: compute the key once on each side, match by
+lookup. So evaluation happens (compute `keyA(resource)` per ticket, `keyB(user)`
+per connection, the `WHERE` per refetch) — but never the N×M scan. **An equi-join
+is a hash lookup, not a nested-loop scan**; the room is the hash bucket, the
+`WHERE` is the residual it can't express, and authorization ultimately lives in
+the `WHERE`, with the room saving refetches when the equi-join part already says
+"not yours."
 
 ## Tickets vs payloads — the default that makes scoping a non-problem
 
