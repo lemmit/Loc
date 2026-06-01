@@ -825,6 +825,65 @@ and reused on both sides.
 > graduate to a `projection`), and the cache tier is chosen by the read's authz
 > shape (per-user reads cache in-handler below the gate, not in OutputCache).
 
+## Runtime — the moving parts, end to end
+
+How it actually *runs*, concretely. Five components:
+
+```
+  WRITE backend (hosts the context)              RELAY backend (holds the sockets)        BROWSER
+  ┌─────────────────────────────┐    broker      ┌──────────────────────────────┐  SSE/WS ┌────────────┐
+  │ aggregate.save(order#42)     │  (Redis/Kafka/ │ connections: connId→{claims,  │◀───────▶│ React Query │
+  │  → DomainEventDispatcher     │──in-proc)─────▶│   rooms, socket}              │         │ + realtime  │
+  │  → publishRoomsFor(#42)      │  ticket /room  │ rooms: roomKey→Set<connId>    │         │ client      │
+  │  → publish ticket to rooms   │                │ onTicket(room): push members  │         └────────────┘
+  └─────────────────────────────┘                │  (+ optional per-push filter) │
+                                                  └──────────────────────────────┘
+  authorized READ endpoint (the gate) ◀────── refetch GET /orders (authz'd WHERE) ─────────┘
+```
+
+**Generated at compile time** (from the policy + read/view ASTs) — no policy is
+interpreted at runtime, it's compiled into these:
+
+| Generated | From | Used by |
+|---|---|---|
+| `publishRoomsFor(Type, after, before)` → room keys | policy equi dimensions (dataKey ancestors, dept, region) + instance + before-image | dispatcher |
+| `roomOf(queryKey, claims)` → room key | same, mirrored | the **client** |
+| `maySee(claims, resourceFields)` → bool | the full policy as an in-memory predicate | relay (B filter / A join check) |
+| `invalidates: tag → queryKeys[]` | read/view dependency sets | the client |
+| before-image field set | which fields are room keys | the save path |
+
+**One request, traced:**
+
+```
+① CONNECT   verify JWT → claims { tenantId:t.acme, dataKey:t.acme.dept.D, dept:D, regions:{A}, perms }
+            relay: connections[c1] = { claims, rooms:∅, socket }
+② SUBSCRIBE mount useQuery(["orders"]) → client: room = roomOf(["orders"],claims) = "t.acme.dept.D:orders"
+            → {join:room} → relay asserts room ∈ roomsDerivableFrom(c1.claims)   ← structural join authz
+            → rooms[room].add(c1)
+③ WRITE     save(order#42)[dept:D,region:A,dataKey:t.acme.dept.D,status:open]
+            dispatcher: publishRoomsFor = ["t.acme.dept.D:orders","t.acme:orders","t:orders",
+                                           "orders:region:A","orders:42"]  (+ OLD-value rooms if a key field changed)
+            ticket {tag:"orders",id:42}  (no payload) → broker.publish(room, ticket) for each
+④ ROUTE     broker → relays subscribed to those rooms (backplane if sharded)
+            relay.onTicket(room): for c in rooms[room]:
+                if residualFilter && !maySee(c.claims,#42fields): continue   ← option B (status/region residual)
+                c.socket.send(ticket)
+⑤ DELIVER   client.onTicket({orders,42}) → qc.invalidateQueries(["orders"])  (list + [orders,42] + finds)
+            active query → refetch GET /orders → WHERE <full policy> (dept=D AND status=open AND withinHours()) ← GATE
+            → only rows c1 may see → re-render
+⑥ AMBIENT   that read also returned { validUntil: 17:00 } → client setTimeout(refetch, 17:00−now)  (clock re-check)
+   on unmount → {leave:room} → relay drops c1 from rooms[room]
+```
+
+**The split that makes it tractable:** compile time turns the policy into three
+small functions (`publishRoomsFor`, `roomOf`, `maySee`) + the invalidation map +
+the before-image set; runtime is then cheap and dumb — the dispatcher computes
+room keys from the resource's own fields (O(1)), the relay is two hash maps + a
+push loop (O(recipients), optional in-memory `maySee` filter), the client is a
+query-cache hook + `invalidateQueries` + a couple of timers; and **the gate is
+always the refetch** — rooms/`maySee` only decide *who to nudge*, the authorized
+read's `WHERE` decides *what they get*, every time.
+
 ## IR, lowering, enrichment (phase mapping)
 
 Following the `view`/`criterion`/`workflow` vertical-slice recipe:
