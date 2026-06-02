@@ -1,0 +1,301 @@
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+} from "../../ir/types/loom-ir.js";
+import { isTpcBase, isTpcConcrete } from "../../ir/util/inheritance.js";
+import { effectiveSavingShape } from "../../ir/util/resolve-datasource.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
+import { crudOpNames } from "./api-emit.js";
+import { emitAggregateResources } from "./domain-emit.js";
+import { renderJasonEncoderImpl } from "./jason-camel-emit.js";
+import { joinEntityName, renderJoinResource } from "./join-resource-emit.js";
+import { renderAshType } from "./render-expr.js";
+import { buildFindActions, findRepoFor, mergeViewFindsForAgg } from "./repository-emit.js";
+
+// ---------------------------------------------------------------------------
+// Context emission — one Ash.Resource per aggregate + one Ash.Domain per ctx
+// ---------------------------------------------------------------------------
+
+export function emitContext(
+  appName: string,
+  ctx: EnrichedBoundedContextIR,
+  appModule: string,
+  out: Map<string, string>,
+  options: {
+    resolveDataSource?: (
+      agg: AggregateIR,
+    ) => import("../../ir/util/resolve-datasource.js").ResolvedDataSource | undefined;
+  } = {},
+): void {
+  const ctxSnake = snake(ctx.name);
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+
+  // Enums — Ash enum types
+  for (const en of ctx.enums) {
+    const path = `lib/${appName}/${ctxSnake}/${snake(en.name)}.ex`;
+    out.set(path, renderEnumModule(en, contextModule));
+  }
+
+  // Value objects — Ash embedded resources
+  for (const vo of ctx.valueObjects) {
+    const path = `lib/${appName}/${ctxSnake}/${snake(vo.name)}.ex`;
+    out.set(path, renderValueObjectModule(vo, contextModule, appModule));
+  }
+
+  // Events
+  for (const ev of ctx.events) {
+    const path = `lib/${appName}/${ctxSnake}/events/${snake(ev.name)}.ex`;
+    out.set(path, renderEventModule(ev, contextModule));
+  }
+
+  // Aggregates — Ash.Resource modules. Validations (operation preconditions
+  // / aggregate invariants) and validate-clause emission are produced by
+  // emitAggregateResources.
+  const allResources: string[] = [];
+  const aggFiles = emitAggregateResources(ctx, appModule, appName, {
+    resolveDataSource: options.resolveDataSource,
+  });
+  for (const [path, content] of aggFiles) out.set(path, content);
+  for (const agg of ctx.aggregates) {
+    // Abstract TPC base: no Ash.Resource is emitted for it, so it is not
+    // registered on the domain (and has no parts / join resources).
+    if (agg.isAbstract) continue;
+    allResources.push(`${contextModule}.${upperFirst(agg.name)}`);
+    for (const part of agg.parts) {
+      allResources.push(`${contextModule}.${upperFirst(part.name)}`);
+    }
+    // Reference-collection (`Id<T>[]`) join resources — one Ash.Resource
+    // module per association, owning the join table.  Registered on the
+    // context's Ash.Domain like any other resource so the auto-discovery
+    // sees it.  Naming flows through `joinEntityName(assoc)` so all four
+    // emitters (resource, configuration, domain, migration) stay in sync.
+    for (const assoc of agg.associations) {
+      const joinPath = `lib/${appName}/${ctxSnake}/${assoc.joinTable}.ex`;
+      out.set(joinPath, renderJoinResource(assoc, contextModule, appModule));
+      allResources.push(`${contextModule}.${joinEntityName(assoc)}`);
+    }
+  }
+  // Custom find actions (repository finds + view-derived finds) are
+  // spliced in via a separate side-channel — emitAggregateResources
+  // doesn't yet consume customFinds, so we wrap each aggregate's
+  // emitted source by injecting custom find action lines.  Until
+  // emitAggregateResources accepts customFinds, the orchestrator
+  // keeps its repository-find responsibility here as a post-pass.
+  for (const agg of ctx.aggregates) {
+    if (agg.isAbstract) continue;
+    const repo = findRepoFor(ctx, agg.name);
+    const repoWithViews = mergeViewFindsForAgg(agg, repo, ctx);
+    if (!repoWithViews) continue;
+    const customFinds = buildFindActions(repoWithViews, agg, contextModule);
+    if (customFinds.length === 0) continue;
+    const path = `lib/${appName}/${ctxSnake}/${snake(agg.name)}.ex`;
+    const existing = out.get(path);
+    if (!existing) continue;
+    // Splice find actions before the `defaults` line inside `actions do`.
+    out.set(
+      path,
+      existing.replace(
+        /( {2}actions do\n)/,
+        `$1${customFinds.map((s) => "    " + s).join("\n")}\n\n`,
+      ),
+    );
+  }
+
+  // Domain module per context
+  const domainPath = `lib/${appName}/${ctxSnake}.ex`;
+  out.set(domainPath, renderDomainModule(ctx, contextModule, allResources));
+}
+
+// ---------------------------------------------------------------------------
+// Enum module
+// ---------------------------------------------------------------------------
+
+function renderEnumModule(
+  en: import("../../ir/types/loom-ir.js").EnumIR,
+  contextModule: string,
+): string {
+  const moduleName = `${contextModule}.${upperFirst(en.name)}`;
+  const values = en.values.map((v) => `  :${snake(v)}`).join(",\n");
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  use Ash.Type.Enum, values: [
+${values}
+  ]
+end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Value object module (embedded Ash.Resource)
+// ---------------------------------------------------------------------------
+
+function renderValueObjectModule(
+  vo: import("../../ir/types/loom-ir.js").ValueObjectIR,
+  contextModule: string,
+  appModule: string,
+): string {
+  const moduleName = `${contextModule}.${upperFirst(vo.name)}`;
+  const attrLines = vo.fields.map((f) => {
+    const ashType = renderAshType(f.type, contextModule);
+    const opts = f.optional ? "allow_nil?: true" : "allow_nil?: false";
+    return `    attribute :${snake(f.name)}, ${ashType}, ${opts}`;
+  });
+
+  // VOs are embedded inside aggregates' wire shape, so they need the
+  // camelCase Jason encoder too — same shared helper as aggregates.
+  const fieldAtoms = vo.fields.map((f) => `:${snake(f.name)}`);
+  const jasonImpl = renderJasonEncoderImpl(moduleName, fieldAtoms, appModule);
+
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  use Ash.Resource, data_layer: :embedded
+
+  attributes do
+${attrLines.join("\n")}
+  end
+end
+
+${jasonImpl}`;
+}
+
+// ---------------------------------------------------------------------------
+// Event module
+// ---------------------------------------------------------------------------
+
+function renderEventModule(
+  ev: import("../../ir/types/loom-ir.js").EventIR,
+  contextModule: string,
+): string {
+  const moduleName = `${contextModule}.Events.${upperFirst(ev.name)}`;
+  void renderAshType; // used in sibling fns
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc "Domain event: ${upperFirst(ev.name)}"
+
+  defstruct [${ev.fields.map((f) => `:${snake(f.name)}`).join(", ")}]
+  @type t :: %__MODULE__{
+${ev.fields.map((f) => `    ${snake(f.name)}: term()`).join(",\n")}
+  }
+end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Ash.Domain rendering (per context)
+// ---------------------------------------------------------------------------
+
+function renderDomainModule(
+  ctx: BoundedContextIR,
+  contextModule: string,
+  resources: string[],
+): string {
+  // Ash 3.x: `define` calls live INSIDE the `resource ... do`
+  // block, NOT in a separate top-level `code_interface do` block
+  // (that was Ash 2.x; removed in 3.0).
+  const resourceBlocks: string[] = [];
+  const partResources = new Set<string>();
+  // Parts of `shape(embedded)` aggregates are Ash *embedded* resources —
+  // they are NOT domain-registered (Ash forbids an embedded resource in a
+  // domain's `resources` block); they live inline in the parent's jsonb.
+  const embeddedParts = new Set<string>();
+  for (const agg of ctx.aggregates) {
+    const isEmbedded = effectiveSavingShape(agg as EnrichedAggregateIR) === "embedded";
+    for (const part of agg.parts) {
+      const mod = `${contextModule}.${upperFirst(part.name)}`;
+      partResources.add(mod);
+      if (isEmbedded) embeddedParts.add(mod);
+    }
+  }
+  for (const r of resources) {
+    if (embeddedParts.has(r)) continue;
+    const aggName = r.split(".").pop()!;
+    // Locate the IR aggregate to enumerate its custom finds.
+    const agg = ctx.aggregates.find((a) => upperFirst(a.name) === aggName);
+    if (!agg) {
+      // Entity-part resource (child table) — registered with no
+      // code-interface defines; Ash 3.x's `resource X` shorthand.
+      resourceBlocks.push(`    resource ${r}`);
+      continue;
+    }
+    // A CRUD verb claimed by a public operation (e.g. crudish `update`) drops
+    // its standard `define` — the per-op define below owns that name, matching
+    // the cross-backend per-op form (avoids a duplicate Ash code-interface
+    // define).  See CRUD_VERB_NAMES.
+    const crudOps = crudOpNames(agg);
+    const defines: string[] = (
+      [
+        ["create", `      define :create_${snake(agg.name)}, action: :create`],
+        ["list", `      define :list_${snake(plural(agg.name))}, action: :read`],
+        ["get", `      define :get_${snake(agg.name)}, action: :read, get_by: [:id]`],
+        ["update", `      define :update_${snake(agg.name)}, action: :update, get_by: [:id]`],
+        ["destroy", `      define :destroy_${snake(agg.name)}, action: :destroy, get_by: [:id]`],
+      ] as const
+    )
+      .filter(([name]) => !crudOps.has(name))
+      .map(([, src]) => src);
+    const repo = ctx.repositories.find((rr) => rr.aggregateName === agg.name);
+    if (repo) {
+      for (const find of repo.finds) {
+        // Skip the IR-enriched "all" find — `define :list_X, action: :read`
+        // (above) already provides the equivalent code-interface entry.
+        // Emitting `define :all_X, action: :all` would also require a
+        // matching custom `read :all do end` action on the resource;
+        // dropping both keeps the domain block minimal and compile-clean.
+        if (find.name === "all") continue;
+        const argsList = find.params.map((p) => `:${snake(p.name)}`).join(", ");
+        const argsClause = argsList ? `, args: [${argsList}]` : "";
+        defines.push(
+          `      define :${snake(find.name)}_${snake(agg.name)}, action: :${snake(find.name)}${argsClause}`,
+        );
+      }
+    }
+    // Operation actions (`update :<op>`) get a code-interface define so a
+    // one-click `Action(<instance>.<op>)` can invoke them directly
+    // (`<Ctx>.<op>_<agg>!(record)`).  Op params become positional args.
+    for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+      const argsList = op.params.map((p) => `:${snake(p.name)}`).join(", ");
+      const argsClause = argsList ? `, args: [${argsList}]` : "";
+      defines.push(
+        `      define :${snake(op.name)}_${snake(agg.name)}, action: :${snake(op.name)}${argsClause}`,
+      );
+    }
+    resourceBlocks.push(`    resource ${r} do\n${defines.join("\n")}\n    end`);
+  }
+
+  // Polymorphic read home for each abstract TPC (`ownTable`) base
+  // (aggregate-inheritance.md, `find all <Base>`).  The base owns no resource;
+  // its read is the union of its concrete subtypes' generated `list_<concrete>`
+  // code-interface functions.  Emitted as plain module functions (Ash has no
+  // cross-resource read action) — read-only; writes go through the concretes.
+  const baseBlocks: string[] = [];
+  for (const base of ctx.aggregates) {
+    if (!isTpcBase(base, ctx.aggregates)) continue;
+    const concretes = ctx.aggregates.filter(
+      (a) => a.extendsAggregate === base.name && isTpcConcrete(a, ctx.aggregates),
+    );
+    if (concretes.length === 0) continue;
+    const listName = `list_${snake(plural(base.name))}`;
+    const union = concretes.map((c) => `list_${snake(plural(c.name))}!()`).join(" ++ ");
+    baseBlocks.push(
+      [
+        `  @doc "Polymorphic read of the abstract base ${upperFirst(base.name)} — the union of its concrete subtypes."`,
+        `  def ${listName}!, do: ${union}`,
+        `  def ${listName}, do: {:ok, ${listName}!()}`,
+      ].join("\n"),
+    );
+  }
+  // Byte-identical with the pre-inheritance output when there is no TPC base.
+  const readerSection = baseBlocks.length > 0 ? `\n\n${baseBlocks.join("\n\n")}` : "";
+
+  return `# Auto-generated.
+defmodule ${contextModule} do
+  use Ash.Domain
+
+  resources do
+${resourceBlocks.join("\n")}
+  end${readerSection}
+end
+`;
+}

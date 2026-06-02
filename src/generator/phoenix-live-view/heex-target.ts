@@ -194,9 +194,3 @@ function snakeLocal(s: string): string {
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
     .toLowerCase();
 }
-
-function pluralLocal(s: string): string {
-  if (s.endsWith("y") && !/[aeiou]y$/.test(s)) return `${s.slice(0, -1)}ies`;
-  if (/(s|x|z|ch|sh)$/.test(s)) return `${s}es`;
-  return `${s}s`;
-}
