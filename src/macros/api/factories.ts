@@ -99,6 +99,7 @@ export function primType(
     mkTypeRef({
       $type: "TypeRef",
       base: prim,
+      ctors: [],
       array: opts.array ?? false,
       optional: opts.optional ?? false,
     }),
@@ -126,6 +127,7 @@ export function idRef(
     mkTypeRef({
       $type: "TypeRef",
       base: idType,
+      ctors: [],
       array: opts.array ?? false,
       optional: opts.optional ?? false,
     }),
@@ -149,6 +151,7 @@ export function namedType(
     mkTypeRef({
       $type: "TypeRef",
       base: nt,
+      ctors: [],
       array: opts.array ?? false,
       optional: opts.optional ?? false,
     }),

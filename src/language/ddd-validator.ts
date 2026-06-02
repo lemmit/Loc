@@ -26,6 +26,7 @@ import {
   checkCriteria,
   checkDataSource,
   checkDeployable,
+  checkGenericCarriers,
   checkLayout,
   checkLegacyConstructorCalls,
   checkMacroExpansion,
@@ -107,6 +108,10 @@ export class DddValidator {
     // uniqueness within a context (and vs. value objects / events) and
     // distinct non-empty field names.
     checkPayloads(model, accept);
+    // Generic-carrier instantiation (payload-transport-layer.md, P3):
+    // the single type argument of `paged` / `envelope` must be a carrier,
+    // and v1 admits only single-level (non-nested) instantiation.
+    checkGenericCarriers(model, accept);
     // `slot` is a UI-only param marker (PR #632) — reject anywhere
     // outside a component's parameter list with a clear error rather
     // than letting the backend emitter throw at generate time.

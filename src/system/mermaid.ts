@@ -64,6 +64,8 @@ function typeName(t: TypeIR): string {
       return `${typeName(t.inner)}?`;
     case "slot":
       return "slot";
+    case "genericInstance":
+      return `${typeName(t.arg)} ${t.ctor}`;
   }
 }
 
@@ -87,6 +89,9 @@ function refsOfKind(t: TypeIR, kind: "id" | "valueobject" | "enum", out: Set<str
       return;
     case "optional":
       refsOfKind(t.inner, kind, out);
+      return;
+    case "genericInstance":
+      refsOfKind(t.arg, kind, out);
       return;
     case "primitive":
     case "entity":

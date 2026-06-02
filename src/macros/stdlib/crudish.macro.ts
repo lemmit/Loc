@@ -94,6 +94,7 @@ function cloneType(
     $type: "TypeRef",
     array: t.array,
     optional: t.optional,
+    ctors: [...t.ctors],
     base: cloneBase(t.base),
   });
   // Re-parent the base node: $container metadata is required by

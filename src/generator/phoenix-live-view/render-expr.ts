@@ -526,6 +526,10 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
       return renderAshType(t.inner, contextModule);
     case "slot":
       throw new Error("renderAshType: 'slot' type is UI-only and should not reach the backend.");
+    case "genericInstance":
+      throw new Error(
+        `renderAshType: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
   }
 }
 

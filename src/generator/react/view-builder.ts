@@ -306,5 +306,9 @@ function zodForResponseInner(t: TypeIR): string {
       throw new Error(
         "zodForResponseInner: 'slot' type is UI-only and should not reach the response schema.",
       );
+    case "genericInstance":
+      throw new Error(
+        `zodForResponseInner: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
   }
 }

@@ -556,6 +556,11 @@ function typeShorthand(t: TypeIR): string {
       return `${typeShorthand(t.inner)}?`;
     case "slot":
       return "slot";
+    case "genericInstance":
+      // Enrichment runs before the IR-validate gate, so a `paged` /
+      // `envelope` instance can legitimately reach here; render readable
+      // postfix text rather than throwing.
+      return `${typeShorthand(t.arg)} ${t.ctor}`;
   }
 }
 

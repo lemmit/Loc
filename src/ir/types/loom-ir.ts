@@ -91,12 +91,26 @@ export type TypeIR =
   | { kind: "entity"; name: string; sensitivity?: SensitivityTags }
   | { kind: "array"; element: TypeIR; sensitivity?: SensitivityTags }
   | { kind: "optional"; inner: TypeIR; sensitivity?: SensitivityTags }
+  /** Carrier-bounded generic payload instantiation — `customer paged`,
+   *  `event envelope` (payload-transport-layer.md, P3).  `ctor` names a
+   *  blessed stdlib shape (see `src/ir/stdlib/generics.ts`); `arg` is the
+   *  single carrier type argument.  Nesting is left-associative postfix:
+   *  `string envelope paged` lowers to
+   *  `genericInstance(paged, genericInstance(envelope, primitive string))`.
+   *  P3a represents this in the IR but blocks emission at IR-validate; P3b
+   *  monomorphizes each distinct instance into a concrete payload. */
+  | { kind: "genericInstance"; ctor: GenericCtorName; arg: TypeIR; sensitivity?: SensitivityTags }
   /** Element-shaped param marker — only valid on a `component`'s
    *  parameter list.  Values flow as JSX (any walker expression) from
    *  the caller's scope into the component body; a bare ref to a
    *  slot-typed param renders the caller's expression at that
    *  position.  See `docs/page-metamodel.md`. */
   | { kind: "slot"; sensitivity?: SensitivityTags };
+
+/** The blessed closed set of generic-payload carriers (v1, A7a).  Kept in
+ *  lockstep with the `GenericCtor` grammar rule and the stdlib registry in
+ *  `src/ir/stdlib/generics.ts`. */
+export type GenericCtorName = "paged" | "envelope";
 
 export interface ParamIR {
   name: string;

@@ -397,6 +397,10 @@ export function renderCsType(t: TypeIR): string {
       return `${renderCsType(t.inner)}?`;
     case "slot":
       throw new Error("renderCsType: 'slot' type is UI-only and should not reach the backend.");
+    case "genericInstance":
+      throw new Error(
+        `renderCsType: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
   }
 }
 

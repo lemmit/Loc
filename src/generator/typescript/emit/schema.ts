@@ -509,6 +509,10 @@ function drizzleColumnLinesForName(
       throw new Error(
         "drizzleColumnLinesForName: 'slot' type is UI-only and should not reach the schema emitter.",
       );
+    case "genericInstance":
+      throw new Error(
+        `drizzleColumnLinesForName: generic carrier '${inner.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
   }
 }
 

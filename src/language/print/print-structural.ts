@@ -700,5 +700,11 @@ function printTypeRef(node: TypeRef): string {
       throw new Error(`printTypeRef: unhandled base ${(exhaustive as { $type: string }).$type}`);
     }
   }
-  return `${s}${node.array ? "[]" : ""}${node.optional ? "?" : ""}`;
+  // Postfix generic carriers (P3): `customer paged`, `string envelope paged`.
+  // They sit between the base and the array/optional suffixes, matching the
+  // grammar's `base (ctors)* ([]) (?)` order.  Guard against programmatically
+  // built TypeRef nodes (web builder, macros) that may omit the list.
+  const ctorList = node.ctors ?? [];
+  const ctors = ctorList.length > 0 ? ` ${ctorList.join(" ")}` : "";
+  return `${s}${ctors}${node.array ? "[]" : ""}${node.optional ? "?" : ""}`;
 }
