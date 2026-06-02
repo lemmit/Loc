@@ -35,7 +35,7 @@ system Demo {
   resource catalogState { for: Catalog, kind: state, use: primarySql }
   deployable honoApi    { platform: hono           contexts: [Catalog] dataSources: [catalogState] serves: ShopApi port: 3000 }
   deployable dotnetApi  { platform: dotnet         contexts: [Catalog] dataSources: [catalogState] serves: ShopApi port: 8080 }
-  deployable phoenixApi { platform: phoenixLiveView contexts: [Catalog] dataSources: [catalogState] serves: ShopApi port: 4000 }
+  deployable phoenixApi { platform: phoenix contexts: [Catalog] dataSources: [catalogState] serves: ShopApi port: 4000 }
 }
 `;
 

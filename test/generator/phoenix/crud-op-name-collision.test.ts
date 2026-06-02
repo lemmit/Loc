@@ -30,7 +30,7 @@ const FIXTURE = `system S {
   storage primary { type: postgres }
   resource catState { for: Cat, kind: state, use: primary }
   deployable web {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Cat]
     dataSources: [catState]
     serves: CatApi

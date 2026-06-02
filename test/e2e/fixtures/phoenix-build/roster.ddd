@@ -35,7 +35,7 @@ system Roster {
   storage primary { type: postgres }
   resource rosterState { for: Roster, kind: state, use: primary }
   deployable phoenixApp {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Roster]
     dataSources: [rosterState]
     serves: RosterApi

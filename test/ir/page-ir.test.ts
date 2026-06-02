@@ -565,7 +565,7 @@ describe("page metamodel — IR shape", () => {
         system Acme {
           subdomain M { context C { } }
           ui Admin { framework: phoenixLiveView }
-          deployable app { platform: phoenixLiveView, contexts: [C], hosts: Admin, port: 4000 }
+          deployable app { platform: phoenix, contexts: [C], hosts: Admin, port: 4000 }
         }
       `);
       const d = deployableByName(loom, "app");
@@ -580,7 +580,7 @@ describe("page metamodel — IR shape", () => {
           subdomain M { context C { } }
           ui Web { framework: react }
           ui Admin { framework: phoenixLiveView }
-          deployable app { platform: phoenixLiveView, contexts: [C], hosts: [Web, Admin], port: 4000 }
+          deployable app { platform: phoenix, contexts: [C], hosts: [Web, Admin], port: 4000 }
         }
       `);
       expect(deployableByName(loom, "app").hostedUiNames).toEqual(["Web", "Admin"]);
@@ -606,12 +606,12 @@ describe("page metamodel — IR shape", () => {
       expect(deployableByName(loom, "app").platform).toBe("phoenix");
     });
 
-    it("legacy platform: phoenixLiveView desugars to the canonical phoenix", async () => {
+    it("legacy platform: phoenix desugars to the canonical phoenix", async () => {
       const loom = await buildLoom(`
         system Acme {
           subdomain M { context C { } }
           ui Admin { framework: liveview }
-          deployable app { platform: phoenixLiveView, contexts: [C], hosts: Admin, port: 4000 }
+          deployable app { platform: phoenix, contexts: [C], hosts: Admin, port: 4000 }
         }
       `);
       expect(deployableByName(loom, "app").platform).toBe("phoenix");

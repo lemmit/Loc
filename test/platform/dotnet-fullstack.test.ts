@@ -9,7 +9,7 @@ import { generateSystems } from "../../src/system/index.js";
 // Fullstack `platform: dotnet, ui: WebApp` mode.
 //
 // A single .NET deployable that BOTH serves an API AND hosts a React
-// SPA from wwwroot/.  Mirrors the proven phoenixLiveView fullstack
+// SPA from wwwroot/.  Mirrors the proven phoenix fullstack
 // shape: one project, one container, one compose service.  The .NET
 // project's controllers move to `/api/*` so the SPA's path namespace
 // stays free for client-side routing; Program.cs gains
