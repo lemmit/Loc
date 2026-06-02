@@ -22,6 +22,7 @@ import type {
 import {
   checkBinaryOperands,
   checkBuilderCallType,
+  checkChannels,
   checkComponent,
   checkContext,
   checkCriteria,
@@ -143,6 +144,9 @@ export class DddValidator {
     // Criterion declarations + use sites: candidate-type support,
     // body purity, reference cycles, and call arity.
     checkCriteria(model, accept);
+    // Channel + channelSource: key-field existence and the channel<->storage
+    // transport compatibility matrix (channels.md, Slice 1).
+    checkChannels(model, accept);
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
         checkContext(m, accept);

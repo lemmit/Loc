@@ -9,6 +9,8 @@ import type {
   Api,
   Apply,
   BoundedContext,
+  Channel,
+  ChannelSource,
   Component,
   ConfigEntry,
   ConnectionSource,
@@ -62,6 +64,7 @@ import {
   isAssignOrCallStmt,
   isBoundedContext,
   isCallSuffix,
+  isChannel,
   isComponent,
   isContainment,
   isCreate,
@@ -114,6 +117,8 @@ import type {
   ApiIR,
   ApplyIR,
   BoundedContextIR,
+  ChannelIR,
+  ChannelSourceIR,
   CodeRefIR,
   CodeRefKind,
   ComponentIR,
@@ -637,6 +642,15 @@ function lowerSystem(sys: System): SystemIR {
   // body is a page-body-shaped expression lowered against the same
   // env shape pages use.  No params or state — layouts are static
   // wrappers, not parametric components.
+  const channelSources = sys.members
+    .filter((m): m is ChannelSource => m.$type === "ChannelSource")
+    .map(
+      (cs): ChannelSourceIR => ({
+        name: cs.name,
+        channelName: cs.channel ?? "",
+        storageName: cs.use?.ref?.name ?? "",
+      }),
+    );
   const layouts = sys.members
     .filter((m): m is Layout => m.$type === "Layout")
     .map((l): LayoutIR => lowerLayout(l));
@@ -651,6 +665,7 @@ function lowerSystem(sys: System): SystemIR {
     apis,
     storages,
     dataSources,
+    channelSources,
     layouts,
   };
   // Scaffold expander always runs.  `page.origin` (set during page
@@ -1391,6 +1406,7 @@ function lowerContext(
   const workflows: WorkflowIR[] = [];
   const views: ViewIR[] = [];
   const criteria: CriterionIR[] = [];
+  const channels: ChannelIR[] = [];
   const retrievals: RetrievalIR[] = [];
   const seeds: SeedIR[] = [];
   // Context-level capabilities propagate to every aggregate inside.
@@ -1409,6 +1425,7 @@ function lowerContext(
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
     else if (isView(m)) views.push(lowerView(m, env));
     else if (isCriterion(m)) criteria.push(lowerCriterion(m, env));
+    else if (isChannel(m)) channels.push(lowerChannel(m));
     else if (isRetrieval(m)) retrievals.push(lowerRetrieval(m, env));
     else if (isSeed(m)) seeds.push(lowerSeed(m, env));
   }
@@ -1428,8 +1445,22 @@ function lowerContext(
     workflows,
     views,
     criteria,
+    channels,
     retrievals,
     seeds,
+  };
+}
+
+/** Lower a `channel <Name> { carries: … }` declaration (channels.md, Slice 1)
+ *  to its IR record.  Structural only — no expressions.  Knob defaults
+ *  reproduce today's in-process broadcast/ephemeral dispatch. */
+function lowerChannel(c: Channel): ChannelIR {
+  return {
+    name: c.name,
+    carries: c.carries.map((r) => r.$refText).filter((n) => n.length > 0),
+    delivery: (c.delivery as ChannelIR["delivery"]) ?? "broadcast",
+    retention: (c.retention as ChannelIR["retention"]) ?? "ephemeral",
+    ...(c.key ? { key: c.key } : {}),
   };
 }
 
