@@ -4,10 +4,10 @@
 build order specified below.
 **Scope:** Collapse the zero-to-running path into a single opinionated
 command, give the running model a unified dev loop and a one-command
-deploy, and add the handful of runtime capabilities (`auth` providers
-with login/signup UI, `job`, `email`, object `storage`, `seed`) that
-nearly every real application needs on its first day — none of which
-the model can express today.
+deploy, and add the handful of runtime capabilities (turnkey `auth` via
+OIDC delegation, `job`, `email`, object `storage`, `seed`) that nearly
+every real application needs on its first day — none of which the model
+can express today.
 
 > This proposal is a *family*, not a single feature. The items are
 > grouped because they share one goal — make the first hour of a Loom
@@ -53,10 +53,12 @@ and a production one:
    need authentication with a login screen, scheduled/background work,
    transactional email, file upload, and seed data on first boot. Today:
    - **Auth** (`auth.md`) gives `user {}`, `currentUser`, `permissions`,
-     `requires`, and JWT-*decode* middleware — but the author writes the
-     verifier, and there is **no signup/login UI, no password hashing,
-     no session/cookie, no OAuth providers, no email verification, and no
-     default-deny**.
+     `requires`, and JWT-*decode* middleware — but the author hand-writes
+     the verifier, and there is **no out-of-the-box identity provider
+     integration, no session issuance, no login redirect/UI, and no
+     default-deny**. (Per D-AUTH-OIDC the fix is OIDC delegation — Loom
+     fills the verifier hook + login handshake against an external IdP,
+     not a built-in password store.)
    - **Jobs / schedules** — no construct exists.
    - **Email** — no construct exists.
    - **File upload / object storage** — the `storage` enum has no object
@@ -79,7 +81,7 @@ and changes no emitted output for a model that doesn't opt in.
 
 Three of the items are **CLI / project-shape** concerns (`ddd new`, `ddd
 dev`, `ddd deploy`) — they wrap the existing generator and orchestrator,
-adding no IR. Five are **language surface** concerns (`auth` providers,
+adding no IR. Five are **language surface** concerns (`auth` (OIDC),
 `job`, `email`, object `storage`, `seed`) — each adds a declaration that
 lowers through the normal pipeline to per-backend emission.
 
@@ -123,7 +125,7 @@ Templates seed `main.ddd` at increasing richness:
 |---|---|
 | `blank` | One `system` with one `module`/`context`/`aggregate` and a single backend + react deployable. |
 | `crud` (default) | Two aggregates with a repository find, a UI with scaffolded pages, one backend + react frontend. |
-| `saas` | `crud` plus an `auth { providers: [email] }` block, a `seed {}` block, and a protected page — the canonical "real app skeleton" (consumes §6.1, §6.5). |
+| `saas` | `crud` plus an `auth { oidc { … } }` block (delegating to a bundled dev Keycloak, D-AUTH-OIDC), a `seed {}` block, and a protected page — the canonical "real app skeleton" (consumes §6.1, §6.5). |
 
 Selecting a template runs the model straight through `ddd generate
 system` so the directory is provably valid before the author touches it.
@@ -186,13 +188,19 @@ k8s manifest generation — that remains an explicit non-goal per
 
 ---
 
-## 4. Turnkey authentication
+## 4. Turnkey authentication — delegate to OIDC (D-AUTH-OIDC)
 
-This is the largest runtime gap. The intent is to keep everything
-`auth.md` already ships (the typed `user {}`, `currentUser`,
-`permissions`, `requires`, row-level finds) and add the *runtime* the
-author currently has to supply by hand: identity storage, credential
-handling, sessions, providers, and the login/signup UI.
+This is the largest runtime gap. Per **D-AUTH-OIDC**, turnkey auth
+**delegates to an OIDC identity provider** rather than having Loom build
+an auth runtime — **Keycloak** is the self-hostable default; Auth0 /
+Cognito / Zitadel / Ory / Entra ID are the same `issuer` URL to Loom. It
+keeps everything `auth.md` already ships (the typed `user {}`,
+`currentUser`, `permissions`, `requires`, row-level finds) and
+**completes the verifier hook**: Loom validates the IdP's tokens and maps
+claims into the typed `user {}` shape; the IdP owns credential storage,
+password reset, MFA, lockout, and the hosted login/signup pages. "Don't
+roll your own auth" — and definitely not across three backends × four
+design packs.
 
 ### 4.1 Surface
 
@@ -207,46 +215,62 @@ system Acme {
   }
 
   auth {
-    providers: [email, google, github]   // email = password; others = OAuth
-    sessions:  cookie                     // cookie | jwt
-    emailVerification: required           // off | required (consumes §6.2)
-    signupFields: [role]                  // extra user fields collected at signup
+    oidc {
+      issuer:   env("OIDC_ISSUER")     // e.g. https://idp/realms/acme (Keycloak)
+      clientId: env("OIDC_CLIENT_ID")  // clientSecret via env for confidential clients
+    }
+    sessions: cookie                   // cookie | jwt — how the app holds the post-login session
+    claims:   { role: "realm_access.roles", email: "email" }   // IdP claim → user{} field
   }
 
   // existing per-deployable opt-in is unchanged
   deployable api  { platform: hono, contexts: [...], dataSources: [...], auth: required }
-  deployable web  { platform: react, targets: api, auth: ui }   // mounts login/signup pages
+  deployable web  { platform: react, targets: api, auth: ui }   // mounts the login redirect + guard
 }
 ```
 
 `auth {}` is admissible only alongside a `user {}` block. Declaring it:
 
-- Makes the `user` an **owned, persisted identity** — Loom generates an
-  `AuthUser` aggregate (id, email, hashed password for the `email`
-  provider, provider-link rows for OAuth, `emailVerifiedAt`) and its
-  migration, in the same backend that hosts the auth-owning context.
-- Generates a **real verifier** (replacing the hand-written
-  `IUserVerifier` / `registerUserVerifier` seam) that validates the
-  session/JWT, loads the user, and projects it into the existing typed
-  `User` shape. The hand-written seam remains available for authors who
-  want to override.
-- Generates **endpoints**: `POST /auth/signup`, `/auth/login`,
-  `/auth/logout`, `/auth/verify-email`, and the OAuth `…/callback`
-  routes, plus session issuance (signed `HttpOnly` cookie or JWT per
-  `sessions:`).
-- On a `react` deployable carrying `auth: ui`, generates **login,
-  signup, and email-verification pages** in the active design pack
-  (Mantine/shadcn/MUI/Chakra/HEEx), a session-aware API client, and a
-  route guard that redirects unauthenticated users.
+- Generates a **real verifier** — the batteries-included fill-in for the
+  already-shipped `IUserVerifier` / `registerUserVerifier` seam — that
+  validates the OIDC token (JWKS signature, `iss` / `aud` / `exp`), maps
+  the configured `claims:` into the typed `User` shape, and rejects
+  otherwise. The hand-written seam stays as an override.
+- Generates the **login handshake, not a login form**: `/auth/login`
+  redirects to the IdP's authorization endpoint, `/auth/callback`
+  exchanges the code and issues the local session (signed `HttpOnly`
+  cookie or forwarded JWT per `sessions:`), `/auth/logout` clears it.
+  There is **no signup / password / verify-email endpoint** — the IdP
+  hosts those.
+- On a `react` / LiveView deployable with `auth: ui`: a **route guard** +
+  session-aware API client + a "Sign in" affordance that starts the
+  redirect. **No login/signup pages are generated** — the IdP's hosted
+  pages are used (themed in the IdP).
 
-### 4.2 Default-deny
+**No `AuthUser` aggregate, no password column, no OAuth client code.**
+The identity lives in the IdP; Loom's `user {}` stays the *projection* of
+its claims, exactly as today — just with a generated verifier instead of
+a hand-written one.
+
+### 4.2 Zero-config quick-start — a bundled dev IdP
+
+The one cost of self-hosted OIDC — standing up an IdP — is closed by
+**bundling a dev IdP**: the generated `docker-compose.yml` adds a
+**Keycloak** service with a pre-provisioned realm (client, redirect URIs)
+and a **seeded demo user**, so `docker compose up` logs in out of the
+box; production repoints the same `issuer:` at a real Keycloak / hosted
+IdP. The demo user is *seed data* (§5.4) — the quick-start auth story is
+"bundled Keycloak realm + a seeded user," with Loom owning **zero** auth
+logic.
+
+### 4.3 Default-deny
 
 `auth.md` lists default-deny as a known hole: an `auth: required`
 deployable still serves operations that declare no `requires` gate. This
-proposal closes it under the `auth {}` block:
+proposal closes it under the `auth {}` block (orthogonal to OIDC):
 
 ```ddd
-auth { providers: [email], enforcement: denyByDefault }
+auth { oidc { … }, enforcement: denyByDefault }
 ```
 
 Under `denyByDefault`, every operation / find / view / workflow reachable
@@ -255,19 +279,22 @@ explicit `requires anonymous`) — the IR validator rejects an ungated
 reachable command. `enforcement: opt` preserves today's behaviour as the
 default so existing models don't break.
 
-### 4.3 Lowering & per-backend emission
+### 4.4 Lowering & per-backend emission
 
-The `AuthUser` aggregate and its repository lower through the normal
-pipeline, so persistence, migrations, and wire-shape come for free. The
-provider/session machinery is per-backend runtime code emitted alongside
-the existing auth files:
+There is **no domain aggregate to lower** — the work is per-backend OIDC
+middleware + the `/auth/*` redirect handshake, emitted alongside the
+existing auth files, each backend using its standard OIDC library:
 
 | Backend | Adds |
 |---|---|
-| Hono | `auth/*` password hashing (argon2/bcrypt), session cookie or JWT issue/verify, OAuth client, the `/auth/*` routes; the generated verifier replaces the manual registry. |
-| .NET | ASP.NET Core auth handler + the same `/auth/*` controllers; the generated `IUserVerifier` is registered automatically (the startup fail-fast becomes a fallback, not a requirement). |
-| Phoenix | Ash-authentication-shaped strategies for email/OAuth + LiveView login/signup. |
-| React | Login/signup/verify pages, session-aware client, route guard. |
+| Hono | OIDC token verify (`jose` + JWKS), the `/auth/login\|callback\|logout` redirect handlers, session cookie / JWT issue; the generated verifier replaces the manual registry. |
+| .NET | `AddOpenIdConnect` / `AddJwtBearer` (Microsoft.Identity.Web) + the same `/auth/*` handlers; the generated `IUserVerifier` is registered automatically. |
+| Phoenix | An `oidcc` / `Ueberauth`-shaped OIDC strategy + the LiveView login redirect + session plug. |
+| React | Route guard, session-aware client, "Sign in" redirect (no login form). |
+
+A self-contained email/password mode, if ever wanted, is a **secondary,
+library-backed** option (never hand-rolled across backends) — explicitly
+not the headline.
 
 ---
 
@@ -372,7 +399,8 @@ of an empty list.
 | Situation | Diagnostic |
 |---|---|
 | `auth {}` without a `user {}` block | "auth block requires a `user { … }` block to define the identity shape." |
-| `auth { providers: [google] }` but no OAuth client env contract documented | Warning: "OAuth provider 'google' requires `GOOGLE_CLIENT_ID`/`SECRET` at runtime." |
+| `auth { oidc { … } }` without an `issuer:` / `clientId:` | Error: "oidc requires `issuer` and `clientId` (env-bound)." |
+| an `auth.claims:` entry maps a field not present on `user { … }` | Error: "claim mapping targets unknown user field 'X'." |
 | `enforcement: denyByDefault` with an ungated reachable command | Error at the operation/find/view: "reachable under `auth: required` with `denyByDefault` but declares no `requires` gate (use `requires anonymous` to allow)." |
 | `job` with both `every:` and `on:` | Error: "a job is either scheduled (`every:`) or event-triggered (`on:`), not both." |
 | `job` on a deployable with no queue/cron-capable dataSource | Error: "job 'X' needs a queue storage; deployable 'D' binds none." |
@@ -390,8 +418,10 @@ tests in the existing suites.
 1. **npm publish + `ddd new` (blank/crud) + quick-start default**
    (§3.1–3.2). Turns the toolchain into a product. No IR change.
 2. **`ddd dev`** (§3.3). The moment-to-moment loop.
-3. **Turnkey auth** (§4) — the largest single runtime item; `saas`
-   template (§3.1) lands with it.
+3. **Turnkey auth via OIDC** (§4, D-AUTH-OIDC) — the largest single
+   runtime item, now scoped down to OIDC token-verify + login handshake
+   + a bundled dev Keycloak (no password runtime); `saas` template
+   (§3.1) lands with it.
 4. **`ddd deploy fly`** (§3.4). Closes the loop to a live URL; other
    targets follow as adapters.
 5. **`job` / `email` / object `storage` + `Upload` / `seed`** (§5),
