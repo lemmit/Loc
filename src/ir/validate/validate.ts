@@ -979,7 +979,10 @@ function describeColumnRef(e: ExprIR): string {
  * The label is human-readable (`"collection op .where"`,
  * `"lambda"`, `"call to function 'X'"`) so the diagnostic message
  * can be specific. */
-function firstNonQueryableNode(e: ExprIR): string | null {
+// Exported for the queryable-subset parity test
+// (`test/ir/queryable-subset-parity.test.ts`), which pins the invariant
+// that everything this gate admits, `lowerToDrizzle` can lower.
+export function firstNonQueryableNode(e: ExprIR): string | null {
   switch (e.kind) {
     case "literal":
     case "this":
@@ -989,19 +992,29 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       // Refs the lowering produces that translate cleanly to SQL —
       // `param`/`let`/`lambda` are bare identifiers, `this-prop`
       // becomes `tableName.col`, `enum-value` becomes a literal
-      // string, `this-vo-prop` is a column flattened by Drizzle
-      // (handled via member access).  `current-user` is a
-      // closure-captured value; the renderer threads a
-      // `currentUser` parameter through the repo method and the
-      // ref / its member accesses become plain JS / C# value
-      // references.
+      // string.  `current-user` is a closure-captured value; the
+      // renderer threads a `currentUser` parameter through the repo
+      // method and the ref / its member accesses become plain JS / C#
+      // value references.
+      //
+      // NOTE: `this-vo-prop` is deliberately NOT admitted here.  A
+      // value-object sub-property is queryable only in its
+      // `this.<vo>.<sub>` MEMBER form (handled by the `member` case
+      // below, which Drizzle flattens to a `<vo>_<sub>` column).  A
+      // *bare* `this-vo-prop` ref carries only the sub-property name,
+      // not its parent VO field, so it cannot form the flattened
+      // column — `lowerToDrizzle` returns null for it.  (It is only
+      // produced inside a value-object's own body, never in an
+      // aggregate find/view/retrieval `where`, so this rejects an
+      // unreachable shape rather than a real one — but admitting it
+      // would let an internal-error throw replace a clean diagnostic
+      // if it ever became reachable.)
       if (
         e.refKind === "param" ||
         e.refKind === "let" ||
         e.refKind === "lambda" ||
         e.refKind === "this-prop" ||
         e.refKind === "enum-value" ||
-        e.refKind === "this-vo-prop" ||
         e.refKind === "current-user"
       )
         return null;
