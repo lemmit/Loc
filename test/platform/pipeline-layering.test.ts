@@ -27,10 +27,11 @@ import { describe, expect, it } from "vitest";
 // one-directional and enforced by file structure", but until this test
 // the phase boundaries (unlike the generator→platform edge, guarded by
 // backend-packages-layering.test.ts) were convention-only.  Auditing
-// the tree surfaced a handful of pre-existing value backward-edges;
-// they are pinned in ALLOWED below with their rationale so the surface
-// is frozen and catalogued (each entry is a cleanup worklist item)
-// rather than silently growing.  A new backward value-edge fails here.
+// the tree surfaced two pre-existing value backward-edges (language
+// validators reaching into `ir/` runtime helpers); they are pinned in
+// ALLOWED below with their rationale so the surface is frozen and
+// catalogued (each entry is a cleanup worklist item) rather than
+// silently growing.  A new backward value-edge fails here.
 // ---------------------------------------------------------------------------
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -41,32 +42,20 @@ const srcDir = path.join(repoRoot, "src");
  *  downstream module specifiers it is permitted to value-import, each
  *  with the reason it exists / how it should eventually be removed. */
 const ALLOWED: Record<string, { spec: string; why: string }[]> = {
-  // `_packs/builtin-formats.ts` is a 136-line, zero-import metadata
-  // module (built-in design-pack family/version/format identity +
-  // parsing).  It is consumed by language validators, ir lowering AND
-  // the generator, so its home under `generator/` is the *sole* source
-  // of language→generator / ir→generator value edges.  Relocating it to
-  // a neutral upstream layer would let these three entries be deleted.
+  // Two value edges remain — both language validators reaching into an
+  // `ir/` runtime helper.  Candidates to invert later (move the shared
+  // predicate / maps to a foundational layer, or thread them in); pinned
+  // so the surface is frozen rather than growing.
+  //
+  // (The three former `generator/_packs/builtin-formats` edges are gone:
+  // that pure, zero-import metadata module was relocated to
+  // `src/util/builtin-formats.ts` — a foundational layer language / ir /
+  // generator may all depend on — so those imports are no longer
+  // backward edges.)
   "src/language/validators/data/platform-rules.ts": [
-    {
-      spec: "generator/_packs/builtin-formats",
-      why: "mislocated pack-identity metadata — relocate upstream",
-    },
     {
       spec: "ir/types/loom-ir",
       why: "platform-family DSL/adapter maps + PLATFORM_SAVING_SHAPES live on the IR types module",
-    },
-  ],
-  "src/language/validators/deployable.ts": [
-    {
-      spec: "generator/_packs/builtin-formats",
-      why: "mislocated pack-identity metadata — relocate upstream",
-    },
-  ],
-  "src/ir/lower/lower.ts": [
-    {
-      spec: "generator/_packs/builtin-formats",
-      why: "mislocated pack-identity metadata — relocate upstream",
     },
   ],
   "src/language/validators/datasource.ts": [
