@@ -249,7 +249,7 @@ function collectContextsFor(
   //     gated as not-implemented there by IR-validate, so it never generates.
   // Concretes always stay; the per-aggregate emit loop skips abstract bases
   // for repo/routes regardless, so a kept TPH base only contributes its table.
-  const isHono = d.platform === "hono";
+  const isHono = d.platform === "node";
   const keepsTable = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
     !!a.isAbstract && isHono && (a.inheritanceUsing ?? "sharedTable") === "sharedTable";
   // On Hono, a TPC (`ownTable`) base is also kept in the view — not for a table

@@ -245,22 +245,26 @@ function qualifyPlatform(raw: string | undefined): {
   ref: string;
 } {
   // D-PHOENIX-SURFACE: `phoenix` is the canonical host-platform name.
-  // The legacy `phoenixLiveView` *platform* spelling is desugared here at
-  // the boundary so every downstream consumer sees only `phoenix`.
-  const value = canonicalPlatform(raw ?? "hono");
+  // Legacy *platform* spellings (`phoenixLiveView`, `hono`) are desugared
+  // here at the boundary so every downstream consumer sees only the
+  // canonical family (`phoenix`, `node`).
+  const value = canonicalPlatform(raw ?? "node");
   const parsed = parseBuiltinPlatformRef(value);
   return parsed
     ? { family: parsed.family as Platform, ref: parsed.qualified }
     : { family: value as Platform, ref: value };
 }
 
-/** Canonicalise the legacy `phoenixLiveView` *platform* alias to the
- *  canonical `phoenix`; everything else passes through.  Boundary-only:
- *  the alias never reaches the IR or any generator.  (The LiveView
- *  *framework* keeps the `phoenixLiveView` spelling — see
- *  `canonicalFramework`.) */
+/** Canonicalise a legacy *platform* alias to its canonical family
+ *  (`phoenixLiveView` → `phoenix`, `hono` → `node`); everything else
+ *  passes through.  Boundary-only: the alias never reaches the IR or any
+ *  generator.  (The Hono *web framework* keeps the `hono` spelling as the
+ *  `transport:` value; the LiveView *framework* keeps `phoenixLiveView` —
+ *  see `canonicalFramework`.) */
 function canonicalPlatform(value: string): string {
-  return value === "phoenixLiveView" ? "phoenix" : value;
+  if (value === "phoenixLiveView") return "phoenix";
+  if (value === "hono") return "node";
+  return value;
 }
 
 /** Canonicalise a D-PHOENIX-SURFACE framework alias.  `liveview` →

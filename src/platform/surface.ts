@@ -32,7 +32,7 @@ export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set(["react", "
 // A small public interface every platform implementation
 // (dotnet / hono / react) exposes to the system orchestrator.
 // Lets `system/index.ts` dispatch over a registry instead of
-// `if (platform === "dotnet") ... else if (platform === "hono") ...`
+// `if (platform === "dotnet") ... else if (platform === "node") ...`
 // branches, while INTENTIONALLY leaving each platform's internal
 // emission strategy unconstrained — Hono uses procedural routes
 // builders, .NET uses CQRS templates, React uses procedural TSX.

@@ -27,7 +27,7 @@ import type { PlatformSurface } from "./surface.js";
 
 const platforms: Record<Platform, PlatformSurface> = {
   dotnet: dotnetPlatform,
-  hono: honoPlatform,
+  node: honoPlatform,
   react: reactPlatform,
   // `static` is the page-metamodel's UI-only deployable kind.  It
   // shares the React surface — a deployable declared as
@@ -49,7 +49,7 @@ const platforms: Record<Platform, PlatformSurface> = {
 // `platforms`.
 // ---------------------------------------------------------------------------
 export const BUILTIN_PLATFORM_LATEST = {
-  hono: "v4",
+  node: "v4",
   dotnet: "v8",
   phoenix: "v1",
 } as const satisfies Partial<Record<Platform, string>>;
@@ -149,17 +149,25 @@ export interface ParsedBuiltinPlatformRef {
   qualified: string;
 }
 
-/** D-PHOENIX-SURFACE platform aliases → canonical family name.
- *  `phoenix` is the canonical host-platform name (decoupled from the
- *  LiveView *framework*, which keeps the `phoenixLiveView` spelling).
- *  The legacy `phoenixLiveView` *platform* name is admitted as a
- *  back-compat alias that desugars to `phoenix`; a `@version` pin is
- *  preserved (`phoenixLiveView@v1` → `phoenix@v1`). */
+/** Legacy platform name → canonical family.  Each canonical name
+ *  decouples the *platform* (runtime) from the *framework* it was once
+ *  conflated with: `phoenixLiveView` → `phoenix` (D-PHOENIX-SURFACE; the
+ *  LiveView *framework* keeps the `phoenixLiveView` spelling), `hono` →
+ *  `node` (D-NODE-PLATFORM; the Hono *web framework* lives on as the
+ *  `transport: hono` value). */
+const LEGACY_PLATFORM_ALIASES: Record<string, string> = {
+  phoenixLiveView: "phoenix",
+  hono: "node",
+};
+
+/** Desugar a legacy platform name to its canonical family, preserving any
+ *  `@version` pin (`hono@v4` → `node@v4`). */
 function aliasPlatform(s: string): string {
   const at = s.indexOf("@");
   const family = at === -1 ? s : s.slice(0, at);
-  if (family !== "phoenixLiveView") return s;
-  return at === -1 ? "phoenix" : `phoenix${s.slice(at)}`;
+  const canonical = LEGACY_PLATFORM_ALIASES[family];
+  if (canonical === undefined) return s;
+  return at === -1 ? canonical : `${canonical}${s.slice(at)}`;
 }
 
 /** Parse a `platform:` value.  Mirrors `parseBuiltinDesignRef`

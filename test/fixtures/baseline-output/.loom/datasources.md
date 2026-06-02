@@ -14,7 +14,7 @@ Authoritative source is the `.ddd` model; the validators (`src/ir/validate/valid
 | Orders | state | ordersState | primarySql | postgres | orders _(default)_ | — |
 | Products | state | productsState | primarySql | postgres | products _(default)_ | — |
 
-### catalogWeb — `platform: hono`
+### catalogWeb — `platform: node`
 
 | Context | Kind | Resource | Storage | Storage type | Schema | TablePrefix |
 | --- | --- | --- | --- | --- | --- | --- |

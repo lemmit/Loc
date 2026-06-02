@@ -43,7 +43,7 @@ describe(".loom/datasources.md", () => {
       }
     `);
     const md = renderDataSourcesMd(sys);
-    expect(md).toMatch(/### api — `platform: hono`/);
+    expect(md).toMatch(/### api — `platform: node`/);
     expect(md).toMatch(
       /\| Orders \| state \| ordersState \| pg \| postgres \| orders _\(default\)_ \| — \|/,
     );

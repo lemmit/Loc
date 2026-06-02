@@ -27,14 +27,14 @@ describe("manifest contract", () => {
 });
 
 describe("in-tree discovery (default source)", () => {
-  it("discovers hono@v4 with a real co-located manifest", () => {
-    const hono = discoverBackends().find((b) => b.manifest.family === "hono");
-    expect(hono?.manifest).toMatchObject({
+  it("discovers node@v4 with a real co-located manifest", () => {
+    const node = discoverBackends().find((b) => b.manifest.family === "node");
+    expect(node?.manifest).toMatchObject({
       kind: "backend",
-      family: "hono",
+      family: "node",
       loomVersion: "v4",
     });
-    expect(hono?.manifest.core).toMatch(/^\^?\d/);
+    expect(node?.manifest.core).toMatch(/^\^?\d/);
   });
 
   it("discovers exactly the three backend families", () => {
@@ -42,45 +42,45 @@ describe("in-tree discovery (default source)", () => {
       discoverBackends()
         .map((b) => `${b.manifest.family}@${b.manifest.loomVersion}`)
         .sort(),
-    ).toEqual(["dotnet@v8", "hono@v4", "phoenix@v1"]);
+    ).toEqual(["dotnet@v8", "node@v4", "phoenix@v1"]);
   });
 
   it("resolution is byte-identical: bareword/pin yield the SAME surface", () => {
-    expect(platformFor("hono")).toBe(platformFor("hono@v4" as never));
-    expect(platformFor("hono").name).toBe("hono");
-    expect(backendVersionsForFamily("hono")).toEqual(["v4"]);
-    expect(isRegisteredBackendRef("hono@v4")).toBe(true);
-    expect(isRegisteredBackendRef("hono@v9")).toBe(false);
+    expect(platformFor("node")).toBe(platformFor("node@v4" as never));
+    expect(platformFor("node").name).toBe("node");
+    expect(backendVersionsForFamily("node")).toEqual(["v4"]);
+    expect(isRegisteredBackendRef("node@v4")).toBe(true);
+    expect(isRegisteredBackendRef("node@v9")).toBe(false);
   });
 });
 
 describe("injectable source — resolver is discovery-agnostic", () => {
   it("setBackendSource swaps what the resolver sees", () => {
-    const real = discoverBackends().find((b) => b.manifest.family === "hono")!;
-    // A stub source exposing only hono, but pinned at a different
+    const real = discoverBackends().find((b) => b.manifest.family === "node")!;
+    // A stub source exposing only node, but pinned at a different
     // loomVersion — proves resolution keys off the manifest, not a
     // hardcoded map.
     const stub: DiscoveredBackend = {
-      manifest: { kind: "backend", family: "hono", loomVersion: "v9", core: "^1.0.0" },
+      manifest: { kind: "backend", family: "node", loomVersion: "v9", core: "^1.0.0" },
       surface: real.surface,
     };
     setBackendSource(() => [stub]);
-    expect(isRegisteredBackendRef("hono@v9")).toBe(true);
-    expect(isRegisteredBackendRef("hono@v4")).toBe(false);
-    expect(backendVersionsForFamily("hono")).toEqual(["v9"]);
-    expect(platformFor("hono@v9" as never)).toBe(real.surface);
+    expect(isRegisteredBackendRef("node@v9")).toBe(true);
+    expect(isRegisteredBackendRef("node@v4")).toBe(false);
+    expect(backendVersionsForFamily("node")).toEqual(["v9"]);
+    expect(platformFor("node@v9" as never)).toBe(real.surface);
   });
 
   it("resetBackendSource restores the in-tree set", () => {
     setBackendSource(() => []);
     resetBackendSource();
-    expect(isRegisteredBackendRef("hono@v4")).toBe(true);
+    expect(isRegisteredBackendRef("node@v4")).toBe(true);
   });
 
   it("not-discovered ref errors with the discovered list", () => {
     setBackendSource(() => []);
-    expect(() => platformFor("hono@v4" as never)).toThrow(
-      /Unknown backend platform version "hono@v4"\. Discovered: \./,
+    expect(() => platformFor("node@v4" as never)).toThrow(
+      /Unknown backend platform version "node@v4"\. Discovered: \./,
     );
   });
 });

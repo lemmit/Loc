@@ -10,7 +10,7 @@
   },
   "loom": {
     "kind": "backend",
-    "family": "hono",
+    "family": "node",
     "loomVersion": "v4",
     "core": "^1.0.0"
   }

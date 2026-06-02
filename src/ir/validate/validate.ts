@@ -1344,7 +1344,7 @@ function validateInheritanceStorage(
   backendPlatforms: Set<string>,
 ): void {
   const byName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
-  const hostedByHono = backendPlatforms.has("hono");
+  const hostedByHono = backendPlatforms.has("node");
   for (const agg of ctx.aggregates) {
     if (!agg.isAbstract && !agg.extendsAggregate) continue;
     // A concrete's layout defaults to its base's (resolved within the
@@ -1360,7 +1360,7 @@ function validateInheritanceStorage(
     const how = agg.inheritanceUsing
       ? "inheritanceUsing(sharedTable)"
       : "the omitted-modifier default (sharedTable)";
-    const others = [...backendPlatforms].filter((p) => p !== "hono");
+    const others = [...backendPlatforms].filter((p) => p !== "node");
     const hostNote =
       others.length > 0
         ? `it is hosted by ${others.join(", ")}, where TPH is not implemented`

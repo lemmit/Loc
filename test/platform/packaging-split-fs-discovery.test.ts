@@ -35,11 +35,11 @@ afterEach(() => resetBackendSource());
 describe("fs-discovery — workspace symlink discovery", () => {
   it("discovers @loom/backend-hono-v4 by its package.json loom key", async () => {
     const fs = await discoverBackendsFs(repoRoot);
-    const hono = fs.find((b) => b.manifest.family === "hono");
+    const hono = fs.find((b) => b.manifest.family === "node");
     expect(hono).toBeDefined();
     expect(hono?.manifest).toMatchObject({
       kind: "backend",
-      family: "hono",
+      family: "node",
       loomVersion: "v4",
     });
     expect(hono?.manifest.core).toMatch(/^\^?\d/);
@@ -50,8 +50,8 @@ describe("fs-discovery — workspace symlink discovery", () => {
     // the identical PlatformSurface, so every downstream resolver
     // is unaffected by the source swap.
     const fs = await discoverBackendsFs(repoRoot);
-    const fsHono = fs.find((b) => b.manifest.family === "hono")!;
-    const inTreeHono = defaultBuiltInBackends().find((b) => b.manifest.family === "hono")!;
+    const fsHono = fs.find((b) => b.manifest.family === "node")!;
+    const inTreeHono = defaultBuiltInBackends().find((b) => b.manifest.family === "node")!;
     expect(fsHono.surface).toBe(inTreeHono.surface);
   });
 
@@ -81,13 +81,13 @@ describe("installFsBackendSource — composition with in-tree default", () => {
     expect(families).toContain("phoenix@v1");
     // hono@v4 is now sourced through fs (its workspace symlink),
     // but the entry still resolves to the same surface instance.
-    expect(families).toContain("hono@v4");
+    expect(families).toContain("node@v4");
   });
 
   it("does not double-count a backend present in both fs and in-tree", async () => {
     await installFsBackendSource(repoRoot);
     const honoEntries = discoverBackends().filter(
-      (b) => b.manifest.family === "hono" && b.manifest.loomVersion === "v4",
+      (b) => b.manifest.family === "node" && b.manifest.loomVersion === "v4",
     );
     expect(honoEntries.length).toBe(1);
   });

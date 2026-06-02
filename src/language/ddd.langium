@@ -249,7 +249,7 @@ Framework returns string:
 // canonicalises it to `phoenixLiveView` until the literal-rename
 // cleanup phase.
 Platform returns string:
-    'dotnet' | 'hono' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | STRING;
+    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,

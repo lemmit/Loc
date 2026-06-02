@@ -21,7 +21,7 @@ model {
       Customers = component 'Customers'
     }
     catalogWeb = container 'catalogWeb' {
-      technology 'hono'
+      technology 'node'
       Products = component 'Products'
       Customers = component 'Customers'
     }

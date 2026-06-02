@@ -34,13 +34,13 @@ import { BACKEND_PINS } from "./pins.js";
  *  it is extracted. */
 export const loomManifest: LoomBackendManifest = {
   kind: "backend",
-  family: "hono",
+  family: "node",
   loomVersion: "v4",
   core: "^1.0.0",
 };
 
 const honoPlatform: PlatformSurface = {
-  name: "hono",
+  name: "node",
   defaultPort: 3000,
   needsDb: true,
   mountsUi: false,
@@ -86,7 +86,7 @@ const honoPlatform: PlatformSurface = {
         prisma: stubAdapter<PersistenceAdapter>(
           "persistence",
           "prisma",
-          "hono",
+          "node",
           () => Object.keys(menu.persistence),
           {
             name: "prisma",
@@ -100,7 +100,7 @@ const honoPlatform: PlatformSurface = {
       },
       styles: {
         layered: layeredStyleAdapter,
-        cqrs: stubAdapter<StyleAdapter>("style", "cqrs", "hono", () => Object.keys(menu.styles), {
+        cqrs: stubAdapter<StyleAdapter>("style", "cqrs", "node", () => Object.keys(menu.styles), {
           name: "cqrs",
           supportedStrategies: ["state"],
           supportedLayouts: ["byLayer", "byFeature"],
@@ -111,7 +111,7 @@ const honoPlatform: PlatformSurface = {
         byFeature: stubAdapter<LayoutAdapter>(
           "layout",
           "byFeature",
-          "hono",
+          "node",
           () => Object.keys(menu.layouts),
           { name: "byFeature" },
         ),

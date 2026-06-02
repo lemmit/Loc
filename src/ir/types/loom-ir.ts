@@ -1510,7 +1510,7 @@ export interface NeedIR {
 // `ashPhoenix` HEEx pack.  Unlike `react`/`static` it owns its own
 // database (`needsDb: true`) and never declares `targets:` —
 // validator enforces both.
-export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenix";
+export type Platform = "dotnet" | "node" | "react" | "static" | "phoenix";
 
 // D-REALIZATION-AXES — the `application:` axis is the one axis whose DSL
 // spelling differs from its backing D-ADAPTER-HOME adapter key: the
@@ -1541,7 +1541,7 @@ export function applicationAdapterToDsl(v: string): string {
  *  (`PersistenceAdapter.supportedShapes`). */
 export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingShape[]>> = {
   dotnet: ["relational", "embedded", "document"],
-  hono: ["relational", "embedded", "document"],
+  node: ["relational", "embedded", "document"],
   // Phoenix/Ash emits relational + embedded (Ash embedded resources);
   // `document` (a single opaque `:map` — non-idiomatic for Ash) is a
   // future allowed-but-warned addition.
@@ -1550,10 +1550,10 @@ export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingSha
 
 export interface DeployableIR {
   name: string;
-  /** The platform **family** (`"hono"`, `"dotnet"`, `"react"`, …) —
+  /** The platform **family** (`"node"`, `"dotnet"`, `"react"`, …) —
    *  the closed union every downstream consumer branches on.  A
    *  `family@version` pin in the source is normalised here to its
-   *  family so `platform === "hono"` etc. stay valid. */
+   *  family so `platform === "node"` etc. stay valid. */
   platform: Platform;
   /** The fully-qualified backend ref (`"hono@v4"`) after lowering,
    *  mirroring `design?`.  Bareword `platform: hono` resolves through
