@@ -113,17 +113,21 @@ the menus go size-1 → size-N:
   layered; namespace-by-feature is a later slice). `byLayer` default stays
   byte-identical (baseline fixture unchanged); compiles by construction (C#
   namespaces are path-independent, `.csproj` globs `**/*.cs`).
-- **5b (node) — hono `byFeature` layout — DONE.** Brings `directoryLayout:` to a
-  SECOND backend, same pure-relocation pattern. `platform: node { directoryLayout:
-  byFeature }` colocates each aggregate's domain module / drizzle repository /
-  HTTP routes / extern / test (and the TPH/TPC base union + reader) under
-  `features/<agg>/`; pooled domain (ids / value-objects / events / errors),
-  `db/schema.ts`, `http/index.ts`, views / workflows, obs / auth / lib, and the
-  root stay layered. byFeature reuses byLayer's basenames (file names stay
-  byte-identical, only the folder changes). `byLayer` default unchanged;
-  type-checks unchanged (TS resolves relative imports regardless of folder).
 - dotnet: `dapper`, `marten` (persistence); `serviceLayer` (style/`application`).
 - node: `express` / `fastify` (transport); `prisma` (persistence).
+- **node `byFeature` layout — ATTEMPTED + REVERTED (#830, reverted).** A naive
+  port of the dotnet `byFeature` relocation does NOT work for the TypeScript
+  backend: unlike .NET `using <Namespace>` (path-independent), the generated TS
+  files import each other by **relative path** (`db/repositories/<agg>.ts` →
+  `../schema`, `../../domain/<agg>`, …). Relocating files to `features/<agg>/`
+  without rewriting those specifiers yields non-compiling output, and the shared
+  `src/generator/typescript/` emitters hardcode byLayer-relative imports by
+  design. A correct TS `byFeature` therefore needs **layout-aware import
+  rewriting** (compute each cross-file specifier from the source + target
+  category's resolved paths) — a real feature, scoped separately, gated by a
+  build-generated-ts example that actually selects `byFeature`. The `byLayer`
+  default is unaffected (this is why CI was green — no example selected
+  `byFeature`); the lesson: any new layout MUST be exercised by a compile gate.
 - Activate gating **R2** (`directoryLayout × application`) once a real style does
   NOT support a real layout, and **R3** (`serviceLayer|flat` × event-sourced) as
   those values become real — R3 lands in `src/ir/validate/validate.ts` (it's an
