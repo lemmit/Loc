@@ -474,14 +474,18 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
    `<Agg>.Create(…)` (fields ordered to the factory's required-field
    order) + DI-resolved `I<Agg>Repository.SaveAsync`, ship-once
    `__loom_seed` marker (ADO `ExecuteScalar`), `LOOM_SEED` gating, and a
-   `Seed.RunSeeds(…)` boot call after `Database.Migrate()`. **Phoenix
-   `seeds.exs` is still pending** — it's blocked on a real finding: the
-   Phoenix `value-object-ctor` renderer emits *positional* struct args
-   (`%Ctx.Money{9.99, "USD"}`, asserted in `phoenix-render-expr.test.ts`),
-   which is **invalid Elixir** (structs need named fields). The Phoenix
-   seeder must construct value objects with named fields itself (or the
-   underlying renderer be fixed, since `Money { … }` in a Phoenix
-   *operation body* has the same latent bug). Tracked as the next slice.
+   `Seed.RunSeeds(…)` boot call after `Database.Migrate()`. **Phoenix ✅
+   Done** (`src/generator/phoenix-live-view/seeds-emit.ts`):
+   `priv/repo/seeds.exs` going through the Ash create code interface
+   (`<Ctx>.create_<agg>!(%{ … })`), ship-once `__loom_seed` marker (via
+   `Ecto.Adapters.SQL`), `LOOM_SEED` gating, and a `run priv/repo/seeds.exs`
+   step appended to the `ecto.setup` mix alias. This required first fixing
+   the Phoenix `value-object-ctor` renderer, which emitted *positional*
+   struct args (`%Ctx.Money{9.99, "USD"}` — invalid Elixir): lowering now
+   carries the value object's declared field order in `argNames` (TS/.NET
+   ignore it; Phoenix emits `%Ctx.Money{amount: …, currency: …}`), which
+   also fixes the same latent bug for VO construction in Phoenix
+   *operation bodies*.
 4. Imperative (workflow-body) form — reuses statement lowering.
 5. `seed-spec.json` artifact + compose seed step (`LOOM_SEED` dataset
    gating already landed in phase 2); quick-start `saas` template
