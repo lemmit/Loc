@@ -7,7 +7,11 @@
 // `src/ir/enrich/wire-projection.ts`.
 
 import { describe, expect, it } from "vitest";
-import { buildCreateInput } from "../../../src/ir/enrich/wire-projection.js";
+import {
+  buildCreateInput,
+  createOmissionValue,
+  omittableCreateInputs,
+} from "../../../src/ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   ExprIR,
@@ -85,5 +89,19 @@ describe("create-input contract — buildCreateInput", () => {
       fields: [field("flag", BOOL, { optional: true })],
     } as AggregateIR);
     expect(optionalBool[0]?.requiredInput).toBe(false);
+  });
+});
+
+describe("create-input consumption helpers", () => {
+  it("omittableCreateInputs = exactly the non-required create-input fields", () => {
+    // description (optional), qty (default), active (bool) — not name/sku/password.
+    expect([...omittableCreateInputs(agg)].sort()).toEqual(["active", "description", "qty"]);
+  });
+
+  it("createOmissionValue picks default ▸ false (bool) ▸ null", () => {
+    const byName = new Map(FIELDS.map((f) => [f.name, f]));
+    expect(createOmissionValue(byName.get("qty")!)).toEqual({ kind: "default", expr: ONE });
+    expect(createOmissionValue(byName.get("active")!)).toEqual({ kind: "false" });
+    expect(createOmissionValue(byName.get("description")!)).toEqual({ kind: "null" });
   });
 });

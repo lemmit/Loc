@@ -9,6 +9,7 @@
 import type {
   AggregateIR,
   CreateInputFieldIR,
+  ExprIR,
   FieldAccess,
   FieldIR,
   TypeIR,
@@ -114,6 +115,38 @@ function isRequiredCreateInput(f: FieldIR): boolean {
 function hasImplicitDefault(t: TypeIR): boolean {
   const base = t.kind === "optional" ? t.inner : t;
   return base.kind === "primitive" && base.name === "bool";
+}
+
+/** Names of the create-input fields the client MAY OMIT (`requiredInput`
+ * is false): optional-typed, explicitly defaulted, or a bare `bool`.  The
+ * single source every backend consults to mark a create-request field
+ * optional — replacing each one's own type-nullability test and ad-hoc
+ * bool special-case.  A name absent from this set is required input. */
+export function omittableCreateInputs(agg: AggregateIR): ReadonlySet<string> {
+  return new Set(
+    (agg.createInput ?? buildCreateInput(agg))
+      .filter((c) => !c.requiredInput)
+      .map((c) => c.field.name),
+  );
+}
+
+/** What an omitted, omittable create-input field initialises to:
+ *   - `default`  — its explicit `= <expr>` default (render in-language);
+ *   - `false`    — a bare `bool`'s implicit default;
+ *   - `null`     — an optional-typed field with no default.
+ * Backends apply this when the client omits the field (factory `?? …`,
+ * Ash `default:`), so a defaulted field's value is never lost just because
+ * it became optional input. */
+export type CreateOmissionValue =
+  | { readonly kind: "default"; readonly expr: ExprIR }
+  | { readonly kind: "false" }
+  | { readonly kind: "null" };
+
+export function createOmissionValue(f: FieldIR): CreateOmissionValue {
+  if (f.default !== undefined) return { kind: "default", expr: f.default };
+  const base = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (base.kind === "primitive" && base.name === "bool") return { kind: "false" };
+  return { kind: "null" };
 }
 
 /** Whether an aggregate is **constructible** under the Stage-4 invariant
