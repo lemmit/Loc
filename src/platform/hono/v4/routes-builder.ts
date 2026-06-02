@@ -115,6 +115,7 @@ export function buildRoutesFile(
     lines.push(`import { moneySchema } from "../lib/schemas";`);
   }
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
+  lines.push(`import { ProblemDetails, newApp } from "./problem-details";`);
   lines.push(`import { ${agg.name} } from "../domain/${lowerFirst(agg.name)}";`);
   lines.push(
     `import type { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
@@ -264,13 +265,13 @@ export function buildRoutesFile(
   lines.push(
     `export const ${agg.name}ListResponse = z.array(${agg.name}Response).openapi("${agg.name}ListResponse");`,
   );
-  // RFC 7807 problem body — the shared cross-backend error contract.  All
-  // fields optional (matching .NET's framework ProblemDetails schema, which
-  // marks none required); trace correlation rides the `x-request-id`
-  // response header, not the body, so the body stays byte-identical.
-  lines.push(
-    `const ProblemDetails = z.object({ type: z.string().nullish(), title: z.string().nullish(), status: z.number().int().nullish(), detail: z.string().nullish(), instance: z.string().nullish() }).openapi("ProblemDetails");`,
-  );
+  // RFC 7807 ProblemDetails body — declared once for the project in
+  // `http/problem-details.ts` (with the §3.2 `errors[]` extension for
+  // validation failures, consumed by the frontend ACL's
+  // `applyServerErrors`).  Imported above so OpenAPI route declarations
+  // resolve the same Zod schema instance and the cross-backend wire
+  // contract stays byte-identical.  See
+  // docs/proposals/validation-error-extension.md.
   lines.push("");
 
   // The router.  Audited / provenanced aggregates also receive `db` +
@@ -280,7 +281,10 @@ export function buildRoutesFile(
     ? `repo: ${agg.name}Repository, db: NodePgDatabase<typeof schema>, events: DomainEventDispatcher`
     : `repo: ${agg.name}Repository`;
   lines.push(`export function ${lowerFirst(agg.name)}Routes(${routerParams}): OpenAPIHono {`);
-  lines.push(`  const app = new OpenAPIHono();`);
+  // `newApp()` from `./problem-details` constructs OpenAPIHono with the
+  // shared validation `defaultHook` pre-wired — Zod parse failures emit
+  // 422 ProblemDetails with `errors[]` for the frontend ACL.
+  lines.push(`  const app = newApp();`);
   lines.push("");
 
   // Create — gated on `hasCreate` (no canonical create ⇒ no POST route).
@@ -569,7 +573,10 @@ function emitOperationRoute(
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
-  // operation → 400 (domain) + 404 (aggregate not found), per the matrix.
+  // operation → 400 (domain) + 404 (aggregate not found), per the
+  // openapi-errors matrix.  422 emitted at runtime via the shared
+  // defaultHook; OpenAPI declaration deferred until .NET + Phoenix catch
+  // up (Phase B + C of validation-error-extension.md).
   out.push(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
