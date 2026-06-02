@@ -55,6 +55,7 @@ export type DddKeywordNames =
     | "aggregate"
     | "aggregates"
     | "api"
+    | "application"
     | "apply"
     | "asc"
     | "ashPhoenix"
@@ -89,6 +90,7 @@ export type DddKeywordNames =
     | "description"
     | "design"
     | "destroy"
+    | "directoryLayout"
     | "document"
     | "dotnet"
     | "e2e"
@@ -115,6 +117,7 @@ export type DddKeywordNames =
     | "find"
     | "footer"
     | "for"
+    | "foundation"
     | "framework"
     | "from"
     | "function"
@@ -156,6 +159,7 @@ export type DddKeywordNames =
     | "money"
     | "mui"
     | "mysql"
+    | "node"
     | "now"
     | "null"
     | "objectStore"
@@ -170,6 +174,7 @@ export type DddKeywordNames =
     | "payload"
     | "permissions"
     | "persistedAs"
+    | "persistence"
     | "phoenix"
     | "phoenixLiveView"
     | "platform"
@@ -201,6 +206,7 @@ export type DddKeywordNames =
     | "retain"
     | "retrieval"
     | "route"
+    | "runtime"
     | "s3"
     | "schema"
     | "search"
@@ -236,6 +242,7 @@ export type DddKeywordNames =
     | "title"
     | "token"
     | "transactional"
+    | "transport"
     | "true"
     | "ttl"
     | "type"
@@ -398,10 +405,10 @@ export function isLiteralExpr(item: unknown): item is LiteralExpr {
     return reflection.isInstance(item, LiteralExpr);
 }
 
-export type LooseName = 'aggregates' | 'api' | 'asc' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'desc' | 'description' | 'design' | 'env' | 'error' | 'eventLog' | 'events' | 'every' | 'favicon' | 'framework' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'page' | 'payload' | 'permissions' | 'primary' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
+export type LooseName = 'aggregates' | 'api' | 'application' | 'asc' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'desc' | 'description' | 'design' | 'directoryLayout' | 'env' | 'error' | 'eventLog' | 'events' | 'every' | 'favicon' | 'foundation' | 'framework' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'page' | 'payload' | 'permissions' | 'persistence' | 'primary' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'runtime' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'transactional' | 'transport' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'foundation' || item === 'application' || item === 'persistence' || item === 'directoryLayout' || item === 'transport' || item === 'runtime' || item === 'transactional' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type LValueIdent = 'aggregates' | 'api' | 'command' | 'contains' | 'contexts' | 'create' | 'destroy' | 'error' | 'id' | 'modules' | 'payload' | 'permissions' | 'query' | 'response' | 'ui' | 'views' | 'workflows' | string;
@@ -460,10 +467,10 @@ export function isPayloadKind(item: unknown): item is PayloadKind {
     return item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error';
 }
 
-export type Platform = 'dotnet' | 'hono' | 'phoenix' | 'phoenixLiveView' | 'react' | 'static' | string;
+export type Platform = 'dotnet' | 'hono' | 'node' | 'phoenix' | 'phoenixLiveView' | 'react' | 'static' | string;
 
 export function isPlatform(item: unknown): item is Platform {
-    return item === 'dotnet' || item === 'hono' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'dotnet' || item === 'hono' || item === 'node' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export type PostfixSuffix = CallSuffix | MemberSuffix;
@@ -873,17 +880,23 @@ export function isDecLit(item: unknown): item is DecLit {
 export interface Deployable extends AstNode {
     readonly $container: System;
     readonly $type: 'Deployable';
+    application?: LooseName;
     auth?: AuthMode;
     contextRefs: Array<Reference<BoundedContext>>;
     dataSourceRefs: Array<Reference<Resource>>;
     design?: DesignPack;
+    directoryLayout?: LooseName;
     favicon?: string;
+    foundation?: LooseName;
     hosts: Array<Reference<Ui>>;
     name: LooseName;
+    persistence?: LooseName;
     platform: Platform;
     port?: number;
+    runtime?: LooseName;
     serves: Array<Reference<Api>>;
     targets?: Reference<Deployable>;
+    transport?: LooseName;
     uiBlock?: UiBlockBinding;
     uiCompose?: UiComposeBinding;
     uiSugar?: UiSugarBinding;
@@ -3048,17 +3061,23 @@ export class DddAstReflection extends AbstractAstReflection {
                 return {
                     name: Deployable,
                     properties: [
+                        { name: 'application' },
                         { name: 'auth' },
                         { name: 'contextRefs', defaultValue: [] },
                         { name: 'dataSourceRefs', defaultValue: [] },
                         { name: 'design' },
+                        { name: 'directoryLayout' },
                         { name: 'favicon' },
+                        { name: 'foundation' },
                         { name: 'hosts', defaultValue: [] },
                         { name: 'name' },
+                        { name: 'persistence' },
                         { name: 'platform' },
                         { name: 'port' },
+                        { name: 'runtime' },
                         { name: 'serves', defaultValue: [] },
                         { name: 'targets' },
+                        { name: 'transport' },
                         { name: 'uiBlock' },
                         { name: 'uiCompose' },
                         { name: 'uiSugar' }

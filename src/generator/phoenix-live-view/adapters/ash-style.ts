@@ -50,14 +50,14 @@ export const ashStyleAdapter: StyleAdapter = {
     // `emitApiControllers` is per-aggregate today (a thin
     // <Agg>Controller shell), but per-op decomposition would require
     // a new emit slice that doesn't exist.  Deferred to F7d.
-    throw new AdapterNotImplementedError("style", "ash", "phoenixLiveView", realSiblings());
+    throw new AdapterNotImplementedError("style", "ash", "phoenix", realSiblings());
   },
 
   emitHandlerOrService(_op: OperationIR, _ctx: EmitCtx): readonly EmittedArtifact[] {
     // Same per-op caveat — Ash's "handler" is the action body itself,
     // declared inside the Resource module that the ashPostgres
     // PersistenceAdapter already emits.  No per-op file boundary.
-    throw new AdapterNotImplementedError("style", "ash", "phoenixLiveView", realSiblings());
+    throw new AdapterNotImplementedError("style", "ash", "phoenix", realSiblings());
   },
 
   emitDi(ctx: EmitCtx): Lines {

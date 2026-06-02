@@ -20,6 +20,19 @@
 > - **D-ENV-SWAP** — the §3.8 `overrides` block is deferred out of
 >   the F1 micro-plan; per-environment swap in v1 uses alternate
 >   `dataSource` decls picked by the test deployable.
+> - **D-REALIZATION-AXES** — the deployable platform-config axis
+>   *names* in §3.x are renamed: `style:` → **`application:`**
+>   (values `flat | serviceLayer | cqrs`) and `layout:` →
+>   **`directoryLayout:`**; `persistence:` keeps its name but carries
+>   the data-access library only (the domain/app-framework axis moves
+>   to the new **`foundation:`** keyword, default `vanilla`). The
+>   adapter *kinds* in `src/generator/_adapters/` stay `style`/`layout`
+>   internally; the DSL spelling differs (`application`↔`style`,
+>   `directoryLayout`↔`layout`). The §8.2/§882 **`platform: hono` →
+>   `platform: node { framework: hono }`** rename is **not adopted** —
+>   `hono` remains the platform name; `node` does not exist. The full
+>   axis vocabulary, gating matrix, and examples live in
+>   [`platform-realization-axes.md`](./platform-realization-axes.md).
 >
 > The §1 motivation, §2.1 invariants 1–3 and 5, §3.1 physical
 > storage grammar, and most of §3.4–§3.7 (per-aggregate persistence

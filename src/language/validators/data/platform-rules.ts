@@ -18,11 +18,18 @@ import {
   packFormatForBuiltin,
 } from "../../../generator/_packs/builtin-formats.js";
 import {
+  applicationAdapterToDsl,
+  applicationDslToAdapter,
   PLATFORM_SAVING_SHAPES,
   type Platform,
   type SavingShape,
 } from "../../../ir/types/loom-ir.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../../platform/registry.js";
+import {
+  allAdapterNames,
+  availableAdapterNames,
+  hasAdapters,
+} from "../../../platform/resolve-adapters.js";
 
 /** Frontend keyword platforms — those that are valid as bareword
  *  `platform:` values without being registered as a backend family. */
@@ -113,7 +120,7 @@ export function expectedFrameworkFor(
   // framework as its bareword.
   const fam = platformFamily(platform);
   if (fam === "react" || fam === "static") return "react";
-  if (fam === "phoenixLiveView") return "phoenixLiveView";
+  if (fam === "phoenix") return "phoenixLiveView";
   if (fam === "dotnet" && hasUi) return "react";
   return undefined;
 }
@@ -141,3 +148,88 @@ export function builtinPackNamesForFormat(format: "tsx" | "heex"): string {
     })
     .join(", ");
 }
+
+// ---------------------------------------------------------------------------
+// D-REALIZATION-AXES — the six deployable realization axes.
+//
+// Three axes (`persistence` / `application` / `directoryLayout`) ride the
+// live D-ADAPTER-HOME adapter menus; their DSL menu is the REAL (non-stub)
+// adapters off the surface, in DSL spelling.  Three (`foundation` /
+// `transport` / `runtime`) are greenfield — no adapter infra yet, so a
+// single current value each.  Frontends carry no axes (empty menu →
+// validator rejects any axis written on them).
+// ---------------------------------------------------------------------------
+
+export type RealizationAxis =
+  | "foundation"
+  | "application"
+  | "persistence"
+  | "directoryLayout"
+  | "transport"
+  | "runtime";
+
+// `applicationDslToAdapter` / `applicationAdapterToDsl` live in
+// `loom-ir.ts` (shared with lowering) — imported above.
+
+/** Adapter kind backing each axis, or undefined for the greenfield axes. */
+const ADAPTER_KIND_BY_AXIS: Partial<Record<RealizationAxis, "persistence" | "style" | "layout">> = {
+  persistence: "persistence",
+  application: "style",
+  directoryLayout: "layout",
+};
+
+function adapterKindForAxis(axis: RealizationAxis): "persistence" | "style" | "layout" | undefined {
+  return ADAPTER_KIND_BY_AXIS[axis];
+}
+
+/** Single current value for a greenfield axis on a backend family. */
+function greenfieldMenu(family: Platform, axis: "foundation" | "transport" | "runtime"): string[] {
+  if (axis === "runtime") return ["transactional"];
+  if (axis === "foundation") return [family === "phoenix" ? "ash" : "vanilla"];
+  // transport — the platform's only current HTTP surface.
+  return [family === "dotnet" ? "minimalApi" : family === "phoenix" ? "phoenixRouter" : "hono"];
+}
+
+/** The DSL-legal values for one realization axis on a platform family.
+ *  Adapter-backed axes → the REAL adapters (stubs excluded) in DSL
+ *  spelling; greenfield axes → the size-1 menu.  `[]` for frontends /
+ *  unknown platforms (no adapter menu) — any axis there is rejected. */
+export function realizationAxisMenu(family: Platform, axis: RealizationAxis): string[] {
+  if (!hasAdapters(family)) return [];
+  switch (axis) {
+    case "persistence":
+      return availableAdapterNames(family, "persistence");
+    case "directoryLayout":
+      return availableAdapterNames(family, "layout");
+    case "application":
+      return availableAdapterNames(family, "style").map(applicationAdapterToDsl);
+    default:
+      return greenfieldMenu(family, axis);
+  }
+}
+
+/** True when an out-of-menu value is a REGISTERED STUB (the platform
+ *  reserves the name but hasn't implemented it) rather than an unknown
+ *  value — lets the diagnostic say "reserved but not yet implemented". */
+export function isReservedStub(family: Platform, axis: RealizationAxis, dslValue: string): boolean {
+  const kind = adapterKindForAxis(axis);
+  if (kind === undefined) return false; // greenfield axes have no stubs
+  const key = axis === "application" ? applicationDslToAdapter(dslValue) : dslValue;
+  return (
+    allAdapterNames(family, kind).includes(key) &&
+    !availableAdapterNames(family, kind).includes(key)
+  );
+}
+
+/** Which realization axes each `foundation:` value OWNS (supplies itself)
+ *  — setting an owned axis alongside the foundation is an error (R4).
+ *  `vanilla` owns nothing; a rung-3/4 framework owns the application +
+ *  HTTP surface.  Data-driven: growing the foundation menu activates the
+ *  rule with no code change.  (`ash` does NOT own `persistence:` in v1 —
+ *  `ashPostgres`/`ashSqlite` stay selectable; menu-narrowing deferred.) */
+export const FOUNDATION_OWNED_AXES: Record<string, readonly RealizationAxis[]> = {
+  vanilla: [],
+  ash: ["application", "transport"],
+  abp: ["application", "transport"],
+  nestjs: ["application", "transport"],
+};

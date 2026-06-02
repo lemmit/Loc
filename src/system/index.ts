@@ -12,6 +12,7 @@ import type {
 import type { MigrationsIR } from "../ir/types/migrations-ir.js";
 import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
+import { hasAdapters, resolveLayout, resolveStyle } from "../platform/resolve-adapters.js";
 import { renderDataSourcesMd } from "./datasources.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderC4Model, renderC4SpecJson } from "./likec4.js";
@@ -250,7 +251,7 @@ function collectContextsFor(
   //     gated as not-implemented there by IR-validate, so it never generates.
   // Concretes always stay; the per-aggregate emit loop skips abstract bases
   // for repo/routes regardless, so a kept TPH base only contributes its table.
-  const isHono = d.platform === "hono";
+  const isHono = d.platform === "node";
   const keepsTable = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
     !!a.isAbstract && isHono && (a.inheritanceUsing ?? "sharedTable") === "sharedTable";
   // A TPC (`ownTable`) base is kept in the view on every backend that
@@ -294,6 +295,20 @@ function emitDeployable(
   // dictates).
   const sub = serviceSlug(d.name);
   const platform = platformFor(d.platform);
+  // D-REALIZATION-AXES (Phase 4): resolve the deployable's `application:`
+  // (→ style) and `directoryLayout:` (→ layout) selections to concrete
+  // adapters HERE — the system layer is the one allowed to import
+  // `resolve-adapters` (generators must not reach into `src/platform/`).
+  // The resolved adapters thread down through `emitProject` into each
+  // backend's `EmitCtx`.  Backends only (`hasAdapters`); frontends carry
+  // no axes, so both stay undefined.  Under today's size-1 real menus the
+  // resolved adapter is the backend's existing default → byte-identical.
+  const resolvedStyle = hasAdapters(d.platform)
+    ? resolveStyle(d.platform, d.application)
+    : undefined;
+  const resolvedLayout = hasAdapters(d.platform)
+    ? resolveLayout(d.platform, d.directoryLayout)
+    : undefined;
   const files = platform.emitProject({
     contexts,
     deployable: d,
@@ -301,6 +316,8 @@ function emitDeployable(
     migrations: options.migrations,
     emitTrace,
     topLevelComponents: options.topLevelComponents,
+    styleAdapter: resolvedStyle,
+    layoutAdapter: resolvedLayout,
   });
   for (const [relPath, content] of files) {
     out.set(`${sub}/${relPath}`, content);

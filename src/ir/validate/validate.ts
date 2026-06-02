@@ -1112,7 +1112,7 @@ function validateSystem(sys: SystemIR, diags: LoomDiagnostic[]): void {
 // has no schema / connection routing config to emit — so the omission
 // is an authoring mistake, not a meaningful default.
 //
-// Only fires for backend deployables (dotnet, hono, phoenixLiveView).
+// Only fires for backend deployables (dotnet, node, phoenix).
 // Frontend-only platforms (react, static) own no database and can't
 // have a dataSource to point at.
 // ---------------------------------------------------------------------------
@@ -1262,8 +1262,9 @@ function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
 
   // Backends that consume contextFilters with the principal / shape
   // limitation.  .NET (HasQueryFilter) is deliberately absent — it
-  // supports both deferred cases.
-  const LIMITED_FAMILIES = new Set(["hono", "phoenixLiveView"]);
+  // supports both deferred cases.  Canonical families (D-NODE-PLATFORM /
+  // D-PHOENIX-SURFACE): `node` (was `hono`), `phoenix` (was `phoenixLiveView`).
+  const LIMITED_FAMILIES = new Set(["node", "phoenix"]);
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
@@ -1547,7 +1548,7 @@ function validateInheritanceStorage(
   backendPlatforms: Set<string>,
 ): void {
   const byName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
-  const hostedByHono = backendPlatforms.has("hono");
+  const hostedByHono = backendPlatforms.has("node");
   for (const agg of ctx.aggregates) {
     if (!agg.isAbstract && !agg.extendsAggregate) continue;
     // A concrete's layout defaults to its base's (resolved within the
@@ -1563,7 +1564,7 @@ function validateInheritanceStorage(
     const how = agg.inheritanceUsing
       ? "inheritanceUsing(sharedTable)"
       : "the omitted-modifier default (sharedTable)";
-    const others = [...backendPlatforms].filter((p) => p !== "hono");
+    const others = [...backendPlatforms].filter((p) => p !== "node");
     const hostNote =
       others.length > 0
         ? `it is hosted by ${others.join(", ")}, where TPH is not implemented`

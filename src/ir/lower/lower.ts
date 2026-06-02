@@ -107,6 +107,7 @@ import {
   isWorkflow,
 } from "../../language/generated/ast.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../platform/registry.js";
+import { defaultsFor } from "../../platform/resolve-adapters.js";
 import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
@@ -180,6 +181,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
+import { applicationDslToAdapter } from "../types/loom-ir.js";
 import { inferExprType, lowerExpr, lowerExprInContext } from "./lower-expr.js";
 import { lowerStatement } from "./lower-stmt.js";
 import {
@@ -217,6 +219,31 @@ function qualifyDesign(raw: string | undefined, fallback: BuiltinPackFamily): st
   return parsed ? parsed.qualified : value;
 }
 
+/** Default values for the three greenfield realization axes
+ *  (D-REALIZATION-AXES) — the axes with no adapter infra yet, so each has
+ *  a single current value per platform.  `application`/`persistence`/
+ *  `directoryLayout` are NOT here: they source their defaults from the
+ *  live adapter menu (`defaultsFor`).  Only ever called for backends
+ *  (frontends carry no realization axes). */
+function greenfieldAxisDefaults(platform: Platform): {
+  foundation: string;
+  transport: string;
+  runtime: string;
+} {
+  return {
+    // Phoenix's domain framework defaults to Ash (matches today's
+    // `phoenixLiveView` behaviour after desugar — D-PHOENIX-SURFACE
+    // open-item 2); every other backend is `vanilla` (no framework).
+    foundation: platform === "phoenix" ? "ash" : "vanilla",
+    // The platform's only current HTTP surface.
+    transport:
+      platform === "dotnet" ? "minimalApi" : platform === "phoenix" ? "phoenixRouter" : "hono",
+    // Repository-loaded, DB-transaction consistency — the only runtime
+    // shipped today (actor runtimes land per-backend later).
+    runtime: "transactional",
+  };
+}
+
 /** Split a `platform:` value into the family (the closed `Platform`
  *  union every consumer branches on) and the fully-qualified ref
  *  (`family@version`, mirrors `qualifyDesign`).  Bareword backend →
@@ -230,24 +257,27 @@ function qualifyPlatform(raw: string | undefined): {
   family: Platform;
   ref: string;
 } {
-  // D-PHOENIX-SURFACE: `phoenix` is the host-platform spelling that
-  // decouples the name from the LiveView framework.  Canonicalise it to
-  // `phoenixLiveView` at this boundary so every downstream consumer (13
-  // call sites keyed on the literal) stays unchanged until the rename
-  // cleanup phase.
-  const value = canonicalPlatform(raw ?? "hono");
+  // D-PHOENIX-SURFACE: `phoenix` is the canonical host-platform name.
+  // Legacy *platform* spellings (`phoenixLiveView`, `hono`) are desugared
+  // here at the boundary so every downstream consumer sees only the
+  // canonical family (`phoenix`, `node`).
+  const value = canonicalPlatform(raw ?? "node");
   const parsed = parseBuiltinPlatformRef(value);
   return parsed
     ? { family: parsed.family as Platform, ref: parsed.qualified }
     : { family: value as Platform, ref: value };
 }
 
-/** Canonicalise a D-PHOENIX-SURFACE platform alias to the IR's stable
- *  family name.  `phoenix` → `phoenixLiveView`; everything else passes
- *  through.  Boundary-only: the alias never reaches the IR or any
- *  generator. */
+/** Canonicalise a legacy *platform* alias to its canonical family
+ *  (`phoenixLiveView` → `phoenix`, `hono` → `node`); everything else
+ *  passes through.  Boundary-only: the alias never reaches the IR or any
+ *  generator.  (The Hono *web framework* keeps the `hono` spelling as the
+ *  `transport:` value; the LiveView *framework* keeps `phoenixLiveView` —
+ *  see `canonicalFramework`.) */
 function canonicalPlatform(value: string): string {
-  return value === "phoenix" ? "phoenixLiveView" : value;
+  if (value === "phoenixLiveView") return "phoenix";
+  if (value === "hono") return "node";
+  return value;
 }
 
 /** Canonicalise a D-PHOENIX-SURFACE framework alias.  `liveview` →
@@ -540,7 +570,7 @@ function lowerSystem(sys: System): SystemIR {
     //     by Playwright page objects) AND an API spec (driven by
     //     fetch against the deployable's HTTP surface).
     const isFrontendOnly = !!targetPlatform && platformFor(targetPlatform).isFrontend;
-    const isFullstack = targetPlatform === "phoenixLiveView";
+    const isFullstack = targetPlatform === "phoenix";
     if (isFrontendOnly) {
       e2eTests.push(lowerE2E(b, e2eEnv, "ui"));
     } else if (isFullstack) {
@@ -898,7 +928,7 @@ function lowerDeployable(d: Deployable): DeployableIR {
     canonicalFramework(d.uiBlock?.framework) ??
     canonicalFramework(firstHostedUi?.framework) ??
     (uiName
-      ? platform === "phoenixLiveView"
+      ? platform === "phoenix"
         ? "phoenixLiveView"
         : platformFor(platform).isFrontend || platform === "dotnet"
           ? "react"
@@ -912,7 +942,7 @@ function lowerDeployable(d: Deployable): DeployableIR {
   //  - backends without a `ui:` mount carry no design.
   const design = platformFor(platform).isFrontend
     ? qualifyDesign(d.design, "mantine")
-    : platform === "phoenixLiveView"
+    : platform === "phoenix"
       ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
       : platform === "dotnet" && uiName
         ? qualifyDesign(d.design, "mantine")
@@ -930,6 +960,39 @@ function lowerDeployable(d: Deployable): DeployableIR {
   // bindings the deployable hosts.
   const contextNames = (d.contextRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
   const dataSourceNames = (d.dataSourceRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
+  // D-REALIZATION-AXES: normalize the six axes.  Backends fill every axis
+  // with a concrete value (an absent knob → the platform default);
+  // frontends (`react`/`static`) carry none — `defaultsFor` is undefined
+  // for them, the validator rejects any axis written on a frontend.  The
+  // three adapter-backed axes source their default from the live adapter
+  // menu (`adapterDefaults`); the three greenfield axes from the table
+  // above.  `application`↔adapter `style`, `directoryLayout`↔`layout`.
+  const adapterDefaults = defaultsFor(platform);
+  const axes =
+    adapterDefaults !== undefined
+      ? (() => {
+          const gf = greenfieldAxisDefaults(platform);
+          return {
+            foundation: d.foundation ?? gf.foundation,
+            // Store the resolved adapter key (`serviceLayer` → `layered`)
+            // so the future codegen passes it straight to `resolveStyle`.
+            application: d.application
+              ? applicationDslToAdapter(d.application)
+              : adapterDefaults.style,
+            persistence: d.persistence ?? adapterDefaults.persistence.state,
+            directoryLayout: d.directoryLayout ?? adapterDefaults.layout,
+            transport: d.transport ?? gf.transport,
+            runtime: d.runtime ?? gf.runtime,
+          };
+        })()
+      : {
+          foundation: undefined,
+          application: undefined,
+          persistence: undefined,
+          directoryLayout: undefined,
+          transport: undefined,
+          runtime: undefined,
+        };
   return {
     name: d.name,
     platform,
@@ -940,6 +1003,12 @@ function lowerDeployable(d: Deployable): DeployableIR {
     targetName: d.targets?.ref?.name,
     auth,
     design,
+    foundation: axes.foundation,
+    application: axes.application,
+    persistence: axes.persistence,
+    directoryLayout: axes.directoryLayout,
+    transport: axes.transport,
+    runtime: axes.runtime,
     uiName,
     uiFramework,
     hostedUiNames,
