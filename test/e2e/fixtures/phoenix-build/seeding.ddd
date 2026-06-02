@@ -9,7 +9,13 @@ system Seeding {
     context Catalog {
       enum Tier { Free, Pro }
 
-      aggregate Widget with crudish {
+      // Plain aggregate (mirrors acme-lv's served Customer shape).  NOT
+      // `with crudish`: crudish injects a canonical `update` operation that
+      // the Phoenix REST controller emits on top of the standard update,
+      // producing a duplicate `def update/2` clause that fails
+      // `--warnings-as-errors`.  Phoenix emits `create_<agg>!` regardless
+      // (always-on create), so the seeder is unaffected.
+      aggregate Widget {
         name: string
         size: int
         tier: Tier
