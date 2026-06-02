@@ -1,4 +1,5 @@
 import {
+  platformFamily,
   platformOwnsBackend,
   platformSavingShapes,
 } from "../../language/validators/data/platform-rules.js";
@@ -24,7 +25,7 @@ import type {
   TestStmtIR,
   TypeIR,
 } from "../types/loom-ir.js";
-import { allContexts, findUsesCurrentUser } from "../types/loom-ir.js";
+import { allContexts, exprUsesCurrentUser, findUsesCurrentUser } from "../types/loom-ir.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -55,6 +56,11 @@ export interface LoomDiagnostic {
   message: string;
   /** Where the diagnostic came from — `<system>/<test-name>`. */
   source: string;
+  /** Optional stable diagnostic code (e.g. `loom.criterion-not-selectable`)
+   *  mirroring the `loom.*` codes the Langium-side validators attach.
+   *  Lets tests and tooling match a diagnostic by identity rather than
+   *  by message substring. Undefined on the older message-only diags. */
+  code?: string;
 }
 
 export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
@@ -68,6 +74,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateSystem(sys, diags);
     validateDataSourceCoverage(sys, diags);
     validateSavingShapeSupport(sys, diags);
+    validateHonoContextFilterSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
@@ -736,6 +743,43 @@ function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagnostic[])
       }
     }
   }
+  // `filter <expr>` capability predicates (lowered to
+  // `agg.contextFilters`) are a SELECTION position too: every backend
+  // installs them at the query layer (.NET `HasQueryFilter`, Drizzle
+  // read-site conjunction, Ecto base-query helper), so they must lower
+  // to the same queryable subset as a `find`/`view` `where`.  Until now
+  // they bypassed this check — an unselectable capability filter would
+  // silently emit nothing (Drizzle/Ecto) or fail at C# render (.NET).
+  // `currentUser.<scalar>` is admitted here exactly as in find filters:
+  // the backend threads the request principal in (row-level
+  // soft-delete / tenancy filters are the motivating case).
+  for (const agg of ctx.aggregates) {
+    const filters = (agg as EnrichedAggregateIR).contextFilters ?? [];
+    for (const predicate of filters) {
+      const offending = firstNonQueryableNode(predicate);
+      if (offending) {
+        diags.push({
+          severity: "error",
+          message:
+            `aggregate '${agg.name}': a 'filter' capability predicate is not selectable (${offending}). ` +
+            `Capability filters install at the query layer, so they must lower to the queryable subset: ` +
+            `comparisons, &&/||/!, parens, 'this.<column>' / 'this.<vo>.<sub>' refs, 'currentUser.<field>', literals.`,
+          source: `${ctx.name}/${agg.name}`,
+          code: "loom.criterion-not-selectable",
+        });
+        continue;
+      }
+      const unknown = firstUnknownColumnRef(predicate, agg, ctx);
+      if (unknown) {
+        diags.push({
+          severity: "error",
+          message: `aggregate '${agg.name}': a 'filter' capability predicate references unknown field ${unknown} on '${agg.name}'.`,
+          source: `${ctx.name}/${agg.name}`,
+          code: "loom.criterion-not-selectable",
+        });
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1182,6 +1226,65 @@ function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[]): voi
             `emit: ${supported.join(", ")}.  Use a supported shape, or host this ` +
             `aggregate on a deployable whose platform emits shape(${shape}).`,
           source: `${sys.name}/${dep.name}`,
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Capability-filter support on the Hono backend (partial today).  A
+// `filter <expr>` capability installs at the query layer on every read.
+// On .NET it rides EF Core's `HasQueryFilter` (global, DI-resolved).
+// Drizzle has no global query filter, so the predicate is AND-ed into
+// each generated read site.  Two cases are not yet wired and would
+// otherwise emit silently-wrong SQL (a soft-delete / tenancy-isolation
+// footgun), so reject them with a clear error instead:
+//
+//   1. Principal-referencing filters (`this.tenantId ==
+//      currentUser.tenantId`).  The always-on load path (`findById` /
+//      `getById` / `findManyByIds`) would need the request principal
+//      threaded through those methods and every caller — deferred.
+//   2. Non-relational shapes (`shape(document)` / `shape(embedded)`).
+//      A document aggregate stores its fields inside one `jsonb` column,
+//      so `this.isDeleted` is not a top-level column the predicate can
+//      reference without JSON-path lowering — deferred.
+//
+// Non-principal capability filters on a relational aggregate
+// (`filter !this.isDeleted`) ARE emitted on Hono.  See
+// docs/proposals/criterion-everywhere.md.
+// ---------------------------------------------------------------------------
+function validateHonoContextFilterSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "hono") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        const filters = enriched.contextFilters ?? [];
+        if (filters.length === 0) continue;
+        const usesPrincipal = filters.some((p) => exprUsesCurrentUser(p));
+        const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
+        const nonRelational = shape !== "relational";
+        if (!usesPrincipal && !nonRelational) continue;
+        const reason = usesPrincipal
+          ? `references currentUser (e.g. a tenancy filter); principal-referencing capability ` +
+            `filters are not yet wired on Hono`
+          : `is persisted as shape(${shape}); capability filters are only wired for ` +
+            `relational aggregates on Hono today`;
+        diags.push({
+          severity: "error",
+          message:
+            `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
+            `'${ctxName}.${agg.name}' with a 'filter' capability predicate that ${reason}. ` +
+            `Host this aggregate on a .NET deployable, or remove the unsupported capability filter. ` +
+            `Non-principal filters on relational aggregates (e.g. 'filter !this.isDeleted') are emitted.`,
+          source: `${sys.name}/${dep.name}`,
+          code: "loom.context-filter-unsupported",
         });
       }
     }
