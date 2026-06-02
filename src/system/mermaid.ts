@@ -310,6 +310,13 @@ function stepNode(id: string, s: WorkflowStmtIR): StepNode {
       return { id, decl: `${id}["${label(`${s.name} = ${s.aggName}.create()`)}"]` };
     case "repo-let":
       return { id, decl: `${id}["${label(`${s.name} = ${s.repoName}.${s.method}()`)}"]` };
+    case "repo-run":
+      return {
+        id,
+        decl: `${id}["${label(`${s.name} = ${s.repoName}.run(${s.retrievalName})`)}"]`,
+      };
+    case "for-each":
+      return { id, decl: `${id}["${label(`for ${s.var} in ...`)}"]` };
     case "expr-let":
       return { id, decl: `${id}["${label(`let ${s.name}`)}"]` };
     case "op-call":
@@ -472,6 +479,16 @@ function sequenceMessages(s: WorkflowStmtIR): string[] {
       return [`  WF->>${s.repoName}: ${s.method}()`, `  ${s.repoName}-->>WF: ${s.name}`];
     case "op-call":
       return [`  WF->>${s.aggName}: ${s.op}()`];
+    case "repo-run":
+      return [
+        `  WF->>${s.repoName}: run(${s.retrievalName})`,
+        `  ${s.repoName}-->>WF: ${s.name}[]`,
+      ];
+    case "for-each":
+      return [
+        `  note over WF: ${label(`for ${s.var} in ${s.varAggName}[]`)}`,
+        ...s.body.flatMap(sequenceMessages),
+      ];
     case "expr-let":
       return [];
     case "resource-call": {

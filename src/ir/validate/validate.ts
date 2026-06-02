@@ -1927,6 +1927,7 @@ function validateWorkflowBody(
   const reposByName = new Map(ctx.repositories.map((r) => [r.name, r] as const));
   const eventsByName = new Map(ctx.events.map((e) => [e.name, e] as const));
   const bindingAgg = new Map<string, string>(); // bindingName -> aggName
+  const arrayBindingAgg = new Map<string, string>(); // repo-run binding -> element aggName
   let mutated = false;
 
   for (const st of wf.statements) {
@@ -2070,6 +2071,71 @@ function validateWorkflowBody(
           }
         }
         bindingAgg.set(st.name, st.aggName);
+        break;
+      }
+      case "repo-run": {
+        // `let xs = Repo.run(<Retrieval>(args), page?)` — the bound
+        // result is an aggregate array, consumable only by a `for-each`.
+        const repo = reposByName.get(st.repoName);
+        if (!repo) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': '${st.repoName}.run(...)' references unknown repository '${st.repoName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const retrieval = ctx.retrievals.find((r) => r.name === st.retrievalName);
+        if (!retrieval) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': '${st.repoName}.run(${st.retrievalName}(...))' references unknown retrieval '${st.retrievalName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const target = retrieval.targetType.kind === "entity" ? retrieval.targetType.name : "";
+        if (target !== st.aggName) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': retrieval '${st.retrievalName}' is over '${target}', but '${st.repoName}' is a repository for '${st.aggName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        // Record the array binding so a `for-each` over it resolves the
+        // element aggregate.
+        arrayBindingAgg.set(st.name, st.aggName);
+        break;
+      }
+      case "for-each": {
+        // The iterable must be an aggregate array (today: a `repo-run`
+        // result).  Bind the loop var to the element aggregate so body
+        // op-calls resolve, then validate the body op-calls.
+        // The iterable should be a `repo-run` array binding (the only
+        // aggregate-array producer in v1).  A bare `ref` to such a
+        // binding is the supported shape.
+        const iterableBinding = st.iterable.kind === "ref" ? st.iterable.name : undefined;
+        const isArrayBinding = iterableBinding ? arrayBindingAgg.has(iterableBinding) : false;
+        if (st.varAggName === "Unknown" || !isArrayBinding) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': 'for ${st.var} in ...' must iterate a 'let xs = Repo.run(...)' result (the only aggregate array in v1).`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        bindingAgg.set(st.var, st.varAggName);
+        for (const inner of st.body) {
+          if (inner.kind === "op-call") {
+            mutated = true;
+            if (!bindingAgg.get(inner.target)) {
+              diags.push({
+                severity: "error",
+                message: `workflow '${wf.name}': in 'for ${st.var}', '${inner.target}.${inner.op}(...)' references unknown binding '${inner.target}'.`,
+                source: `${ctx.name}/${wf.name}`,
+              });
+            }
+          }
+        }
         break;
       }
       case "op-call": {

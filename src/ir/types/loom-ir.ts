@@ -751,11 +751,40 @@ export type WorkflowStmtIR =
       expr: ExprIR;
     }
   | {
+      // `let xs = Repo.run(<Retrieval>(args), page?)` — bind the named
+      // query bundle's result array (retrieval.md).  Distinct from
+      // `repo-let` (which forbids array returns): a `repo-run` is always
+      // an aggregate array, consumable only by a `for-each` loop.
+      kind: "repo-run";
+      name: string;
+      repoName: string;
+      aggName: string;
+      retrievalName: string;
+      retrievalArgs: ExprIR[];
+      page?: { offset?: ExprIR; limit?: ExprIR };
+      /** Element aggregate array type `{ kind: "array", element: entity }`. */
+      returnType: TypeIR;
+    }
+  | {
       kind: "op-call";
       target: string;
       aggName: string;
       op: string;
       args: ExprIR[];
+    }
+  | {
+      // `for <var> in <iterable> { <body> }` (retrieval.md).  Iterates an
+      // aggregate array, binding each element to `var`.  Mutations to
+      // `var` inside the body persist via `savesPerIteration` — the same
+      // dirtiness rule as workflow-exit saves, applied to the loop scope
+      // and emitted INSIDE the loop (the flat workflow-level `savesAtExit`
+      // can't express a per-element save).
+      kind: "for-each";
+      var: string;
+      varAggName: string;
+      iterable: ExprIR;
+      body: WorkflowStmtIR[];
+      savesPerIteration: { name: string; aggName: string; repoName: string }[];
     }
   | {
       // A bare (unbound) resource-op call statement — `files.put(k, v)`
@@ -2071,6 +2100,14 @@ function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
     case "repo-let":
     case "op-call":
       return s.args.some(exprUsesCurrentUser);
+    case "repo-run":
+      return (
+        s.retrievalArgs.some(exprUsesCurrentUser) ||
+        (s.page?.offset ? exprUsesCurrentUser(s.page.offset) : false) ||
+        (s.page?.limit ? exprUsesCurrentUser(s.page.limit) : false)
+      );
+    case "for-each":
+      return exprUsesCurrentUser(s.iterable) || s.body.some(workflowStmtUsesCurrentUser);
     case "resource-call":
       return exprUsesCurrentUser(s.call);
   }

@@ -1214,7 +1214,28 @@ Statement:
   | RequiresStmt
   | LetStmt
   | EmitStmt
+  | ForStmt
   | AssignOrCallStmt;
+
+// `for <var> in <iterable> { <body> }` — iterate an aggregate array
+// (typically `Repo.run(<Retrieval>(args), page?)`), binding each element
+// to `<var>` in the body.  The body reuses `Statement*`, so op-calls,
+// lets, emits, and nested loops all parse.  Each iteration's mutations to
+// `<var>` persist via a per-iteration save (see the for-each lowering).
+// `for` is already a hard keyword elsewhere (`repository X for Agg`); the
+// leading statement position disambiguates the loop.
+ForStmt:
+    'for' var=ID 'in' iterable=ForIterable '{'
+        body+=Statement*
+    '}';
+
+// The loop iterable is restricted to a name or a postfix chain
+// (`customers`, `Customers.run(R(args), …)`) — deliberately NOT the full
+// `Expression`, because `BuilderCall` (`Name { … }`) would otherwise
+// swallow the loop's own `{ body }` block.  These are the only forms
+// that produce an aggregate array in v1 anyway.
+ForIterable infers Expression:
+    NameRef ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+)?;
 
 PreconditionStmt:
     'precondition' expr=Expression;

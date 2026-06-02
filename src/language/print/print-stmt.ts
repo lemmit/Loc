@@ -23,6 +23,10 @@ export function printStmt(node: Statement): string {
       const target = printLValue(node.target);
       return node.op && node.value ? `${target} ${node.op} ${printExpr(node.value)}` : target;
     }
+    case "ForStmt": {
+      const body = node.body.map((s) => `  ${printStmt(s)}`).join("\n");
+      return `for ${node.var} in ${printExpr(node.iterable)} {\n${body}\n}`;
+    }
     default: {
       const exhaustive: never = node;
       throw new Error(`printStmt: unhandled node ${(exhaustive as { $type: string }).$type}`);
