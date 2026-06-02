@@ -864,3 +864,83 @@ normalized form (mirrors `design:` via `BUILTIN_PACK_LATEST`).
 deployable grammar; `DeployableIR`; `checkDeployable`; each backend's
 `PlatformSurface` (menu+default fields). **Amends D-PHOENIX-SURFACE** open-item 1;
 **depends on D-ADAPTER-HOME**.
+
+---
+
+## D-SEED-PATH — seed rows go through the domain `create`
+
+**Status:** PINNED.
+
+**Problem.** `database-seeding.md` must pick how a declarative seed row
+reaches the database. Target frameworks split: EF `HasData` and Drizzle
+`insert` go *straight to tables*; Ash goes *through actions* (enforcing
+changesets). Loom needs one default.
+
+**Decision.** Seed rows lower through the aggregate's **canonical
+`create`** by default — the same path a real request takes — so
+invariants and create-time logic run, and a seed that violates an
+invariant is caught at boot rather than producing a corrupt row. A
+`seed raw { … }` modifier opts a block into table-level inserts for
+bulk fixtures where the domain pass is deliberately bypassed (or too
+slow); `raw` carries a `loom.seed-raw-unchecked` warning when a value
+would fail an invariant.
+
+**Rationale.**
+
+- The domain `create` already encodes the invariants; bypassing it to
+  insert rows is the same mistake as letting an API skip validation.
+- Ash's native seed idiom is `Ash.create!`; routing through `create`
+  makes the Loom surface map cleanly onto the most-opinionated backend
+  rather than the least.
+- `raw` keeps the escape hatch explicit and visible, not the default.
+
+**Consequences.** `SeedIR.path: "domain" | "raw"`; the declarative
+record shape is the aggregate's **`create`-parameter shape** (no `id`
+field — the framework mints ids). Object graphs built by *operations*
+(not create params) are the imperative-body's job, not the declarative
+form's.
+
+**Affects.** `database-seeding.md` §2 (D-SEED-PATH), §3.2, §6 (per-
+backend emitters), §8 (`loom.seed-raw-unchecked`).
+
+---
+
+## D-SEED-IDEMPOTENCY — v1 is ship-once via a dataset marker
+
+**Status:** PINNED.
+
+**Problem.** Re-running a seed must not duplicate rows. Two mechanisms
+were on the table: (a) an applied-**marker** table; (b) per-row
+**upsert** by a declared natural key.
+
+**Decision.** v1 is **ship-once via an applied-marker**: a `__loom_seed`
+table holds one row per applied `(module, dataset)`; the seeder skips
+the whole set on boot if the marker is present. This matches the Rails
+`db:seed` / Ecto `seeds.exs` contract, needs no natural key on the
+rows, and covers the quick-start demo entirely. Editing an
+already-applied seed has no effect until the marker is cleared
+(`ddd seed --reset <dataset>`); seeding is forward-only, mirroring the
+migrations stance.
+
+Per-row **upsert by a declared natural key** (`key Aggregate.field`),
+for *reference* data corrected in place over time, is **deferred** — it
+adds a second idempotency mechanism, a grammar clause, a validation
+rule, and a per-backend upsert branch, and earns its keep only once a
+model actually has evolving lookup data. The grammar reserves the slot
+(`seed <dataset> key Aggregate.field`) so it lands additively later.
+
+**Rationale.**
+
+- The driving use case (first-boot demo content) is served by the
+  marker alone; the marker is the smaller, simpler mechanism.
+- Marker-by-content-hash was rejected: re-applying forward-only
+  `create`s on a changed set just collides on existing rows — the very
+  thing upsert would fix — so hashing buys nothing without also buying
+  upsert. Keying the marker by *dataset name* sidesteps it.
+
+**Consequences.** No `key`/`contentHash` in `SeedIR` for v1; the marker
+table is emitted as a synthetic `createTable` step by the owning
+module's migration pass. `LOOM_SEED` gates which datasets run.
+
+**Affects.** `database-seeding.md` §2 (D-SEED-IDEMPOTENCY), §7, §10
+(deferred upsert), build-order §11 phase 6.

@@ -645,6 +645,36 @@ export interface BoundedContextIR {
   criteria: CriterionIR[];
   /** Named query bundles declared in this context (retrieval.md). */
   retrievals: RetrievalIR[];
+  /** First-boot seed datasets declared in this context (database-seeding.md).
+   *  Platform-neutral; the system-level seed builder (phase ⑨) groups these
+   *  per (module, dataset) and the backends emit native seeders. */
+  seeds: SeedIR[];
+}
+
+/** A first-boot seed dataset for a context's aggregates
+ *  (database-seeding.md).  Declarative form only in this slice: each row is
+ *  the create-parameter shape of one aggregate, lowered through the domain
+ *  `create` by default (D-SEED-PATH).  `module` is attached later by the
+ *  system-level builder; at context-lowering time only `dataset`/`path`/`rows`
+ *  are known. */
+export interface SeedIR {
+  /** Dataset name; `"default"` runs unconditionally, others gate on
+   *  `LOOM_SEED` / the test harness.  Defaults to `"default"` when the
+   *  source omits it. */
+  dataset: string;
+  /** Through the domain `create` (default) or straight to tables (`raw`). */
+  path: "domain" | "raw";
+  /** Ordered records, in source order.  (Topological reorder by `@handle`
+   *  cross-row refs is a later slice.) */
+  rows: SeedRowIR[];
+}
+
+/** One seeded aggregate instance — the create-parameter shape, no `id`. */
+export interface SeedRowIR {
+  /** Target aggregate name. */
+  aggregate: string;
+  /** Field initialisers, fully-resolved to `ExprIR`. */
+  fields: { name: string; value: ExprIR }[];
 }
 
 /** A saved, strongly-typed query over one source aggregate.  Two
