@@ -74,7 +74,7 @@ system Acme {
   }
 
   storage primary { type: postgres }
-  dataSource ordersState { for: Orders, kind: state, use: primary }
+  resource ordersState { for: Orders, kind: state, use: primary }
 
   deployable api    { platform: dotnet, contexts: [Orders], dataSources: [ordersState], port: 8080 }
   deployable webApp { platform: react,  targets: api, ui: SalesAdmin, port: 3001 }

@@ -79,7 +79,7 @@ system Acme {
   // Per-deployable opt-in.  Without `auth: required` the deployable
   // stays open (existing behaviour).
   storage primary { type: postgres }
-  dataSource ordersState { for: Orders, kind: state, use: primary }
+  resource ordersState { for: Orders, kind: state, use: primary }
 
   deployable api {
     platform: dotnet

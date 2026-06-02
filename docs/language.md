@@ -51,8 +51,8 @@ system Acme {
     subdomain Catalog { context Products { … } }
     subdomain Sales   { context Orders   { … } }
     storage primary { type: postgres }
-    dataSource productsState { for: Products, kind: state, use: primary }
-    dataSource ordersState   { for: Orders,   kind: state, use: primary }
+    resource productsState { for: Products, kind: state, use: primary }
+    resource ordersState   { for: Orders,   kind: state, use: primary }
     deployable api {
         platform: dotnet, contexts: [Products, Orders],
         dataSources: [productsState, ordersState], port: 8080
@@ -82,7 +82,7 @@ import "./orders.ddd"
 system Shop {
     subdomain Sales { context Orders { … } }
     storage primary { type: postgres }
-    dataSource ordersState { for: Orders, kind: state, use: primary }
+    resource ordersState { for: Orders, kind: state, use: primary }
     deployable api {
         platform: hono, contexts: [Orders], dataSources: [ordersState]
     }
@@ -144,15 +144,15 @@ preserved at [`plans/multi-file-source.md`](plans/multi-file-source.md).
 | Form | Purpose |
 | --- | --- |
 | `subdomain Name { … }` | Groups one or more bounded contexts under a name.  A subdomain is a logical unit; it doesn't directly produce code.  Was named `module` before the D-STORAGE-SPLIT rename. |
-| `deployable name { platform: dotnet\|hono\|phoenixLiveView, contexts: [A, B], dataSources: [X, Y], port: N, auth: required? }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  `contexts:` names which bounded contexts this deployable hosts; `dataSources:` lists the system-scope `dataSource` decls that route those contexts' persistence (every hosted aggregate must have a matching binding — see the `dataSource` row below).  Optional `auth: required` enables JWT-decode middleware on this deployable; see [`auth.md`](auth.md). |
+| `deployable name { platform: dotnet\|hono\|phoenixLiveView, contexts: [A, B], dataSources: [X, Y], port: N, auth: required? }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  `contexts:` names which bounded contexts this deployable hosts; `dataSources:` lists the system-scope `resource` decls that route those contexts' persistence (every hosted aggregate must have a matching binding — see the `resource` row below; the clause keyword stays `dataSources:` for compatibility).  Optional `auth: required` enables JWT-decode middleware on this deployable; see [`auth.md`](auth.md). |
 | `deployable name { platform: react, targets: <other-deployable>, port: N }` | A frontend deployable: a Vite-built React + RQ + Zod + Mantine SPA whose API base URL is wired to `targets`'s port.  Hosted contexts are inherited from the target. |
 | `context Name { … }` | Allowed directly inside a system; treated as if it were in an implicit `_default` subdomain. |
 | `test e2e "name" against <deployable> { … }` | End-to-end test that runs against the named deployable's HTTP API; lowers to a vitest file at the system output root. |
 | `user { id: string, role: string, … }` | System-wide JWT-claim shape decoded by the verifier hook.  At most one per system; required when any deployable opts in via `auth: required`.  The `currentUser` magic identifier in operation / workflow / view-bind expressions is typed against this shape.  See [`auth.md`](auth.md). |
 | `theme { primary: "#…", radius: "md", … }` | System-wide visual identity — design tokens consumed by every React (and Phoenix LiveView) deployable in this system.  At most one per system.  Colour properties (`primary`, `secondary`, `accent`, `success`, `warning`, `error`, `neutral`) accept CSS hex values (`#RGB` / `#RRGGBB` / `#RRGGBBAA`).  `radius` is one of `none / sm / md / lg / xl`.  `fontFamily` and `fontFamilyMono` are free-form strings.  `colorScheme` is `light / dark / auto`.  Unknown property names and invalid values are validator errors. |
 | `api Name from <Subdomain>` | First-class API contract derived from a subdomain's domain (aggregates expose `all / byId / create / update / delete`, repositories expose their finds, workflows expose mutations, views expose queries).  Backend deployables `serves:` an api; UIs reference one via `api X: <ApiName>` parameters.  See [`architecture.md`](architecture.md). |
-| `storage Name { type: postgres\|redis\|kafka\|… }` | Typed physical store reusable across deployables.  v0 fully supports `postgres`; other types parse but don't activate generator output.  See [`architecture.md`](architecture.md). |
-| `dataSource Name { for: <Ctx>, kind: <k>, use: <storage>, … }` | Logical binding from a bounded context's data of kind `state` / `eventLog` / `snapshot` / `cache` / `replica` to a physical `storage`.  Optional knobs: `schema`, `tablePrefix`, `keyPrefix`, `ttl`, `every`, `retain`, `isolationLevel`, `readonly`, `shape` (per-projection saving-shape override of the aggregate header's `shape(…)`).  Every backend deployable (`dotnet`, `hono`, `phoenixLiveView`) hosting an aggregate must list a matching dataSource under its `dataSources:` field.  See [`architecture.md`](architecture.md) for the kind ↔ storage compatibility matrix. |
+| `storage Name { type: postgres\|redis\|kafka\|s3\|rabbitmq\|restApi\|… }` | Typed physical store / service reusable across deployables.  `type:` names the built-in **sourceType** that realizes it.  v0 fully supports `postgres`; object-store / queue / external-api types (`s3`, `rabbitmq`, `restApi`) activate dev-compose sidecars + client emission; the rest parse but don't activate generator output.  Optional `config { k: v }` map for vendor parameters (region, bucket, vhost, …).  See [`resources.md`](resources.md). |
+| `resource Name { for: <Ctx>, kind: <k>, use: <storage>, … }` | The configured binding (renamed from `dataSource`) from a bounded context's data of kind `state` / `eventLog` / `snapshot` / `cache` / `replica` / `objectStore` / `queue` / `api` to a physical `storage`.  Optional knobs: `schema`, `tablePrefix`, `keyPrefix`, `ttl`, `every`, `retain`, `isolationLevel`, `readonly`, `shape`, `config { … }`.  Every backend deployable hosting an aggregate must list a matching `resource` under its `dataSources:` field.  See [`resources.md`](resources.md) for the full model (sourceTypes, kinds, capabilities, interfaces) and workflow-level consumption. |
 | `ui Name { … }` | Block of pages, components, menu, and api parameters that a deployable binds via `ui:`.  See [`page-metamodel.md`](page-metamodel.md). |
 
 A subdomain (and the bounded contexts it groups) may appear in any
@@ -183,12 +183,12 @@ used in operation / workflow expression bodies.  The
 
 Backend deployables (`dotnet`, `hono`, `phoenixLiveView`) declare
 `contexts: [...]` (which bounded contexts they host) and
-`dataSources: [...]` (the system-scope `dataSource` decls that route
+`dataSources: [...]` (the system-scope `resource` decls that route
 those contexts' persistence).  React deployables declare
 `targets: <other-deployable>` instead — the frontend's API base URL
 is wired to the target's port and its hosted contexts are inherited
 from the target so pages exactly cover the API surface.  See
-[`architecture.md`](architecture.md) for the storage/dataSource model
+[`resources.md`](resources.md) for the storage/resource model
 and [`generators.md`](generators.md) for what each platform emits per
 aggregate.
 
