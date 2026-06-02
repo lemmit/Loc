@@ -3,7 +3,7 @@
 > Status: **PARTIAL** — Phase 1 landed (declarative `seed` surface →
 > `SeedIR` → lowering + validators; no codegen yet). Remaining phases
 > (per-backend emitters, the `__loom_seed` marker + compose wiring, the
-> imperative body, `@handle`/`SeedRef`) tracked in §11.
+> imperative body, the `raw` explicit-id path) tracked in §11.
 > Graduates the `seed {}` sketch from
 > [`quickstart-and-day-one-batteries.md` §5.4](./quickstart-and-day-one-batteries.md)
 > into a full, platform-neutral design that mirrors the migrations
@@ -142,58 +142,53 @@ context Catalog {
 }
 ```
 
-**Cross-aggregate references** use a local handle (`@name`) that
-resolves to the created instance's id — the seed builder topologically
-orders by these edges exactly as the migration builder orders tables by
-FK:
+**Cross-aggregate references use explicit ids** (D-SEED-XREF) — the
+declarative-fixture model of Django, EF Core `HasData`, and raw SQL —
+**not** a bespoke handle abstraction. The default domain `create` path
+mints ids (you cannot reference an id that does not exist yet), so
+related/cross-referenced seed data uses the **`raw` path**: each row is
+a literal record — an explicit `id` and literal FK columns — inserted
+directly, bypassing `create`. The author writes the same literal id in
+the referenced row and the referencing FK, and orders rows so a
+referenced row precedes its referrer:
 
 ```ddd
 context Sales {
-  seed demo {
-    Customer @acme { name: "Acme Corp", email: "ops@acme.test" }
-    Order { customerId: @acme, status: Draft, placedAt: now() }
+  seed reference raw {
+    Customer { id: "acme", name: "Acme Corp", email: "ops@acme.test" }
+    Order { id: "ord-1", customerId: "acme", status: "Draft" }
   }
 }
 ```
 
-`@acme` lowers to a `SeedRef` in the IR; the Order row's `customerId`
-carries a dependency edge on the Customer row. (`now()` and the other
-pure stdlib builtins already legal in default-value position are legal
-here.)
+There is no `@handle`, no `SeedRef`, no topological reorder — id
+consistency and ordering are the author's, exactly as in `HasData` /
+`seeds.rb` with explicit ids / a SQL fixture. (A bespoke `@handle`
+symbolic-reference form was considered and **dropped**: no concrete
+stack has it; the relational-graph case it targeted is better served by
+explicit ids here, or by the imperative body (§3.3) whose `let`
+bindings *are* the handle, for free.)
 
-### 3.2 Record shape and id resolution
+### 3.2 Record shape
 
-A seed record is the aggregate's **`create`-parameter shape, not its
-wire shape** — so it has **no `id` field**. The framework owns id
-minting (the lifecycle-operations rule), so the author never writes
-one. For `Product with crudish` the canonical create is
-`create({ sku, price })`, hence `Product { sku, price }`. Value objects
-nest as object literals (`price: { amount, currency }`), enums are bare
-values (`status: Draft`), and optional params may be omitted.
+A **domain-path** record (the default, §3.1) is the aggregate's
+**`create`-parameter shape, not its wire shape** — so it has **no `id`
+field** (the framework mints ids) and therefore no cross-references.
+For `Product with crudish` the canonical create is `create({ sku,
+price })`, hence `Product { sku, price }`. Value objects nest as object
+literals (`price: { amount, currency }`), enums are bare values
+(`status: Draft`), optionals may be omitted. Object graphs assembled by
+*operations* (`Order.contains lines: OrderLine[]` via `addLine`) are out
+of reach for the declarative domain form — that is the imperative body
+(§3.3).
 
-Object graphs assembled by *operations* rather than create params —
-`Order.contains lines: OrderLine[]` populated through `addLine` — are
-deliberately **out of reach for the declarative form**; that is exactly
-what the imperative body (§3.3) is for.
-
-**Id access is therefore never a literal — it flows through the
-`@handle`** — and whether a handle yields a *known, stable* id depends
-on the aggregate's `ids` kind:
-
-| `ids` kind | Id source | Handle resolution |
-|---|---|---|
-| `guid` (default) | app-minted before insert | deterministic **UUIDv5(`dataset`, `aggregate`, `handle`)** — same id every run; safe to reference from stable URLs / e2e assertions |
-| `string` | author-supplied natural key (a create param) | the id *is* a written field; the handle is that value |
-| `int` / `long` | DB sequence/identity, unknown until insert | the handle binds to the id **captured at runtime** from `create`'s return — consistent within a run, not stable across fresh DBs; an id cannot be hard-coded (use `guid` if a stable id is needed) |
-
-The payoff: for the two kinds where the app knows the id before insert
-(`guid`, `string`), cross-row *and* cross-block references resolve to a
-deterministic id, so deep links and test fixtures get a stable, known
-id for free. For DB-generated `int`/`long`, an id is inherently
-unknowable until insert, so a runtime-captured handle is the correct
-(and only possible) answer — `SeedRef` lowers to "look up the id minted
-for `@acme` in this run", which every backend already expresses (a
-local variable in `db/seed.ts`, the `ISeeder`, and `seeds.exs`).
+A **`raw`-path** record is the **table-column shape**: it may set an
+explicit `id` and writes FK columns as literal id values. This is the
+home for explicit ids and the cross-references built on them. Per `ids`
+kind the explicit id is just a column literal — a uuid for `guid`, the
+natural-key string for `string`, an integer for `int`/`long` (you own
+uniqueness). v1 raw supports scalar / enum / id-reference columns;
+value-object and containment columns route through the domain path.
 
 ### 3.3 Imperative form (relational graphs)
 
@@ -251,13 +246,13 @@ Seed:
     '}';
 
 SeedRow:
-    aggregate=[Aggregate:ID] ('@' handle=ID)? value=ObjectLit ;
+    aggregate=[Aggregate:ID] value=ObjectLit ;
 ```
 
 (A future `key Country.code` clause for the deferred upsert path — §10
 — slots in after `dataset` without touching the row rule.)
 
-`@handle` reuses the `SeedRef` resolution noted below; `ObjectLit` and
+`ObjectLit` and
 `Statement` are existing rules — no new expression syntax. `seed` is a
 soft keyword everywhere except `ContextMember` position (the same
 pattern `workflow` / `view` already use, per the grammar's
@@ -278,9 +273,11 @@ export interface SeedIR {
   /** Dataset name; "default" runs unconditionally, others gate on
    *  LOOM_SEED / the test harness. */
   dataset: string;
-  /** Through the domain `create` (default) or straight to tables. */
+  /** Through the domain `create` (default) or straight to tables (`raw`:
+   *  explicit `id` + literal FK columns → direct insert). */
   path: "domain" | "raw";
-  /** Ordered records, topologically sorted by SeedRef edges. */
+  /** Records in source order — the author orders parents before children
+   *  (no topological reorder; cross-refs are explicit literal ids). */
   rows: SeedRowIR[];
   /** Imperative form: lowered workflow statements (mutually exclusive
    *  with rows). */
@@ -289,15 +286,11 @@ export interface SeedIR {
 
 export interface SeedRowIR {
   aggregate: string;
-  handle?: string;                 // @name, if bound
-  /** Field initialisers, fully-resolved ExprIR (SeedRef for @refs). */
+  /** Field initialisers, fully-resolved ExprIR.  On the `raw` path these
+   *  include an explicit `id` and literal FK columns. */
   fields: { name: string; value: ExprIR }[];
 }
 ```
-
-A new `ExprIR` variant `SeedRef { handle: string; aggregate: string }`
-carries cross-row dependencies; the builder uses it both to topo-sort
-and to emit "look up the id created for `@acme`" in each backend.
 
 ### Where it is built
 
@@ -308,10 +301,9 @@ called from `emitSystem` in `src/system/index.ts` right after
 1. Filters to modules where `module.migrationsOwner` is set (frontend-
    only modules seed nothing — same gate as migrations).
 2. Collects every `seed` block in the module's contexts, groups by
-   dataset, concatenates in declaration order.
-3. Topologically sorts rows by `SeedRef` edges (cycle ⇒ a validation
-   error, same class as the FK-cycle guards).
-4. Returns `SeedIR[]`, distributed per deployable by the existing
+   dataset, concatenates in declaration order (author order is preserved
+   — explicit-id cross-refs need no reorder).
+3. Returns `SeedIR[]`, distributed per deployable by the existing
    `migrationsForDeployable` machinery (renamed conceptually to "DB
    artifacts for deployable").
 
@@ -334,9 +326,10 @@ alongside the existing `migrations?: MigrationsIR[]`
 quick-start) the container entrypoint after `db:migrate`.
 
 - **domain path** → calls the generated repository `create` per row
-  inside a transaction; `@handle` ids captured in a local map.
-- **raw path** → Drizzle `insert(...).values(...)`, guarded by the
-  `__loom_seed` marker row for the dataset.
+  inside a transaction (framework-minted ids).
+- **raw path** → a direct Postgres `INSERT` (explicit `id` + literal FK
+  columns) run via `db.execute(sql…)`, guarded by the `__loom_seed`
+  marker row for the dataset.
 
 ### 6.2 .NET / EF Core
 
@@ -396,10 +389,8 @@ is the deferred follow-up (§10).
 | Situation | Diagnostic (`loom.seed-*`) |
 |---|---|
 | `seed` row for an aggregate outside the enclosing context | Error: cross-context seed (same scoping as a workflow body). `loom.seed-foreign-aggregate` |
-| Record field set fails the aggregate `create` param type-check | Error, reusing the call-arg type checker. `loom.seed-shape-mismatch` |
-| `@handle` referenced before it is bound, or unknown | Error. `loom.seed-unresolved-ref` |
-| `SeedRef` cycle across rows | Error: "seed rows form a dependency cycle." `loom.seed-cycle` |
-| `raw` + a value that an invariant would reject | **Warning** (raw deliberately bypasses the domain). `loom.seed-raw-unchecked` |
+| Record field set fails the aggregate `create` param type-check (domain path) | Error, reusing the call-arg type checker. `loom.seed-shape-mismatch` |
+| `id` / value-object / containment column on a `raw` row that v1 can't insert | Error: "raw seed supports scalar / enum / id columns only." `loom.seed-raw-unsupported-column` |
 | `seed` in a context whose module has no `migrationsOwner` (frontend-only) | Error: "nothing to seed — no database-owning deployable hosts this context." `loom.seed-no-db` |
 
 ---
@@ -409,11 +400,11 @@ is the deferred follow-up (§10).
 | Phase | Change |
 |---|---|
 | ① parse | `Seed` rule + `ContextMember` arm |
-| ③ scope | seed body / record fields resolve in the context scope (reuse workflow scoping); `@handle` is a new local binding kind |
+| ③ scope | seed body / record fields resolve in the context scope (reuse workflow scoping) |
 | ④ AST validate | `src/language/validators/seed.ts` — the table in §8 |
-| ⑤ lower | `lower.ts` lowers `Seed` → `SeedIR` (records) or reuses statement-lowering (body); new `SeedRef` ExprIR in `lower-expr.ts` |
+| ⑤ lower | `lower.ts` lowers `Seed` → `SeedIR` (records) or reuses statement-lowering (body) |
 | ⑥ enrich | none — reuses `migrationsOwner` |
-| ⑦ IR validate | cross-row cycle + dependency checks in `validate.ts` |
+| ⑦ IR validate | cross-aggregate / raw-column checks in `validate.ts` |
 | ⑧ codegen | `seeds?:` consumed by each backend's emitter (`emit/seed.ts` per platform) |
 | ⑨ system compose | `buildSeeds(sys)` in `seed-builder.ts`; `seed-spec.ts` artifact; compose seed step |
 | ⑩ write | `db/seed.ts` / `Seeder.cs` / `seeds.exs` + `.loom/seed-spec.json` |
@@ -458,8 +449,7 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
    `BoundedContextIR` + `lowerSeed` + `checkSeeds`
    (`loom.seed-foreign-aggregate`, `loom.seed-duplicate-field`) +
    parsing / lowering / negative-validator tests. Declarative form
-   only; `@handle`/`SeedRef`, create-param shape-checking, and the
-   `raw`-unchecked warning are split into a Phase 1b follow-up.
+   only; create-param shape-checking is a follow-up.
 2. ✅ **Done.** Hono emitter (`src/generator/typescript/emit/seed.ts`):
    `db/seed.ts` going through the domain `create` + repository `save`
    (D-SEED-PATH), ship-once per dataset via the `__loom_seed` marker
@@ -486,11 +476,19 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
    ignore it; Phoenix emits `%Ctx.Money{amount: …, currency: …}`), which
    also fixes the same latent bug for VO construction in Phoenix
    *operation bodies*.
-4. Imperative (workflow-body) form — reuses statement lowering.
-5. `seed-spec.json` artifact + compose seed step (`LOOM_SEED` dataset
-   gating already landed in phase 2); quick-start `saas` template
-   consumes it (closes the quickstart proposal's §5.4 dependency).
-6. `ddd seed` runner + `--reset`; then (only on demand) the `key:`
+4. **`raw` explicit-id path** — the home for **cross-references**
+   (D-SEED-XREF): a `raw` row's fields (explicit `id` + literal FK
+   columns) emit a direct Postgres `INSERT` shared across all three
+   backends (executed via Drizzle `db.execute`, EF `ExecuteSqlRawAsync`,
+   Ecto `Ecto.Adapters.SQL`), bypassing `create`. v1 = scalar / enum /
+   id columns; value-object + containment columns stay on the domain
+   path. Author orders parents before children.
+5. Imperative (workflow-body) form — reuses statement lowering.
+   Deferred: grammar disambiguation is proven feasible, but the
+   statement-execution + auto-save semantics are a standalone project.
+6. `seed-spec.json` artifact + compose seed step; quick-start `saas`
+   template (closes the quickstart proposal's §5.4 dependency).
+7. `ddd seed` runner + `--reset`; then (only on demand) the `key:`
    upsert path for evolving reference data (§10).
 
 A model with no `seed` block emits byte-identically at every phase —
