@@ -26,6 +26,7 @@ import { emitCqrs } from "./cqrs-emit.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
 import { emitDotnetMigrations } from "./emit/migrations.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
+import { emitDotnetSeeds } from "./emit/seed.js";
 import {
   joinEntityName,
   renderAuditableInterceptor,
@@ -253,6 +254,15 @@ function emitProjectFromContexts(
   if (hasMigrations) {
     emitDotnetMigrations(system!.migrations!, ns, out);
   }
+  // First-boot seed data (database-seeding.md, Phase 3a) — emits
+  // Infrastructure/Persistence/Seed.cs when the served contexts declare any
+  // `seed` block.  Through the domain `Create` (D-SEED-PATH), ship-once per
+  // dataset (D-SEED-IDEMPOTENCY).  Program.cs gets `hasSeeds` below so it
+  // adds the `Seed.RunSeeds(...)` startup call after `Database.Migrate()`.
+  if (merged.seeds.length > 0) {
+    emitDotnetSeeds(merged, ns, out);
+  }
+  const hasSeeds = out.has("Infrastructure/Persistence/Seed.cs");
   // Resource client classes (objectStore / queue / api) + their NuGet
   // deps (Phase 4c).  Empty when the deployable wires no consumable
   // resources — the csproj stays byte-identical.
@@ -264,6 +274,7 @@ function emitProjectFromContexts(
     usesStamping,
     hasEmbeddedSpa,
     hasMigrations,
+    hasSeeds,
     emitTrace,
     resourceNugetDeps: resourceEmission.nugetDeps,
   });
@@ -592,6 +603,7 @@ function emitProject(
     usesStamping?: boolean;
     hasEmbeddedSpa?: boolean;
     hasMigrations?: boolean;
+    hasSeeds?: boolean;
     emitTrace?: boolean;
     resourceNugetDeps?: Record<string, string>;
   },
@@ -601,6 +613,7 @@ function emitProject(
   const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   const hasMigrations = !!options?.hasMigrations;
+  const hasSeeds = !!options?.hasSeeds;
   const emitTrace = !!options?.emitTrace;
   out.set(
     "Program.cs",
@@ -610,6 +623,7 @@ function emitProject(
       usesStamping,
       hasEmbeddedSpa,
       hasMigrations,
+      hasSeeds,
       emitTrace,
     }),
   );
