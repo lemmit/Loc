@@ -13,7 +13,9 @@ system Roster {
         derived display: string = name
         party: Pokemon id[]
         caught: Pokemon id[]
+        verified: bool
         invariant party.count <= 6
+        operation verify() { verified := true }
         operation addToParty(pokemon: Pokemon id) {
           precondition party.count < 6
           party += pokemon
@@ -27,6 +29,22 @@ system Roster {
       repository Trainers for Trainer {
         find holdingInParty(pokemon: Pokemon id): Trainer[]
             where this.party.contains(pokemon)
+      }
+      // Named query bundle (retrieval.md) — exercises the Ash read-action
+      // emission (filter via ^arg + sort via prepare build + offset
+      // pagination) under the real `mix compile` gate.
+      criterion NamedLike(needle: string) of Trainer = name == needle
+      retrieval ByName(needle: string) of Trainer {
+        where: NamedLike(needle)
+        sort:  [name asc]
+      }
+      // Exercises the workflow `for` loop (Enum.reduce_while over a paged
+      // Repo.run) under the real `mix compile` gate.
+      workflow verifyByName(needle: string) {
+        let matched = Trainers.run(ByName(needle), page: { offset: 0, limit: 100 })
+        for t in matched {
+          t.verify()
+        }
       }
     }
   }
