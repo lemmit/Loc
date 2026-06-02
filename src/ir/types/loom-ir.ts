@@ -825,8 +825,12 @@ export interface OnIR {
   /** The parameter name the inbound event instance binds to in the body
    *  (e.g. `paid` in `on(paid: PaymentReceived)`). */
   param: string;
-  /** The reactor body — workflow statements (emit / let / op-call / …).
-   *  The `by <expr>` routing/correlation clause is deferred to a later slice. */
+  /** The `by <expr>` routing expression (workflow-and-applier.md A2-S3),
+   *  lowered in the event-binding scope — e.g. `paid.orderId`.  Undefined when
+   *  the source omits `by`; the runtime then routes by name-match against the
+   *  workflow's correlation field (resolved at validation time). */
+  correlation?: ExprIR;
+  /** The reactor body — workflow statements (emit / let / op-call / …). */
   statements: WorkflowStmtIR[];
 }
 

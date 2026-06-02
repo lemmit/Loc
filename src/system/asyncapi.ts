@@ -81,6 +81,7 @@ export function renderAsyncApi(sys: SystemIR): string {
       out.push("    x-loom:");
       out.push(`      workflow: ${yamlStr(`${ctx}.${wf}`)}`);
       out.push(`      event: ${yamlStr(sub.event)}`);
+      if (sub.correlation) out.push("      correlated: true");
     }
   }
   return `${out.join("\n")}\n`;

@@ -647,9 +647,10 @@ function printWorkflow(node: Workflow): string {
   );
 }
 
-// `on(e: Event) { … }` reactor member (workflow-and-applier.md A2).
+// `on(e: Event) [by <expr>] { … }` reactor member (workflow-and-applier.md A2).
 function printOnDecl(node: OnDecl): string {
-  const head = `on(${node.param}: ${node.event.$refText})`;
+  const by = node.correlation ? ` by ${printExpr(node.correlation)}` : "";
+  const head = `on(${node.param}: ${node.event.$refText})${by}`;
   return block(head, node.body.map(printStmt));
 }
 

@@ -2394,7 +2394,8 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
 // `refKind: "param"` local typed as the event entity, so `e.field` accesses
 // resolve through the same machinery.  The body reuses `lowerWorkflowStatement`
 // (a reactor is a workflow continuation and may load/save aggregates and emit).
-// The `by` routing/correlation clause is deferred to a later slice.
+// The `by <expr>` routing clause (A2-S3) is lowered in the event-binding scope;
+// its type-check against the workflow's correlation field lives in the validator.
 function lowerOn(
   o: OnDecl,
   baseEnv: Env,
@@ -2404,6 +2405,7 @@ function lowerOn(
 ): OnIR {
   const eventName = o.event.ref?.name ?? o.event.$refText;
   const inner = withLocal(baseEnv, o.param, "param", { kind: "entity", name: eventName });
+  const correlation = o.correlation ? lowerExpr(o.correlation, inner) : undefined;
   const statements: WorkflowStmtIR[] = [];
   let bodyEnv = inner;
   for (const s of o.body) {
@@ -2411,7 +2413,12 @@ function lowerOn(
     statements.push(lowered.stmt);
     bodyEnv = lowered.envAfter;
   }
-  return { event: eventName, param: o.param, statements };
+  return {
+    event: eventName,
+    param: o.param,
+    ...(correlation ? { correlation } : {}),
+    statements,
+  };
 }
 
 function plural(s: string): string {
