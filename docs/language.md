@@ -266,6 +266,23 @@ list of references to a *different* aggregate that outlives any one
 owner — persisted as a separate join table when the backend supports
 it (see [`docs/generators.md`](generators.md)).
 
+### Aggregate inheritance
+
+An aggregate may extend a shared base so subtypes carry a common field set and
+can be queried polymorphically:
+
+| Form | Notes |
+| --- | --- |
+| `abstract aggregate <Name> { … }` | A base that is never instantiated: no table / repository / routes of its own. May declare fields and `derived` getters; may **not** declare `create` / `operation` behaviour or a `repository`. |
+| `aggregate <X> extends <Base> { … }` | A concrete subtype. `<Base>` must be an `abstract aggregate` in the same context. Inherits the base's fields (merged into the wire shape ahead of its own; an own field shadows a like-named base field). |
+| `inheritanceUsing(sharedTable \| ownTable)` | Header modifier (on the base, optionally per concrete) choosing the table-mapping strategy. Default `sharedTable` (TPH). `ownTable` (TPC) emits a standalone table per concrete. |
+
+`find all <Base>` returns the polymorphic union of all subtypes via a per-backend
+reader. TPC (`ownTable`) is emitted on every backend; TPH (`sharedTable`) on the
+node/Hono backend only — a TPH hierarchy with no node/Hono host is an error. See
+[`inheritance.md`](inheritance.md) for the per-backend emission, the validation
+rules, and the deferred patterns.
+
 ### Aggregate / entity-part members
 
 Inside an aggregate or an `entity` part:
