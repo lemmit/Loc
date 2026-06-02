@@ -16,7 +16,7 @@ import {
 } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural, upperFirst } from "../../util/naming.js";
-import type { EmitCtx } from "../_adapters/index.js";
+import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { generateReactForContexts } from "../react/index.js";
 import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
 import { cqrsStyleAdapter } from "./adapters/cqrs-style.js";
@@ -118,7 +118,13 @@ export function generateDotnet(
 export function generateDotnetForContexts(
   contexts: EnrichedBoundedContextIR[],
   namespace?: string,
-  system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
+  system?: {
+    deployable: DeployableIR;
+    sys: SystemIR;
+    migrations?: MigrationsIR[];
+    styleAdapter?: StyleAdapter;
+    layoutAdapter?: LayoutAdapter;
+  },
   options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
@@ -138,7 +144,13 @@ function emitProjectFromContexts(
   contexts: EnrichedBoundedContextIR[],
   ns: string,
   out: Map<string, string>,
-  system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
+  system?: {
+    deployable: DeployableIR;
+    sys: SystemIR;
+    migrations?: MigrationsIR[];
+    styleAdapter?: StyleAdapter;
+    layoutAdapter?: LayoutAdapter;
+  },
   emitTrace = false,
 ): void {
   // Fullstack-dotnet branch — when the deployable declares a `ui:`
@@ -162,13 +174,17 @@ function emitProjectFromContexts(
   // `emitAggregate` only; helpers that don't yet route through
   // adapters keep the existing direct emit-fn calls.
   //
-  // The dotnet generator dispatches through its OWN sibling adapters
-  // (`./adapters/cqrs-style.js`, `./adapters/by-layer-layout.js`) —
-  // sibling imports stay within `src/generator/`, so the backend-
-  // packages layering invariant (no `src/generator/* → src/platform/*`
-  // edges) holds.  Future per-deployable overrides (`style: layered`,
-  // `persistence: dapper`, …) will resolve through the registry at
-  // the platform-surface seam (`src/platform/dotnet.ts`).
+  // The dotnet generator dispatches through the deployable's RESOLVED
+  // style / layout adapters (D-REALIZATION-AXES `application:` /
+  // `directoryLayout:`), threaded in via `system.{style,layout}Adapter`.
+  // The system orchestrator resolves them through
+  // `platform/resolve-adapters.ts`; the generator never imports
+  // `src/platform/` itself, so the backend-packages layering invariant
+  // (no `src/generator/* → src/platform/*` edges) holds.  When unresolved
+  // (legacy single-context generate mode), the call sites fall back to
+  // the OWN sibling adapters (`./adapters/cqrs-style.js`,
+  // `./adapters/by-layer-layout.js`) — byte-identical under the size-1
+  // real menus, since the resolved adapter IS that sibling.
   const emitCtx: EmitCtx | undefined = system
     ? {
         deployable: system.deployable,
@@ -176,6 +192,8 @@ function emitProjectFromContexts(
         sys: system.sys,
         migrations: system.migrations,
         emitTrace,
+        styleAdapter: system.styleAdapter,
+        layoutAdapter: system.layoutAdapter,
       }
     : undefined;
   // Each context contributes its enums / VOs / events / aggregates.
@@ -547,9 +565,14 @@ function emitAggregate(
   // recomputes the same `Application/<Plural>/...` + `Api/...` paths
   // the emitter writes inline.
   if (emitCtx) {
-    const artifacts = cqrsStyleAdapter.emitForAggregate?.(agg, emitCtx) ?? [];
+    // Resolved selection (D-REALIZATION-AXES) when the orchestrator
+    // threaded one in; the sibling default otherwise.  Size-1 menus →
+    // the same object → byte-identical.
+    const style = emitCtx.styleAdapter ?? cqrsStyleAdapter;
+    const layout = emitCtx.layoutAdapter ?? byLayerLayoutAdapter;
+    const artifacts = style.emitForAggregate?.(agg, emitCtx) ?? [];
     for (const artifact of artifacts) {
-      out.set(byLayerLayoutAdapter.pathFor(artifact, emitCtx), artifact.content);
+      out.set(layout.pathFor(artifact, emitCtx), artifact.content);
     }
   } else {
     emitCqrs(agg, repo, ctx, ns, out, { routePrefix, emitTrace });

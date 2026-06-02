@@ -9,7 +9,7 @@ import type {
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
-import type { EmitCtx } from "../_adapters/index.js";
+import type { EmitCtx, StyleAdapter } from "../_adapters/index.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { generateReactForContexts } from "../react/index.js";
 import { ashStyleAdapter } from "./adapters/ash-style.js";
@@ -78,12 +78,19 @@ export interface GeneratePhoenixLiveViewArgs {
    *  invariant_evaluated) don't have a clean Phoenix seam (Ash
    *  resources are declarative), so they stay deferred. */
   emitTrace?: boolean;
+  /** The deployable's resolved STYLE adapter (D-REALIZATION-AXES
+   *  `application:` → the Ash action surface).  The system orchestrator
+   *  resolves it from `deployable.application` via `resolveStyle` and
+   *  threads it in; `ashStyleAdapter.emitDi` dispatches through it.
+   *  Absent in legacy single-context mode → falls back to the sibling
+   *  `ashStyleAdapter` (byte-identical: `ash` is the only real style). */
+  styleAdapter?: StyleAdapter;
 }
 
 export function generatePhoenixLiveViewProject(
   args: GeneratePhoenixLiveViewArgs,
 ): Map<string, string> {
-  const { contexts, deployable, sys, migrations, emitTrace } = args;
+  const { contexts, deployable, sys, migrations, emitTrace, styleAdapter } = args;
   const out = new Map<string, string>();
 
   const appName = toSnakeApp(deployable.name);
@@ -247,6 +254,7 @@ export function generatePhoenixLiveViewProject(
     emitTrace,
     out,
     migrations ?? [],
+    styleAdapter,
   );
 
   return out;
@@ -516,6 +524,7 @@ function emitShellFiles(
   emitTrace: boolean | undefined,
   out: Map<string, string>,
   migrations: MigrationsIR[],
+  styleAdapter?: StyleAdapter,
 ): void {
   const port = deployable.port ?? 4000;
 
@@ -605,10 +614,15 @@ function emitShellFiles(
     sys,
     migrations,
     emitTrace,
+    styleAdapter,
   };
+  // Resolved style selection (D-REALIZATION-AXES) when threaded in; the
+  // sibling default otherwise.  `ash` is the only real style, so the
+  // resolved adapter IS `ashStyleAdapter` → byte-identical.
+  const style = emitCtx.styleAdapter ?? ashStyleAdapter;
   out.set(
     "config/config.exs",
-    renderConfigExs(appName, appModule, contexts, ashStyleAdapter.emitDi(emitCtx)),
+    renderConfigExs(appName, appModule, contexts, style.emitDi(emitCtx)),
   );
   out.set("config/dev.exs", renderDevExs(appName, appModule, port));
   out.set("config/prod.exs", renderProdExs(appName, appModule));

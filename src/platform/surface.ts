@@ -1,4 +1,9 @@
-import type { PlatformAdapterDefaults, PlatformAdapters } from "../generator/_adapters/index.js";
+import type {
+  LayoutAdapter,
+  PlatformAdapterDefaults,
+  PlatformAdapters,
+  StyleAdapter,
+} from "../generator/_adapters/index.js";
 import type {
   ComponentIR,
   DeployableIR,
@@ -175,6 +180,16 @@ export interface PlatformSurface {
      *  `src/components/<Name>.tsx` per ui that references the
      *  component); other platforms ignore the arg. */
     topLevelComponents?: ComponentIR[];
+    /** The deployable's resolved STYLE / LAYOUT adapters
+     *  (D-REALIZATION-AXES `application:` / `directoryLayout:`).  The
+     *  system orchestrator resolves these from the deployable's axis
+     *  selection via `resolveStyle` / `resolveLayout` and passes them
+     *  here; the surface forwards them into its generator's `EmitCtx`.
+     *  Absent for frontends and in legacy single-context generate mode —
+     *  the generator then falls back to its hardcoded default sibling
+     *  (byte-identical under today's size-1 menus). */
+    styleAdapter?: StyleAdapter;
+    layoutAdapter?: LayoutAdapter;
   }): Map<string, string>;
   /** Inputs for the deployable's docker-compose service stanza. */
   composeService(args: {

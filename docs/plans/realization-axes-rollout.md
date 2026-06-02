@@ -15,8 +15,21 @@
   flipped; `phoenixLiveView` retained as a back-compat alias; platform/framework
   conflation disentangled (the LiveView *framework* keeps `phoenixLiveView`).
   (D-PHOENIX-SURFACE.)
+- **Phase 3 — `hono → node` rename.** Canonical JS-runtime platform is `node`;
+  `hono` desugars to it and lives on as the `transport:` framework value.
+  (D-NODE-PLATFORM.)
+- **Phase 4 — Codegen axis consumption (keystone).** The system orchestrator
+  resolves each backend deployable's `application:` (→ style) and
+  `directoryLayout:` (→ layout) selection via `resolve-adapters` and threads the
+  resolved adapters through `emitProject` → the generator's `EmitCtx`; the
+  per-aggregate dispatch (dotnet/node) and config DI (phoenix) use the threaded
+  adapter, falling back to the sibling default in legacy single-context mode.
+  Byte-identical under today's size-1 real menus (baseline-fixture + conformance
+  gates green); end-to-end threading covered by
+  `test/platform/realization-axes-emit-wiring.test.ts`. `persistence:` has no
+  live emit-dispatch consumer yet — it threads when Phase 5 adds one.
 
-## Phase 3 — `hono → node` rename + `hono` as `transport:` (D-NODE-PLATFORM)
+## Phase 3 — `hono → node` rename + `hono` as `transport:` (D-NODE-PLATFORM) — **DONE**
 
 Mirror Phase 2's pattern for the JS world. **Bigger blast radius** — `hono` is
 the most-used backend across tests/examples — and the same platform/framework
@@ -44,24 +57,35 @@ disentanglement applies (the *runtime* → `node`; the *web framework* → a
 *Independent of Phase 4; can land any time (or fold into Phase 6 when
 `transport` codegen is real).*
 
-## Phase 4 — Codegen axis consumption (keystone)
+## Phase 4 — Codegen axis consumption (keystone) — **DONE**
 
-The F5d/F6d/F7d orchestrator rewire: make each backend's `emitProject` dispatch
-through `resolve*` using the deployable's selection, so the axes stop being
+The F5d/F6d/F7d orchestrator rewire: make each backend's per-aggregate dispatch
+run through the deployable's resolved adapter selection, so the axes stop being
 inert.
 
-- System orchestrator passes `deployable.{application,persistence,
-  directoryLayout}` into the platform surface's emit path.
-- Each backend's `emitProject` resolves its adapters via
-  `resolvePersistence/Style/Layout(platform, deployable.<axis>)` instead of the
-  hardcoded default path.
-- **Byte-identical-fixture discipline** (the same gate used for the
-  `WalkerTarget` extractions): with today's size-1 real menus the output must be
-  unchanged; the wire-spec JSON Schema diff must be empty.
-- **Verification:** all `LOOM_TS_BUILD` / `LOOM_DOTNET_BUILD` /
-  `LOOM_PHOENIX_BUILD` + conformance-parity green; fixture diffs empty.
+As shipped (the layering invariant — no `src/generator/* → src/platform/*`
+edges — shaped the seam):
 
-Highest effort/risk; **everything downstream is inert until this lands.**
+- The **system orchestrator** (`src/system/index.ts`, the layer allowed to
+  import `resolve-adapters`) resolves `deployable.application` (→ `resolveStyle`)
+  and `deployable.directoryLayout` (→ `resolveLayout`) for backends, then passes
+  the resolved adapter OBJECTS into `PlatformSurface.emitProject` via two new
+  optional args.
+- Each surface FORWARDS the resolved adapters into its generator's `EmitCtx`
+  (`styleAdapter` / `layoutAdapter`).  The per-aggregate dispatch uses
+  `emitCtx.styleAdapter ?? <sibling default>` (dotnet/node: style + layout;
+  phoenix: style only, for config DI).  Legacy single-context generate mode
+  passes none → sibling fallback → unchanged output.
+- **`persistence:` deferred** — no backend invokes a persistence adapter through
+  `EmitCtx` yet (efcore is internal, drizzle is a static constant), so threading
+  it would be inert plumbing.  It threads in Phase 5 alongside its first consumer.
+- **Byte-identical** under today's size-1 real menus: baseline-fixture
+  (`page-emitter-equivalence`) + conformance-parity green, wire-spec diff empty.
+  End-to-end threading (sentinel-adapter injection through the public
+  `emitProject` arg) covered by
+  `test/platform/realization-axes-emit-wiring.test.ts`.
+- **Verification:** build + lint + fast suite green; the `LOOM_*_BUILD` gates run
+  in CI.
 
 ## Phase 5 — Grow the menus (stub adapters → real)
 

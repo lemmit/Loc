@@ -54,13 +54,23 @@ const honoPlatform: PlatformSurface = {
   // one of these names would compile-error with TS2393 "Duplicate
   // function implementation".
   reservedRepositoryFindNames: new Set(["save", "findById", "getById", "delete"]),
-  emitProject({ contexts, deployable, sys, migrations, emitTrace }): Map<string, string> {
+  emitProject({
+    contexts,
+    deployable,
+    sys,
+    migrations,
+    emitTrace,
+    styleAdapter,
+    layoutAdapter,
+  }): Map<string, string> {
     // The package supplies its own pins to the shared emitter —
-    // edge points package → shared, never the reverse.
+    // edge points package → shared, never the reverse.  The deployable's
+    // resolved style / layout adapters (D-REALIZATION-AXES) are forwarded
+    // straight through into the generator's EmitCtx.
     return generateTypeScriptForContexts(
       contexts,
       BACKEND_PINS,
-      { deployable, sys, migrations },
+      { deployable, sys, migrations, styleAdapter, layoutAdapter },
       { emitTrace },
     );
   },
