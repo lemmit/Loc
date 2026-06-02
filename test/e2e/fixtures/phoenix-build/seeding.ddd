@@ -9,13 +9,13 @@ system Seeding {
     context Catalog {
       enum Tier { Free, Pro }
 
-      // Plain aggregate (mirrors acme-lv's served Customer shape).  NOT
-      // `with crudish`: crudish injects a canonical `update` operation that
-      // the Phoenix REST controller emits on top of the standard update,
-      // producing a duplicate `def update/2` clause that fails
-      // `--warnings-as-errors`.  Phoenix emits `create_<agg>!` regardless
-      // (always-on create), so the seeder is unaffected.
-      aggregate Widget {
+      // `with crudish` — also the regression gate for the Phoenix CRUD-verb
+      // operation-name collision: crudish injects a canonical `update`
+      // operation whose Phoenix controller `def` / domain `define` used to
+      // duplicate the standard CRUD update (`mix compile --warnings-as-errors`
+      // failure).  The per-operation pass now skips CRUD-verb-named ops
+      // (CRUD_VERB_NAMES), so this compiles — and the build gate proves it.
+      aggregate Widget with crudish {
         name: string
         size: int
         tier: Tier
