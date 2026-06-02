@@ -147,7 +147,8 @@ system DevPlatform {
                         visibility: Public,
                         active: true,
                         sequence: 1,
-                                createdAt: "2024-01-01T00:00:00Z"
+                        budget: 0.0,
+                        createdAt: now()
                     })
                     expectThrows p.rename("")
                 }
