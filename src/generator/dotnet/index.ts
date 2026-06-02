@@ -63,7 +63,12 @@ import {
   renderTestsFile,
   renderValueObject,
 } from "./emit.js";
-import { buildFindBodies, collectFindBodyUsings } from "./find-emit.js";
+import {
+  buildFindBodies,
+  buildRetrievalBodies,
+  collectFindBodyUsings,
+  collectRetrievalBodyUsings,
+} from "./find-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
@@ -571,15 +576,27 @@ function emitAggregate(
   // here so all the existing find emission paths (interface,
   // implementation, EF Core configuration) pick them up uniformly.
   const repoWithViews = mergeViewsAsFinds(agg, repo, ctx);
+  // Context retrievals (retrieval.md) targeting this aggregate emit a
+  // `Run<Name>Async` repository method.  Document-shaped aggregates skip
+  // them in v1 (the in-memory document impl doesn't compose LINQ query
+  // operators); they stay a follow-up.
+  const aggRetrievals = isDoc
+    ? []
+    : (ctx.retrievals ?? []).filter(
+        (r) => r.targetType.kind === "entity" && r.targetType.name === agg.name,
+      );
   out.set(
     `Domain/${aggFolder}/I${agg.name}Repository.cs`,
-    renderRepositoryInterface(agg, repoWithViews, ns),
+    renderRepositoryInterface(agg, repoWithViews, ns, aggRetrievals),
   );
   // A find with a `where` expression that lowers to `Regex.IsMatch`
   // declares its System.Text.RegularExpressions dependency; the
-  // repository impl emitter then adds the using.
+  // repository impl emitter then adds the using.  Retrieval `where`
+  // predicates contribute the same way.
   const repoImplUsings = collectFindBodyUsings(repoWithViews);
+  collectRetrievalBodyUsings(aggRetrievals, repoImplUsings);
   const findBodies = buildFindBodies(agg, repoWithViews);
+  const retrievalBodies = buildRetrievalBodies(agg, aggRetrievals);
   out.set(
     `Infrastructure/Repositories/${agg.name}Repository.cs`,
     isDoc
@@ -589,6 +606,8 @@ function emitAggregate(
       : renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
           extraUsings: [...repoImplUsings].sort(),
           emitTrace,
+          retrievals: aggRetrievals,
+          retrievalBodies,
         }),
   );
   if (isDoc) {
