@@ -203,6 +203,10 @@ export function printStructural(node: AstNode): string {
       return printUiHelperImport(node as UiHelperImport);
     case "FindDecl":
       return printFindDecl(node as FindDecl);
+    case "Criterion":
+      return printCriterion(node as import("../generated/ast.js").Criterion);
+    case "Retrieval":
+      return printRetrieval(node as import("../generated/ast.js").Retrieval);
     default:
       throw new Error(`printStructural: unhandled node ${node.$type}`);
   }
@@ -571,6 +575,41 @@ function printFindDecl(node: FindDecl): string {
   const params = node.params.map(printParameter).join(", ");
   const where = node.filter ? ` where ${printExpr(node.filter)}` : "";
   return `find ${node.name}(${params}): ${printTypeRef(node.returnType)}${where}`;
+}
+
+/** `criterion <Name>[(<params>)] of <T> = <expr>` — the single-line form
+ *  round-trips both source variants (the `{ where: … }` block lowers to
+ *  the same `body`). */
+function printCriterion(node: import("../generated/ast.js").Criterion): string {
+  const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
+  return `criterion ${node.name}${params} of ${printTypeRef(node.target)} = ${printExpr(node.body)}`;
+}
+
+/** `retrieval <Name>[(<params>)] of <T>` — single-line `= <where>` when no
+ *  `sort`/`loads`, otherwise the `{ where: … sort: … loads: … }` block. */
+function printRetrieval(node: import("../generated/ast.js").Retrieval): string {
+  const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
+  const head = `retrieval ${node.name}${params} of ${printTypeRef(node.target)}`;
+  if (node.sort.length === 0 && node.loads.length === 0) {
+    return `${head} = ${printExpr(node.where)}`;
+  }
+  const items: string[] = [`where: ${printExpr(node.where)}`];
+  if (node.sort.length > 0) {
+    items.push(`sort: [${node.sort.map(printSortItem).join(", ")}]`);
+  }
+  if (node.loads.length > 0) {
+    items.push(`loads: [${node.loads.map(printLoadPath).join(", ")}]`);
+  }
+  return block(head, items);
+}
+
+function printSortItem(node: import("../generated/ast.js").SortItem): string {
+  const dir = node.direction ? ` ${node.direction}` : "";
+  return `${printLoadPath(node.path)}${dir}`;
+}
+
+function printLoadPath(node: import("../generated/ast.js").LoadPath): string {
+  return node.segments.map((s) => `${s.name}${s.collection ? "[]" : ""}`).join(".");
 }
 
 function printWorkflow(node: Workflow): string {

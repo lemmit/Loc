@@ -16,11 +16,12 @@ import type {
   ExprIR,
   FieldIR,
   FindIR,
+  RetrievalIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { indent, lines } from "../../util/code-builder.js";
-import { lowerFirst, plural } from "../../util/naming.js";
+import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./emit.js";
 import {
@@ -409,6 +410,71 @@ export function findQueryMethod(
         `    if (rootRows.length === 0) throw new AggregateNotFoundError("not found");`,
     `    const result = await this.findById(rootRows[0]!.id as Ids.${agg.name}Id) as ${agg.name}${optional ? " | null" : ""};`,
     `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: result == null ? 0 : 1`)}`,
+    `    return result;`,
+    `  }`,
+  );
+}
+
+/** Emit a `run<Name>(...)` repository method from a `RetrievalIR` — the
+ *  named query bundle (retrieval.md).  Mirrors the array-returning
+ *  `findQueryMethod` path (same bulk-load + hydrate), adding the
+ *  retrieval's `sort` (→ `.orderBy(asc/desc(col))`) and a call-site
+ *  `page` (→ `.limit().offset()`).  The `where` predicate lowers through
+ *  the same `lowerToDrizzle` oracle a find filter does; the IR validator
+ *  (`validateRetrievals`) guarantees it lowers cleanly.  Honours only the
+ *  default-whole load plan in v1 (explicit `loads` deferred to PR6). */
+export function runMethod(
+  agg: EnrichedAggregateIR,
+  retrieval: RetrievalIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const tableName = repoTableName(agg, ctx);
+  const methodName = `run${upperFirst(retrieval.name)}`;
+  // Retrieval params + an optional call-site page argument.  `page` is
+  // never part of the declaration (retrieval.md) — it rides here.
+  const baseParams = retrieval.params.map((p) => `${p.name}: ${tsTypeForReturn(p.type)}`);
+  const params = [...baseParams, "page?: { offset?: number; limit?: number }"].join(", ");
+
+  // `where` → Drizzle predicate, AND-ed with the TPH `kind` scope.
+  const kindPred = kindPredicate(agg, ctx, tableName);
+  const lowered = lowerToDrizzle(retrieval.where, tableName, ctx);
+  if (!lowered) {
+    throw new Error(
+      `internal: where-clause for retrieval '${retrieval.name}' on '${agg.name}' ` +
+        "could not lower to Drizzle, but validateRetrievals should have caught this. " +
+        "Please file a bug.",
+    );
+  }
+  const whereClause = `.where(${withKind(lowered.expr, kindPred)})`;
+
+  // `sort` → `.orderBy(asc(col), desc(col), …)`.  Only the first path
+  // segment is used in v1 (a direct column); nested / collection sort
+  // paths are a v2 concern, already gated by validateRetrievals.
+  const orderByClause =
+    retrieval.sort.length > 0
+      ? `.orderBy(${retrieval.sort
+          .map((s) => `${s.direction}(schema.${tableName}.${s.path[0]!.name})`)
+          .join(", ")})`
+      : "";
+
+  const eagerContains = eagerContainsOf(agg);
+  const needsIdsLocal = eagerContains.length > 0 || associationsOf(agg).length > 0;
+  return lines(
+    `  async ${methodName}(${params}): Promise<${agg.name}[]> {`,
+    // `page` is optional — apply limit / offset only when supplied.
+    `    let query = this.db.select().from(schema.${tableName})${whereClause}${orderByClause}.$dynamic();`,
+    `    if (page?.limit !== undefined) query = query.limit(page.limit);`,
+    `    if (page?.offset !== undefined) query = query.offset(page.offset);`,
+    `    const rootRows = await query;`,
+    `    if (rootRows.length === 0) {`,
+    `      ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${methodName}", rows: 0`)}`,
+    `      return [];`,
+    `    }`,
+    needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
+    ...bulkLoadContainmentLines(eagerContains, agg, ctx),
+    associationMapLines(agg, "this.db", "    "),
+    `    const result = rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
+    `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${methodName}", rows: result.length`)}`,
     `    return result;`,
     `  }`,
   );

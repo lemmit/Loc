@@ -22,11 +22,13 @@ import type {
   EnumDecl,
   EventDecl,
   Expression,
+  ForStmt,
   FunctionDecl,
   Invariant,
   Layout,
   LayoutMainSlot,
   LayoutNamedSlot,
+  LoadPath,
   MenuBlock,
   Model,
   Operation,
@@ -37,6 +39,7 @@ import type {
   Repository,
   Requirement,
   Resource,
+  Retrieval,
   Solution,
   StateField,
   Statement,
@@ -57,6 +60,7 @@ import {
   isApply,
   isAssignOrCallStmt,
   isBoundedContext,
+  isCallSuffix,
   isComponent,
   isContainment,
   isCreate,
@@ -70,6 +74,7 @@ import {
   isEventDecl,
   isExpectStmt,
   isExpectThrowsStmt,
+  isForStmt,
   isFunctionDecl,
   isInvariant,
   isLetStmt,
@@ -86,6 +91,7 @@ import {
   isRequirement,
   isRequiresStmt,
   isResource,
+  isRetrieval,
   isSolution,
   isSubdomain,
   isSystem,
@@ -126,6 +132,8 @@ import type {
   IdValueType,
   InvariantIR,
   LayoutIR,
+  LoadPlanIR,
+  LoadSegmentIR,
   MenuBlockIR,
   MenuLinkIR,
   MenuMetaIR,
@@ -144,7 +152,9 @@ import type {
   RequirementIR,
   RequirementStatus,
   RequirementType,
+  RetrievalIR,
   SolutionIR,
+  SortTermIR,
   StateFieldIR,
   StmtIR,
   StorageIR,
@@ -864,13 +874,6 @@ function lowerDeployable(d: Deployable): DeployableIR {
     d.uiBlock?.ref?.ref?.name ??
     firstHostedUi?.name ??
     undefined;
-  const design = platformFor(platform).isFrontend
-    ? qualifyDesign(d.design, "mantine")
-    : platform === "phoenixLiveView"
-      ? qualifyDesign(d.design, "ashPhoenix")
-      : platform === "dotnet" && uiName
-        ? qualifyDesign(d.design, "mantine")
-        : undefined;
   // Page-metamodel UI binding.  The grammar accepts two
   // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
   // (full block).  Both lower to the same `uiName` + optional
@@ -886,7 +889,8 @@ function lowerDeployable(d: Deployable): DeployableIR {
   // Precedence: explicit `framework:` on the legacy block binding, then
   // the framework declared on the `hosts:`-ed `ui` itself (D-PHOENIX-SURFACE
   // phase 2 — the ui owns its framework), then the legacy platform-derived
-  // default.
+  // default.  Computed before `design` so the pack default can branch on
+  // it (a phoenix host embedding react needs a tsx pack, not ashPhoenix).
   const uiFramework =
     canonicalFramework(d.uiBlock?.framework) ??
     canonicalFramework(firstHostedUi?.framework) ??
@@ -897,6 +901,19 @@ function lowerDeployable(d: Deployable): DeployableIR {
           ? "react"
           : undefined
       : undefined);
+  // Design pack default depends on what actually renders:
+  //  - frontend platforms + fullstack-dotnet render React → `mantine`;
+  //  - phoenixLiveView renders HEEx → `ashPhoenix`, UNLESS it embeds a
+  //    `framework: react` ui (D-PHOENIX-SURFACE), in which case the SPA
+  //    needs a tsx pack → `mantine`;
+  //  - backends without a `ui:` mount carry no design.
+  const design = platformFor(platform).isFrontend
+    ? qualifyDesign(d.design, "mantine")
+    : platform === "phoenixLiveView"
+      ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
+      : platform === "dotnet" && uiName
+        ? qualifyDesign(d.design, "mantine")
+        : undefined;
   // Explicit api composition.
   const serves = (d.serves ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
   const uiBindings = (d.uiCompose?.bindings ?? []).map(
@@ -1306,6 +1323,7 @@ function lowerContext(
   const workflows: WorkflowIR[] = [];
   const views: ViewIR[] = [];
   const criteria: CriterionIR[] = [];
+  const retrievals: RetrievalIR[] = [];
   // Context-level capabilities propagate to every aggregate inside.
   // Lower them here in the context env (no `this` binding); each
   // aggregate's lowering re-uses the lowered IR directly.  The `this`
@@ -1322,6 +1340,7 @@ function lowerContext(
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
     else if (isView(m)) views.push(lowerView(m, env));
     else if (isCriterion(m)) criteria.push(lowerCriterion(m, env));
+    else if (isRetrieval(m)) retrievals.push(lowerRetrieval(m, env));
   }
   return {
     name: ctx.name,
@@ -1339,6 +1358,7 @@ function lowerContext(
     workflows,
     views,
     criteria,
+    retrievals,
   };
 }
 
@@ -1365,6 +1385,48 @@ function lowerCriterion(c: Criterion, env: Env): CriterionIR {
     targetType,
     body: lowerExpr(c.body, bodyEnv),
   };
+}
+
+/** Lower a `retrieval <Name>(params) of <T> { where: … sort: … loads: … }`
+ *  declaration to RetrievalIR.  The `where` predicate is lowered in the
+ *  retrieval's own scope exactly like a criterion body (aggregate
+ *  candidate binds `this` + bare field names; parameters become `param`
+ *  locals), so it composes criteria and bare predicates the same way a
+ *  `find … where` does.  `sort` / `loads` are structural paths, not
+ *  expressions — lowered to segment lists.  No `page` (call-site only). */
+function lowerRetrieval(r: Retrieval, env: Env): RetrievalIR {
+  const targetType = lowerType(r.target);
+  let bodyEnv: Env = { ...env, locals: new Map() };
+  if (targetType.kind === "entity") {
+    const candidate = findEntityByName(env, targetType.name);
+    if (candidate && isAggregate(candidate)) bodyEnv = inAggregate(bodyEnv, candidate);
+  }
+  for (const p of r.params) {
+    bodyEnv = withLocal(bodyEnv, p.name, "param", lowerType(p.type));
+  }
+  const sort: SortTermIR[] = r.sort.map((s) => ({
+    path: lowerLoadPath(s.path),
+    direction: (s.direction ?? "asc") as "asc" | "desc",
+  }));
+  const loadPlan: LoadPlanIR =
+    r.loads.length > 0
+      ? { kind: "explicit", paths: r.loads.map(lowerLoadPath) }
+      : { kind: "whole" };
+  return {
+    name: r.name,
+    params: r.params.map((p) => ({ name: p.name, type: lowerType(p.type) })),
+    targetType,
+    where: lowerExpr(r.where, bodyEnv),
+    sort,
+    loadPlan,
+  };
+}
+
+/** Lower a structural `LoadPath` AST node (`this.lines[].product`) to its
+ *  candidate-rooted segment list (`this` already stripped by the grammar
+ *  optionality). */
+function lowerLoadPath(p: LoadPath): LoadSegmentIR[] {
+  return p.segments.map((seg) => ({ name: seg.name, collection: !!seg.collection }));
 }
 
 function lowerEnum(e: EnumDecl): EnumIR {
@@ -2101,6 +2163,39 @@ function lowerActionBody(spec: ActionSpec, env: Env): OperationIR {
 // saves; a repo-let saves only when a later `op-call` targets it.
 // ---------------------------------------------------------------------------
 
+type SaveEntry = { name: string; aggName: string; repoName: string };
+
+/** Compute the bindings to save for a statement list (the dirtiness
+ *  rule): every `factory-let` always, every `repo-let` only when a later
+ *  op-call targets it.  When `loopVar` is supplied (a `for-each` body),
+ *  the loop variable itself is saved if it is the target of any op-call
+ *  in that body — the per-iteration save.  Top-level callers pass no
+ *  loopVar; the result is the flat `savesAtExit` (byte-identical to the
+ *  previous inline computation). */
+function computeSaves(
+  statements: WorkflowStmtIR[],
+  repoForAgg: Map<string, string>,
+  loopVar?: { name: string; aggName: string; repoName: string },
+): SaveEntry[] {
+  const opCallTargets = new Set<string>();
+  for (const st of statements) {
+    if (st.kind === "op-call") opCallTargets.add(st.target);
+  }
+  const saves: SaveEntry[] = [];
+  if (loopVar && opCallTargets.has(loopVar.name)) {
+    saves.push({ name: loopVar.name, aggName: loopVar.aggName, repoName: loopVar.repoName });
+  }
+  for (const st of statements) {
+    if (st.kind === "factory-let") {
+      const repoName = repoForAgg.get(st.aggName) ?? plural(st.aggName);
+      saves.push({ name: st.name, aggName: st.aggName, repoName });
+    } else if (st.kind === "repo-let" && opCallTargets.has(st.name)) {
+      saves.push({ name: st.name, aggName: st.aggName, repoName: st.repoName });
+    }
+  }
+  return saves;
+}
+
 function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR {
   let inner = env;
   const params: ParamIR[] = [];
@@ -2128,26 +2223,7 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
     inner = lowered.envAfter;
     if (lowered.binding) letAggs.set(lowered.binding.name, lowered.binding);
   }
-  // savesAtExit: factory-lets always; repo-lets only when targeted
-  // by a later op-call (validator already restricts which statement
-  // shapes can mutate).
-  const opCallTargets = new Set<string>();
-  for (const st of statements) {
-    if (st.kind === "op-call") opCallTargets.add(st.target);
-  }
-  const savesAtExit: WorkflowIR["savesAtExit"] = [];
-  for (const st of statements) {
-    if (st.kind === "factory-let") {
-      const repoName = repoForAgg.get(st.aggName) ?? plural(st.aggName);
-      savesAtExit.push({ name: st.name, aggName: st.aggName, repoName });
-    } else if (st.kind === "repo-let" && opCallTargets.has(st.name)) {
-      savesAtExit.push({
-        name: st.name,
-        aggName: st.aggName,
-        repoName: st.repoName,
-      });
-    }
-  }
+  const savesAtExit = computeSaves(statements, repoForAgg);
   return {
     name: wf.name,
     params,
@@ -2215,6 +2291,44 @@ function lowerWorkflowStatement(
       envAfter: env,
     };
   }
+  if (isForStmt(stmt)) {
+    // `for <var> in <iterable> { body }` — bind the loop var to the
+    // iterable's element aggregate type, lower the body in that extended
+    // scope, then compute the per-iteration saves over the body.
+    const iterable = lowerExpr(stmt.iterable, env);
+    const iterableType = inferExprType(stmt.iterable, env);
+    const elementType = iterableType.kind === "array" ? iterableType.element : undefined;
+    const varAggName = elementType?.kind === "entity" ? elementType.name : "Unknown";
+    const repoName = repoForAgg.get(varAggName) ?? plural(varAggName);
+    // Bind the loop var to the element type so body op-calls resolve `o`'s
+    // aggregate; fall back to the (possibly Unknown) entity type when the
+    // iterable didn't infer to an array (the validator surfaces that).
+    const varType: TypeIR = elementType ?? { kind: "entity", name: varAggName };
+    const bodyEnv = withLocal(env, stmt.var, "let", varType);
+    const body: WorkflowStmtIR[] = [];
+    let walkEnv = bodyEnv;
+    for (const s of stmt.body) {
+      const lowered = lowerWorkflowStatement(s, walkEnv, aggsByName, reposByName, repoForAgg);
+      body.push(lowered.stmt);
+      walkEnv = lowered.envAfter;
+    }
+    const savesPerIteration = computeSaves(body, repoForAgg, {
+      name: stmt.var,
+      aggName: varAggName,
+      repoName,
+    });
+    return {
+      stmt: {
+        kind: "for-each",
+        var: stmt.var,
+        varAggName,
+        iterable,
+        body,
+        savesPerIteration,
+      },
+      envAfter: env,
+    };
+  }
   if (isLetStmt(stmt)) {
     const expr = stmt.expr;
     // factory-let: `Agg.create({fields})`
@@ -2235,6 +2349,36 @@ function lowerWorkflowStatement(
         },
         envAfter: withLocal(env, stmt.name, "let", aggType),
         binding: { name: stmt.name, aggName: factory.aggName, repoName },
+      };
+    }
+    // repo-run: `Repo.run(<Retrieval>(args), page?)` — binds the
+    // retrieval's result array.  Checked before the generic repo-let so
+    // `run` doesn't fall through to the find-method path.
+    const runCall = matchRetrievalRunCall(expr, reposByName);
+    if (runCall) {
+      const aggName = runCall.repo.aggregate?.ref?.name ?? "Unknown";
+      const repoName = runCall.repo.name;
+      const elementType: TypeIR = { kind: "entity", name: aggName };
+      const arrayType: TypeIR = { kind: "array", element: elementType };
+      return {
+        stmt: {
+          kind: "repo-run",
+          name: stmt.name,
+          repoName,
+          aggName,
+          retrievalName: runCall.retrievalName,
+          retrievalArgs: runCall.retrievalArgs.map((a) => lowerExpr(a, env)),
+          ...(runCall.pageOffset || runCall.pageLimit
+            ? {
+                page: {
+                  ...(runCall.pageOffset ? { offset: lowerExpr(runCall.pageOffset, env) } : {}),
+                  ...(runCall.pageLimit ? { limit: lowerExpr(runCall.pageLimit, env) } : {}),
+                },
+              }
+            : {}),
+          returnType: arrayType,
+        },
+        envAfter: withLocal(env, stmt.name, "let", arrayType),
       };
     }
     // repo-let: `Repo.method(args)`
@@ -2420,4 +2564,58 @@ function matchRepoCall(
     method: s.member,
     args: (s.args ?? []).map((a) => a.value),
   };
+}
+
+interface RetrievalRunMatch {
+  repo: Repository;
+  retrievalName: string;
+  retrievalArgs: Expression[];
+  /** The `page:` object-literal argument's fields, if supplied. */
+  pageOffset?: Expression;
+  pageLimit?: Expression;
+}
+
+/** Recognise `<Repo>.run(<RetrievalRef>(args), page?)`.  The first
+ *  positional arg is itself a call (the retrieval reference); an optional
+ *  named `page:` arg carries an object literal `{ offset?, limit? }`. */
+function matchRetrievalRunCall(
+  expr: Expression | undefined,
+  reposByName: Map<string, Repository>,
+): RetrievalRunMatch | undefined {
+  if (!expr || !isPostfixChain(expr)) return undefined;
+  if (expr.suffixes.length !== 1) return undefined;
+  const s = expr.suffixes[0]!;
+  if (!isMemberSuffix(s) || !s.call || s.member !== "run") return undefined;
+  const recv = expr.head;
+  if (!isNameRef(recv)) return undefined;
+  const repo = reposByName.get(recv.name);
+  if (!repo) return undefined;
+  const callArgs = s.args ?? [];
+  // First positional arg = the retrieval reference `Name(args)`.
+  const refArg = callArgs.find((a) => !a.name);
+  if (!refArg) return undefined;
+  const ref = refArg.value;
+  // Bare `Name` (parameterless retrieval).
+  if (isNameRef(ref)) {
+    return { repo, retrievalName: ref.name, retrievalArgs: [] };
+  }
+  // `Name(args)` — a NameRef head + a single CallSuffix.
+  if (!isPostfixChain(ref) || !isNameRef(ref.head) || ref.suffixes.length !== 1) {
+    return undefined;
+  }
+  const rs = ref.suffixes[0]!;
+  if (!isCallSuffix(rs)) return undefined;
+  const retrievalName = ref.head.name;
+  const retrievalArgs: Expression[] = (rs.args ?? []).map((a) => a.value);
+  // Optional `page:` named arg — an object literal with offset / limit.
+  const pageArg = callArgs.find((a) => a.name === "page");
+  let pageOffset: Expression | undefined;
+  let pageLimit: Expression | undefined;
+  if (pageArg && isObjectLit(pageArg.value)) {
+    for (const f of pageArg.value.fields) {
+      if (f.name === "offset") pageOffset = f.value;
+      else if (f.name === "limit") pageLimit = f.value;
+    }
+  }
+  return { repo, retrievalName, retrievalArgs, pageOffset, pageLimit };
 }

@@ -581,6 +581,51 @@ export interface CriterionIR {
   body: ExprIR;
 }
 
+/** One `sort` term of a retrieval — a structural path through the
+ *  candidate aggregate plus an ordering direction. */
+export interface SortTermIR {
+  /** Dotted path segments, candidate-rooted (`this` stripped).  A
+   *  segment flagged `collection` carried a `[]` marker. */
+  path: LoadSegmentIR[];
+  direction: "asc" | "desc";
+}
+
+/** One segment of a structural `loads` / `sort` path. */
+export interface LoadSegmentIR {
+  name: string;
+  /** True when the segment carried a `[]` collection marker. */
+  collection: boolean;
+}
+
+/** The fetch shape for a retrieval (load-specifications.md /
+ *  reified-criteria.md §"The internal seam").  `kind: "whole"` is the
+ *  default-whole load (full owned aggregate tree, cross-aggregate refs
+ *  as ids) — structural, no analysis.  `kind: "explicit"` carries the
+ *  author's `loads:` paths, which restrict or expand the default. */
+export type LoadPlanIR = { kind: "whole" } | { kind: "explicit"; paths: LoadSegmentIR[][] };
+
+/** A named query *bundle* (retrieval.md): a composed predicate plus the
+ *  shaping a real query carries — ordering and a load shape.  Lowered
+ *  from a `retrieval` declaration; the source-level realisation of the
+ *  RetrievalIR bundle node (reified-criteria.md).
+ *
+ *  No `page` field — pagination is a call-site argument on
+ *  `Repo.run(R(args), page?)`, never part of the declaration. */
+export interface RetrievalIR {
+  name: string;
+  params: ParamIR[];
+  /** The `of <T>` candidate type (entity aggregate). */
+  targetType: TypeIR;
+  /** The lowered `where` predicate, in the retrieval's own scope
+   *  (parameters as `param` refs, candidate fields as `this-prop`).
+   *  Composes criteria + bare predicates like a `find … where`. */
+  where: ExprIR;
+  /** Ordering terms, in declaration order.  Empty when no `sort:`. */
+  sort: SortTermIR[];
+  /** Fetch shape; `{ kind: "whole" }` when no `loads:` clause. */
+  loadPlan: LoadPlanIR;
+}
+
 export interface BoundedContextIR {
   name: string;
   enums: EnumIR[];
@@ -598,6 +643,8 @@ export interface BoundedContextIR {
   views: ViewIR[];
   /** Named predicate specifications declared in this context. */
   criteria: CriterionIR[];
+  /** Named query bundles declared in this context (retrieval.md). */
+  retrievals: RetrievalIR[];
 }
 
 /** A saved, strongly-typed query over one source aggregate.  Two
@@ -704,11 +751,40 @@ export type WorkflowStmtIR =
       expr: ExprIR;
     }
   | {
+      // `let xs = Repo.run(<Retrieval>(args), page?)` — bind the named
+      // query bundle's result array (retrieval.md).  Distinct from
+      // `repo-let` (which forbids array returns): a `repo-run` is always
+      // an aggregate array, consumable only by a `for-each` loop.
+      kind: "repo-run";
+      name: string;
+      repoName: string;
+      aggName: string;
+      retrievalName: string;
+      retrievalArgs: ExprIR[];
+      page?: { offset?: ExprIR; limit?: ExprIR };
+      /** Element aggregate array type `{ kind: "array", element: entity }`. */
+      returnType: TypeIR;
+    }
+  | {
       kind: "op-call";
       target: string;
       aggName: string;
       op: string;
       args: ExprIR[];
+    }
+  | {
+      // `for <var> in <iterable> { <body> }` (retrieval.md).  Iterates an
+      // aggregate array, binding each element to `var`.  Mutations to
+      // `var` inside the body persist via `savesPerIteration` — the same
+      // dirtiness rule as workflow-exit saves, applied to the loop scope
+      // and emitted INSIDE the loop (the flat workflow-level `savesAtExit`
+      // can't express a per-element save).
+      kind: "for-each";
+      var: string;
+      varAggName: string;
+      iterable: ExprIR;
+      body: WorkflowStmtIR[];
+      savesPerIteration: { name: string; aggName: string; repoName: string }[];
     }
   | {
       // A bare (unbound) resource-op call statement — `files.put(k, v)`
@@ -2034,6 +2110,14 @@ function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
     case "repo-let":
     case "op-call":
       return s.args.some(exprUsesCurrentUser);
+    case "repo-run":
+      return (
+        s.retrievalArgs.some(exprUsesCurrentUser) ||
+        (s.page?.offset ? exprUsesCurrentUser(s.page.offset) : false) ||
+        (s.page?.limit ? exprUsesCurrentUser(s.page.limit) : false)
+      );
+    case "for-each":
+      return exprUsesCurrentUser(s.iterable) || s.body.some(workflowStmtUsesCurrentUser);
     case "resource-call":
       return exprUsesCurrentUser(s.call);
   }
