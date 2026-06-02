@@ -89,10 +89,13 @@ describe("create-input contract — optionals are included", () => {
     const files = await generateSystemFiles(FIXTURE);
     const dto = findFile(files, /ProjectRequests\.cs$/i)!;
     const create = dto.match(/record CreateProjectRequest\([^;]*\);/)![0];
-    // Required scalar carries [Required]; optionals are bare nullable.
-    expect(create).toMatch(/\[property: Required\][^,)]*\bName\b/);
+    // Required scalar carries Required; optionals are bare nullable.  The
+    // attribute target (`[Required]` on the record parameter vs
+    // `[property: Required]` on the property) is an ASP.NET binding detail,
+    // not part of "is it required" — so match either form.
+    expect(create).toMatch(/\[(?:property: )?Required\][^,)]*\bName\b/);
     expect(create).toMatch(/string\?\s+Description/);
-    expect(create).not.toMatch(/\[property: Required\][^,)]*\bDescription\b/);
+    expect(create).not.toMatch(/\[(?:property: )?Required\][^,)]*\bDescription\b/);
   });
 
   it("Phoenix CreateProjectRequest marks optionals not-required", async () => {
