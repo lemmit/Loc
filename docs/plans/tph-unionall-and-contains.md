@@ -1,20 +1,28 @@
 # Plan: TPH mixed-strategy `find all` (UNION-ALL) + `contains` on a TPH concrete
 
-Status: **partially shipped / partially dropped.**
+Status: **mostly shipped; one niche variant dropped.**
 
-- **Feature 2 — `contains` on a TPH concrete (Pattern 4): SHIPPED** in PR #768.
+- **`contains` on a TPH concrete (Pattern 4): SHIPPED** in PR #768.
   The gate `loom.tph-contains-unsupported` is lifted; a TPH concrete's parts
   emit their own tables FK'd to the shared base table. The fix was small (the
   repository already keys parts on `parentId`, and a TPH concrete's id is the
   shared-table row id, so only the schema/migration emitters changed).
-- **Feature 1 — UNION-ALL `find all Base` over a mixed hierarchy (Pattern 3):
-  DROPPED.** It exists only to unlock the per-concrete `ownTable` *override*,
-  which was deliberately gated as out-of-scope (`loom.tph-own-override-unsupported`
-  / `loom.polymorphic-id-ref-mixed-strategy`) — the override is a niche
-  "mixed-strategy" shape with confusing polymorphic-read semantics, not worth
-  the read-side complexity of a `unionAll` across the shared table + each
-  override's own table. If real demand appears, the design below is preserved
-  as a starting point; until then the gate stands and this is not planned work.
+- **Polymorphic `find all <Base>` over a uniform TPC (`ownTable`) hierarchy
+  (Pattern 2): SHIPPED** in PR #781. Built by **delegation**, not a raw SQL
+  union: a read-only `<Base>Repository` whose `findAll()` concatenates each
+  concrete repo's `all()` and whose `findById()` tries each concrete. This
+  reuses the per-aggregate loaders (so contained parts + `X id[]` associations
+  load correctly) instead of a flat-scalar `unionAll` across differently-shaped
+  tables. Hono-only (v1). `Base id` refs under TPC stay rejected (ambiguous FK).
+- **UNION-ALL `find all <Base>` over a MIXED hierarchy (Pattern 3 — a
+  `sharedTable` base with a per-concrete `ownTable` *override*): DROPPED.** This
+  is the only remaining variant. It exists solely to unlock the per-concrete
+  override, which was deliberately gated as out-of-scope
+  (`loom.tph-own-override-unsupported` / `loom.polymorphic-id-ref-mixed-strategy`) —
+  a niche "mixed-strategy" shape with confusing polymorphic-read semantics, not
+  worth the read-side complexity of unioning the shared table + each override's
+  own table. If real demand appears, the design below is a starting point;
+  until then the gate stands and this is not planned work.
 
 Companion to [`docs/proposals/aggregate-inheritance.md`](../proposals/aggregate-inheritance.md)
 (Patterns 3 and 4). The single source of truth for TPH base/concrete resolution

@@ -9,8 +9,8 @@ import type {
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
-import { csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
-import { renderCsStatements } from "../render-stmt.js";
+import { collectCsExprUsings, csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
+import { collectCsStmtUsings, renderCsStatements } from "../render-stmt.js";
 
 /** True for a field type that is a collection of references
  * (`Id<T>[]`) — persisted via a join table, not a column. */
@@ -62,15 +62,21 @@ export function renderEntity(
   const createInputFieldList = isAgg(entity) ? forCreateInput(entity.fields) : [];
   const hasExtern = operations.some((o) => o.extern);
   const setterVisibility = hasExtern ? "internal" : "private";
-  // Threaded through every render call below.  Renderers add the
-  // non-implicit namespaces they reach into (`System.Text.RegularExpressions`
-  // when an invariant uses `email.matches(...)`); on file assembly the
-  // accumulated set becomes one `using <ns>;` per entry, so the file
-  // imports only what its own expressions actually use.
+  // Non-implicit namespaces this entity's rendered expressions reach
+  // into (`System.Text.RegularExpressions` when an invariant uses
+  // `email.matches(...)`), collected over the same derived / function /
+  // invariant / operation bodies rendered below so the file imports
+  // only what its own expressions actually use.
   const usings = new Set<string>();
+  for (const d of entity.derived) collectCsExprUsings(d.expr, usings);
+  for (const fn of entity.functions) collectCsExprUsings(fn.body, usings);
+  for (const inv of entity.invariants) {
+    collectCsExprUsings(inv.expr, usings);
+    if (inv.guard) collectCsExprUsings(inv.guard, usings);
+  }
+  for (const op of operations) collectCsStmtUsings(op.statements, usings);
   const renderCtx = {
     thisName: "this",
-    usings,
     // Threaded through so render-stmt's collection-mutation path can
     // distinguish ref-collection fields (writable public `Party`)
     // from containment fields (private `_lines` backing).  Entity

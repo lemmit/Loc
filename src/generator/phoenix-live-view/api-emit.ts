@@ -315,9 +315,20 @@ function renderWorkflowAction(
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   const workflowModule = `${contextModule}.Workflows.${upperFirst(wf.name)}`;
 
-  // Build the permitted param key list from the workflow's declared params
-  const allowedKeys = wf.params.map((p) => `"${snake(p.name)}"`).join(", ");
-  const takeExpr = allowedKeys.length > 0 ? `Map.take(params, [${allowedKeys}])` : `%{}`;
+  // Build the permitted param key list from the workflow's declared
+  // params.  Phoenix JSON params are STRING-keyed (`%{"name" => …}`), but
+  // the workflow `run/2` head pattern-matches ATOM keys (`%{name: name}`),
+  // so a string-keyed map crashes with FunctionClauseError in the head —
+  // before the body's try/catch can run.  Build an atom-keyed map from the
+  // declared params.  The keys come from the compile-time param list (not
+  // user input), so `String.to_atom` here can't be abused for atom
+  // exhaustion; an absent param maps to `nil` (the head still matches, and
+  // a required-but-missing value surfaces as a precondition/guard failure
+  // rather than a 500).
+  const atomEntries = wf.params
+    .map((p) => `${snake(p.name)}: params[${JSON.stringify(snake(p.name))}]`)
+    .join(", ");
+  const takeExpr = wf.params.length > 0 ? `%{${atomEntries}}` : `%{}`;
 
   return `  @doc "POST /api/workflows/${wfSnake}"
   def ${wfSnake}(conn, params) do

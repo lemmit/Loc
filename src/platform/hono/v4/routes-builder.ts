@@ -24,6 +24,7 @@ import type {
 import {
   aggregateUsesMoney,
   findUsesCurrentUser,
+  operationIsGuarded,
   operationUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import {
@@ -560,6 +561,13 @@ function emitOperationRoute(
   out.push(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
+  // A `requires` guard denies with 403 (ForbiddenError → onError) — declare
+  // it so the published contract documents the authorization outcome.
+  if (operationIsGuarded(op)) {
+    out.push(
+      `      403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+  }
   out.push(
     `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );

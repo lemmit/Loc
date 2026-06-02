@@ -1,6 +1,6 @@
 import type { EnrichedAggregateIR, FindIR, RepositoryIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
-import { renderCsExpr } from "./render-expr.js";
+import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Repository find-method bodies.
@@ -19,23 +19,36 @@ import { renderCsExpr } from "./render-expr.js";
 export function buildFindBodies(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
-  usings?: Set<string>,
 ): Array<{ name: string; filterClause: string; projectionClause: string }> {
   if (!repo) return [];
   return repo.finds.map((find) => ({
     name: find.name,
-    filterClause: filterClauseFor(find, agg, usings),
+    filterClause: filterClauseFor(find, agg),
     projectionClause: projectionClauseFor(find.returnType),
   }));
 }
 
-function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR, usings?: Set<string>): string {
+/** Namespaces the find-filter predicates of `repo` reach into (e.g.
+ *  System.Text.RegularExpressions for a `where … matches …` find) — the
+ *  repository-impl emitter declares these as `using`s.  Pure mirror of
+ *  what `filterClauseFor` renders. */
+export function collectFindBodyUsings(
+  repo: RepositoryIR | undefined,
+  into: Set<string> = new Set(),
+): Set<string> {
+  for (const find of repo?.finds ?? []) {
+    if (find.filter) collectCsExprUsings(find.filter, into);
+  }
+  return into;
+}
+
+function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR): string {
   if (find.filter) {
     // `agg` is threaded so the renderer can resolve a
     // `this.<refColl>.contains(param)` predicate to its
     // AssociationIR and emit a join-table subquery.  See
     // `render-expr.ts:renderMethodCall`.
-    return `.Where(x => ${renderCsExpr(find.filter, { thisName: "x", usings, agg })})`;
+    return `.Where(x => ${renderCsExpr(find.filter, { thisName: "x", agg })})`;
   }
   if (find.params.length === 0) return "";
   const conditions: string[] = [];

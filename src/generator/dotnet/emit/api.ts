@@ -24,8 +24,8 @@ function actionName(tokens: OpIdTokens): string {
  *  responses for an operation kind (from the shared matrix).  A Swashbuckle
  *  operation filter (see Program.cs) rewrites their content-type to
  *  `application/problem+json` so the emitted spec matches Hono/Phoenix. */
-function producesProblem(kind: OpErrorKind, indent = "    "): string[] {
-  return errorStatuses(kind).map(
+function producesProblem(kind: OpErrorKind, guarded = false, indent = "    "): string[] {
+  return errorStatuses(kind, guarded).map(
     (s) => `${indent}[ProducesResponseType(typeof(ProblemDetails), ${s})]`,
   );
 }
@@ -51,7 +51,14 @@ interface ControllerShape {
   /** When true, the aggregate has a canonical `destroy` — emit a
    *  `DELETE /{id}` action dispatching `Destroy<Agg>Command`. */
   destroyAction?: boolean;
-  publicOps: Array<{ name: string; routeSlug?: string; cmdArgs: string[]; paramNames: string[] }>;
+  publicOps: Array<{
+    name: string;
+    routeSlug?: string;
+    cmdArgs: string[];
+    paramNames: string[];
+    /** Has a `requires` guard → declares 403 (authorization denied). */
+    guarded: boolean;
+  }>;
   finds: Array<{
     name: string;
     isRoot: boolean;
@@ -126,7 +133,7 @@ export function renderController(
       // [ProducesResponseType] is present, Swashbuckle stops inferring the
       // 2xx body from the action signature, so it must be spelled out.
       "    [ProducesResponseType(204)]",
-      ...producesProblem("operation"),
+      ...producesProblem("operation", op.guarded),
       `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}${agg.name}Request request)`,
       "    {",
       ...wireInLine,
@@ -524,6 +531,72 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
                     }
                 }
             }
+        }
+    }
+}
+`;
+}
+
+/** Swashbuckle schema filter — marks request-DTO properties `required` in
+ *  the OpenAPI schema from the constructor-parameter `[Required]`
+ *  attributes.
+ *
+ *  Why this is needed: request DTOs are positional records whose required
+ *  fields carry a PARAMETER-targeted `[Required]` (a PROPERTY-targeted
+ *  `[property: Required]` makes ASP.NET's record validation throw at
+ *  model-binding time — see `dtoParam`).  But Swashbuckle 6.x's
+ *  DataAnnotations reader only honours the PROPERTY-targeted form, so
+ *  parameter-targeted `[Required]` never reaches the request-body schema's
+ *  `required` array — leaving .NET request bodies marked nothing-required
+ *  while Hono/Phoenix mark every non-optional field required.
+ *
+ *  This filter closes that gap by reflecting each schema's CLR type: for a
+ *  positional record, it reads the primary-constructor parameters and adds
+ *  the camelCase property name to `schema.Required` for each parameter that
+ *  carries `[Required]`.  Response DTOs carry `[property: Required]` on the
+ *  property (not the parameter), so they're untouched here and keep
+ *  Swashbuckle's own handling — no double-marking.  Mirrors `dtoParam`'s
+ *  required predicate exactly (a non-nullable `bool` request field has no
+ *  `[Required]`, so it's correctly left optional). */
+export function renderRequiredFromCtorParamFilter(ns: string): string {
+  return `// Auto-generated.
+using System;
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
+using System.Reflection;
+using System.Text.Json;
+using Microsoft.OpenApi.Models;
+using Swashbuckle.AspNetCore.SwaggerGen;
+
+namespace ${ns}.Api;
+
+public sealed class RequiredFromCtorParamFilter : ISchemaFilter
+{
+    public void Apply(OpenApiSchema schema, SchemaFilterContext context)
+    {
+        var type = context.Type;
+        if (schema.Properties is null || schema.Properties.Count == 0) return;
+
+        // Positional records expose their declared fields via the primary
+        // constructor.  Pick the longest constructor (the primary one for a
+        // positional record) and mark each [Required] parameter's property.
+        var ctor = type.GetConstructors()
+            .OrderByDescending(c => c.GetParameters().Length)
+            .FirstOrDefault();
+        if (ctor is null) return;
+
+        foreach (var p in ctor.GetParameters())
+        {
+            if (p.Name is null) continue;
+            if (p.GetCustomAttribute<RequiredAttribute>() is null) continue;
+            // Swashbuckle keys schema properties by the serialized name;
+            // the app uses camelCase (PropertyNamingPolicy.CamelCase), so
+            // match on camelCase first, then fall back to the exact key.
+            var camel = JsonNamingPolicy.CamelCase.ConvertName(p.Name);
+            var key = schema.Properties.ContainsKey(camel)
+                ? camel
+                : (schema.Properties.ContainsKey(p.Name) ? p.Name : null);
+            if (key is not null) schema.Required.Add(key);
         }
     }
 }

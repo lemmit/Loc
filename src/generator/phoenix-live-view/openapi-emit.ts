@@ -15,6 +15,7 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../ir/types/loom-ir.js";
+import { operationIsGuarded, workflowIsGuarded } from "../../ir/types/loom-ir.js";
 import {
   peelCollection,
   peelNullable,
@@ -247,8 +248,8 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
  *  carries the `ProblemDetails` schema MODULE under `application/problem+json`
  *  — matching Hono/.NET so the conformance gate's error-response dimension
  *  compares equal. */
-function errorResponseEntries(kind: OpErrorKind, schemasModule: string): string {
-  return errorStatuses(kind)
+function errorResponseEntries(kind: OpErrorKind, schemasModule: string, guarded = false): string {
+  return errorStatuses(kind, guarded)
     .map(
       (s) => `,
             ${s} => %OpenApiSpex.Response{
@@ -299,7 +300,7 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "Success",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :object}}}
-            }${errorResponseEntries("workflow", schemasModule)}
+            }${errorResponseEntries("workflow", schemasModule, workflowIsGuarded(wf))}
           }
         }
       }`);
@@ -447,7 +448,7 @@ function renderApiSpec(
             }
           },
           responses: %{
-            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("operation", schemasModule)}
+            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("operation", schemasModule, operationIsGuarded(op))}
           }
         }
       }`,

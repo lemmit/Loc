@@ -7,6 +7,7 @@ export {
   renderExceptionFilter,
   renderListWrapperFilter,
   renderProblemDetailsFilter,
+  renderRequiredFromCtorParamFilter,
 } from "./emit/api.js";
 export { renderAuditableInterceptor } from "./emit/auditable-interceptor.tpl.js";
 export { renderCommon, renderNoopDispatcher } from "./emit/common.js";

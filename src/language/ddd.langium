@@ -139,6 +139,22 @@ Deployable:
         // value is one of the v0 allowed values, and every UI api
         // parameter has a binding when the UI declares any.
         (uiSugar=UiSugarBinding | uiCompose=UiComposeBinding | uiBlock=UiBlockBinding)?
+        // D-PHOENIX-SURFACE: `hosts:` is the host↔ui relation that
+        // supersedes the `ui:`/`ui {}` bindings above.  A deployable
+        // hosts one or more `ui` declarations; the framework lives on
+        // the `ui` (phase 2), not derived from the platform.  Two forms:
+        // bare single (`hosts: WebApp`) and bracketed multi
+        // (`hosts: [Web, Admin]`) — the bracketed form mirrors
+        // `contexts:`/`dataSources:` and avoids the unbracketed-comma
+        // ambiguity where a following soft-keyword clause (`design`)
+        // would be swallowed as another ref.  A list type from day one
+        // so the deferred one-ui-many-frameworks case needs no grammar
+        // change.  Additive in this phase — parses alongside the legacy
+        // bindings; later phases make it canonical and retire `ui:`.
+        ('hosts' ':' (
+            '[' hosts+=[Ui:ID] (',' hosts+=[Ui:ID])* ','? ']'
+          | hosts+=[Ui:ID]
+        ) ','?)?
         ('port' ':' port=INT ','?)?
         ('auth' ':' auth=AuthMode ','?)?
         ('design' ':' design=DesignPack ','?)?
@@ -200,19 +216,24 @@ UiBlockBinding:
 // Frameworks the `ui:` mount lowers against.  `react` renders TSX
 // against a design pack (`mantine`/`shadcn`); `phoenixLiveView`
 // renders HEEx against the `ashPhoenix` pack as part of a fullstack
-// Elixir/Ash deployable.  Future values (`blazor-wasm`,
-// `blazor-server`, …) extend this enum when their codegen backends
-// land.
+// Elixir/Ash deployable.  `liveview` is the D-PHOENIX-SURFACE spelling
+// of `phoenixLiveView` (the framework, decoupled from the host
+// platform name); lowering canonicalises it to `phoenixLiveView`.
+// Future values (`blazor-wasm`, `blazor-server`, …) extend this enum
+// when their codegen backends land.
 Framework returns string:
-    'react' | 'phoenixLiveView';
+    'react' | 'phoenixLiveView' | 'liveview';
 
 // Backend platforms accept a quoted `family@version` pin
 // (`platform: "hono@v4"`) via the STRING alternative — symmetric
 // with `DesignPack` below.  Bareword keywords are unchanged so
 // every existing source parses identically; the validator + lowering
 // (`parseBuiltinPlatformRef`) are the resolution authority.
+// `phoenix` is the D-PHOENIX-SURFACE host-platform name; lowering
+// canonicalises it to `phoenixLiveView` until the literal-rename
+// cleanup phase.
 Platform returns string:
-    'dotnet' | 'hono' | 'react' | 'static' | 'phoenixLiveView' | STRING;
+    'dotnet' | 'hono' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,
@@ -249,6 +270,12 @@ AuthMode returns string:
 
 Ui:
     'ui' name=ID withClause=WithClause? '{'
+        // D-PHOENIX-SURFACE: the UI's framework is part of its own
+        // technical identity, not derived from the host backend.
+        // Optional + additive — existing sources omit it and keep the
+        // legacy "framework derived from the deployable's platform"
+        // path until the `hosts:` work consumes it.
+        ('framework' ':' framework=Framework ','?)?
         members+=UiMember*
     '}';
 
@@ -609,7 +636,7 @@ BoundedContext:
 
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
-    | Criterion | FilterDecl | StampDecl | ImplementsDecl;
+    | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -890,6 +917,57 @@ Criterion:
       | '{' 'where' ':' body=Expression '}'
     );
 
+// Retrieval — a named query *bundle*: a composed predicate (`where`,
+// the same expression position as `criterion`/`find … where`, so it
+// references criteria and `this.<field>` candidate refs) plus the
+// shaping a real query carries — `sort` ordering and a `loads` fetch
+// shape.  Pagination is NOT a slot here: `page` is a call-site argument
+// on `Repo.run(R(args), page?)`, never part of the declaration.  See
+// docs/proposals/retrieval.md.  Lowers to RetrievalIR
+// (docs/proposals/reified-criteria.md).
+//
+//   retrieval AllActive of Customer = ActiveCustomer
+//   retrieval HighValueInRegion(region: string) of Order {
+//     where: InRegion(region) && OrderTotalAtLeast(1000)
+//     sort:  [total desc, createdAt asc]
+//     loads: [this.lines[].product]
+//   }
+//
+// `sort` / `loads` admit the `sort`/`loads`/`asc`/`desc` keywords as
+// soft keywords (LooseName / NameRefIdent) so user code naming a field
+// `sort` / `loads` / `asc` / `desc` keeps parsing.
+Retrieval:
+    'retrieval' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? 'of' target=TypeRef
+    (
+        '=' where=Expression
+      | '{' 'where' ':' where=Expression
+            ('sort'  ':' '[' (sort+=SortItem (',' sort+=SortItem)*)? ']')?
+            ('loads' ':' '[' (loads+=LoadPath (',' loads+=LoadPath)*)? ']')?
+        '}'
+    );
+
+// A single sort term — a candidate path and a direction.  `direction`
+// is a discriminator field (not an `{infer}` action) per the grammar
+// convention; defaults to ascending when omitted.
+SortItem:
+    path=LoadPath (direction=SortDirection)?;
+
+SortDirection returns string:
+    'asc' | 'desc';
+
+// A structural path through the candidate aggregate for `sort` / `loads`
+// — flat-list rule (head + dotted tail), with an optional `[]` marker on
+// any segment meaning "across the collection" (mirrors `contains`
+// syntax).  Not an Expression: load-specifications.md restricts these to
+// structural paths (no filters / lambdas).  A leading `this` is admitted
+// and stripped at lowering so `this.lines[].product` and
+// `lines[].product` are equivalent.
+LoadPath:
+    ('this' '.')? segments+=LoadSegment ('.' segments+=LoadSegment)*;
+
+LoadSegment:
+    name=LooseName (collection?='[]')?;
+
 // ---------------------------------------------------------------------------
 // Members
 // ---------------------------------------------------------------------------
@@ -938,7 +1016,11 @@ Property:
         // `query`, etc. (e.g. `event Foo { payload: string }`) keep parsing.
         // They act as hard keywords only at `ContextMember` position, where
         // `PayloadDecl` (`kind=PayloadKind name=ID '{'`) begins.
-        | 'payload' | 'command' | 'query' | 'response' | 'error')
+        | 'payload' | 'command' | 'query' | 'response' | 'error'
+        // Retrieval keywords (retrieval.md) — soft in property position so
+        // user-declared fields named `sort` / `loads` / `asc` / `desc` /
+        // `retrieval` keep parsing.  Hard only inside the `Retrieval` slots.
+        | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1087,7 +1169,11 @@ LooseName returns string:
     // Payload-family keywords (payload-transport-layer.md, P1) admitted as
     // soft in loose-name positions; hard only at `ContextMember`
     // (`PayloadDecl`).
-    | 'payload' | 'command' | 'query' | 'response' | 'error';
+    | 'payload' | 'command' | 'query' | 'response' | 'error'
+    // Retrieval keywords (retrieval.md) admitted as soft so user code can
+    // still name a field `retrieval` / `sort` / `loads` / `asc` / `desc`.
+    // Hard only inside the `Retrieval` rule's slots.
+    | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1128,7 +1214,28 @@ Statement:
   | RequiresStmt
   | LetStmt
   | EmitStmt
+  | ForStmt
   | AssignOrCallStmt;
+
+// `for <var> in <iterable> { <body> }` — iterate an aggregate array
+// (typically `Repo.run(<Retrieval>(args), page?)`), binding each element
+// to `<var>` in the body.  The body reuses `Statement*`, so op-calls,
+// lets, emits, and nested loops all parse.  Each iteration's mutations to
+// `<var>` persist via a per-iteration save (see the for-each lowering).
+// `for` is already a hard keyword elsewhere (`repository X for Agg`); the
+// leading statement position disambiguates the loop.
+ForStmt:
+    'for' var=ID 'in' iterable=ForIterable '{'
+        body+=Statement*
+    '}';
+
+// The loop iterable is restricted to a name or a postfix chain
+// (`customers`, `Customers.run(R(args), …)`) — deliberately NOT the full
+// `Expression`, because `BuilderCall` (`Name { … }`) would otherwise
+// swallow the loop's own `{ body }` block.  These are the only forms
+// that produce an aggregate array in v1 anyway.
+ForIterable infers Expression:
+    NameRef ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+)?;
 
 PreconditionStmt:
     'precondition' expr=Expression;
@@ -1475,7 +1582,11 @@ NameRefIdent returns string:
        // Payload-family keywords (payload-transport-layer.md, P1) admitted as
        // bare NameRefs so expressions can read a field named `payload`,
        // `error`, `query`, etc.  Hard only at `ContextMember` (`PayloadDecl`).
-       | 'payload' | 'command' | 'query' | 'response' | 'error';
+       | 'payload' | 'command' | 'query' | 'response' | 'error'
+       // Retrieval keywords (retrieval.md) admitted as bare NameRefs so an
+       // expression can read a field named `retrieval` / `sort` / `loads` /
+       // `asc` / `desc`.  Hard only inside the `Retrieval` rule's slots.
+       | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc';
 
 // ---------------------------------------------------------------------------
 // Terminals

@@ -6,6 +6,7 @@ import {
   type TypeIR,
   type WorkflowIR,
   type WorkflowStmtIR,
+  workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import { camelId, opWorkflow } from "../../../ir/util/openapi-ids.js";
@@ -267,6 +268,13 @@ function emitWorkflowRoute(
   out.push(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
+  // A `requires` guard denies with 403 (ForbiddenError → onError) — declare
+  // it so the published contract documents the authorization outcome.
+  if (workflowIsGuarded(wf)) {
+    out.push(
+      `      403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+  }
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
@@ -410,6 +418,36 @@ function renderStmt(
     }
     case "expr-let":
       return [`${indent}const ${st.name} = ${renderArg(st.expr)};`];
+    case "repo-run": {
+      // `Repo.run(<Retrieval>(args), page?)` → the generated
+      // `run<Name>(args, page?)` repository method (retrieval.md / PR3-A).
+      const args = st.retrievalArgs.map(renderArg);
+      if (st.page) {
+        const parts: string[] = [];
+        if (st.page.offset) parts.push(`offset: ${renderArg(st.page.offset)}`);
+        if (st.page.limit) parts.push(`limit: ${renderArg(st.page.limit)}`);
+        args.push(`{ ${parts.join(", ")} }`);
+      }
+      return [
+        `${indent}const ${st.name} = await ${lowerFirst(st.repoName)}.run${upperFirst(st.retrievalName)}(${args.join(", ")});`,
+      ];
+    }
+    case "for-each": {
+      // `for o in xs { … }` → a JS `for…of`; the body renders at +2
+      // indent, then each iteration's dirty bindings save INSIDE the loop
+      // (aggregate events drain through the same save).
+      const inner = `${indent}  `;
+      const bodyLines = st.body.flatMap((s) => renderStmt(s, paramExprs, inner, ctx));
+      const saveLines = st.savesPerIteration.map(
+        (sv) => `${inner}await ${lowerFirst(sv.repoName)}.save(${sv.name});`,
+      );
+      return [
+        `${indent}for (const ${st.var} of ${renderArg(st.iterable)}) {`,
+        ...bodyLines,
+        ...saveLines,
+        `${indent}}`,
+      ];
+    }
     case "resource-call":
       // Bare resource-op statement (`files.put(k, v)`).  `renderArg`
       // renders the call as `(await files$put(...))`; emit it as a
@@ -440,9 +478,16 @@ function collectReposForWorkflow(wf: WorkflowIR): {
   aggName: string;
 }[] {
   const seen = new Map<string, string>();
-  for (const st of wf.statements) {
-    if (st.kind === "repo-let") seen.set(st.repoName, st.aggName);
-  }
+  const walk = (stmts: WorkflowStmtIR[]): void => {
+    for (const st of stmts) {
+      if (st.kind === "repo-let" || st.kind === "repo-run") seen.set(st.repoName, st.aggName);
+      else if (st.kind === "for-each") {
+        for (const sv of st.savesPerIteration) seen.set(sv.repoName, sv.aggName);
+        walk(st.body);
+      }
+    }
+  };
+  walk(wf.statements);
   for (const save of wf.savesAtExit) seen.set(save.repoName, save.aggName);
   return [...seen.entries()].map(([repoName, aggName]) => ({
     repoName,

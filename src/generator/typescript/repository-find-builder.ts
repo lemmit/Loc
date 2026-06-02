@@ -8,6 +8,7 @@
 
 import type {
   BoundedContextIR,
+  ContainmentIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
@@ -15,11 +16,12 @@ import type {
   ExprIR,
   FieldIR,
   FindIR,
+  RetrievalIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../ir/types/loom-ir.js";
-import { lines } from "../../util/code-builder.js";
-import { lowerFirst, plural } from "../../util/naming.js";
+import { indent, lines } from "../../util/code-builder.js";
+import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./emit.js";
 import {
@@ -51,6 +53,55 @@ function withKind(filter: string, kindPred: string | null): string {
   return kindPred ? `and(${filter}, ${kindPred})` : filter;
 }
 
+/** `agg`'s `contains` children paired with their resolved entity part,
+ *  dropping any containment whose part can't be found (defensive — the
+ *  IR guarantees they exist).  Both array-returning read paths derive
+ *  this set identically before bulk-loading. */
+function eagerContainsOf(agg: EnrichedAggregateIR): { c: ContainmentIR; part: EntityPartIR }[] {
+  return agg.contains
+    .map((c) => ({ c, part: agg.parts.find((p) => p.name === c.partName) }))
+    .filter((x): x is { c: ContainmentIR; part: EntityPartIR } => !!x.part);
+}
+
+/** Bulk-load every containment (collection + singular) into a per-parent
+ *  `Map` keyed off the already-loaded `rootIds`, emitted at 4-space
+ *  indent against `this.db`.  Shared verbatim by the two array-returning
+ *  read paths (`findManyByIds` and the array-returning `find`); a
+ *  collection accumulates into a `T[]` list, a singular is first-row-wins
+ *  into a single `T`. */
+function bulkLoadContainmentLines(
+  eagerContains: { c: ContainmentIR; part: EntityPartIR }[],
+  agg: EnrichedAggregateIR,
+  ctx: BoundedContextIR,
+): string[] {
+  return eagerContains.flatMap(({ c, part }) => {
+    const childTable = lowerFirst(plural(part.name));
+    const head = `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, rootIds));`;
+    if (c.collection) {
+      return [
+        head,
+        `    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`,
+        `    for (const r of ${c.name}Rows) {`,
+        `      const list = ${c.name}ByParent.get(r.parentId) ?? [];`,
+        `      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
+        `      ${c.name}ByParent.set(r.parentId, list);`,
+        `    }`,
+      ];
+    }
+    // Singular containment: at most one row per parent (DB doesn't
+    // enforce that, but the aggregate boundary does).  First-row-wins
+    // on duplicates.
+    return [
+      head,
+      `    const ${c.name}ByParent = new Map<string, ${part.name}>();`,
+      `    for (const r of ${c.name}Rows) {`,
+      `      if (${c.name}ByParent.has(r.parentId)) continue;`,
+      `      ${c.name}ByParent.set(r.parentId, ${hydrateEntityExpr(part, "r", agg, ctx)});`,
+      `    }`,
+    ];
+  });
+}
+
 export function findManyByIdsMethod(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string {
   const tableName = repoTableName(agg, ctx);
   const idFilter = withKind(
@@ -59,9 +110,7 @@ export function findManyByIdsMethod(agg: EnrichedAggregateIR, ctx: BoundedContex
   );
   // Bulk-load every containment (collections + singulars) into per-
   // parent maps; mirrors the array-return path of findQueryMethod.
-  const eagerContains = agg.contains
-    .map((c) => ({ c, part: agg.parts.find((p) => p.name === c.partName) }))
-    .filter((x): x is { c: typeof x.c; part: EntityPartIR } => !!x.part);
+  const eagerContains = eagerContainsOf(agg);
   const needsIdsLocal = eagerContains.length > 0 || associationsOf(agg).length > 0;
   return lines(
     `  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`,
@@ -69,29 +118,7 @@ export function findManyByIdsMethod(agg: EnrichedAggregateIR, ctx: BoundedContex
     `    const rootRows = await this.db.select().from(schema.${tableName}).where(${idFilter});`,
     `    if (rootRows.length === 0) return [];`,
     needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
-    ...eagerContains.flatMap(({ c, part }) => {
-      const childTable = lowerFirst(plural(part.name));
-      const head = `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, rootIds));`;
-      if (c.collection) {
-        return [
-          head,
-          `    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`,
-          `    for (const r of ${c.name}Rows) {`,
-          `      const list = ${c.name}ByParent.get(r.parentId) ?? [];`,
-          `      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
-          `      ${c.name}ByParent.set(r.parentId, list);`,
-          `    }`,
-        ];
-      }
-      return [
-        head,
-        `    const ${c.name}ByParent = new Map<string, ${part.name}>();`,
-        `    for (const r of ${c.name}Rows) {`,
-        `      if (${c.name}ByParent.has(r.parentId)) continue;`,
-        `      ${c.name}ByParent.set(r.parentId, ${hydrateEntityExpr(part, "r", agg, ctx)});`,
-        `    }`,
-      ];
-    }),
+    ...bulkLoadContainmentLines(eagerContains, agg, ctx),
     associationMapLines(agg, "this.db", "    "),
     `    return rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
     `  }`,
@@ -118,7 +145,7 @@ export function findByIdMethod(
           `    ${renderHonoStoreLogCall("txBegin", `aggregate: "${agg.name}", id: id as string`)}`,
           `    try {`,
           `      const result = await this.db.transaction(async (tx) => {`,
-          ...body.map((l) => `  ${l}`),
+          ...indent(2, body),
           `      });`,
           `      ${renderHonoStoreLogCall("txCommit", `aggregate: "${agg.name}", id: id as string`)}`,
           `      return result;`,
@@ -344,9 +371,7 @@ export function findQueryMethod(
     // undefined `shipping` variable.  Now we load each containment
     // into a per-parent Map and use a hydrate helper that reads from
     // those maps.
-    const eagerContains = agg.contains
-      .map((c) => ({ c, part: agg.parts.find((p) => p.name === c.partName) }))
-      .filter((x): x is { c: typeof x.c; part: EntityPartIR } => !!x.part);
+    const eagerContains = eagerContainsOf(agg);
     const needsIdsLocal = eagerContains.length > 0 || associationsOf(agg).length > 0;
     return lines(
       `  async ${find.name}(${params}): Promise<${agg.name}[]> {`,
@@ -356,32 +381,7 @@ export function findQueryMethod(
       `      return [];`,
       `    }`,
       needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
-      ...eagerContains.flatMap(({ c, part }) => {
-        const childTable = lowerFirst(plural(part.name));
-        const head = `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, rootIds));`;
-        if (c.collection) {
-          return [
-            head,
-            `    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`,
-            `    for (const r of ${c.name}Rows) {`,
-            `      const list = ${c.name}ByParent.get(r.parentId) ?? [];`,
-            `      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
-            `      ${c.name}ByParent.set(r.parentId, list);`,
-            `    }`,
-          ];
-        }
-        // Singular containment: at most one row per parent (DB doesn't
-        // enforce that, but the aggregate boundary does).  First-row-
-        // wins on duplicates.
-        return [
-          head,
-          `    const ${c.name}ByParent = new Map<string, ${part.name}>();`,
-          `    for (const r of ${c.name}Rows) {`,
-          `      if (${c.name}ByParent.has(r.parentId)) continue;`,
-          `      ${c.name}ByParent.set(r.parentId, ${hydrateEntityExpr(part, "r", agg, ctx)});`,
-          `    }`,
-        ];
-      }),
+      ...bulkLoadContainmentLines(eagerContains, agg, ctx),
       associationMapLines(agg, "this.db", "    "),
       `    const result = rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
       `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: result.length`)}`,
@@ -410,6 +410,71 @@ export function findQueryMethod(
         `    if (rootRows.length === 0) throw new AggregateNotFoundError("not found");`,
     `    const result = await this.findById(rootRows[0]!.id as Ids.${agg.name}Id) as ${agg.name}${optional ? " | null" : ""};`,
     `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: result == null ? 0 : 1`)}`,
+    `    return result;`,
+    `  }`,
+  );
+}
+
+/** Emit a `run<Name>(...)` repository method from a `RetrievalIR` — the
+ *  named query bundle (retrieval.md).  Mirrors the array-returning
+ *  `findQueryMethod` path (same bulk-load + hydrate), adding the
+ *  retrieval's `sort` (→ `.orderBy(asc/desc(col))`) and a call-site
+ *  `page` (→ `.limit().offset()`).  The `where` predicate lowers through
+ *  the same `lowerToDrizzle` oracle a find filter does; the IR validator
+ *  (`validateRetrievals`) guarantees it lowers cleanly.  Honours only the
+ *  default-whole load plan in v1 (explicit `loads` deferred to PR6). */
+export function runMethod(
+  agg: EnrichedAggregateIR,
+  retrieval: RetrievalIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const tableName = repoTableName(agg, ctx);
+  const methodName = `run${upperFirst(retrieval.name)}`;
+  // Retrieval params + an optional call-site page argument.  `page` is
+  // never part of the declaration (retrieval.md) — it rides here.
+  const baseParams = retrieval.params.map((p) => `${p.name}: ${tsTypeForReturn(p.type)}`);
+  const params = [...baseParams, "page?: { offset?: number; limit?: number }"].join(", ");
+
+  // `where` → Drizzle predicate, AND-ed with the TPH `kind` scope.
+  const kindPred = kindPredicate(agg, ctx, tableName);
+  const lowered = lowerToDrizzle(retrieval.where, tableName, ctx);
+  if (!lowered) {
+    throw new Error(
+      `internal: where-clause for retrieval '${retrieval.name}' on '${agg.name}' ` +
+        "could not lower to Drizzle, but validateRetrievals should have caught this. " +
+        "Please file a bug.",
+    );
+  }
+  const whereClause = `.where(${withKind(lowered.expr, kindPred)})`;
+
+  // `sort` → `.orderBy(asc(col), desc(col), …)`.  Only the first path
+  // segment is used in v1 (a direct column); nested / collection sort
+  // paths are a v2 concern, already gated by validateRetrievals.
+  const orderByClause =
+    retrieval.sort.length > 0
+      ? `.orderBy(${retrieval.sort
+          .map((s) => `${s.direction}(schema.${tableName}.${s.path[0]!.name})`)
+          .join(", ")})`
+      : "";
+
+  const eagerContains = eagerContainsOf(agg);
+  const needsIdsLocal = eagerContains.length > 0 || associationsOf(agg).length > 0;
+  return lines(
+    `  async ${methodName}(${params}): Promise<${agg.name}[]> {`,
+    // `page` is optional — apply limit / offset only when supplied.
+    `    let query = this.db.select().from(schema.${tableName})${whereClause}${orderByClause}.$dynamic();`,
+    `    if (page?.limit !== undefined) query = query.limit(page.limit);`,
+    `    if (page?.offset !== undefined) query = query.offset(page.offset);`,
+    `    const rootRows = await query;`,
+    `    if (rootRows.length === 0) {`,
+    `      ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${methodName}", rows: 0`)}`,
+    `      return [];`,
+    `    }`,
+    needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
+    ...bulkLoadContainmentLines(eagerContains, agg, ctx),
+    associationMapLines(agg, "this.db", "    "),
+    `    const result = rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
+    `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${methodName}", rows: result.length`)}`,
     `    return result;`,
     `  }`,
   );

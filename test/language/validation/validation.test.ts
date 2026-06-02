@@ -285,7 +285,9 @@ describe("validation", () => {
           deployable api { platform: hono, contexts: [T], ui: WebApp, port: 3000 }
         }
       `);
-      expect(errors.some((e) => /'ui:' binding is only valid/.test(e))).toBe(true);
+      expect(errors.some((e) => /binding is only valid on platforms that mount a UI/.test(e))).toBe(
+        true,
+      );
     });
 
     it("accepts 'ui:' on a 'platform: dotnet' deployable (fullstack mode)", async () => {

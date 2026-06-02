@@ -1,6 +1,6 @@
 // Auto-generated.  Do not edit by hand.
 import { useParams, Link as RouterLink } from "react-router";
-import { UpdateRequest, useUpdateCustomer } from "../../api/customer";
+import { UpdateCustomerRequest, useUpdateCustomer } from "../../api/customer";
 import { applyServerErrors } from "../../lib/apply-server-errors";
 import { KeyValueRow } from "../../lib/format";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,8 +17,8 @@ function openUpdateModal(mut: ReturnType<typeof useUpdateCustomer>): void {
 }
 
 function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateCustomer>; onClose: () => void }) {
-  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<UpdateRequest>({
-    resolver: zodResolver(UpdateRequest),
+  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<UpdateCustomerRequest>({
+    resolver: zodResolver(UpdateCustomerRequest),
     defaultValues: { username: "", email: "", age: 0 },
   });
   return (

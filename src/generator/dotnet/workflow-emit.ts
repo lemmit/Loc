@@ -6,20 +6,23 @@ import {
   type SystemIR,
   type WorkflowIR,
   type WorkflowStmtIR,
+  workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+import { errorStatuses } from "../../ir/util/openapi-errors.js";
 import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { dotnetResourceAdapterFor, resourceClassName } from "./adapters/resource-clients.js";
 import {
+  collectWireUsings,
   csIdValueClrType,
   domainToRequestExpr,
   dtoParam,
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
-import { renderCsExpr, renderCsType } from "./render-expr.js";
+import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // .NET workflow emission.
@@ -120,20 +123,26 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
   for (const save of wf.savesAtExit) {
     repos.set(save.repoName, save.aggName);
   }
-  for (const st of wf.statements) {
-    if (st.kind === "repo-let") {
-      repos.set(st.repoName, st.aggName);
-    } else if (st.kind === "emit") {
-      hasEmit = true;
-    } else if (st.kind === "op-call") {
-      const agg = aggsByName.get(st.aggName);
-      const op = agg?.operations.find((o) => o.name === st.op);
-      if (op?.extern) {
-        const key = `${st.aggName}.${st.op}`;
-        externs.set(key, { aggName: st.aggName, opName: st.op });
+  const walk = (stmts: WorkflowStmtIR[]): void => {
+    for (const st of stmts) {
+      if (st.kind === "repo-let" || st.kind === "repo-run") {
+        repos.set(st.repoName, st.aggName);
+      } else if (st.kind === "emit") {
+        hasEmit = true;
+      } else if (st.kind === "for-each") {
+        for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
+        walk(st.body);
+      } else if (st.kind === "op-call") {
+        const agg = aggsByName.get(st.aggName);
+        const op = agg?.operations.find((o) => o.name === st.op);
+        if (op?.extern) {
+          const key = `${st.aggName}.${st.op}`;
+          externs.set(key, { aggName: st.aggName, opName: st.op });
+        }
       }
     }
-  }
+  };
+  walk(wf.statements);
   return { repos, hasEmit, externs };
 }
 
@@ -262,7 +271,13 @@ function renderHandler(
   const resourceClasses = buildResourceClasses(sys);
   if (resourceClasses.size > 0 && workflowUsesResourceOp(wf)) usings.add(`${ns}.Resources`);
   const renderArg = (e: import("../../ir/types/loom-ir.js").ExprIR): string => {
-    return renderExprWithCmdParams(e, paramNames, usings, resourceClasses);
+    // Collect the rendered expression's non-implicit namespaces adjacent
+    // to rendering (`renderArg` is the single choke point for every
+    // workflow expression the handler emits) instead of threading a Set
+    // through the renderer.  The cmd-param rewrite only renames refs, so
+    // the `matches` shape collectCsExprUsings keys off is unchanged.
+    collectCsExprUsings(e, usings);
+    return renderExprWithCmdParams(e, paramNames, resourceClasses);
   };
 
   for (const st of wf.statements) {
@@ -448,6 +463,18 @@ function renderStatement(
       const exprText = renderArg(st.expr);
       return [`${INDENT}var ${st.name} = ${isResourceOp ? "await " : ""}${exprText};`];
     }
+    case "repo-run":
+    case "for-each":
+      // The named-query `Repo.run(...)` + the `for` loop that consumes it
+      // are wired end-to-end on Hono first (PR3-B).  The .NET run-method
+      // emission + foreach lands in a follow-up slice; gate here so the
+      // IR stays backend-neutral and the failure is explicit rather than
+      // a call to an unemitted `Run<Name>Async` method.
+      throw new Error(
+        `.NET backend: workflow uses '${st.kind}', which the .NET generator does not yet ` +
+          `support (run-method emission + foreach is a follow-up slice).  Target a Hono ` +
+          `deployable, or omit the retrieval loop for .NET.`,
+      );
     case "resource-call":
       // 4c: bare resource-op statement (`files.put(k, v)`) → awaited async
       // helper call.
@@ -459,7 +486,6 @@ function renderStatement(
 function renderExprWithCmdParams(
   e: import("../../ir/types/loom-ir.js").ExprIR,
   paramNames: Set<string>,
-  usings?: Set<string>,
   resourceClasses?: Map<string, string>,
 ): string {
   // Substitute by rewriting the IR before renderCsExpr.
@@ -517,7 +543,7 @@ function renderExprWithCmdParams(
     }
     return e;
   };
-  return renderCsExpr(rewrite(e), { thisName: "this", usings, resourceClasses });
+  return renderCsExpr(rewrite(e), { thisName: "this", resourceClasses });
 }
 
 // ---------------------------------------------------------------------------
@@ -533,15 +559,21 @@ function renderController(ctx: EnrichedBoundedContextIR, ns: string, routePrefix
   const usings = new Set<string>();
   const blocks: string[] = [];
   for (const wf of ctx.workflows) {
+    for (const p of wf.params) collectWireUsings(p.type, ctx, usings);
     const cmdArgs = wf.params
-      .map((p) => wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx, usings))
+      .map((p) => wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx))
       .join(",\n            ");
+    // Error responses from the shared matrix: 400 always, + 403 when the
+    // workflow has a `requires` guard (denies with ForbiddenException).
+    const errorAttrs = errorStatuses("workflow", workflowIsGuarded(wf))
+      .map((s) => `    [ProducesResponseType(typeof(ProblemDetails), ${s})]\n`)
+      .join("");
     blocks.push(
       `    [HttpPost("${snake(wf.name)}")]\n` +
         // Explicit success (NoContent → 204) so the added error
         // [ProducesResponseType] doesn't suppress Swashbuckle's 2xx inference.
         `    [ProducesResponseType(204)]\n` +
-        `    [ProducesResponseType(typeof(ProblemDetails), 400)]\n` +
+        errorAttrs +
         `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflow(wf.name)))}([FromBody] ${upperFirst(wf.name)}Request request)\n` +
         `    {\n` +
         `        var cmd = new ${upperFirst(wf.name)}Command(\n            ${cmdArgs});\n` +

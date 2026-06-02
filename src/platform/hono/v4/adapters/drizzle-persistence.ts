@@ -185,6 +185,7 @@ export function emitDrizzleSchema(
     workflows: ctx.contexts.flatMap((c) => c.workflows),
     views: ctx.contexts.flatMap((c) => c.views),
     criteria: ctx.contexts.flatMap((c) => c.criteria),
+    retrievals: ctx.contexts.flatMap((c) => c.retrievals),
   };
   return splitLines(renderSchema(merged, options));
 }

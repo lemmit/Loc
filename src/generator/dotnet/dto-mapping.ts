@@ -96,15 +96,31 @@ export function wireType(
   return s;
 }
 
-/** A DTO record positional parameter, marked `[property: Required]` when
- *  the C# type is non-nullable.  Swashbuckle's `SupportNonNullableReference
- *  Types` does NOT reliably infer required-ness from positional-record NRT
- *  metadata (and never marks non-nullable *value* types required), so we
- *  drive it explicitly from the IR: a field is required iff `wireType` did
- *  not append `?` — exactly the optional→nullable mapping.  This matches
- *  Hono/Phoenix, which mark every non-optional field required.  `[property:
- *  Required]` targets the generated property (not the ctor param) so
- *  Swashbuckle's DataAnnotations reader picks it up.
+/** A DTO record positional parameter, marked required when the C# type is
+ *  non-nullable.  Swashbuckle's `SupportNonNullableReferenceTypes` does NOT
+ *  reliably infer required-ness from positional-record NRT metadata (and
+ *  never marks non-nullable *value* types required), so we drive it
+ *  explicitly from the IR: a field is required iff `wireType` did not append
+ *  `?` — exactly the optional→nullable mapping.  This matches Hono/Phoenix,
+ *  which mark every non-optional field required.
+ *
+ *  Attribute TARGET matters and differs by direction:
+ *   - REQUEST DTOs are model-bound + validated.  A `[property: Required]` on
+ *     a positional-record parameter makes ASP.NET's record validation throw
+ *     at model-binding time (`ThrowIfRecordTypeHasValidationOnProperties` →
+ *     `InvalidOperationException`, a 500 on the FIRST POST with a required
+ *     field, before the controller/handler runs).  So requests target the
+ *     constructor PARAMETER with a bare `[Required]`.  Swashbuckle's
+ *     DataAnnotations reader does NOT pick up parameter-targeted attributes,
+ *     so request-body OpenAPI required-ness is restored separately by the
+ *     `RequiredFromCtorParamFilter` ISchemaFilter (emit/api.ts), which
+ *     reflects the ctor params back into `schema.Required`.  That keeps the
+ *     strict-parity `requiredDiffs` gate green without re-introducing the
+ *     property-target metadata that triggers the throw.
+ *   - RESPONSE DTOs are only serialized, never model-bound, so the throw
+ *     can't fire; they keep `[property: Required]` so Swashbuckle's
+ *     property-based DataAnnotations reader marks them required in the
+ *     response schema directly.
  *
  *  Exception: a non-nullable `bool` in a REQUEST is NOT required.  ASP.NET
  *  model-binding defaults an omitted bool to `false` (no error), matching
@@ -119,7 +135,12 @@ export function dtoParam(
 ): string {
   const optionalBoolRequest = dir === "request" && csType === "bool";
   const required = !csType.endsWith("?") && !optionalBoolRequest;
-  return `${required ? "[property: Required] " : ""}${csType} ${name}`;
+  if (!required) return `${csType} ${name}`;
+  // Request → parameter target (bare `[Required]`) so ASP.NET record
+  // validation doesn't throw at model-binding time; response → property
+  // target (`[property: Required]`).  See the doc comment above.
+  const attr = dir === "request" ? "[Required] " : "[property: Required] ";
+  return `${attr}${csType} ${name}`;
 }
 
 /** Map a wire-shaped expression to a domain-typed argument for a command. */
@@ -127,14 +148,13 @@ export function wireToCommandArgument(
   expr: string,
   t: TypeIR,
   ctx: EnrichedBoundedContextIR,
-  usings?: Set<string>,
 ): string {
   const info = wireTypeInfo(t, "request");
   if (info.isNullable) {
-    return `(${expr} is null ? null : ${wireToCommandArgument(`${expr}!`, peelNullable(t), ctx, usings)})`;
+    return `(${expr} is null ? null : ${wireToCommandArgument(`${expr}!`, peelNullable(t), ctx)})`;
   }
   if (info.isCollection) {
-    return `${expr}.Select(__e => ${wireToCommandArgument("__e", peelCollection(t), ctx, usings)}).ToList()`;
+    return `${expr}.Select(__e => ${wireToCommandArgument("__e", peelCollection(t), ctx)}).ToList()`;
   }
   switch (info.refKind) {
     case "primitive":
@@ -142,14 +162,13 @@ export function wireToCommandArgument(
         // Wire is a string; coerce to UTC DateTime regardless of whether
         // the caller sent a Z-suffixed value or a naive datetime-local
         // string.  CultureInfo + DateTimeStyles live in
-        // System.Globalization, outside the SDK's implicit-usings set.
-        usings?.add("System.Globalization");
+        // System.Globalization, outside the SDK's implicit-usings set
+        // (declared via collectWireUsings on the emitter side).
         return `DateTime.Parse(${expr}, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)`;
       }
       if (info.primitive === "money") {
         // Wire string → System.Decimal.  InvariantCulture so a locale's
         // comma-vs-dot doesn't flip the parse.
-        usings?.add("System.Globalization");
         return `decimal.Parse(${expr}, CultureInfo.InvariantCulture)`;
       }
       return expr;
@@ -163,13 +182,40 @@ export function wireToCommandArgument(
       const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return expr;
       const args = vo.fields
-        .map((f) => wireToCommandArgument(`${expr}.${upperFirst(f.name)}`, f.type, ctx, usings))
+        .map((f) => wireToCommandArgument(`${expr}.${upperFirst(f.name)}`, f.type, ctx))
         .join(", ");
       return `new ${info.base}(${args})`;
     }
     case "entity":
       return expr;
   }
+}
+
+/** Namespaces the wire→command conversion of `t` reaches into beyond the
+ *  SDK's implicit usings — `System.Globalization` for the datetime/money
+ *  parse helpers `wireToCommandArgument` emits.  Pure mirror of that
+ *  function's recursion (nullable / collection peel, value-object field
+ *  recursion); emitters call it over the same types they convert to build
+ *  their `using` header. */
+export function collectWireUsings(
+  t: TypeIR,
+  ctx: EnrichedBoundedContextIR,
+  into: Set<string> = new Set(),
+): Set<string> {
+  const info = wireTypeInfo(t, "request");
+  if (info.isNullable) return collectWireUsings(peelNullable(t), ctx, into);
+  if (info.isCollection) return collectWireUsings(peelCollection(t), ctx, into);
+  if (info.refKind === "primitive") {
+    if (info.primitive === "datetime" || info.primitive === "money") {
+      into.add("System.Globalization");
+    }
+    return into;
+  }
+  if (info.refKind === "valueObject") {
+    const vo = ctx.valueObjects.find((v) => v.name === info.base);
+    if (vo) for (const f of vo.fields) collectWireUsings(f.type, ctx, into);
+  }
+  return into;
 }
 
 /** Project a domain expression to its wire-shape Response. */

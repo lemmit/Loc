@@ -121,7 +121,7 @@ function emitFormOfOperationByName(
   addImport(
     ctx,
     `../api/${lowerFirst(agg.name)}`,
-    `${upperFirst(op.name)}Request`,
+    `${upperFirst(op.name)}${agg.name}Request`,
     `use${upperFirst(op.name)}${agg.name}`,
   );
   ctx.collectedTestids.add(testidNamespace);
@@ -461,7 +461,7 @@ function emitFormOfOperation(
   addImport(
     ctx,
     `../api/${lowerFirst(agg.name)}`,
-    `${upperFirst(op.name)}Request`,
+    `${upperFirst(op.name)}${agg.name}Request`,
     `use${upperFirst(op.name)}${agg.name}`,
   );
   ctx.collectedTestids.add(testidNamespace);

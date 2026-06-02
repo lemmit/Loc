@@ -31,6 +31,7 @@ import {
   findManyByIdsMethod,
   findQueryMethod,
   lowerToDrizzle,
+  runMethod,
 } from "./repository-find-builder.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { saveMethod } from "./repository-save-builder.js";
@@ -77,6 +78,18 @@ export function buildRepositoryFile(
   for (const f of allFilters) {
     const lowered = lowerToDrizzle(f, lowerFirst(plural(agg.name)), ctx);
     if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
+  }
+  // Context retrievals (retrieval.md) targeting this aggregate emit a
+  // `run<Name>` method.  Their `where` lowers to Drizzle (same oracle as
+  // finds, so collect its ops), and a non-empty `sort` pulls in `asc` /
+  // `desc` from drizzle-orm.
+  const aggRetrievals = (ctx.retrievals ?? []).filter(
+    (r) => r.targetType.kind === "entity" && r.targetType.name === agg.name,
+  );
+  for (const r of aggRetrievals) {
+    const lowered = lowerToDrizzle(r.where, lowerFirst(plural(agg.name)), ctx);
+    if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
+    if (r.sort.length > 0) for (const s of r.sort) drizzleOps.add(s.direction);
   }
   // If any find or matching view filter references currentUser, the
   // per-method signature gains a `currentUser: User` parameter that
@@ -136,6 +149,8 @@ export function buildRepositoryFile(
     ...(agg.canonicalDestroy ? [deleteMethod(agg), ""] : []),
     ...(repo?.finds ?? []).flatMap((find) => [findQueryMethod(agg, find, ctx), ""]),
     ...viewFinds.flatMap((find) => [findQueryMethod(agg, find, ctx), ""]),
+    // `run<Name>` per context retrieval targeting this aggregate.
+    ...aggRetrievals.flatMap((r) => [runMethod(agg, r, ctx), ""]),
     // toWire — domain instance → wire DTO (plain object).  Used by the
     // Hono routes layer to serialize responses; the shape mirrors the
     // .NET <Agg>Response record so the cross-check sees identical specs.

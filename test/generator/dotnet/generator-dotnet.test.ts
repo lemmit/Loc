@@ -767,9 +767,13 @@ describe(".NET generator", () => {
     const files = generateDotnet(doc.parseResult.value as Model);
 
     // Request DTO uses wire types (Guid for X id, string for datetime).
+    // Required-ness targets the ctor PARAMETER (bare `[Required]`), not the
+    // property — `[property: Required]` on a positional record makes
+    // ASP.NET's record validation throw at model-binding time (500 on every
+    // POST).  Responses keep `[property: Required]`; see dtoParam.
     const req = files.get("Application/Workflows/PlaceOrderRequest.cs")!;
     expect(req).toMatch(
-      /public sealed record PlaceOrderRequest\(\[property: Required\] Guid CustomerId, \[property: Required\] decimal Amount, \[property: Required\] string PlacedAt\)/,
+      /public sealed record PlaceOrderRequest\(\[Required\] Guid CustomerId, \[Required\] decimal Amount, \[Required\] string PlacedAt\)/,
     );
 
     // Command uses domain types (CustomerId, DateTime).
@@ -1236,6 +1240,24 @@ describe(".NET generator", () => {
     expect(program).toMatch(/c\.DocumentFilter<ListResponseWrapperFilter>\(\)/);
   });
 
+  it("emits a RequiredFromCtorParamFilter that marks request-DTO ctor [Required] params required (#779)", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    // Request DTOs carry parameter-targeted [Required], which Swashbuckle's
+    // DataAnnotations reader ignores; this schema filter restores
+    // request-body required-ness from the ctor params (cross-backend parity).
+    const filter = files.get("Api/RequiredFromCtorParamFilter.cs")!;
+    expect(filter).toMatch(/class RequiredFromCtorParamFilter : ISchemaFilter/);
+    // Reflects the primary ctor's [Required] params and adds the camelCase
+    // property name to schema.Required.
+    expect(filter).toMatch(/GetCustomAttribute<RequiredAttribute>\(\)/);
+    expect(filter).toMatch(/schema\.Required\.Add\(key\)/);
+    expect(filter).toMatch(/JsonNamingPolicy\.CamelCase\.ConvertName/);
+    // Registered as a Swashbuckle schema filter, after the NRT support call.
+    const program = files.get("Program.cs")!;
+    expect(program).toMatch(/c\.SchemaFilter<RequiredFromCtorParamFilter>\(\)/);
+  });
+
   it("DomainExceptionFilter catches unhandled exceptions as sanitized 500", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
@@ -1330,6 +1352,50 @@ describe(".NET generator", () => {
       expect(keys).toContain("Auth/ICurrentUserAccessor.cs");
       expect(keys).toContain("Auth/HttpContextCurrentUserAccessor.cs");
       expect(keys).toContain("Auth/UserMiddleware.cs");
+    });
+
+    // A `requires`-guarded op / workflow denies with ForbiddenException →
+    // 403 at runtime; the controller must DECLARE 403 in [ProducesResponseType].
+    const SRC_GUARDED = `
+      system Acme {
+        user { id: string, role: string }
+        subdomain Sales {
+          context Orders {
+            aggregate Order {
+              customerId: string
+              status: string
+              operation cancel() {
+                requires currentUser.role == "admin"
+                status := "cancelled"
+              }
+              operation touch() {
+                status := "touched"
+              }
+            }
+            repository Orders for Order { }
+            workflow archiveAll() {
+              requires currentUser.role == "admin"
+              let o = Order.create({ customerId: "c", status: "archived" })
+            }
+          }
+        }
+        deployable api { platform: dotnet, contexts: [Orders], port: 8080, auth: required }
+      }
+    `;
+
+    it("declares [ProducesResponseType(ProblemDetails, 403)] on guarded ops/workflows, not unguarded ones", async () => {
+      const files = await emitForAuthSystem(SRC_GUARDED);
+      const ctrl = files.get("Api/OrdersController.cs")!;
+      // The guarded `cancel` action carries 403; the unguarded `touch` does not.
+      const cancelBlock = ctrl.slice(ctrl.indexOf('[HttpPost("{id}/cancel")]'));
+      expect(cancelBlock).toMatch(/\[ProducesResponseType\(typeof\(ProblemDetails\), 403\)\]/);
+      const touchBlock = ctrl
+        .slice(ctrl.indexOf('[HttpPost("{id}/touch")]'))
+        .slice(0, ctrl.slice(ctrl.indexOf('[HttpPost("{id}/touch")]')).indexOf("public async"));
+      expect(touchBlock).not.toMatch(/403/);
+      // The guarded workflow controller also declares 403.
+      const wfCtrl = files.get("Api/OrdersWorkflowsController.cs")!;
+      expect(wfCtrl).toMatch(/\[ProducesResponseType\(typeof\(ProblemDetails\), 403\)\]/);
     });
 
     it("does NOT emit Auth/* files when the deployable has no `auth: required`", async () => {

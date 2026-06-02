@@ -1,6 +1,13 @@
 # Frontend ACL — volatile state ↔ sealed payload, with bidirectional error hydration
 
-> Status: **SEALED — ready to implement.** Three rounds of review converged on the layout below. Implementation plan: [`../plans/frontend-acl-implementation.md`](../plans/frontend-acl-implementation.md).
+> Status: **PARTIAL** — Phases 1+2 shipped on `main` as [#769](https://github.com/lemmit/Loc/pull/769) (commit `25dba02`). Three deferred work items tracked in the plan:
+> - **Schema restructure** (flat-key inputs + `.transform()` + `.readonly()` so `<Action>FormState` actually diverges from `<Action>Payload`) — gated on a real form needing flat ≠ nested, OR `loom-forms.md` Phase F1.
+> - **Per-action `FieldMap` instances** with `satisfies StrictFieldMap<Payload, FormState>` — meaningless until the schema restructure (the constraint is trivial when both types are structurally identical; today the catch block uses `{} as const` identity).
+> - **`option`-field rendering** (the "leave unchanged" toggle) — gated on `partial-update.md`.
+>
+> Implementation plan: [`../plans/frontend-acl-implementation.md`](../plans/frontend-acl-implementation.md). The "Design — what gets emitted" section below describes the FULL architecture; the parts that ship today are the two shared lib files + the catch-block wiring across all 8 pack/versions.
+>
+> **Dormancy note:** the `applied` per-field error path is wired and tested but stays dormant until backends emit RFC 7807 §3.2 `errors[]`. That extension lives in `exception-less.md` (PROPOSED). Today the loop's `global` (422 with `title` only) and `unhandled` paths fire; the field-routing path waits.
 >
 > **Sister proposals**:
 > - [`loom-forms.md`](./loom-forms.md) — supplies the form-binding model (action ⇒ field list) this proposal builds on top of. This doc fills `loom-forms.md`'s open items #3 (`option` rendering at the form layer) and #4 (RFC 7807 `pointer` → form field mapping) and adds the runtime that makes them work.

@@ -93,6 +93,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // bundled in a system's modules or sits at the top level.
   for (const c of allContexts(loom)) {
     validateQueryableWheres(c, diags);
+    validateRetrievals(c, diags);
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);
     validateExternOperations(c, diags);
@@ -735,6 +736,97 @@ function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagnostic[])
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Retrieval validation (retrieval.md).  A `retrieval`'s `where` is a
+// selection position — same queryable-subset contract as a `find …
+// where` (reuses the oracle above).  Its `sort` and `loads` slots carry
+// structural paths that must resolve against the candidate aggregate.
+// `page` cannot appear here (the grammar forbids a page slot), so there
+// is nothing to check for it.
+// ---------------------------------------------------------------------------
+
+function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  for (const r of ctx.retrievals) {
+    const targetName = r.targetType.kind === "entity" ? r.targetType.name : undefined;
+    const agg = targetName ? ctx.aggregates.find((a) => a.name === targetName) : undefined;
+    const src = `${ctx.name}/retrieval ${r.name}`;
+
+    // `where` — same queryable-subset enforcement as find filters.
+    const offending = firstNonQueryableNode(r.where);
+    if (offending) {
+      diags.push({
+        severity: "error",
+        message:
+          `retrieval '${r.name}': where-clause is not queryable (${offending}). ` +
+          `Allowed: comparisons, &&/||/!, parens, 'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
+        source: src,
+      });
+    } else if (agg) {
+      const unknown = firstUnknownColumnRef(r.where, agg, ctx);
+      if (unknown) {
+        diags.push({
+          severity: "error",
+          message: `retrieval '${r.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
+          source: src,
+        });
+      }
+      const bothCols = firstColumnVsColumn(r.where);
+      if (bothCols) {
+        diags.push({
+          severity: "error",
+          message:
+            `retrieval '${r.name}': comparison between two columns (${bothCols}) is not queryable. ` +
+            `eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
+          source: src,
+        });
+      }
+    }
+
+    if (!agg) continue;
+
+    // `sort` — each term's path must start at a real aggregate field.
+    for (const term of r.sort) {
+      const head = term.path[0];
+      if (head && !aggregateHasMember(agg, head.name)) {
+        diags.push({
+          severity: "error",
+          message: `retrieval '${r.name}': sort references unknown field '${head.name}' on aggregate '${agg.name}'.`,
+          source: src,
+        });
+      }
+    }
+
+    // `loads` — each path's first segment must resolve on the aggregate
+    // (a stored field, a containment, or a cross-aggregate reference
+    // field).  Deeper path resolution across parts / referenced
+    // aggregates is the v2 load-inference concern (load-specifications.md);
+    // v1 validates the entry point only.
+    if (r.loadPlan.kind === "explicit") {
+      for (const path of r.loadPlan.paths) {
+        const head = path[0];
+        if (head && !aggregateHasMember(agg, head.name)) {
+          diags.push({
+            severity: "error",
+            message: `retrieval '${r.name}': loads references unknown field '${head.name}' on aggregate '${agg.name}'.`,
+            source: src,
+          });
+        }
+      }
+    }
+  }
+}
+
+/** True when `name` is a stored field, containment, or derived property
+ *  of the aggregate — the set of members a `sort` / `loads` path may
+ *  root at. */
+function aggregateHasMember(agg: AggregateIR, name: string): boolean {
+  return (
+    agg.fields.some((f) => f.name === name) ||
+    agg.contains.some((c) => c.name === name) ||
+    agg.derived.some((d) => d.name === name)
+  );
 }
 
 /** Walk an already-queryable expression and return the first
@@ -1835,6 +1927,7 @@ function validateWorkflowBody(
   const reposByName = new Map(ctx.repositories.map((r) => [r.name, r] as const));
   const eventsByName = new Map(ctx.events.map((e) => [e.name, e] as const));
   const bindingAgg = new Map<string, string>(); // bindingName -> aggName
+  const arrayBindingAgg = new Map<string, string>(); // repo-run binding -> element aggName
   let mutated = false;
 
   for (const st of wf.statements) {
@@ -1978,6 +2071,71 @@ function validateWorkflowBody(
           }
         }
         bindingAgg.set(st.name, st.aggName);
+        break;
+      }
+      case "repo-run": {
+        // `let xs = Repo.run(<Retrieval>(args), page?)` — the bound
+        // result is an aggregate array, consumable only by a `for-each`.
+        const repo = reposByName.get(st.repoName);
+        if (!repo) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': '${st.repoName}.run(...)' references unknown repository '${st.repoName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const retrieval = ctx.retrievals.find((r) => r.name === st.retrievalName);
+        if (!retrieval) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': '${st.repoName}.run(${st.retrievalName}(...))' references unknown retrieval '${st.retrievalName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const target = retrieval.targetType.kind === "entity" ? retrieval.targetType.name : "";
+        if (target !== st.aggName) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': retrieval '${st.retrievalName}' is over '${target}', but '${st.repoName}' is a repository for '${st.aggName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        // Record the array binding so a `for-each` over it resolves the
+        // element aggregate.
+        arrayBindingAgg.set(st.name, st.aggName);
+        break;
+      }
+      case "for-each": {
+        // The iterable must be an aggregate array (today: a `repo-run`
+        // result).  Bind the loop var to the element aggregate so body
+        // op-calls resolve, then validate the body op-calls.
+        // The iterable should be a `repo-run` array binding (the only
+        // aggregate-array producer in v1).  A bare `ref` to such a
+        // binding is the supported shape.
+        const iterableBinding = st.iterable.kind === "ref" ? st.iterable.name : undefined;
+        const isArrayBinding = iterableBinding ? arrayBindingAgg.has(iterableBinding) : false;
+        if (st.varAggName === "Unknown" || !isArrayBinding) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': 'for ${st.var} in ...' must iterate a 'let xs = Repo.run(...)' result (the only aggregate array in v1).`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        bindingAgg.set(st.var, st.varAggName);
+        for (const inner of st.body) {
+          if (inner.kind === "op-call") {
+            mutated = true;
+            if (!bindingAgg.get(inner.target)) {
+              diags.push({
+                severity: "error",
+                message: `workflow '${wf.name}': in 'for ${st.var}', '${inner.target}.${inner.op}(...)' references unknown binding '${inner.target}'.`,
+                source: `${ctx.name}/${wf.name}`,
+              });
+            }
+          }
+        }
         break;
       }
       case "op-call": {

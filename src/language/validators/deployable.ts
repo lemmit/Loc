@@ -18,9 +18,11 @@ import {
 import type { Deployable } from "../generated/ast.js";
 import {
   builtinPackNamesForFormat,
+  canonicalFramework,
   expectedFrameworkFor,
   expectedPackFormatFor,
   FRONTEND_KEYWORDS,
+  hostableFrameworksFor,
   platformMountsUi,
   platformOwnsBackend,
 } from "./data/platform-rules.js";
@@ -58,14 +60,24 @@ export function checkDeployable(
   //          for the bulk-CRUD case.  Diagnostic code
   //          `loom.react-deployable-missing-ui`.
   checkDeployablePlatform(d, accept);
-  const hasUiBinding = !!(d.uiSugar || d.uiCompose || d.uiBlock);
+  // D-PHOENIX-SURFACE: `hosts:` is a UI mount on equal footing with the
+  // legacy `ui:` bindings — it satisfies the "must declare a UI" rules
+  // (4/4b) and is subject to the same platform-mounts-UI check (3).
+  const hasHosts = (d.hosts ?? []).length > 0;
+  const hasUiBinding = !!(d.uiSugar || d.uiCompose || d.uiBlock) || hasHosts;
   if (hasUiBinding && !platformMountsUi(d.platform)) {
     accept(
       "error",
-      `'ui:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenixLiveView', 'dotnet'); got '${d.platform}'.`,
+      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenixLiveView', 'dotnet'); got '${d.platform}'.`,
       {
         node: d,
-        property: d.uiSugar ? "uiSugar" : d.uiCompose ? "uiCompose" : "uiBlock",
+        property: d.uiSugar
+          ? "uiSugar"
+          : d.uiCompose
+            ? "uiCompose"
+            : d.uiBlock
+              ? "uiBlock"
+              : "hosts",
       },
     );
   }
@@ -100,6 +112,47 @@ export function checkDeployable(
           property: "framework",
           code: "loom.framework-mismatch",
           data: { expected },
+        },
+      );
+    }
+  }
+
+  // Rule 13b (D-PHOENIX-SURFACE): when the referenced `ui { framework: … }`
+  // declaration carries its own framework, the hosting deployable's
+  // platform must be able to serve it — `framework ∈ host.hostableFrameworks`.
+  // This is the host-capability direction (the `ui` owns its framework,
+  // the host declares what it can host) that supersedes Rule 13's
+  // derive-from-platform model.  Backward-compatible: only fires when the
+  // `ui` declaration opts in by declaring `framework:` (existing sources
+  // omit it and are unaffected).  The principled rule means LiveView is
+  // rejected on every non-Phoenix host, while React is accepted on any
+  // static-asset host.
+  // Every `ui` the deployable mounts — the legacy single binding plus
+  // each `hosts:` entry (phase 4) — checked uniformly.
+  const mountedUis = [
+    (d.uiSugar ?? d.uiCompose ?? d.uiBlock)?.ref?.ref,
+    ...(d.hosts ?? []).map((r) => r.ref),
+  ];
+  if (hasUiBinding && platformMountsUi(d.platform)) {
+    const hostable = hostableFrameworksFor(d.platform);
+    for (const ui of mountedUis) {
+      const uiFramework = canonicalFramework(ui?.framework);
+      if (!uiFramework || hostable.has(uiFramework)) continue;
+      const menu = [...hostable].sort().join(", ") || "none";
+      accept(
+        "error",
+        `Deployable '${d.name}' (platform '${d.platform}') cannot host ui '${ui?.name}' framework '${uiFramework}'. This platform hosts: ${menu}. A runtime-coupled framework (e.g. 'phoenixLiveView'/LiveView) can only run on its own runtime; a static-bundle framework (e.g. 'react') runs on any static-asset host.`,
+        {
+          node: d,
+          property:
+            d.hosts && d.hosts.length > 0
+              ? "hosts"
+              : d.uiSugar
+                ? "uiSugar"
+                : d.uiCompose
+                  ? "uiCompose"
+                  : "uiBlock",
+          code: "loom.ui-framework-unhostable",
         },
       );
     }
