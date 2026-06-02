@@ -4097,45 +4097,88 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "value": ")"
           },
           {
-            "$type": "Keyword",
-            "value": "{"
-          },
-          {
-            "$type": "Assignment",
-            "feature": "decls",
-            "operator": "+=",
-            "terminal": {
-              "$type": "RuleCall",
-              "rule": {
-                "$ref": "#/rules@54"
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Assignment",
+                "feature": "extern",
+                "operator": "?=",
+                "terminal": {
+                  "$type": "Keyword",
+                  "value": "extern"
+                }
               },
-              "arguments": []
-            },
-            "cardinality": "*"
-          },
-          {
-            "$type": "Keyword",
-            "value": "body"
-          },
-          {
-            "$type": "Keyword",
-            "value": ":"
-          },
-          {
-            "$type": "Assignment",
-            "feature": "body",
-            "operator": "=",
-            "terminal": {
-              "$type": "RuleCall",
-              "rule": {
-                "$ref": "#/rules@142"
+              {
+                "$type": "Keyword",
+                "value": "from"
               },
-              "arguments": []
-            }
+              {
+                "$type": "Assignment",
+                "feature": "externPath",
+                "operator": "=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@176"
+                  },
+                  "arguments": []
+                }
+              }
+            ],
+            "cardinality": "?"
           },
           {
-            "$type": "Keyword",
-            "value": "}"
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Keyword",
+                "value": "{"
+              },
+              {
+                "$type": "Assignment",
+                "feature": "decls",
+                "operator": "+=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@54"
+                  },
+                  "arguments": []
+                },
+                "cardinality": "*"
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "body"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ":"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "body",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@142"
+                      },
+                      "arguments": []
+                    }
+                  }
+                ],
+                "cardinality": "?"
+              },
+              {
+                "$type": "Keyword",
+                "value": "}"
+              }
+            ],
+            "cardinality": "?"
           }
         ]
       },

@@ -468,11 +468,22 @@ MenuMetaEntry:
 
 // ---- component ----------------------------------------------------------
 
+// A `component` is normally a typed function from params to a walked
+// body.  An `extern` component instead hands rendering to a
+// hand-written file: `component X(...) extern from "<src-relative
+// path>"` declares the typed param contract but no `body:` — the
+// generator imports the user's module at call sites and emits a
+// `<Name>.props.ts` typed-props interface (the UI escape hatch; see
+// docs/proposals/extern-component-escape-hatch.md).  The `extern`
+// keyword always carries its `from` path; the body is omitted (the
+// validator pins both halves of this exclusivity).
 Component:
-    'component' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
-        decls+=ComponentDecl*
-        'body' ':' body=Expression
-    '}';
+    'component' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+        (extern?='extern' 'from' externPath=STRING)?
+        ('{'
+            decls+=ComponentDecl*
+            ('body' ':' body=Expression)?
+        '}')?;
 
 ComponentDecl:
     StateBlock;

@@ -22,6 +22,7 @@ import type {
 import {
   checkBinaryOperands,
   checkBuilderCallType,
+  checkComponent,
   checkContext,
   checkCriteria,
   checkDataSource,
@@ -97,6 +98,9 @@ export class DddValidator {
     // never silently overrides Stack / Form / etc.  Also flag
     // duplicate helper names within the same UI.
     checkUiHelperImports(model, accept);
+    // `component` declarations: enforce the extern↔body exclusivity the
+    // grammar admits but can't constrain (extern ⇒ no body; normal ⇒ body).
+    checkComponent(model, accept);
     // Traceability artifacts.  The grammar admits a
     // permissive requirement prop-bag and any code cross-reference;
     // semantic constraints (allowed keys / enum values / required

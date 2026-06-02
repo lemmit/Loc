@@ -420,7 +420,16 @@ function printPageProp(node: PageProp): string {
 
 function printComponent(node: Component): string {
   const params = node.params.map(printParameter).join(", ");
-  const items = [...node.decls.map(printStateBlock), `body: ${printExpr(node.body)}`];
+  // An extern component declares no body — its rendering lives in a
+  // hand-written module at the `from` path.
+  if (node.extern) {
+    const header = `component ${node.name}(${params}) extern from ${quote(node.externPath ?? "")}`;
+    return block(header, node.decls.map(printStateBlock));
+  }
+  const items = [
+    ...node.decls.map(printStateBlock),
+    `body: ${node.body ? printExpr(node.body) : ""}`,
+  ];
   return block(`component ${node.name}(${params})`, items);
 }
 

@@ -37,7 +37,12 @@ import type { LoadedPack } from "../_packs/loader.js";
 import { isWalkableLayoutBody, walkBodyToTsx } from "./body-walker.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
 import { buildViewPageObject } from "./view-builder.js";
-import { renderCustomLayoutPage, renderUserComponentFile } from "./walker/page-shell.js";
+import {
+  renderCustomLayoutPage,
+  renderExternComponentProps,
+  renderExternComponentShim,
+  renderUserComponentFile,
+} from "./walker/page-shell.js";
 import { buildWalkerPageObject } from "./walker-page-objects.js";
 import { buildWorkflowPageObject } from "./workflow-builder.js";
 
@@ -204,13 +209,28 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
   for (const c of ctx.topLevelComponents) emittedComponents.set(c.name, c);
   for (const c of ui.components) emittedComponents.set(c.name, c);
   for (const c of emittedComponents.values()) {
+    // Extern component: Loom owns a re-export shim at
+    // `src/components/<Name>.tsx` (so call sites import `components/<Name>`
+    // unchanged) plus a typed `<Name>.props.ts`; the user owns the
+    // hand-written module at the `from` path.  No body is walked.
+    if (c.extern) {
+      out.set(
+        `src/components/${c.name}.tsx`,
+        renderExternComponentShim(c.name, c.externPath ?? ""),
+      );
+      out.set(
+        `src/components/${c.name}.props.ts`,
+        renderExternComponentProps(c.name, c.params, ctx.aggregatesByName),
+      );
+      continue;
+    }
     out.set(
       `src/components/${c.name}.tsx`,
       renderUserComponentFile(
         c.name,
         c.params,
         c.state,
-        c.body,
+        c.body!,
         ctx.pack,
         userComponents,
         ctx.aggregatesByName,
