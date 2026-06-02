@@ -1,9 +1,13 @@
 # Database seeding — a Loomish `seed` declaration
 
-> Status: **PARTIAL** — Phase 1 landed (declarative `seed` surface →
-> `SeedIR` → lowering + validators; no codegen yet). Remaining phases
-> (per-backend emitters, the `__loom_seed` marker + compose wiring, the
-> imperative body, the `raw` explicit-id path) tracked in §11.
+> Status: **PARTIAL** — Phase 1 (declarative `seed` surface → `SeedIR` →
+> lowering + validators, #803) **and all three per-backend emitters**
+> shipped: Hono/Drizzle `db/seed.ts` (Phase 2, #804), .NET/EF `Seed.cs`
+> (Phase 3a, #805), Phoenix/Ash `seeds.exs` (Phase 3b, #806), CI build
+> gates compiling the generated seeders (#808), and `D-SEED-XREF`
+> explicit-id cross-references (#828). Remaining phases (the `__loom_seed`
+> ship-once marker + compose wiring, the imperative body, per-row
+> natural-key upsert) tracked in §11.
 > Graduates the `seed {}` sketch from
 > [`quickstart-and-day-one-batteries.md` §5.4](./quickstart-and-day-one-batteries.md)
 > into a full, platform-neutral design that mirrors the migrations
