@@ -413,8 +413,8 @@ LayoutProp:
 //
 // Each slot's body is a single Expression evaluated in the same
 // scope as a page body — so it can reference walker-stdlib primitives
-// (Sticky, Container, Group, …), user-declared components, and
-// helper imports.  `main` is a special slot with no body — it marks
+// (Sticky, Container, Group, …) and user-declared components.
+// `main` is a special slot with no body — it marks
 // where React Router's `<Outlet />` lands; every layout must declare
 // exactly one `main`.  Validator enforces.
 Layout:
