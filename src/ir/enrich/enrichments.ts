@@ -369,6 +369,7 @@ function monomorphizeGenericInstances(
       kind: "payload",
       fields: genericShape(inst.ctor).fields(inst.arg),
       synthesized: true,
+      generic: { ctor: inst.ctor, arg: inst.arg },
     });
   }
   return out;

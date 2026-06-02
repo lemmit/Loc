@@ -108,6 +108,23 @@ export function genericInstanceName(ctor: GenericCtorName, arg: TypeIR): string 
   return `${genericArgName(arg)}${upperFirst(ctor)}`;
 }
 
+/** Default 1-based page index and page size auto-applied to a `paged` find
+ *  when the caller supplies no `page` / `pageSize` query parameter
+ *  (payload-transport-layer.md, P3b). */
+export const PAGED_DEFAULT_PAGE = 1;
+export const PAGED_DEFAULT_PAGE_SIZE = 20;
+
+/** If `t` is a top-level `paged(arg)` instantiation, return its carrier `arg`
+ *  and the monomorphized payload `name`; otherwise null.  Used by every
+ *  backend's find emitter to recognise a paginated return and wire the
+ *  page/pageSize input + limit/offset/count query against the named DTO. */
+export function pagedReturn(t: TypeIR): { arg: TypeIR; name: string } | null {
+  if (t.kind === "genericInstance" && t.ctor === "paged") {
+    return { arg: t.arg, name: genericInstanceName("paged", t.arg) };
+  }
+  return null;
+}
+
 /** Visit every `genericInstance` reachable from a type, descending array /
  *  optional / nested-instance wrappers.  Shared by the enrichment collector
  *  and any other phase that needs to find instantiations inside a type. */

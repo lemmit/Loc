@@ -492,6 +492,11 @@ export interface PayloadIR {
    *  `<Agg>Wire`), false/absent for author-declared ones.  Lets later
    *  phases and the validator distinguish derived shapes from source. */
   synthesized?: boolean;
+  /** Set on a payload monomorphized from a generic carrier instantiation
+   *  (P3b) — carries the originating `ctor` + carrier `arg` so backends can
+   *  emit it as a DTO and resolve a `genericInstance` reference to this
+   *  payload's name.  Absent on `<Agg>Wire` and author payloads. */
+  generic?: { ctor: GenericCtorName; arg: TypeIR };
 }
 
 export interface FindIR {

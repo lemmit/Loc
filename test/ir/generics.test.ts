@@ -6,7 +6,12 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
-import { GENERIC_SHAPES, genericInstanceName, genericShape } from "../../src/ir/stdlib/generics.js";
+import {
+  GENERIC_SHAPES,
+  genericInstanceName,
+  genericShape,
+  pagedReturn,
+} from "../../src/ir/stdlib/generics.js";
 import type { PayloadIR, TypeIR } from "../../src/ir/types/loom-ir.js";
 import { allContexts } from "../../src/ir/types/loom-ir.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
@@ -118,6 +123,29 @@ describe("generics — naming (P3b)", () => {
   });
 });
 
+describe("generics — pagedReturn helper (P3b)", () => {
+  it("recognises a top-level paged return and names the payload", () => {
+    expect(
+      pagedReturn({
+        kind: "genericInstance",
+        ctor: "paged",
+        arg: { kind: "entity", name: "Order" },
+      }),
+    ).toEqual({ arg: { kind: "entity", name: "Order" }, name: "OrderPaged" });
+  });
+
+  it("returns null for non-paged types", () => {
+    expect(pagedReturn({ kind: "array", element: { kind: "entity", name: "Order" } })).toBeNull();
+    expect(
+      pagedReturn({
+        kind: "genericInstance",
+        ctor: "envelope",
+        arg: { kind: "primitive", name: "string" },
+      }),
+    ).toBeNull();
+  });
+});
+
 describe("generics — monomorphization (P3b)", () => {
   it("synthesizes a named payload for `string paged` from a field type", async () => {
     const payloads = await payloadsOf(
@@ -150,6 +178,15 @@ describe("generics — monomorphization (P3b)", () => {
       "C",
     );
     expect(payloads.some((p) => p.name === "OrderIdPaged")).toBe(true);
+  });
+
+  it("marks monomorphized payloads with their generic origin (ctor + arg)", async () => {
+    const payloads = await payloadsOf(
+      `system S { subdomain D { context C { response R { items: string paged } } } }`,
+      "C",
+    );
+    const sp = payloads.find((p) => p.name === "StringPaged");
+    expect(sp!.generic).toEqual({ ctor: "paged", arg: { kind: "primitive", name: "string" } });
   });
 
   it("dedupes repeated instantiations into one payload", async () => {
