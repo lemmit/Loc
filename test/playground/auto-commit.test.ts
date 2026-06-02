@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 import { GitStore, openGitFs, startAutoCommit } from "../../web/src/workspace/git/index.js";
 
@@ -65,22 +65,33 @@ describe("GitStore.commitWorkingTree", () => {
 describe("startAutoCommit", () => {
   it("commits after the debounce once edits settle", async () => {
     const store = await freshStore();
-    const stop = startAutoCommit(store, { debounceMs: 10, message: "autosave" });
+    const stop = startAutoCommit(store, { debounceMs: 20, message: "autosave" });
     await store.writeFile("/workspace/main.ddd", "v1");
-    await tick(40);
-    const log = await store.log();
-    expect(log).toHaveLength(1);
-    expect(log[0].message).toContain("autosave");
+    // Poll rather than wait a fixed window: the commit is async (stage +
+    // git ops over fake-indexeddb) and can land well after the debounce
+    // timer under load.
+    await vi.waitFor(async () => expect((await store.log()).length).toBe(1), {
+      timeout: 3000,
+      interval: 25,
+    });
+    expect((await store.log())[0].message).toContain("autosave");
     stop();
   });
 
   it("coalesces a burst of writes into a single commit", async () => {
     const store = await freshStore();
-    const stop = startAutoCommit(store, { debounceMs: 20 });
+    // Debounce comfortably larger than per-write latency so the burst
+    // reliably collapses into one timer → one commit.
+    const stop = startAutoCommit(store, { debounceMs: 80 });
     await store.writeFile("/workspace/a.ddd", "1");
     await store.writeFile("/workspace/b.ddd", "2");
     await store.writeFile("/workspace/c.ddd", "3");
-    await tick(60);
+    await vi.waitFor(async () => expect((await store.log()).length).toBeGreaterThanOrEqual(1), {
+      timeout: 3000,
+      interval: 25,
+    });
+    // Let any further (incorrect) commit fire, then assert it stayed at one.
+    await tick(160);
     expect(await store.log()).toHaveLength(1);
     stop();
   });
