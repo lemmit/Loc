@@ -531,12 +531,16 @@ fail-fast). Concretely on the branch:
 - **React** — `renderExternComponentShim` + `renderExternComponentProps`
   (`walker/page-shell.ts`), branched in `emitPagesForUi` (`pages-emitter.ts`).
 - **Printer** — `printComponent` renders `extern from "<path>"` with no body.
-- **Tests** — `test/language/validation/extern-component.test.ts` +
-  `test/generator/react/walker-extern-components.test.ts`.
+- **Tests** — unit: `test/language/validation/extern-component.test.ts` +
+  `test/generator/react/walker-extern-components.test.ts`; end-to-end (opt-in,
+  `npm run test:tsc-react-extern`, `LOOM_REACT_BUILD=1`):
+  `test/e2e/extern-component-build.test.ts` generates the project, drops in a
+  hand-written widget, `npm install` + `tsc --noEmit`, and proves the contract
+  **bites** — a correct widget type-checks; one reading a field absent from the
+  wire DTO fails `tsc`. This is the gate the proposal called for.
 
-Still open per §4 staging: Tier 2 (`action`), LiveView, the
-`loom.extern-component-framework-mismatch` framework guard, and a
-`LOOM_REACT_BUILD` end-to-end "domain rename breaks the user's `.tsx`" gate.
+Still open per §4 staging: Tier 2 (`action`), LiveView, and the
+`loom.extern-component-framework-mismatch` framework guard.
 
 ## 9. Validation rules
 
