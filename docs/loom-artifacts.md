@@ -51,7 +51,7 @@ traceability coverage, or migration baselines.
 
 | File | Producer | What it is |
 |---|---|---|
-| `datasources.md` | `src/system/datasources.ts` → `renderDataSourcesMd` | Per-system Markdown view of how `dataSource` declarations route domain contexts to physical storage.  Two sections: per-deployable routing (context → kind → storage with effective schema / table-prefix), and per-storage usage roll-up.  Catches accidental "primary" sharing and unused bindings at PR-review time. |
+| `datasources.md` | `src/system/datasources.ts` → `renderDataSourcesMd` | Per-system Markdown view of how `resource` declarations route domain contexts to physical storage.  Two sections: per-deployable routing (context → kind → storage with effective schema / table-prefix), and per-storage usage roll-up.  Catches accidental "primary" sharing and unused bindings at PR-review time. |
 
 ## Diagrams
 
