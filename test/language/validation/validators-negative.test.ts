@@ -113,35 +113,6 @@ describe("validators (negative) — theme block", () => {
   });
 });
 
-describe("validators (negative) — UI helper imports", () => {
-  it("rejects a helper that shadows a walker stdlib primitive", async () => {
-    const { errors } = await parse(`
-      system S {
-        subdomain M { context C { aggregate A { name: string } } }
-        ui WebApp {
-          import helper Stack from "./helpers/stack"
-        }
-      }
-    `);
-    expect(errors.some((e) => /Helper 'Stack' shadows the walker stdlib primitive/.test(e))).toBe(
-      true,
-    );
-  });
-
-  it("rejects a duplicate helper import within the same UI", async () => {
-    const { errors } = await parse(`
-      system S {
-        subdomain M { context C { aggregate A { name: string } } }
-        ui WebApp {
-          import helper formatPrice from "./helpers/a"
-          import helper formatPrice from "./helpers/b"
-        }
-      }
-    `);
-    expect(errors.some((e) => /Duplicate helper import 'formatPrice'/.test(e))).toBe(true);
-  });
-});
-
 describe("validators (negative) — match / matches()", () => {
   it("rejects a `matches` call with zero arguments", async () => {
     const { errors } = await parse(`

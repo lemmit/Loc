@@ -56,6 +56,9 @@ describe.skipIf(!ENABLED)(
       // entity + many_to_many relationship + `manage_relationship` mutations
       // + `exists(...)` filter that Phoenix join-table emission produces.
       { name: "roster.ddd" },
+      // First-boot seeding (database-seeding.md): compiles priv/repo/seeds.exs
+      // (the Ash create-action seed path) + the ecto.setup alias change.
+      { name: "seeding.ddd" },
     ])("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

@@ -542,7 +542,11 @@ function lowerBuilderCall(expr: BuilderCall, env: Env): ExprIR {
   const name = expr.type;
   const vo = findValueObjectByName(env, name);
   if (vo) {
-    return lowerBuilderCallAsCall(expr, env, name, "value-object-ctor");
+    // Carry the value object's declared field order so backends that need
+    // named construction (Phoenix `%Mod.VO{field: …}` structs) always have
+    // names — positional backends (TS `new VO(…)`, .NET) ignore them.
+    const fieldNames = vo.members.filter(isProperty).map((p) => p.name);
+    return lowerBuilderCallAsCall(expr, env, name, "value-object-ctor", fieldNames);
   }
   const ent = findEntityByName(env, name);
   if (ent && isEntityPart(ent)) {
@@ -571,13 +575,16 @@ function lowerBuilderCallAsCall(
   env: Env,
   name: string,
   callKind: "value-object-ctor" | "free",
+  fieldNames?: string[],
 ): ExprIR {
   // Hoist `style:` named arg into its own IR field — see lowerStyleArg.
   // Filtering happens by index so `args` and `argNames` stay parallel.
   const styleHoist = hoistStyleArg(expr.entries, env);
   const entries = styleHoist.remainingEntries;
   const args = entries.map((e) => lowerExpr(e.value, env));
-  const argNames = entries.map((e) => e.name || undefined);
+  // Explicit entry name wins; otherwise fall back to the declared field
+  // name at this position (value-object ctors — see lowerBuilderCall).
+  const argNames = entries.map((e, i) => e.name || fieldNames?.[i]);
   const named = argNames.some((n) => n !== undefined);
   return {
     kind: "call",

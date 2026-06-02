@@ -216,19 +216,6 @@ export interface WalkerTarget {
    *  once per page after the body walk completes. */
   renderApiHoisting(uses: ApiCallSite[]): string[];
 
-  // --- Helper-import seam -------------------------------------------------
-
-  /** Produce the per-page import block for user `import helper X
-   *  from "..."` declarations actually referenced by the page body.
-   *  TSX returns JS `import { fn } from "path"` lines; HEEx returns
-   *  Elixir `alias Path.To.Module` / `import Path.To.Module` lines.
-   *  `decls` is the UI-level import declarations; `used` is the
-   *  subset the walker actually encountered. */
-  renderHelperImports(
-    used: ReadonlySet<string>,
-    decls: ReadonlyArray<{ name: string; path: string }>,
-  ): string[];
-
   // --- Match expression seam ----------------------------------------------
 
   /** Render a `match { arm => expr, ..., else => expr }` expression.

@@ -286,6 +286,21 @@ function renderWorkflowStmt(
       // renderExpr already throws via the resource-op guard; keep an
       // explicit branch so the switch stays exhaustive.
       return [{ kind: "expr", text: `    ${renderExpr(st.call, renderCtx)}` }];
+    case "repo-run":
+    case "for-each":
+      // The named-query `Repo.run(...)` + the `for` loop that consumes it
+      // don't map to the immutable `with`-chain shape Phoenix workflow
+      // bodies render into — they need an `Enum.reduce_while` reshape
+      // (see docs/proposals/retrieval.md + the implementation plan).
+      // Gated here until that slice (PR3-C) lands, so the IR stays
+      // backend-neutral and the failure is explicit rather than broken
+      // Elixir.
+      throw new Error(
+        `Phoenix backend: workflow '${st.kind === "for-each" ? `for ${st.var}` : st.name}' uses ` +
+          `'${st.kind}', which the Phoenix/Ash generator does not yet support ` +
+          `(needs the Enum.reduce_while reshape).  Target a Hono or .NET deployable, ` +
+          `or omit the retrieval loop for Phoenix.`,
+      );
   }
 }
 

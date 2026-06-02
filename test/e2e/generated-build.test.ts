@@ -37,6 +37,9 @@ describe.skipIf(!ENABLED)(
       // Document-persistence path (`normalised(false)`): jsonb column +
       // JSON round-trip through `_create` (toDoc / fromDoc).
       "examples/document.ddd",
+      // First-boot seeding (database-seeding.md): compiles db/seed.ts + the
+      // index.ts runSeeds wiring + the db:seed package.json script.
+      "examples/seeding.ddd",
     ])("%s — `ddd generate ts` output type-checks + tsup-bundles", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
       try {

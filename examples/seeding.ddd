@@ -1,0 +1,32 @@
+// Seeding regression fixture (database-seeding.md) — top-level context form
+// consumed by the TS + .NET build gates:
+//   - `ddd generate ts`     → db/seed.ts                       (LOOM_TS_BUILD)
+//   - `ddd generate dotnet` → Infrastructure/Persistence/Seed.cs (LOOM_DOTNET_BUILD)
+//
+// The Phoenix gate uses the system-wrapped twin at
+// test/e2e/fixtures/phoenix-build/seeding.ddd.
+//
+// Fields are scalar + enum only (no value objects, no cross-aggregate `X id`
+// refs) so every backend's seeder produces trivially compilable output.  VO /
+// money construction in seeds is covered by the per-backend unit tests.
+context Catalog {
+  enum Tier { Free, Pro }
+
+  aggregate Widget with crudish {
+    name: string
+    size: int
+    tier: Tier
+    invariant size >= 0
+    derived display: string = name
+  }
+
+  repository Widgets for Widget { }
+
+  seed default {
+    Widget { name: "Alpha", size: 1, tier: Free }
+    Widget { name: "Beta", size: 2, tier: Pro }
+  }
+  seed demo {
+    Widget { name: "Gamma", size: 3, tier: Pro }
+  }
+}

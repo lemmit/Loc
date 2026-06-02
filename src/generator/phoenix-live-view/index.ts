@@ -24,6 +24,7 @@ import { emitMigrations } from "./migrations-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
 import { renderAshType } from "./render-expr.js";
 import { buildFindActions, findRepoFor, mergeViewFindsForAgg } from "./repository-emit.js";
+import { contextsHaveSeeds, renderSeedsExs } from "./seeds-emit.js";
 import { renderSidebarComponent } from "./sidebar-emit.js";
 import { renderTelemetry } from "./telemetry-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
@@ -524,7 +525,10 @@ function emitShellFiles(
   // resources — mix.exs stays byte-identical.
   const resourceEmission = emitPhoenixResourceFiles(sys, appName, appModule);
   for (const [path, content] of resourceEmission.files) out.set(path, content);
-  out.set("mix.exs", renderMixExs(appName, appModule, resourceEmission.hexDeps));
+  out.set(
+    "mix.exs",
+    renderMixExs(appName, appModule, resourceEmission.hexDeps, contextsHaveSeeds(contexts)),
+  );
   out.set(".formatter.exs", renderFormatterExs());
   out.set("Dockerfile", renderDockerfile(appName));
   out.set(".dockerignore", renderDockerignore());
@@ -614,8 +618,10 @@ function emitShellFiles(
   out.set("config/prod.exs", renderProdExs(appName, appModule));
   out.set("config/runtime.exs", renderRuntimeExs(appName, appModule));
 
-  // Priv
-  out.set("priv/repo/seeds.exs", `# Auto-generated — empty seeds stub.\n`);
+  // Priv — first-boot seed data (database-seeding.md, Phase 3b).  Through the
+  // domain create action (D-SEED-PATH), ship-once per dataset
+  // (D-SEED-IDEMPOTENCY); an empty stub when no `seed` block is declared.
+  out.set("priv/repo/seeds.exs", renderSeedsExs(appModule, contexts));
 
   // Release
   out.set("rel/env.sh.eex", renderRelEnv(appName));
@@ -630,7 +636,13 @@ function renderMixExs(
   appName: string,
   appModule: string,
   extraHexDeps: Record<string, string> = {},
+  hasSeeds = false,
 ): string {
+  // Run the seeds script as the last step of `ecto.setup` — only when a
+  // `seed` block is declared, so seedless projects stay byte-identical.
+  const ectoSetup = hasSeeds
+    ? `["ecto.create", "ash.codegen", "ash.migrate", "run priv/repo/seeds.exs"]`
+    : `["ecto.create", "ash.codegen", "ash.migrate"]`;
   // Resource-client Hex deps (Phase 4c) — `{:ex_aws, "~> 2.5"}` etc.,
   // appended to the base dep list.  Sorted for stable output.
   const extraDepLines = Object.entries(extraHexDeps)
@@ -700,7 +712,7 @@ defmodule ${appModule}.MixProject do
   defp aliases do
     [
       setup: ["deps.get", "ash.setup"],
-      "ecto.setup": ["ecto.create", "ash.codegen", "ash.migrate"],
+      "ecto.setup": ${ectoSetup},
       "ecto.reset": ["ecto.drop", "ecto.setup"]
     ]
   end

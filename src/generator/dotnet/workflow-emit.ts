@@ -123,20 +123,26 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
   for (const save of wf.savesAtExit) {
     repos.set(save.repoName, save.aggName);
   }
-  for (const st of wf.statements) {
-    if (st.kind === "repo-let") {
-      repos.set(st.repoName, st.aggName);
-    } else if (st.kind === "emit") {
-      hasEmit = true;
-    } else if (st.kind === "op-call") {
-      const agg = aggsByName.get(st.aggName);
-      const op = agg?.operations.find((o) => o.name === st.op);
-      if (op?.extern) {
-        const key = `${st.aggName}.${st.op}`;
-        externs.set(key, { aggName: st.aggName, opName: st.op });
+  const walk = (stmts: WorkflowStmtIR[]): void => {
+    for (const st of stmts) {
+      if (st.kind === "repo-let" || st.kind === "repo-run") {
+        repos.set(st.repoName, st.aggName);
+      } else if (st.kind === "emit") {
+        hasEmit = true;
+      } else if (st.kind === "for-each") {
+        for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
+        walk(st.body);
+      } else if (st.kind === "op-call") {
+        const agg = aggsByName.get(st.aggName);
+        const op = agg?.operations.find((o) => o.name === st.op);
+        if (op?.extern) {
+          const key = `${st.aggName}.${st.op}`;
+          externs.set(key, { aggName: st.aggName, opName: st.op });
+        }
       }
     }
-  }
+  };
+  walk(wf.statements);
   return { repos, hasEmit, externs };
 }
 
@@ -457,6 +463,18 @@ function renderStatement(
       const exprText = renderArg(st.expr);
       return [`${INDENT}var ${st.name} = ${isResourceOp ? "await " : ""}${exprText};`];
     }
+    case "repo-run":
+    case "for-each":
+      // The named-query `Repo.run(...)` + the `for` loop that consumes it
+      // are wired end-to-end on Hono first (PR3-B).  The .NET run-method
+      // emission + foreach lands in a follow-up slice; gate here so the
+      // IR stays backend-neutral and the failure is explicit rather than
+      // a call to an unemitted `Run<Name>Async` method.
+      throw new Error(
+        `.NET backend: workflow uses '${st.kind}', which the .NET generator does not yet ` +
+          `support (run-method emission + foreach is a follow-up slice).  Target a Hono ` +
+          `deployable, or omit the retrieval loop for .NET.`,
+      );
     case "resource-call":
       // 4c: bare resource-op statement (`files.put(k, v)`) → awaited async
       // helper call.

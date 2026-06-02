@@ -280,23 +280,7 @@ Ui:
     '}';
 
 UiMember:
-    UiApiParam | UiHelperImport | Page | Component | MenuBlock;
-
-// ---- helper import (UI-level) ----------------------------------
-//
-// Surfaces a user-authored TS helper into the walker stdlib so a
-// page body can reference `<name>(args…)` and the emitted page
-// TSX gets a matching `import { <name> } from "<path>";` at the
-// top.  Paths are emitted verbatim and are resolved against the
-// generated page's source location (typically `web/src/pages/`),
-// so `"./helpers/x"` resolves to `web/src/pages/helpers/x.ts`.
-//
-//   import helper formatPrice from "./helpers/price"
-//
-// Validator rejects names that shadow walker stdlib primitives so
-// helper authors never silently override `Stack` / `Form` / etc.
-UiHelperImport:
-    'import' 'helper' name=ID 'from' path=STRING;
+    UiApiParam | Page | Component | MenuBlock;
 
 // ---- api declaration (system-level) ----------------------------
 //
@@ -429,8 +413,8 @@ LayoutProp:
 //
 // Each slot's body is a single Expression evaluated in the same
 // scope as a page body — so it can reference walker-stdlib primitives
-// (Sticky, Container, Group, …), user-declared components, and
-// helper imports.  `main` is a special slot with no body — it marks
+// (Sticky, Container, Group, …) and user-declared components.
+// `main` is a special slot with no body — it marks
 // where React Router's `<Outlet />` lands; every layout must declare
 // exactly one `main`.  Validator enforces.
 Layout:
@@ -468,11 +452,22 @@ MenuMetaEntry:
 
 // ---- component ----------------------------------------------------------
 
+// A `component` is normally a typed function from params to a walked
+// body.  An `extern` component instead hands rendering to a
+// hand-written file: `component X(...) extern from "<src-relative
+// path>"` declares the typed param contract but no `body:` — the
+// generator imports the user's module at call sites and emits a
+// `<Name>.props.ts` typed-props interface (the UI escape hatch; see
+// docs/proposals/extern-component-escape-hatch.md).  The `extern`
+// keyword always carries its `from` path; the body is omitted (the
+// validator pins both halves of this exclusivity).
 Component:
-    'component' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
-        decls+=ComponentDecl*
-        'body' ':' body=Expression
-    '}';
+    'component' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+        (extern?='extern' 'from' externPath=STRING)?
+        ('{'
+            decls+=ComponentDecl*
+            ('body' ':' body=Expression)?
+        '}')?;
 
 ComponentDecl:
     StateBlock;
@@ -636,7 +631,7 @@ BoundedContext:
 
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
-    | Criterion | FilterDecl | StampDecl | ImplementsDecl;
+    | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -889,6 +884,21 @@ View:
 BindEntry:
     name=ID '=' expr=Expression;
 
+// Seed — first-boot data for a context's aggregates (database-seeding.md).
+// Declarative form: a named dataset of typed records, each lowering through
+// the aggregate's canonical create (D-SEED-PATH), so invariants hold.  `raw`
+// opts a block into table-level inserts.  The imperative (workflow-shaped)
+// body, `@handle` cross-row refs, and the deferred `key` clause are later
+// slices.  Each row's value is an ObjectLit shaped like the aggregate's
+// create parameters — no `id` field; the framework mints ids.
+Seed:
+    'seed' (dataset=ID)? (raw?='raw')? '{'
+        rows+=SeedRow*
+    '}';
+
+SeedRow:
+    aggregate=[Aggregate:ID] value=ObjectLit;
+
 // Criterion — a named, parameterised, pure boolean predicate over a
 // candidate type `T` (the Specification Pattern, Evans / Spring-Data
 // style).  See docs/criterion.md.
@@ -916,6 +926,57 @@ Criterion:
         '=' body=Expression
       | '{' 'where' ':' body=Expression '}'
     );
+
+// Retrieval — a named query *bundle*: a composed predicate (`where`,
+// the same expression position as `criterion`/`find … where`, so it
+// references criteria and `this.<field>` candidate refs) plus the
+// shaping a real query carries — `sort` ordering and a `loads` fetch
+// shape.  Pagination is NOT a slot here: `page` is a call-site argument
+// on `Repo.run(R(args), page?)`, never part of the declaration.  See
+// docs/proposals/retrieval.md.  Lowers to RetrievalIR
+// (docs/proposals/reified-criteria.md).
+//
+//   retrieval AllActive of Customer = ActiveCustomer
+//   retrieval HighValueInRegion(region: string) of Order {
+//     where: InRegion(region) && OrderTotalAtLeast(1000)
+//     sort:  [total desc, createdAt asc]
+//     loads: [this.lines[].product]
+//   }
+//
+// `sort` / `loads` admit the `sort`/`loads`/`asc`/`desc` keywords as
+// soft keywords (LooseName / NameRefIdent) so user code naming a field
+// `sort` / `loads` / `asc` / `desc` keeps parsing.
+Retrieval:
+    'retrieval' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? 'of' target=TypeRef
+    (
+        '=' where=Expression
+      | '{' 'where' ':' where=Expression
+            ('sort'  ':' '[' (sort+=SortItem (',' sort+=SortItem)*)? ']')?
+            ('loads' ':' '[' (loads+=LoadPath (',' loads+=LoadPath)*)? ']')?
+        '}'
+    );
+
+// A single sort term — a candidate path and a direction.  `direction`
+// is a discriminator field (not an `{infer}` action) per the grammar
+// convention; defaults to ascending when omitted.
+SortItem:
+    path=LoadPath (direction=SortDirection)?;
+
+SortDirection returns string:
+    'asc' | 'desc';
+
+// A structural path through the candidate aggregate for `sort` / `loads`
+// — flat-list rule (head + dotted tail), with an optional `[]` marker on
+// any segment meaning "across the collection" (mirrors `contains`
+// syntax).  Not an Expression: load-specifications.md restricts these to
+// structural paths (no filters / lambdas).  A leading `this` is admitted
+// and stripped at lowering so `this.lines[].product` and
+// `lines[].product` are equivalent.
+LoadPath:
+    ('this' '.')? segments+=LoadSegment ('.' segments+=LoadSegment)*;
+
+LoadSegment:
+    name=LooseName (collection?='[]')?;
 
 // ---------------------------------------------------------------------------
 // Members
@@ -965,7 +1026,11 @@ Property:
         // `query`, etc. (e.g. `event Foo { payload: string }`) keep parsing.
         // They act as hard keywords only at `ContextMember` position, where
         // `PayloadDecl` (`kind=PayloadKind name=ID '{'`) begins.
-        | 'payload' | 'command' | 'query' | 'response' | 'error')
+        | 'payload' | 'command' | 'query' | 'response' | 'error'
+        // Retrieval keywords (retrieval.md) — soft in property position so
+        // user-declared fields named `sort` / `loads` / `asc` / `desc` /
+        // `retrieval` keep parsing.  Hard only inside the `Retrieval` slots.
+        | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1114,7 +1179,11 @@ LooseName returns string:
     // Payload-family keywords (payload-transport-layer.md, P1) admitted as
     // soft in loose-name positions; hard only at `ContextMember`
     // (`PayloadDecl`).
-    | 'payload' | 'command' | 'query' | 'response' | 'error';
+    | 'payload' | 'command' | 'query' | 'response' | 'error'
+    // Retrieval keywords (retrieval.md) admitted as soft so user code can
+    // still name a field `retrieval` / `sort` / `loads` / `asc` / `desc`.
+    // Hard only inside the `Retrieval` rule's slots.
+    | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1155,7 +1224,28 @@ Statement:
   | RequiresStmt
   | LetStmt
   | EmitStmt
+  | ForStmt
   | AssignOrCallStmt;
+
+// `for <var> in <iterable> { <body> }` — iterate an aggregate array
+// (typically `Repo.run(<Retrieval>(args), page?)`), binding each element
+// to `<var>` in the body.  The body reuses `Statement*`, so op-calls,
+// lets, emits, and nested loops all parse.  Each iteration's mutations to
+// `<var>` persist via a per-iteration save (see the for-each lowering).
+// `for` is already a hard keyword elsewhere (`repository X for Agg`); the
+// leading statement position disambiguates the loop.
+ForStmt:
+    'for' var=ID 'in' iterable=ForIterable '{'
+        body+=Statement*
+    '}';
+
+// The loop iterable is restricted to a name or a postfix chain
+// (`customers`, `Customers.run(R(args), …)`) — deliberately NOT the full
+// `Expression`, because `BuilderCall` (`Name { … }`) would otherwise
+// swallow the loop's own `{ body }` block.  These are the only forms
+// that produce an aggregate array in v1 anyway.
+ForIterable infers Expression:
+    NameRef ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+)?;
 
 PreconditionStmt:
     'precondition' expr=Expression;
@@ -1502,7 +1592,11 @@ NameRefIdent returns string:
        // Payload-family keywords (payload-transport-layer.md, P1) admitted as
        // bare NameRefs so expressions can read a field named `payload`,
        // `error`, `query`, etc.  Hard only at `ContextMember` (`PayloadDecl`).
-       | 'payload' | 'command' | 'query' | 'response' | 'error';
+       | 'payload' | 'command' | 'query' | 'response' | 'error'
+       // Retrieval keywords (retrieval.md) admitted as bare NameRefs so an
+       // expression can read a field named `retrieval` / `sort` / `loads` /
+       // `asc` / `desc`.  Hard only inside the `Retrieval` rule's slots.
+       | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc';
 
 // ---------------------------------------------------------------------------
 // Terminals
