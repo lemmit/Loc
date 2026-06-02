@@ -72,9 +72,9 @@ describe("realization axes — R1 out-of-menu", () => {
     expect(errors.some((e) => /application: serviceLayer/.test(e))).toBe(true);
   });
 
-  it("rejects a stub directoryLayout (`byFeature` on dotnet)", async () => {
+  it("accepts `directoryLayout: byFeature` on dotnet (real since Phase 5a)", async () => {
     const { errors } = await parse(sys("dotnet { directoryLayout: byFeature }"));
-    expect(errors.some((e) => /directoryLayout: byFeature/.test(e))).toBe(true);
+    expect(errors).toEqual([]);
   });
 
   it("rejects a wholly-unknown value as unknown, not reserved", async () => {

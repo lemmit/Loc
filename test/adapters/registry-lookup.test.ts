@@ -106,10 +106,11 @@ describe("adapter registry — lookup", () => {
 });
 
 describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 menu)", () => {
-  it("excludes stubs on dotnet (efcore real; dapper/marten stubs)", () => {
+  it("excludes stubs on dotnet (efcore/cqrs/byLayer/byFeature real; dapper/marten/layered stubs)", () => {
     expect(availableAdapterNames("dotnet", "persistence")).toEqual(["efcore"]);
     expect(availableAdapterNames("dotnet", "style")).toEqual(["cqrs"]);
-    expect(availableAdapterNames("dotnet", "layout")).toEqual(["byLayer"]);
+    // byFeature became real in Phase 5a — both layouts are now selectable.
+    expect(availableAdapterNames("dotnet", "layout")).toEqual(["byFeature", "byLayer"]);
   });
 
   it("excludes stubs on hono (drizzle/layered/byLayer real)", () => {

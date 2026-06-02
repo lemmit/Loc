@@ -1,11 +1,11 @@
 import {
-  type LayoutAdapter,
   type PersistenceAdapter,
   type PlatformAdapterDefaults,
   type PlatformAdapters,
   type StyleAdapter,
   stubAdapter,
 } from "../generator/_adapters/index.js";
+import { byFeatureLayoutAdapter } from "../generator/dotnet/adapters/by-feature-layout.js";
 import { byLayerLayoutAdapter } from "../generator/dotnet/adapters/by-layer-layout.js";
 import { cqrsStyleAdapter } from "../generator/dotnet/adapters/cqrs-style.js";
 import { efcorePersistenceAdapter } from "../generator/dotnet/adapters/efcore-persistence.js";
@@ -87,8 +87,8 @@ const dotnetPlatform: PlatformSurface = {
     };
   },
   // .NET — EF Core + Dapper + Marten persistence; CQRS + layered style;
-  // byLayer + byFeature layout.  `efcore` / `cqrs` / `byLayer` are real
-  // (F5a/b/c); `dapper` / `marten` / `layered` / `byFeature` are stubs.
+  // byLayer + byFeature layout.  `efcore` / `cqrs` / `byLayer` / `byFeature`
+  // are real (F5a/b/c + Phase 5a); `dapper` / `marten` / `layered` are stubs.
   // Built lazily (see PlatformSurface.adapters jsdoc) so the adapter
   // bindings are read after init, not during the load-time cycle.
   adapters(): PlatformAdapters {
@@ -137,13 +137,7 @@ const dotnetPlatform: PlatformSurface = {
       },
       layouts: {
         byLayer: byLayerLayoutAdapter,
-        byFeature: stubAdapter<LayoutAdapter>(
-          "layout",
-          "byFeature",
-          "dotnet",
-          () => Object.keys(menu.layouts),
-          { name: "byFeature" },
-        ),
+        byFeature: byFeatureLayoutAdapter,
       },
     };
     return menu;

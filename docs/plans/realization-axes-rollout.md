@@ -92,12 +92,25 @@ edges — shaped the seam):
 Implement the reserved stub adapters so a selection has observable effect and
 the menus go size-1 → size-N:
 
-- dotnet: `dapper`, `marten` (persistence); `serviceLayer` (style/`application`);
-  `byFeature` (layout/`directoryLayout`).
+- **5a — dotnet `byFeature` layout — DONE.** First real dotnet layout: the
+  `directoryLayout: byFeature` selection relocates each aggregate's application +
+  API artifacts (commands / queries / handlers / DTOs / controller) under
+  `Features/<Aggregate>/` (vertical-slice), delegating Domain / Infrastructure /
+  Tests / root to `byLayer`. Pure relocation — identical file CONTENTS, only the
+  app/API paths differ (namespaces stay layered; namespace-by-feature is a later
+  slice once the style emitter varies content by layout). `byLayer` default stays
+  byte-identical. `availableAdapterNames("dotnet","layout")` now
+  `["byFeature","byLayer"]`; the R1 "reserved stub" rejection for `byFeature`
+  flips to accepted. Covered by `test/adapters/dotnet-by-feature.test.ts`
+  (routing + delegation + end-to-end pure-relocation). **R2 stays unreachable**:
+  every real style (`cqrs`) declares `supportedLayouts: ["byLayer","byFeature"]`,
+  so no invalid (style × layout) combo exists yet.
+- dotnet: `dapper`, `marten` (persistence); `serviceLayer` (style/`application`).
 - node: `express` / `fastify` (transport); `prisma` (persistence).
-- Activate gating **R2** (`directoryLayout: byFeature` × `serviceLayer|flat`)
-  and **R3** (`serviceLayer|flat` × event-sourced) as those values become real
-  — R3 lands in `src/ir/validate/validate.ts` (it's an aggregate-cross-ref).
+- Activate gating **R2** (`directoryLayout × application`) once a real style does
+  NOT support a real layout, and **R3** (`serviceLayer|flat` × event-sourced) as
+  those values become real — R3 lands in `src/ir/validate/validate.ts` (it's an
+  aggregate-cross-ref).
 
 Each adapter is a contained unit with its own emit tests + a CI build.
 
