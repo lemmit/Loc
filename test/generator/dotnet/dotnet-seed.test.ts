@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { generateDotnet } from "../../../src/generator/dotnet/index.js";
 import { generateSystems } from "../../../src/system/index.js";
 import { parseString } from "../../_helpers/index.js";
 
@@ -87,6 +88,23 @@ describe("dotnet database seeding (Phase 3a, domain path)", () => {
     expect(program.indexOf("db.Database.Migrate()")).toBeLessThan(
       program.indexOf("Seed.RunSeeds("),
     );
+  });
+
+  it("also emits the seeder via the legacy per-context `generate dotnet` path", async () => {
+    // The build gate runs `ddd generate dotnet <file>` (legacy, per-context),
+    // not `generate system` — so the per-context path must emit Seed.cs too.
+    const TOP_LEVEL = `context Catalog {
+      enum Tier { Free, Pro }
+      aggregate Widget with crudish { name: string size: int tier: Tier derived display: string = name }
+      repository Widgets for Widget { }
+      seed default { Widget { name: "Alpha", size: 1, tier: Free } }
+    }`;
+    const { model, errors } = await parseString(TOP_LEVEL);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const files = generateDotnet(model);
+    const seed = [...files].find(([k]) => /Seed\.cs$/.test(k))?.[1];
+    expect(seed).toBeDefined();
+    expect(seed!).toContain('Widget.Create("Alpha", 1, Tier.Free)');
   });
 
   it("omits the seeder entirely when no seed block is declared", async () => {

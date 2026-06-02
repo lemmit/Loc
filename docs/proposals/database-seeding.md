@@ -496,3 +496,15 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
 A model with no `seed` block emits byte-identically at every phase —
 the existing fixtures and conformance baselines do not move until a
 seed is actually declared.
+
+**Build-gate coverage.** `examples/seeding.ddd` (top-level context, for the
+TS + .NET legacy `generate` gates) and its system-wrapped twin
+`test/e2e/fixtures/phoenix-build/seeding.ddd` are wired into the
+`LOOM_TS_BUILD` / `LOOM_DOTNET_BUILD` / `LOOM_PHOENIX_BUILD` matrices, so the
+emitted `db/seed.ts` / `Seed.cs` / `seeds.exs` are actually **compiled**
+(tsc + tsup, `dotnet build /warnaserror`, `mix compile --warnings-as-errors`)
+rather than only content-asserted. The fixture uses scalar + enum fields
+(no value objects / `X id` refs) so it compiles trivially on all three;
+VO/money construction in seeds stays covered by the per-backend unit tests.
+The legacy per-context `generate dotnet` path emits the seeder too (mirroring
+`generate ts`), since that's the command the .NET gate runs.

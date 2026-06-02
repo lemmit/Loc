@@ -1,0 +1,51 @@
+// Seeding regression fixture (database-seeding.md) — system-wrapped twin of
+// examples/seeding.ddd, consumed by the Phoenix build gate via
+// `ddd generate system` → priv/repo/seeds.exs (LOOM_PHOENIX_BUILD).
+//
+// Scalar + enum fields only so the Ash create-action seed path compiles
+// trivially.
+system Seeding {
+  subdomain Catalog {
+    context Catalog {
+      enum Tier { Free, Pro }
+
+      // Plain aggregate (mirrors acme-lv's served Customer shape).  NOT
+      // `with crudish`: crudish injects a canonical `update` operation that
+      // the Phoenix REST controller emits on top of the standard update,
+      // producing a duplicate `def update/2` clause that fails
+      // `--warnings-as-errors`.  Phoenix emits `create_<agg>!` regardless
+      // (always-on create), so the seeder is unaffected.
+      aggregate Widget {
+        name: string
+        size: int
+        tier: Tier
+        invariant size >= 0
+        derived display: string = name
+      }
+
+      repository Widgets for Widget { }
+
+      seed default {
+        Widget { name: "Alpha", size: 1, tier: Free }
+        Widget { name: "Beta", size: 2, tier: Pro }
+      }
+      seed demo {
+        Widget { name: "Gamma", size: 3, tier: Pro }
+      }
+    }
+  }
+
+  api CatalogApi from Catalog
+  ui CatalogAdmin with scaffold(subdomains: [Catalog]) { }
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+
+  deployable phoenixApp {
+    platform: phoenixLiveView
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    ui: CatalogAdmin
+    port: 4000
+  }
+}

@@ -204,6 +204,8 @@ export function printStructural(node: AstNode): string {
       return printCriterion(node as import("../generated/ast.js").Criterion);
     case "Retrieval":
       return printRetrieval(node as import("../generated/ast.js").Retrieval);
+    case "Seed":
+      return printSeed(node as import("../generated/ast.js").Seed);
     default:
       throw new Error(`printStructural: unhandled node ${node.$type}`);
   }
@@ -487,6 +489,16 @@ function printStampDecl(node: import("../generated/ast.js").StampDecl): string {
 /** `implements "<name>"` */
 function printImplementsDecl(node: import("../generated/ast.js").ImplementsDecl): string {
   return `implements ${quote(node.name)}`;
+}
+
+/** `seed [dataset] [raw] { <Agg> { … } … }` (database-seeding.md) */
+function printSeed(node: import("../generated/ast.js").Seed): string {
+  const dataset = node.dataset ? ` ${node.dataset}` : "";
+  const raw = node.raw ? " raw" : "";
+  return block(
+    `seed${dataset}${raw}`,
+    node.rows.map((r) => `${r.aggregate.$refText} ${printExpr(r.value)}`),
+  );
 }
 
 function printContextMember(node: ContextMember): string {
