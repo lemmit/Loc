@@ -18,6 +18,7 @@
 // create action) and `@handle` cross-row id refs.
 
 import type { BoundedContextIR, ExprIR } from "../../ir/types/loom-ir.js";
+import { renderSeedRowInsert } from "../../system/sql-pg.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderExpr } from "./render-expr.js";
 
@@ -26,6 +27,7 @@ const EMPTY_STUB = "# Auto-generated — empty seeds stub.\n";
 interface SeedEntry {
   ctxModule: string;
   agg: string;
+  raw: boolean;
   fields: { name: string; value: ExprIR }[];
 }
 
@@ -54,7 +56,12 @@ export function renderSeedsExs(appModule: string, contexts: BoundedContextIR[]):
           byDataset.set(seed.dataset, list);
           order.push(seed.dataset);
         }
-        list.push({ ctxModule, agg: row.aggregate, fields: row.fields });
+        list.push({
+          ctxModule,
+          agg: row.aggregate,
+          raw: seed.path === "raw",
+          fields: row.fields,
+        });
       }
     }
   }
@@ -109,6 +116,12 @@ function renderDatasetBlock(dataset: string, entries: SeedEntry[]): string {
 }
 
 function renderCreate(e: SeedEntry): string {
+  if (e.raw) {
+    // raw path (D-SEED-XREF): direct INSERT with explicit id + FK columns,
+    // executed through Ecto's raw-SQL channel.  Balanced parens make `~s(…)`
+    // safe (same as the marker DDL above).
+    return `Ecto.Adapters.SQL.query!(repo, ~s(${renderSeedRowInsert(e.agg, e.fields)}), [])`;
+  }
   const ctx = { thisName: "record", contextModule: e.ctxModule };
   const fields = e.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`).join(", ");
   return `${e.ctxModule}.create_${snake(e.agg)}!(%{${fields}})`;

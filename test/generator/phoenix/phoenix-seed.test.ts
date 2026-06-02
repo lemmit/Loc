@@ -92,3 +92,32 @@ describe("phoenix database seeding (Phase 3b, domain path)", () => {
     expect(files.get("web/mix.exs")!).not.toContain("run priv/repo/seeds.exs");
   });
 });
+
+describe("phoenix seeding — raw explicit-id path", () => {
+  const RAW = `system S {
+    subdomain Sales { context Sales {
+      aggregate Customer with crudish { name: string }
+      aggregate Order with crudish { customerId: Customer id status: string }
+      repository Customers for Customer { }
+      repository Orders for Order { }
+      seed reference raw {
+        Customer { id: "c1", name: "Acme" }
+        Order { id: "o1", customerId: "c1", status: "new" }
+      }
+    } }
+    api A from Sales
+    ui U with scaffold(subdomains: [Sales]) { }
+    storage p { type: postgres }
+    resource st { for: Sales, kind: state, use: p }
+    deployable web { platform: phoenixLiveView contexts: [Sales] dataSources: [st] serves: A ui: U port: 4000 }
+  }`;
+
+  it("emits Ecto.Adapters.SQL INSERTs with explicit id + FK", async () => {
+    const seeds = (await build(RAW)).get("web/priv/repo/seeds.exs")!;
+    expect(seeds).toContain(
+      'Ecto.Adapters.SQL.query!(repo, ~s(INSERT INTO "customers" ("id", "name") VALUES (\'c1\', \'Acme\')), [])',
+    );
+    expect(seeds).toContain('INSERT INTO "orders" ("id", "customer_id", "status")');
+    expect(seeds).not.toContain("create_customer!");
+  });
+});

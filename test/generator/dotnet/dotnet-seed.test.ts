@@ -118,3 +118,29 @@ describe("dotnet database seeding (Phase 3a, domain path)", () => {
     expect(program).not.toContain("Seed.RunSeeds(");
   });
 });
+
+describe("dotnet seeding — raw explicit-id path", () => {
+  const RAW = `system S {
+    subdomain Sales { context Sales {
+      aggregate Customer with crudish { name: string }
+      aggregate Order with crudish { customerId: Customer id status: string }
+      repository Customers for Customer { }
+      repository Orders for Order { }
+      seed reference raw {
+        Customer { id: "c1", name: "Acme" }
+        Order { id: "o1", customerId: "c1", status: "new" }
+      }
+    } }
+    api A from Sales
+    deployable api { platform: dotnet contexts: [Sales] serves: A port: 8080 }
+  }`;
+
+  it("emits ExecuteSqlRawAsync INSERTs with explicit id + FK", async () => {
+    const seed = find(await build(RAW), /Seed\.cs$/);
+    expect(seed).toContain(
+      'await db.Database.ExecuteSqlRawAsync(@"INSERT INTO ""customers"" (""id"", ""name"") VALUES (\'c1\', \'Acme\')", ct);',
+    );
+    expect(seed).toContain('INSERT INTO ""orders"" (""id"", ""customer_id"", ""status"")');
+    expect(seed).not.toContain("Customer.Create(");
+  });
+});

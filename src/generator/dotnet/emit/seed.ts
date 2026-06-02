@@ -23,13 +23,19 @@ import type {
   EnrichedBoundedContextIR,
   SeedRowIR,
 } from "../../../ir/types/loom-ir.js";
+import { renderSeedRowInsert } from "../../../system/sql-pg.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
 
+interface Entry {
+  row: SeedRowIR;
+  raw: boolean;
+}
+
 interface Dataset {
   name: string;
-  rows: SeedRowIR[];
+  entries: Entry[];
 }
 
 export function emitDotnetSeeds(
@@ -48,11 +54,12 @@ export function emitDotnetSeeds(
   const callLines: string[] = [];
   const usedAggs = new Set<string>();
   for (const ds of datasets) {
-    const rows = ds.rows.filter((r) => aggByName.has(r.aggregate));
-    if (rows.length === 0) continue;
-    fnBlocks.push(renderDatasetFn(ds.name, rows, aggByName));
+    const entries = ds.entries.filter((e) => aggByName.has(e.row.aggregate));
+    if (entries.length === 0) continue;
+    fnBlocks.push(renderDatasetFn(ds.name, entries, aggByName));
     callLines.push(`        await Seed${upperFirst(ds.name)}(db, sp, requested, ct);`);
-    for (const r of rows) usedAggs.add(r.aggregate);
+    // raw rows emit SQL only — they import no aggregate class/repository.
+    for (const e of entries) if (!e.raw) usedAggs.add(e.row.aggregate);
   }
   if (callLines.length === 0) return;
 
@@ -68,27 +75,31 @@ function groupByDataset(ctx: EnrichedBoundedContextIR): Dataset[] {
   for (const seed of ctx.seeds) {
     let ds = byName.get(seed.dataset);
     if (!ds) {
-      ds = { name: seed.dataset, rows: [] };
+      ds = { name: seed.dataset, entries: [] };
       byName.set(seed.dataset, ds);
       order.push(seed.dataset);
     }
-    ds.rows.push(...seed.rows);
+    for (const row of seed.rows) ds.entries.push({ row, raw: seed.path === "raw" });
   }
   return order.map((n) => byName.get(n)!);
 }
 
 function renderDatasetFn(
   dataset: string,
-  rows: SeedRowIR[],
+  entries: Entry[],
   aggByName: Map<string, EnrichedAggregateIR>,
 ): string {
-  const aggs = [...new Set(rows.map((r) => r.aggregate))];
-  const repoDecls = aggs.map(
+  const domainAggs = [...new Set(entries.filter((e) => !e.raw).map((e) => e.row.aggregate))];
+  const repoDecls = domainAggs.map(
     (a) => `        var ${repoVar(a)} = sp.GetRequiredService<I${a}Repository>();`,
   );
-  const saveLines = rows.map((r) => {
-    const agg = aggByName.get(r.aggregate)!;
-    return `        await ${repoVar(r.aggregate)}.SaveAsync(${r.aggregate}.Create(${renderArgs(r, agg)}), ct);`;
+  const saveLines = entries.map((e) => {
+    if (e.raw) {
+      // raw path (D-SEED-XREF): direct INSERT with explicit id + FK columns.
+      return `        await db.Database.ExecuteSqlRawAsync(${csVerbatim(renderSeedRowInsert(e.row.aggregate, e.row.fields))}, ct);`;
+    }
+    const agg = aggByName.get(e.row.aggregate)!;
+    return `        await ${repoVar(e.row.aggregate)}.SaveAsync(${e.row.aggregate}.Create(${renderArgs(e.row, agg)}), ct);`;
   });
   return lines(
     `    private static async Task Seed${upperFirst(dataset)}(`,
@@ -122,6 +133,12 @@ function repoVar(agg: string): string {
 
 function csStr(s: string): string {
   return JSON.stringify(s);
+}
+
+/** A C# verbatim string literal (`@"…"`, doubling `"`) — keeps the SQL's own
+ *  double-quoted identifiers + single-quoted values readable. */
+function csVerbatim(s: string): string {
+  return `@"${s.replace(/"/g, '""')}"`;
 }
 
 function renderSeedFile(
