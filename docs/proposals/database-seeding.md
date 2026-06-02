@@ -1,10 +1,20 @@
 # Database seeding — a Loomish `seed` declaration
 
-> Status: **PROPOSED.** No code yet; grammar / IR / semantics specified.
+> Status: **PARTIAL** — Phase 1 landed (declarative `seed` surface →
+> `SeedIR` → lowering + validators; no codegen yet). Remaining phases
+> (per-backend emitters, the `__loom_seed` marker + compose wiring, the
+> imperative body, `@handle`/`SeedRef`) tracked in §11.
 > Graduates the `seed {}` sketch from
 > [`quickstart-and-day-one-batteries.md` §5.4](./quickstart-and-day-one-batteries.md)
 > into a full, platform-neutral design that mirrors the migrations
 > pipeline.
+>
+> **Shipped in Phase 1:** the `Seed` / `SeedRow` grammar rules
+> (`ddd.langium`), `SeedIR` / `SeedRowIR` on `BoundedContextIR`
+> (`src/ir/types/loom-ir.ts`), `lowerSeed` (`src/ir/lower/lower.ts`),
+> the `checkSeeds` validator (`src/language/validators/seed.ts`:
+> `loom.seed-foreign-aggregate`, `loom.seed-duplicate-field`), and
+> parsing / lowering / negative-validator tests.
 >
 > **Pinned decisions affecting this proposal**
 > - The DB-owning deployable per module is already chosen by the
@@ -444,8 +454,12 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
 
 ## 11. Build order (strictly additive)
 
-1. Grammar + AST validators + `SeedIR` + lowering (declarative form
-   only). One parsing test, the §8 negative tests, one lowering test.
+1. ✅ **Done.** Grammar (`Seed`/`SeedRow`) + `SeedIR`/`SeedRowIR` on
+   `BoundedContextIR` + `lowerSeed` + `checkSeeds`
+   (`loom.seed-foreign-aggregate`, `loom.seed-duplicate-field`) +
+   parsing / lowering / negative-validator tests. Declarative form
+   only; `@handle`/`SeedRef`, create-param shape-checking, and the
+   `raw`-unchecked warning are split into a Phase 1b follow-up.
 2. Hono emitter + `db:seed` script + `__loom_seed` marker migration
    step. `LOOM_TS_BUILD` gate.
 3. .NET seeder + Phoenix `seeds.exs`. Per-backend build gates.

@@ -636,7 +636,7 @@ BoundedContext:
 
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
-    | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl;
+    | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -888,6 +888,21 @@ View:
 
 BindEntry:
     name=ID '=' expr=Expression;
+
+// Seed — first-boot data for a context's aggregates (database-seeding.md).
+// Declarative form: a named dataset of typed records, each lowering through
+// the aggregate's canonical create (D-SEED-PATH), so invariants hold.  `raw`
+// opts a block into table-level inserts.  The imperative (workflow-shaped)
+// body, `@handle` cross-row refs, and the deferred `key` clause are later
+// slices.  Each row's value is an ObjectLit shaped like the aggregate's
+// create parameters — no `id` field; the framework mints ids.
+Seed:
+    'seed' (dataset=ID)? (raw?='raw')? '{'
+        rows+=SeedRow*
+    '}';
+
+SeedRow:
+    aggregate=[Aggregate:ID] value=ObjectLit;
 
 // Criterion — a named, parameterised, pure boolean predicate over a
 // candidate type `T` (the Specification Pattern, Evans / Spring-Data
