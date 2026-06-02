@@ -12,6 +12,8 @@ import type {
 import type { MigrationsIR } from "../ir/types/migrations-ir.js";
 import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
+import { hasAdapters, resolveLayout, resolveStyle } from "../platform/resolve-adapters.js";
+import { renderAsyncApi } from "./asyncapi.js";
 import { renderDataSourcesMd } from "./datasources.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderC4Model, renderC4SpecJson } from "./likec4.js";
@@ -159,6 +161,9 @@ function emitSystem(
   // declarations route domain contexts to physical storage.  Pairs
   // with the Phase B / C / D validators.  See `datasources.ts`.
   out.set(".loom/datasources.md", renderDataSourcesMd(sys));
+  // AsyncAPI view of `channel` declarations (channels.md, Slice 1).
+  // Realises the BC-model's "events as channels" placeholder.
+  out.set(".loom/asyncapi.yaml", renderAsyncApi(sys));
 
   // E2E test scaffolding — emitted only when the system declares
   // `test e2e` blocks.  Lives at the system root so it can run against
@@ -238,8 +243,38 @@ function collectContextsFor(
 ): EnrichedBoundedContextIR[] {
   const want = new Set(d.contextNames);
   const out: EnrichedBoundedContextIR[] = [];
+  // An abstract base (aggregate-inheritance.md) is kept in the generation
+  // view only when it OWNS a physical table the platform must emit — i.e. a
+  // `sharedTable` (TPH) base on the Hono backend, the one backend that
+  // implements TPH (v1).  Otherwise it emits nothing of its own (no table /
+  // repository / routes) and is stripped here, a single chokepoint:
+  //   - `ownTable` (TPC) base, any backend → kept for the base-reader pass
+  //     (see keepsForBaseReader); it contributes no table of its own, but is
+  //     the read home for `find all <Base>`.
+  //   - `sharedTable` (TPH) base on a non-Hono backend → dropped; TPH is
+  //     gated as not-implemented there by IR-validate, so it never generates.
+  // Concretes always stay; the per-aggregate emit loop skips abstract bases
+  // for repo/routes regardless, so a kept TPH base only contributes its table.
+  const isHono = d.platform === "node";
+  const keepsTable = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
+    !!a.isAbstract && isHono && (a.inheritanceUsing ?? "sharedTable") === "sharedTable";
+  // A TPC (`ownTable`) base is kept in the view on every backend that
+  // implements the polymorphic read home — not for a table of its own (the
+  // per-aggregate emit loop skips abstract aggregates), but so the base-reader
+  // pass can see it and emit `find all <Base>`: Hono delegates to the concrete
+  // Drizzle repositories, .NET to the concrete EF repositories (returning the
+  // abstract-base union type), Phoenix to the concrete Ash reads.  Frontend
+  // platforms never host a context, so they never reach here.
+  const keepsForBaseReader = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
+    !!a.isAbstract && a.inheritanceUsing === "ownTable";
+  const dropped = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
+    !!a.isAbstract && !keepsTable(a) && !keepsForBaseReader(a);
   for (const mod of modulesByName.values()) {
-    for (const c of mod.contexts) if (want.has(c.name)) out.push(c);
+    for (const c of mod.contexts) {
+      if (!want.has(c.name)) continue;
+      const kept = c.aggregates.filter((a) => !dropped(a));
+      out.push(kept.length === c.aggregates.length ? c : { ...c, aggregates: kept });
+    }
   }
   return out;
 }
@@ -264,6 +299,20 @@ function emitDeployable(
   // dictates).
   const sub = serviceSlug(d.name);
   const platform = platformFor(d.platform);
+  // D-REALIZATION-AXES (Phase 4): resolve the deployable's `application:`
+  // (→ style) and `directoryLayout:` (→ layout) selections to concrete
+  // adapters HERE — the system layer is the one allowed to import
+  // `resolve-adapters` (generators must not reach into `src/platform/`).
+  // The resolved adapters thread down through `emitProject` into each
+  // backend's `EmitCtx`.  Backends only (`hasAdapters`); frontends carry
+  // no axes, so both stay undefined.  Under today's size-1 real menus the
+  // resolved adapter is the backend's existing default → byte-identical.
+  const resolvedStyle = hasAdapters(d.platform)
+    ? resolveStyle(d.platform, d.application)
+    : undefined;
+  const resolvedLayout = hasAdapters(d.platform)
+    ? resolveLayout(d.platform, d.directoryLayout)
+    : undefined;
   const files = platform.emitProject({
     contexts,
     deployable: d,
@@ -271,6 +320,8 @@ function emitDeployable(
     migrations: options.migrations,
     emitTrace,
     topLevelComponents: options.topLevelComponents,
+    styleAdapter: resolvedStyle,
+    layoutAdapter: resolvedLayout,
   });
   for (const [relPath, content] of files) {
     out.set(`${sub}/${relPath}`, content);

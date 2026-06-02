@@ -114,7 +114,7 @@ one tree and writes the cross-cutting `docker-compose.yml`,
 - [`generators.md`](generators.md) — per-platform feature matrix
   (what each backend emits, file-by-file).
 - [`architecture.md`](architecture.md) — how `subdomain`, `deployable`,
-  `api`, `storage`, `dataSource`, and `ui` compose into a runnable system.
+  `api`, `storage`, `resource`, and `ui` compose into a runnable system.
 - [`design-packs.md`](design-packs.md) — frontend versioning via
   design pack + stack.
 - [`technical.md`](technical.md) — pipeline phases, including how

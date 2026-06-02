@@ -22,11 +22,14 @@ import type {
 import {
   checkBinaryOperands,
   checkBuilderCallType,
+  checkChannels,
+  checkComponent,
   checkContext,
   checkCriteria,
   checkDataSource,
   checkDeployable,
   checkGenericCarriers,
+  checkInheritance,
   checkLayout,
   checkLegacyConstructorCalls,
   checkMacroExpansion,
@@ -35,13 +38,13 @@ import {
   checkMatchesCalls,
   checkPayloads,
   checkPrimitiveConversions,
+  checkSeeds,
   checkSlotMemberAccess,
   checkSlotTypePosition,
   checkTheme,
   checkTraceability,
   checkTypeReferences,
   checkUi,
-  checkUiHelperImports,
 } from "./validators/index.js";
 
 export class DddValidator {
@@ -91,11 +94,9 @@ export class DddValidator {
     // targets (VO / EntityPart / user-component / walker primitive) and
     // errors on misses.
     checkBuilderCallType(model, accept, this.services);
-    // `import helper <name> from "..."` declarations.
-    // Reject names that shadow walker stdlib primitives so a typo
-    // never silently overrides Stack / Form / etc.  Also flag
-    // duplicate helper names within the same UI.
-    checkUiHelperImports(model, accept);
+    // `component` declarations: enforce the extern↔body exclusivity the
+    // grammar admits but can't constrain (extern ⇒ no body; normal ⇒ body).
+    checkComponent(model, accept);
     // Traceability artifacts.  The grammar admits a
     // permissive requirement prop-bag and any code cross-reference;
     // semantic constraints (allowed keys / enum values / required
@@ -104,14 +105,24 @@ export class DddValidator {
     // Type-position references: bare aggregate name (must be `X id`),
     // and cross-aggregate entity-part name (must go through the root).
     checkTypeReferences(model, accept);
+    // Aggregate-inheritance surface (aggregate-inheritance.md, I1):
+    // `extends` may only target an `abstract` base; abstract bases have no
+    // repository and declare no lifecycle actions; `inheritanceUsing(…)` is
+    // only valid on a participant; and an event-sourced / document concrete
+    // of a `sharedTable` base is forced to `ownTable` (D-ES-TPH).
+    checkInheritance(model, accept);
     // Payload declarations (payload-transport-layer.md, P1): name
     // uniqueness within a context (and vs. value objects / events) and
     // distinct non-empty field names.
     checkPayloads(model, accept);
     // Generic-carrier instantiation (payload-transport-layer.md, P3):
     // the single type argument of `paged` / `envelope` must be a carrier,
-    // and v1 admits only single-level (non-nested) instantiation.
+    // v1 admits only single-level (non-nested) instantiation, and a carrier
+    // may appear only in a transport position (find return / payload field).
     checkGenericCarriers(model, accept);
+    // Seed datasets (database-seeding.md): a seed may only populate
+    // aggregates of its own context, and a record may not repeat a field.
+    checkSeeds(model, accept);
     // `slot` is a UI-only param marker (PR #632) — reject anywhere
     // outside a component's parameter list with a clear error rather
     // than letting the backend emitter throw at generate time.
@@ -139,6 +150,9 @@ export class DddValidator {
     // Criterion declarations + use sites: candidate-type support,
     // body purity, reference cycles, and call arity.
     checkCriteria(model, accept);
+    // Channel + channelSource: key-field existence and the channel<->storage
+    // transport compatibility matrix (channels.md, Slice 1).
+    checkChannels(model, accept);
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
         checkContext(m, accept);

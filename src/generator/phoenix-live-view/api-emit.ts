@@ -57,6 +57,40 @@ export interface ApiEmitArgs {
   emitTrace?: boolean;
 }
 
+/** Standard CRUD action/define names the Phoenix backend emits for a served
+ *  aggregate (list/get/create/update/destroy).  A public operation whose
+ *  snake name collides with one of these (e.g. crudish's canonical `update`)
+ *  is the **canonical cross-backend form** — Hono/.NET serve it as
+ *  `POST /<plural>/:id/<op>` with a per-op request schema (`UpdateXRequest`),
+ *  and the conformance gate compares that schema across backends.  Phoenix
+ *  must match it.  So when an op claims a CRUD-verb name, the **operation
+ *  wins**: the per-op route/controller `def`/domain `define`/OpenAPI path are
+ *  kept, and the redundant **standard** CRUD action of that name (which is
+ *  Phoenix-controller-only — never in the OpenAPI or Hono) is suppressed, so
+ *  the two don't collide into a duplicate `def <verb>/2` clause / duplicate
+ *  Ash code-interface define.  `crudOpNames(agg)` returns the set to suppress. */
+export const CRUD_VERB_NAMES: ReadonlySet<string> = new Set([
+  "list",
+  "get",
+  "create",
+  "update",
+  "destroy",
+]);
+
+/** The CRUD-verb names claimed by an aggregate's public operations — the
+ *  standard CRUD actions/defines to suppress in favour of the operation. */
+export function crudOpNames(agg: {
+  operations: { name: string; visibility?: string }[];
+}): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const op of agg.operations) {
+    if (op.visibility !== "public") continue;
+    const s = snake(op.name);
+    if (CRUD_VERB_NAMES.has(s)) out.add(s);
+  }
+  return out;
+}
+
 export interface ApiRoute {
   method: "get" | "post" | "put" | "patch" | "delete";
   /**
@@ -156,6 +190,11 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
         files.set(controllerPath, renderAggregateController(ctx, agg, appModule, !!args.emitTrace));
 
         const aggPlural = aggsSnake;
+        // CRUD-verb names claimed by a public operation (e.g. crudish
+        // `update`) — the standard CRUD route of that name is suppressed so
+        // the operation's `POST /:id/<verb>` route owns the action (and the
+        // controller `def`s don't collide).  See CRUD_VERB_NAMES.
+        const crudOps = crudOpNames(agg);
         // Route order matters: Phoenix matches the first declared route.
         // Literal-segment paths (`/<plural>/<find>`) MUST come before the
         // `:id`-parameterised member route (`/<plural>/:id`), otherwise
@@ -165,18 +204,22 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
         //   3. Member:     get / update / destroy   (`:id` paths)
         //   4. Per-op:     POST /<plural>/:id/<op>  (member action; longer
         //                  than `:id` so no ambiguity)
-        apiRoutes.push({
-          method: "get",
-          path: `/${aggPlural}`,
-          controller: controllerLocal,
-          action: ":list",
-        });
-        apiRoutes.push({
-          method: "post",
-          path: `/${aggPlural}`,
-          controller: controllerLocal,
-          action: ":create",
-        });
+        if (!crudOps.has("list")) {
+          apiRoutes.push({
+            method: "get",
+            path: `/${aggPlural}`,
+            controller: controllerLocal,
+            action: ":list",
+          });
+        }
+        if (!crudOps.has("create")) {
+          apiRoutes.push({
+            method: "post",
+            path: `/${aggPlural}`,
+            controller: controllerLocal,
+            action: ":create",
+          });
+        }
         const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
         if (repo) {
           for (const find of repo.finds) {
@@ -190,24 +233,30 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
             });
           }
         }
-        apiRoutes.push({
-          method: "get",
-          path: `/${aggPlural}/:id`,
-          controller: controllerLocal,
-          action: ":get",
-        });
-        apiRoutes.push({
-          method: "patch",
-          path: `/${aggPlural}/:id`,
-          controller: controllerLocal,
-          action: ":update",
-        });
-        apiRoutes.push({
-          method: "delete",
-          path: `/${aggPlural}/:id`,
-          controller: controllerLocal,
-          action: ":destroy",
-        });
+        if (!crudOps.has("get")) {
+          apiRoutes.push({
+            method: "get",
+            path: `/${aggPlural}/:id`,
+            controller: controllerLocal,
+            action: ":get",
+          });
+        }
+        if (!crudOps.has("update")) {
+          apiRoutes.push({
+            method: "patch",
+            path: `/${aggPlural}/:id`,
+            controller: controllerLocal,
+            action: ":update",
+          });
+        }
+        if (!crudOps.has("destroy")) {
+          apiRoutes.push({
+            method: "delete",
+            path: `/${aggPlural}/:id`,
+            controller: controllerLocal,
+            action: ":destroy",
+          });
+        }
         for (const op of agg.operations.filter((o) => o.visibility === "public")) {
           // URL segment from routeSlug (D-URLSTYLE); the Phoenix action
           // atom (and the matching controller `def`) stay the op verb so
@@ -285,9 +334,17 @@ ${actions}
 
   # RFC 7807 problem body — application/problem+json + x-request-id header
   # (trace correlation off the body so it's byte-identical to Hono / .NET).
-  # Status-aware: a \`{:error, :forbidden}\` from a workflow \`requires\` guard
-  # maps to 403 (matching Hono/.NET); every other reason is a 400 domain
-  # error.
+  # Status-aware:
+  #   - \`%Ash.Error.Invalid{}\` (validation) → 422 with §3.2 \`errors[]\`
+  #     extension via the shared ProblemDetails responder, consumed by
+  #     the frontend ACL's \`applyServerErrors\` (Phase C of
+  #     docs/proposals/validation-error-extension.md).
+  #   - \`:forbidden\` (requires guard) → 403.
+  #   - everything else → 400 domain error.
+  defp error_response(conn, %Ash.Error.Invalid{} = err) do
+    ${webModule}.ProblemDetails.validation_error_response(conn, err)
+  end
+
   defp error_response(conn, reason) do
     {status, title} =
       case reason do
@@ -295,12 +352,7 @@ ${actions}
         _ -> {400, "Bad Request"}
       end
 
-    trace_id = get_resp_header(conn, "x-request-id") |> List.first("unknown")
-    body = Jason.encode!(%{type: "about:blank", title: title, status: status, detail: inspect(reason), instance: conn.request_path})
-    conn
-    |> put_resp_content_type("application/problem+json")
-    |> put_resp_header("x-request-id", trace_id)
-    |> send_resp(status, body)
+    ${webModule}.ProblemDetails.problem_response(conn, status, title, inspect(reason))
   end
 end
 `;
@@ -315,9 +367,20 @@ function renderWorkflowAction(
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   const workflowModule = `${contextModule}.Workflows.${upperFirst(wf.name)}`;
 
-  // Build the permitted param key list from the workflow's declared params
-  const allowedKeys = wf.params.map((p) => `"${snake(p.name)}"`).join(", ");
-  const takeExpr = allowedKeys.length > 0 ? `Map.take(params, [${allowedKeys}])` : `%{}`;
+  // Build the permitted param key list from the workflow's declared
+  // params.  Phoenix JSON params are STRING-keyed (`%{"name" => …}`), but
+  // the workflow `run/2` head pattern-matches ATOM keys (`%{name: name}`),
+  // so a string-keyed map crashes with FunctionClauseError in the head —
+  // before the body's try/catch can run.  Build an atom-keyed map from the
+  // declared params.  The keys come from the compile-time param list (not
+  // user input), so `String.to_atom` here can't be abused for atom
+  // exhaustion; an absent param maps to `nil` (the head still matches, and
+  // a required-but-missing value surfaces as a precondition/guard failure
+  // rather than a 500).
+  const atomEntries = wf.params
+    .map((p) => `${snake(p.name)}: params[${JSON.stringify(snake(p.name))}]`)
+    .join(", ");
+  const takeExpr = wf.params.length > 0 ? `%{${atomEntries}}` : `%{}`;
 
   return `  @doc "POST /api/workflows/${wfSnake}"
   def ${wfSnake}(conn, params) do
@@ -434,19 +497,31 @@ function renderAggregateController(
     ? `    ${renderPhoenixLogCall("wireIn", [{ name: "keys", valueExpr: "Map.keys(params)" }])}\n`
     : "";
 
-  const crud = `  @doc "GET /api/${aggPlural}"
+  // Standard CRUD actions, keyed by name.  A CRUD verb claimed by a public
+  // operation (e.g. crudish `update`) is dropped here — the per-op action
+  // below owns that `def`, matching the cross-backend `POST /:id/<verb>` form
+  // (so the two don't collide into a duplicate `def <verb>/2`).
+  const crudOps = crudOpNames(agg);
+  const crudSegments: { name: string; src: string }[] = [
+    {
+      name: "list",
+      src: `  @doc "GET /api/${aggPlural}"
   def list(conn, _params) do
     records = ${contextModule}.list_${aggPlural}!()
     json(conn, records)
-  end
-
-  @doc "GET /api/${aggPlural}/:id"
+  end`,
+    },
+    {
+      name: "get",
+      src: `  @doc "GET /api/${aggPlural}/:id"
   def get(conn, %{"id" => id}) do
     record = ${contextModule}.get_${aggSnake}!(id)
     json(conn, record)
-  end
-
-  @doc "POST /api/${aggPlural}"
+  end`,
+    },
+    {
+      name: "create",
+      src: `  @doc "POST /api/${aggPlural}"
   def create(conn, params) do
 ${wireInLine}    record = ${contextModule}.create_${aggSnake}!(params)
     ${renderPhoenixLogCall("aggregateCreated", [
@@ -456,20 +531,30 @@ ${wireInLine}    record = ${contextModule}.create_${aggSnake}!(params)
     conn
     |> put_status(:created)
     |> json(%{id: record.id})
-  end
-
-  @doc "PATCH /api/${aggPlural}/:id"
+  end`,
+    },
+    {
+      name: "update",
+      src: `  @doc "PATCH /api/${aggPlural}/:id"
   def update(conn, %{"id" => id} = params) do
 ${wireInLine}    attrs = Map.drop(params, ["id"])
     record = ${contextModule}.update_${aggSnake}!(id, attrs)
     json(conn, record)
-  end
-
-  @doc "DELETE /api/${aggPlural}/:id"
+  end`,
+    },
+    {
+      name: "destroy",
+      src: `  @doc "DELETE /api/${aggPlural}/:id"
   def destroy(conn, %{"id" => id}) do
     ${contextModule}.destroy_${aggSnake}!(id)
     send_resp(conn, 204, "")
-  end`;
+  end`,
+    },
+  ];
+  const crud = crudSegments
+    .filter((s) => !crudOps.has(s.name))
+    .map((s) => s.src)
+    .join("\n\n");
 
   // Per-find actions.  Each delegates to `<Ctx>.<find>_<agg>` (positional
   // args extracted from query params; the Ash code-interface declared
@@ -527,6 +612,16 @@ ${cuLine}    ${contextModule}.${opSnake}_${aggSnake}!(${callArgs}${callOpts})
   return `# Auto-generated.
 defmodule ${controllerModule} do
   use ${webModule}, :controller
+  # Plug.ErrorHandler intercepts raised exceptions from the bang
+  # Ash code-interface calls below (\`create_${aggSnake}!\`, etc.).
+  # When the raised reason is an \`Ash.Error.Invalid\`, we route to
+  # the shared ProblemDetails responder which emits 422 + the §3.2
+  # \`errors[]\` extension consumed by the frontend ACL's
+  # \`applyServerErrors\` (matches Hono / .NET).  Anything else falls
+  # through to Phoenix's default \`render_errors\` pipeline.
+  # See docs/proposals/validation-error-extension.md (Phase C).
+  use Plug.ErrorHandler
+
   # Catalog log events (aggregate_created on Create; see
   # docs/proposals/observability.md) reach Elixir's Logger via the
   # renderer in src/generator/_obs/render-phoenix.ts.
@@ -539,6 +634,17 @@ defmodule ${controllerModule} do
   """
 
 ${allActions}
+
+  # ---------------------------------------------------------------------------
+  # Plug.ErrorHandler — Ash.Error.Invalid → 422 ProblemDetails + errors[]
+  # ---------------------------------------------------------------------------
+
+  @impl Plug.ErrorHandler
+  def handle_errors(conn, %{reason: %Ash.Error.Invalid{} = err}) do
+    ${webModule}.ProblemDetails.validation_error_response(conn, err)
+  end
+
+  def handle_errors(conn, _assigns), do: conn
 end
 `;
 }

@@ -1,4 +1,5 @@
 import {
+  platformFamily,
   platformOwnsBackend,
   platformSavingShapes,
 } from "../../language/validators/data/platform-rules.js";
@@ -18,13 +19,14 @@ import type {
   EnrichedSystemIR,
   ExprIR,
   FunctionIR,
+  StmtIR,
   SubdomainIR,
   SystemIR,
   TestE2EIR,
   TestStmtIR,
   TypeIR,
 } from "../types/loom-ir.js";
-import { allContexts, findUsesCurrentUser } from "../types/loom-ir.js";
+import { allContexts, exprUsesCurrentUser, findUsesCurrentUser } from "../types/loom-ir.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -55,6 +57,11 @@ export interface LoomDiagnostic {
   message: string;
   /** Where the diagnostic came from — `<system>/<test-name>`. */
   source: string;
+  /** Optional stable diagnostic code (e.g. `loom.criterion-not-selectable`)
+   *  mirroring the `loom.*` codes the Langium-side validators attach.
+   *  Lets tests and tooling match a diagnostic by identity rather than
+   *  by message substring. Undefined on the older message-only diags. */
+  code?: string;
 }
 
 export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
@@ -68,6 +75,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateSystem(sys, diags);
     validateDataSourceCoverage(sys, diags);
     validateSavingShapeSupport(sys, diags);
+    validateContextFilterSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
@@ -86,18 +94,24 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     // enum are easier to catch there since lowering loses that
     // information by design.
   }
+  // Which backend (needsDb) platforms host each context — drives the TPH
+  // storage gate (sharedTable is implemented for Hono only, v1).
+  const backendPlatformsByContext = backendPlatformsHostingEachContext(loom);
   // Per-context checks apply uniformly whether the context is
   // bundled in a system's modules or sits at the top level.
   for (const c of allContexts(loom)) {
     validateQueryableWheres(c, diags);
+    validateRetrievals(c, diags);
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);
     validateExternOperations(c, diags);
+    validateEventSourcedDiscipline(c, diags);
     validateWorkflows(c, diags);
     validateViews(c, diags);
     validateCurrentUserScope(c, diags);
     validatePermissionRefs(c, diags);
     validateGenericInstancesUnimplemented(c, diags);
+    validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
   validateExprIntegrity(loom, diags);
   return diags;
@@ -461,6 +475,145 @@ function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagnostic[]
 }
 
 // ---------------------------------------------------------------------------
+// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers Phase A1).
+//
+// `persistedAs(eventLog)` makes an aggregate event-sourced: its truth is
+// the event stream, and state is a fold of that stream.  That imposes a
+// body contract distinct from a state-based aggregate:
+//
+//   1. Appliers (`apply(e: E) { … }`) are only meaningful on an
+//      event-sourced aggregate.  On a state-based one they have nothing
+//      to fold — flag them.
+//   2. Command bodies (`operation` / `create` / `destroy`) decide and
+//      `emit`; they must not mutate `this` directly.  The state
+//      transition is the applier's job — a command that assigns to
+//      `this.x` would bypass the stream and desync the fold.
+//   3. Every event a command emits needs a matching applier, or the
+//      fold silently drops that transition.
+//   4. Applier bodies are pure folds: assignments / collection mutations
+//      and `let` bindings only.  No `emit` (an applier reacts to an
+//      event, it doesn't raise one), and no side-effecting calls (the
+//      fold must be deterministic and replayable).
+//   5. At most one applier per event type — two folds for one event are
+//      ambiguous.
+//
+// Emission of the event store / fold / projection layer is the deferred
+// Phase A2; this validator establishes the contract the surface promises
+// so authors get the discipline checked before any code is generated.
+// ---------------------------------------------------------------------------
+
+function validateEventSourcedDiscipline(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  for (const agg of ctx.aggregates) {
+    const isEventSourced = agg.persistedAs === "eventLog";
+    const appliers = agg.appliers ?? [];
+
+    // Rule 1 — appliers require an event-sourced aggregate.
+    if (!isEventSourced && appliers.length > 0) {
+      diags.push({
+        severity: "error",
+        message:
+          `aggregate '${agg.name}' declares apply(...) but is not event-sourced. ` +
+          `Appliers fold events into state; they only apply to a 'persistedAs(eventLog)' aggregate. ` +
+          `Add 'persistedAs(eventLog)' to the aggregate header, or remove the applier.`,
+        source: `${ctx.name}/${agg.name}`,
+      });
+    }
+
+    if (!isEventSourced) continue;
+
+    // Rule 5 — one applier per event type.
+    const appliersByEvent = new Map<string, number>();
+    for (const ap of appliers) {
+      appliersByEvent.set(ap.event, (appliersByEvent.get(ap.event) ?? 0) + 1);
+    }
+    for (const [eventName, count] of appliersByEvent) {
+      if (count > 1) {
+        diags.push({
+          severity: "error",
+          message:
+            `aggregate '${agg.name}' declares ${count} appliers for event '${eventName}'. ` +
+            `An event folds into state exactly one way — declare a single apply(${eventName}).`,
+          source: `${ctx.name}/${agg.name}`,
+        });
+      }
+    }
+
+    // Rules 2 + 3 — command bodies emit-only; emitted events covered.
+    const appliedEvents = new Set(appliers.map((a) => a.event));
+    const commands: { label: string; statements: StmtIR[] }[] = [
+      ...agg.operations.map((op) => ({
+        label: `operation '${op.name}'`,
+        statements: op.statements,
+      })),
+      ...(agg.creates ?? []).map((c) => ({
+        label: `create '${c.name}'`,
+        statements: c.statements,
+      })),
+      ...(agg.destroys ?? []).map((d) => ({
+        label: `destroy '${d.name}'`,
+        statements: d.statements,
+      })),
+    ];
+    for (const cmd of commands) {
+      for (const stmt of cmd.statements) {
+        if (stmt.kind === "assign" || stmt.kind === "add" || stmt.kind === "remove") {
+          diags.push({
+            severity: "error",
+            message:
+              `aggregate '${agg.name}' ${cmd.label} mutates 'this' directly, but the aggregate is event-sourced. ` +
+              `Command bodies on a 'persistedAs(eventLog)' aggregate decide and 'emit'; the state change belongs in an apply(...) block. ` +
+              `Replace the assignment with an 'emit', and fold it in an applier.`,
+            source: `${ctx.name}/${agg.name}`,
+          });
+        }
+        if (stmt.kind === "emit" && !appliedEvents.has(stmt.eventName)) {
+          diags.push({
+            severity: "error",
+            message:
+              `aggregate '${agg.name}' ${cmd.label} emits '${stmt.eventName}' but no applier folds it. ` +
+              `Every emitted event needs a matching apply(${stmt.eventName}: ${stmt.eventName}) on the aggregate, ` +
+              `or the event is recorded but never reflected in state.`,
+            source: `${ctx.name}/${agg.name}`,
+          });
+        }
+      }
+    }
+
+    // Rule 4 — applier bodies are pure folds.
+    for (const ap of appliers) {
+      for (const stmt of ap.statements) {
+        if (stmt.kind === "emit") {
+          diags.push({
+            severity: "error",
+            message:
+              `aggregate '${agg.name}' apply(${ap.event}) emits an event. ` +
+              `An applier reacts to an event by folding it into state — it must not emit. ` +
+              `Move the 'emit' to the command body that decides it.`,
+            source: `${ctx.name}/${agg.name}`,
+          });
+        } else if (stmt.kind === "call") {
+          diags.push({
+            severity: "error",
+            message:
+              `aggregate '${agg.name}' apply(${ap.event}) calls '${stmt.name}'. ` +
+              `Applier bodies must be deterministic, replayable folds — assignments and 'let' only, no side-effecting calls.`,
+            source: `${ctx.name}/${agg.name}`,
+          });
+        } else if (stmt.kind === "precondition" || stmt.kind === "requires") {
+          diags.push({
+            severity: "error",
+            message:
+              `aggregate '${agg.name}' apply(${ap.event}) contains a '${stmt.kind}' statement. ` +
+              `Guards belong in the command that decides the event; by the time it is applied the decision is already made.`,
+            source: `${ctx.name}/${agg.name}`,
+          });
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // `X id` validation for React deployables.
 //
 // The React form generator renders an `X id` form field as a `<Select>`
@@ -683,6 +836,134 @@ function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagnostic[])
       }
     }
   }
+  // `filter <expr>` capability predicates (lowered to
+  // `agg.contextFilters`) are a SELECTION position too: every backend
+  // installs them at the query layer (.NET `HasQueryFilter`, Drizzle
+  // read-site conjunction, Ecto base-query helper), so they must lower
+  // to the same queryable subset as a `find`/`view` `where`.  Until now
+  // they bypassed this check — an unselectable capability filter would
+  // silently emit nothing (Drizzle/Ecto) or fail at C# render (.NET).
+  // `currentUser.<scalar>` is admitted here exactly as in find filters:
+  // the backend threads the request principal in (row-level
+  // soft-delete / tenancy filters are the motivating case).
+  for (const agg of ctx.aggregates) {
+    const filters = (agg as EnrichedAggregateIR).contextFilters ?? [];
+    for (const predicate of filters) {
+      const offending = firstNonQueryableNode(predicate);
+      if (offending) {
+        diags.push({
+          severity: "error",
+          message:
+            `aggregate '${agg.name}': a 'filter' capability predicate is not selectable (${offending}). ` +
+            `Capability filters install at the query layer, so they must lower to the queryable subset: ` +
+            `comparisons, &&/||/!, parens, 'this.<column>' / 'this.<vo>.<sub>' refs, 'currentUser.<field>', literals.`,
+          source: `${ctx.name}/${agg.name}`,
+          code: "loom.criterion-not-selectable",
+        });
+        continue;
+      }
+      const unknown = firstUnknownColumnRef(predicate, agg, ctx);
+      if (unknown) {
+        diags.push({
+          severity: "error",
+          message: `aggregate '${agg.name}': a 'filter' capability predicate references unknown field ${unknown} on '${agg.name}'.`,
+          source: `${ctx.name}/${agg.name}`,
+          code: "loom.criterion-not-selectable",
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Retrieval validation (retrieval.md).  A `retrieval`'s `where` is a
+// selection position — same queryable-subset contract as a `find …
+// where` (reuses the oracle above).  Its `sort` and `loads` slots carry
+// structural paths that must resolve against the candidate aggregate.
+// `page` cannot appear here (the grammar forbids a page slot), so there
+// is nothing to check for it.
+// ---------------------------------------------------------------------------
+
+function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  for (const r of ctx.retrievals) {
+    const targetName = r.targetType.kind === "entity" ? r.targetType.name : undefined;
+    const agg = targetName ? ctx.aggregates.find((a) => a.name === targetName) : undefined;
+    const src = `${ctx.name}/retrieval ${r.name}`;
+
+    // `where` — same queryable-subset enforcement as find filters.
+    const offending = firstNonQueryableNode(r.where);
+    if (offending) {
+      diags.push({
+        severity: "error",
+        message:
+          `retrieval '${r.name}': where-clause is not queryable (${offending}). ` +
+          `Allowed: comparisons, &&/||/!, parens, 'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
+        source: src,
+      });
+    } else if (agg) {
+      const unknown = firstUnknownColumnRef(r.where, agg, ctx);
+      if (unknown) {
+        diags.push({
+          severity: "error",
+          message: `retrieval '${r.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
+          source: src,
+        });
+      }
+      const bothCols = firstColumnVsColumn(r.where);
+      if (bothCols) {
+        diags.push({
+          severity: "error",
+          message:
+            `retrieval '${r.name}': comparison between two columns (${bothCols}) is not queryable. ` +
+            `eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
+          source: src,
+        });
+      }
+    }
+
+    if (!agg) continue;
+
+    // `sort` — each term's path must start at a real aggregate field.
+    for (const term of r.sort) {
+      const head = term.path[0];
+      if (head && !aggregateHasMember(agg, head.name)) {
+        diags.push({
+          severity: "error",
+          message: `retrieval '${r.name}': sort references unknown field '${head.name}' on aggregate '${agg.name}'.`,
+          source: src,
+        });
+      }
+    }
+
+    // `loads` — each path's first segment must resolve on the aggregate
+    // (a stored field, a containment, or a cross-aggregate reference
+    // field).  Deeper path resolution across parts / referenced
+    // aggregates is the v2 load-inference concern (load-specifications.md);
+    // v1 validates the entry point only.
+    if (r.loadPlan.kind === "explicit") {
+      for (const path of r.loadPlan.paths) {
+        const head = path[0];
+        if (head && !aggregateHasMember(agg, head.name)) {
+          diags.push({
+            severity: "error",
+            message: `retrieval '${r.name}': loads references unknown field '${head.name}' on aggregate '${agg.name}'.`,
+            source: src,
+          });
+        }
+      }
+    }
+  }
+}
+
+/** True when `name` is a stored field, containment, or derived property
+ *  of the aggregate — the set of members a `sort` / `loads` path may
+ *  root at. */
+function aggregateHasMember(agg: AggregateIR, name: string): boolean {
+  return (
+    agg.fields.some((f) => f.name === name) ||
+    agg.contains.some((c) => c.name === name) ||
+    agg.derived.some((d) => d.name === name)
+  );
 }
 
 /** Walk an already-queryable expression and return the first
@@ -924,7 +1205,7 @@ function validateSystem(sys: SystemIR, diags: LoomDiagnostic[]): void {
 // has no schema / connection routing config to emit — so the omission
 // is an authoring mistake, not a meaningful default.
 //
-// Only fires for backend deployables (dotnet, hono, phoenixLiveView).
+// Only fires for backend deployables (dotnet, node, phoenix).
 // Frontend-only platforms (react, static) own no database and can't
 // have a dataSource to point at.
 // ---------------------------------------------------------------------------
@@ -1038,6 +1319,74 @@ function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[]): voi
             `emit: ${supported.join(", ")}.  Use a supported shape, or host this ` +
             `aggregate on a deployable whose platform emits shape(${shape}).`,
           source: `${sys.name}/${dep.name}`,
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Capability-filter support on the Hono and Phoenix backends (partial
+// today).  A `filter <expr>` capability installs at the query layer on
+// every read.  On .NET it rides EF Core's `HasQueryFilter` (global,
+// DI-resolved) — no restriction.  Hono AND-s the predicate into each
+// Drizzle read site; Phoenix emits an Ash `base_filter`.  Two cases are
+// not yet wired on either and would otherwise emit silently-wrong query
+// behaviour (a soft-delete / tenancy-isolation footgun), so reject them
+// with a clear error instead:
+//
+//   1. Principal-referencing filters (`this.tenantId ==
+//      currentUser.tenantId`).  Binding the request principal into the
+//      always-on read path is deferred (Hono: thread through findById +
+//      callers; Phoenix: an actor-bound base_filter) — see
+//      docs/proposals/criterion-everywhere.md.
+//   2. Non-relational shapes (`shape(document)` / `shape(embedded)`).
+//      Fields live inside a jsonb column, so `this.isDeleted` is not a
+//      top-level column the predicate can reference without JSON-path
+//      lowering — deferred.  (Phoenix only emits relational anyway, so
+//      the saving-shape validator usually blocks this upstream.)
+//
+// Non-principal capability filters on a relational aggregate
+// (`filter !this.isDeleted`) ARE emitted on both backends.
+// ---------------------------------------------------------------------------
+function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+
+  // Backends that consume contextFilters with the principal / shape
+  // limitation.  .NET (HasQueryFilter) is deliberately absent — it
+  // supports both deferred cases.  Canonical families (D-NODE-PLATFORM /
+  // D-PHOENIX-SURFACE): `node` (was `hono`), `phoenix` (was `phoenixLiveView`).
+  const LIMITED_FAMILIES = new Set(["node", "phoenix"]);
+
+  for (const dep of sys.deployables) {
+    const fam = platformFamily(dep.platform);
+    if (!fam || !LIMITED_FAMILIES.has(fam)) continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        const filters = enriched.contextFilters ?? [];
+        if (filters.length === 0) continue;
+        const usesPrincipal = filters.some((p) => exprUsesCurrentUser(p));
+        const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
+        const nonRelational = shape !== "relational";
+        if (!usesPrincipal && !nonRelational) continue;
+        const reason = usesPrincipal
+          ? `references currentUser (e.g. a tenancy filter); principal-referencing capability ` +
+            `filters are not yet wired on the ${fam} backend`
+          : `is persisted as shape(${shape}); capability filters are only wired for ` +
+            `relational aggregates on the ${fam} backend today`;
+        diags.push({
+          severity: "error",
+          message:
+            `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
+            `'${ctxName}.${agg.name}' with a 'filter' capability predicate that ${reason}. ` +
+            `Host this aggregate on a .NET deployable, or remove the unsupported capability filter. ` +
+            `Non-principal filters on relational aggregates (e.g. 'filter !this.isDeleted') are emitted.`,
+          source: `${sys.name}/${dep.name}`,
+          code: "loom.context-filter-unsupported",
         });
       }
     }
@@ -1250,6 +1599,82 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
   // per-backend `supportedShapes` capability check, not warned as inert.
 ];
 
+// Aggregate-inheritance storage gate (aggregate-inheritance.md, I2/I3).
+//
+// `ownTable` (TPC) emission is wired on every backend: the abstract base is
+// dropped from the generation view (system/index.ts `collectContextsFor`) and
+// each concrete emits as a standalone table carrying the merged base + own
+// fields (the `wireShape` merge in enrichContext).
+//
+// `sharedTable` (TPH) is implemented for the Hono backend only (v1): the
+// hierarchy lives in one shared table named for the base, with a `kind`
+// discriminator and per-concrete columns made nullable; each concrete's repo
+// filters/stamps `kind`. So a TPH hierarchy is allowed iff its context is
+// hosted by a Hono backend deployable. Otherwise it's an error (not a
+// warning) — TPH on .NET/Phoenix isn't built, and a context with no Hono host
+// has no implemented emission target. `sharedTable` is the omitted-modifier
+// default, so an inheritance hierarchy with no `inheritanceUsing(…)` is TPH
+// too. Polymorphic `Party id` refs and `find all Party` remain deferred (the
+// language validator rejects the former); document / TPT shapes are later.
+const DEFAULT_INHERITANCE_LAYOUT = "sharedTable" as const;
+
+/** Map each context name to the set of backend (needsDb) platforms that host
+ *  it — a context is TPH-capable iff that set includes `hono`. */
+function backendPlatformsHostingEachContext(loom: EnrichedLoomModel): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const sys of loom.systems) {
+    for (const d of sys.deployables) {
+      if (!platformFor(d.platform).needsDb) continue;
+      for (const cn of d.contextNames) {
+        const set = out.get(cn) ?? new Set<string>();
+        set.add(d.platform);
+        out.set(cn, set);
+      }
+    }
+  }
+  return out;
+}
+
+function validateInheritanceStorage(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  const byName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  const hostedByHono = backendPlatforms.has("node");
+  for (const agg of ctx.aggregates) {
+    if (!agg.isAbstract && !agg.extendsAggregate) continue;
+    // A concrete's layout defaults to its base's (resolved within the
+    // context); a per-concrete `inheritanceUsing(…)` override wins. The
+    // abstract base uses its own declared layout. Either way an omitted
+    // modifier means `sharedTable` (TPH), the documented default.
+    const base = agg.extendsAggregate ? byName.get(agg.extendsAggregate) : undefined;
+    const effective = agg.inheritanceUsing ?? base?.inheritanceUsing ?? DEFAULT_INHERITANCE_LAYOUT;
+    if (effective !== "sharedTable") continue;
+    // Implemented when a Hono backend hosts the context.
+    if (hostedByHono) continue;
+    const role = agg.isAbstract ? "abstract base" : `extends ${agg.extendsAggregate}`;
+    const how = agg.inheritanceUsing
+      ? "inheritanceUsing(sharedTable)"
+      : "the omitted-modifier default (sharedTable)";
+    const others = [...backendPlatforms].filter((p) => p !== "node");
+    const hostNote =
+      others.length > 0
+        ? `it is hosted by ${others.join(", ")}, where TPH is not implemented`
+        : "no Hono backend deployable hosts this context";
+    diags.push({
+      severity: "error",
+      message:
+        `aggregate '${agg.name}' (${role}) resolves to sharedTable (TPH) inheritance via ` +
+        `${how}, but TPH storage emission is implemented for the Hono backend only — ` +
+        `${hostNote}. Host the context on a Hono deployable, or declare ` +
+        `'inheritanceUsing(ownTable)' to use the per-concrete (TPC) layout (all backends). ` +
+        `Tracked in aggregate-inheritance.md I2/I3.`,
+      source: `${ctx.name}/${agg.name}`,
+    });
+  }
+}
+
 function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const ds of sys.dataSources) {
     for (const knob of UNWIRED_KNOBS) {
@@ -1405,6 +1830,11 @@ function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
         const source = `${c.name}/${agg.name}/${op.name}`;
         const visit = visitor(source);
         for (const st of op.statements) walkExprsInStmt(st, visit);
+      }
+      for (const ap of agg.appliers ?? []) {
+        const source = `${c.name}/${agg.name}/apply(${ap.event})`;
+        const visit = visitor(source);
+        for (const st of ap.statements) walkExprsInStmt(st, visit);
       }
       for (const inv of agg.invariants) {
         const source = `${c.name}/${agg.name}/invariant`;
@@ -1702,6 +2132,7 @@ function validateWorkflowBody(
   const reposByName = new Map(ctx.repositories.map((r) => [r.name, r] as const));
   const eventsByName = new Map(ctx.events.map((e) => [e.name, e] as const));
   const bindingAgg = new Map<string, string>(); // bindingName -> aggName
+  const arrayBindingAgg = new Map<string, string>(); // repo-run binding -> element aggName
   let mutated = false;
 
   for (const st of wf.statements) {
@@ -1845,6 +2276,71 @@ function validateWorkflowBody(
           }
         }
         bindingAgg.set(st.name, st.aggName);
+        break;
+      }
+      case "repo-run": {
+        // `let xs = Repo.run(<Retrieval>(args), page?)` — the bound
+        // result is an aggregate array, consumable only by a `for-each`.
+        const repo = reposByName.get(st.repoName);
+        if (!repo) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': '${st.repoName}.run(...)' references unknown repository '${st.repoName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const retrieval = ctx.retrievals.find((r) => r.name === st.retrievalName);
+        if (!retrieval) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': '${st.repoName}.run(${st.retrievalName}(...))' references unknown retrieval '${st.retrievalName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const target = retrieval.targetType.kind === "entity" ? retrieval.targetType.name : "";
+        if (target !== st.aggName) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': retrieval '${st.retrievalName}' is over '${target}', but '${st.repoName}' is a repository for '${st.aggName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        // Record the array binding so a `for-each` over it resolves the
+        // element aggregate.
+        arrayBindingAgg.set(st.name, st.aggName);
+        break;
+      }
+      case "for-each": {
+        // The iterable must be an aggregate array (today: a `repo-run`
+        // result).  Bind the loop var to the element aggregate so body
+        // op-calls resolve, then validate the body op-calls.
+        // The iterable should be a `repo-run` array binding (the only
+        // aggregate-array producer in v1).  A bare `ref` to such a
+        // binding is the supported shape.
+        const iterableBinding = st.iterable.kind === "ref" ? st.iterable.name : undefined;
+        const isArrayBinding = iterableBinding ? arrayBindingAgg.has(iterableBinding) : false;
+        if (st.varAggName === "Unknown" || !isArrayBinding) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': 'for ${st.var} in ...' must iterate a 'let xs = Repo.run(...)' result (the only aggregate array in v1).`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        bindingAgg.set(st.var, st.varAggName);
+        for (const inner of st.body) {
+          if (inner.kind === "op-call") {
+            mutated = true;
+            if (!bindingAgg.get(inner.target)) {
+              diags.push({
+                severity: "error",
+                message: `workflow '${wf.name}': in 'for ${st.var}', '${inner.target}.${inner.op}(...)' references unknown binding '${inner.target}'.`,
+                source: `${ctx.name}/${wf.name}`,
+              });
+            }
+          }
+        }
         break;
       }
       case "op-call": {

@@ -1,5 +1,6 @@
 // Auto-generated.  Do not edit by hand.
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { ProblemDetails, newApp } from "./problem-details";
 import { Customer } from "../domain/customer";
 import type { CustomerRepository } from "../db/repositories/customer-repository";
 import * as Ids from "../domain/ids";
@@ -13,6 +14,11 @@ const CreateCustomerRequest = z.object({
 }).openapi("CreateCustomerRequest").refine((data) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 const CreateCustomerResponse = z.object({ id: z.string() }).openapi("CreateCustomerResponse");
 
+const UpdateCustomerRequest = z.object({
+  username: z.string(),
+  email: z.string(),
+  age: z.coerce.number().int(),
+}).openapi("UpdateCustomerRequest");
 
 const ByEmailQuery = z.object({
   email: z.string(),
@@ -25,10 +31,9 @@ export const CustomerResponse = z.object({
   display: z.string(),
 }).openapi("CustomerResponse");
 export const CustomerListResponse = z.array(CustomerResponse).openapi("CustomerListResponse");
-const ProblemDetails = z.object({ type: z.string().nullish(), title: z.string().nullish(), status: z.number().int().nullish(), detail: z.string().nullish(), instance: z.string().nullish() }).openapi("ProblemDetails");
 
 export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
-  const app = new OpenAPIHono();
+  const app = newApp();
 
   app.openapi(
     createRoute({
@@ -73,6 +78,61 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
       const found = await repo.findById(Ids.CustomerId(id));
       if (!found) throw new AggregateNotFoundError("not_found");
       return c.json(repo.toWire(found) as z.infer<typeof CustomerResponse>, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "delete",
+      path: "/{id}",
+      tags: ["customers"],
+      operationId: "destroyCustomer",
+      request: { params: z.object({ id: z.string().uuid() }) },
+      responses: {
+        204: { description: "No Content" },
+        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
+        409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },
+      },
+    }),
+    async (c) => {
+      const { id } = c.req.valid("param");
+      await repo.getById(Ids.CustomerId(id));
+      try {
+        await repo.delete(Ids.CustomerId(id));
+      } catch (err) {
+        if (err && typeof err === "object" && (err as { code?: string }).code === "23503") {
+          return c.body(JSON.stringify({ type: "about:blank", title: "Conflict", status: 409, detail: "Customer is still referenced and cannot be deleted.", instance: c.req.path }), 409, { "content-type": "application/problem+json" });
+        }
+        throw err;
+      }
+      return c.body(null, 204);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/{id}/update",
+      tags: ["customers"],
+      operationId: "updateCustomer",
+      request: {
+        params: z.object({ id: z.string().uuid() }),
+        body: { content: { "application/json": { schema: UpdateCustomerRequest } } },
+      },
+      responses: {
+        204: { description: "No content" },
+        400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
+        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
+      },
+    }),
+    async (c) => {
+      const { id } = c.req.valid("param");
+      const body = c.req.valid("json");
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "operation_invoked", aggregate: "Customer", op: "update", id });
+      const aggregate = await repo.getById(Ids.CustomerId(id));
+      aggregate.update(body.username, body.email, body.age);
+      await repo.save(aggregate);
+      return c.body(null, 204);
     },
   );
 

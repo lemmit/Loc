@@ -89,11 +89,29 @@ function renderWorkflow(
     { name: "workflow", valueExpr: JSON.stringify(wf.name) },
   ]);
 
+  // precondition / requires statements short-circuit with
+  // `throw({:error, …})`.  The controller calls `run/2` inside a
+  // `case`, which does NOT catch throws — an uncaught throw crashes the
+  // request (500) instead of yielding the `{:error, reason}` the
+  // controller maps to 403 / 400.  Wrap the body in `try/catch :throw`
+  // so a thrown `{:error, …}` becomes the function's return value.  Only
+  // emit the wrapper when a guard can actually throw, keeping
+  // guard-free workflows unchanged.
+  const hasGuards = wf.statements.some((s) => s.kind === "precondition" || s.kind === "requires");
+  const runBody = hasGuards
+    ? [
+        "    try do",
+        indentLines(body, "  "),
+        "    catch",
+        "      :throw, {:error, _} = err -> err",
+        "    end",
+      ].join("\n")
+    : body;
+
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc "Workflow: ${upperFirst(wf.name)}"
 
-  alias ${contextModule}
   require Logger
 
   # currentUser threading.  Controllers pass
@@ -103,10 +121,20 @@ defmodule ${moduleName} do
   def run(${paramPattern}, current_user \\\\ nil) do
     _ = current_user
     ${startedCall}
-${body}
+${runBody}
   end
 end
 `;
+}
+
+/** Prefix every non-empty line of a multi-line block with `pad`.  Used
+ *  to re-indent a rendered workflow body when nesting it inside a
+ *  `try/catch` wrapper. */
+function indentLines(block: string, pad: string): string {
+  return block
+    .split("\n")
+    .map((l) => (l.length > 0 ? pad + l : l))
+    .join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -114,7 +142,11 @@ end
 // ---------------------------------------------------------------------------
 
 interface WorkflowBodyLine {
-  kind: "with-clause" | "emit" | "precondition" | "requires" | "expr";
+  // `stmt` — a standalone full statement (e.g. a `repo-run` bind) that is
+  //   NOT a `with`-clause; `loop` — a multi-line standalone block (an
+  //   `Enum.reduce_while` for a `for` loop).  Both force the body to be
+  //   rendered as an ordered sequence rather than a single `with`-chain.
+  kind: "with-clause" | "emit" | "precondition" | "requires" | "expr" | "stmt" | "loop";
   text: string;
   bindName?: string;
 }
@@ -257,7 +289,81 @@ function renderWorkflowStmt(
       // renderExpr already throws via the resource-op guard; keep an
       // explicit branch so the switch stays exhaustive.
       return [{ kind: "expr", text: `    ${renderExpr(st.call, renderCtx)}` }];
+    case "repo-run": {
+      // `Repo.run(<Retrieval>(args), page?)` → the `run_<ret>_<agg>!`
+      // code-interface (bang variant: returns the page struct directly
+      // and raises on failure, so it composes inside `Ash.transaction`
+      // which converts a raise to a rolled-back `{:error, _}`).  Page
+      // rides as a `page: [offset:, limit:]` keyword opt.
+      const args = st.retrievalArgs.map((a) => renderExpr(a, renderCtx));
+      if (st.page) {
+        const entries: string[] = [];
+        if (st.page.offset) entries.push(`offset: ${renderExpr(st.page.offset, renderCtx)}`);
+        if (st.page.limit) entries.push(`limit: ${renderExpr(st.page.limit, renderCtx)}`);
+        args.push(`page: [${entries.join(", ")}]`);
+      }
+      const action = `run_${snake(st.retrievalName)}_${snake(st.aggName)}`;
+      return [
+        {
+          kind: "stmt",
+          text: `    ${snake(st.name)} = ${contextModule}.${action}!(${args.join(", ")})`,
+          bindName: snake(st.name),
+        },
+      ];
+    }
+    case "for-each": {
+      // `for c in xs { … }` → `Enum.reduce_while` over the page's
+      // `.results` (offset pagination returns `%Ash.Page.Offset{}`, not a
+      // bare list).  Each body op-call runs as an Ash update (persisting);
+      // a failure halts the reduce with the error tuple so the enclosing
+      // transaction rolls back.
+      const iterable = `${renderExpr(st.iterable, renderCtx)}.results`;
+      const bodyLines = st.body.flatMap((inner) =>
+        renderLoopBodyStmt(inner, ctx, renderCtx, contextModule),
+      );
+      const loop = [
+        `    Enum.reduce_while(${iterable}, {:ok, nil}, fn ${snake(st.var)}, _acc ->`,
+        ...bodyLines.map((l) => `  ${l}`),
+        `    end)`,
+      ].join("\n");
+      return [{ kind: "loop", text: loop }];
+    }
   }
+}
+
+/** Render a `for`-loop body statement as Elixir inside the
+ *  `Enum.reduce_while` callback — op-calls become a `case` that threads
+ *  `{:cont, {:ok, _}}` / `{:halt, err}`.  v1 loop bodies are op-calls
+ *  (the validator restricts the shape); anything else is rendered as a
+ *  bare line (defensive). */
+function renderLoopBodyStmt(
+  st: WorkflowStmtIR,
+  ctx: BoundedContextIR,
+  renderCtx: RenderCtx,
+  contextModule: string,
+): string[] {
+  if (st.kind === "op-call") {
+    const op = ctx.aggregates
+      .find((a) => a.name === st.aggName)
+      ?.operations.find((o) => o.name === st.op);
+    const argEntries = (op?.params ?? []).map(
+      (p, i) => `${snake(p.name)}: ${renderExpr(st.args[i]!, renderCtx)}`,
+    );
+    const action = `${snake(st.op)}_${snake(st.aggName)}`;
+    const target = snake(st.target);
+    const call = argEntries.length
+      ? `${contextModule}.${action}(${target}, %{${argEntries.join(", ")}})`
+      : `${contextModule}.${action}(${target})`;
+    return [
+      `    case ${call} do`,
+      `      {:ok, updated} -> {:cont, {:ok, updated}}`,
+      `      err -> {:halt, err}`,
+      `    end`,
+    ];
+  }
+  // Non-op-call body statements aren't expected in v1 loops; render the
+  // underlying stmt lines as a fallback so the switch stays total.
+  return renderWorkflowStmt(st, ctx, renderCtx, contextModule).map((l) => l.text);
 }
 
 // ---------------------------------------------------------------------------
@@ -297,9 +403,15 @@ function renderTransactionalBody(
   const withClauses = body.filter((l) => l.kind === "with-clause");
   const emitLines = body.filter((l) => l.kind === "emit");
   const exprLines = body.filter((l) => l.kind === "expr");
+  // `stmt` / `loop` lines (repo-run bind + for-each reduce_while) can't be
+  // `with`-clauses — when present, render the body as an ordered sequence
+  // ending in the loop's `{:ok,_}`/`{:error,_}` rather than a with-chain.
+  const seqLines = body.filter((l) => l.kind === "stmt" || l.kind === "loop");
 
   let txBody: string;
-  if (withClauses.length === 0 && exprLines.length === 0) {
+  if (seqLines.length > 0) {
+    txBody = seqLines.map((l) => indentBlock(l.text, "      ")).join("\n");
+  } else if (withClauses.length === 0 && exprLines.length === 0) {
     txBody = `      {:ok, :ok}`;
   } else {
     // Elixir's `with` must start with its first clause on the same line —
@@ -367,12 +479,18 @@ function renderSequentialBody(lines: WorkflowBodyLine[], wf: WorkflowIR): string
   const withClauses = body.filter((l) => l.kind === "with-clause");
   const emitLines = body.filter((l) => l.kind === "emit");
   const exprLines = body.filter((l) => l.kind === "expr");
+  const seqLines = body.filter((l) => l.kind === "stmt" || l.kind === "loop");
 
   const lastBind = [...body].reverse().find((l) => l.bindName);
   const returnVal = lastBind?.bindName ?? ":ok";
 
   let bodySection: string;
-  if (withClauses.length === 0 && exprLines.length === 0) {
+  if (seqLines.length > 0) {
+    // Ordered sequence: stmt binds then the loop's reduce_while as the
+    // terminal expression.  The completed-log fires before the loop runs
+    // (a loop failure returns its own {:error,_}; success falls through).
+    bodySection = [`    ${completedCall}`, ...seqLines.map((l) => l.text)].join("\n");
+  } else if (withClauses.length === 0 && exprLines.length === 0) {
     bodySection = `    ${completedCall}\n    :ok`;
   } else {
     // See renderTransactionalBody — `with` must hug its first clause.
@@ -390,6 +508,21 @@ function renderSequentialBody(lines: WorkflowBodyLine[], wf: WorkflowIR): string
     emitLines.length > 0 ? "\n" + emitLines.map((l) => "    " + l.text.trimStart()).join("\n") : "";
 
   return `${precondSection ? precondSection + "\n" : ""}${bodySection}${emitSection}`;
+}
+
+/** Re-indent a multi-line block (whose lines start at 4-space base) to a
+ *  new base indent — used to lift sequenced stmt/loop bodies into the
+ *  transaction's `fn -> … end` (6-space) without disturbing their
+ *  internal relative indentation. */
+function indentBlock(text: string, base: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      if (line.length === 0) return line;
+      const stripped = line.replace(/^ {4}/, "");
+      return `${base}${stripped}`;
+    })
+    .join("\n");
 }
 
 function elixirIsolationLevel(level: import("../../ir/types/loom-ir.js").IsolationLevel): string {

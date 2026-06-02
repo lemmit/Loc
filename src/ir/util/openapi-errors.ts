@@ -10,13 +10,17 @@
 // `x-request-id` response header (not the body), so the body stays
 // byte-identical across backends.
 //
-// The matrix is deterministic from route shape — no auth-conditionality —
-// so the three emitters never drift:
+// The matrix is deterministic from route shape, with one auth-conditional
+// dimension: an operation / workflow carrying a `requires` guard also
+// declares 403 (it denies with ForbiddenError/Exception/`:forbidden` at
+// runtime).  `guarded` is the same predicate on every backend
+// (`operationIsGuarded` / `workflowIsGuarded`), so the three emitters stay
+// in lockstep.
 //   create  (POST /<aggs>)            → 400  (domain / validation)
 //   getById (GET  /<aggs>/{id})       → 404  (not found)
-//   operation (POST /<aggs>/{id}/op)  → 400, 404
+//   operation (POST /<aggs>/{id}/op)  → 400, [403 if guarded], 404
 //   find (optional return)            → 404
-//   workflow (POST /workflows/<wf>)   → 400
+//   workflow (POST /workflows/<wf>)   → 400, [403 if guarded]
 //   list / view / non-optional find   → (none beyond the universal 500)
 //
 // 500 is the universal fallback every route can produce; like most specs
@@ -32,6 +36,7 @@ export const PROBLEM_SCHEMA = "ProblemDetails";
 export type OpErrorKind =
   | "create"
   | "getById"
+  | "destroy"
   | "operation"
   | "workflow"
   | "findOptional"
@@ -40,17 +45,25 @@ export type OpErrorKind =
   | "list"
   | "view";
 
-/** The HTTP error statuses a given operation kind declares, ascending. */
-export function errorStatuses(kind: OpErrorKind): number[] {
+/** The HTTP error statuses a given operation kind declares, ascending.
+ *  `guarded` (an op/workflow with a `requires` guard) inserts 403 — the
+ *  authorization-denied outcome — for the `operation` and `workflow`
+ *  kinds; it's inert for every other kind (no kind but those two carries a
+ *  guard). */
+export function errorStatuses(kind: OpErrorKind, guarded = false): number[] {
   switch (kind) {
     case "create":
       return [400];
     case "getById":
       return [404];
+    // destroy (DELETE /<aggs>/{id}) → 404 (not found) + 409 (still
+    // referenced: cross-aggregate `X id` FK is ON DELETE RESTRICT).
+    case "destroy":
+      return [404, 409];
     case "operation":
-      return [400, 404];
+      return guarded ? [400, 403, 404] : [400, 404];
     case "workflow":
-      return [400];
+      return guarded ? [400, 403] : [400];
     case "findOptional":
       return [404];
     case "findList":
@@ -73,6 +86,8 @@ export function problemTitle(status: number): string {
       return "Forbidden";
     case 404:
       return "Not Found";
+    case 409:
+      return "Conflict";
     case 500:
       return "Internal Server Error";
     default:

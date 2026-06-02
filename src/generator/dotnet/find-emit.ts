@@ -1,6 +1,12 @@
-import type { EnrichedAggregateIR, FindIR, RepositoryIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type {
+  EnrichedAggregateIR,
+  FindIR,
+  RepositoryIR,
+  RetrievalIR,
+  TypeIR,
+} from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
-import { renderCsExpr } from "./render-expr.js";
+import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Repository find-method bodies.
@@ -19,23 +25,82 @@ import { renderCsExpr } from "./render-expr.js";
 export function buildFindBodies(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
-  usings?: Set<string>,
 ): Array<{ name: string; filterClause: string; projectionClause: string }> {
   if (!repo) return [];
   return repo.finds.map((find) => ({
     name: find.name,
-    filterClause: filterClauseFor(find, agg, usings),
+    filterClause: filterClauseFor(find, agg),
     projectionClause: projectionClauseFor(find.returnType),
   }));
 }
 
-function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR, usings?: Set<string>): string {
+/** Namespaces the find-filter predicates of `repo` reach into (e.g.
+ *  System.Text.RegularExpressions for a `where … matches …` find) — the
+ *  repository-impl emitter declares these as `using`s.  Pure mirror of
+ *  what `filterClauseFor` renders. */
+export function collectFindBodyUsings(
+  repo: RepositoryIR | undefined,
+  into: Set<string> = new Set(),
+): Set<string> {
+  for (const find of repo?.finds ?? []) {
+    if (find.filter) collectCsExprUsings(find.filter, into);
+  }
+  return into;
+}
+
+/** LINQ clause fragments for a `retrieval`'s `Run<Name>Async` method
+ *  (retrieval.md): the `where` predicate, the `sort` ordering, and the
+ *  default-whole projection.  Paging (`Skip`/`Take`) is spliced from the
+ *  call-site `page` argument by the impl emitter, not here. */
+export function buildRetrievalBodies(
+  agg: EnrichedAggregateIR,
+  retrievals: RetrievalIR[],
+): Array<{ name: string; whereClause: string; orderByClause: string }> {
+  return retrievals.map((r) => ({
+    name: r.name,
+    whereClause: `.Where(x => ${renderCsExpr(r.where, { thisName: "x", agg })})`,
+    orderByClause: orderByClauseFor(r),
+  }));
+}
+
+/** `.OrderBy(x => x.Col)[.ThenBy…]` for a retrieval's sort terms (empty
+ *  when unsorted).  Only the first path segment is used in v1 (a direct
+ *  column), matching the Hono emitter + validateRetrievals gating. */
+function orderByClauseFor(r: RetrievalIR): string {
+  if (r.sort.length === 0) return "";
+  return r.sort
+    .map((s, i) => {
+      const col = upperFirst(s.path[0]!.name);
+      const method =
+        i === 0
+          ? s.direction === "desc"
+            ? "OrderByDescending"
+            : "OrderBy"
+          : s.direction === "desc"
+            ? "ThenByDescending"
+            : "ThenBy";
+      return `.${method}(x => x.${col})`;
+    })
+    .join("");
+}
+
+/** Namespaces a retrieval's `where` predicates reach into — same role as
+ *  `collectFindBodyUsings` for finds. */
+export function collectRetrievalBodyUsings(
+  retrievals: RetrievalIR[],
+  into: Set<string> = new Set(),
+): Set<string> {
+  for (const r of retrievals) collectCsExprUsings(r.where, into);
+  return into;
+}
+
+function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR): string {
   if (find.filter) {
     // `agg` is threaded so the renderer can resolve a
     // `this.<refColl>.contains(param)` predicate to its
     // AssociationIR and emit a join-table subquery.  See
     // `render-expr.ts:renderMethodCall`.
-    return `.Where(x => ${renderCsExpr(find.filter, { thisName: "x", usings, agg })})`;
+    return `.Where(x => ${renderCsExpr(find.filter, { thisName: "x", agg })})`;
   }
   if (find.params.length === 0) return "";
   const conditions: string[] = [];

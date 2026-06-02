@@ -1,11 +1,28 @@
 # Playground git-backed VFS — versioned workspace, preview, and regeneration
 
-> Status: **PROPOSED.** No code yet. This records the architecture
-> agreed in a design thread for making the browser playground's
-> filesystem git-native. It supersedes nothing on `origin/main`; it
-> reshapes `web/`'s persistence layer (`web/src/vfs/`, `web/src/build/`,
-> `web/src/workspace/`). The toolchain (`src/`) and the Node CLI are
-> **untouched** — this is a `web/`-only change.
+> Status: **SHIPPED.** Implemented on `origin/main` across #748
+> (store + async workspace layer + generated-as-merge + preview-from-
+> workspace), #757 (debounced commit-on-save, refresh race guard,
+> scoped source scan), and #761 (dead-code cleanup). The durable store
+> is LightningFS + isomorphic-git under `web/src/workspace/git/`; the
+> legacy IndexedDB workspace is imported once via
+> `web/src/vfs/legacy-idb.ts`. The toolchain (`src/`) and the Node CLI
+> are untouched — this was a `web/`-only change. Build order:
+> [`../plans/playground-git-vfs-implementation.md`](../plans/playground-git-vfs-implementation.md).
+>
+> **Follow-ups shipped** (beyond the original design note below): the
+> workspace history is now visible — a **History** dock/mobile tab
+> listing commits + per-commit file changes (#766); **restore to a past
+> commit** via `GitStore.restoreCommit` (#773); an **in-editor conflict
+> indicator** — the Output panel's "Conflicts" stream/dot when a
+> regenerated file carries `<<<<<<<` markers (#778, closing the deferral
+> noted in earlier revisions); and Playwright **e2e** for history,
+> restore, and conflicts (#814).
+>
+> **Still out of scope:** remotes (clone/push/pull), per the design
+> below.
+>
+> The text below is the original design note, preserved for context.
 
 ## Problem
 

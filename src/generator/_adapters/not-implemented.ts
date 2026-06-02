@@ -19,6 +19,15 @@
  *  name, so the user sees which slot they tripped. */
 export type AdapterKind = "persistence" | "style" | "layout";
 
+/** Brand stamped on every stub's capability target so a pure lookup can
+ *  tell stubs from real adapters WITHOUT invoking an `emit*` method
+ *  (which throws).  Read by `availableAdapterNames`
+ *  (`src/platform/resolve-adapters.ts`) to derive the validator's menu of
+ *  only-implemented adapters — per D-REALIZATION-AXES, selecting a stub
+ *  must be rejected at validation, not blow up at generation.  A symbol
+ *  key, so it can never collide with a capability/emit field name. */
+export const ADAPTER_IS_STUB = Symbol("loom.adapterIsStub");
+
 export class AdapterNotImplementedError extends Error {
   constructor(
     readonly adapterKind: AdapterKind,
@@ -60,6 +69,10 @@ export function stubAdapter<T extends object>(
    *  forget a required capability field. */
   capabilities: Partial<T>,
 ): T {
+  // Brand the target so `availableAdapterNames` can tell stubs apart by
+  // a pure read (`adapter[ADAPTER_IS_STUB] === true`).  Lives on the
+  // target, so the proxy's `prop in target` branch returns it directly.
+  (capabilities as Record<symbol, unknown>)[ADAPTER_IS_STUB] = true;
   return new Proxy(capabilities as T, {
     get(target, prop, receiver) {
       // Capability fields answer directly.

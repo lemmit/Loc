@@ -44,7 +44,7 @@ system Sys {
 async function buildCtx(): Promise<EmitCtx> {
   const loom = enrichLoomModel(lowerModel(await parseValid(SRC)));
   const sys = loom.systems[0]!;
-  const deployable = sys.deployables.find((d) => d.platform === "hono")!;
+  const deployable = sys.deployables.find((d) => d.platform === "node")!;
   const all: EnrichedBoundedContextIR[] = sys.subdomains.flatMap((s) => s.contexts);
   const contexts = all.filter((c) => deployable.contextNames.includes(c.name));
   return { deployable, contexts, sys, migrations: [] };

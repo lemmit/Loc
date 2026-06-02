@@ -11,6 +11,7 @@ export {
   type GitAuthor,
   type ListOpts,
   type CommitInfo,
+  type CommitFileChange,
 } from "./git-store.js";
 export { startAutoCommit, type AutoCommitOptions } from "./auto-commit.js";
 export { commitOnSave, GENERATED_BASE_REF } from "./helpers.js";

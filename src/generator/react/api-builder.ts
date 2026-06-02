@@ -1,5 +1,5 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { forApiRead, forCreateInput } from "../../ir/enrich/wire-projection.js";
+import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   aggregateUsesMoney,
@@ -70,13 +70,16 @@ export function buildApiModule(
   // keeping `immutable` (settable on create) and `secret` (client
   // provides password hashes / API keys).  Aligns with the Hono and
   // .NET CreateRequest shapes.
-  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
+  const requiredFields = createInputFields(agg);
   lines.push(
     ...emitObjectWithRefines(
       `Create${agg.name}Request`,
       requiredFields.map((f) => ({ name: f.name, base: zodForRequest(f.type) })),
       agg.invariants,
-      new Set(agg.fields.map((f) => f.name)),
+      // Only create-input fields can be validated at the wire boundary —
+      // invariants over excluded fields (e.g. a `managed` collection) are
+      // enforced server-side, so they must not refine an absent field.
+      new Set(requiredFields.map((f) => f.name)),
     ),
   );
   lines.push(`export type Create${agg.name}Request = z.infer<typeof Create${agg.name}Request>;`);
@@ -86,14 +89,14 @@ export function buildApiModule(
     const opInvariants = preconditionsAsInvariants(op);
     lines.push(
       ...emitObjectWithRefines(
-        `${upperFirst(op.name)}Request`,
+        `${upperFirst(op.name)}${agg.name}Request`,
         op.params.map((p) => ({ name: p.name, base: zodForRequest(p.type) })),
         opInvariants,
         new Set(op.params.map((p) => p.name)),
       ),
     );
     lines.push(
-      `export type ${upperFirst(op.name)}Request = z.infer<typeof ${upperFirst(op.name)}Request>;`,
+      `export type ${upperFirst(op.name)}${agg.name}Request = z.infer<typeof ${upperFirst(op.name)}${agg.name}Request>;`,
     );
   }
   lines.push("");
@@ -169,6 +172,24 @@ export function buildApiModule(
   lines.push(`}`);
   lines.push("");
 
+  // useDelete<Agg> — canonical hard delete (DELETE /<tag>/{id}).  Gated on
+  // the IR lifecycle: emitted only when the aggregate has a canonical
+  // `destroy` (declared or via `crudish`), so plain aggregates' API modules
+  // are unchanged.  Pairs with the `api.delete` helper, which the shell
+  // emits under the same condition.
+  if (agg.canonicalDestroy) {
+    lines.push(`export function useDelete${agg.name}() {`);
+    lines.push(`  const qc = useQueryClient();`);
+    lines.push(`  return useMutation({`);
+    lines.push(`    mutationFn: async (id: string) => {`);
+    lines.push(`      await api.delete(\`/${tag}/\${id}\`);`);
+    lines.push(`    },`);
+    lines.push(`    onSuccess: () => qc.invalidateQueries({ queryKey: ${aggKey} }),`);
+    lines.push(`  });`);
+    lines.push(`}`);
+    lines.push("");
+  }
+
   // use<Op><Agg> — one per public operation.
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     // URL segment from routeSlug (D-URLSTYLE); the hook name + request
@@ -177,7 +198,7 @@ export function buildApiModule(
     lines.push(`export function use${upperFirst(op.name)}${agg.name}(id: string) {`);
     lines.push(`  const qc = useQueryClient();`);
     lines.push(`  return useMutation({`);
-    lines.push(`    mutationFn: async (input: ${upperFirst(op.name)}Request) => {`);
+    lines.push(`    mutationFn: async (input: ${upperFirst(op.name)}${agg.name}Request) => {`);
     lines.push(`      await api.post(\`/${tag}/\${id}/${opSnake}\`, input);`);
     lines.push(`    },`);
     lines.push(`    onSuccess: () => {`);

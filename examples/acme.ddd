@@ -60,7 +60,7 @@ system Acme {
                 invariant currency.length == 3
             }
 
-            aggregate Product {
+            aggregate Product with crudish {
                 sku: string
                 price: Money
                 invariant sku.length > 0
@@ -80,7 +80,7 @@ system Acme {
 
             event OrderConfirmed { order: Order id, at: datetime }
 
-            aggregate Order {
+            aggregate Order with crudish {
                 customerId: string
                 status: OrderStatus
                 placedAt: datetime
@@ -190,7 +190,7 @@ system Acme {
     subdomain CustomerMgmt {
         context Customers {
 
-            aggregate Customer {
+            aggregate Customer with crudish {
 
                 // Inline `check` per-property sugar — desugars to an
                 // invariant on the parent.  Single-field shapes get

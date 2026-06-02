@@ -1384,7 +1384,7 @@ describe("typescript generator", () => {
       );
       const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
       const sys = loom.systems[0]!;
-      const dep = sys.deployables.find((d) => d.platform === "hono")!;
+      const dep = sys.deployables.find((d) => d.platform === "node")!;
       const contexts = sys.subdomains.flatMap((m) => m.contexts);
       return generateTypeScriptForContexts(contexts, HONO_V4_PINS, { deployable: dep, sys });
     }
@@ -1481,6 +1481,97 @@ describe("typescript generator", () => {
       const route = files.get("http/order.routes.ts")!;
       expect(route).toMatch(/c\.get\("currentUser"\)/);
       expect(route).toMatch(/aggregate\.cancel\(currentUser\)/);
+    });
+
+    const SRC_WORKFLOW_GUARD = `
+      system Acme {
+        user {
+          id: string
+          role: string
+        }
+        subdomain Sales {
+          context Orders {
+            aggregate Order {
+              customerId: string
+              status: string
+            }
+            repository Orders for Order { }
+            workflow archiveAll() {
+              requires currentUser.role == "admin"
+              let o = Order.create({ customerId: "c", status: "archived" })
+            }
+            workflow touchOne() {
+              let o = Order.create({ customerId: "c", status: "new" })
+            }
+          }
+        }
+        deployable api {
+          platform: hono
+          contexts: [Orders]
+          port: 3000
+          auth: required
+        }
+      }
+    `;
+
+    it("guarded workflow binds currentUser before the requires check, and denies with ForbiddenError (403)", async () => {
+      // A `requires currentUser.…` guard in a workflow renders the bare
+      // token `currentUser`; without a binding the handler throws a
+      // ReferenceError (→ 500) before it can deny.  The handler must read
+      // the request-scoped user — mirroring the per-operation route — so a
+      // failed guard raises ForbiddenError, which onError maps to 403.
+      const files = await emitForAuthSystem(SRC_WORKFLOW_GUARD);
+      const wf = files.get("http/workflows.ts")!;
+      expect(wf).toMatch(
+        /const currentUser = httpCtx\.get\("currentUser"\) as import\("\.\.\/auth\/user-types"\)\.User;/,
+      );
+      expect(wf).toMatch(/if \(!\(currentUser\.role === "admin"\)\) throw new ForbiddenError\(/);
+      expect(wf).toMatch(/if \(err instanceof ForbiddenError\) return problem\(403,/);
+      // The binding is conditional: only the guarded workflow's handler
+      // gets it — `touchOne` never references currentUser.
+      expect((wf.match(/httpCtx\.get\("currentUser"\)/g) ?? []).length).toBe(1);
+      // The guarded workflow DECLARES 403 in its OpenAPI responses (the
+      // unguarded `touchOne` does not) — exactly one 403 across the file.
+      expect(wf).toMatch(
+        /403: \{ description: "Forbidden", content: \{ "application\/problem\+json": \{ schema: ProblemDetails \} \} \}/,
+      );
+      expect((wf.match(/403: \{ description: "Forbidden"/g) ?? []).length).toBe(1);
+    });
+
+    it("a `requires`-guarded operation declares 403 in its route responses; an unguarded one does not", async () => {
+      // A `requires` guard (not a precondition) denies with ForbiddenError →
+      // 403; the route's `responses` block gains a 403 ProblemDetails entry.
+      // `block` is guarded, `nudge` is not — exactly one 403 in the file.
+      const src = `
+        system Acme {
+          user { id: string, role: string }
+          subdomain Sales {
+            context Orders {
+              aggregate Order {
+                customerId: string
+                status: string
+                operation block() {
+                  requires currentUser.role == "admin"
+                  status := "blocked"
+                }
+                operation nudge() {
+                  status := "nudged"
+                }
+              }
+              repository Orders for Order { }
+            }
+          }
+          deployable api { platform: hono, contexts: [Orders], port: 3000, auth: required }
+        }
+      `;
+      const files = await emitForAuthSystem(src);
+      const route = files.get("http/order.routes.ts")!;
+      expect(route).toMatch(/operationId: "blockOrder"/);
+      expect(route).toMatch(
+        /403: \{ description: "Forbidden", content: \{ "application\/problem\+json": \{ schema: ProblemDetails \} \} \}/,
+      );
+      // Only the guarded op declares it.
+      expect((route.match(/403: \{ description: "Forbidden"/g) ?? []).length).toBe(1);
     });
 
     // -----------------------------------------------------------------------
@@ -1617,7 +1708,7 @@ describe("typescript generator", () => {
       const orderRoutes = files.get("http/order.routes.ts")!;
       // `qty > 0` → recognised as min(1) on the int field.
       expect(orderRoutes).toMatch(
-        /AddLineRequest = z\.object\(\{[\s\S]*qty: z\.coerce\.number\(\)\.int\(\)\.min\(1\)/,
+        /AddLineOrderRequest = z\.object\(\{[\s\S]*qty: z\.coerce\.number\(\)\.int\(\)\.min\(1\)/,
       );
     });
 
@@ -1647,7 +1738,7 @@ describe("typescript generator", () => {
       // `this.status` via a helper-fn.  Must NOT appear as a refine
       // on AddLineRequest (and the refine can't read `this`).
       const addLineBlock = orderRoutes.match(
-        /const AddLineRequest = z\.object\(\{[\s\S]*?\}\)\.openapi\("AddLineRequest"\)([^;]*);/,
+        /const AddLineOrderRequest = z\.object\(\{[\s\S]*?\}\)\.openapi\("AddLineOrderRequest"\)([^;]*);/,
       )!;
       // Only the `qty > 0` precondition is wire-translatable, and it
       // was absorbed into the int chain — so no `.refine(` here.
@@ -1656,7 +1747,7 @@ describe("typescript generator", () => {
       // preconditions — both server-only — so the schema is empty +
       // unrefined.
       expect(orderRoutes).toMatch(
-        /const ConfirmRequest = z\.object\(\{\s*\}\)\.openapi\("ConfirmRequest"\);/,
+        /const ConfirmOrderRequest = z\.object\(\{\s*\}\)\.openapi\("ConfirmOrderRequest"\);/,
       );
     });
 
@@ -1671,6 +1762,7 @@ describe("typescript generator", () => {
               email: string
               derived display: string = email
               invariant email.matches("^[^@]+@.+$")
+              create(email: string) { email := email }
             }
             repository Users for User { }
           }
@@ -1719,6 +1811,7 @@ describe("typescript generator", () => {
               fromTime: int
               toTime:   int
               invariant fromTime < toTime
+              create(fromTime: int, toTime: int) { fromTime := fromTime  toTime := toTime }
             }
             repository Reservations for Reservation { }
           }

@@ -22,7 +22,9 @@ These cover a single language feature each.  Each one is self-contained.
 | --- | --- |
 | [`auth.md`](auth.md) | `user` block, `auth: required`, `currentUser`, `requires`, row-level permissions. |
 | [`views.md`](views.md) | `view` declarations, joined ("snowflake") views via `X id` follows. |
+| [`inheritance.md`](inheritance.md) | `abstract aggregate`, `extends`, `inheritanceUsing(sharedTable \| ownTable)` — TPC (all backends) vs TPH (Hono only), and the polymorphic `find all <Base>` reader. |
 | [`workflow.md`](workflow.md) | `workflow` blocks, transactional vs non-transactional, isolation levels, event drain semantics. |
+| [`resources.md`](resources.md) | `storage` / `resource`, source types, the `objectStore` / `queue` / `api` kinds, the `config` map, and workflow-level resource consumption (`files.put`, `jobs.enqueue`, `rates.get`). |
 | [`extern.md`](extern.md) | `extern` operations and their per-backend handler registries. |
 | [`capabilities.md`](capabilities.md) | `filter`, `stamp`, `implements` — cross-aggregate behaviours like soft-delete and audit. |
 | [`scaffold-macros.md`](scaffold-macros.md) | The `scaffold`, `crudish`, `audit`, and `softDelete` macros — what they expand to. |

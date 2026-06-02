@@ -31,6 +31,7 @@ fastest way to read this matrix concretely.
 | `event` | TypeScript discriminated union; pushed via `_events.push` | `record` implementing `IDomainEvent`; pushed via `_events.Add` | (events are domain-internal; not surfaced to the SPA) |
 | `aggregate` | Class with private state, factory, ops, derived getters, `pullEvents()` | Sealed class with private state, factory, ops, derived getters, `PullEvents()` | List + Detail + New page; api hooks |
 | `entity` part | Same as aggregate but with `_parentId` | Same as aggregate; mapped via `OwnsMany` | Sub-table on detail page, master-detail row testids |
+| `abstract aggregate` + `extends` / `inheritanceUsing` | **TPC** (`ownTable`): standalone Drizzle table per concrete; a read-only `<Base>Repository.findAll()` union reader + `<Base>` discriminated-union type. **TPH** (`sharedTable`, default): one shared table + `kind` discriminator + nullable per-concrete columns; `<Base> id` refs + base reader supported. | **TPC**: `abstract class <Base>` carrying shared fields, concretes `: <Base>`, EF `Ignore<<Base>>()` (each concrete maps standalone); read-only `I<Base>Repository` / `<Base>Repository` → `IReadOnlyList<<Base>>`. **TPH**: not implemented — IR-validate error. | Concrete subtypes carry the merged base fields in their wire shape; no base-specific page. |
 | `contains` (collection) | Drizzle table with `parent_id` FK; auto-loaded in repo | EF owned-collection; auto-loaded by tracker | Sub-table on detail; not editable in the create form |
 | `X id[]` (reference collection) | Auto-derived many-to-many **join table** (composite PK enforces set semantics); save diff-syncs join rows, `.contains(param)` lowers to an `inArray` subquery against the join table. The join table also carries an `ordinal` column written on every `+=`, but the wire contract is unordered — see "What the generators don't do" below. | EF Core join entity + `DbSet<JoinEntity>` (composite PK + `Ordinal`); `GetByIdAsync` loads via the join entity, `SaveAsync` diff-syncs, `.contains(param)` lowers to `_db.<JoinDbSet>.Any(...)`. (Phoenix/Ash backend: `many_to_many ... through <JoinResource>` + a `calculate :<field>, {:array, :uuid}, expr(<rel>.id)`; `.contains` lowers to `exists(<rel>, id == ^arg(:<param>))`.) | `X id[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
 | `derived` | Getter that calls into the expression | Computed property that calls into the expression | Read-only field on detail; included in the response Zod schema |
@@ -40,7 +41,7 @@ fastest way to read this matrix concretely.
 | `operation` | Public method (or private if marked) that enforces preconditions, mutates state, queues events, and re-asserts invariants | Same shape; visibility honoured | Mantine button on the detail page; opens a modal whose form binds to `<Op>Request`; submit calls `use<Op><Agg>()` |
 | `precondition` | `if (!cond) throw new DomainError(<source>)` | `if (!cond) throw new DomainException(<source>)` | (server-side; HTTP 400 surfaces as a Mantine error notification) |
 | `emit` | `_events.push({ type: "X", … })` | `_events.Add(new X(...))` | (server-side) |
-| `repository` find | Method on `<Agg>Repository`; convention-based predicate or TODO comment for `where` clauses | Method on `I<Agg>Repository`; LINQ `.Where(x => …)` for both convention and `where` forms | `use<FindName><Agg>(query)` React Query hook + a list-page filter mode (deferred; v1 emits the hook only) |
+| `repository` find | Method on `<Agg>Repository`; `where` clauses lower to Drizzle predicates (`lowerToDrizzle`) over the queryable subset, paramless finds fall back to convention-matching | Method on `I<Agg>Repository`; LINQ `.Where(x => …)` for both convention and `where` forms | `use<FindName><Agg>(query)` React Query hook + a list-page filter mode (deferred; v1 emits the hook only) |
 | Auto `findById` / `getById` | Yes — load root + parts in a transaction; `getById` throws on missing | Yes — `GetByIdAsync` returns `Order?`, `getById` is implicit via the controller raising 404 | `use<Agg>ById(id)` hook, used by the detail page |
 | Auto `find all` | Yes — `GET /<plural>`, loads with master-detail | Yes — `GET /<plural>` via `GetAllQuery` + handler | `useAll<Agg>()` hook, used by the list page |
 | `test "name" { … }` | Vitest at `domain/<aggregate>.test.ts` | xUnit at `Tests/<Plural>/<Aggregate>Tests.cs` | (n/a — backend-only) |
@@ -162,9 +163,15 @@ and the React Select picker.
   current pairs carrying their `ordinal` position so reorders persist)
   in a transaction, drain events via `dispatcher.dispatch`
 - `all()` — auto-included; loads all rows and hydrates with parts
-- `<find>(...)` — one method per user-declared `find`; convention-
-  based predicate or a TODO comment for `where` clauses (Drizzle has
-  no general lambda → SQL translator)
+- `<find>(...)` — one method per user-declared `find`; a `where`
+  clause lowers to a Drizzle predicate (`lowerToDrizzle` in
+  `repository-find-builder.ts`) over the queryable subset
+  (comparisons, `&&`/`||`, `!`, bare-boolean columns, value-object
+  sub-columns, `currentUser.<field>`, enum values, and
+  `<refColl>.contains(x)` join-table subqueries); a paramless find
+  falls back to convention-matching its params to columns. The IR
+  validator (`firstNonQueryableNode`) gates `where` clauses to exactly
+  this subset, so lowering never silently drops a predicate.
 - `toWire(root)` — domain → wire DTO projection used by route
   handlers
 
@@ -610,6 +617,7 @@ Aggregate IR maps onto Ash:
 | `workflow placeOrder(...) { ... }` | code-interface module with `Ash.transaction(<App>.<Ctx>, fn -> with … end)` |
 | `view ActiveOrders = Order where …` | thin module wrapping `Order |> Ash.Query.filter(…)` |
 | `emit OrderConfirmed { … }` | `Phoenix.PubSub.broadcast(<App>.PubSub, "events", %Events.OrderConfirmed{…})` |
+| `abstract aggregate Party` + `extends` (TPC) | base emits no resource; each concrete is a standalone `Ash.Resource`; the context Ash.Domain gains `list_parties!/0` (the union of the concrete `list_<concrete>!` reads). TPH (`sharedTable`) is not implemented on Phoenix — IR-validate error. |
 
 ### Per-page detail
 

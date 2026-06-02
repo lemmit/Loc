@@ -518,6 +518,12 @@
         "named": [
           "useState"
         ]
+      },
+      {
+        "from": "../lib/apply-server-errors",
+        "named": [
+          "applyServerErrors"
+        ]
       }
     ],
     "form-default-onsubmit": [
@@ -525,6 +531,12 @@
         "from": "notistack",
         "named": [
           "enqueueSnackbar"
+        ]
+      },
+      {
+        "from": "../lib/apply-server-errors",
+        "named": [
+          "applyServerErrors"
         ]
       }
     ],

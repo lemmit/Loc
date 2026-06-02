@@ -56,6 +56,8 @@ export {
   assignStmtPath,
   contextFilter,
   contextStamp,
+  create,
+  destroy,
   field,
   idRef,
   implementsCapability,

@@ -6,9 +6,11 @@ using Api.Domain.Enums;
 
 namespace Api.Application.Orders.Requests;
 
-public sealed record CreateOrderRequest([property: Required] string CustomerId, [property: Required] OrderStatus Status, [property: Required] string PlacedAt);
+public sealed record CreateOrderRequest([Required] string CustomerId, [Required] OrderStatus Status, [Required] string PlacedAt);
 
-public sealed record AddLineRequest([property: Required] Guid ProductId, [property: Required] int Qty);
+public sealed record AddLineOrderRequest([Required] Guid ProductId, [Required] int Qty);
 
-public sealed record ConfirmRequest();
+public sealed record ConfirmOrderRequest();
+
+public sealed record UpdateOrderRequest([Required] string CustomerId, [Required] OrderStatus Status, [Required] string PlacedAt);
 

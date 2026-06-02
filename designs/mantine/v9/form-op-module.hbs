@@ -7,8 +7,8 @@ function open{{opPascal}}Modal(mut: ReturnType<typeof use{{opPascal}}{{aggregate
 
 function {{opPascal}}Form({ mut, onClose }: { mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}>; onClose: () => void }) {
 {{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
-{{/each}}  const {{{destructured}}} = useForm<{{opPascal}}Request>({
-    resolver: zodResolver({{opPascal}}Request),
+{{/each}}  const {{{destructured}}} = useForm<{{opPascal}}{{aggregateName}}Request>({
+    resolver: zodResolver({{opPascal}}{{aggregateName}}Request),
     defaultValues: {{{defaultValuesTs}}},
   });
   return (
@@ -20,7 +20,12 @@ function {{opPascal}}Form({ mut, onClose }: { mut: ReturnType<typeof use{{opPasc
           notifications.show({ color: "green", message: "{{humanOp}} succeeded" });
           onClose();
         } catch (e) {
-          notifications.show({ color: "red", message: (e as Error).message });
+          const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+          if (outcome.kind === "global") {
+            notifications.show({ color: "red", message: outcome.title });
+          } else if (outcome.kind === "unhandled") {
+            notifications.show({ color: "red", message: (e as Error).message });
+          }
         }
       })}
     >

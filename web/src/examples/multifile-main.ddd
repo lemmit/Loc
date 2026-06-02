@@ -12,7 +12,7 @@ system MultiFileStore {
 
   subdomain Catalog {
     context Products {
-      aggregate Product {
+      aggregate Product with crudish {
         sku: string
         price: Money
         currency: Currency

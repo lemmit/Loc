@@ -40,15 +40,23 @@ export function renderDbContext(
   documentAggs: ReadonlySet<string> = new Set(),
 ): string {
   const isDoc = (name: string) => documentAggs.has(name);
-  const anyDoc = ctx.aggregates.some((a) => isDoc(a.name));
+  // Abstract TPC (`ownTable`) bases own no table — they are excluded from the
+  // EF model via `modelBuilder.Ignore<Base>()` so each concrete maps standalone
+  // (its own table carrying the inherited base columns flattened), instead of
+  // EF folding the hierarchy into TPH/TPC mapping.  They contribute no DbSet
+  // and no configuration; the concretes do.
+  const entityAggs = ctx.aggregates.filter((a) => !a.isAbstract);
+  const abstractBases = ctx.aggregates.filter((a) => a.isAbstract);
+  const anyDoc = entityAggs.some((a) => isDoc(a.name));
   const aggUsings = ctx.aggregates.map((a) => `using ${ns}.Domain.${plural(a.name)};`);
   if (anyDoc) aggUsings.push(`using ${ns}.Infrastructure.Persistence.Documents;`);
-  const dbSets = ctx.aggregates.map((a) =>
+  const dbSets = entityAggs.map((a) =>
     isDoc(a.name)
       ? `    public DbSet<${a.name}Document> ${plural(upperFirst(a.name))} => Set<${a.name}Document>();`
       : `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
   );
-  const applyConfigs = ctx.aggregates.map((a) =>
+  const ignoreBases = abstractBases.map((a) => `        modelBuilder.Ignore<${a.name}>();`);
+  const applyConfigs = entityAggs.map((a) =>
     isDoc(a.name)
       ? `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}DocumentConfiguration());`
       : `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
@@ -94,6 +102,7 @@ export function renderDbContext(
       ...joinDbSets,
       "    protected override void OnModelCreating(ModelBuilder modelBuilder)",
       "    {",
+      ...ignoreBases,
       ...applyConfigs,
       ...joinApplyConfigs,
       "    }",

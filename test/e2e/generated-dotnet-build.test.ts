@@ -38,10 +38,17 @@ describe.skipIf(!ENABLED)(
       "examples/banking.ddd",
       "examples/inventory.ddd",
       "examples/roster.ddd",
+      // crudish lifecycle — the only example that emits a canonical
+      // destroy, so this cell is what compiles the .NET [HttpDelete] +
+      // Destroy<Agg>Command + repo DeleteAsync paths.
+      "examples/lifecycle.ddd",
       // Document-persistence path (`normalised(false)`): exercises the
       // STJ round-trip emit — `<Agg>Document` record, snapshot DTOs,
       // `ToSnapshot()`/`FromSnapshot(...)`, jsonb column.
       "examples/document.ddd",
+      // First-boot seeding (database-seeding.md): compiles
+      // Infrastructure/Persistence/Seed.cs + the Program.cs RunSeeds wiring.
+      "examples/seeding.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {

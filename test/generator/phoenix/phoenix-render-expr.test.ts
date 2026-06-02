@@ -308,6 +308,25 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
     ).toBe("Enum.count(record.items)");
   });
 
+  it("collapses array.length → Enum.count(...) (not a `.length` field access)", () => {
+    // The DSL admits both `.count` and `.length` on arrays; a missing
+    // `.length` arm let it fall through to `record.items.length`, a map
+    // field access that raises `BadMapError` on a list at runtime — the
+    // root cause of guarded workflows returning 500 instead of 403.
+    expect(
+      renderExpr(
+        {
+          kind: "member",
+          receiver: thisProp("items"),
+          member: "length",
+          receiverType: { kind: "array", element: STRING },
+          memberType: INT,
+        },
+        ctx,
+      ),
+    ).toBe("Enum.count(record.items)");
+  });
+
   it("renders string.matches(literal) as Regex.match?(~r/…/, …)", () => {
     expect(
       renderExpr(
@@ -367,6 +386,24 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
         ctx,
       ),
     ).toBe("%MyApp.Money{3}");
+  });
+
+  it("renders a value-object constructor with named struct fields (snake) when argNames are present", () => {
+    // Real lowered IR carries the VO's field order in `argNames`, so the
+    // struct is built with named fields — `%Mod.VO{positional}` is invalid
+    // Elixir.  Names are snake-cased to match Ash attributes.
+    expect(
+      renderExpr(
+        {
+          kind: "call",
+          callKind: "value-object-ctor",
+          name: "Money",
+          args: [{ kind: "literal", lit: "decimal", value: "9.99" }, litStr("USD")],
+          argNames: ["amount", "currencyCode"],
+        },
+        ctx,
+      ),
+    ).toBe('%MyApp.Money{amount: 9.99, currency_code: "USD"}');
   });
 
   it("renders entity-part constructor (kind: new) with snake field keys", () => {

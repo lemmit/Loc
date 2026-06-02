@@ -57,7 +57,7 @@ interface RenderCtx {
  * `/api/<route>`.  Hono and dotnet serve at the root, so no prefix.
  */
 function apiBasePath(platform: string): string {
-  return platform === "phoenixLiveView" ? "/api" : "";
+  return platform === "phoenix" ? "/api" : "";
 }
 
 export function renderE2EFile(

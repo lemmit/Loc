@@ -30,9 +30,16 @@ describe.skipIf(!ENABLED)(
       "examples/banking.ddd",
       "examples/inventory.ddd",
       "examples/roster.ddd",
+      // crudish lifecycle — the only example that emits a canonical
+      // destroy, so this cell is what compiles the Hono DELETE route +
+      // repo `delete()` paths.
+      "examples/lifecycle.ddd",
       // Document-persistence path (`normalised(false)`): jsonb column +
       // JSON round-trip through `_create` (toDoc / fromDoc).
       "examples/document.ddd",
+      // First-boot seeding (database-seeding.md): compiles db/seed.ts + the
+      // index.ts runSeeds wiring + the db:seed package.json script.
+      "examples/seeding.ddd",
     ])("%s — `ddd generate ts` output type-checks + tsup-bundles", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
       try {

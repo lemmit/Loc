@@ -21,18 +21,20 @@ context Sales {
     quantity: int
   }
 
-  aggregate Customer {
+  aggregate Customer with crudish {
     name: string
     email: string
+    verified: bool
     invariant email.length > 0
+    operation verify() { verified := true }
   }
 
-  aggregate Product {
+  aggregate Product with crudish {
     sku: string
     price: Money
   }
 
-  aggregate Order {
+  aggregate Order with crudish {
     customerId: Customer id
     status: OrderStatus
     placedAt: datetime
@@ -90,6 +92,27 @@ context Sales {
   }
 
   repository Customers for Customer { }
+
+  // Reusable predicate (Specification pattern) over Customer.
+  criterion NamedLike(needle: string) of Customer = this.name == needle
+
+  // Named query bundle (retrieval.md): a composed `where` + `sort`,
+  // executed via `Customers.run(ByName("x"), page?)`.  Emits a
+  // `runByName` repository method; `page` is a call-site argument.
+  retrieval ByName(needle: string) of Customer {
+    where: NamedLike(needle)
+    sort:  [name asc]
+  }
+
+  // Retrieval-driven loop: page a named query and mutate each element.
+  // Exercises Repo.run + the workflow `for` loop end-to-end on Hono and
+  // .NET (the build gates compile the emitted runByName + foreach/save).
+  workflow verifyByName(needle: string) {
+    let matched = Customers.run(ByName(needle), page: { offset: 0, limit: 100 })
+    for c in matched {
+      c.verify()
+    }
+  }
 
   repository Orders for Order {
     // Convention: when no `where` is given, parameters are matched to

@@ -17,23 +17,25 @@ import {
 describe("parseBuiltinPlatformRef", () => {
   it("maps a backend bareword to its default version", () => {
     expect(parseBuiltinPlatformRef("hono")).toEqual({
-      family: "hono",
+      family: "node",
       version: "v4",
-      qualified: "hono@v4",
+      qualified: "node@v4",
     });
     expect(parseBuiltinPlatformRef("dotnet")?.qualified).toBe("dotnet@v8");
-    expect(parseBuiltinPlatformRef("phoenixLiveView")?.qualified).toBe("phoenixLiveView@v1");
+    expect(parseBuiltinPlatformRef("phoenix")?.qualified).toBe("phoenix@v1");
+    // Back-compat: legacy `phoenixLiveView` aliases to canonical `phoenix`.
+    expect(parseBuiltinPlatformRef("phoenixLiveView")?.qualified).toBe("phoenix@v1");
   });
 
   it("parses an explicit family@version pin", () => {
     expect(parseBuiltinPlatformRef("hono@v4")).toEqual({
-      family: "hono",
+      family: "node",
       version: "v4",
-      qualified: "hono@v4",
+      qualified: "node@v4",
     });
     // Version need not exist yet — the parse is purely syntactic;
     // resolution (platformFor) is what rejects unknown versions.
-    expect(parseBuiltinPlatformRef("hono@v5")?.qualified).toBe("hono@v5");
+    expect(parseBuiltinPlatformRef("hono@v5")?.qualified).toBe("node@v5");
   });
 
   it("returns null for frontend / unknown platforms", () => {
@@ -50,7 +52,9 @@ describe("platformFor — byte-identity guarantee", () => {
     // is unchanged.
     expect(platformFor("hono")).toBe(platformFor("hono@v4" as never));
     expect(platformFor("dotnet")).toBe(platformFor("dotnet@v8" as never));
-    expect(platformFor("phoenixLiveView")).toBe(platformFor("phoenixLiveView@v1" as never));
+    expect(platformFor("phoenix")).toBe(platformFor("phoenix@v1" as never));
+    // Back-compat: the legacy `phoenixLiveView` spelling resolves identically.
+    expect(platformFor("phoenixLiveView")).toBe(platformFor("phoenix"));
   });
 
   it("frontend platforms resolve straight through (single-version)", () => {
@@ -62,16 +66,14 @@ describe("platformFor — byte-identity guarantee", () => {
   });
 
   it("the defaults map covers exactly the backend families", () => {
-    expect(Object.keys(BUILTIN_PLATFORM_LATEST).sort()).toEqual([
-      "dotnet",
-      "hono",
-      "phoenixLiveView",
-    ]);
+    expect(Object.keys(BUILTIN_PLATFORM_LATEST).sort()).toEqual(["dotnet", "node", "phoenix"]);
   });
 
   it("throws a clear error for an unregistered backend version", () => {
+    // The legacy `hono@v5` pin desugars to the canonical `node` family
+    // before resolution, so the error names `node@v5`.
     expect(() => platformFor("hono@v5" as never)).toThrow(
-      /Unknown backend platform version "hono@v5"/,
+      /Unknown backend platform version "node@v5"/,
     );
   });
 });

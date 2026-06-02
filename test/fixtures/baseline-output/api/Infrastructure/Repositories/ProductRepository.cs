@@ -54,6 +54,12 @@ public sealed class ProductRepository : IProductRepository
             await _events.DispatchAsync(ev, ct);
         }
     }
+
+    public async Task DeleteAsync(Product aggregate, CancellationToken ct = default)
+    {
+        _db.Products.Remove(aggregate);
+        await _db.SaveChangesAsync(ct);
+    }
     public async Task<List<Product>> All(CancellationToken ct = default)
     {
         var result = await _db.Products.ToListAsync(ct);

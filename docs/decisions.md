@@ -683,3 +683,400 @@ against the real model here.
 **Affects.** `lifecycle-operations.md` Phase 2 + integration-seams
 sections (superseded by `lifecycle-url-style.md`); `ApiIR.urlStyle`,
 `OperationIR.routeSlug`; the enrichment pass; depends on D-LIFECYCLE-VERB.
+
+---
+
+## D-PHOENIX-SURFACE — the decomposed Phoenix platform surface
+
+**Status:** PINNED. (Reconciles two proposals that, taken individually,
+collide. Subsumes the **D-PHOENIX-ECTO** ask from
+`elixir-ecto-and-api-only-backends.md`.)
+
+**Problem.** Two proposals each free a *different* axis off the single
+`phoenixLiveView` keyword, and their individually-recommended fixes
+**conflict**:
+
+- `elixir-ecto-and-api-only-backends.md` frees the **domain** axis (Ash vs
+  Ecto) and its **Option B** recommends carrying that axis *in the platform
+  name* — `phoenixLiveView` = Ash, a new `phoenix` = Ecto.
+- `embedded-frontend-composition.md` frees the **hosted-UI-framework** axis
+  (LiveView vs embedded React) and recommends **retiring `phoenixLiveView`**
+  entirely — one `phoenix` platform, with `liveview` demoted to a
+  `framework:` value on `ui`.
+
+Composed, they collide: Option B uses the *name* to encode the domain axis,
+while the framework note frees a *different* axis off that same name and
+deletes it. You cannot do both. `phoenixLiveView` froze **two** axes plus the
+host into one token; the fix must free **both** axes the same way — neither
+should be re-frozen into a platform name.
+
+**Decision.** **One** backend platform, **`phoenix`**, with both frozen axes
+expressed as orthogonal config — *not* as platform names:
+
+| Concern | Where it lives | Values |
+|---|---|---|
+| **Host runtime / web framework** | `platform: phoenix` | the Phoenix/BEAM runtime (`needsDb: true`, `apiBasePath: "/api"`, serves `priv/static`) |
+| **Domain / persistence framework** | the existing **D-ADAPTER-HOME `style:`/`persistence:` adapter** menu off the backend's `PlatformSurface` — **not** a new keyword | `ash` \| `ecto` |
+| **Hosted UI framework** | `ui { framework: … }` + `deployable { hosts: }` | `liveview` (Phoenix-only) \| `react`/… (any static host) |
+
+This makes `phoenix.hostableFrameworks = {liveview} ∪ {react, …}` — the
+richest of any platform — a *derived* consequence of Phoenix being the only
+platform that is both a render runtime **and** a static-asset host, not a
+special case. It is **a refinement of D-PHOENIX-ECTO Option B**: keep Option
+B's "no `family@version`, no `apiOnly` platform" conclusions, but reject its
+"domain axis = platform name" mechanism (which the framework note shows
+double-books the name).
+
+**The domain axis is universal, not Phoenix-special.** *Every* backend freezes
+a domain/persistence framework — `hono`→Drizzle, `dotnet`→EF+Mediator,
+`phoenix`→Ash|Ecto (`docs/generators.md:27`). Ash-vs-Ecto is the *same axis* as
+Drizzle-vs-Prisma or EF-vs-Dapper; Phoenix only *looks* special because it is the
+first backend whose menu has **size > 1**, so it is the first where the modifier
+is ever written. Therefore:
+
+- **No `domain:` keyword, and nothing Phoenix-only.** The axis is the
+  already-PINNED **D-ADAPTER-HOME** `style:`/`persistence:` adapter surface:
+  each backend exposes its menu + default off its `PlatformSurface`; `phoenix`'s
+  menu is `{ash, ecto}` (default `ash`), `hono`'s is `{drizzle}`, `dotnet`'s is
+  `{ef}`. A size-1 menu means the author never writes the modifier — which is
+  why `platform: hono` looks "domain-free" today. Adding Ecto is *populating
+  Phoenix's menu*, not minting a platform mechanism.
+- **No second `framework:` on the backend.** `framework` is now the **UI** axis
+  (`ui { framework: react | liveview }`); reusing it backend-side would collide.
+  A backend's web framework simply **is** its `platform:` (`hono`/`dotnet`/
+  `phoenix`). So a backend has exactly two axes, both already named:
+  `platform:` (runtime/web framework) and `style:`/`persistence:` (domain
+  framework) — and the Ecto note's own Option A already spells Ash/Ecto in
+  exactly that surface (`persistence: { ectoPostgres }`, `style: { ecto }`).
+
+Option A (adapter swap) is therefore not a *later* factoring for this axis — it
+**is** the axis. This decision pins the domain axis onto the D-ADAPTER-HOME
+surface now (the menu/default fields); only the Ash-emit *extraction behind the
+adapter contract* remains as the implementation tail the Ecto note phases.
+
+**Consequences.**
+
+- `phoenixLiveView` is retired as a platform token; a desugar shim maps it to
+  `platform: phoenix` + the `ash` adapter (default) + the referenced `ui`
+  gaining `framework: liveview` (mirrors the `platform: react` → vite-host shim).
+- **API-only** stays resolved by **D-API-ONLY** (absence of a `ui`/`hosts:`
+  mount) — unchanged; it is neither a name nor a flag.
+- **Phoenix-embeds-React** (bundle → `priv/static`, same-origin `/api`)
+  becomes expressible for free — the `wwwroot` twin of dotnet.
+- The four Phoenix shapes {Ash,Ecto} × {LiveView, embedded-React} +
+  {API-only} are spanned by two orthogonal axes (one of them a pre-existing
+  adapter menu), not 5+ platform names.
+
+**Open within this decision.**
+
+1. ~~**Adapter-surface spelling** — `style:` vs `persistence:` vs both for the
+   Ash/Ecto choice.~~ **RESOLVED by D-REALIZATION-AXES:** neither — the
+   domain-framework axis gets a dedicated `foundation:` keyword (default
+   `vanilla`), and `persistence:` narrows to the data-access library only.
+2. **Default domain** when unspecified on `platform: phoenix` — **`ash`**
+   (matches today's `phoenixLiveView` behaviour after desugar). PINNED — now
+   expressed as `foundation: ash` (the default) per D-REALIZATION-AXES.
+
+**Affects.** `embedded-frontend-composition.md` §6 (its "retire
+`phoenixLiveView`" is this decision's framework half); `elixir-ecto-and-api-only-backends.md`
+§4 + §6 (supersedes its D-PHOENIX-ECTO Option-B "sibling platform name" with
+"one `phoenix` platform + the domain axis on the D-ADAPTER-HOME surface"); the
+`Platform` grammar enum + `Framework` enum; `src/platform/registry.ts`;
+`checkDeployable`; **depends on D-ADAPTER-HOME** (the domain axis *is* that
+surface's menu/default).
+
+**Amended by D-REALIZATION-AXES.** Its *mechanism* for the domain axis — "rides
+the `style:`/`persistence:` surface, no new keyword" — is superseded: the axis
+gets the dedicated keyword `foundation:` so the data layer stays pickable under a
+framework (`foundation: ash` + `persistence: ashSqlite`). Every *other*
+conclusion of this decision stands (one `phoenix` platform, no `family@version`,
+no `apiOnly`, `framework:` is UI-only, default domain = Ash).
+
+---
+
+## D-REALIZATION-AXES — the deployable platform-config axes (and the `foundation:` amendment)
+
+**Status:** PINNED. (Amends **D-PHOENIX-SURFACE**'s domain-axis mechanism;
+depends on **D-ADAPTER-HOME** and **D-STORAGE-SPLIT**. Full matrix, gating rules,
+and examples in `proposals/platform-realization-axes.md`.)
+
+**Problem.** `platform: dotnet` bundles EF Core + MediatR-CQRS + minimal API with
+no exposed knobs (`storage-and-platform-config.md:58`). The decomposition into
+`platform: <name> { … }` config needs (a) a fixed, reviewed *vocabulary* of
+axes, and (b) a resolution of D-PHOENIX-SURFACE open-item 1 (where the Ash/Ecto
+domain-framework axis lives). The storage doc's `style:`/`layout:` names are
+weak/colliding, and folding the domain framework into `persistence:` destroys the
+ability to pick the data layer *underneath* a framework.
+
+**Decision.** A backend deployable's realization is **six orthogonal, optional,
+validator-gated axes**, each named for the layer it realizes. Each is a
+menu+default exposed off the backend's `PlatformSurface` (D-ADAPTER-HOME); a bare
+`platform: <name>` equals the full default block (byte-identical to today).
+
+| Axis | Realizes | Values (dotnet shown; menu is per-platform) | Default |
+|---|---|---|---|
+| `foundation:` | opinionated domain/app framework, or none | `vanilla` · `abp` (phoenix: `ash` · `vanilla`; node: `vanilla` · `nestjs`) | `vanilla` (phoenix: `ash`) |
+| `application:` | application-layer orchestration topology | `flat` · `serviceLayer` · `cqrs` | `cqrs` |
+| `persistence:` | data-access library only | `efcore` · `dapper` · `marten` | `efcore` |
+| `directoryLayout:` | source-tree organization | `byLayer` · `byFeature` | `byLayer` |
+| `transport:` | HTTP surface | `minimalApi` · `controllers` | `minimalApi` |
+| `runtime:` | aggregate execution / concurrency model | `transactional` · `orleans` · `akka` (phoenix: `transactional` · `genserver`) | `transactional` |
+
+**Rulings folded in:**
+
+- **`foundation:` is its own keyword** — *this is the amendment to
+  D-PHOENIX-SURFACE.* The Ash/Ecto (and EF/ABP, Drizzle/NestJS) domain-framework
+  axis is **not** a `persistence:`/`style:` value; it is `foundation:` (default
+  `vanilla`). This keeps the data layer pickable under a framework
+  (`foundation: ash` + `persistence: ashSqlite`; `foundation: abp` +
+  `persistence: dapper`). It preserves D-PHOENIX-SURFACE's correct **no
+  `domain:` keyword** instinct — `foundation:` names the framework hosting the
+  domain, not the domain (which is the `.ddd` source).
+- **`persistence:` narrows** to the data-access library only (no domain
+  framework). Prefer it over "dal" (dated acronym).
+- **`style:` → `application:`** (layer-named; not `layering:`, which collides
+  with its own value and miscasts CQRS). Values are a topology spectrum
+  `flat` → `serviceLayer` → `cqrs`. `flat` (not `transactionScript` — that is an
+  orthogonal logic-organization pattern spanning all three values; Loom is
+  domain-model by construction so that axis is pinned and unexposed).
+- **`layout:` → `directoryLayout:`** (explicit; disambiguates from the
+  page-level `layout:` wrapper — a real collision).
+- **`runtime:` default is `transactional`** (names the DB-transaction
+  consistency model; the contrast to actor-mailbox serialization), not the
+  earlier coinage `pooled`.
+- **Foundation owns layers.** Each `foundation:` value declares which of
+  `{application, transport, persistence-flavor}` it owns; setting an owned knob
+  is an error. `vanilla` owns nothing.
+- **Actor runtimes need a durable store, not necessarily a journal** — event
+  sourcing is idiomatic for persistent actors, not required (Akka.NET + EF via a
+  `DbContextFactory` is a valid, non-standard state-stored mode). `flat` × actor
+  runtime is a *warning*, not an error.
+
+All axes are **optional**; lowering normalizes each omitted knob to its platform
+default, so the IR carries concrete values and `ddd snapshot` round-trips the
+normalized form (mirrors `design:` via `BUILTIN_PACK_LATEST`).
+
+**Affects.** `proposals/platform-realization-axes.md` (the full spec);
+`proposals/storage-and-platform-config.md` (its `style:`/`layout:` names and the
+"`platform: dotnet` defaults" row are renamed per this decision);
+`proposals/elixir-ecto-and-api-only-backends.md` (its Phase-2 "`style:` vs
+`persistence:` field" question is answered: `foundation:`); the `Platform` /
+deployable grammar; `DeployableIR`; `checkDeployable`; each backend's
+`PlatformSurface` (menu+default fields). **Amends D-PHOENIX-SURFACE** open-item 1;
+**depends on D-ADAPTER-HOME**.
+
+---
+
+## D-NODE-PLATFORM — `node` is the JS-runtime platform; `hono` is a `transport:` value
+
+**Status:** PINNED. (Mirrors **D-PHOENIX-SURFACE**'s rename pattern; depends on
+**D-REALIZATION-AXES** for the `transport:` axis. Rollout in
+`proposals/realization-axes-rollout.md` Phase 3.)
+
+**Problem.** `platform: hono` conflates the **JS runtime** (Node) with the **web
+framework** (Hono) in one token — the same conflation just resolved for
+`phoenixLiveView`. `dotnet` / `phoenix` name the language-ecosystem; `hono` names
+only *one of several* interchangeable TS web frameworks (Hono / Express /
+Fastify / Elysia). The codebase already splits these: language codegen lives in
+`src/generator/typescript/`, while `src/platform/hono/` is the Hono web-framework
+backend.
+
+**Decision.**
+
+- **`node` is the canonical JS-runtime platform** (language TypeScript, *derived*
+  — not a name prefix; cf. `dotnet` is not `csharp-dotnet`). Legacy
+  `platform: hono` is admitted as a **back-compat alias** that desugars to
+  `platform: node { transport: hono }` (same mechanism as `phoenixLiveView` →
+  `phoenix`).
+- **The web framework is the `transport:` axis** (D-REALIZATION-AXES). `node`'s
+  menu: `hono`\* · `express` · `fastify` · `elysia`; default `hono`. (`dotnet`
+  transport stays `minimalApi`\*·`controllers`; `phoenix` `phoenixRouter`\*.)
+- **NestJS is a `foundation:` value** (rung-3): it owns application + transport
+  and runs on an underlying http adapter, so `foundation: nestjs` locks
+  `transport:` via R4 — identical shape to `foundation: abp` on dotnet.
+- **`language` is a derived surface property** (`typescript` for `node`/`react`,
+  `csharp` for `dotnet`, `elixir` for `phoenix`), consumed by the Phase-F
+  shared-contracts grouping — *not* a platform-name prefix.
+- **Future JS runtimes** (`bun` / `deno` / `edge`) are **sibling `platform:`
+  values** (distinct stdlib/deploy), all TypeScript — not a `typescript-X`
+  prefix and not a new sub-axis.
+
+**Affects.** `src/platform/registry.ts` (add `node`, alias `hono`→`node`); the
+`Platform` IR union + grammar `Platform` rule (add `node`, keep `hono` as
+back-compat keyword); the `transport:` menu (`hono` becomes its default value);
+`src/platform/hono/` (reframed as node's Hono transport); the derived `language`
+property on `PlatformSurface`. **Depends on D-REALIZATION-AXES**; mirrors
+**D-PHOENIX-SURFACE**.
+
+---
+
+## D-SEED-PATH — seed rows go through the domain `create`
+
+**Status:** PINNED.
+
+**Problem.** `database-seeding.md` must pick how a declarative seed row
+reaches the database. Target frameworks split: EF `HasData` and Drizzle
+`insert` go *straight to tables*; Ash goes *through actions* (enforcing
+changesets). Loom needs one default.
+
+**Decision.** Seed rows lower through the aggregate's **canonical
+`create`** by default — the same path a real request takes — so
+invariants and create-time logic run, and a seed that violates an
+invariant is caught at boot rather than producing a corrupt row. A
+`seed raw { … }` modifier opts a block into table-level inserts for
+bulk fixtures where the domain pass is deliberately bypassed (or too
+slow); `raw` carries a `loom.seed-raw-unchecked` warning when a value
+would fail an invariant.
+
+**Rationale.**
+
+- The domain `create` already encodes the invariants; bypassing it to
+  insert rows is the same mistake as letting an API skip validation.
+- Ash's native seed idiom is `Ash.create!`; routing through `create`
+  makes the Loom surface map cleanly onto the most-opinionated backend
+  rather than the least.
+- `raw` keeps the escape hatch explicit and visible, not the default.
+
+**Consequences.** `SeedIR.path: "domain" | "raw"`; the declarative
+record shape is the aggregate's **`create`-parameter shape** (no `id`
+field — the framework mints ids). Object graphs built by *operations*
+(not create params) are the imperative-body's job, not the declarative
+form's.
+
+**Affects.** `database-seeding.md` §2 (D-SEED-PATH), §3.2, §6 (per-
+backend emitters), §8 (`loom.seed-raw-unchecked`).
+
+---
+
+## D-SEED-IDEMPOTENCY — v1 is ship-once via a dataset marker
+
+**Status:** PINNED.
+
+**Problem.** Re-running a seed must not duplicate rows. Two mechanisms
+were on the table: (a) an applied-**marker** table; (b) per-row
+**upsert** by a declared natural key.
+
+**Decision.** v1 is **ship-once via an applied-marker**: a `__loom_seed`
+table holds one row per applied `(module, dataset)`; the seeder skips
+the whole set on boot if the marker is present. This matches the Rails
+`db:seed` / Ecto `seeds.exs` contract, needs no natural key on the
+rows, and covers the quick-start demo entirely. Editing an
+already-applied seed has no effect until the marker is cleared
+(`ddd seed --reset <dataset>`); seeding is forward-only, mirroring the
+migrations stance.
+
+Per-row **upsert by a declared natural key** (`key Aggregate.field`),
+for *reference* data corrected in place over time, is **deferred** — it
+adds a second idempotency mechanism, a grammar clause, a validation
+rule, and a per-backend upsert branch, and earns its keep only once a
+model actually has evolving lookup data. The grammar reserves the slot
+(`seed <dataset> key Aggregate.field`) so it lands additively later.
+
+**Rationale.**
+
+- The driving use case (first-boot demo content) is served by the
+  marker alone; the marker is the smaller, simpler mechanism.
+- Marker-by-content-hash was rejected: re-applying forward-only
+  `create`s on a changed set just collides on existing rows — the very
+  thing upsert would fix — so hashing buys nothing without also buying
+  upsert. Keying the marker by *dataset name* sidesteps it.
+
+**Consequences.** No `key`/`contentHash` in `SeedIR` for v1; the marker
+table is emitted as a synthetic `createTable` step by the owning
+module's migration pass. `LOOM_SEED` gates which datasets run.
+
+**Affects.** `database-seeding.md` §2 (D-SEED-IDEMPOTENCY), §7, §10
+(deferred upsert), build-order §11 phase 6.
+
+---
+
+## D-SEED-XREF — seed cross-references are explicit ids (no `@handle`)
+
+**Status:** PINNED.
+
+**Problem.** Declarative seed data sometimes needs to relate rows (an
+`Order` referencing a `Customer`). How does a referencing row name the
+referenced row's id?
+
+**Decision.** **Explicit ids on the `raw` path** — the declarative-fixture
+model of Django fixtures, EF Core `HasData`, and raw SQL. A `raw` row is a
+literal record (explicit `id` + literal FK columns) inserted directly,
+bypassing the domain `create`; the author writes the same literal id in the
+referenced row and the referencing FK, and orders parents before children.
+No bespoke handle/reference construct, no topological reorder.
+
+A symbolic-reference form (`Customer @acme { … }` / `Order { customerId:
+@acme }`, lowering to a `SeedRef` ExprIR + topo-sort) was prototyped and
+**dropped**: no concrete stack has it (imperative seeders use host-language
+local variables; declarative ones use explicit ids), it duplicates what the
+imperative body's `let` bindings already give for free, and it spread a new
+`ExprIR` variant + topo-sort + three validators across the toolchain for a
+convenience neither camp felt the need to invent.
+
+**Consequences.** The default **domain** path mints ids and therefore has no
+cross-references (a minted id isn't knowable to reference) — flat demo /
+reference data only. Cross-referenced / relational seed data uses **`raw`**.
+`SeedRowIR` carries no `handle`; there is no `seed-ref` ExprIR; `SeedIR.rows`
+stay in source order.
+
+**Affects.** `database-seeding.md` §3.1/§3.2 (cross-ref design), §5 (IR), §8
+(validation), §11 (build order — `raw` path is the cross-ref home).
+
+---
+
+## D-AUTH-OIDC — turnkey auth delegates to OIDC; Loom does not build an auth runtime
+
+**Status:** PINNED.
+
+**Problem.** `quickstart-and-day-one-batteries.md` §4 ("turnkey auth") sketched
+a self-built auth runtime: an `auth { providers: [email, google, github] }`
+block that makes Loom generate an `AuthUser` aggregate with **hashed
+passwords**, signup/login/verify-email endpoints, OAuth clients, session
+issuance, and login/signup UI — across Hono, .NET, **and** Phoenix, × four
+design packs. That is a large, security-critical, perpetually-maintained
+surface for a code generator to own.
+
+**Decision.** Turnkey auth **delegates to an OIDC identity provider**.
+**Keycloak** is the self-hostable default; Auth0 / Cognito / Zitadel / Ory /
+Entra ID are the same thing to Loom — an `issuer` URL. "Don't roll your own
+auth": Loom **validates tokens and maps claims into the existing typed
+`user {}` shape**; the IdP owns credential storage, password reset, MFA,
+lockout, and the hosted login/signup pages. Loom generates **no `AuthUser`
+aggregate, no password column, no OAuth client code** — only an OIDC verifier
+(the batteries-included fill-in for the already-shipped
+`IUserVerifier` / `registerUserVerifier` seam), the `/auth/login|callback|logout`
+redirect handshake, session issuance, and a route guard.
+
+**Rationale.**
+
+- "Don't roll your own auth" is the strongest security guidance in the field;
+  passwords/MFA/reset/lockout are deep and ruinous to get wrong.
+- OIDC is the universal protocol — every IdP plugs in uniformly behind one
+  `issuer`. Loom's per-backend work shrinks to "validate a token" (mature libs
+  everywhere: `jose`, `Microsoft.Identity`, `oidcc`/`Ueberauth`) + a redirect.
+- It **completes** what `auth.md` already ships (typed `user {}`,
+  `currentUser`, `requires`, `auth: required` middleware, the verifier hook)
+  rather than adding a new runtime. OIDC is just the batteries-included
+  verifier.
+- The multi-backend × multi-pack cost of a hand-built password/session/login-UI
+  runtime is a maintenance + security liability where any divergence is a
+  vulnerability.
+
+**Zero-config quick-start.** The one cost of self-hosted OIDC — standing up an
+IdP — is closed by **bundling a dev IdP**: the generated `docker-compose.yml`
+adds a Keycloak service with a pre-provisioned realm + a **seeded demo user**
+(seeding feature, `database-seeding.md` §5.4), so `docker compose up` logs in
+out of the box; production repoints `issuer:` at a real IdP. The on-ramp owns
+zero auth logic.
+
+**Consequences.** The `auth {}` surface is reframed from
+`providers: [email, google, github]` to `auth { oidc { issuer, clientId, … } }`
++ a `claims:` map. A self-contained email/password mode, if ever wanted, is a
+**secondary, library-backed** option — never hand-rolled across backends, and
+not the headline. Default-deny enforcement (`enforcement: denyByDefault`) is
+unaffected.
+
+**Affects.** `quickstart-and-day-one-batteries.md` §1 (battery list), §3.1
+(`saas` template), §4 (entire turnkey-auth section), §7 (build order);
+`auth.md` (the verifier-hook seam is OIDC's mount point — no rewrite, just the
+completion it always anticipated).

@@ -9,6 +9,7 @@ import type {
   Criterion,
   EntityPart,
   EntityPartMember,
+  EventDecl,
   Expression,
   FunctionDecl,
   LValue,
@@ -88,6 +89,7 @@ import {
   cstText,
   type Env,
   findEntityByName,
+  findEventByName,
   findFunctionInEnv,
   findValueObjectByName,
   inAggregate,
@@ -540,7 +542,11 @@ function lowerBuilderCall(expr: BuilderCall, env: Env): ExprIR {
   const name = expr.type;
   const vo = findValueObjectByName(env, name);
   if (vo) {
-    return lowerBuilderCallAsCall(expr, env, name, "value-object-ctor");
+    // Carry the value object's declared field order so backends that need
+    // named construction (Phoenix `%Mod.VO{field: …}` structs) always have
+    // names — positional backends (TS `new VO(…)`, .NET) ignore them.
+    const fieldNames = vo.members.filter(isProperty).map((p) => p.name);
+    return lowerBuilderCallAsCall(expr, env, name, "value-object-ctor", fieldNames);
   }
   const ent = findEntityByName(env, name);
   if (ent && isEntityPart(ent)) {
@@ -569,13 +575,16 @@ function lowerBuilderCallAsCall(
   env: Env,
   name: string,
   callKind: "value-object-ctor" | "free",
+  fieldNames?: string[],
 ): ExprIR {
   // Hoist `style:` named arg into its own IR field — see lowerStyleArg.
   // Filtering happens by index so `args` and `argNames` stay parallel.
   const styleHoist = hoistStyleArg(expr.entries, env);
   const entries = styleHoist.remainingEntries;
   const args = entries.map((e) => lowerExpr(e.value, env));
-  const argNames = entries.map((e) => e.name || undefined);
+  // Explicit entry name wins; otherwise fall back to the declared field
+  // name at this position (value-object ctors — see lowerBuilderCall).
+  const argNames = entries.map((e, i) => e.name || fieldNames?.[i]);
   const named = argNames.some((n) => n !== undefined);
   return {
     kind: "call",
@@ -1250,6 +1259,10 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
   if (t.kind === "entity") {
     const target = findEntityByName(env, t.name);
     if (target) return memberOnEntity(target, name);
+    // Applier event params carry the event name as an entity marker —
+    // fall back to the event's field set when it isn't an aggregate/part.
+    const event = findEventByName(env, t.name);
+    if (event) return memberOnEvent(event, name);
   }
   if (t.kind === "valueobject") {
     const vo = findValueObjectByName(env, t.name);
@@ -1310,6 +1323,16 @@ function memberOnValueObject(vo: ValueObject, name: string): TypeIR {
     if (isDerivedProp(m) && m.name === name) {
       return lowerType(m.type);
     }
+  }
+  return { kind: "primitive", name: "string" };
+}
+
+/** Member type on an applier's event parameter (`apply(e: E) { … e.f … }`).
+ *  An event is a flat payload of `Property` fields (`event E { f: T, … }`),
+ *  so resolution is field-only — no `id`, containment, or derived members. */
+function memberOnEvent(event: EventDecl, name: string): TypeIR {
+  for (const f of event.fields) {
+    if (f.name === name) return lowerType(f.type);
   }
   return { kind: "primitive", name: "string" };
 }
@@ -1388,6 +1411,8 @@ function stepInto(t: TypeIR, name: string, env: Env): TypeIR {
   if (t.kind === "entity") {
     const target = findEntityByName(env, t.name);
     if (target) return memberOnEntity(target, name);
+    const event = findEventByName(env, t.name);
+    if (event) return memberOnEvent(event, name);
   }
   if (t.kind === "valueobject") {
     const vo = findValueObjectByName(env, t.name);

@@ -1,3 +1,10 @@
+import {
+  isTphBase,
+  isTphConcrete,
+  ownFieldsOf,
+  tableOwnerName,
+  tphConcretesOf,
+} from "../generator/typescript/tph.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -59,7 +66,33 @@ export function schemaFromModule(
   shapeOf: (agg: EnrichedAggregateIR) => SavingShape = (agg) => effectiveSavingShape(agg),
 ): SchemaSnapshot {
   const tables: TableShape[] = [];
-  for (const agg of collectAggregates(module)) {
+  const pool = collectAggregates(module);
+  for (const agg of pool) {
+    // An abstract base that is NOT a TPH base owns no table — a TPC
+    // (`ownTable`) base emits nothing here (each concrete is standalone);
+    // mirrors the schema emitter (emit/schema.ts).  The TPH base falls through
+    // to `tphTableForAggregate` below.
+    if (agg.isAbstract && !isTphBase(agg, pool)) continue;
+    // TPH (aggregate-inheritance.md, sharedTable): the hierarchy is one
+    // shared table named for the abstract base.  A TPH concrete shares it
+    // (emits no table); the base emits the shared table (base columns + every
+    // concrete's own columns made nullable + the `kind` discriminator) so the
+    // runtime DDL matches the Drizzle schema (emit/schema.ts `emitTphTable`).
+    if (isTphConcrete(agg, pool)) {
+      // A TPH concrete emits no table of its own, but its contained parts
+      // still need their tables — FK'd to the SHARED base table (Pattern 4),
+      // mirroring emit/schema.ts.  `tableOwnerName` resolves the concrete to
+      // its base; the part's `parentId` holds the shared-table row id.
+      const owner = tableOwnerName(agg, pool);
+      for (const part of agg.parts) {
+        tables.push(tableForPart(part, agg, module.name, owner));
+      }
+      continue;
+    }
+    if (isTphBase(agg, pool)) {
+      tables.push(tphTableForAggregate(agg, pool, module.name));
+      continue;
+    }
     const shape = shapeOf(agg);
     if (shape === "document") {
       tables.push(documentTableForAggregate(agg, module.name));
@@ -353,10 +386,70 @@ function tableForAggregate(agg: AggregateIR, ownerModule: string): TableShape {
   };
 }
 
-function tableForPart(part: EntityPartIR, parent: AggregateIR, ownerModule: string): TableShape {
+/** TPH shared table (aggregate-inheritance.md, sharedTable): mirrors the
+ *  Drizzle `emitTphTable`.  Columns are `id`, the `kind` discriminator (text,
+ *  not null), the abstract base's own columns (declared nullability), then
+ *  every concrete subtype's own columns forced nullable, de-duplicated by
+ *  column name (first wins).  v1 covers scalar / value-object / enum / id
+ *  fields; reference collections lower to join tables as usual. */
+function tphTableForAggregate(
+  base: AggregateIR,
+  pool: readonly AggregateIR[],
+  ownerModule: string,
+): TableShape {
+  const tableName = plural(snake(base.name));
+  const kindField: FieldIR = {
+    name: "kind",
+    type: { kind: "primitive", name: "string" },
+    optional: false,
+  } as FieldIR;
+  const columns: ColumnShape[] = [
+    { name: "id", type: idColumnType(base.idValueType), nullable: false },
+    mapField(kindField).column,
+  ];
+  const foreignKeys: FKShape[] = [];
+  const indexes: IndexShape[] = [];
+  const seen = new Set(columns.map((c) => c.name));
+
+  const pushField = (f: FieldIR, forceNullable: boolean): void => {
+    if (isReferenceCollection(f.type)) return;
+    const mapped = mapField(f);
+    if (seen.has(mapped.column.name)) return;
+    seen.add(mapped.column.name);
+    const column = forceNullable ? { ...mapped.column, nullable: true } : mapped.column;
+    columns.push(column);
+    if (mapped.fkRefTable) {
+      foreignKeys.push({ column: column.name, refTable: mapped.fkRefTable, onDelete: "restrict" });
+      indexes.push({
+        name: `${tableName}_${column.name}_idx`,
+        table: tableName,
+        columns: [column.name],
+        unique: false,
+      });
+    }
+  };
+
+  for (const f of base.fields) pushField(f, false);
+  for (const concrete of tphConcretesOf(base, pool)) {
+    for (const f of ownFieldsOf(concrete, base)) pushField(f, true);
+  }
+
+  return { name: tableName, ownerModule, columns, primaryKey: ["id"], foreignKeys, indexes };
+}
+
+function tableForPart(
+  part: EntityPartIR,
+  parent: AggregateIR,
+  ownerModule: string,
+  // The aggregate that physically owns the parent table.  For a plain
+  // aggregate this is `parent.name`; for a TPH concrete it's the shared base
+  // table (the concrete has no table of its own), so the part's FK targets the
+  // base.  Defaults to `parent.name` so non-inheritance output is unchanged.
+  ownerName: string = parent.name,
+): TableShape {
   const tableName = plural(snake(part.name));
-  const parentTable = plural(snake(parent.name));
-  const parentFk = `${snake(parent.name)}_id`;
+  const parentTable = plural(snake(ownerName));
+  const parentFk = `${snake(ownerName)}_id`;
   const columns: ColumnShape[] = [
     { name: "id", type: idColumnType(parent.idValueType), nullable: false },
     { name: parentFk, type: idColumnType(parent.idValueType), nullable: false },

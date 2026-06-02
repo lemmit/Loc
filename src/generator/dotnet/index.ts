@@ -9,6 +9,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import { isTpcBase, isTpcConcrete } from "../../ir/util/inheritance.js";
 import {
   effectiveSavingShape,
   isDocumentShaped,
@@ -16,9 +17,13 @@ import {
 } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural, upperFirst } from "../../util/naming.js";
-import type { EmitCtx } from "../_adapters/index.js";
+import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { generateReactForContexts } from "../react/index.js";
-import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
+import {
+  byLayerLayoutAdapter,
+  type DotnetArtifact,
+  type DotnetArtifactCategory,
+} from "./adapters/by-layer-layout.js";
 import { cqrsStyleAdapter } from "./adapters/cqrs-style.js";
 import { emitDotnetResourceFiles } from "./adapters/resource-clients.js";
 import { emitAuthFiles } from "./auth-emit.js";
@@ -26,9 +31,13 @@ import { emitCqrs } from "./cqrs-emit.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
 import { emitDotnetMigrations } from "./emit/migrations.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
+import { emitDotnetSeeds } from "./emit/seed.js";
 import {
   joinEntityName,
+  renderAbstractBaseEntity,
   renderAuditableInterceptor,
+  renderBaseReaderImpl,
+  renderBaseReaderInterface,
   renderCommon,
   renderConfiguration,
   renderCsproj,
@@ -52,12 +61,18 @@ import {
   renderProgram,
   renderRepositoryImpl,
   renderRepositoryInterface,
+  renderRequiredFromCtorParamFilter,
   renderSnapshots,
   renderTestCsproj,
   renderTestsFile,
   renderValueObject,
 } from "./emit.js";
-import { buildFindBodies } from "./find-emit.js";
+import {
+  buildFindBodies,
+  buildRetrievalBodies,
+  collectFindBodyUsings,
+  collectRetrievalBodyUsings,
+} from "./find-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
@@ -117,7 +132,13 @@ export function generateDotnet(
 export function generateDotnetForContexts(
   contexts: EnrichedBoundedContextIR[],
   namespace?: string,
-  system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
+  system?: {
+    deployable: DeployableIR;
+    sys: SystemIR;
+    migrations?: MigrationsIR[];
+    styleAdapter?: StyleAdapter;
+    layoutAdapter?: LayoutAdapter;
+  },
   options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
@@ -137,7 +158,13 @@ function emitProjectFromContexts(
   contexts: EnrichedBoundedContextIR[],
   ns: string,
   out: Map<string, string>,
-  system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
+  system?: {
+    deployable: DeployableIR;
+    sys: SystemIR;
+    migrations?: MigrationsIR[];
+    styleAdapter?: StyleAdapter;
+    layoutAdapter?: LayoutAdapter;
+  },
   emitTrace = false,
 ): void {
   // Fullstack-dotnet branch — when the deployable declares a `ui:`
@@ -161,13 +188,17 @@ function emitProjectFromContexts(
   // `emitAggregate` only; helpers that don't yet route through
   // adapters keep the existing direct emit-fn calls.
   //
-  // The dotnet generator dispatches through its OWN sibling adapters
-  // (`./adapters/cqrs-style.js`, `./adapters/by-layer-layout.js`) —
-  // sibling imports stay within `src/generator/`, so the backend-
-  // packages layering invariant (no `src/generator/* → src/platform/*`
-  // edges) holds.  Future per-deployable overrides (`style: layered`,
-  // `persistence: dapper`, …) will resolve through the registry at
-  // the platform-surface seam (`src/platform/dotnet.ts`).
+  // The dotnet generator dispatches through the deployable's RESOLVED
+  // style / layout adapters (D-REALIZATION-AXES `application:` /
+  // `directoryLayout:`), threaded in via `system.{style,layout}Adapter`.
+  // The system orchestrator resolves them through
+  // `platform/resolve-adapters.ts`; the generator never imports
+  // `src/platform/` itself, so the backend-packages layering invariant
+  // (no `src/generator/* → src/platform/*` edges) holds.  When unresolved
+  // (legacy single-context generate mode), the call sites fall back to
+  // the OWN sibling adapters (`./adapters/cqrs-style.js`,
+  // `./adapters/by-layer-layout.js`) — byte-identical under the size-1
+  // real menus, since the resolved adapter IS that sibling.
   const emitCtx: EmitCtx | undefined = system
     ? {
         deployable: system.deployable,
@@ -175,6 +206,8 @@ function emitProjectFromContexts(
         sys: system.sys,
         migrations: system.migrations,
         emitTrace,
+        styleAdapter: system.styleAdapter,
+        layoutAdapter: system.layoutAdapter,
       }
     : undefined;
   // Each context contributes its enums / VOs / events / aggregates.
@@ -188,6 +221,7 @@ function emitProjectFromContexts(
     for (const agg of ctx.aggregates) {
       emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace, emitCtx);
     }
+    emitBaseReaders(ctx, ns, out);
     emitWorkflows(ctx, ns, out, { routePrefix, sys: system?.sys });
     emitViews(ctx, ns, out, { routePrefix });
   }
@@ -204,6 +238,9 @@ function emitProjectFromContexts(
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
     criteria: contexts.flatMap((c) => c.criteria),
+    channels: contexts.flatMap((c) => c.channels),
+    retrievals: contexts.flatMap((c) => c.retrievals),
+    seeds: contexts.flatMap((c) => c.seeds),
   };
   // Auth files — emitted only when the deployable opts in
   // via `auth: required` AND the system declares a user block (the
@@ -238,6 +275,7 @@ function emitProjectFromContexts(
     "Api/ListResponseWrapperFilter.cs",
     renderListWrapperFilter(ns, listWrapperPairs(contexts)),
   );
+  out.set("Api/RequiredFromCtorParamFilter.cs", renderRequiredFromCtorParamFilter(ns));
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
@@ -249,6 +287,15 @@ function emitProjectFromContexts(
   if (hasMigrations) {
     emitDotnetMigrations(system!.migrations!, ns, out);
   }
+  // First-boot seed data (database-seeding.md, Phase 3a) — emits
+  // Infrastructure/Persistence/Seed.cs when the served contexts declare any
+  // `seed` block.  Through the domain `Create` (D-SEED-PATH), ship-once per
+  // dataset (D-SEED-IDEMPOTENCY).  Program.cs gets `hasSeeds` below so it
+  // adds the `Seed.RunSeeds(...)` startup call after `Database.Migrate()`.
+  if (merged.seeds.length > 0) {
+    emitDotnetSeeds(merged, ns, out);
+  }
+  const hasSeeds = out.has("Infrastructure/Persistence/Seed.cs");
   // Resource client classes (objectStore / queue / api) + their NuGet
   // deps (Phase 4c).  Empty when the deployable wires no consumable
   // resources — the csproj stays byte-identical.
@@ -260,6 +307,7 @@ function emitProjectFromContexts(
     usesStamping,
     hasEmbeddedSpa,
     hasMigrations,
+    hasSeeds,
     emitTrace,
     resourceNugetDeps: resourceEmission.nugetDeps,
   });
@@ -307,6 +355,9 @@ function listWrapperPairs(
   const pairs: Array<{ element: string; wrapper: string }> = [];
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) {
+      // Abstract TPC bases emit no DTOs (no routes / handlers), so there is no
+      // `<Base>Response` to wrap.
+      if (agg.isAbstract) continue;
       pairs.push({ element: `${agg.name}Response`, wrapper: `${agg.name}ListResponse` });
     }
     for (const view of ctx.views) {
@@ -336,6 +387,7 @@ function emitContext(
   for (const agg of ctx.aggregates) {
     emitAggregate(agg, ctx, ns, out, undefined, emitTrace);
   }
+  emitBaseReaders(ctx, ns, out);
   emitWorkflows(ctx, ns, out);
   emitViews(ctx, ns, out);
   // Stamping interceptor — same gating as the system path.
@@ -349,7 +401,14 @@ function emitContext(
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
   const usesStamping = ctx.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
-  emitProject(ctx, ns, out, { usesValidators, usesStamping, emitTrace });
+  // First-boot seed data (database-seeding.md) — the legacy per-context path
+  // emits the seeder too (consistent with `generate ts`), so `generate dotnet`
+  // on a seeded model produces + wires Seed.cs.
+  if (ctx.seeds.length > 0) {
+    emitDotnetSeeds(ctx, ns, out);
+  }
+  const hasSeeds = out.has("Infrastructure/Persistence/Seed.cs");
+  emitProject(ctx, ns, out, { usesValidators, usesStamping, emitTrace, hasSeeds });
   emitTestProject(ctx, ns, out);
 }
 
@@ -380,6 +439,9 @@ function emitStampingInterceptor(
 
 function emitIds(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
   for (const agg of ctx.aggregates) {
+    // An abstract TPC base keeps no identity of its own (each concrete carries
+    // its own strongly-typed `<Concrete>Id`), so it contributes no `<Base>Id`.
+    if (agg.isAbstract) continue;
     out.set(`Domain/Ids/${agg.name}Id.cs`, renderId(agg.name, agg.idValueType, ns));
     for (const part of agg.parts) {
       out.set(`Domain/Ids/${part.name}Id.cs`, renderId(part.name, agg.idValueType, ns));
@@ -425,6 +487,33 @@ function emitDispatcher(ns: string, out: Map<string, string>): void {
   out.set("Infrastructure/Events/NoopDomainEventDispatcher.cs", renderNoopDispatcher(ns));
 }
 
+/** Polymorphic read home for each abstract TPC (`ownTable`) base in the
+ *  context: a read-only `I<Base>Repository` / `<Base>Repository` pair that
+ *  delegates to the concrete repositories and concatenates (aggregate-
+ *  inheritance.md, `find all <Base>`).  Emits nothing when the context has no
+ *  TPC base. */
+function emitBaseReaders(
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+  out: Map<string, string>,
+): void {
+  for (const base of ctx.aggregates) {
+    if (!isTpcBase(base, ctx.aggregates)) continue;
+    const concretes = ctx.aggregates.filter(
+      (a) => a.extendsAggregate === base.name && isTpcConcrete(a, ctx.aggregates),
+    );
+    if (concretes.length === 0) continue;
+    out.set(
+      `Domain/${plural(base.name)}/I${base.name}Repository.cs`,
+      renderBaseReaderInterface(base, ns),
+    );
+    out.set(
+      `Infrastructure/Repositories/${base.name}Repository.cs`,
+      renderBaseReaderImpl(base, concretes, ns),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Per-aggregate emission
 // ---------------------------------------------------------------------------
@@ -446,6 +535,41 @@ function emitAggregate(
   emitCtx?: EmitCtx,
 ): void {
   const aggFolder = plural(agg.name);
+  // Per-aggregate placement (D-REALIZATION-AXES `directoryLayout:`): route the
+  // aggregate's domain + persistence files through the deployable's RESOLVED
+  // layout adapter (threaded via emitCtx), falling back to byLayer in the
+  // legacy single-context path.  byLayer reproduces the historical inline
+  // paths byte-for-byte; byFeature rehomes them under `Features/<Agg>/`.  The
+  // adapters ignore the EmitCtx arg for path routing, so an empty stand-in is
+  // fine when there's no system context.
+  const layout = emitCtx?.layoutAdapter ?? byLayerLayoutAdapter;
+  const place = (name: string, category: DotnetArtifactCategory, content: string): void => {
+    out.set(
+      layout.pathFor(
+        { name, content, category, aggregateName: agg.name } as DotnetArtifact,
+        emitCtx ?? ({} as EmitCtx),
+      ),
+      content,
+    );
+  };
+  // An abstract TPC (`ownTable`) base owns no table, no repository, no routes
+  // — it is kept in the generation view only to anchor the polymorphic reader
+  // (emitBaseReaders) and to give the concretes a C# base class to inherit.
+  // Emit just the abstract class and stop; everything else below is per
+  // instantiable aggregate.
+  if (agg.isAbstract) {
+    place(`${agg.name}.cs`, "entity", renderAbstractBaseEntity(agg, ns));
+    return;
+  }
+  // A concrete TPC subtype inherits the abstract base's fields from the base
+  // class instead of re-declaring them; thread the base name + its field set
+  // through so renderEntity emits `: <Base>` and skips the inherited fields.
+  const tpcBase = agg.extendsAggregate
+    ? ctx.aggregates.find((a) => a.name === agg.extendsAggregate && isTpcBase(a, ctx.aggregates))
+    : undefined;
+  const superType = tpcBase
+    ? { name: tpcBase.name, fieldNames: new Set(tpcBase.fields.map((f) => f.name)) }
+    : undefined;
   const repo = findRepoFor(ctx, agg.name);
   // dataSource resolution drives BOTH the table-mapping knobs (schema /
   // tablePrefix) and the saving SHAPE.  `isDoc` (shape(document))
@@ -460,31 +584,43 @@ function emitAggregate(
   const isEmbedded = shape === "embedded";
 
   for (const part of agg.parts) {
-    out.set(
-      `Domain/${aggFolder}/${part.name}.cs`,
-      renderEntity(part, false, ns, agg.name, emitTrace, isDoc),
-    );
+    place(`${part.name}.cs`, "entity", renderEntity(part, false, ns, agg.name, emitTrace, isDoc));
   }
-  out.set(
-    `Domain/${aggFolder}/${agg.name}.cs`,
-    renderEntity(agg, true, ns, agg.name, emitTrace, isDoc),
+  place(
+    `${agg.name}.cs`,
+    "entity",
+    renderEntity(agg, true, ns, agg.name, emitTrace, isDoc, superType),
   );
   // Views whose source is this aggregate become parameterless,
   // filtered, list-returning finds on the repository.  Synthesised
   // here so all the existing find emission paths (interface,
   // implementation, EF Core configuration) pick them up uniformly.
   const repoWithViews = mergeViewsAsFinds(agg, repo, ctx);
-  out.set(
-    `Domain/${aggFolder}/I${agg.name}Repository.cs`,
-    renderRepositoryInterface(agg, repoWithViews, ns),
+  // Context retrievals (retrieval.md) targeting this aggregate emit a
+  // `Run<Name>Async` repository method.  Document-shaped aggregates skip
+  // them in v1 (the in-memory document impl doesn't compose LINQ query
+  // operators); they stay a follow-up.
+  const aggRetrievals = isDoc
+    ? []
+    : (ctx.retrievals ?? []).filter(
+        (r) => r.targetType.kind === "entity" && r.targetType.name === agg.name,
+      );
+  place(
+    `I${agg.name}Repository.cs`,
+    "repository-interface",
+    renderRepositoryInterface(agg, repoWithViews, ns, aggRetrievals),
   );
-  // Threaded into buildFindBodies so a find with a `where` expression
-  // that lowers to `Regex.IsMatch` declares its System.Text.RegularExpressions
-  // dependency; the repository impl emitter then adds the using.
-  const repoImplUsings = new Set<string>();
-  const findBodies = buildFindBodies(agg, repoWithViews, repoImplUsings);
-  out.set(
-    `Infrastructure/Repositories/${agg.name}Repository.cs`,
+  // A find with a `where` expression that lowers to `Regex.IsMatch`
+  // declares its System.Text.RegularExpressions dependency; the
+  // repository impl emitter then adds the using.  Retrieval `where`
+  // predicates contribute the same way.
+  const repoImplUsings = collectFindBodyUsings(repoWithViews);
+  collectRetrievalBodyUsings(aggRetrievals, repoImplUsings);
+  const findBodies = buildFindBodies(agg, repoWithViews);
+  const retrievalBodies = buildRetrievalBodies(agg, aggRetrievals);
+  place(
+    `${agg.name}Repository.cs`,
+    "repository-impl",
     isDoc
       ? renderDocumentRepositoryImpl(agg, repoWithViews, ns, findBodies, {
           extraUsings: [...repoImplUsings].sort(),
@@ -492,6 +628,8 @@ function emitAggregate(
       : renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
           extraUsings: [...repoImplUsings].sort(),
           emitTrace,
+          retrievals: aggRetrievals,
+          retrievalBodies,
         }),
   );
   if (isDoc) {
@@ -499,15 +637,13 @@ function emitAggregate(
     // column) + its EF configuration + the snapshot DTOs the repository
     // (de)serialises.  No normalised entity configuration, no join
     // tables — contained parts + references fold into the document.
-    out.set(
-      `Infrastructure/Persistence/Documents/${agg.name}Document.cs`,
-      renderDocumentPoco(agg, ns),
-    );
-    out.set(
-      `Infrastructure/Persistence/Configurations/${agg.name}DocumentConfiguration.cs`,
+    place(`${agg.name}Document.cs`, "document-poco", renderDocumentPoco(agg, ns));
+    place(
+      `${agg.name}DocumentConfiguration.cs`,
+      "ef-configuration",
       renderDocumentConfiguration(agg, ns, { schema: ds?.schema, tablePrefix: ds?.tablePrefix }),
     );
-    out.set(`Domain/${aggFolder}/${agg.name}Snapshots.cs`, renderSnapshots(agg, ns));
+    place(`${agg.name}Snapshots.cs`, "entity", renderSnapshots(agg, ns));
   } else {
     // Relational (default) AND embedded both use the normal entity +
     // repository + DbSet<Agg>; they differ only in the EF configuration:
@@ -515,8 +651,9 @@ function emitAggregate(
     // types `.ToJson(...)` (no child table), so its `OwnsMany/OwnsOne`
     // calls carry `.ToJson()` and the join tables are skipped.
     // dataSource-driven schema / tablePrefix knobs flow through both.
-    out.set(
-      `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
+    place(
+      `${agg.name}Configuration.cs`,
+      "ef-configuration",
       renderConfiguration(agg, ns, ctx, {
         schema: ds?.schema,
         tablePrefix: ds?.tablePrefix,
@@ -530,9 +667,10 @@ function emitAggregate(
     if (!isEmbedded) {
       for (const assoc of agg.associations) {
         const cls = joinEntityName(assoc);
-        out.set(`Infrastructure/Persistence/JoinTables/${cls}.cs`, renderJoinEntity(assoc, ns));
-        out.set(
-          `Infrastructure/Persistence/Configurations/${cls}Configuration.cs`,
+        place(`${cls}.cs`, "join-entity", renderJoinEntity(assoc, ns));
+        place(
+          `${cls}Configuration.cs`,
+          "join-entity-configuration",
           renderJoinEntityConfiguration(assoc, ns),
         );
       }
@@ -545,9 +683,14 @@ function emitAggregate(
   // recomputes the same `Application/<Plural>/...` + `Api/...` paths
   // the emitter writes inline.
   if (emitCtx) {
-    const artifacts = cqrsStyleAdapter.emitForAggregate?.(agg, emitCtx) ?? [];
+    // Resolved selection (D-REALIZATION-AXES) when the orchestrator
+    // threaded one in; the sibling default otherwise.  Size-1 menus →
+    // the same object → byte-identical.
+    const style = emitCtx.styleAdapter ?? cqrsStyleAdapter;
+    const layout = emitCtx.layoutAdapter ?? byLayerLayoutAdapter;
+    const artifacts = style.emitForAggregate?.(agg, emitCtx) ?? [];
     for (const artifact of artifacts) {
-      out.set(byLayerLayoutAdapter.pathFor(artifact, emitCtx), artifact.content);
+      out.set(layout.pathFor(artifact, emitCtx), artifact.content);
     }
   } else {
     emitCqrs(agg, repo, ctx, ns, out, { routePrefix, emitTrace });
@@ -575,6 +718,7 @@ function emitInfrastructure(
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set("Api/ListResponseWrapperFilter.cs", renderListWrapperFilter(ns, listWrapperPairs([ctx])));
+  out.set("Api/RequiredFromCtorParamFilter.cs", renderRequiredFromCtorParamFilter(ns));
 }
 
 function emitProject(
@@ -587,6 +731,7 @@ function emitProject(
     usesStamping?: boolean;
     hasEmbeddedSpa?: boolean;
     hasMigrations?: boolean;
+    hasSeeds?: boolean;
     emitTrace?: boolean;
     resourceNugetDeps?: Record<string, string>;
   },
@@ -596,6 +741,7 @@ function emitProject(
   const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   const hasMigrations = !!options?.hasMigrations;
+  const hasSeeds = !!options?.hasSeeds;
   const emitTrace = !!options?.emitTrace;
   out.set(
     "Program.cs",
@@ -605,6 +751,7 @@ function emitProject(
       usesStamping,
       hasEmbeddedSpa,
       hasMigrations,
+      hasSeeds,
       emitTrace,
     }),
   );

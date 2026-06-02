@@ -1,10 +1,11 @@
 // Auto-generated.  Do not edit by hand.
 import { useParams, Link as RouterLink } from "react-router";
-import { AddLineRequest, ConfirmRequest, useAddLineOrder, useConfirmOrder } from "../../api/order";
+import { AddLineOrderRequest, ConfirmOrderRequest, UpdateOrderRequest, useAddLineOrder, useConfirmOrder, useUpdateOrder } from "../../api/order";
 import { useAllProducts } from "../../api/product";
+import { applyServerErrors } from "../../lib/apply-server-errors";
 import { DateTimeValue, IdValue, KeyValueRow } from "../../lib/format";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Alert, Anchor, Badge, Breadcrumbs, Button, Card, Group, NumberInput, Select, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
+import { Alert, Anchor, Badge, Breadcrumbs, Button, Card, Group, NumberInput, Select, Skeleton, Stack, Table, Text, TextInput, Title } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { Controller, useForm } from "react-hook-form";
@@ -18,8 +19,8 @@ function openAddLineModal(mut: ReturnType<typeof useAddLineOrder>): void {
 
 function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>; onClose: () => void }) {
   const __products = useAllProducts();
-  const { handleSubmit, control } = useForm<AddLineRequest>({
-    resolver: zodResolver(AddLineRequest),
+  const { handleSubmit, setError, control } = useForm<AddLineOrderRequest>({
+    resolver: zodResolver(AddLineOrderRequest),
     defaultValues: { productId: "", qty: 0 },
   });
   return (
@@ -31,7 +32,12 @@ function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>
           notifications.show({ color: "green", message: "Add Line succeeded" });
           onClose();
         } catch (e) {
-          notifications.show({ color: "red", message: (e as Error).message });
+          const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+          if (outcome.kind === "global") {
+            notifications.show({ color: "red", message: outcome.title });
+          } else if (outcome.kind === "unhandled") {
+            notifications.show({ color: "red", message: (e as Error).message });
+          }
         }
       })}
     >
@@ -68,8 +74,8 @@ function openConfirmModal(mut: ReturnType<typeof useConfirmOrder>): void {
 }
 
 function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>; onClose: () => void }) {
-  const { handleSubmit } = useForm<ConfirmRequest>({
-    resolver: zodResolver(ConfirmRequest),
+  const { handleSubmit, setError } = useForm<ConfirmOrderRequest>({
+    resolver: zodResolver(ConfirmOrderRequest),
     defaultValues: {  },
   });
   return (
@@ -81,7 +87,12 @@ function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>
           notifications.show({ color: "green", message: "Confirm succeeded" });
           onClose();
         } catch (e) {
-          notifications.show({ color: "red", message: (e as Error).message });
+          const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+          if (outcome.kind === "global") {
+            notifications.show({ color: "red", message: outcome.title });
+          } else if (outcome.kind === "unhandled") {
+            notifications.show({ color: "red", message: (e as Error).message });
+          }
         }
       })}
     >
@@ -95,12 +106,64 @@ function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>
     </form>
   );
 }
+function openUpdateModal(mut: ReturnType<typeof useUpdateOrder>): void {
+  modals.open({
+    title: "Update",
+    children: <UpdateForm mut={mut} onClose={() => modals.closeAll()} />,
+  });
+}
+
+function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateOrder>; onClose: () => void }) {
+  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<UpdateOrderRequest>({
+    resolver: zodResolver(UpdateOrderRequest),
+    defaultValues: { customerId: "", status: "Draft", placedAt: "" },
+  });
+  return (
+    <form
+      data-testid="orders-op-update-form"
+      onSubmit={handleSubmit(async (vals) => {
+        try {
+          await mut.mutateAsync(vals);
+          notifications.show({ color: "green", message: "Update succeeded" });
+          onClose();
+        } catch (e) {
+          const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
+          if (outcome.kind === "global") {
+            notifications.show({ color: "red", message: outcome.title });
+          } else if (outcome.kind === "unhandled") {
+            notifications.show({ color: "red", message: (e as Error).message });
+          }
+        }
+      })}
+    >
+      <Stack>
+        <TextInput label="Customer Id" {...register("customerId")} data-testid="orders-op-update-input-customerId" error={errors.customerId?.message} />
+
+        <Controller
+          control={control}
+          name="status"
+          render={({ field, fieldState }) => (
+            <Select label="Status" data-testid="orders-op-update-input-status" data={ ["Draft","Confirmed","Shipped","Cancelled"] } allowDeselect={false} value={field.value as string} onChange={(v) => field.onChange(v)} error={fieldState.error?.message} />
+          )}
+        />
+
+        <TextInput label="Placed At" {...register("placedAt")} data-testid="orders-op-update-input-placedAt" type="datetime-local" error={errors.placedAt?.message} />
+
+        <Group justify="flex-end" mt="sm">
+          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mut.isPending} data-testid="orders-op-update-submit">Update</Button>
+        </Group>
+      </Stack>
+    </form>
+  );
+}
 
 export default function OrderDetail() {
   const { id } = useParams<{ id: string }>();
   const orderById = useOrderById(id);
   const addLine = useAddLineOrder(id ?? "");
   const confirm = useConfirmOrder(id ?? "");
+  const update = useUpdateOrder(id ?? "");
   return (
     <Stack data-testid="orders-detail">
       <Breadcrumbs>
@@ -160,6 +223,8 @@ export default function OrderDetail() {
         <Button variant="filled" onClick={() => openAddLineModal(addLine)} data-testid="orders-op-addLine">Add Line</Button>
     
         <Button variant="light" onClick={() => openConfirmModal(confirm)} data-testid="orders-op-confirm">Confirm</Button>
+    
+        <Button variant="light" onClick={() => openUpdateModal(update)} data-testid="orders-op-update">Update</Button>
     
       </Group>
     </Stack>

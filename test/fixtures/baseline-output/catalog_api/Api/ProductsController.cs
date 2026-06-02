@@ -46,6 +46,39 @@ public sealed class ProductsController : ControllerBase
         return response is null ? NotFound() : Ok(response);
     }
 
+    [HttpDelete("{id}")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
+    [ProducesResponseType(typeof(ProblemDetails), 409)]
+    public async Task<IActionResult> DestroyProduct([FromRoute] Guid id)
+    {
+        try
+        {
+            await _mediator.Send(new DestroyProductCommand(new ProductId(id)));
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            return Conflict(new ProblemDetails { Title = "Conflict", Status = 409, Detail = "Product is still referenced and cannot be deleted." });
+        }
+        return NoContent();
+    }
+
+    [HttpPost("{id}/update")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
+    public async Task<IActionResult> UpdateProduct([FromRoute] Guid id, [FromBody] UpdateProductRequest request)
+    {
+        _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Product", "update", id);
+        var cmd = new UpdateCommand(
+            new ProductId(id),
+            request.Sku,
+            new Money(request.Price.Amount, request.Price.Currency)
+        );
+        await _mediator.Send(cmd);
+        return NoContent();
+    }
+
     [HttpGet]
     [ProducesResponseType(typeof(IReadOnlyList<ProductResponse>), 200)]
     public async Task<ActionResult<IReadOnlyList<ProductResponse>>> AllProduct()

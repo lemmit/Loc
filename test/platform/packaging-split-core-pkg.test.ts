@@ -61,6 +61,6 @@ describe("fs discovery ignores the @loom/core package", () => {
     // skipped by the backend walk.
     expect(backends.some((b) => (b.manifest.family as string) === "core")).toBe(false);
     // sanity: the real backend is still found.
-    expect(backends.some((b) => b.manifest.family === "hono")).toBe(true);
+    expect(backends.some((b) => b.manifest.family === "node")).toBe(true);
   });
 });

@@ -167,7 +167,11 @@ export function generateReactForContexts(
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
   out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
-  out.set("src/api/client.ts", renderShellFile("api-client", {}, pack));
+  // `api.delete` helper only when some served aggregate has a canonical
+  // destroy (declared or via `crudish`) — keeps the shared client
+  // byte-identical for projects without any hard-delete.
+  const hasDelete = aggregates.some((a) => !!a.agg.canonicalDestroy);
+  out.set("src/api/client.ts", renderShellFile("api-client", { hasDelete }, pack));
   out.set("src/api/config.ts", renderShellFile("api-config", { apiBaseUrl }, pack));
   // Frontend observability: a namespaced loglevel logger + a top-level
   // error boundary.  Both are pack-agnostic shared shell files; main.tsx
@@ -177,6 +181,14 @@ export function generateReactForContexts(
   out.set("src/logger.ts", renderShellFile("logger", {}, pack));
   out.set("src/ErrorBoundary.tsx", renderShellFile("error-boundary", {}, pack));
   out.set("src/lib/format.tsx", renderShellFile("format-helpers", {}, pack));
+  // Frontend ACL shared utilities — pack-agnostic, emitted into every
+  // React project.  `strict-field-map.ts` is type-only (zero runtime
+  // cost; erased at compile time).  `apply-server-errors.ts` decodes
+  // RFC 7807 ProblemDetails 422 responses into per-field RHF errors
+  // via the per-action FieldMap instance the form walker passes in.
+  // See docs/proposals/frontend-acl.md.
+  out.set("src/lib/strict-field-map.ts", REACT_LIB_STRICT_FIELD_MAP_TS);
+  out.set("src/lib/apply-server-errors.ts", REACT_LIB_APPLY_SERVER_ERRORS_TS);
   // Theme — every generated app gets a tasteful baseline (indigo
   // primary, medium radius, Inter font) so the bare-Mantine
   // "construction site" look is gone by default.  System-level
@@ -493,6 +505,96 @@ export const moneySchema = z.string().transform((s, ctx) => {
     return z.NEVER;
   }
 });
+`;
+
+// =============================================================================
+// Frontend ACL shared utilities — see docs/proposals/frontend-acl.md.
+//
+// Both files are pack-agnostic and emitted into every React project under
+// src/lib/.  Per-action FieldMap *instances* are NOT emitted here — they
+// live next to their action's schema (currently inside src/api/<agg>.ts,
+// or src/lib/schemas/<action>.schema.ts after a future schema split).
+// =============================================================================
+
+/**
+ * Compile-time type machinery — erased from the runtime bundle.  Pinned
+ * to every per-action FieldMap via a `satisfies StrictFieldMap<...>`
+ * clause so wire-shape drift surfaces as a TSC error at the schema
+ * file, not as a silent error-misrouting at runtime.
+ */
+const REACT_LIB_STRICT_FIELD_MAP_TS = `// Auto-generated.  Do not edit by hand.
+// See docs/proposals/frontend-acl.md.
+
+type NestedPaths<T> = T extends object
+  ? {
+      [K in keyof T & string]: T[K] extends object
+        ? \`\${K}.\${NestedPaths<T[K]>}\`
+        : \`\${K}\`;
+    }[keyof T & string]
+  : never;
+
+/**
+ * Strict bidirectional pin between a payload's nested shape and a form
+ * state's flat key set.  Keys MUST be valid dot-notation leaf paths of
+ * the payload; values MUST be valid keys of the form state.  Used as a
+ * \`satisfies\` constraint on per-action FieldMap constants.
+ */
+export type StrictFieldMap<TPayload, TFormState> = {
+  readonly [K in NestedPaths<TPayload>]?: keyof TFormState & string;
+};
+`;
+
+/**
+ * Runtime decoder for ProblemDetails 422 responses (per
+ * docs/proposals/exception-less.md).  Called from the form walker's
+ * generated catch block.  Returns an outcome so the caller switches
+ * inline on global / unhandled paths (pack-native toast emitted by
+ * the design pack template).  Pure logic, no pack specifics.
+ */
+const REACT_LIB_APPLY_SERVER_ERRORS_TS = `// Auto-generated.  Do not edit by hand.
+// See docs/proposals/frontend-acl.md.
+
+import type { UseFormSetError, FieldValues, Path } from "react-hook-form";
+import type { StrictFieldMap } from "./strict-field-map";
+
+interface ProblemDetails {
+  title?: string;
+  errors?: { pointer: string; message: string }[];
+}
+
+export interface ApplyServerErrorsArgs<TPayload, TFormState extends FieldValues> {
+  readonly error: unknown;
+  readonly setError: UseFormSetError<TFormState>;
+  readonly fieldMap: StrictFieldMap<TPayload, TFormState>;
+}
+
+export type ServerErrorOutcome =
+  | { kind: "applied" }
+  | { kind: "global"; title: string }
+  | { kind: "unhandled" };
+
+export function applyServerErrors<TPayload, TFormState extends FieldValues>({
+  error,
+  setError,
+  fieldMap,
+}: ApplyServerErrorsArgs<TPayload, TFormState>): ServerErrorOutcome {
+  const r = (error as { response?: { status?: number; data?: ProblemDetails } }).response;
+  if (r?.status !== 422 || !r.data) return { kind: "unhandled" };
+
+  const pd = r.data;
+  if (Array.isArray(pd.errors) && pd.errors.length > 0) {
+    for (const { pointer, message } of pd.errors) {
+      const flatKey = pointerToFlat(pointer);
+      const target = (fieldMap as Record<string, string | undefined>)[flatKey] ?? flatKey;
+      setError(target as Path<TFormState>, { type: "server", message });
+    }
+    return { kind: "applied" };
+  }
+  return pd.title ? { kind: "global", title: pd.title } : { kind: "unhandled" };
+}
+
+const pointerToFlat = (p: string) =>
+  p.startsWith("/") ? p.slice(1).split("/").map(decodeURIComponent).join(".") : p;
 `;
 
 export const E2E_FIXTURES_TS = `// Auto-generated.

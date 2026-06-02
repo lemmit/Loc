@@ -10,7 +10,7 @@ flowchart LR
   subgraph deployables["🚀 Deployables"]
     direction TB
     deploy_api{{"api · dotnet"}}
-    deploy_catalogWeb{{"catalogWeb · hono"}}
+    deploy_catalogWeb{{"catalogWeb · node"}}
     deploy_catalogApi{{"catalogApi · dotnet"}}
     deploy_webApp{{"webApp · static"}}
   end
@@ -45,6 +45,7 @@ classDiagram
     +Money price
     +string /display
     +string /inspect
+    +update(sku, price)
   }
   class Products {
     <<repository>>
@@ -74,6 +75,7 @@ classDiagram
     +isMutable() bool
     +addLine(productId, qty)
     +confirm()
+    +update(customerId, status, placedAt)
   }
   class OrderLine {
     <<entity>>
@@ -100,6 +102,7 @@ classDiagram
     +int age
     +string /display
     +string /inspect
+    +update(username, email, age)
   }
   class Customers {
     <<repository>>

@@ -1,4 +1,9 @@
-import type { PlatformAdapterDefaults, PlatformAdapters } from "../generator/_adapters/index.js";
+import type {
+  LayoutAdapter,
+  PlatformAdapterDefaults,
+  PlatformAdapters,
+  StyleAdapter,
+} from "../generator/_adapters/index.js";
 import type {
   ComponentIR,
   DeployableIR,
@@ -9,12 +14,30 @@ import type {
 import type { MigrationsIR } from "../ir/types/migrations-ir.js";
 
 // ---------------------------------------------------------------------------
+// D-PHOENIX-SURFACE — framework host-capability building blocks.
+//
+// Encode the "host serves a framework iff it provides that framework's
+// runtime" rule ONCE, as composable sets, rather than re-listing
+// frameworks on every surface object (the lookup-table anti-pattern
+// D-PHOENIX-SURFACE open-question #3 warns against).  A static-asset
+// host's `hostableFrameworks` is exactly `STATIC_BUNDLE_FRAMEWORKS`;
+// a runtime-coupled host unions its runtime framework on top.
+// ---------------------------------------------------------------------------
+
+/** Frameworks that compile to static assets and are therefore hostable
+ *  by any platform that serves a static root.  `static` is React's
+ *  UI-only alias (same Vite-built bundle).  Future static-bundle
+ *  frameworks (`angular`, `vue`) join here and become embeddable in
+ *  every static-asset host with no per-host edit. */
+export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set(["react", "static"]);
+
+// ---------------------------------------------------------------------------
 // Platform surface contract.
 //
 // A small public interface every platform implementation
 // (dotnet / hono / react) exposes to the system orchestrator.
 // Lets `system/index.ts` dispatch over a registry instead of
-// `if (platform === "dotnet") ... else if (platform === "hono") ...`
+// `if (platform === "dotnet") ... else if (platform === "node") ...`
 // branches, while INTENTIONALLY leaving each platform's internal
 // emission strategy unconstrained — Hono uses procedural routes
 // builders, .NET uses CQRS templates, React uses procedural TSX.
@@ -95,6 +118,29 @@ export interface PlatformSurface {
    * the deployable they `targets:`, since they have no domain code
    * of their own — they just consume the backend's wire shapes. */
   readonly isFrontend: boolean;
+  /** The set of `ui { framework: … }` values this platform can serve
+   * when it `hosts:` a UI — the capability behind D-PHOENIX-SURFACE
+   * (`docs/decisions.md`).
+   *
+   * Principled rule, not a hand-maintained lookup table: a host can
+   * serve a framework **iff it provides the runtime that framework
+   * requires**.  A framework that compiles to static assets (`react`,
+   * `static`) is hostable by any static-asset host — every backend that
+   * serves a static root (`dotnet` → `wwwroot`, `hono` → static
+   * middleware, `phoenixLiveView` → `priv/static`) plus the standalone
+   * frontend hosts.  A runtime-coupled framework (LiveView, spelled
+   * `phoenixLiveView` here) is hostable only by its runtime — Phoenix
+   * alone.  This is why Phoenix has the richest set
+   * (`{phoenixLiveView, react, static}`): it is the only platform that
+   * is *both* a server-render runtime *and* a static-asset host.
+   *
+   * Dormant in this phase: the field records the capability; the
+   * deployable validator's `hosts:`/`framework:` membership check that
+   * consumes it lands with the grammar work.  Until then nothing reads
+   * it, so populating it changes no generated output.  Values are
+   * `Framework` grammar strings (today `react` | `phoenixLiveView`,
+   * plus `static` as React's alias). */
+  readonly hostableFrameworks: ReadonlySet<string>;
   /** Repository method names this platform auto-emits for every
    * aggregate.  A user-declared find with one of these names would
    * collide with the auto-emitted method (TS: duplicate function
@@ -134,6 +180,16 @@ export interface PlatformSurface {
      *  `src/components/<Name>.tsx` per ui that references the
      *  component); other platforms ignore the arg. */
     topLevelComponents?: ComponentIR[];
+    /** The deployable's resolved STYLE / LAYOUT adapters
+     *  (D-REALIZATION-AXES `application:` / `directoryLayout:`).  The
+     *  system orchestrator resolves these from the deployable's axis
+     *  selection via `resolveStyle` / `resolveLayout` and passes them
+     *  here; the surface forwards them into its generator's `EmitCtx`.
+     *  Absent for frontends and in legacy single-context generate mode —
+     *  the generator then falls back to its hardcoded default sibling
+     *  (byte-identical under today's size-1 menus). */
+    styleAdapter?: StyleAdapter;
+    layoutAdapter?: LayoutAdapter;
   }): Map<string, string>;
   /** Inputs for the deployable's docker-compose service stanza. */
   composeService(args: {

@@ -379,7 +379,104 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       );
     }
   }, 120_000);
+
+  // Runtime authorization parity — distinct from the OpenAPI parity above.
+  // showcase's `registerProject` workflow guards on
+  // `currentUser.permissions.length > 0`; every backend's dev-stub auth
+  // verifier returns an admin user with EMPTY permissions, so an
+  // authenticated request must be DENIED with 403 on all three backends.
+  //
+  // Runs in parity-only mode too (the three backends are already booted).
+  // History: Hono once 500'd (unbound currentUser, #759), Phoenix once
+  // 500'd (`.length` field access #759, then uncaught `throw` #771) — both
+  // fixed.  .NET still 500s despite correct-looking generated code; this
+  // test exists to (a) lock the contract once .NET is fixed and (b) dump
+  // each backend's response body + container logs on any non-403 so the
+  // real server-side error (e.g. the .NET stacktrace) surfaces in CI.
+  it("cross-backend: a guarded workflow denies with 403 (runtime authorization)", async () => {
+    const targets: Record<string, string> = {
+      hono: "http://localhost:3000/workflows/register_project",
+      dotnet: "http://localhost:8080/workflows/register_project",
+      phoenix: "http://localhost:4000/api/workflows/register_project",
+    };
+    const statuses: Record<string, number> = {};
+    const bodies: Record<string, string> = {};
+    for (const [name, url] of Object.entries(targets)) {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer e2e-stub-token",
+        },
+        body: JSON.stringify({ name: "Parity Test", visibility: "Public" }),
+      });
+      statuses[name] = r.status;
+      bodies[name] = (await r.text()).slice(0, 1000);
+    }
+
+    const allDeny = Object.values(statuses).every((s) => s === 403);
+    if (!allDeny) {
+      // A guard-crash returns a generic 500 body that hides the cause, so
+      // dump the response bodies AND the container logs (the .NET
+      // DomainExceptionFilter logs the real exception before returning
+      // 500; Phoenix prints an Elixir stacktrace).  Persist to the same
+      // diagnostics file the workflow's post-failure step surfaces.
+      dumpComposeDiagnostics(outDir, "workflow-403", {
+        statuses,
+        bodies,
+      });
+    }
+
+    // Every backend must deny with 403 — not 400 (domain/validation) and
+    // not 500 (a guard crash).  Asserting all three at once names which
+    // backend diverged in the failure message.
+    for (const [name, status] of Object.entries(statuses)) {
+      expect(
+        status,
+        `${name} guarded-workflow status (all: ${JSON.stringify(statuses)}; body: ${bodies[name]})`,
+      ).toBe(403);
+    }
+  }, 60_000);
 });
+
+/** Capture compose ps + logs (and any extra context) to console.error and
+ *  to /tmp/loom-e2e-diagnostics.log, which the parity workflow's
+ *  post-failure step re-prints after this suite's afterAll deletes outDir.
+ *  Mirrors the inline capture blocks in the health/boot paths. */
+function dumpComposeDiagnostics(
+  outDir: string,
+  tag: string,
+  extra?: Record<string, unknown>,
+): void {
+  const capture = (cmd: string): string => {
+    try {
+      return execSync(cmd, {
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+    } catch (e: unknown) {
+      const ex = e as { stdout?: string; stderr?: string; message?: string };
+      return `[capture failed] ${ex.message ?? "unknown"}\nstdout: ${ex.stdout ?? ""}\nstderr: ${ex.stderr ?? ""}`;
+    }
+  };
+  const sections = [
+    `===== ${tag}: context =====`,
+    extra ? JSON.stringify(extra, null, 2) : "(none)",
+    `===== ${tag}: compose ps -a =====`,
+    capture(`docker compose -f ${outDir}/docker-compose.yml ps -a`),
+    `===== ${tag}: compose logs --tail=400 =====`,
+    capture(`docker compose -f ${outDir}/docker-compose.yml logs --tail=400`),
+    `===== end ${tag} diagnostics =====`,
+  ];
+  const body = sections.join("\n");
+  console.error("\n" + body + "\n");
+  try {
+    fs.writeFileSync("/tmp/loom-e2e-diagnostics.log", body);
+  } catch {
+    /* ignore */
+  }
+}
 
 async function fetchSpec(url: string): Promise<OpenApiSpec> {
   const r = await fetch(url);

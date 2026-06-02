@@ -50,10 +50,14 @@ export type DddKeywordNames =
     | "["
     | "[]"
     | "]"
+    | "abstract"
     | "against"
     | "aggregate"
     | "aggregates"
     | "api"
+    | "application"
+    | "apply"
+    | "asc"
     | "ashPhoenix"
     | "audited"
     | "auth"
@@ -62,9 +66,13 @@ export type DddKeywordNames =
     | "bind"
     | "body"
     | "bool"
+    | "broadcast"
     | "cache"
     | "canonical"
+    | "carries"
     | "chakra"
+    | "channel"
+    | "channelSource"
     | "check"
     | "clickhouse"
     | "command"
@@ -80,11 +88,14 @@ export type DddKeywordNames =
     | "dataSources"
     | "datetime"
     | "decimal"
+    | "delivery"
     | "deployable"
     | "derived"
+    | "desc"
     | "description"
     | "design"
     | "destroy"
+    | "directoryLayout"
     | "document"
     | "dotnet"
     | "e2e"
@@ -97,6 +108,7 @@ export type DddKeywordNames =
     | "enum"
     | "env"
     | "envelope"
+    | "ephemeral"
     | "error"
     | "event"
     | "eventLog"
@@ -104,6 +116,7 @@ export type DddKeywordNames =
     | "every"
     | "expect"
     | "expectThrows"
+    | "extends"
     | "extern"
     | "false"
     | "favicon"
@@ -111,19 +124,22 @@ export type DddKeywordNames =
     | "find"
     | "footer"
     | "for"
+    | "foundation"
     | "framework"
     | "from"
     | "function"
     | "guid"
     | "header"
-    | "helper"
     | "hono"
+    | "hosts"
     | "id"
     | "ids"
     | "immutable"
     | "implements"
     | "import"
+    | "in"
     | "inMemory"
+    | "inheritanceUsing"
     | "instance"
     | "int"
     | "internal"
@@ -131,12 +147,16 @@ export type DddKeywordNames =
     | "isolationLevel"
     | "json"
     | "kafka"
+    | "key"
     | "keyPrefix"
     | "kind"
     | "layout"
     | "let"
     | "link"
     | "literal"
+    | "liveview"
+    | "loads"
+    | "log"
     | "long"
     | "main"
     | "managed"
@@ -148,6 +168,8 @@ export type DddKeywordNames =
     | "money"
     | "mui"
     | "mysql"
+    | "nats"
+    | "node"
     | "now"
     | "null"
     | "objectStore"
@@ -156,12 +178,15 @@ export type DddKeywordNames =
     | "onCreate"
     | "onUpdate"
     | "operation"
+    | "ownTable"
     | "page"
     | "paged"
     | "parent"
     | "payload"
     | "permissions"
     | "persistedAs"
+    | "persistence"
+    | "phoenix"
     | "phoenixLiveView"
     | "platform"
     | "port"
@@ -173,6 +198,7 @@ export type DddKeywordNames =
     | "query"
     | "queue"
     | "rabbitmq"
+    | "raw"
     | "react"
     | "readCommitted"
     | "readUncommitted"
@@ -189,22 +215,28 @@ export type DddKeywordNames =
     | "response"
     | "restApi"
     | "retain"
+    | "retention"
+    | "retrieval"
     | "route"
+    | "runtime"
     | "s3"
     | "schema"
     | "search"
     | "secret"
     | "section"
+    | "seed"
     | "sensitive"
     | "serializable"
     | "serves"
     | "service"
     | "shadcn"
     | "shape"
+    | "sharedTable"
     | "sidebar"
     | "slot"
     | "snapshot"
     | "solution"
+    | "sort"
     | "sqlite"
     | "stamp"
     | "state"
@@ -222,6 +254,7 @@ export type DddKeywordNames =
     | "title"
     | "token"
     | "transactional"
+    | "transport"
     | "true"
     | "ttl"
     | "type"
@@ -236,6 +269,7 @@ export type DddKeywordNames =
     | "when"
     | "where"
     | "with"
+    | "work"
     | "workflow"
     | "workflows"
     | "{"
@@ -244,7 +278,7 @@ export type DddKeywordNames =
 
 export type DddTokenNames = DddTerminalNames | DddKeywordNames;
 
-export type AggregateMember = Containment | Create | DerivedProp | Destroy | EntityPart | FilterDecl | FunctionDecl | ImplementsDecl | Invariant | Operation | Property | StampDecl | TestBlock;
+export type AggregateMember = Apply | Containment | Create | DerivedProp | Destroy | EntityPart | FilterDecl | FunctionDecl | ImplementsDecl | Invariant | Operation | Property | StampDecl | TestBlock;
 
 export const AggregateMember = 'AggregateMember';
 
@@ -272,6 +306,18 @@ export function isBoolLiteral(item: unknown): item is BoolLiteral {
     return item === 'true' || item === 'false';
 }
 
+export type ChannelDelivery = 'broadcast' | 'queue';
+
+export function isChannelDelivery(item: unknown): item is ChannelDelivery {
+    return item === 'broadcast' || item === 'queue';
+}
+
+export type ChannelRetention = 'ephemeral' | 'log' | 'work';
+
+export function isChannelRetention(item: unknown): item is ChannelRetention {
+    return item === 'ephemeral' || item === 'log' || item === 'work';
+}
+
 export type ComponentDecl = StateBlock;
 
 export const ComponentDecl = 'ComponentDecl';
@@ -296,7 +342,7 @@ export function isConnectionSource(item: unknown): item is ConnectionSource {
     return reflection.isInstance(item, ConnectionSource);
 }
 
-export type ContextMember = Aggregate | Criterion | EnumDecl | EventDecl | FilterDecl | ImplementsDecl | PayloadDecl | Repository | StampDecl | ValueObject | View | Workflow;
+export type ContextMember = Aggregate | Channel | Criterion | EnumDecl | EventDecl | FilterDecl | ImplementsDecl | PayloadDecl | Repository | Retrieval | Seed | StampDecl | ValueObject | View | Workflow;
 
 export const ContextMember = 'ContextMember';
 
@@ -338,10 +384,10 @@ export function isFieldAccess(item: unknown): item is FieldAccess {
     return item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret';
 }
 
-export type Framework = 'phoenixLiveView' | 'react';
+export type Framework = 'liveview' | 'phoenixLiveView' | 'react';
 
 export function isFramework(item: unknown): item is Framework {
-    return item === 'react' || item === 'phoenixLiveView';
+    return item === 'react' || item === 'phoenixLiveView' || item === 'liveview';
 }
 
 export type GenericCtor = 'envelope' | 'paged';
@@ -354,6 +400,12 @@ export type IdKind = 'guid' | 'int' | 'long' | 'string';
 
 export function isIdKind(item: unknown): item is IdKind {
     return item === 'guid' || item === 'int' || item === 'long' || item === 'string';
+}
+
+export type InheritanceLayout = 'ownTable' | 'sharedTable';
+
+export function isInheritanceLayout(item: unknown): item is InheritanceLayout {
+    return item === 'sharedTable' || item === 'ownTable';
 }
 
 export type IsolationLevel = 'readCommitted' | 'readUncommitted' | 'repeatableRead' | 'serializable';
@@ -384,10 +436,10 @@ export function isLiteralExpr(item: unknown): item is LiteralExpr {
     return reflection.isInstance(item, LiteralExpr);
 }
 
-export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'description' | 'design' | 'env' | 'envelope' | 'error' | 'eventLog' | 'events' | 'every' | 'favicon' | 'framework' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'page' | 'paged' | 'payload' | 'permissions' | 'primary' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
+export type LooseName = 'aggregates' | 'api' | 'application' | 'asc' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'desc' | 'description' | 'design' | 'directoryLayout' | 'env' | 'envelope' | 'error' | 'eventLog' | 'events' | 'every' | 'favicon' | 'foundation' | 'framework' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'page' | 'paged' | 'payload' | 'permissions' | 'persistence' | 'primary' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'runtime' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'transactional' | 'transport' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'foundation' || item === 'application' || item === 'persistence' || item === 'directoryLayout' || item === 'transport' || item === 'runtime' || item === 'transactional' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type LValueIdent = 'aggregates' | 'api' | 'command' | 'contains' | 'contexts' | 'create' | 'destroy' | 'envelope' | 'error' | 'id' | 'modules' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'ui' | 'views' | 'workflows' | string;
@@ -426,10 +478,10 @@ export function isNamedDecl(item: unknown): item is NamedDecl {
     return reflection.isInstance(item, NamedDecl);
 }
 
-export type NameRefIdent = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'create' | 'dataSources' | 'description' | 'design' | 'destroy' | 'env' | 'envelope' | 'error' | 'eventLog' | 'events' | 'every' | 'favicon' | 'filter' | 'framework' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'ogImage' | 'page' | 'paged' | 'payload' | 'permissions' | 'primary' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
+export type NameRefIdent = 'aggregates' | 'api' | 'asc' | 'bi' | 'bind' | 'body' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'create' | 'dataSources' | 'desc' | 'description' | 'design' | 'destroy' | 'env' | 'envelope' | 'error' | 'eventLog' | 'events' | 'every' | 'favicon' | 'filter' | 'framework' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'ogImage' | 'page' | 'paged' | 'payload' | 'permissions' | 'primary' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'schema' | 'search' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
 
 export function isNameRefIdent(item: unknown): item is NameRefIdent {
-    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'create' || item === 'destroy' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'create' || item === 'destroy' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type PageProp = BodyProp | CanonicalProp | DescriptionProp | LayoutProp | OgImageProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
@@ -446,10 +498,10 @@ export function isPayloadKind(item: unknown): item is PayloadKind {
     return item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error';
 }
 
-export type Platform = 'dotnet' | 'hono' | 'phoenixLiveView' | 'react' | 'static' | string;
+export type Platform = 'dotnet' | 'hono' | 'node' | 'phoenix' | 'phoenixLiveView' | 'react' | 'static' | string;
 
 export function isPlatform(item: unknown): item is Platform {
-    return item === 'dotnet' || item === 'hono' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'dotnet' || item === 'hono' || item === 'node' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export type PostfixSuffix = CallSuffix | MemberSuffix;
@@ -478,6 +530,12 @@ export function isSavingShape(item: unknown): item is SavingShape {
     return item === 'relational' || item === 'embedded' || item === 'document';
 }
 
+export type SortDirection = 'asc' | 'desc';
+
+export function isSortDirection(item: unknown): item is SortDirection {
+    return item === 'asc' || item === 'desc';
+}
+
 export type StampEvent = 'onCreate' | 'onUpdate';
 
 export function isStampEvent(item: unknown): item is StampEvent {
@@ -490,7 +548,7 @@ export function isStateFieldName(item: unknown): item is StateFieldName {
     return item === 'filter' || item === 'stamp' || item === 'implements' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type Statement = AssignOrCallStmt | EmitStmt | LetStmt | PreconditionStmt | RequiresStmt;
+export type Statement = AssignOrCallStmt | EmitStmt | ForStmt | LetStmt | PreconditionStmt | RequiresStmt;
 
 export const Statement = 'Statement';
 
@@ -498,13 +556,13 @@ export function isStatement(item: unknown): item is Statement {
     return reflection.isInstance(item, Statement);
 }
 
-export type StorageType = 'bigquery' | 'clickhouse' | 'elastic' | 'inMemory' | 'kafka' | 'meilisearch' | 'mysql' | 'postgres' | 'rabbitmq' | 'redis' | 'restApi' | 's3' | 'sqlite';
+export type StorageType = 'bigquery' | 'clickhouse' | 'elastic' | 'inMemory' | 'kafka' | 'meilisearch' | 'mysql' | 'nats' | 'postgres' | 'rabbitmq' | 'redis' | 'restApi' | 's3' | 'sqlite';
 
 export function isStorageType(item: unknown): item is StorageType {
-    return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery' || item === 's3' || item === 'rabbitmq' || item === 'restApi';
+    return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery' || item === 's3' || item === 'rabbitmq' || item === 'nats' || item === 'restApi';
 }
 
-export type SystemMember = Api | BoundedContext | Deployable | Layout | Resource | Storage | Subdomain | TestE2E | ThemeBlock | Ui | UserBlock;
+export type SystemMember = Api | BoundedContext | ChannelSource | Deployable | Layout | Resource | Storage | Subdomain | TestE2E | ThemeBlock | Ui | UserBlock;
 
 export const SystemMember = 'SystemMember';
 
@@ -540,7 +598,7 @@ export function isTruthKind(item: unknown): item is TruthKind {
     return item === 'eventLog' || item === 'state';
 }
 
-export type UiMember = Component | MenuBlock | Page | UiApiParam | UiHelperImport;
+export type UiMember = Component | MenuBlock | Page | UiApiParam;
 
 export const UiMember = 'UiMember';
 
@@ -566,10 +624,13 @@ export interface Aggregate extends AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'Aggregate';
     idKind?: IdKind;
+    inheritanceUsing?: InheritanceLayout;
+    isAbstract: boolean;
     members: Array<AggregateMember>;
     name: string;
     persistedAs?: TruthKind;
     shape?: SavingShape;
+    superType?: Reference<Aggregate>;
     withClause?: WithClause;
 }
 
@@ -593,8 +654,22 @@ export function isApi(item: unknown): item is Api {
     return reflection.isInstance(item, Api);
 }
 
+export interface Apply extends AstNode {
+    readonly $container: Aggregate;
+    readonly $type: 'Apply';
+    body: Array<Statement>;
+    event: Reference<EventDecl>;
+    param: LooseName;
+}
+
+export const Apply = 'Apply';
+
+export function isApply(item: unknown): item is Apply {
+    return reflection.isInstance(item, Apply);
+}
+
 export interface AssignOrCallStmt extends AstNode {
-    readonly $container: Create | Destroy | Lambda | Operation | StampDecl | TestBlock | TestE2E | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | Operation | StampDecl | TestBlock | TestE2E | Workflow;
     readonly $type: 'AssignOrCallStmt';
     op?: '+=' | '-=' | ':=';
     target: LValue;
@@ -608,7 +683,7 @@ export function isAssignOrCallStmt(item: unknown): item is AssignOrCallStmt {
 }
 
 export interface BinaryChain extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'BinaryChain';
     head: Expression;
     ops: Array<'!=' | '%' | '&&' | '*' | '+' | '-' | '/' | '<' | '<=' | '==' | '>' | '>=' | '||'>;
@@ -659,7 +734,7 @@ export function isBoolConfigValue(item: unknown): item is BoolConfigValue {
 }
 
 export interface BoolLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'BoolLit';
     value: 'false' | 'true';
 }
@@ -685,7 +760,7 @@ export function isBoundedContext(item: unknown): item is BoundedContext {
 }
 
 export interface BuilderCall extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'BuilderCall';
     entries: Array<BuilderEntry>;
     type: string;
@@ -747,11 +822,43 @@ export function isCanonicalProp(item: unknown): item is CanonicalProp {
     return reflection.isInstance(item, CanonicalProp);
 }
 
+export interface Channel extends AstNode {
+    readonly $container: BoundedContext;
+    readonly $type: 'Channel';
+    carries: Array<Reference<EventDecl>>;
+    delivery?: ChannelDelivery;
+    key?: string;
+    name: string;
+    retention?: ChannelRetention;
+}
+
+export const Channel = 'Channel';
+
+export function isChannel(item: unknown): item is Channel {
+    return reflection.isInstance(item, Channel);
+}
+
+export interface ChannelSource extends AstNode {
+    readonly $container: System;
+    readonly $type: 'ChannelSource';
+    channel: string;
+    name: LooseName;
+    use?: Reference<Storage>;
+}
+
+export const ChannelSource = 'ChannelSource';
+
+export function isChannelSource(item: unknown): item is ChannelSource {
+    return reflection.isInstance(item, ChannelSource);
+}
+
 export interface Component extends AstNode {
     readonly $container: Model | Ui;
     readonly $type: 'Component';
-    body: Expression;
+    body?: Expression;
     decls: Array<ComponentDecl>;
+    extern: boolean;
+    externPath?: string;
     name: string;
     params: Array<Parameter>;
 }
@@ -820,7 +927,7 @@ export function isCriterion(item: unknown): item is Criterion {
 }
 
 export interface DecLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'DecLit';
     value: string;
 }
@@ -834,16 +941,23 @@ export function isDecLit(item: unknown): item is DecLit {
 export interface Deployable extends AstNode {
     readonly $container: System;
     readonly $type: 'Deployable';
+    application?: LooseName;
     auth?: AuthMode;
     contextRefs: Array<Reference<BoundedContext>>;
     dataSourceRefs: Array<Reference<Resource>>;
     design?: DesignPack;
+    directoryLayout?: LooseName;
     favicon?: string;
+    foundation?: LooseName;
+    hosts: Array<Reference<Ui>>;
     name: LooseName;
+    persistence?: LooseName;
     platform: Platform;
     port?: number;
+    runtime?: LooseName;
     serves: Array<Reference<Api>>;
     targets?: Reference<Deployable>;
+    transport?: LooseName;
     uiBlock?: UiBlockBinding;
     uiCompose?: UiComposeBinding;
     uiSugar?: UiSugarBinding;
@@ -909,7 +1023,7 @@ export function isEmitField(item: unknown): item is EmitField {
 }
 
 export interface EmitStmt extends AstNode {
-    readonly $container: Create | Destroy | Lambda | Operation | TestBlock | TestE2E | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | Operation | TestBlock | TestE2E | Workflow;
     readonly $type: 'EmitStmt';
     event: Reference<EventDecl>;
     fields: Array<EmitField>;
@@ -1036,6 +1150,20 @@ export function isFindDecl(item: unknown): item is FindDecl {
     return reflection.isInstance(item, FindDecl);
 }
 
+export interface ForStmt extends AstNode {
+    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | Operation | Workflow;
+    readonly $type: 'ForStmt';
+    body: Array<Statement>;
+    iterable: Expression;
+    var: string;
+}
+
+export const ForStmt = 'ForStmt';
+
+export function isForStmt(item: unknown): item is ForStmt {
+    return reflection.isInstance(item, ForStmt);
+}
+
 export interface FunctionDecl extends AstNode {
     readonly $container: Aggregate | EntityPart | ValueObject;
     readonly $type: 'FunctionDecl';
@@ -1052,7 +1180,7 @@ export function isFunctionDecl(item: unknown): item is FunctionDecl {
 }
 
 export interface IdRef extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'IdRef';
 }
 
@@ -1111,7 +1239,7 @@ export function isIntConfigValue(item: unknown): item is IntConfigValue {
 }
 
 export interface IntLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'IntLit';
     value: number;
 }
@@ -1137,7 +1265,7 @@ export function isInvariant(item: unknown): item is Invariant {
 }
 
 export interface Lambda extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'Lambda';
     body?: Expression;
     param: string;
@@ -1200,7 +1328,7 @@ export function isLayoutProp(item: unknown): item is LayoutProp {
 }
 
 export interface LetStmt extends AstNode {
-    readonly $container: Create | Destroy | Lambda | Operation | TestBlock | TestE2E | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | Operation | TestBlock | TestE2E | Workflow;
     readonly $type: 'LetStmt';
     expr: Expression;
     name: string;
@@ -1213,7 +1341,7 @@ export function isLetStmt(item: unknown): item is LetStmt {
 }
 
 export interface ListLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'ListLit';
     elements: Array<Expression>;
 }
@@ -1234,6 +1362,31 @@ export const LiteralConnectionSource = 'LiteralConnectionSource';
 
 export function isLiteralConnectionSource(item: unknown): item is LiteralConnectionSource {
     return reflection.isInstance(item, LiteralConnectionSource);
+}
+
+export interface LoadPath extends AstNode {
+    readonly $container: Retrieval | SortItem;
+    readonly $type: 'LoadPath';
+    segments: Array<LoadSegment>;
+}
+
+export const LoadPath = 'LoadPath';
+
+export function isLoadPath(item: unknown): item is LoadPath {
+    return reflection.isInstance(item, LoadPath);
+}
+
+export interface LoadSegment extends AstNode {
+    readonly $container: LoadPath;
+    readonly $type: 'LoadSegment';
+    collection: boolean;
+    name: LooseName;
+}
+
+export const LoadSegment = 'LoadSegment';
+
+export function isLoadSegment(item: unknown): item is LoadSegment {
+    return reflection.isInstance(item, LoadSegment);
 }
 
 export interface LValue extends AstNode {
@@ -1351,7 +1504,7 @@ export function isMatchArm(item: unknown): item is MatchArm {
 }
 
 export interface MatchExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'MatchExpr';
     arms: Array<MatchArm>;
     elseExpr?: Expression;
@@ -1456,7 +1609,7 @@ export function isModel(item: unknown): item is Model {
 }
 
 export interface MoneyLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'MoneyLit';
     value?: string;
 }
@@ -1480,7 +1633,7 @@ export function isNamedType(item: unknown): item is NamedType {
 }
 
 export interface NameRef extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'NameRef';
     name: NameRefIdent;
 }
@@ -1492,7 +1645,7 @@ export function isNameRef(item: unknown): item is NameRef {
 }
 
 export interface NowExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'NowExpr';
 }
 
@@ -1503,7 +1656,7 @@ export function isNowExpr(item: unknown): item is NowExpr {
 }
 
 export interface NullLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'NullLit';
     value: 'null';
 }
@@ -1517,7 +1670,7 @@ export function isNullLit(item: unknown): item is NullLit {
 export interface ObjectFieldInit extends AstNode {
     readonly $container: ObjectLit;
     readonly $type: 'ObjectFieldInit';
-    name: string;
+    name: LooseName;
     value: Expression;
 }
 
@@ -1528,7 +1681,7 @@ export function isObjectFieldInit(item: unknown): item is ObjectFieldInit {
 }
 
 export interface ObjectLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | SeedRow | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'ObjectLit';
     fields: Array<ObjectFieldInit>;
 }
@@ -1595,7 +1748,7 @@ export function isPageMenuMeta(item: unknown): item is PageMenuMeta {
 }
 
 export interface Parameter extends AstNode {
-    readonly $container: Component | Create | Criterion | Destroy | FindDecl | FunctionDecl | Operation | Page | Workflow;
+    readonly $container: Component | Create | Criterion | Destroy | FindDecl | FunctionDecl | Operation | Page | Retrieval | Workflow;
     readonly $type: 'Parameter';
     name: LooseName;
     type: TypeRef;
@@ -1608,7 +1761,7 @@ export function isParameter(item: unknown): item is Parameter {
 }
 
 export interface ParenExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'ParenExpr';
     inner: Expression;
 }
@@ -1658,9 +1811,9 @@ export function isPermissionsBlock(item: unknown): item is PermissionsBlock {
 }
 
 export interface PostfixChain extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'PostfixChain';
-    head: Expression;
+    head: Expression | NameRef;
     suffixes: Array<PostfixSuffix>;
 }
 
@@ -1671,7 +1824,7 @@ export function isPostfixChain(item: unknown): item is PostfixChain {
 }
 
 export interface PreconditionStmt extends AstNode {
-    readonly $container: Create | Destroy | Lambda | Operation | TestBlock | TestE2E | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | Operation | TestBlock | TestE2E | Workflow;
     readonly $type: 'PreconditionStmt';
     expr: Expression;
 }
@@ -1683,7 +1836,7 @@ export function isPreconditionStmt(item: unknown): item is PreconditionStmt {
 }
 
 export interface PrimitiveConversion extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'PrimitiveConversion';
     target?: 'decimal' | 'long' | 'money' | 'string';
     value?: Expression;
@@ -1712,7 +1865,8 @@ export interface Property extends AstNode {
     readonly $type: 'Property';
     access?: FieldAccess;
     check?: Expression;
-    name: 'canonical' | 'command' | 'config' | 'connection' | 'dataSources' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'managed' | 'money' | 'objectStore' | 'ogImage' | 'paged' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'schema' | 'secret' | 'service' | 'snapshot' | 'tablePrefix' | 'token' | 'ttl' | 'use' | string;
+    default?: Expression;
+    name: 'asc' | 'canonical' | 'command' | 'config' | 'connection' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'money' | 'objectStore' | 'ogImage' | 'paged' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'service' | 'snapshot' | 'sort' | 'tablePrefix' | 'token' | 'ttl' | 'use' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;
@@ -1778,7 +1932,7 @@ export function isRequiresProp(item: unknown): item is RequiresProp {
 }
 
 export interface RequiresStmt extends AstNode {
-    readonly $container: Create | Destroy | Lambda | Operation | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | Operation | Workflow;
     readonly $type: 'RequiresStmt';
     expr: Expression;
 }
@@ -1814,6 +1968,23 @@ export function isResource(item: unknown): item is Resource {
     return reflection.isInstance(item, Resource);
 }
 
+export interface Retrieval extends AstNode {
+    readonly $container: BoundedContext;
+    readonly $type: 'Retrieval';
+    loads: Array<LoadPath>;
+    name: string;
+    params: Array<Parameter>;
+    sort: Array<SortItem>;
+    target: TypeRef;
+    where: Expression;
+}
+
+export const Retrieval = 'Retrieval';
+
+export function isRetrieval(item: unknown): item is Retrieval {
+    return reflection.isInstance(item, Retrieval);
+}
+
 export interface RouteProp extends AstNode {
     readonly $container: Page;
     readonly $type: 'RouteProp';
@@ -1836,6 +2007,33 @@ export const SecretConnectionSource = 'SecretConnectionSource';
 
 export function isSecretConnectionSource(item: unknown): item is SecretConnectionSource {
     return reflection.isInstance(item, SecretConnectionSource);
+}
+
+export interface Seed extends AstNode {
+    readonly $container: BoundedContext;
+    readonly $type: 'Seed';
+    dataset?: string;
+    raw: boolean;
+    rows: Array<SeedRow>;
+}
+
+export const Seed = 'Seed';
+
+export function isSeed(item: unknown): item is Seed {
+    return reflection.isInstance(item, Seed);
+}
+
+export interface SeedRow extends AstNode {
+    readonly $container: Seed;
+    readonly $type: 'SeedRow';
+    aggregate: Reference<Aggregate>;
+    value: ObjectLit;
+}
+
+export const SeedRow = 'SeedRow';
+
+export function isSeedRow(item: unknown): item is SeedRow {
+    return reflection.isInstance(item, SeedRow);
 }
 
 export interface SensitivityClause extends AstNode {
@@ -1887,6 +2085,19 @@ export const Solution = 'Solution';
 
 export function isSolution(item: unknown): item is Solution {
     return reflection.isInstance(item, Solution);
+}
+
+export interface SortItem extends AstNode {
+    readonly $container: Retrieval;
+    readonly $type: 'SortItem';
+    direction?: SortDirection;
+    path: LoadPath;
+}
+
+export const SortItem = 'SortItem';
+
+export function isSortItem(item: unknown): item is SortItem {
+    return reflection.isInstance(item, SortItem);
 }
 
 export interface StampDecl extends AstNode {
@@ -1958,7 +2169,7 @@ export function isStringConfigValue(item: unknown): item is StringConfigValue {
 }
 
 export interface StringLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'StringLit';
     value: string;
 }
@@ -1997,7 +2208,7 @@ export function isSystem(item: unknown): item is System {
 }
 
 export interface TernaryExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'TernaryExpr';
     cond: Expression;
     elseExpr: Expression;
@@ -2080,7 +2291,7 @@ export function isThemeProp(item: unknown): item is ThemeProp {
 }
 
 export interface ThisRef extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'ThisRef';
 }
 
@@ -2103,7 +2314,7 @@ export function isTitleProp(item: unknown): item is TitleProp {
 }
 
 export interface TypeRef extends AstNode {
-    readonly $container: Criterion | DerivedProp | FindDecl | FunctionDecl | Parameter | Property | StateField | UserField;
+    readonly $container: Criterion | DerivedProp | FindDecl | FunctionDecl | Parameter | Property | Retrieval | StateField | UserField;
     readonly $type: 'TypeRef';
     array: boolean;
     base: BaseType;
@@ -2120,6 +2331,7 @@ export function isTypeRef(item: unknown): item is TypeRef {
 export interface Ui extends AstNode {
     readonly $container: System;
     readonly $type: 'Ui';
+    framework?: Framework;
     members: Array<UiMember>;
     name: string;
     withClause?: WithClause;
@@ -2170,19 +2382,6 @@ export function isUiComposeBinding(item: unknown): item is UiComposeBinding {
     return reflection.isInstance(item, UiComposeBinding);
 }
 
-export interface UiHelperImport extends AstNode {
-    readonly $container: Ui;
-    readonly $type: 'UiHelperImport';
-    name: string;
-    path: string;
-}
-
-export const UiHelperImport = 'UiHelperImport';
-
-export function isUiHelperImport(item: unknown): item is UiHelperImport {
-    return reflection.isInstance(item, UiHelperImport);
-}
-
 export interface UiParamBinding extends AstNode {
     readonly $container: UiComposeBinding;
     readonly $type: 'UiParamBinding';
@@ -2209,7 +2408,7 @@ export function isUiSugarBinding(item: unknown): item is UiSugarBinding {
 }
 
 export interface UnaryExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
     readonly $type: 'UnaryExpr';
     op: '!' | '-';
     operand: Expression;
@@ -2307,6 +2506,7 @@ export type DddAstType = {
     Aggregate: Aggregate
     AggregateMember: AggregateMember
     Api: Api
+    Apply: Apply
     AssignOrCallStmt: AssignOrCallStmt
     BaseType: BaseType
     BinaryChain: BinaryChain
@@ -2320,6 +2520,8 @@ export type DddAstType = {
     CallArg: CallArg
     CallSuffix: CallSuffix
     CanonicalProp: CanonicalProp
+    Channel: Channel
+    ChannelSource: ChannelSource
     Component: Component
     ComponentDecl: ComponentDecl
     ConfigEntry: ConfigEntry
@@ -2347,6 +2549,7 @@ export type DddAstType = {
     Expression: Expression
     FilterDecl: FilterDecl
     FindDecl: FindDecl
+    ForStmt: ForStmt
     FunctionDecl: FunctionDecl
     IdRef: IdRef
     IdType: IdType
@@ -2366,6 +2569,8 @@ export type DddAstType = {
     ListLit: ListLit
     LiteralConnectionSource: LiteralConnectionSource
     LiteralExpr: LiteralExpr
+    LoadPath: LoadPath
+    LoadSegment: LoadSegment
     MacroArg: MacroArg
     MacroArgBool: MacroArgBool
     MacroArgInt: MacroArgInt
@@ -2414,12 +2619,16 @@ export type DddAstType = {
     RequiresProp: RequiresProp
     RequiresStmt: RequiresStmt
     Resource: Resource
+    Retrieval: Retrieval
     RouteProp: RouteProp
     SecretConnectionSource: SecretConnectionSource
+    Seed: Seed
+    SeedRow: SeedRow
     SensitivityClause: SensitivityClause
     ServiceConnectionSource: ServiceConnectionSource
     SlotType: SlotType
     Solution: Solution
+    SortItem: SortItem
     StampDecl: StampDecl
     StateBlock: StateBlock
     StateField: StateField
@@ -2445,7 +2654,6 @@ export type DddAstType = {
     UiApiParam: UiApiParam
     UiBlockBinding: UiBlockBinding
     UiComposeBinding: UiComposeBinding
-    UiHelperImport: UiHelperImport
     UiMember: UiMember
     UiParamBinding: UiParamBinding
     UiSugarBinding: UiSugarBinding
@@ -2462,7 +2670,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, RouteProp, SecretConnectionSource, SensitivityClause, ServiceConnectionSource, SlotType, Solution, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
+        return [Aggregate, AggregateMember, Api, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2474,6 +2682,12 @@ export class DddAstReflection extends AbstractAstReflection {
             case Deployable:
             case Subdomain: {
                 return this.isSubtype(SystemMember, supertype) || this.isSubtype(Targetable, supertype);
+            }
+            case Apply:
+            case Create:
+            case Destroy:
+            case TestBlock: {
+                return this.isSubtype(AggregateMember, supertype);
             }
             case AssignOrCallStmt:
             case EmitStmt:
@@ -2530,20 +2744,28 @@ export class DddAstReflection extends AbstractAstReflection {
             case MemberSuffix: {
                 return this.isSubtype(PostfixSuffix, supertype);
             }
+            case Channel:
+            case Criterion:
+            case PayloadDecl:
+            case Retrieval:
+            case Seed: {
+                return this.isSubtype(ContextMember, supertype);
+            }
+            case ChannelSource:
+            case Layout:
+            case Resource:
+            case Storage:
+            case TestE2E:
+            case ThemeBlock:
+            case Ui:
+            case UserBlock: {
+                return this.isSubtype(SystemMember, supertype);
+            }
             case Component: {
                 return this.isSubtype(ModelMember, supertype) || this.isSubtype(UiMember, supertype);
             }
             case Containment: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype);
-            }
-            case Create:
-            case Destroy:
-            case TestBlock: {
-                return this.isSubtype(AggregateMember, supertype);
-            }
-            case Criterion:
-            case PayloadDecl: {
-                return this.isSubtype(ContextMember, supertype);
             }
             case DerivedProp:
             case FunctionDecl:
@@ -2578,20 +2800,15 @@ export class DddAstReflection extends AbstractAstReflection {
             case StampDecl: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(ContextMember, supertype);
             }
+            case ForStmt:
+            case RequiresStmt: {
+                return this.isSubtype(Statement, supertype);
+            }
             case IdType:
             case NamedType:
             case PrimitiveType:
             case SlotType: {
                 return this.isSubtype(BaseType, supertype);
-            }
-            case Layout:
-            case Resource:
-            case Storage:
-            case TestE2E:
-            case ThemeBlock:
-            case Ui:
-            case UserBlock: {
-                return this.isSubtype(SystemMember, supertype);
             }
             case LayoutMainSlot:
             case LayoutNamedSlot: {
@@ -2606,8 +2823,7 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case MenuBlock:
             case Page:
-            case UiApiParam:
-            case UiHelperImport: {
+            case UiApiParam: {
                 return this.isSubtype(UiMember, supertype);
             }
             case Operation: {
@@ -2618,9 +2834,6 @@ export class DddAstReflection extends AbstractAstReflection {
             case System:
             case TestCase: {
                 return this.isSubtype(ModelMember, supertype);
-            }
-            case RequiresStmt: {
-                return this.isSubtype(Statement, supertype);
             }
             case StateBlock: {
                 return this.isSubtype(ComponentDecl, supertype) || this.isSubtype(PageProp, supertype);
@@ -2637,8 +2850,23 @@ export class DddAstReflection extends AbstractAstReflection {
     getReferenceType(refInfo: ReferenceInfo): string {
         const referenceId = `${refInfo.container.$type}:${refInfo.property}`;
         switch (referenceId) {
+            case 'Aggregate:superType':
+            case 'Repository:aggregate':
+            case 'SeedRow:aggregate':
+            case 'View:source': {
+                return Aggregate;
+            }
             case 'Api:source': {
                 return Subdomain;
+            }
+            case 'Apply:event':
+            case 'Channel:carries':
+            case 'EmitStmt:event': {
+                return EventDecl;
+            }
+            case 'ChannelSource:use':
+            case 'Resource:use': {
+                return Storage;
             }
             case 'Containment:partType': {
                 return EntityPart;
@@ -2650,6 +2878,12 @@ export class DddAstReflection extends AbstractAstReflection {
             case 'Deployable:dataSourceRefs': {
                 return Resource;
             }
+            case 'Deployable:hosts':
+            case 'UiBlockBinding:ref':
+            case 'UiComposeBinding:ref':
+            case 'UiSugarBinding:ref': {
+                return Ui;
+            }
             case 'Deployable:serves':
             case 'UiApiParam:apiRef': {
                 return Api;
@@ -2659,9 +2893,6 @@ export class DddAstReflection extends AbstractAstReflection {
             case 'UiParamBinding:source': {
                 return Deployable;
             }
-            case 'EmitStmt:event': {
-                return EventDecl;
-            }
             case 'IdType:target':
             case 'NamedType:target': {
                 return NamedDecl;
@@ -2669,17 +2900,10 @@ export class DddAstReflection extends AbstractAstReflection {
             case 'MenuLink:page': {
                 return Page;
             }
-            case 'Repository:aggregate':
-            case 'View:source': {
-                return Aggregate;
-            }
             case 'Requirement:parent':
             case 'Solution:requirement':
             case 'TestCase:requirement': {
                 return Requirement;
-            }
-            case 'Resource:use': {
-                return Storage;
             }
             case 'Solution:entitles':
             case 'TestCase:covers': {
@@ -2688,11 +2912,6 @@ export class DddAstReflection extends AbstractAstReflection {
             case 'TestBlock:verifies':
             case 'TestE2E:verifies': {
                 return TestCase;
-            }
-            case 'UiBlockBinding:ref':
-            case 'UiComposeBinding:ref':
-            case 'UiSugarBinding:ref': {
-                return Ui;
             }
             default: {
                 throw new Error(`${referenceId} is not a valid reference id.`);
@@ -2707,10 +2926,13 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: Aggregate,
                     properties: [
                         { name: 'idKind' },
+                        { name: 'inheritanceUsing' },
+                        { name: 'isAbstract', defaultValue: false },
                         { name: 'members', defaultValue: [] },
                         { name: 'name' },
                         { name: 'persistedAs' },
                         { name: 'shape' },
+                        { name: 'superType' },
                         { name: 'withClause' }
                     ]
                 };
@@ -2722,6 +2944,16 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'name' },
                         { name: 'source' },
                         { name: 'urlStyle' }
+                    ]
+                };
+            }
+            case Apply: {
+                return {
+                    name: Apply,
+                    properties: [
+                        { name: 'body', defaultValue: [] },
+                        { name: 'event' },
+                        { name: 'param' }
                     ]
                 };
             }
@@ -2831,12 +3063,36 @@ export class DddAstReflection extends AbstractAstReflection {
                     ]
                 };
             }
+            case Channel: {
+                return {
+                    name: Channel,
+                    properties: [
+                        { name: 'carries', defaultValue: [] },
+                        { name: 'delivery' },
+                        { name: 'key' },
+                        { name: 'name' },
+                        { name: 'retention' }
+                    ]
+                };
+            }
+            case ChannelSource: {
+                return {
+                    name: ChannelSource,
+                    properties: [
+                        { name: 'channel' },
+                        { name: 'name' },
+                        { name: 'use' }
+                    ]
+                };
+            }
             case Component: {
                 return {
                     name: Component,
                     properties: [
                         { name: 'body' },
                         { name: 'decls', defaultValue: [] },
+                        { name: 'extern', defaultValue: false },
+                        { name: 'externPath' },
                         { name: 'name' },
                         { name: 'params', defaultValue: [] }
                     ]
@@ -2895,16 +3151,23 @@ export class DddAstReflection extends AbstractAstReflection {
                 return {
                     name: Deployable,
                     properties: [
+                        { name: 'application' },
                         { name: 'auth' },
                         { name: 'contextRefs', defaultValue: [] },
                         { name: 'dataSourceRefs', defaultValue: [] },
                         { name: 'design' },
+                        { name: 'directoryLayout' },
                         { name: 'favicon' },
+                        { name: 'foundation' },
+                        { name: 'hosts', defaultValue: [] },
                         { name: 'name' },
+                        { name: 'persistence' },
                         { name: 'platform' },
                         { name: 'port' },
+                        { name: 'runtime' },
                         { name: 'serves', defaultValue: [] },
                         { name: 'targets' },
+                        { name: 'transport' },
                         { name: 'uiBlock' },
                         { name: 'uiCompose' },
                         { name: 'uiSugar' }
@@ -3036,6 +3299,16 @@ export class DddAstReflection extends AbstractAstReflection {
                     ]
                 };
             }
+            case ForStmt: {
+                return {
+                    name: ForStmt,
+                    properties: [
+                        { name: 'body', defaultValue: [] },
+                        { name: 'iterable' },
+                        { name: 'var' }
+                    ]
+                };
+            }
             case FunctionDecl: {
                 return {
                     name: FunctionDecl,
@@ -3155,6 +3428,23 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: LiteralConnectionSource,
                     properties: [
                         { name: 'literal' }
+                    ]
+                };
+            }
+            case LoadPath: {
+                return {
+                    name: LoadPath,
+                    properties: [
+                        { name: 'segments', defaultValue: [] }
+                    ]
+                };
+            }
+            case LoadSegment: {
+                return {
+                    name: LoadSegment,
+                    properties: [
+                        { name: 'collection', defaultValue: false },
+                        { name: 'name' }
                     ]
                 };
             }
@@ -3481,6 +3771,7 @@ export class DddAstReflection extends AbstractAstReflection {
                     properties: [
                         { name: 'access' },
                         { name: 'check' },
+                        { name: 'default' },
                         { name: 'name' },
                         { name: 'provenanced', defaultValue: false },
                         { name: 'sensitivity' },
@@ -3554,6 +3845,19 @@ export class DddAstReflection extends AbstractAstReflection {
                     ]
                 };
             }
+            case Retrieval: {
+                return {
+                    name: Retrieval,
+                    properties: [
+                        { name: 'loads', defaultValue: [] },
+                        { name: 'name' },
+                        { name: 'params', defaultValue: [] },
+                        { name: 'sort', defaultValue: [] },
+                        { name: 'target' },
+                        { name: 'where' }
+                    ]
+                };
+            }
             case RouteProp: {
                 return {
                     name: RouteProp,
@@ -3567,6 +3871,25 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: SecretConnectionSource,
                     properties: [
                         { name: 'secret' }
+                    ]
+                };
+            }
+            case Seed: {
+                return {
+                    name: Seed,
+                    properties: [
+                        { name: 'dataset' },
+                        { name: 'raw', defaultValue: false },
+                        { name: 'rows', defaultValue: [] }
+                    ]
+                };
+            }
+            case SeedRow: {
+                return {
+                    name: SeedRow,
+                    properties: [
+                        { name: 'aggregate' },
+                        { name: 'value' }
                     ]
                 };
             }
@@ -3602,6 +3925,15 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'name' },
                         { name: 'requirement' },
                         { name: 'title' }
+                    ]
+                };
+            }
+            case SortItem: {
+                return {
+                    name: SortItem,
+                    properties: [
+                        { name: 'direction' },
+                        { name: 'path' }
                     ]
                 };
             }
@@ -3762,6 +4094,7 @@ export class DddAstReflection extends AbstractAstReflection {
                 return {
                     name: Ui,
                     properties: [
+                        { name: 'framework' },
                         { name: 'members', defaultValue: [] },
                         { name: 'name' },
                         { name: 'withClause' }
@@ -3792,15 +4125,6 @@ export class DddAstReflection extends AbstractAstReflection {
                     properties: [
                         { name: 'bindings', defaultValue: [] },
                         { name: 'ref' }
-                    ]
-                };
-            }
-            case UiHelperImport: {
-                return {
-                    name: UiHelperImport,
-                    properties: [
-                        { name: 'name' },
-                        { name: 'path' }
                     ]
                 };
             }

@@ -166,9 +166,9 @@ describe("react generator", () => {
     expect(orderPo).toMatch(/export class OrderDetailPage/);
     // Typed input contract.
     expect(orderPo).toMatch(/Partial<CreateOrderRequest>/);
-    expect(orderPo).toMatch(/AddLineRequest/);
+    expect(orderPo).toMatch(/AddLineOrderRequest/);
     // One method per public op.
-    expect(orderPo).toMatch(/async addLine\(input: AddLineRequest\)/);
+    expect(orderPo).toMatch(/async addLine\(input: AddLineOrderRequest\)/);
     expect(orderPo).toMatch(/async confirm\(\): Promise<this>/);
     // Locator helper for the contained collection's rows (assert via
     // toHaveCount).
@@ -814,7 +814,7 @@ describe("react generator", () => {
       const orderApi = files.get("web_app/src/api/order.ts")!;
       // acme Order.addLine: precondition qty > 0 (int qty).
       expect(orderApi).toMatch(
-        /AddLineRequest = z\.object\(\{[\s\S]*qty: z\.number\(\)\.int\(\)\.min\(1\)/,
+        /AddLineOrderRequest = z\.object\(\{[\s\S]*qty: z\.number\(\)\.int\(\)\.min\(1\)/,
       );
     });
 
@@ -831,7 +831,7 @@ describe("react generator", () => {
       expect(createBlock[1]).toBe("");
       // ConfirmRequest is empty: `isMutable()` + `lines.count > 0`
       // are both non-translatable → no params, no refines.
-      expect(orderApi).toMatch(/export const ConfirmRequest = z\.object\(\{\s*\}\);/);
+      expect(orderApi).toMatch(/export const ConfirmOrderRequest = z\.object\(\{\s*\}\);/);
     });
 
     it("RHF still binds zodResolver to the refined CreateProductRequest schema", async () => {

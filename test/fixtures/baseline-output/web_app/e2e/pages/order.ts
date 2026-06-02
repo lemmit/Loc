@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import type { Page, Locator } from "@playwright/test";
 import { expect } from "@playwright/test";
-import type { CreateOrderRequest, AddLineRequest, OrderResponse } from "../../src/api/order";
+import type { CreateOrderRequest, AddLineOrderRequest, UpdateOrderRequest, OrderResponse } from "../../src/api/order";
 
 export class OrderListPage {
   static readonly url = "/orders";
@@ -97,7 +97,7 @@ export class OrderDetailPage {
   }
 
   /** addLine — opens the modal, fills the form, submits. */
-  async addLine(input: AddLineRequest): Promise<this> {
+  async addLine(input: AddLineOrderRequest): Promise<this> {
     await this.page.getByTestId("orders-op-addLine").click();
     await this.page.getByTestId("orders-op-addLine-form").waitFor();
     if (input.productId !== undefined) {
@@ -122,6 +122,31 @@ export class OrderDetailPage {
     await this.page.getByTestId("orders-op-confirm").click();
     await this.page.getByTestId("orders-op-confirm-submit").click();
     await this.page.getByTestId("orders-op-confirm-form").waitFor({ state: "detached" });
+    await this.page.waitForLoadState("networkidle");
+    return this;
+  }
+
+  /** update — opens the modal, fills the form, submits. */
+  async update(input: UpdateOrderRequest): Promise<this> {
+    await this.page.getByTestId("orders-op-update").click();
+    await this.page.getByTestId("orders-op-update-form").waitFor();
+    if (input.customerId !== undefined) {
+      await this.page.getByTestId("orders-op-update-input-customerId").fill(input.customerId!);
+    }
+    if (input.status !== undefined) {
+      {
+        const __sel = this.page.getByTestId("orders-op-update-input-status");
+        await __sel.click();
+        const __listbox = this.page.locator('[role="listbox"]').filter({ has: this.page.getByRole("option", { name: input.status!, exact: true }) });
+        await __listbox.waitFor({ state: "visible" });
+        await __listbox.getByRole("option", { name: input.status!, exact: true }).click();
+      }
+    }
+    if (input.placedAt !== undefined) {
+      await this.page.getByTestId("orders-op-update-input-placedAt").fill(input.placedAt!.slice(0, 19));
+    }
+    await this.page.getByTestId("orders-op-update-submit").click();
+    await this.page.getByTestId("orders-op-update-form").waitFor({ state: "detached" });
     await this.page.waitForLoadState("networkidle");
     return this;
   }

@@ -16,6 +16,7 @@ export type OutputStream =
   | "problems"
   | "generator"
   | "bundler"
+  | "conflicts"
   | "backend"
   | "app"
   | "tests";
@@ -26,6 +27,7 @@ const STREAMS: { value: OutputStream; label: string }[] = [
   { value: "problems", label: "Problems" },
   { value: "generator", label: "Generator" },
   { value: "bundler", label: "Bundler" },
+  { value: "conflicts", label: "Conflicts" },
   { value: "backend", label: "Backend logs" },
   { value: "app", label: "App logs" },
   { value: "tests", label: "Tests" },
@@ -45,6 +47,8 @@ export function streamDot(ctx: LayoutCtx, stream: OutputStream): DotColour {
         (ctx.reactBundleResult != null && !ctx.reactBundleResult.ok);
       return failed ? "red" : null;
     }
+    case "conflicts":
+      return ctx.generatedConflicts.length > 0 ? "red" : null;
     case "backend":
       return ctx.backendLog.some((l) => l.level === "error") ? "red" : null;
     case "app":
@@ -134,6 +138,7 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
         )}
         {stream === "generator" && <GeneratorBody ctx={ctx} />}
         {stream === "bundler" && <BundlerBody ctx={ctx} />}
+        {stream === "conflicts" && <ConflictsBody ctx={ctx} />}
         {stream === "backend" && (
           <FilterableLogView
             lines={ctx.backendLog}
@@ -395,6 +400,51 @@ function GeneratorBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
               {d.line != null ? `${d.line}${d.column != null ? `:${d.column}` : ""}: ` : ""}
               {d.message}
             </Text>
+          ))}
+        </Stack>
+      </Box>
+    </ScrollArea>
+  );
+}
+
+// Generated-code conflicts — the regenerate 3-way merge leaves git-style
+// markers in a hand-edited generated file it couldn't auto-merge.  Such a
+// file won't bundle until resolved, so list them here with the fix steps.
+// Self-clears: `ctx.generatedConflicts` re-scans on every workspace change.
+function ConflictsBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
+  const { generatedConflicts } = ctx;
+  if (generatedConflicts.length === 0) {
+    return (
+      <Text c="dimmed" size="sm" p="sm">
+        No conflicts. When a regenerate can't merge a hand-edited generated
+        file, the conflicting files appear here.
+      </Text>
+    );
+  }
+  return (
+    <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+      <Box p="xs">
+        <Text size="xs" fw={600} tt="uppercase" c="red" mb={4}>
+          {generatedConflicts.length} generated file
+          {generatedConflicts.length === 1 ? "" : "s"} with merge conflicts
+        </Text>
+        <Text size="xs" c="dimmed" mb="xs">
+          A regenerate couldn't merge your edits with the new output. Open each
+          file, pick the right side between the{" "}
+          <Code>{"<<<<<<<"}</Code> / <Code>{"======="}</Code> /{" "}
+          <Code>{">>>>>>>"}</Code> markers, and delete the markers. These files
+          won't bundle until resolved.
+        </Text>
+        <Stack gap={2}>
+          {generatedConflicts.map((path) => (
+            <Group key={path} gap={6} wrap="nowrap" data-testid="output-conflict-row">
+              <Badge size="xs" variant="light" color="red">
+                conflict
+              </Badge>
+              <Text size="xs" ff="monospace" style={{ wordBreak: "break-all" }}>
+                generated/{path}
+              </Text>
+            </Group>
           ))}
         </Stack>
       </Box>

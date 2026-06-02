@@ -3,7 +3,11 @@ import { ashPostgresPersistenceAdapter } from "../generator/phoenix-live-view/ad
 import { ashStyleAdapter } from "../generator/phoenix-live-view/adapters/ash-style.js";
 import { byFeatureLayoutAdapter } from "../generator/phoenix-live-view/adapters/by-feature-layout.js";
 import { generatePhoenixLiveViewProject } from "../generator/phoenix-live-view/index.js";
-import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
+import {
+  type ComposeServiceShape,
+  type PlatformSurface,
+  STATIC_BUNDLE_FRAMEWORKS,
+} from "./surface.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix LiveView platform — fullstack Elixir/Ash deployable.
@@ -22,18 +26,41 @@ import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 // `PlatformSurface` wiring that delegates to the orchestrator.
 // ---------------------------------------------------------------------------
 
-const phoenixLiveViewPlatform: PlatformSurface = {
-  name: "phoenixLiveView",
+const phoenixPlatform: PlatformSurface = {
+  name: "phoenix",
   defaultPort: 4000,
   needsDb: true,
   mountsUi: true,
   isFrontend: false,
+  // The keystone (D-PHOENIX-SURFACE): Phoenix is the only platform that
+  // is BOTH a server-render runtime (LiveView, spelled `phoenixLiveView`)
+  // AND a static-asset host (`priv/static`), so it serves its own
+  // runtime-coupled framework UNIONED with every static-bundle framework.
+  // Richest `hostableFrameworks` of any platform.
+  hostableFrameworks: new Set(["phoenixLiveView", ...STATIC_BUNDLE_FRAMEWORKS]),
   // Ash code-interface conventions.  A user-declared find named one
   // of these would collide with the auto-generated CRUD action of
   // the same name on the resource module.
   reservedRepositoryFindNames: new Set(["get", "read", "create", "update", "destroy"]),
-  emitProject({ contexts, deployable, sys, migrations, emitTrace }): Map<string, string> {
-    return generatePhoenixLiveViewProject({ contexts, deployable, sys, migrations, emitTrace });
+  emitProject({
+    contexts,
+    deployable,
+    sys,
+    migrations,
+    emitTrace,
+    styleAdapter,
+  }): Map<string, string> {
+    // Forward the deployable's resolved style adapter (D-REALIZATION-AXES
+    // `application:`) into the generator's EmitCtx; the layout axis has no
+    // Phoenix consumer (Ash owns the byFeature layout), so it's dropped.
+    return generatePhoenixLiveViewProject({
+      contexts,
+      deployable,
+      sys,
+      migrations,
+      emitTrace,
+      styleAdapter,
+    });
   },
   composeService({ slug }): ComposeServiceShape {
     return {
@@ -72,4 +99,4 @@ const phoenixLiveViewPlatform: PlatformSurface = {
   },
 };
 
-export default phoenixLiveViewPlatform;
+export default phoenixPlatform;

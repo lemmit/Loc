@@ -1,4 +1,8 @@
-import { forCreateInput } from "../../ir/enrich/wire-projection.js";
+import {
+  createInputFields,
+  hasCreate,
+  wireCreateDefault,
+} from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -7,10 +11,15 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
-import { findUsesCurrentUser, operationUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import {
+  findUsesCurrentUser,
+  operationIsGuarded,
+  operationUsesCurrentUser,
+} from "../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import {
   aggregateResponseParams,
+  collectWireUsings,
   csIdValueClrType,
   domainToRequestExpr,
   dtoParam,
@@ -29,7 +38,7 @@ import {
   renderRequestDtos,
   renderResponseDtos,
 } from "./emit.js";
-import { renderCsType } from "./render-expr.js";
+import { renderCsExpr, renderCsType } from "./render-expr.js";
 import { renderCreateValidator, renderOperationValidator } from "./validator-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -61,11 +70,18 @@ export function emitCqrs(
   // `forCreateInput` excludes `managed` / `token` / `internal` (server-
   // owned or domain-only), keeps `immutable` (settable at creation) and
   // `secret` (client supplies password hashes / API keys).
-  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
+  const requiredFields = createInputFields(agg);
 
   emitResponseDtos(agg, ctx, ns, aggFolder, out);
   emitRequestDtos(agg, ctx, ns, aggFolder, out);
-  emitCreateCommandAndHandler(agg, requiredFields, ns, aggFolder, out);
+  // Create command/handler gated on the IR lifecycle (`canonicalCreate`),
+  // mirroring the destroy gate below: an aggregate that declares no create
+  // is not constructible over HTTP and emits no Create command/handler,
+  // request DTO, response, or controller action.
+  if (hasCreate(agg)) emitCreateCommandAndHandler(agg, requiredFields, ns, aggFolder, out);
+  // Canonical destroy → Delete command + handler (gated on the IR
+  // lifecycle, so plain aggregates emit no extra CQRS files).
+  if (agg.canonicalDestroy) emitDestroyCommandAndHandler(agg, ns, aggFolder, out);
   emitOperationCommandsAndHandlers(agg, ctx, ns, aggFolder, out);
   emitGetByIdQueryAndHandler(agg, ctx, ns, aggFolder, out);
   emitFindQueriesAndHandlers(agg, repo, ctx, ns, aggFolder, out);
@@ -103,10 +119,13 @@ function emitResponseDtos(
     name: `${agg.name}Response`,
     params: aggregateResponseParams(agg, ctx),
   });
-  records.push({
-    name: `Create${agg.name}Response`,
-    params: dtoParam(csIdValueClrType(agg.idValueType), "Id"),
-  });
+  // Create-response (the new id) only when the aggregate is constructible.
+  if (hasCreate(agg)) {
+    records.push({
+      name: `Create${agg.name}Response`,
+      params: dtoParam(csIdValueClrType(agg.idValueType), "Id"),
+    });
+  }
   out.set(
     `Application/${aggFolder}/Responses/${agg.name}Responses.cs`,
     renderResponseDtos({ ns, aggName: agg.name, records }),
@@ -136,17 +155,30 @@ function emitRequestDtos(
   // Create-request payload: required + access-permitted client input.
   // `forCreateInput` excludes `managed` / `token` / `internal` (server-
   // owned or domain-only), keeps `immutable` (settable at creation) and
-  // `secret` (client supplies password hashes / API keys).
-  const requiredFields = forCreateInput(agg.fields).filter((f) => !f.optional);
-  records.push({
-    name: `Create${agg.name}Request`,
-    params: requiredFields
-      .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name), "request"))
-      .join(", "),
-  });
+  // `secret` (client supplies password hashes / API keys).  Gated on
+  // `hasCreate`: a non-constructible aggregate emits no CreateRequest.
+  if (hasCreate(agg)) {
+    const requiredFields = createInputFields(agg);
+    records.push({
+      name: `Create${agg.name}Request`,
+      params: requiredFields
+        .map((f) => {
+          // Explicit `= default` → optional request field via a record
+          // default value, dropping its `[Required]` (see `wireCreateDefault`).
+          const d = wireCreateDefault(f);
+          return dtoParam(
+            wireType(f.type, ctx, "request"),
+            upperFirst(f.name),
+            "request",
+            d ? renderCsExpr(d) : undefined,
+          );
+        })
+        .join(", "),
+    });
+  }
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     records.push({
-      name: `${upperFirst(op.name)}Request`,
+      name: `${upperFirst(op.name)}${agg.name}Request`,
       params: op.params
         .map((p) => dtoParam(wireType(p.type, ctx, "request"), upperFirst(p.name), "request"))
         .join(", "),
@@ -209,6 +241,41 @@ function emitCreateCommandAndHandler(
   }
 }
 
+/** Canonical hard-delete: `Destroy<Agg>Command(<Agg>Id Id)` + handler that
+ * loads (404 if absent), then hard-deletes via the repo.  Mirrors the
+ * operation-handler load→act→return shape; crudish's destroy is empty-bodied
+ * so there's no domain `destroy()` method to invoke. */
+function emitDestroyCommandAndHandler(
+  agg: AggregateIR,
+  ns: string,
+  aggFolder: string,
+  out: Map<string, string>,
+): void {
+  out.set(
+    `Application/${aggFolder}/Commands/Destroy${agg.name}Command.cs`,
+    renderCommand({
+      ns,
+      aggName: agg.name,
+      commandName: `Destroy${agg.name}Command`,
+      commandParams: `${agg.name}Id Id`,
+    }),
+  );
+  out.set(
+    `Application/${aggFolder}/Commands/Destroy${agg.name}Handler.cs`,
+    renderCommandHandler({
+      ns,
+      aggName: agg.name,
+      handlerName: `Destroy${agg.name}Handler`,
+      commandName: `Destroy${agg.name}Command`,
+      body:
+        `        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)\n` +
+        `            ?? throw new AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +
+        `        await _repo.DeleteAsync(aggregate, ct);\n` +
+        `        return Unit.Value;\n`,
+    }),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // One command + handler per public operation
 // ---------------------------------------------------------------------------
@@ -259,7 +326,7 @@ function emitOperationCommandsAndHandlers(
       // Emit the user-implementable handler interface alongside the
       // auto Mediator handler, then dispatch through it.
       const ifaceName = `I${upperFirst(op.name)}${agg.name}Handler`;
-      const reqName = `${upperFirst(op.name)}Request`;
+      const reqName = `${upperFirst(op.name)}${agg.name}Request`;
       // Request record is wire-typed (X id → Guid, enum → string,
       // datetime → string, value-object → <VO>Request) but `cmd.X`
       // is domain-typed.  Convert each param via
@@ -566,18 +633,24 @@ function emitController(
   routePrefix?: string,
   emitTrace?: boolean,
 ): void {
-  // Threaded through every wireToCommandArgument call below.  When a
-  // datetime field is on the wire, the helper lowers to
-  // `DateTime.Parse(..., CultureInfo.InvariantCulture, …)` and adds
-  // `System.Globalization` to this set; the controller file imports
-  // it once, only when actually needed.
+  // Namespaces the wire→command conversions below reach into (e.g.
+  // System.Globalization for a datetime/money parse); collected over the
+  // same types those conversions consume so the controller file imports
+  // each once, only when actually needed.
+  const publicOps = agg.operations.filter((o) => o.visibility === "public");
   const usings = new Set<string>();
+  for (const f of requiredFields) collectWireUsings(f.type, ctx, usings);
+  for (const op of publicOps) for (const p of op.params) collectWireUsings(p.type, ctx, usings);
+  for (const find of repo?.finds ?? [])
+    for (const p of find.params) collectWireUsings(p.type, ctx, usings);
   out.set(
     `Api/${upperFirst(plural(agg.name))}Controller.cs`,
     renderController(agg, repo, ns, {
       idClrType: csIdValueClrType(agg.idValueType),
+      createAction: hasCreate(agg),
+      destroyAction: !!agg.canonicalDestroy,
       createCmdArgs: requiredFields.map((f) =>
-        wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx, usings),
+        wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx),
       ),
       publicOps: agg.operations
         .filter((o) => o.visibility === "public")
@@ -587,12 +660,13 @@ function emitController(
           // for the C# action method + command type.
           routeSlug: op.routeSlug,
           cmdArgs: op.params.map((p) =>
-            wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx, usings),
+            wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx),
           ),
           // Wire-shape key set for --trace's wire_in line.  Param names
           // are lowerCamel in the IR — same form the JSON wire uses
           // (default ASP.NET JsonNamingPolicy.CamelCase).
           paramNames: op.params.map((p) => p.name),
+          guarded: operationIsGuarded(op),
         })),
       finds: (repo?.finds ?? []).map((find) => ({
         name: find.name,
@@ -612,7 +686,7 @@ function emitController(
           })
           .join(", "),
         queryConstructorArgs: find.params
-          .map((p) => wireToCommandArgument(p.name, p.type, ctx, usings))
+          .map((p) => wireToCommandArgument(p.name, p.type, ctx))
           .join(", "),
         returnShape: (find.returnType.kind === "array"
           ? "list"

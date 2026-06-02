@@ -1,3 +1,4 @@
+import { wireCreateDefault } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -57,6 +58,11 @@ export function emitAggregateResources(
   const ctxSnake = snake(ctx.name);
 
   for (const agg of ctx.aggregates) {
+    // An abstract TPC (`ownTable`) base owns no table and is never
+    // instantiated — it emits no Ash.Resource (the polymorphic read home is a
+    // function on the context domain module; see renderDomainModule).  Each
+    // concrete subtype is a standalone resource carrying the merged base fields.
+    if (agg.isAbstract) continue;
     const ds = options.resolveDataSource?.(agg);
     // `shape(embedded)`: contained parts fold into a jsonb column on the
     // root via Ash embedded resources (`attribute :items, {:array,
@@ -111,6 +117,16 @@ function renderAggregateResource(
   // explicitly loads it).
   const associations = agg.associations;
   const persistedFields = agg.fields.filter((f) => !isRefCollection(f.type));
+
+  // Capability filters (`filter <expr>` → contextFilters).  Ash's analog
+  // to EF Core's HasQueryFilter is `base_filter` — applied to every read
+  // of the resource.  Only non-principal predicates reach codegen here;
+  // principal-referencing filters (tenancy) and non-relational shapes are
+  // deferred and rejected by the IR validator
+  // (`validatePhoenixContextFilterSupport`).  Renders the same
+  // `record.<field>` form the find-action filters use (the established,
+  // Ash-valid convention).
+  const baseFilterLine = renderBaseFilter(agg, renderCtx);
 
   // Field list for the `defimpl Jason.Encoder` block: :id, persisted
   // fields only, timestamps.  Reference-collection fields are excluded
@@ -190,7 +206,7 @@ function renderAggregateResource(
   postgres do
 ${postgresBlockLines.join("\n")}
   end
-
+${baseFilterLine}
   attributes do
     ${renderPrimaryKey(agg.idValueType)}
     ${[...persistedFields.map((f) => renderAttribute(f, ctxModule)), ...embeddedAttrLines].join("\n    ")}
@@ -305,6 +321,32 @@ ${jasonImpl}`;
 // Primary key
 // ---------------------------------------------------------------------------
 
+/** Render an Ash `base_filter` from an aggregate's non-principal
+ *  capability filters (`filter <expr>` → contextFilters), or "" when it
+ *  has none.  `base_filter` is Ash's analog to EF Core's HasQueryFilter:
+ *  it applies to every read of the resource.  Multiple predicates are
+ *  conjoined with Ash's `and`.  Principal-referencing predicates are
+ *  excluded here (the IR validator rejects them on Phoenix), so what
+ *  remains renders to a closed Ash expression.  Returns a line that
+ *  splices after the `postgres do` block (leading newline so the module
+ *  template stays readable when absent).
+ *
+ *  Ash filter expressions reference the row's own attributes by BARE
+ *  name (`is_deleted`), and related attributes by relationship path
+ *  (`address.postal_code`) — there is no `record`/`self` receiver. The
+ *  shared `renderExpr` threads `thisName` as the receiver, so we render
+ *  with `record` and strip the leading `record.` from each reference
+ *  (`record.address.postal_code` → `address.postal_code`). */
+function renderBaseFilter(agg: AggregateIR, ctx: RenderCtx): string {
+  const predicates = (agg.contextFilters ?? []).filter((p) => !exprUsesCurrentUser(p));
+  if (predicates.length === 0) return "";
+  const rendered = predicates.map((p) =>
+    renderExpr(p, { ...ctx, thisName: "record" }).replace(/\brecord\./g, ""),
+  );
+  const body = rendered.length === 1 ? rendered[0]! : `and(${rendered.join(", ")})`;
+  return `\n  base_filter expr(${body})\n`;
+}
+
 function renderPrimaryKey(idValueType: string): string {
   switch (idValueType) {
     case "int":
@@ -325,7 +367,12 @@ function renderPrimaryKey(idValueType: string): string {
 function renderAttribute(f: FieldIR, ctxModule: string): string {
   const ashType = renderAshType(f.type, ctxModule);
   const allowNil = f.optional ? "true" : "false";
-  return `attribute :${snake(f.name)}, ${ashType}, allow_nil?: ${allowNil}`;
+  // An explicit `= default` makes the field optional input: Ash applies the
+  // default when the create action omits it, so it drops from the required
+  // set (see `wireCreateDefault`).  Bool/optional optionality is unchanged.
+  const d = wireCreateDefault(f);
+  const def = d ? `, default: ${renderExpr(d)}` : "";
+  return `attribute :${snake(f.name)}, ${ashType}, allow_nil?: ${allowNil}${def}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -589,8 +636,17 @@ function renderActions(
 
   const opActions = ops.map((op) => renderOperationAction(op, renderCtx, ctxModule));
 
+  // Ash forbids two actions of the same name.  A mutate operation whose
+  // name collides with a default action (notably `crudish`'s `update`,
+  // which emits an explicit `update :update do`) shadows that default —
+  // drop it from the `defaults [...]` list so the explicit action stands
+  // alone.  The action name is unchanged, so the unconditional PATCH
+  // /<aggs>/{id} (action: :update) route still resolves.
+  const opActionNames = new Set(ops.map((op) => snake(op.name)));
+  const defaultActions = ["read", "update", "destroy"].filter((a) => !opActionNames.has(a));
+
   return `\n  actions do
-    defaults [:read, :update, :destroy]
+    defaults [${defaultActions.map((a) => `:${a}`).join(", ")}]
 
 ${defaultCreate}
 ${opActions.join("\n")}

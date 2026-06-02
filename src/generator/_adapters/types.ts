@@ -12,6 +12,8 @@
 
 import type { DeployableIR, EnrichedBoundedContextIR, SystemIR } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import type { LayoutAdapter } from "./layout-surface.js";
+import type { StyleAdapter } from "./style-surface.js";
 
 /** Lines emitter result — same shape every existing emitter already
  *  returns via `code-builder.lines(...)`. */
@@ -45,4 +47,17 @@ export interface EmitCtx {
   /** Generate-time observability switch — when true, emit trace-level
    *  domain instrumentation. */
   emitTrace?: boolean;
+  /** The deployable's resolved STYLE adapter (`application:` axis →
+   *  D-REALIZATION-AXES).  Resolved once at the system orchestrator from
+   *  `deployable.application` via `resolveStyle` and threaded down, so a
+   *  per-deployable selection takes effect.  Absent in legacy
+   *  single-context generate mode (no system orchestrator) — call sites
+   *  fall back to the backend's hardcoded default sibling, keeping output
+   *  byte-identical.  With today's size-1 real menus the resolved adapter
+   *  IS that default. */
+  styleAdapter?: StyleAdapter;
+  /** The deployable's resolved LAYOUT adapter (`directoryLayout:` axis).
+   *  Resolved from `deployable.directoryLayout` via `resolveLayout`; same
+   *  fallback discipline as `styleAdapter`. */
+  layoutAdapter?: LayoutAdapter;
 }

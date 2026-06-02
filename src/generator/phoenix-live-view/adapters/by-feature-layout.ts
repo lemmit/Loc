@@ -42,6 +42,7 @@ export type PhoenixArtifactCategory =
   | "web-shell" // lib/<app>_web.ex
   | "endpoint" // lib/<app>_web/endpoint.ex
   | "router" // lib/<app>_web/router.ex
+  | "problem-details" // lib/<app>_web/problem_details.ex
   // lib/<app>_web/components/ — UI components
   | "core-components" // components/core_components.ex
   | "sidebar-component" // components/sidebar.ex
@@ -147,6 +148,8 @@ function pathForCategory(artifact: PhoenixArtifact, ctx: EmitCtx): string {
       return webPath(app, `endpoint.ex`);
     case "router":
       return webPath(app, `router.ex`);
+    case "problem-details":
+      return webPath(app, `problem_details.ex`);
     case "core-components":
       return webPath(app, `components/core_components.ex`);
     case "sidebar-component":

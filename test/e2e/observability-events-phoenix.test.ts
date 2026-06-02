@@ -108,7 +108,7 @@ const FIXTURE_DDD = `system PhxObs {
   api SalesApi from Sales
   ui SalesAdmin with scaffold(subdomains: [Sales]) { }
   deployable phoenixApp {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin

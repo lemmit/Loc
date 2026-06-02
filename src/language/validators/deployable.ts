@@ -9,6 +9,7 @@ import {
   packFormatForBuiltin,
   parseBuiltinDesignRef,
 } from "../../generator/_packs/builtin-formats.js";
+import type { Platform } from "../../ir/types/loom-ir.js";
 import {
   backendVersionsForFamily,
   isRegisteredBackendRef,
@@ -18,11 +19,17 @@ import {
 import type { Deployable } from "../generated/ast.js";
 import {
   builtinPackNamesForFormat,
+  canonicalFramework,
   expectedFrameworkFor,
   expectedPackFormatFor,
+  FOUNDATION_OWNED_AXES,
   FRONTEND_KEYWORDS,
+  hostableFrameworksFor,
+  isReservedStub,
   platformMountsUi,
   platformOwnsBackend,
+  type RealizationAxis,
+  realizationAxisMenu,
 } from "./data/platform-rules.js";
 
 void BUILTIN_PACK_LATEST;
@@ -58,14 +65,25 @@ export function checkDeployable(
   //          for the bulk-CRUD case.  Diagnostic code
   //          `loom.react-deployable-missing-ui`.
   checkDeployablePlatform(d, accept);
-  const hasUiBinding = !!(d.uiSugar || d.uiCompose || d.uiBlock);
+  checkDeployableRealizationAxes(d, accept);
+  // D-PHOENIX-SURFACE: `hosts:` is a UI mount on equal footing with the
+  // legacy `ui:` bindings — it satisfies the "must declare a UI" rules
+  // (4/4b) and is subject to the same platform-mounts-UI check (3).
+  const hasHosts = (d.hosts ?? []).length > 0;
+  const hasUiBinding = !!(d.uiSugar || d.uiCompose || d.uiBlock) || hasHosts;
   if (hasUiBinding && !platformMountsUi(d.platform)) {
     accept(
       "error",
-      `'ui:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenixLiveView', 'dotnet'); got '${d.platform}'.`,
+      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenix', 'dotnet'); got '${d.platform}'.`,
       {
         node: d,
-        property: d.uiSugar ? "uiSugar" : d.uiCompose ? "uiCompose" : "uiBlock",
+        property: d.uiSugar
+          ? "uiSugar"
+          : d.uiCompose
+            ? "uiCompose"
+            : d.uiBlock
+              ? "uiBlock"
+              : "hosts",
       },
     );
   }
@@ -105,6 +123,47 @@ export function checkDeployable(
     }
   }
 
+  // Rule 13b (D-PHOENIX-SURFACE): when the referenced `ui { framework: … }`
+  // declaration carries its own framework, the hosting deployable's
+  // platform must be able to serve it — `framework ∈ host.hostableFrameworks`.
+  // This is the host-capability direction (the `ui` owns its framework,
+  // the host declares what it can host) that supersedes Rule 13's
+  // derive-from-platform model.  Backward-compatible: only fires when the
+  // `ui` declaration opts in by declaring `framework:` (existing sources
+  // omit it and are unaffected).  The principled rule means LiveView is
+  // rejected on every non-Phoenix host, while React is accepted on any
+  // static-asset host.
+  // Every `ui` the deployable mounts — the legacy single binding plus
+  // each `hosts:` entry (phase 4) — checked uniformly.
+  const mountedUis = [
+    (d.uiSugar ?? d.uiCompose ?? d.uiBlock)?.ref?.ref,
+    ...(d.hosts ?? []).map((r) => r.ref),
+  ];
+  if (hasUiBinding && platformMountsUi(d.platform)) {
+    const hostable = hostableFrameworksFor(d.platform);
+    for (const ui of mountedUis) {
+      const uiFramework = canonicalFramework(ui?.framework);
+      if (!uiFramework || hostable.has(uiFramework)) continue;
+      const menu = [...hostable].sort().join(", ") || "none";
+      accept(
+        "error",
+        `Deployable '${d.name}' (platform '${d.platform}') cannot host ui '${ui?.name}' framework '${uiFramework}'. This platform hosts: ${menu}. A runtime-coupled framework (e.g. 'phoenixLiveView'/LiveView) can only run on its own runtime; a static-bundle framework (e.g. 'react') runs on any static-asset host.`,
+        {
+          node: d,
+          property:
+            d.hosts && d.hosts.length > 0
+              ? "hosts"
+              : d.uiSugar
+                ? "uiSugar"
+                : d.uiCompose
+                  ? "uiCompose"
+                  : "uiBlock",
+          code: "loom.ui-framework-unhostable",
+        },
+      );
+    }
+  }
+
   // Rule 14: design-pack format must match the framework the deployable
   // renders against.  TSX packs (mantine/shadcn/mui/chakra) need a
   // `react` framework; HEEx packs (ashPhoenix) need `phoenixLiveView`.
@@ -114,7 +173,13 @@ export function checkDeployable(
   // packs (any name not in BUILTIN_PACK_FORMATS) get a warning
   // instead — the validator can't read their `pack.json` to know the
   // format, but a typo should still surface loudly.
-  checkDeployableDesignPack(d, hasUiBinding, framework, accept);
+  // The framework the design pack must match: prefer a hosted/referenced
+  // `ui` declaration's own `framework:` (D-PHOENIX-SURFACE — the ui owns
+  // it; e.g. a phoenix host embedding `framework: react` needs a tsx
+  // pack, not ashPhoenix), then the legacy block-binding framework.
+  // Mirrors the lowering precedence in `lower.ts`.
+  const uiDeclaredFramework = canonicalFramework(mountedUis.find((u) => u?.framework)?.framework);
+  checkDeployableDesignPack(d, hasUiBinding, uiDeclaredFramework ?? framework, accept);
 
   // Existing rules — react/static both behave like frontends.
   if (isFrontendPlatform(d.platform)) {
@@ -130,7 +195,7 @@ export function checkDeployable(
     if (isFrontendPlatform(target.platform)) {
       accept(
         "error",
-        `Frontend deployable '${d.name}' cannot target another frontend ('${target.name}'). Pick a 'dotnet' or 'hono' deployable.`,
+        `Frontend deployable '${d.name}' cannot target another frontend ('${target.name}'). Pick a 'dotnet' or 'node' deployable.`,
         { node: d, property: "targets" },
       );
     }
@@ -179,7 +244,7 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
     if (!FRONTEND_KEYWORDS.has(raw)) {
       accept(
         "error",
-        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'hono', 'react', 'static', 'phoenixLiveView' (backends also accept a pinned form, e.g. 'hono@v4').`,
+        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'react', 'static', 'phoenix' (backends also accept a pinned form, e.g. 'node@v4').`,
         { node: d, property: "platform" },
       );
     }
@@ -195,6 +260,64 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
       `Platform '${raw}' on deployable '${d.name}' — no version '${parsed.version}' of backend '${parsed.family}'. Available: ${available.map((v) => `'${parsed.family}@${v}'`).join(", ")}.`,
       { node: d, property: "platform" },
     );
+  }
+}
+
+/** Resolve a `platform:` value to its canonical family (`phoenix` →
+ *  `phoenixLiveView`, `hono@v4` → `hono`), falling back to the raw value
+ *  for frontends (`react`/`static`).  Mirrors how lowering canonicalises. */
+function resolveAxisFamily(platform: string): Platform {
+  return (parseBuiltinPlatformRef(platform)?.family ?? platform) as Platform;
+}
+
+/** D-REALIZATION-AXES gating.  This PR ships **R1** (out-of-menu) and
+ *  **R4** (foundation owns layers); R2/R3/R5/R7 have no reachable trigger
+ *  until the menus grow (stubs become real / actor runtimes land) and are
+ *  deferred to the PRs that add those values (see
+ *  `docs/proposals/platform-realization-axes.md` §7). */
+export function checkDeployableRealizationAxes(d: Deployable, accept: ValidationAcceptor): void {
+  if (d.platform == null) return;
+  const family = resolveAxisFamily(d.platform);
+  const axes: { name: RealizationAxis; value: string | undefined }[] = [
+    { name: "foundation", value: d.foundation },
+    { name: "application", value: d.application },
+    { name: "persistence", value: d.persistence },
+    { name: "directoryLayout", value: d.directoryLayout },
+    { name: "transport", value: d.transport },
+    { name: "runtime", value: d.runtime },
+  ];
+
+  // R1 — every set axis value must be in its platform menu.
+  for (const { name, value } of axes) {
+    if (value == null) continue;
+    const menu = realizationAxisMenu(family, name);
+    if (menu.includes(value)) continue;
+    const reason = isReservedStub(family, name, value)
+      ? `is reserved on platform '${family}' but not yet implemented`
+      : `is not available on platform '${family}'`;
+    const avail = menu.length
+      ? `Available: ${menu.map((v) => `'${v}'`).join(", ")}.`
+      : `Platform '${family}' exposes no '${name}:' choices (realization axes apply to backend deployables).`;
+    accept("error", `'${name}: ${value}' on deployable '${d.name}' ${reason}. ${avail}`, {
+      node: d,
+      property: name,
+      code: "loom.platform-knob-out-of-menu",
+    });
+  }
+
+  // R4 — a `foundation:` framework owns some axes; setting an owned axis
+  // alongside it is an error (the framework supplies it).
+  if (d.foundation != null) {
+    const owned = FOUNDATION_OWNED_AXES[d.foundation] ?? [];
+    for (const axis of owned) {
+      const set = axes.find((a) => a.name === axis)?.value;
+      if (set == null) continue;
+      accept(
+        "error",
+        `'foundation: ${d.foundation}' owns the ${axis} layer — remove '${axis}:' (the framework supplies it).`,
+        { node: d, property: axis, code: "loom.platform-knob-owned-by-foundation" },
+      );
+    }
   }
 }
 
