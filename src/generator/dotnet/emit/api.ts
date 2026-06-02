@@ -305,7 +305,7 @@ export function renderExceptionFilter(ns: string, options?: { usesValidators?: b
   // Confined to this file — adding `System.Diagnostics` project-wide
   // would expose `Activity` (a common DDD entity name) to every
   // generated source file.
-  return `// Auto-generated.${usesValidators ? "\nusing System.Linq;" : ""}
+  return `// Auto-generated.${usesValidators ? "\nusing System.Collections.Generic;\nusing System.Linq;\nusing System.Text.Json;" : ""}
 using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -340,22 +340,34 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         var trace_id = Activity.Current?.TraceId.ToString() ?? "";${
           usesValidators
             ? `
-        // FluentValidation arm — runs FIRST because
-        // validation failures are the most common 400 cause.  The
-        // envelope extends the existing { error, trace_id } shape
-        // with a structured \`failures\` array carrying field +
-        // message per FluentValidation issue, so frontends can
-        // surface field-level errors next to the right input.
+        // FluentValidation arm — runs FIRST because validation
+        // failures are the most common 4xx cause.  Emits an RFC 7807
+        // ProblemDetails with the §3.2 \`errors[]\` extension carried
+        // on \`Extensions["errors"]\`, status 422 (Unprocessable
+        // Entity, the standard for input-shape errors).  Shape matches
+        // Hono's defaultHook output byte-for-byte so the frontend
+        // ACL's \`applyServerErrors\` works against either backend.
+        // See docs/proposals/validation-error-extension.md and
+        // docs/proposals/frontend-acl.md.
         if (context.Exception is FluentValidation.ValidationException fv)
         {
-            context.Result = new BadRequestObjectResult(new
+            var problem = new ProblemDetails
             {
-                error = "Validation failed",
-                trace_id,
-                failures = fv.Errors
-                    .Select(e => new { field = e.PropertyName, message = e.ErrorMessage })
-                    .ToArray(),
-            });
+                Type = "about:blank",
+                Title = "Validation failed",
+                Status = 422,
+                Detail = "One or more fields are invalid.",
+                Instance = context.HttpContext.Request.Path,
+            };
+            problem.Extensions["errors"] = fv.Errors
+                .Select(e => new { pointer = PointerOf(e.PropertyName), message = e.ErrorMessage })
+                .ToArray();
+            context.HttpContext.Response.Headers["x-request-id"] = trace_id;
+            context.Result = new ObjectResult(problem)
+            {
+                StatusCode = 422,
+                ContentTypes = { "application/problem+json" },
+            };
             context.ExceptionHandled = true;
             return;
         }`
@@ -426,6 +438,45 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             StatusCode = status,
             ContentTypes = { "application/problem+json" },
         };
+    }${
+      usesValidators
+        ? `
+
+    // Convert a FluentValidation property path to an RFC 6901 JSON
+    // pointer matching the wire shape the frontend ACL expects.  The
+    // app's JSON output uses JsonNamingPolicy.CamelCase, so each
+    // PascalCase segment is camel-cased; array indexer notation
+    // (\`Items[0].Qty\`) becomes a numeric segment (\`/items/0/qty\`).
+    // RFC 6901 escapes apply inside each segment (\`~\` → \`~0\`,
+    // \`/\` → \`~1\`).  Empty input → empty pointer (the whole document).
+    private static string PointerOf(string propertyName)
+    {
+        if (string.IsNullOrEmpty(propertyName)) return "";
+        var segments = new List<string>();
+        foreach (var dotPart in propertyName.Split('.'))
+        {
+            var idx = 0;
+            while (idx < dotPart.Length)
+            {
+                var bracket = dotPart.IndexOf('[', idx);
+                if (bracket < 0)
+                {
+                    segments.Add(JsonNamingPolicy.CamelCase.ConvertName(dotPart.Substring(idx)));
+                    break;
+                }
+                if (bracket > idx)
+                {
+                    segments.Add(JsonNamingPolicy.CamelCase.ConvertName(dotPart.Substring(idx, bracket - idx)));
+                }
+                var close = dotPart.IndexOf(']', bracket);
+                if (close < 0) break;
+                segments.Add(dotPart.Substring(bracket + 1, close - bracket - 1));
+                idx = close + 1;
+            }
+        }
+        return "/" + string.Join("/", segments.ConvertAll(s => s.Replace("~", "~0").Replace("/", "~1")));
+    }`
+        : ""
     }
 }
 `;

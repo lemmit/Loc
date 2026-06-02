@@ -164,16 +164,34 @@ This is forward-compatible: when Phase B + C land, the central matrix
 adds 422 + the schema gains `errors:` for all three backends in lockstep,
 and parity stays green.
 
-### .NET (follow-up)
+### .NET (Phase B — shipping)
 
-ASP.NET's `ValidationProblemDetails` already produces an `errors` dictionary
-(`Dictionary<string, string[]>`), but with property names (e.g. `"Price.Amount"`)
-as keys — not RFC 6901 pointers. The follow-up converts the dictionary to
-the array form: each `(property, messages)` becomes one or more `{ pointer,
-message }` entries, with the property name mapped to a JSON pointer.
+The FluentValidation arm of `Api/DomainExceptionFilter.cs` was emitting a
+custom 400 envelope (`{ error, trace_id, failures: [{ field, message }] }`).
+Replaced by a 422 `ProblemDetails` with the §3.2 `errors[]` extension carried
+on `ProblemDetails.Extensions["errors"]` — same wire body as Hono's
+`defaultHook`.
 
-Status code change: `400` → `422` for the validation path; framework's
-`InvalidModelStateResponseFactory` is overridden once in `Program.cs`.
+A `PointerOf` static helper on the same filter class converts
+FluentValidation property paths to RFC 6901 JSON pointers:
+- `Name` → `/name`
+- `Price.Amount` → `/price/amount`
+- `Items[0].Qty` → `/items/0/qty`
+- Empty → `""` (root error)
+
+Pascal-case segments go through `JsonNamingPolicy.CamelCase.ConvertName` so
+the pointers align with the wire shape the app emits via
+`PropertyNamingPolicy = CamelCase` (set globally in `Program.cs`). RFC 6901
+segment escapes (`~` → `~0`, `/` → `~1`) apply inside each segment.
+
+Same scope split as Hono: the OpenAPI `ProblemDetails` schema declaration
+and the route-level 422 response keep parity with Phoenix until Phase D.
+ASP.NET's framework-default `InvalidModelStateResponseFactory` is
+intentionally NOT overridden — body validation goes through the FluentValidation
+CQRS pipeline, which throws `ValidationException` and lands in the filter
+arm above. The .NET test `does NOT touch ValidationProblemDetails` stays
+pinned: forking the framework default would touch a wider API surface than
+this PR needs.
 
 ### Phoenix (follow-up)
 
@@ -212,10 +230,20 @@ format is unchanged.
 
 ## Phased delivery
 
-- **Phase A (this PR):** Hono `defaultHook` + OpenAPI schema + route-level
-  422 declarations + tests + cross-reference docs.
-- **Phase B (follow-up PR):** .NET override + status code change + parity
-  restore.
-- **Phase C (follow-up PR):** Phoenix walker + parity confirmation.
-- **Phase D (later):** Once `exception-less.md` lands, refactor internal
-  production path; wire format stays the same.
+- **Phase A — Hono** (shipped #782): runtime body emits 422 + `errors[]`;
+  OpenAPI schema declaration deferred to keep parity with .NET + Phoenix.
+- **Phase B — .NET** (shipping in this PR): runtime body emits 422 +
+  `Extensions["errors"]`; `PointerOf` helper on `DomainExceptionFilter`
+  converts FluentValidation paths to RFC 6901; same OpenAPI deferral
+  as Hono.
+- **Phase C — Phoenix** (follow-up): walk `Ash.Error.Invalid` into the
+  same shape.
+- **Phase D — OpenAPI lockstep** (after C lands): flip the central
+  matrix in `src/ir/util/openapi-errors.ts` to add 422 for
+  `create` / `operation` / `workflow`, add `errors:` to every backend's
+  `ProblemDetails` schema, invert the parity-deferred test assertions.
+  All three backends move together so parity stays green.
+- **Phase E — exception-less interop** (much later): when
+  `exception-less.md` lands, refactor the internal production path
+  (from `defaultHook` / filter arm to per-variant typed returns).
+  Wire format stays unchanged.
