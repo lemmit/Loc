@@ -15,7 +15,7 @@ import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { generateReactForContexts } from "../react/index.js";
 import { ashStyleAdapter } from "./adapters/ash-style.js";
 import { emitPhoenixResourceFiles } from "./adapters/resource-clients.js";
-import { type ApiRoute, emitApiControllers } from "./api-emit.js";
+import { type ApiRoute, crudOpNames, emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
 import { renderJasonCamelCaseModule, renderJasonEncoderImpl } from "./jason-camel-emit.js";
@@ -459,13 +459,22 @@ function renderDomainModule(
       resourceBlocks.push(`    resource ${r}`);
       continue;
     }
-    const defines: string[] = [
-      `      define :create_${snake(agg.name)}, action: :create`,
-      `      define :list_${snake(plural(agg.name))}, action: :read`,
-      `      define :get_${snake(agg.name)}, action: :read, get_by: [:id]`,
-      `      define :update_${snake(agg.name)}, action: :update, get_by: [:id]`,
-      `      define :destroy_${snake(agg.name)}, action: :destroy, get_by: [:id]`,
-    ];
+    // A CRUD verb claimed by a public operation (e.g. crudish `update`) drops
+    // its standard `define` — the per-op define below owns that name, matching
+    // the cross-backend per-op form (avoids a duplicate Ash code-interface
+    // define).  See CRUD_VERB_NAMES.
+    const crudOps = crudOpNames(agg);
+    const defines: string[] = (
+      [
+        ["create", `      define :create_${snake(agg.name)}, action: :create`],
+        ["list", `      define :list_${snake(plural(agg.name))}, action: :read`],
+        ["get", `      define :get_${snake(agg.name)}, action: :read, get_by: [:id]`],
+        ["update", `      define :update_${snake(agg.name)}, action: :update, get_by: [:id]`],
+        ["destroy", `      define :destroy_${snake(agg.name)}, action: :destroy, get_by: [:id]`],
+      ] as const
+    )
+      .filter(([name]) => !crudOps.has(name))
+      .map(([, src]) => src);
     const repo = ctx.repositories.find((rr) => rr.aggregateName === agg.name);
     if (repo) {
       for (const find of repo.finds) {
