@@ -34,7 +34,7 @@ system Sys {
   resource billingState { for: Billing, kind: state, use: primary }
   ui WebApp {}
   deployable webApp {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Orders, Billing]
     dataSources: [ordersState, billingState]
     ui: WebApp

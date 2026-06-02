@@ -37,12 +37,12 @@ describe("validator: ui framework must be hostable by the deployable (D-PHOENIX-
     ).toBe(true);
   });
 
-  it("accepts a LiveView ui hosted on a phoenixLiveView deployable (its own runtime)", async () => {
+  it("accepts a LiveView ui hosted on a phoenix deployable (its own runtime)", async () => {
     const { errors } = await parseString(`
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         ui Admin { framework: phoenixLiveView }
-        deployable app { platform: phoenixLiveView, contexts: [C], ui: Admin, port: 4000 }
+        deployable app { platform: phoenix, contexts: [C], ui: Admin, port: 4000 }
       }
     `);
     expect(

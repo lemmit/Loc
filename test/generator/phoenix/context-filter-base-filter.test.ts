@@ -27,7 +27,7 @@ system Sys {
   resource docsState { for: Docs, kind: state, use: primary }
   ui WebApp {}
   deployable api {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Docs]
     dataSources: [docsState]
     ui: WebApp

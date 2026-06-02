@@ -452,7 +452,7 @@ system DevPlatform {
     }
 
     deployable phoenixApi {
-        platform: phoenixLiveView
+        platform: phoenix
         contexts: [Catalog, Builds, People]
         dataSources: [catalogState, buildsState, peopleState]
         serves: ProjectsApi, DeliveryApi, AccountsApi

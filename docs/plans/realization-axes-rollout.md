@@ -113,6 +113,15 @@ the menus go size-1 → size-N:
   layered; namespace-by-feature is a later slice). `byLayer` default stays
   byte-identical (baseline fixture unchanged); compiles by construction (C#
   namespaces are path-independent, `.csproj` globs `**/*.cs`).
+- **5b (node) — hono `byFeature` layout — DONE.** Brings `directoryLayout:` to a
+  SECOND backend, same pure-relocation pattern. `platform: node { directoryLayout:
+  byFeature }` colocates each aggregate's domain module / drizzle repository /
+  HTTP routes / extern / test (and the TPH/TPC base union + reader) under
+  `features/<agg>/`; pooled domain (ids / value-objects / events / errors),
+  `db/schema.ts`, `http/index.ts`, views / workflows, obs / auth / lib, and the
+  root stay layered. byFeature reuses byLayer's basenames (file names stay
+  byte-identical, only the folder changes). `byLayer` default unchanged;
+  type-checks unchanged (TS resolves relative imports regardless of folder).
 - dotnet: `dapper`, `marten` (persistence); `serviceLayer` (style/`application`).
 - node: `express` / `fastify` (transport); `prisma` (persistence).
 - Activate gating **R2** (`directoryLayout × application`) once a real style does

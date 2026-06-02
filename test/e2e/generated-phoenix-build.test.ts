@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 // generated Phoenix project compiles against real Ash 3.x.
 //
 // Mirrors `test/generated-build.test.ts` (the TS-build regression):
-// emit a phoenixLiveView deployable from a fixture, then run
+// emit a phoenix deployable from a fixture, then run
 // `mix deps.get && mix compile --warnings-as-errors` inside the
 // hexpm/elixir Docker image.  Catches Ash 3.x API drift and any
 // other semantic emission bug that the per-file syntax check

@@ -55,7 +55,7 @@ const phoenixSystem = (orderField: string): string => `
       }
     }
     deployable phoenixApp {
-      platform: phoenixLiveView, contexts: [C], serves: DemoApi,
+      platform: phoenix, contexts: [C], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }
@@ -124,7 +124,7 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
           page NewOrder { route: "/orders/new" body: CreateForm { of: Order } }
         }
         deployable phoenixApp {
-          platform: phoenixLiveView, contexts: [C], serves: DemoApi,
+          platform: phoenix, contexts: [C], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }
@@ -162,7 +162,7 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
           }
         }
         deployable phoenixApp {
-          platform: phoenixLiveView, contexts: [C], serves: DemoApi,
+          platform: phoenix, contexts: [C], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }

@@ -34,7 +34,7 @@ system Sys {
   resource ordersState { for: Orders, kind: state, use: primary }
   ui WebApp {}
   deployable webApp {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Orders]
     dataSources: [ordersState]
     ui: WebApp

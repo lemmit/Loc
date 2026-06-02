@@ -43,7 +43,7 @@ const FIXTURE_SOURCE = `system PhoenixShop {
   api StoreApi from Store
 
   deployable shopBackend {
-    platform: phoenixLiveView,
+    platform: phoenix,
     contexts: [Store],
     serves: StoreApi,
     port: 4000
@@ -86,7 +86,7 @@ async function buildFixture(): Promise<Model> {
 }
 
 describe("e2e dispatch to phoenixLiveView", () => {
-  it("emits e2e/<system>.e2e.test.ts for a phoenixLiveView deployable", async () => {
+  it("emits e2e/<system>.e2e.test.ts for a phoenix deployable", async () => {
     const model = await buildFixture();
     const { files } = generateSystems(model);
     // The e2e spec must be generated.

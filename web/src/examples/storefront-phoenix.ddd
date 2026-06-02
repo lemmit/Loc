@@ -164,7 +164,7 @@ system StorefrontPhoenix {
   resource storefrontState { for: Storefront, kind: state, use: primary }
 
   deployable phoenixApp {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Storefront]
     dataSources: [storefrontState]
     serves: StorefrontApi

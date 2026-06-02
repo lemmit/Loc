@@ -41,7 +41,7 @@ system Seeding {
   resource catalogState { for: Catalog, kind: state, use: primary }
 
   deployable phoenixApp {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Catalog]
     dataSources: [catalogState]
     serves: CatalogApi
