@@ -211,7 +211,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `docs/technical.md` — pipeline architecture (the canonical, detailed version of the summary above).
 - `docs/tools.md` — CLI, `.loomignore`, watch mode, Docker workflow, OpenAPI parity check, proxy CAs.
 
-Per-feature reference docs — `docs/auth.md`, `views.md`, `workflow.md`, `criterion.md` (reusable predicate specifications), `extern.md`, `capabilities.md` (filter/stamp/implements), `scaffold-macros.md` (the macro stdlib), `provenance.md` (provenanced fields + ddd snapshot), `observability.md`, `traceability.md`, `conformance.md`, `migrations-design.md`.
+Per-feature reference docs — `docs/auth.md`, `views.md`, `inheritance.md` (abstract aggregates / `extends` / TPC vs TPH / polymorphic `find all <Base>`), `workflow.md`, `criterion.md` (reusable predicate specifications), `extern.md`, `capabilities.md` (filter/stamp/implements), `scaffold-macros.md` (the macro stdlib), `provenance.md` (provenanced fields + ddd snapshot), `observability.md`, `traceability.md`, `conformance.md`, `migrations-design.md`.
 
 `docs/plans/` and `docs/audits/` hold in-flight design notes and historical snapshots; do not treat them as authoritative for what ships today. `docs/proposals/` holds proposals not yet adopted.
 
