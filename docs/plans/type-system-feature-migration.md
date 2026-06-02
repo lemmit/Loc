@@ -148,6 +148,17 @@ heavily**.
   field written from an operation whose body uses `?` propagation;
   assert the emitted trace capture is well-formed and the snapshot
   still content-addresses. Treat this as a gate on the A4 PR.
+- **Opportunity (fold in, don't do separately):** the per-backend
+  `render-expr.ts` carry a structurally identical ~17-arm dispatch over
+  `ExprIR` (TS / .NET / Phoenix), diverging only in leaf emission. Since
+  A4 already rewrites these files heavily, that is the cheap moment to
+  unify the dispatch behind an `ExprTarget` contract (leaf emitters +
+  the framework-shaped seams), mirroring the `WalkerTarget` extraction
+  the body-walker already uses (`src/generator/_walker/target.ts`; PRs
+  #607–#627). Extracting it *before* A4 means re-doing it; doing it as
+  part of A4 is close to free. The pure `refCollectionFieldName` query
+  was already hoisted to `src/ir/util/ref-collection.ts` (#793) as the
+  one A4-independent slice — the rest waits for A4.
 
 ### 5.2 Provenance × wireShape, and the `managed`-on-wire option
 
