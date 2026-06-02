@@ -20,6 +20,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, findUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { indent, lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
@@ -725,14 +726,6 @@ export function lowerToDrizzle(
     if (e.kind === "ref" && e.refKind === "this-prop" && isBool(e.type)) {
       return `schema.${tableName}.${e.name}`;
     }
-    return null;
-  }
-
-  /** Field name behind a `this.<field>` receiver, or null. */
-  function refCollectionFieldName(e: import("../../ir/types/loom-ir.js").ExprIR): string | null {
-    if (e.kind === "paren") return refCollectionFieldName(e.inner);
-    if (e.kind === "member" && e.receiver.kind === "this") return e.member;
-    if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
     return null;
   }
 

@@ -5,6 +5,7 @@ import type {
   ExprIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -543,14 +544,4 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
     case "slot":
       throw new Error("renderAshType: 'slot' type is UI-only and should not reach the backend.");
   }
-}
-
-/** Field name behind a `this.<field>` receiver (used to look up the
- * AssociationIR when lowering `.contains(...)`), or null if the
- * receiver isn't a `this`-rooted single member access. */
-function refCollectionFieldName(e: ExprIR): string | null {
-  if (e.kind === "paren") return refCollectionFieldName(e.inner);
-  if (e.kind === "member" && e.receiver.kind === "this") return e.member;
-  if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
-  return null;
 }
