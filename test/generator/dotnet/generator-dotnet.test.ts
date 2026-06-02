@@ -1672,11 +1672,23 @@ describe(".NET generator", () => {
       const files = generateDotnet(model);
       const filter = files.get("Api/DomainExceptionFilter.cs")!;
       expect(filter).toMatch(/is FluentValidation\.ValidationException fv/);
-      // Envelope: extends the existing { error, trace_id } shape with a
-      // structured `failures` array.
-      expect(filter).toMatch(/error = "Validation failed"/);
-      expect(filter).toMatch(/failures = fv\.Errors/);
-      expect(filter).toMatch(/new \{ field = e\.PropertyName, message = e\.ErrorMessage \}/);
+      // Envelope: RFC 7807 ProblemDetails with the §3.2 `errors[]`
+      // extension carried on `Extensions["errors"]`, status 422.
+      // Shape matches Hono's defaultHook so the frontend ACL's
+      // `applyServerErrors` works against either backend.  See
+      // docs/proposals/validation-error-extension.md.
+      expect(filter).toMatch(/Title = "Validation failed"/);
+      expect(filter).toMatch(/Status = 422/);
+      expect(filter).toMatch(/problem\.Extensions\["errors"\] = fv\.Errors/);
+      expect(filter).toMatch(
+        /new \{ pointer = PointerOf\(e\.PropertyName\), message = e\.ErrorMessage \}/,
+      );
+      expect(filter).toMatch(/StatusCode = 422/);
+      expect(filter).toMatch(/ContentTypes = \{ "application\/problem\+json" \}/);
+      // The PointerOf helper encodes RFC 6901 JSON pointers — see the
+      // validation-error-extension.test.ts file for the dedicated
+      // assertions on its emitted source.
+      expect(filter).toMatch(/private static string PointerOf\(string propertyName\)/);
     });
 
     it("skips the FluentValidation gate entirely when no aggregate has wire-translatable invariants", async () => {
