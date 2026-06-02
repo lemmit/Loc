@@ -54,5 +54,4 @@ export {
   checkPage,
   checkTheme,
   checkUi,
-  checkUiHelperImports,
 } from "./ui.js";

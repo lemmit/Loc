@@ -13,7 +13,6 @@ import type {
   StateFieldIR,
   TypeIR,
   UiApiParamIR,
-  UiHelperImportIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
@@ -107,10 +106,6 @@ export function renderCustomLayoutPage(
    *  enum / value-object resolution inside the form-field
    *  preparer). */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
-  /** User-authored helper imports.  Body refs whose
-   *  call name matches a helper emit as plain JS calls; the shell
-   *  adds `import { <name> } from "<path>"` for each USED helper. */
-  helperImports: ReadonlyArray<UiHelperImportIR> = [],
   /** Relative-path prefix from the emitted page TSX
    *  back to the `src/` root.  Defaults to `"../"` for pages at
    *  `src/pages/<name>.tsx` (1 hop).  Scaffold-expanded pages live
@@ -139,7 +134,6 @@ export function renderCustomLayoutPage(
     usedApiHooks,
     formOfs,
     actionMutations,
-    usedHelpers,
   } = walkBodyToTsx(
     body,
     pack,
@@ -149,7 +143,6 @@ export function renderCustomLayoutPage(
     apiParams,
     aggregatesByName,
     bcByAggregate,
-    helperImports,
     workflowsByName,
     bcByWorkflow,
     aggregateParamTypes(params, aggregatesByName),
@@ -187,8 +180,6 @@ export function renderCustomLayoutPage(
       formOfs: [],
       actionMutations: [],
       collectedTestids: new Set(),
-      helperImports: new Map(),
-      usedHelpers: new Set(),
       usesCodeBlock: false,
     };
     const titleExpr = emitExpr(title, titleCtx);
@@ -214,18 +205,6 @@ export function renderCustomLayoutPage(
   // multiple ops on the same aggregate dedupe to one import line
   // (matching the existing scaffold output's per-aggregate api file).
   const apiHookImports = renderApiHookImports(usedApiHooks, srcImportPrefix);
-  // `import { <name> } from "<path>"` per UI-declared
-  // helper actually referenced in the body.  Lines grouped per
-  // path so two helpers from the same module dedupe to one
-  // import line; paths sorted for deterministic output.
-  // Delegated to `tsxTarget.renderHelperImports` — see
-  // `src/generator/_walker/target.ts`.  The target returns one
-  // line per import; this site re-attaches the trailing newline
-  // matching the existing splice into the import block template.
-  const helperImportLines = tsxTarget
-    .renderHelperImports(usedHelpers, helperImports)
-    .map((l) => `${l}\n`)
-    .join("");
   // Api hook declarations, emitted at page-top right before the
   // JSX return.  Each unique `<param>.<aggregate>.<op>` becomes
   // one `const <var> = use<Op><Aggregate>(args?);` line.
@@ -316,7 +295,7 @@ export function renderCustomLayoutPage(
   const navigateLine =
     usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${helperImportLines}${userComponentImports}${form.moduleScope}
+${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${userComponentImports}${form.moduleScope}
 export default function ${pageName}() {
 ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}  return (
     ${indentJsx(tsx, "    ")}
@@ -535,7 +514,6 @@ export function renderUserComponentFile(
     [],
     aggregatesByName,
     bcByAggregate,
-    [],
     new Map(),
     new Map(),
     aggregateParamTypes(params, aggregatesByName),
@@ -778,8 +756,6 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     formOfs: [],
     actionMutations: [],
     collectedTestids: new Set(),
-    helperImports: new Map(),
-    usedHelpers: new Set(),
     usesCodeBlock: false,
   };
   return emitExpr(expr, dummy);

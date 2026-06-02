@@ -1301,22 +1301,6 @@ export interface UiIR {
    *  declares.  Composition is supplied by the deployable that
    *  deploys this UI. */
   apiParams: UiApiParamIR[];
-  /** User-authored TS helpers brought into the walker
-   *  stdlib via `import helper <name> from "<path>"`.  Body refs to
-   *  `<name>(...)` emit a TS `import { <name> } from "<path>"` at
-   *  the top of the generated page TSX. */
-  helperImports: UiHelperImportIR[];
-}
-
-/** UI helper import — `import helper formatPrice from "./helpers/price"`.
- *  The path is preserved verbatim; the page TSX includes it as a
- *  named import. */
-export interface UiHelperImportIR {
-  /** Helper function name (referenced in page bodies). */
-  name: string;
-  /** Module path (preserved verbatim — caller decides absolute /
-   *  relative / package). */
-  path: string;
 }
 
 /** API declaration — first-class contract derived from a module's

@@ -280,23 +280,7 @@ Ui:
     '}';
 
 UiMember:
-    UiApiParam | UiHelperImport | Page | Component | MenuBlock;
-
-// ---- helper import (UI-level) ----------------------------------
-//
-// Surfaces a user-authored TS helper into the walker stdlib so a
-// page body can reference `<name>(args…)` and the emitted page
-// TSX gets a matching `import { <name> } from "<path>";` at the
-// top.  Paths are emitted verbatim and are resolved against the
-// generated page's source location (typically `web/src/pages/`),
-// so `"./helpers/x"` resolves to `web/src/pages/helpers/x.ts`.
-//
-//   import helper formatPrice from "./helpers/price"
-//
-// Validator rejects names that shadow walker stdlib primitives so
-// helper authors never silently override `Stack` / `Form` / etc.
-UiHelperImport:
-    'import' 'helper' name=ID 'from' path=STRING;
+    UiApiParam | Page | Component | MenuBlock;
 
 // ---- api declaration (system-level) ----------------------------
 //
@@ -429,8 +413,8 @@ LayoutProp:
 //
 // Each slot's body is a single Expression evaluated in the same
 // scope as a page body — so it can reference walker-stdlib primitives
-// (Sticky, Container, Group, …), user-declared components, and
-// helper imports.  `main` is a special slot with no body — it marks
+// (Sticky, Container, Group, …) and user-declared components.
+// `main` is a special slot with no body — it marks
 // where React Router's `<Outlet />` lands; every layout must declare
 // exactly one `main`.  Validator enforces.
 Layout:
