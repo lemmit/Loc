@@ -33,12 +33,13 @@ reified ref — not just a new declaration.
 Too big for one PR. Mirror how #765 landed ("surface + IR + validation,
 no emission" — CI-safe because nothing consumes the new IR yet).
 
-1. **PR1 — surface + IR + lowering** (no backend emission; CI-safe). ✅ **DONE** (commit `a417946f`).
-2. **PR2 — validation** (selectability, sort/path checks). ✅ **DONE** (commit `d9c085e0`).
-3. **PR3 — `Repo.run` lowering + Hono/Drizzle emission** + `LOOM_TS_BUILD` gate. ← **next**
-4. **PR4 — .NET/EF Core emission** + `dotnet-build` gate.
-5. **PR5 — Phoenix/Ash emission** + `phoenix-build` gate.
-6. **PR6 — explicit `loads` / LoadPlanIR fetch realisation + loads-sufficiency** (the actual eager-fetch wiring; PR1 carries the plan, backends honour `whole` only until here).
+1. **PR1 — surface + IR + lowering** (no backend emission; CI-safe). ✅ **MERGED** (#794).
+2. **PR2 — validation** (selectability, sort/path checks). ✅ **MERGED** (#794).
+3. **PR3-A — `run<Name>` repository method emission (Hono/Drizzle)** + `LOOM_TS_BUILD` gate. ✅ **DONE** (PR #800). The method exists + tsc-compiles; not yet callable from a workflow.
+4. **PR3-B — workflow `for` loop + `Repo.run` call wiring + save-model reshape (Hono)**. ✅ **DONE** (this branch). Grammar `ForStmt` (+ block-safe `ForIterable`), IR `repo-run` / `for-each` variants + `savesPerIteration`, `computeSaves` extraction, validator (array-binding iteration + retrieval/target checks), Hono `for…of` + per-iteration save. **.NET and Phoenix gate `repo-run`/`for-each` with an explicit "not yet supported" throw** — they need their own run-method emission (.NET) and the `Enum.reduce_while` reshape (Phoenix). Full `Repo.run` + loop tsc-compiles on Hono.
+5. **PR3-C — .NET run-method emission + `foreach`** + `dotnet-build` gate.
+6. **PR3-D — Phoenix `Enum.reduce_while` reshape** + `phoenix-build` gate.
+7. **PR4 — explicit `loads` / LoadPlanIR fetch realisation + loads-sufficiency** (the actual eager-fetch wiring; backends honour `whole` only until here).
 
 ### PR3 grounding (what the `Repo.run` lowering must reuse)
 
