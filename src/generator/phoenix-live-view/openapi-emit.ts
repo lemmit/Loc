@@ -1,5 +1,9 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
+import {
+  createInputFields,
+  forApiRead,
+  wireCreateDefault,
+} from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -617,7 +621,7 @@ function openApiType(t: TypeIR, schemasModule: string): string {
  *  backend marks request bools required — matching keeps the parity gate
  *  green. */
 function renderProperties(
-  fields: Array<{ name: string; type: TypeIR; optional: boolean }>,
+  fields: Array<{ name: string; type: TypeIR; optional: boolean; wireDefault?: boolean }>,
   schemasModule: string,
   isRequest = false,
 ): {
@@ -641,7 +645,9 @@ function renderProperties(
     const info = wireTypeInfo(f.type, isRequest ? "request" : "response");
     const optionalBoolRequest =
       isRequest && !info.isNullable && info.refKind === "primitive" && info.primitive === "bool";
-    if (!f.optional && !optionalBoolRequest) requiredAtoms.push(`:${key}`);
+    // An explicitly-defaulted request field is optional input (Ash applies
+    // the default on omission), so it drops from the required set too.
+    if (!f.optional && !optionalBoolRequest && !f.wireDefault) requiredAtoms.push(`:${key}`);
   }
 
   return { propsLines, requiredAtoms };
@@ -657,7 +663,7 @@ function wireFieldsToProps(
 function renderSchemaModule(
   moduleName: string,
   schemaTitle: string,
-  fields: Array<{ name: string; type: TypeIR; optional: boolean }>,
+  fields: Array<{ name: string; type: TypeIR; optional: boolean; wireDefault?: boolean }>,
   schemasModule: string,
   isRequest = false,
 ): string {
@@ -815,9 +821,13 @@ function renderCreateRequestSchema(agg: AggregateIR, webModule: string): string 
   // optionals — which ride their own type nullability into the `required`
   // list (see `renderProperties`).  Matches the .NET / Hono / React
   // CreateRequest shapes so the parity gate's property + required sets agree.
-  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = createInputFields(
-    agg,
-  ).map((f: FieldIR) => ({ name: f.name, type: f.type, optional: f.optional }));
+  const fields: Array<{ name: string; type: TypeIR; optional: boolean; wireDefault?: boolean }> =
+    createInputFields(agg).map((f: FieldIR) => ({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      wireDefault: wireCreateDefault(f) !== undefined,
+    }));
   return renderSchemaModule(
     moduleName,
     `Create${agg.name}Request`,

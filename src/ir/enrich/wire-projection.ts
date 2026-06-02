@@ -149,6 +149,22 @@ export function createOmissionValue(f: FieldIR): CreateOmissionValue {
   return { kind: "null" };
 }
 
+/** The explicit `= default` a create-input field carries onto the **wire**
+ *  so the client may omit it (the default is applied at the wire boundary,
+ *  dropping the field from the request's required-set).  Returns the
+ *  default ExprIR for an explicitly-defaulted field, or `undefined` when
+ *  the field has no `= default` or is a bare `bool` (bool optionality is
+ *  owned by each backend's existing bool rule, not this one).  Backends
+ *  render the result in their native default slot — Hono zod `.default(…)`,
+ *  .NET record `= …`, Phoenix Ash `default: …` — so a defaulted field is
+ *  optional input uniformly. */
+export function wireCreateDefault(f: FieldIR): ExprIR | undefined {
+  if (f.default === undefined) return undefined;
+  const base = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (base.kind === "primitive" && base.name === "bool") return undefined;
+  return f.default;
+}
+
 /** Whether an aggregate is **constructible** under the Stage-4 invariant
  * gate: it declares a create (explicit / `crudish`), or — having none —
  * every one of its invariants can be satisfied from the create input

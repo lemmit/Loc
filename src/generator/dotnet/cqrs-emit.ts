@@ -1,4 +1,8 @@
-import { createInputFields, hasCreate } from "../../ir/enrich/wire-projection.js";
+import {
+  createInputFields,
+  hasCreate,
+  wireCreateDefault,
+} from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -34,7 +38,7 @@ import {
   renderRequestDtos,
   renderResponseDtos,
 } from "./emit.js";
-import { renderCsType } from "./render-expr.js";
+import { renderCsExpr, renderCsType } from "./render-expr.js";
 import { renderCreateValidator, renderOperationValidator } from "./validator-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -158,7 +162,17 @@ function emitRequestDtos(
     records.push({
       name: `Create${agg.name}Request`,
       params: requiredFields
-        .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name), "request"))
+        .map((f) => {
+          // Explicit `= default` → optional request field via a record
+          // default value, dropping its `[Required]` (see `wireCreateDefault`).
+          const d = wireCreateDefault(f);
+          return dtoParam(
+            wireType(f.type, ctx, "request"),
+            upperFirst(f.name),
+            "request",
+            d ? renderCsExpr(d) : undefined,
+          );
+        })
         .join(", "),
     });
   }

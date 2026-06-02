@@ -1,11 +1,16 @@
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
+import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
   chainSingleFieldNative,
   refineClauseFor,
   takeSingleFieldChain,
 } from "../../../generator/typescript/zod-refine.js";
 import { wireShapeFor } from "../../../ir/enrich/enrichments.js";
-import { createInputFields, hasCreate } from "../../../ir/enrich/wire-projection.js";
+import {
+  createInputFields,
+  hasCreate,
+  wireCreateDefault,
+} from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -184,7 +189,14 @@ export function buildRoutesFile(
       ...emitWireSchema(
         `const Create${agg.name}Request`,
         `Create${agg.name}Request`,
-        requiredFields.map((f) => ({ name: f.name, base: zodFor(f.type) })),
+        requiredFields.map((f) => {
+          // An explicit `= default` field is optional input: omitted → the
+          // default is applied at the wire (`.default(...)`), so it drops
+          // out of the request's required-set (mirrors the bool rule).
+          const d = wireCreateDefault(f);
+          const base = d ? `${zodFor(f.type)}.default(${renderTsExpr(d)})` : zodFor(f.type);
+          return { name: f.name, base };
+        }),
         agg.invariants,
         // Only fields present in the create input can be validated at the
         // wire boundary — an invariant over a field excluded from create
