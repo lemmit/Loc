@@ -1,4 +1,5 @@
 import type { BinOp, EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { upperFirst } from "../../util/naming.js";
 import { joinDbSetName, joinFkPropName } from "./emit/join-entities.js";
 
@@ -160,16 +161,6 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
       return out;
     }
   }
-}
-
-/** Field name behind a `this.<field>` receiver (used to look up the
- * AssociationIR when lowering `.contains(...)`), or null if the
- * receiver isn't a `this`-rooted single member access. */
-function refCollectionFieldName(e: ExprIR): string | null {
-  if (e.kind === "paren") return refCollectionFieldName(e.inner);
-  if (e.kind === "member" && e.receiver.kind === "this") return e.member;
-  if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
-  return null;
 }
 
 /**

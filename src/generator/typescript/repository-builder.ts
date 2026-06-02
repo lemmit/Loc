@@ -27,10 +27,13 @@ import {
   isRefCollection,
 } from "./repository-associations-builder.js";
 import {
+  contextFilterPredicate,
   findByIdMethod,
   findManyByIdsMethod,
   findQueryMethod,
   lowerToDrizzle,
+  nonPrincipalContextFilters,
+  runMethod,
 } from "./repository-find-builder.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { saveMethod } from "./repository-save-builder.js";
@@ -73,11 +76,32 @@ export function buildRepositoryFile(
       .map((f) => f.filter)
       .filter((x): x is import("../../ir/types/loom-ir.js").ExprIR => !!x),
     ...viewFilters,
+    // Non-principal capability filters (`filter !this.isDeleted`) AND
+    // into every root read; include them in the ops walk so the import
+    // narrower keeps `and` / `not` / comparison helpers they need.
+    ...nonPrincipalContextFilters(agg),
   ];
   for (const f of allFilters) {
     const lowered = lowerToDrizzle(f, lowerFirst(plural(agg.name)), ctx);
     if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
   }
+  // Context retrievals (retrieval.md) targeting this aggregate emit a
+  // `run<Name>` method.  Their `where` lowers to Drizzle (same oracle as
+  // finds, so collect its ops), and a non-empty `sort` pulls in `asc` /
+  // `desc` from drizzle-orm.
+  const aggRetrievals = (ctx.retrievals ?? []).filter(
+    (r) => r.targetType.kind === "entity" && r.targetType.name === agg.name,
+  );
+  for (const r of aggRetrievals) {
+    const lowered = lowerToDrizzle(r.where, lowerFirst(plural(agg.name)), ctx);
+    if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
+    if (r.sort.length > 0) for (const s of r.sort) drizzleOps.add(s.direction);
+  }
+  // The single AND-able capability-filter predicate for this aggregate's
+  // table (null when it has no non-principal capability filter).  Threaded
+  // into each root-table read site below; child/containment reads
+  // (parentId-keyed) are unaffected — the filter constrains root rows.
+  const filterPred = contextFilterPredicate(agg, lowerFirst(plural(agg.name)), ctx, drizzleOps);
   // If any find or matching view filter references currentUser, the
   // per-method signature gains a `currentUser: User` parameter that
   // the closure-captured Drizzle predicate reads.  Pull the User
@@ -113,7 +137,7 @@ export function buildRepositoryFile(
     `    private readonly events: DomainEventDispatcher,`,
     `  ) {}`,
     "",
-    findByIdMethod(agg, ctx, emitTrace),
+    findByIdMethod(agg, ctx, emitTrace, filterPred),
     "",
     `  async getById(id: Ids.${agg.name}Id): Promise<${agg.name}> {`,
     `    const found = await this.findById(id);`,
@@ -124,7 +148,7 @@ export function buildRepositoryFile(
     // Bulk loader used by views that follow `X id` references in bind
     // expressions.  Same hydration path as the array-return finds;
     // filter is a single `inArray`.
-    findManyByIdsMethod(agg, ctx),
+    findManyByIdsMethod(agg, ctx, filterPred),
     "",
     saveMethod(agg, ctx, emitTrace),
     "",
@@ -134,8 +158,11 @@ export function buildRepositoryFile(
     // `ON DELETE CASCADE`; a still-referenced aggregate (cross-aggregate
     // `X id` FK is `restrict`) surfaces as a DB error the route maps to 409.
     ...(agg.canonicalDestroy ? [deleteMethod(agg), ""] : []),
-    ...(repo?.finds ?? []).flatMap((find) => [findQueryMethod(agg, find, ctx), ""]),
-    ...viewFinds.flatMap((find) => [findQueryMethod(agg, find, ctx), ""]),
+    // Find / view queries — capability filter AND-ed into each read.
+    ...(repo?.finds ?? []).flatMap((find) => [findQueryMethod(agg, find, ctx, filterPred), ""]),
+    ...viewFinds.flatMap((find) => [findQueryMethod(agg, find, ctx, filterPred), ""]),
+    // `run<Name>` per context retrieval targeting this aggregate.
+    ...aggRetrievals.flatMap((r) => [runMethod(agg, r, ctx), ""]),
     // toWire — domain instance → wire DTO (plain object).  Used by the
     // Hono routes layer to serialize responses; the shape mirrors the
     // .NET <Agg>Response record so the cross-check sees identical specs.

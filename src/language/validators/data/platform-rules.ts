@@ -44,6 +44,15 @@ export function platformMountsUi(platform: string | undefined): boolean {
   }
 }
 
+/** Canonicalise a D-PHOENIX-SURFACE framework alias to the IR's stable
+ *  value.  `liveview` → `phoenixLiveView`; everything else passes
+ *  through.  Mirrors the lowering-side `canonicalFramework` so the
+ *  validator compares the same canonical value the registry's
+ *  `hostableFrameworks` set holds. */
+export function canonicalFramework(framework: string | undefined): string | undefined {
+  return framework === "liveview" ? "phoenixLiveView" : framework;
+}
+
 /** The set of `ui { framework: … }` values this platform can host —
  *  `PlatformSurface.hostableFrameworks` (D-PHOENIX-SURFACE).  Empty set
  *  for unknown / typo'd platforms (the unknown-platform diagnostic

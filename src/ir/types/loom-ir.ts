@@ -149,6 +149,25 @@ export interface FieldIR {
   default?: ExprIR;
 }
 
+/** One entry in an aggregate's reified **create-input contract** — the
+ *  single source of truth every create surface derives from (wire DTO,
+ *  domain factory, page-object fill, OpenAPI, cross-backend parity).
+ *  Built once by `enrichLoomModel` (see `buildCreateInput`) so every
+ *  backend reads the same field set AND the same per-field required-ness,
+ *  instead of each re-deriving it — the divergence the per-backend
+ *  required-set hacks papered over. */
+export interface CreateInputFieldIR {
+  field: FieldIR;
+  /** Whether the client MUST supply this field on create.  A field is
+   *  required input iff it is non-optional, carries no explicit default,
+   *  and has no language-defined implicit default (a bare `bool` defaults
+   *  to `false`).  A default — explicit or implicit — collapses a field
+   *  onto the same "client may omit" axis as `optional`; whether the
+   *  *aggregate* gets a create at all is a separate, invariant-based
+   *  decision and does not consult this flag. */
+  requiredInput: boolean;
+}
+
 export interface ContainmentIR {
   name: string;
   partName: string;
@@ -345,6 +364,11 @@ export interface AggregateIR {
   /** Canonical JSON-on-the-wire field list.  Populated by
    * `enrichLoomModel`. */
   wireShape?: WireField[];
+  /** Reified create-input contract — the client-suppliable field set with
+   * per-field required-ness.  Populated by `enrichLoomModel`
+   * (`buildCreateInput`); the single source backends consume instead of
+   * re-deriving the create payload.  See {@link CreateInputFieldIR}. */
+  createInput?: CreateInputFieldIR[];
   /** Many-to-many associations derived from `Target id[]` fields.
    * Populated by `enrichLoomModel`; one entry per reference-collection
    * field.  Empty array when the aggregate has none. */
@@ -598,6 +622,51 @@ export interface CriterionIR {
   body: ExprIR;
 }
 
+/** One `sort` term of a retrieval — a structural path through the
+ *  candidate aggregate plus an ordering direction. */
+export interface SortTermIR {
+  /** Dotted path segments, candidate-rooted (`this` stripped).  A
+   *  segment flagged `collection` carried a `[]` marker. */
+  path: LoadSegmentIR[];
+  direction: "asc" | "desc";
+}
+
+/** One segment of a structural `loads` / `sort` path. */
+export interface LoadSegmentIR {
+  name: string;
+  /** True when the segment carried a `[]` collection marker. */
+  collection: boolean;
+}
+
+/** The fetch shape for a retrieval (load-specifications.md /
+ *  reified-criteria.md §"The internal seam").  `kind: "whole"` is the
+ *  default-whole load (full owned aggregate tree, cross-aggregate refs
+ *  as ids) — structural, no analysis.  `kind: "explicit"` carries the
+ *  author's `loads:` paths, which restrict or expand the default. */
+export type LoadPlanIR = { kind: "whole" } | { kind: "explicit"; paths: LoadSegmentIR[][] };
+
+/** A named query *bundle* (retrieval.md): a composed predicate plus the
+ *  shaping a real query carries — ordering and a load shape.  Lowered
+ *  from a `retrieval` declaration; the source-level realisation of the
+ *  RetrievalIR bundle node (reified-criteria.md).
+ *
+ *  No `page` field — pagination is a call-site argument on
+ *  `Repo.run(R(args), page?)`, never part of the declaration. */
+export interface RetrievalIR {
+  name: string;
+  params: ParamIR[];
+  /** The `of <T>` candidate type (entity aggregate). */
+  targetType: TypeIR;
+  /** The lowered `where` predicate, in the retrieval's own scope
+   *  (parameters as `param` refs, candidate fields as `this-prop`).
+   *  Composes criteria + bare predicates like a `find … where`. */
+  where: ExprIR;
+  /** Ordering terms, in declaration order.  Empty when no `sort:`. */
+  sort: SortTermIR[];
+  /** Fetch shape; `{ kind: "whole" }` when no `loads:` clause. */
+  loadPlan: LoadPlanIR;
+}
+
 export interface BoundedContextIR {
   name: string;
   enums: EnumIR[];
@@ -618,6 +687,38 @@ export interface BoundedContextIR {
   /** Channel declarations in this context (channels.md, Slice 1) — the
    *  publisher-side transport contracts over this context's events. */
   channels: ChannelIR[];
+  /** Named query bundles declared in this context (retrieval.md). */
+  retrievals: RetrievalIR[];
+  /** First-boot seed datasets declared in this context (database-seeding.md).
+   *  Platform-neutral; the system-level seed builder (phase ⑨) groups these
+   *  per (module, dataset) and the backends emit native seeders. */
+  seeds: SeedIR[];
+}
+
+/** A first-boot seed dataset for a context's aggregates
+ *  (database-seeding.md).  Declarative form only in this slice: each row is
+ *  the create-parameter shape of one aggregate, lowered through the domain
+ *  `create` by default (D-SEED-PATH).  `module` is attached later by the
+ *  system-level builder; at context-lowering time only `dataset`/`path`/`rows`
+ *  are known. */
+export interface SeedIR {
+  /** Dataset name; `"default"` runs unconditionally, others gate on
+   *  `LOOM_SEED` / the test harness.  Defaults to `"default"` when the
+   *  source omits it. */
+  dataset: string;
+  /** Through the domain `create` (default) or straight to tables (`raw`). */
+  path: "domain" | "raw";
+  /** Ordered records, in source order.  (Topological reorder by `@handle`
+   *  cross-row refs is a later slice.) */
+  rows: SeedRowIR[];
+}
+
+/** One seeded aggregate instance — the create-parameter shape, no `id`. */
+export interface SeedRowIR {
+  /** Target aggregate name. */
+  aggregate: string;
+  /** Field initialisers, fully-resolved to `ExprIR`. */
+  fields: { name: string; value: ExprIR }[];
 }
 
 /** A saved, strongly-typed query over one source aggregate.  Two
@@ -724,11 +825,40 @@ export type WorkflowStmtIR =
       expr: ExprIR;
     }
   | {
+      // `let xs = Repo.run(<Retrieval>(args), page?)` — bind the named
+      // query bundle's result array (retrieval.md).  Distinct from
+      // `repo-let` (which forbids array returns): a `repo-run` is always
+      // an aggregate array, consumable only by a `for-each` loop.
+      kind: "repo-run";
+      name: string;
+      repoName: string;
+      aggName: string;
+      retrievalName: string;
+      retrievalArgs: ExprIR[];
+      page?: { offset?: ExprIR; limit?: ExprIR };
+      /** Element aggregate array type `{ kind: "array", element: entity }`. */
+      returnType: TypeIR;
+    }
+  | {
       kind: "op-call";
       target: string;
       aggName: string;
       op: string;
       args: ExprIR[];
+    }
+  | {
+      // `for <var> in <iterable> { <body> }` (retrieval.md).  Iterates an
+      // aggregate array, binding each element to `var`.  Mutations to
+      // `var` inside the body persist via `savesPerIteration` — the same
+      // dirtiness rule as workflow-exit saves, applied to the loop scope
+      // and emitted INSIDE the loop (the flat workflow-level `savesAtExit`
+      // can't express a per-element save).
+      kind: "for-each";
+      var: string;
+      varAggName: string;
+      iterable: ExprIR;
+      body: WorkflowStmtIR[];
+      savesPerIteration: { name: string; aggName: string; repoName: string }[];
     }
   | {
       // A bare (unbound) resource-op call statement — `files.put(k, v)`
@@ -821,6 +951,9 @@ export type EnrichedAggregateIR = AggregateIR & {
   wireShape: WireField[];
   /** Always populated by `enrichLoomModel` (empty when none derived). */
   associations: AssociationIR[];
+  /** Always populated by `enrichLoomModel` (empty when the aggregate has
+   * no client-suppliable create fields). */
+  createInput: CreateInputFieldIR[];
   parts: EnrichedEntityPartIR[];
 };
 
@@ -1229,22 +1362,6 @@ export interface UiIR {
    *  declares.  Composition is supplied by the deployable that
    *  deploys this UI. */
   apiParams: UiApiParamIR[];
-  /** User-authored TS helpers brought into the walker
-   *  stdlib via `import helper <name> from "<path>"`.  Body refs to
-   *  `<name>(...)` emit a TS `import { <name> } from "<path>"` at
-   *  the top of the generated page TSX. */
-  helperImports: UiHelperImportIR[];
-}
-
-/** UI helper import — `import helper formatPrice from "./helpers/price"`.
- *  The path is preserved verbatim; the page TSX includes it as a
- *  named import. */
-export interface UiHelperImportIR {
-  /** Helper function name (referenced in page bodies). */
-  name: string;
-  /** Module path (preserved verbatim — caller decides absolute /
-   *  relative / package). */
-  path: string;
 }
 
 /** API declaration — first-class contract derived from a module's
@@ -1386,7 +1503,17 @@ export interface ComponentIR {
   name: string;
   params: ParamIR[];
   state: StateFieldIR[];
-  body: ExprIR;
+  /** Walked region tree.  Absent for an `extern` component, whose
+   *  rendering is owned by a hand-written file. */
+  body?: ExprIR;
+  /** True when the component is `extern` — the generator emits a
+   *  typed `<Name>.props.ts` interface and imports the user's module
+   *  at call sites instead of generating a body. */
+  extern?: boolean;
+  /** Module specifier for the hand-written component, relative to the
+   *  generated project's `src/` root (the `from "<path>"` clause).
+   *  Always present when `extern` is true. */
+  externPath?: string;
 }
 
 /** One reactive local field, inside a `page` or `component`. */
@@ -1633,6 +1760,15 @@ export interface DeployableIR {
    *  Future LiveView / Blazor backends extend this enum without
    *  breaking the deployable IR. */
   uiFramework?: string;
+  /** D-PHOENIX-SURFACE: the `ui` declarations this deployable `hosts:`.
+   *  The host↔ui relation that supersedes `uiName` (the legacy single
+   *  `ui:` binding).  A list from day one so a deployable can host
+   *  several UIs (the deferred one-ui-many-frameworks case).  Empty
+   *  when the source uses the legacy `ui:` binding instead.  When
+   *  present and the legacy binding is absent, `uiName`/`uiFramework`
+   *  fall back to the first entry (the framework comes from the `ui`
+   *  declaration itself, not the platform). */
+  hostedUiNames: string[];
   /** Apis this backend deployable serves.  Each
    *  entry references an `Api` declared at system scope.  Empty
    *  for frontend deployables and for backends that haven't yet
@@ -2049,6 +2185,14 @@ function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
     case "repo-let":
     case "op-call":
       return s.args.some(exprUsesCurrentUser);
+    case "repo-run":
+      return (
+        s.retrievalArgs.some(exprUsesCurrentUser) ||
+        (s.page?.offset ? exprUsesCurrentUser(s.page.offset) : false) ||
+        (s.page?.limit ? exprUsesCurrentUser(s.page.limit) : false)
+      );
+    case "for-each":
+      return exprUsesCurrentUser(s.iterable) || s.body.some(workflowStmtUsesCurrentUser);
     case "resource-call":
       return exprUsesCurrentUser(s.call);
   }

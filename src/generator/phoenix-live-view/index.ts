@@ -7,13 +7,15 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import { isTpcBase, isTpcConcrete } from "../../ir/util/inheritance.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx } from "../_adapters/index.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
+import { generateReactForContexts } from "../react/index.js";
 import { ashStyleAdapter } from "./adapters/ash-style.js";
 import { emitPhoenixResourceFiles } from "./adapters/resource-clients.js";
-import { type ApiRoute, emitApiControllers } from "./api-emit.js";
+import { type ApiRoute, crudOpNames, emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
 import { renderJasonCamelCaseModule, renderJasonEncoderImpl } from "./jason-camel-emit.js";
@@ -23,6 +25,7 @@ import { emitMigrations } from "./migrations-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
 import { renderAshType } from "./render-expr.js";
 import { buildFindActions, findRepoFor, mergeViewFindsForAgg } from "./repository-emit.js";
+import { contextsHaveSeeds, renderSeedsExs } from "./seeds-emit.js";
 import { renderSidebarComponent } from "./sidebar-emit.js";
 import { renderTelemetry } from "./telemetry-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
@@ -88,6 +91,18 @@ export function generatePhoenixLiveViewProject(
   const appName = toSnakeApp(deployable.name);
   const appModule = toModulePrefix(appName);
 
+  // D-PHOENIX-SURFACE phase 6: a Phoenix deployable whose hosted `ui`
+  // declares `framework: react` is a JSON-API backend that *embeds* a
+  // React SPA (served from `priv/static`), not a LiveView/HEEx app.  In
+  // that mode the LiveView pages + HEEx sidebar are not emitted; the
+  // React project is generated under `assets/` instead (phase 6a wires
+  // the emit; the endpoint/router/Dockerfile serve-wiring is phase 6b).
+  // Dormant until an example uses it: no current source pairs
+  // `platform: phoenix` with a `framework: react` ui, so output is
+  // unchanged.  The Ash domain + `/api` controllers + OpenAPI are
+  // emitted in either mode.
+  const embedReact = deployable.uiFramework === "react";
+
   // Per-aggregate dataSource lookup — feeds `postgres do schema "…"
   // end` + `tablePrefix` routing in each Ash.Resource's `postgres`
   // block.  Returns `undefined` for systems without a matching
@@ -121,14 +136,17 @@ export function generatePhoenixLiveViewProject(
   // --- LiveView pages --------------------------------------------
   // Per PageIR in the deployable's `ui:` block: one
   // lib/<app>_web/live/<page>_live.ex module + a router entry the
-  // shell renderer splices into router.ex.
-  const { files: liveFiles, routes: liveRoutes } = emitLiveViewPages({
-    contexts,
-    deployable,
-    sys,
-    appName,
-    appModule,
-  });
+  // shell renderer splices into router.ex.  Skipped in embedded-react
+  // mode — the SPA owns the UI; no HEEx pages or live routes.
+  const { files: liveFiles, routes: liveRoutes } = embedReact
+    ? { files: new Map<string, string>(), routes: [] as LiveRoute[] }
+    : emitLiveViewPages({
+        contexts,
+        deployable,
+        sys,
+        appName,
+        appModule,
+      });
   for (const [path, content] of liveFiles) out.set(path, content);
 
   // --- API controllers -------------------------------------------
@@ -171,8 +189,9 @@ export function generatePhoenixLiveViewProject(
   // --- Sidebar component -----------------------------------------
   // Emitted when the deployable mounts a `ui:` — derived from
   // MenuBlockIR or per-page menuMeta, identical structure to the
-  // React generator's sidebar.
-  if (deployable.uiName) {
+  // React generator's sidebar.  Skipped in embedded-react mode (the
+  // HEEx sidebar belongs to the LiveView shell, which the SPA replaces).
+  if (deployable.uiName && !embedReact) {
     const ui = sys.uis.find((u) => u.name === deployable.uiName);
     if (ui) {
       out.set(
@@ -180,6 +199,35 @@ export function generatePhoenixLiveViewProject(
         renderSidebarComponent({ ui, appName, appModule }),
       );
     }
+  }
+
+  // --- Embedded React SPA (D-PHOENIX-SURFACE phase 6a) ------------
+  // When the hosted ui is `framework: react`, generate the React
+  // project under `assets/` (its own Vite build), calling the same
+  // `/api` surface this backend serves.  Mirrors the .NET fullstack
+  // embed (`dotnet/index.ts`): same React generator, same
+  // `apiBaseUrl: "/api"`, same skip of duplicate shell files the
+  // Phoenix project owns.  The endpoint/router/Dockerfile wiring that
+  // *serves* the built bundle from `priv/static` is phase 6b.
+  if (embedReact) {
+    const spaFiles = generateReactForContexts(contexts, sys, deployable, {
+      apiBaseUrl: "/api",
+      pathPrefix: "assets/",
+    });
+    for (const [path, content] of spaFiles) {
+      // Skip the standalone-react shell files the Phoenix project owns
+      // (Dockerfile / .dockerignore / certs) or that don't apply in
+      // embedded mode (the e2e harness).  Mirrors the dotnet filter.
+      if (
+        path === "assets/Dockerfile" ||
+        path === "assets/.dockerignore" ||
+        path === "assets/certs/.gitkeep" ||
+        path.startsWith("assets/e2e/")
+      )
+        continue;
+      out.set(path, content);
+    }
+    out.set("assets/.gitignore", "node_modules\ndist\n");
   }
 
   // --- Theme CSS -------------------------------------------------
@@ -251,6 +299,9 @@ function emitContext(
   });
   for (const [path, content] of aggFiles) out.set(path, content);
   for (const agg of ctx.aggregates) {
+    // Abstract TPC base: no Ash.Resource is emitted for it, so it is not
+    // registered on the domain (and has no parts / join resources).
+    if (agg.isAbstract) continue;
     allResources.push(`${contextModule}.${upperFirst(agg.name)}`);
     for (const part of agg.parts) {
       allResources.push(`${contextModule}.${upperFirst(part.name)}`);
@@ -273,6 +324,7 @@ function emitContext(
   // emitAggregateResources accepts customFinds, the orchestrator
   // keeps its repository-find responsibility here as a post-pass.
   for (const agg of ctx.aggregates) {
+    if (agg.isAbstract) continue;
     const repo = findRepoFor(ctx, agg.name);
     const repoWithViews = mergeViewFindsForAgg(agg, repo, ctx);
     if (!repoWithViews) continue;
@@ -407,13 +459,22 @@ function renderDomainModule(
       resourceBlocks.push(`    resource ${r}`);
       continue;
     }
-    const defines: string[] = [
-      `      define :create_${snake(agg.name)}, action: :create`,
-      `      define :list_${snake(plural(agg.name))}, action: :read`,
-      `      define :get_${snake(agg.name)}, action: :read, get_by: [:id]`,
-      `      define :update_${snake(agg.name)}, action: :update, get_by: [:id]`,
-      `      define :destroy_${snake(agg.name)}, action: :destroy, get_by: [:id]`,
-    ];
+    // A CRUD verb claimed by a public operation (e.g. crudish `update`) drops
+    // its standard `define` — the per-op define below owns that name, matching
+    // the cross-backend per-op form (avoids a duplicate Ash code-interface
+    // define).  See CRUD_VERB_NAMES.
+    const crudOps = crudOpNames(agg);
+    const defines: string[] = (
+      [
+        ["create", `      define :create_${snake(agg.name)}, action: :create`],
+        ["list", `      define :list_${snake(plural(agg.name))}, action: :read`],
+        ["get", `      define :get_${snake(agg.name)}, action: :read, get_by: [:id]`],
+        ["update", `      define :update_${snake(agg.name)}, action: :update, get_by: [:id]`],
+        ["destroy", `      define :destroy_${snake(agg.name)}, action: :destroy, get_by: [:id]`],
+      ] as const
+    )
+      .filter(([name]) => !crudOps.has(name))
+      .map(([, src]) => src);
     const repo = ctx.repositories.find((rr) => rr.aggregateName === agg.name);
     if (repo) {
       for (const find of repo.finds) {
@@ -443,13 +504,38 @@ function renderDomainModule(
     resourceBlocks.push(`    resource ${r} do\n${defines.join("\n")}\n    end`);
   }
 
+  // Polymorphic read home for each abstract TPC (`ownTable`) base
+  // (aggregate-inheritance.md, `find all <Base>`).  The base owns no resource;
+  // its read is the union of its concrete subtypes' generated `list_<concrete>`
+  // code-interface functions.  Emitted as plain module functions (Ash has no
+  // cross-resource read action) — read-only; writes go through the concretes.
+  const baseBlocks: string[] = [];
+  for (const base of ctx.aggregates) {
+    if (!isTpcBase(base, ctx.aggregates)) continue;
+    const concretes = ctx.aggregates.filter(
+      (a) => a.extendsAggregate === base.name && isTpcConcrete(a, ctx.aggregates),
+    );
+    if (concretes.length === 0) continue;
+    const listName = `list_${snake(plural(base.name))}`;
+    const union = concretes.map((c) => `list_${snake(plural(c.name))}!()`).join(" ++ ");
+    baseBlocks.push(
+      [
+        `  @doc "Polymorphic read of the abstract base ${upperFirst(base.name)} — the union of its concrete subtypes."`,
+        `  def ${listName}!, do: ${union}`,
+        `  def ${listName}, do: {:ok, ${listName}!()}`,
+      ].join("\n"),
+    );
+  }
+  // Byte-identical with the pre-inheritance output when there is no TPC base.
+  const readerSection = baseBlocks.length > 0 ? `\n\n${baseBlocks.join("\n\n")}` : "";
+
   return `# Auto-generated.
 defmodule ${contextModule} do
   use Ash.Domain
 
   resources do
 ${resourceBlocks.join("\n")}
-  end
+  end${readerSection}
 end
 `;
 }
@@ -478,7 +564,10 @@ function emitShellFiles(
   // resources — mix.exs stays byte-identical.
   const resourceEmission = emitPhoenixResourceFiles(sys, appName, appModule);
   for (const [path, content] of resourceEmission.files) out.set(path, content);
-  out.set("mix.exs", renderMixExs(appName, appModule, resourceEmission.hexDeps));
+  out.set(
+    "mix.exs",
+    renderMixExs(appName, appModule, resourceEmission.hexDeps, contextsHaveSeeds(contexts)),
+  );
   out.set(".formatter.exs", renderFormatterExs());
   out.set("Dockerfile", renderDockerfile(appName));
   out.set(".dockerignore", renderDockerignore());
@@ -568,8 +657,10 @@ function emitShellFiles(
   out.set("config/prod.exs", renderProdExs(appName, appModule));
   out.set("config/runtime.exs", renderRuntimeExs(appName, appModule));
 
-  // Priv
-  out.set("priv/repo/seeds.exs", `# Auto-generated — empty seeds stub.\n`);
+  // Priv — first-boot seed data (database-seeding.md, Phase 3b).  Through the
+  // domain create action (D-SEED-PATH), ship-once per dataset
+  // (D-SEED-IDEMPOTENCY); an empty stub when no `seed` block is declared.
+  out.set("priv/repo/seeds.exs", renderSeedsExs(appModule, contexts));
 
   // Release
   out.set("rel/env.sh.eex", renderRelEnv(appName));
@@ -584,7 +675,13 @@ function renderMixExs(
   appName: string,
   appModule: string,
   extraHexDeps: Record<string, string> = {},
+  hasSeeds = false,
 ): string {
+  // Run the seeds script as the last step of `ecto.setup` — only when a
+  // `seed` block is declared, so seedless projects stay byte-identical.
+  const ectoSetup = hasSeeds
+    ? `["ecto.create", "ash.codegen", "ash.migrate", "run priv/repo/seeds.exs"]`
+    : `["ecto.create", "ash.codegen", "ash.migrate"]`;
   // Resource-client Hex deps (Phase 4c) — `{:ex_aws, "~> 2.5"}` etc.,
   // appended to the base dep list.  Sorted for stable output.
   const extraDepLines = Object.entries(extraHexDeps)
@@ -654,7 +751,7 @@ defmodule ${appModule}.MixProject do
   defp aliases do
     [
       setup: ["deps.get", "ash.setup"],
-      "ecto.setup": ["ecto.create", "ash.codegen", "ash.migrate"],
+      "ecto.setup": ${ectoSetup},
       "ecto.reset": ["ecto.drop", "ecto.setup"]
     ]
   end

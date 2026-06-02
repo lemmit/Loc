@@ -5,6 +5,7 @@ import type {
   ExprIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -307,9 +308,20 @@ function renderCollectionOp(recv: string, name: string, args: string[], _ctx: Re
 function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): string {
   const args = e.args.map((a) => renderExpr(a, ctx)).join(", ");
   switch (e.callKind) {
-    case "value-object-ctor":
-      // Embedded Ash resource / struct constructor.
+    case "value-object-ctor": {
+      // Embedded Ash resource / struct constructor.  Elixir structs require
+      // *named* fields, so use the (lowering-populated) field names rather
+      // than positional args.  Falls back to positional for hand-built IR
+      // that carries no names (kept total).
+      const names = e.argNames;
+      if (names && names.length === e.args.length && names.every((n) => n)) {
+        const namedFields = e.args
+          .map((a, i) => `${snake(names[i] as string)}: ${renderExpr(a, ctx)}`)
+          .join(", ");
+        return `%${ctx.contextModule}.${upperFirst(e.name)}{${namedFields}}`;
+      }
       return `%${ctx.contextModule}.${upperFirst(e.name)}{${args}}`;
+    }
     case "function":
     case "private-operation":
       // Receiver-prefixed call.  Skip the trailing comma when the user
@@ -532,14 +544,4 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
     case "slot":
       throw new Error("renderAshType: 'slot' type is UI-only and should not reach the backend.");
   }
-}
-
-/** Field name behind a `this.<field>` receiver (used to look up the
- * AssociationIR when lowering `.contains(...)`), or null if the
- * receiver isn't a `this`-rooted single member access. */
-function refCollectionFieldName(e: ExprIR): string | null {
-  if (e.kind === "paren") return refCollectionFieldName(e.inner);
-  if (e.kind === "member" && e.receiver.kind === "this") return e.member;
-  if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
-  return null;
 }

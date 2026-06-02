@@ -186,6 +186,8 @@ export function emitDrizzleSchema(
     views: ctx.contexts.flatMap((c) => c.views),
     criteria: ctx.contexts.flatMap((c) => c.criteria),
     channels: ctx.contexts.flatMap((c) => c.channels),
+    retrievals: ctx.contexts.flatMap((c) => c.retrievals),
+    seeds: ctx.contexts.flatMap((c) => c.seeds),
   };
   return splitLines(renderSchema(merged, options));
 }

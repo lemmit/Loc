@@ -23,6 +23,7 @@ import {
   checkBinaryOperands,
   checkBuilderCallType,
   checkChannels,
+  checkComponent,
   checkContext,
   checkCriteria,
   checkDataSource,
@@ -36,13 +37,13 @@ import {
   checkMatchesCalls,
   checkPayloads,
   checkPrimitiveConversions,
+  checkSeeds,
   checkSlotMemberAccess,
   checkSlotTypePosition,
   checkTheme,
   checkTraceability,
   checkTypeReferences,
   checkUi,
-  checkUiHelperImports,
 } from "./validators/index.js";
 
 export class DddValidator {
@@ -92,11 +93,9 @@ export class DddValidator {
     // targets (VO / EntityPart / user-component / walker primitive) and
     // errors on misses.
     checkBuilderCallType(model, accept, this.services);
-    // `import helper <name> from "..."` declarations.
-    // Reject names that shadow walker stdlib primitives so a typo
-    // never silently overrides Stack / Form / etc.  Also flag
-    // duplicate helper names within the same UI.
-    checkUiHelperImports(model, accept);
+    // `component` declarations: enforce the extern↔body exclusivity the
+    // grammar admits but can't constrain (extern ⇒ no body; normal ⇒ body).
+    checkComponent(model, accept);
     // Traceability artifacts.  The grammar admits a
     // permissive requirement prop-bag and any code cross-reference;
     // semantic constraints (allowed keys / enum values / required
@@ -115,6 +114,9 @@ export class DddValidator {
     // uniqueness within a context (and vs. value objects / events) and
     // distinct non-empty field names.
     checkPayloads(model, accept);
+    // Seed datasets (database-seeding.md): a seed may only populate
+    // aggregates of its own context, and a record may not repeat a field.
+    checkSeeds(model, accept);
     // `slot` is a UI-only param marker (PR #632) — reject anywhere
     // outside a component's parameter list with a clear error rather
     // than letting the backend emitter throw at generate time.

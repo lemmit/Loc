@@ -50,6 +50,122 @@ export function classifyForWire(inv: InvariantIR, ctx: ClassifyContext): boolean
   return true;
 }
 
+/** Returns true iff the invariant can be fully evaluated at **construction
+ *  time** against a proposed create input whose fields are `available`.
+ *  It is satisfiable when it references only: the create-input fields
+ *  themselves, values the server already holds when the factory runs
+ *  (any literal — including `now()` and money — enum values, the current
+ *  user, conversions), and lambda-bound names.  It is NOT satisfiable the
+ *  moment it touches state that does not exist yet or lives outside the
+ *  create payload: a derived getter, a helper function, a bare `this`, the
+ *  generated `id`, an ambient resource handle, or a field absent from
+ *  `available` (managed/token/internal fields, which `forCreateInput`
+ *  drops).
+ *
+ *  This is the constructibility gate's predicate (Stage 4): an aggregate
+ *  with no declared create is constructible iff **every** invariant is
+ *  construction-satisfiable.  It deliberately differs from
+ *  `classifyForWire`, which asks the stricter "can this run in browser
+ *  JS?" — money / `now()` / conversions are server-only there, yet
+ *  perfectly available to the factory here. */
+export function satisfiableAtConstruction(
+  inv: InvariantIR,
+  available: ReadonlySet<string>,
+): boolean {
+  if (!constructionEvaluable(inv.expr, available)) return false;
+  if (inv.guard && !constructionEvaluable(inv.guard, available)) return false;
+  return true;
+}
+
+function constructionEvaluable(
+  e: ExprIR,
+  available: ReadonlySet<string>,
+  scope: ReadonlySet<string> = available,
+): boolean {
+  switch (e.kind) {
+    case "literal":
+      // The factory runs server-side: clock (`now`) and Decimal (`money`)
+      // are both in hand, unlike the browser-JS wire context.
+      return true;
+    case "this":
+    case "id":
+      // Whole-entity state / the generated id are not part of the input.
+      return false;
+    case "ref":
+      switch (e.refKind) {
+        case "param":
+        case "let":
+        case "lambda":
+        case "this-prop":
+        case "this-vo-prop":
+          return scope.has(e.name);
+        case "enum-value":
+        case "current-user":
+          // Both resolvable server-side at construction.
+          return true;
+        case "this-derived":
+        case "helper-fn":
+        case "resource":
+        case "unknown":
+          // Derived getters / helpers traverse aggregate state that does
+          // not exist yet; resource handles read ambient infra.
+          return false;
+      }
+      return false;
+    case "member":
+      return constructionEvaluable(e.receiver, available, scope);
+    case "method-call":
+      return (
+        constructionEvaluable(e.receiver, available, scope) &&
+        e.args.every((a) => constructionEvaluable(a, available, scope))
+      );
+    case "call":
+      // Free / function / private-operation / VO-ctor calls execute domain
+      // logic against state — conservatively not construction-evaluable.
+      return false;
+    case "lambda": {
+      const inner = new Set(scope);
+      inner.add(e.param);
+      if (!e.body) return false;
+      return constructionEvaluable(e.body, available, inner);
+    }
+    case "new":
+    case "object":
+      return e.fields.every((f) => constructionEvaluable(f.value, available, scope));
+    case "paren":
+      return constructionEvaluable(e.inner, available, scope);
+    case "unary":
+      return constructionEvaluable(e.operand, available, scope);
+    case "binary":
+      // Money operands are fine at construction (the factory has Decimal).
+      return (
+        constructionEvaluable(e.left, available, scope) &&
+        constructionEvaluable(e.right, available, scope)
+      );
+    case "ternary":
+      return (
+        constructionEvaluable(e.cond, available, scope) &&
+        constructionEvaluable(e.then, available, scope) &&
+        constructionEvaluable(e.otherwise, available, scope)
+      );
+    case "convert":
+      // The server applies the coercion; the wrapped value must itself be
+      // evaluable.
+      return constructionEvaluable(e.value, available, scope);
+    case "match":
+      return (
+        e.arms.every(
+          (arm) =>
+            constructionEvaluable(arm.cond, available, scope) &&
+            constructionEvaluable(arm.value, available, scope),
+        ) &&
+        (e.otherwise === undefined || constructionEvaluable(e.otherwise, available, scope))
+      );
+    case "list":
+      return e.elements.every((el) => constructionEvaluable(el, available, scope));
+  }
+}
+
 function exprIsTranslatable(
   e: ExprIR,
   ctx: ClassifyContext,

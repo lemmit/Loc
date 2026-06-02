@@ -13,7 +13,6 @@ import type {
   StateFieldIR,
   TypeIR,
   UiApiParamIR,
-  UiHelperImportIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
@@ -107,10 +106,6 @@ export function renderCustomLayoutPage(
    *  enum / value-object resolution inside the form-field
    *  preparer). */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
-  /** User-authored helper imports.  Body refs whose
-   *  call name matches a helper emit as plain JS calls; the shell
-   *  adds `import { <name> } from "<path>"` for each USED helper. */
-  helperImports: ReadonlyArray<UiHelperImportIR> = [],
   /** Relative-path prefix from the emitted page TSX
    *  back to the `src/` root.  Defaults to `"../"` for pages at
    *  `src/pages/<name>.tsx` (1 hop).  Scaffold-expanded pages live
@@ -139,7 +134,6 @@ export function renderCustomLayoutPage(
     usedApiHooks,
     formOfs,
     actionMutations,
-    usedHelpers,
   } = walkBodyToTsx(
     body,
     pack,
@@ -149,7 +143,6 @@ export function renderCustomLayoutPage(
     apiParams,
     aggregatesByName,
     bcByAggregate,
-    helperImports,
     workflowsByName,
     bcByWorkflow,
     aggregateParamTypes(params, aggregatesByName),
@@ -187,8 +180,6 @@ export function renderCustomLayoutPage(
       formOfs: [],
       actionMutations: [],
       collectedTestids: new Set(),
-      helperImports: new Map(),
-      usedHelpers: new Set(),
       usesCodeBlock: false,
     };
     const titleExpr = emitExpr(title, titleCtx);
@@ -214,18 +205,6 @@ export function renderCustomLayoutPage(
   // multiple ops on the same aggregate dedupe to one import line
   // (matching the existing scaffold output's per-aggregate api file).
   const apiHookImports = renderApiHookImports(usedApiHooks, srcImportPrefix);
-  // `import { <name> } from "<path>"` per UI-declared
-  // helper actually referenced in the body.  Lines grouped per
-  // path so two helpers from the same module dedupe to one
-  // import line; paths sorted for deterministic output.
-  // Delegated to `tsxTarget.renderHelperImports` — see
-  // `src/generator/_walker/target.ts`.  The target returns one
-  // line per import; this site re-attaches the trailing newline
-  // matching the existing splice into the import block template.
-  const helperImportLines = tsxTarget
-    .renderHelperImports(usedHelpers, helperImports)
-    .map((l) => `${l}\n`)
-    .join("");
   // Api hook declarations, emitted at page-top right before the
   // JSX return.  Each unique `<param>.<aggregate>.<op>` becomes
   // one `const <var> = use<Op><Aggregate>(args?);` line.
@@ -316,7 +295,7 @@ export function renderCustomLayoutPage(
   const navigateLine =
     usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${helperImportLines}${userComponentImports}${form.moduleScope}
+${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${userComponentImports}${form.moduleScope}
 export default function ${pageName}() {
 ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}  return (
     ${indentJsx(tsx, "    ")}
@@ -535,7 +514,6 @@ export function renderUserComponentFile(
     [],
     aggregatesByName,
     bcByAggregate,
-    [],
     new Map(),
     new Map(),
     aggregateParamTypes(params, aggregatesByName),
@@ -580,8 +558,6 @@ export function renderUserComponentFile(
   // to `{kind: "optional", inner: {kind: "slot"}}` and gets the same
   // treatment, but emits as `name?: ReactNode` so the caller can
   // omit it.
-  const isSlotShape = (t: ParamIR["type"]): boolean =>
-    t.kind === "slot" || (t.kind === "optional" && t.inner.kind === "slot");
   const hasSlotParam = params.some((p) => isSlotShape(p.type));
   const needsReactNode = usesChildren || hasSlotParam;
   const reactTypesImport = needsReactNode ? `import type { ReactNode } from "react";\n` : "";
@@ -640,6 +616,71 @@ ${navigateLine}${actionWiring.decls}${form.decls}${stateLines}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
+`;
+}
+
+/** True when a param type is `slot` or `slot?` — both render as
+ *  `ReactNode` in props. */
+function isSlotShape(t: ParamIR["type"]): boolean {
+  return t.kind === "slot" || (t.kind === "optional" && t.inner.kind === "slot");
+}
+
+/** Emit the machine-owned typed-props interface for an `extern`
+ *  component, at `src/components/<Name>.props.ts`.  Each declared
+ *  param becomes a typed field by the same rules `renderUserComponentFile`
+ *  uses: an aggregate-typed param (`order: Order`) gets the wire DTO
+ *  (`OrderResponse`, imported from its api module) so member accesses
+ *  typecheck in the hand-written component; `slot` / `slot?` render as
+ *  `ReactNode`; everything else falls back to the route-param shape.
+ *  Regenerated every run — the user imports it to type their module. */
+export function renderExternComponentProps(
+  name: string,
+  params: ParamIR[],
+  aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
+): string {
+  const dtoImports = new Map<string, string>(); // DTO type → api module
+  const propType = (p: ParamIR): string => {
+    if (p.type.kind === "entity" && aggregatesByName.has(p.type.name)) {
+      dtoImports.set(`${p.type.name}Response`, `../api/${lowerFirst(p.type.name)}`);
+      return `${p.type.name}Response`;
+    }
+    if (isSlotShape(p.type)) return "ReactNode";
+    return typeRefAsTsString(p);
+  };
+  const propLines = params.map((p) => {
+    // `slot?` → optional prop so the caller can omit it.
+    const optional = p.type.kind === "optional" && p.type.inner.kind === "slot";
+    return `  ${p.name}${optional ? "?:" : ":"} ${propType(p)};`;
+  });
+  const needsReactNode = params.some((p) => isSlotShape(p.type));
+  const reactTypesImport = needsReactNode ? `import type { ReactNode } from "react";\n` : "";
+  const dtoImportLines = [...dtoImports.entries()]
+    .map(([type, mod]) => `import type { ${type} } from "${mod}";\n`)
+    .join("");
+  const body =
+    propLines.length > 0
+      ? `export interface ${name}Props {\n${propLines.join("\n")}\n}\n`
+      : `export type ${name}Props = Record<string, never>;\n`;
+  return `// AUTO-GENERATED by Loom — typed props for the extern component '${name}'.
+// Do not edit; overwritten on every generate.  Import this type from your
+// hand-written module (declared via \`component ${name}(...) extern from\`).
+${reactTypesImport}${dtoImportLines}\n${body}`;
+}
+
+/** Emit the machine-owned re-export shim for an `extern` component, at
+ *  `src/components/<Name>.tsx`.  Call sites import `components/<Name>`
+ *  exactly as for any user component; the shim forwards the default
+ *  export to the hand-written module at the `from` path (src-relative,
+ *  so one `../` hop up from `src/components/`).  Loom owns this shim
+ *  and `<Name>.props.ts`; the user owns the target module.  A missing
+ *  target is a `tsc` error here — the fail-fast. */
+export function renderExternComponentShim(name: string, externPath: string): string {
+  const rel = externPath.replace(/^\.?\//, "");
+  return `// AUTO-GENERATED extern component shim. Re-exports the hand-written module
+// declared via \`component ${name}(...) extern from "${externPath}"\`.
+// Loom owns this shim and './${name}.props'; you own '../${rel}'.
+export { default } from "../${rel}";
+export type { ${name}Props } from "./${name}.props";
 `;
 }
 
@@ -715,8 +756,6 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     formOfs: [],
     actionMutations: [],
     collectedTestids: new Set(),
-    helperImports: new Map(),
-    usedHelpers: new Set(),
     usesCodeBlock: false,
   };
   return emitExpr(expr, dummy);

@@ -15,6 +15,7 @@ import {
   buildTpcBaseReaderFile,
 } from "../../../generator/typescript/base-reader-builder.js";
 import { emitTypescriptMigrations } from "../../../generator/typescript/emit/migrations.js";
+import { emitTypescriptSeeds } from "../../../generator/typescript/emit/seed.js";
 import {
   renderAggregate,
   renderEnumsAndValueObjects,
@@ -193,6 +194,8 @@ export function generateTypeScriptForContexts(
     views: contexts.flatMap((c) => c.views),
     criteria: contexts.flatMap((c) => c.criteria),
     channels: contexts.flatMap((c) => c.channels),
+    retrievals: contexts.flatMap((c) => c.retrievals),
+    seeds: contexts.flatMap((c) => c.seeds),
   };
 
   out.set("domain/ids.ts", renderIds(merged));
@@ -354,6 +357,13 @@ export function generateTypeScriptForContexts(
   if (hasMigrations) {
     emitTypescriptMigrations(system!.migrations!, out);
   }
+  // First-boot seed data (database-seeding.md, Phase 2) — emits `db/seed.ts`
+  // when the served contexts declare any `seed` block.  Through the domain
+  // `create` (D-SEED-PATH), ship-once per dataset (D-SEED-IDEMPOTENCY).
+  if (merged.seeds.length > 0) {
+    emitTypescriptSeeds(merged, out);
+  }
+  const hasSeeds = out.has("db/seed.ts");
   // decimal.js is conditional: only depended on when at least one
   // aggregate in any of the served contexts uses a `money` field.
   // Server bundle size matters; client-side React always ships the
@@ -398,7 +408,10 @@ export function generateTypeScriptForContexts(
   }
 
   const projectUsesMoney = contexts.some(contextUsesMoney);
-  out.set("package.json", projectPackageJson(pins, { withMoney: projectUsesMoney, resourceDeps }));
+  out.set(
+    "package.json",
+    projectPackageJson(pins, { withMoney: projectUsesMoney, resourceDeps, hasSeeds }),
+  );
   // Shared primitive-schema helpers — one home for non-trivial wire
   // shapes (today: `moneySchema`).  Emitted only when something in
   // the project uses money so non-money projects' tsc surface stays
@@ -414,6 +427,7 @@ export function generateTypeScriptForContexts(
       hasMigrations,
       authRequired ? system?.sys.user : undefined,
       resourceImports,
+      hasSeeds,
     ),
   );
   out.set("drizzle.config.ts", DRIZZLE_CONFIG);
@@ -440,7 +454,7 @@ export interface BackendPins {
 
 function projectPackageJson(
   pins: BackendPins,
-  opts: { withMoney: boolean; resourceDeps?: Record<string, string> },
+  opts: { withMoney: boolean; resourceDeps?: Record<string, string>; hasSeeds?: boolean },
 ): string {
   return (
     JSON.stringify(
@@ -464,6 +478,9 @@ function projectPackageJson(
           "db:migrate": "drizzle-kit migrate",
           "db:push": "drizzle-kit push",
           "db:studio": "drizzle-kit studio",
+          // First-boot seed runner (database-seeding.md) — emitted only when
+          // the model declares a `seed` block, else `db/seed.ts` doesn't exist.
+          ...(opts.hasSeeds ? { "db:seed": "tsx db/seed.ts" } : {}),
         },
         dependencies: {
           ...pins.dependencies,
@@ -581,6 +598,7 @@ function renderProjectIndexTs(
   runMigrationsAtBoot: boolean,
   userShape?: UserIR,
   resourceImports: readonly string[] = [],
+  runSeedsAtBoot = false,
 ): string {
   // Side-effect imports for the resource-client modules (objectStore /
   // queue / api) so their clients instantiate at boot.  Empty for
@@ -588,6 +606,10 @@ function renderProjectIndexTs(
   const resourceImportBlock = resourceImports.length > 0 ? `${resourceImports.join("\n")}\n` : "";
   const migImport = runMigrationsAtBoot
     ? `import { migrate } from "drizzle-orm/node-postgres/migrator";\n`
+    : "";
+  const seedImport = runSeedsAtBoot ? `import { runSeeds } from "./db/seed";\n` : "";
+  const seedCall = runSeedsAtBoot
+    ? `\n// Apply first-boot seed data after migrations (database-seeding.md).\n// Ship-once per dataset via the __loom_seed marker; idempotent across boots.\nawait runSeeds(db);\n`
     : "";
   const migCall = runMigrationsAtBoot
     ? `\n// Apply pending schema migrations before serving traffic.  Drizzle's\n// runtime migrator reads db/migrations/meta/_journal.json + each\n// referenced .sql file, tracking state in \`__drizzle_migrations\`;\n// idempotent across boots.\nawait migrate(db, { migrationsFolder: "./db/migrations" });\n`
@@ -608,7 +630,7 @@ import pg from "pg";
 import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
-${migImport}${authStubImport}import { baseLogger } from "./obs/log";
+${migImport}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";
 ${resourceImportBlock}
 // Persistence connection — owned by the drizzle PersistenceAdapter
 // (DATABASE_URL guard → pg pool → pool-error logging → drizzle db).
@@ -616,7 +638,7 @@ ${DRIZZLE_CONNECTION_SETUP.join("\n")}
 
 const port = Number(process.env.PORT ?? 3000);
 baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
-${migCall}${authStubCall}const app = createApp(db);
+${migCall}${seedCall}${authStubCall}const app = createApp(db);
 const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });
 

@@ -388,6 +388,24 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
     ).toBe("%MyApp.Money{3}");
   });
 
+  it("renders a value-object constructor with named struct fields (snake) when argNames are present", () => {
+    // Real lowered IR carries the VO's field order in `argNames`, so the
+    // struct is built with named fields — `%Mod.VO{positional}` is invalid
+    // Elixir.  Names are snake-cased to match Ash attributes.
+    expect(
+      renderExpr(
+        {
+          kind: "call",
+          callKind: "value-object-ctor",
+          name: "Money",
+          args: [{ kind: "literal", lit: "decimal", value: "9.99" }, litStr("USD")],
+          argNames: ["amount", "currencyCode"],
+        },
+        ctx,
+      ),
+    ).toBe('%MyApp.Money{amount: 9.99, currency_code: "USD"}');
+  });
+
   it("renders entity-part constructor (kind: new) with snake field keys", () => {
     expect(
       renderExpr(

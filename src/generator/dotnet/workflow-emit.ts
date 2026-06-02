@@ -1,3 +1,4 @@
+import { createInputFields, createOmissionValue } from "../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
@@ -123,20 +124,26 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
   for (const save of wf.savesAtExit) {
     repos.set(save.repoName, save.aggName);
   }
-  for (const st of wf.statements) {
-    if (st.kind === "repo-let") {
-      repos.set(st.repoName, st.aggName);
-    } else if (st.kind === "emit") {
-      hasEmit = true;
-    } else if (st.kind === "op-call") {
-      const agg = aggsByName.get(st.aggName);
-      const op = agg?.operations.find((o) => o.name === st.op);
-      if (op?.extern) {
-        const key = `${st.aggName}.${st.op}`;
-        externs.set(key, { aggName: st.aggName, opName: st.op });
+  const walk = (stmts: WorkflowStmtIR[]): void => {
+    for (const st of stmts) {
+      if (st.kind === "repo-let" || st.kind === "repo-run") {
+        repos.set(st.repoName, st.aggName);
+      } else if (st.kind === "emit") {
+        hasEmit = true;
+      } else if (st.kind === "for-each") {
+        for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
+        walk(st.body);
+      } else if (st.kind === "op-call") {
+        const agg = aggsByName.get(st.aggName);
+        const op = agg?.operations.find((o) => o.name === st.op);
+        if (op?.extern) {
+          const key = `${st.aggName}.${st.op}`;
+          externs.set(key, { aggName: st.aggName, opName: st.op });
+        }
       }
     }
-  }
+  };
+  walk(wf.statements);
   return { repos, hasEmit, externs };
 }
 
@@ -374,6 +381,24 @@ function csIsolationLevel(level: import("../../ir/types/loom-ir.js").IsolationLe
   }
 }
 
+/** Render the omission value of a create-input field the workflow `create`
+ * left unset, into the C# the named-arg `Create(...)` call passes for it:
+ * a `= default`'s literal (via the workflow expr renderer), a bare bool's
+ * `false`, or an optional's `null`. */
+function renderCsOmission(
+  v: ReturnType<typeof createOmissionValue>,
+  renderArg: (e: import("../../ir/types/loom-ir.js").ExprIR) => string,
+): string {
+  switch (v.kind) {
+    case "default":
+      return renderArg(v.expr);
+    case "false":
+      return "false";
+    case "null":
+      return "null";
+  }
+}
+
 function renderStatement(
   st: WorkflowStmtIR,
   renderArg: (e: import("../../ir/types/loom-ir.js").ExprIR) => string,
@@ -403,7 +428,21 @@ function renderStatement(
       // (matching the source field name), so the named-arg call site
       // must use the same casing — PascalCase here would fail with
       // CS1739 "best overload does not have a parameter named X".
-      const args = st.fields.map((f) => `${f.name}: ${renderArg(f.value)}`).join(", ");
+      const provided = st.fields.map((f) => `${f.name}: ${renderArg(f.value)}`);
+      // The .NET Create(...) factory declares *every* canonical create
+      // input as a required parameter (no C# default — optionals would
+      // have to trail the required params, which the wire-shape ordering
+      // doesn't guarantee). A workflow `create` names only a subset, so
+      // every create input the DSL omitted must be supplied explicitly
+      // with its omission value (an optional → null, a `= default` → the
+      // default literal, a bare bool → false) or the call fails to compile
+      // with CS7036. Named args keep this order-free.
+      const named = new Set(st.fields.map((f) => f.name));
+      const agg = ctx.aggregates.find((a) => a.name === st.aggName);
+      const omitted = (agg ? createInputFields(agg) : [])
+        .filter((f) => !named.has(f.name))
+        .map((f) => `${f.name}: ${renderCsOmission(createOmissionValue(f), renderArg)}`);
+      const args = [...provided, ...omitted].join(", ");
       // C# doesn't support reordering positional args; using named
       // args lets the user write fields in any order in the .ddd source.
       return [`${INDENT}var ${st.name} = ${st.aggName}.Create(${args});`];
@@ -457,6 +496,18 @@ function renderStatement(
       const exprText = renderArg(st.expr);
       return [`${INDENT}var ${st.name} = ${isResourceOp ? "await " : ""}${exprText};`];
     }
+    case "repo-run":
+    case "for-each":
+      // The named-query `Repo.run(...)` + the `for` loop that consumes it
+      // are wired end-to-end on Hono first (PR3-B).  The .NET run-method
+      // emission + foreach lands in a follow-up slice; gate here so the
+      // IR stays backend-neutral and the failure is explicit rather than
+      // a call to an unemitted `Run<Name>Async` method.
+      throw new Error(
+        `.NET backend: workflow uses '${st.kind}', which the .NET generator does not yet ` +
+          `support (run-method emission + foreach is a follow-up slice).  Target a Hono ` +
+          `deployable, or omit the retrieval loop for .NET.`,
+      );
     case "resource-call":
       // 4c: bare resource-op statement (`files.put(k, v)`) → awaited async
       // helper call.

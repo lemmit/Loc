@@ -1,3 +1,4 @@
+import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -28,6 +29,10 @@ import { renderTsStatements } from "../render-stmt.js";
 interface EntityShape {
   name: string;
   isRoot: boolean;
+  /** Whether the root aggregate is constructible (see `isConstructible`).
+   *  Gates the public `create(...)` factory; always false for entity parts
+   *  (they have no factory). */
+  hasCreate: boolean;
   rootName?: string;
   fields: FieldIR[];
   contains: ContainmentIR[];
@@ -133,6 +138,7 @@ function rootShape(a: AggregateIR): EntityShape {
   return {
     name: a.name,
     isRoot: true,
+    hasCreate: hasCreate(a),
     fields: a.fields,
     contains: a.contains,
     derived: a.derived,
@@ -146,6 +152,7 @@ function partShape(p: EntityPartIR, root: AggregateIR): EntityShape {
   return {
     name: p.name,
     isRoot: false,
+    hasCreate: false,
     rootName: root.name,
     fields: p.fields,
     contains: p.contains,
@@ -362,21 +369,37 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
     ].join("\n");
   });
 
-  const requiredFields = e.fields.filter((f) => !f.optional);
-  const createFactory = e.isRoot
-    ? [
-        `  static create(input: { ${requiredFields
-          .map((f) => `${f.name}: ${renderTsType(f.type)}`)
-          .join("; ")} }): ${e.name} {`,
-        `    return new ${e.name}({`,
-        `      id: Ids.new${e.name}Id(),`,
-        ...e.fields.map((f) => `      ${f.name}: ${f.optional ? "null" : `input.${f.name}`},`),
-        ...provFields.map((f) => `      ${f.name}_provenance: null,`),
-        ...e.contains.map((c) => `      ${c.name}: ${c.collection ? "[]" : "null"},`),
-        "    });",
-        "  }",
-      ]
-    : [];
+  // Create-factory input — the create-input set (`forCreateInput`, incl.
+  // optionals) matching the wire DTO.  Every constructible aggregate's
+  // create is parameterized by this set; there is no parameterless form.
+  const createInputs = forCreateInput(e.fields);
+  const createInputNames = new Set(createInputs.map((f) => f.name));
+  const fieldInit = (f: FieldIR): string => {
+    if (createInputNames.has(f.name)) {
+      return f.optional ? `input.${f.name} ?? null` : `input.${f.name}`;
+    }
+    // Outside the create input (managed/token/internal): server-initialised
+    // to null.
+    return "null";
+  };
+  // Public `create(...)` factory gated on constructibility — a
+  // non-constructible aggregate exposes no factory; it is reconstructed
+  // only via `_create` (repository hydration).
+  const createFactory =
+    e.isRoot && e.hasCreate
+      ? [
+          `  static create(input: { ${createInputs
+            .map((f) => `${f.name}${f.optional ? "?" : ""}: ${renderTsType(f.type)}`)
+            .join("; ")} }): ${e.name} {`,
+          `    return new ${e.name}({`,
+          `      id: Ids.new${e.name}Id(),`,
+          ...e.fields.map((f) => `      ${f.name}: ${fieldInit(f)},`),
+          ...provFields.map((f) => `      ${f.name}_provenance: null,`),
+          ...e.contains.map((c) => `      ${c.name}: ${c.collection ? "[]" : "null"},`),
+          "    });",
+          "  }",
+        ]
+      : [];
 
   // History drain — the route handler calls this inside the save
   // transaction and inserts one `provenance_records` row per lineage.

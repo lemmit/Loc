@@ -128,3 +128,30 @@ jobs:
         env:
           LOOM_REACT_BUILD_CASE: ${{ matrix.example }}:${{ matrix.pack }}
         run: npx vitest run test/e2e/generated-react-build.test.ts
+
+  # Extern-component escape-hatch gate (not part of the example × pack
+  # matrix): generate a project with an `extern` component, drop in a
+  # hand-written widget, install + `tsc --noEmit`, and prove the typed
+  # props contract bites — a correct widget compiles, a field-mismatch
+  # one fails.  One runner, ~40s.
+  extern-component:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    name: extern component props contract
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Run extern-component build gate
+        run: npm run test:tsc-react-extern

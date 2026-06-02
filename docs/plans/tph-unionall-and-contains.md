@@ -13,7 +13,14 @@ Status: **mostly shipped; one niche variant dropped.**
   concrete repo's `all()` and whose `findById()` tries each concrete. This
   reuses the per-aggregate loaders (so contained parts + `X id[]` associations
   load correctly) instead of a flat-scalar `unionAll` across differently-shaped
-  tables. Hono-only (v1). `Base id` refs under TPC stay rejected (ambiguous FK).
+  tables. Now implemented on **all three backends** by the same delegation
+  shape: Hono's `<Base>Repository.findAll()`, .NET's read-only
+  `<Base>Repository : I<Base>Repository` (abstract C# base class + concrete
+  inheritance; EF excludes the base via `modelBuilder.Ignore<Base>()` so each
+  concrete maps standalone), and Phoenix's `list_<bases>!/0` on the context
+  Ash.Domain (the union of the concrete `list_<concrete>!` reads). `Base id`
+  refs under TPC stay rejected (ambiguous FK), so the readers expose `findAll`
+  only — there is no polymorphic `findById` target.
 - **UNION-ALL `find all <Base>` over a MIXED hierarchy (Pattern 3 — a
   `sharedTable` base with a per-concrete `ownTable` *override*): DROPPED.** This
   is the only remaining variant. It exists solely to unlock the per-concrete
