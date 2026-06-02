@@ -117,3 +117,31 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
     expect(pkg.scripts["db:seed"]).toBeUndefined();
   });
 });
+
+describe("Hono seeding — raw explicit-id path", () => {
+  const RAW = `system S {
+    subdomain Sales { context Sales {
+      aggregate Customer with crudish { name: string }
+      aggregate Order with crudish { customerId: Customer id status: string }
+      repository Customers for Customer { }
+      repository Orders for Order { }
+      seed reference raw {
+        Customer { id: "c1", name: "Acme" }
+        Order { id: "o1", customerId: "c1", status: "new" }
+      }
+    } }
+    api A from Sales
+    deployable api { platform: hono contexts: [Sales] serves: A port: 3000 }
+  }`;
+
+  it("emits direct INSERTs via db.execute(sql.raw(...)) with explicit id + FK", async () => {
+    const { model, errors } = await parseString(RAW);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const seed = find(generateSystems(model).files, /\/db\/seed\.ts$/);
+    expect(seed).toContain(
+      'db.execute(sql.raw("INSERT INTO \\"customers\\" (\\"id\\", \\"name\\") VALUES (\'c1\', \'Acme\')"))',
+    );
+    expect(seed).toContain('INSERT INTO \\"orders\\" (\\"id\\", \\"customer_id\\", \\"status\\")');
+    expect(seed).not.toContain("Customer.create(");
+  });
+});

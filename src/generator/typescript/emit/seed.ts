@@ -18,14 +18,21 @@
 // refs, and create-shape validation.
 
 import type { EnrichedBoundedContextIR, ExprIR, SeedRowIR } from "../../../ir/types/loom-ir.js";
+import { renderSeedRowInsert } from "../../../system/sql-pg.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { renderTsExpr } from "../render-expr.js";
 
-/** One dataset's merged rows (across all `seed <dataset>` blocks). */
+/** A seed row plus its block's path (domain create vs raw insert). */
+interface Entry {
+  row: SeedRowIR;
+  raw: boolean;
+}
+
+/** One dataset's merged entries (across all `seed <dataset>` blocks). */
 interface Dataset {
   name: string;
-  rows: SeedRowIR[];
+  entries: Entry[];
 }
 
 export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<string, string>): void {
@@ -38,9 +45,9 @@ export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<stri
   const fnBlocks: string[] = [];
   const callLines: string[] = [];
   for (const ds of datasets) {
-    const rows = ds.rows.filter((r) => seedable.has(r.aggregate));
-    if (rows.length === 0) continue;
-    fnBlocks.push(renderDatasetFn(ds.name, rows));
+    const entries = ds.entries.filter((e) => seedable.has(e.row.aggregate));
+    if (entries.length === 0) continue;
+    fnBlocks.push(renderDatasetFn(ds.name, entries));
     callLines.push(`  await seed${upperFirst(ds.name)}(db, requested);`);
   }
   if (callLines.length === 0) return;
@@ -53,40 +60,46 @@ export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<stri
   );
 }
 
-/** Group every `SeedIR` row by dataset, preserving source order. */
+/** Group every `SeedIR` row by dataset, preserving source order + path. */
 function groupByDataset(ctx: EnrichedBoundedContextIR): Dataset[] {
   const byName = new Map<string, Dataset>();
   const order: string[] = [];
   for (const seed of ctx.seeds) {
     let ds = byName.get(seed.dataset);
     if (!ds) {
-      ds = { name: seed.dataset, rows: [] };
+      ds = { name: seed.dataset, entries: [] };
       byName.set(seed.dataset, ds);
       order.push(seed.dataset);
     }
-    ds.rows.push(...seed.rows);
+    for (const row of seed.rows) ds.entries.push({ row, raw: seed.path === "raw" });
   }
   return order.map((n) => byName.get(n)!);
 }
 
-/** Aggregate names actually seeded (for import narrowing). */
+/** Aggregate names whose domain class/repository are imported — `raw` rows
+ *  emit pure SQL and import nothing. */
 function usedAggregates(datasets: Dataset[], seedable: Set<string>): string[] {
   const used = new Set<string>();
   for (const ds of datasets) {
-    for (const r of ds.rows) if (seedable.has(r.aggregate)) used.add(r.aggregate);
+    for (const e of ds.entries) {
+      if (!e.raw && seedable.has(e.row.aggregate)) used.add(e.row.aggregate);
+    }
   }
   return [...used].sort();
 }
 
 /** Render one `async function seed<Dataset>(db, requested)`. */
-function renderDatasetFn(dataset: string, rows: SeedRowIR[]): string {
-  // One repository instance per distinct aggregate in this dataset.
-  const aggs = [...new Set(rows.map((r) => r.aggregate))];
-  const repoDecls = aggs.map(
+function renderDatasetFn(dataset: string, entries: Entry[]): string {
+  // One repository instance per distinct aggregate used on the domain path.
+  const domainAggs = [...new Set(entries.filter((e) => !e.raw).map((e) => e.row.aggregate))];
+  const repoDecls = domainAggs.map(
     (a) => `  const ${repoVar(a)} = new ${a}Repository(db, NoopDomainEventDispatcher);`,
   );
-  const saveLines = rows.map(
-    (r) => `  await ${repoVar(r.aggregate)}.save(${r.aggregate}.create(${renderInput(r)}));`,
+  const saveLines = entries.map((e) =>
+    e.raw
+      ? // raw path (D-SEED-XREF): direct INSERT with explicit id + FK columns.
+        `  await db.execute(sql.raw(${JSON.stringify(renderSeedRowInsert(e.row.aggregate, e.row.fields))}));`
+      : `  await ${repoVar(e.row.aggregate)}.save(${e.row.aggregate}.create(${renderInput(e.row)}));`,
   );
   return lines(
     `async function seed${upperFirst(dataset)}(db: Db, requested: Set<string>): Promise<void> {`,

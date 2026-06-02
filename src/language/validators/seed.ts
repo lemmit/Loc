@@ -9,7 +9,7 @@
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type { Model, Seed } from "../generated/ast.js";
-import { isBoundedContext, isSeed } from "../generated/ast.js";
+import { isBoundedContext, isBuilderCall, isObjectLit, isSeed } from "../generated/ast.js";
 
 export function checkSeeds(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
@@ -49,6 +49,29 @@ function checkSeed(seed: Seed, accept: ValidationAcceptor): void {
         });
       }
       seen.add(f.name);
+
+      if (!seed.raw && f.name === "id") {
+        // Rule 3 — an explicit `id` requires the `raw` path; the domain
+        // `create` path mints ids (D-SEED-PATH / D-SEED-XREF).
+        accept(
+          "error",
+          "An explicit `id` requires `seed raw { … }` — the domain create path mints ids. " +
+            "Cross-references use explicit ids on the raw path (D-SEED-XREF).",
+          { node: f, property: "name", code: "loom.seed-id-needs-raw" },
+        );
+      }
+
+      if (seed.raw && (isObjectLit(f.value) || isBuilderCall(f.value))) {
+        // Rule 4 — raw rows are direct column inserts: scalar / enum / id
+        // literals only.  Value-object / containment columns route through
+        // the domain path.
+        accept(
+          "error",
+          `Raw seed column '${f.name}' is a value object / nested record — raw rows ` +
+            "support scalar / enum / id columns only; use the domain path for value objects.",
+          { node: f, property: "value", code: "loom.seed-raw-unsupported-column" },
+        );
+      }
     }
   }
 }

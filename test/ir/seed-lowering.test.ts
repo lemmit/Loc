@@ -62,3 +62,18 @@ describe("seed — lowering", () => {
     expect(ctx.seeds[0].path).toBe("raw");
   });
 });
+
+describe("seed — raw path lowering", () => {
+  it("marks a `raw` block's SeedIR with path: raw", async () => {
+    const loom = await buildLoomModel(`
+      system S { subdomain M { context C {
+        aggregate Widget with crudish { name: string }
+        repository Widgets for Widget { }
+        seed reference raw { Widget { id: "w1", name: "Alpha" } }
+      }}}
+    `);
+    const seed = allContexts(loom).find((c) => c.name === "C")!.seeds[0];
+    expect(seed.path).toBe("raw");
+    expect(seed.rows[0].fields.map((f) => f.name)).toEqual(["id", "name"]);
+  });
+});
