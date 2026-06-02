@@ -193,12 +193,34 @@ arm above. The .NET test `does NOT touch ValidationProblemDetails` stays
 pinned: forking the framework default would touch a wider API surface than
 this PR needs.
 
-### Phoenix (follow-up)
+### Phoenix (Phase C — shipping)
 
 `Ash.Error.Invalid` wraps per-field validation errors with path information
-(`changeset.errors |> Enum.map(...)`). The follow-up walks the error tree,
-converts atom/keyword paths to JSON pointers, and returns 422 with
-`errors[]`.
+(`%Ash.Error.Invalid{errors: [%Ash.Error.Changes.InvalidAttribute{path: [...],
+field: :amount, message: "..."}, ...]}`). Phase C ships a shared
+`<App>Web.ProblemDetails` Elixir module that walks the error tree,
+converts atom path segments to JSON pointers, and returns 422 with the
+`errors[]` extension — same wire body as Hono and .NET.
+
+The per-aggregate controllers `use Plug.ErrorHandler` and route raised
+`Ash.Error.Invalid` exceptions to the shared `validation_error_response/2`
+function. The workflows controller's existing `error_response/2` grew an
+`%Ash.Error.Invalid{}` pattern-match arm that dispatches to the same
+helper, plus a generic arm that dispatches to `problem_response/4` for
+forbidden / generic domain errors. The previous inline `Jason.encode!` +
+`put_resp_*` block in the workflows controller is gone — all RFC 7807
+emission lives in the shared module.
+
+The Ash error walker handles the common shapes:
+- `path = err |> Map.get(:path, []) |> List.wrap()` — list of atoms
+- `field = err |> Map.get(:field) |> List.wrap()` (or `fields` for the list form)
+- Segments are concatenated: `path ++ field` → list passed to `pointer_of/1`
+- atoms go through `camelize/1` (mirrors `JsonCamelCase.camelize_string/1`),
+  integers stringify as bare indices, then RFC 6901 escapes apply
+
+Same OpenAPI deferral as Hono + .NET: the route-level 422 response and
+the `errors[]` schema declaration wait for Phase D so the cross-backend
+parity gate stays green.
 
 ## OpenAPI parity
 
@@ -236,8 +258,11 @@ format is unchanged.
   `Extensions["errors"]`; `PointerOf` helper on `DomainExceptionFilter`
   converts FluentValidation paths to RFC 6901; same OpenAPI deferral
   as Hono.
-- **Phase C — Phoenix** (follow-up): walk `Ash.Error.Invalid` into the
-  same shape.
+- **Phase C — Phoenix** (shipping in this PR): walks `Ash.Error.Invalid`
+  into the same `errors[]` shape via a shared
+  `<App>Web.ProblemDetails` Elixir module that both per-aggregate
+  controllers (Plug.ErrorHandler arm) and the workflows controller
+  (extended `error_response/2`) call.
 - **Phase D — OpenAPI lockstep** (after C lands): flip the central
   matrix in `src/ir/util/openapi-errors.ts` to add 422 for
   `create` / `operation` / `workflow`, add `errors:` to every backend's

@@ -13,6 +13,7 @@ import { emitPhoenixResourceFiles } from "./adapters/resource-clients.js";
 import type { ApiRoute } from "./api-emit.js";
 import { renderJasonCamelCaseModule } from "./jason-camel-emit.js";
 import type { LiveRoute } from "./liveview-emit.js";
+import { renderProblemDetailsModule } from "./problem-details-emit.js";
 import { contextsHaveSeeds, renderSeedsExs } from "./seeds-emit.js";
 import { renderTelemetry } from "./telemetry-emit.js";
 
@@ -69,6 +70,13 @@ export function emitShellFiles(
   // snake_case atom keys into camelCase JSON keys, matching the Hono /
   // .NET wire shape.  Emitted once per project.
   out.set(`lib/${appName}/jason_camel_case.ex`, renderJasonCamelCaseModule(appModule));
+
+  // lib/<app>_web/problem_details.ex — shared RFC 7807 ProblemDetails
+  // responders used by both the per-aggregate controllers (Plug.ErrorHandler
+  // arm for Ash.Error.Invalid → 422 + errors[] extension) and the
+  // workflows controller (extended error_response/2 for Ash.Error.Invalid
+  // tuples).  See docs/proposals/validation-error-extension.md (Phase C).
+  out.set(`lib/${appName}_web/problem_details.ex`, renderProblemDetailsModule(appModule));
 
   // lib/<app>/telemetry.ex — :telemetry handlers that translate Phoenix
   // endpoint events into the neutral log-event catalog identity.
