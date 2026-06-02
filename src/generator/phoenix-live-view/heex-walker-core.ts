@@ -13,9 +13,6 @@
 //   - HEEx body string spliced into `def render(assigns), do: ~H"""..."""`
 //   - A list of `handle_event/3` clauses derived from operation actions
 //     and block-body lambdas (`onSubmit`, `Action(op).then`).
-//   - A list of Elixir `alias`/`import` lines for user-declared
-//     `import helper X from "..."` declarations the body actually
-//     references.
 //
 // What this walker DOES NOT cover in v0:
 //
@@ -52,7 +49,6 @@ import type {
   StateFieldIR,
   StmtIR,
   TypeIR,
-  UiHelperImportIR,
   UiIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
@@ -77,8 +73,6 @@ export interface WalkResult {
   heex: string;
   /** `handle_event/3` clauses for the LiveView module body. */
   handlers: HandleEventClause[];
-  /** Elixir alias lines for user helpers actually referenced. */
-  aliasLines: string[];
   /** Form bindings discovered inside the page body — one entry per
    *  `Form(of: Agg)` or `Form(runs: Wf)` call.  The LiveView emitter
    *  uses this to assign `@form` in `mount/3` via
@@ -197,8 +191,6 @@ export interface WalkContext {
    *  carried only the name set.  Built once at walker entry next
    *  to `stateNames` so lookups stay symmetric. */
   stateFields: Map<string, StateFieldIR>;
-  /** Set of helper names actually referenced; populated as we walk. */
-  usedHelpers: Set<string>;
   /** Accumulated handle_event clauses. */
   handlers: HandleEventClause[];
   /** Accumulated `Action(...)` bindings (hoisted to the host LiveView). */
@@ -263,7 +255,6 @@ export function walkBodyToHeex(
     ui,
     stateNames,
     stateFields,
-    usedHelpers: new Set(),
     handlers: [],
     actionBindings: [],
     usedComponents: new Set(),
@@ -273,21 +264,9 @@ export function walkBodyToHeex(
 
   const heex = body ? renderExpr(body, ctx) : `<!-- empty body -->`;
 
-  // Helper imports — resolve from used set against declared imports.
-  // Delegated to `heexTarget.renderHelperImports` (cross-framework
-  // contract — see src/generator/_walker/target.ts).  Caller adds
-  // the 2-space module-body indent that's local to this emission
-  // site; the target returns bare `alias <Module>, as: <Pascal>`
-  // lines so other callers (future Phoenix orchestrators) can use
-  // their own indent.
-  const aliasLines = heexTarget
-    .renderHelperImports(ctx.usedHelpers, ui.helperImports as readonly UiHelperImportIR[])
-    .map((line) => `  ${line}`);
-
   return {
     heex,
     handlers: ctx.handlers,
-    aliasLines,
     formBindings: ctx.formBindings,
     queryBindings: ctx.queryBindings,
     actionBindings: ctx.actionBindings,
@@ -437,7 +416,6 @@ function renderRef(expr: Extract<ExprIR, { kind: "ref" }>, ctx: WalkContext): st
     case "current-user":
       return ctx.position === "template" ? `@current_user` : `socket.assigns.current_user`;
     case "helper-fn":
-      ctx.usedHelpers.add(expr.name);
       return snake(expr.name);
     default:
       return snake(expr.name);
@@ -574,7 +552,6 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   }
   // Helper function call.
   if (expr.callKind === "function" || expr.callKind === "free") {
-    ctx.usedHelpers.add(expr.name);
     const args = expr.args.map((a) => renderExpr(a, ctx)).join(", ");
     return `${snake(expr.name)}(${args})`;
   }
@@ -1029,7 +1006,6 @@ export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): 
     ui,
     stateNames: new Set(page.state.map((f) => snake(f.name))),
     stateFields: new Map(page.state.map((f) => [snake(f.name), f])),
-    usedHelpers: new Set(),
     handlers: [],
     actionBindings: [],
     usedComponents: new Set(),
@@ -1078,8 +1054,6 @@ export function defaultInitFor(t: TypeIR): string {
 // Helpers.
 // ---------------------------------------------------------------------------
 
-// Phoenix-side helper-import emission (`alias <Module>, as: <Pascal>`)
-// moved to `heex-target.ts:renderHelperImports`.  The walker calls
 // the target through the cross-framework contract above; this file
 // no longer carries the path → module name derivation.
 

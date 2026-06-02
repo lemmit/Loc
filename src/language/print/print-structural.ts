@@ -50,7 +50,6 @@ import type {
   TypeRef,
   Ui,
   UiApiParam,
-  UiHelperImport,
   UserBlock,
   ValueObject,
   View,
@@ -206,10 +205,12 @@ export function printStructural(node: AstNode): string {
       return printPermissionsBlock(node as PermissionsBlock);
     case "UiApiParam":
       return printUiApiParam(node as UiApiParam);
-    case "UiHelperImport":
-      return printUiHelperImport(node as UiHelperImport);
     case "FindDecl":
       return printFindDecl(node as FindDecl);
+    case "Criterion":
+      return printCriterion(node as import("../generated/ast.js").Criterion);
+    case "Retrieval":
+      return printRetrieval(node as import("../generated/ast.js").Retrieval);
     default:
       throw new Error(`printStructural: unhandled node ${node.$type}`);
   }
@@ -380,10 +381,6 @@ function printUiApiParam(node: UiApiParam): string {
   return `api ${node.name}: ${node.apiRef.$refText}`;
 }
 
-function printUiHelperImport(node: UiHelperImport): string {
-  return `import helper ${node.name} from ${quote(node.path)}`;
-}
-
 function printPage(node: Page): string {
   const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
   return block(`page ${node.name}${params}`, node.props.map(printPageProp));
@@ -423,7 +420,16 @@ function printPageProp(node: PageProp): string {
 
 function printComponent(node: Component): string {
   const params = node.params.map(printParameter).join(", ");
-  const items = [...node.decls.map(printStateBlock), `body: ${printExpr(node.body)}`];
+  // An extern component declares no body — its rendering lives in a
+  // hand-written module at the `from` path.
+  if (node.extern) {
+    const header = `component ${node.name}(${params}) extern from ${quote(node.externPath ?? "")}`;
+    return block(header, node.decls.map(printStateBlock));
+  }
+  const items = [
+    ...node.decls.map(printStateBlock),
+    `body: ${node.body ? printExpr(node.body) : ""}`,
+  ];
   return block(`component ${node.name}(${params})`, items);
 }
 
@@ -569,6 +575,41 @@ function printFindDecl(node: FindDecl): string {
   const params = node.params.map(printParameter).join(", ");
   const where = node.filter ? ` where ${printExpr(node.filter)}` : "";
   return `find ${node.name}(${params}): ${printTypeRef(node.returnType)}${where}`;
+}
+
+/** `criterion <Name>[(<params>)] of <T> = <expr>` — the single-line form
+ *  round-trips both source variants (the `{ where: … }` block lowers to
+ *  the same `body`). */
+function printCriterion(node: import("../generated/ast.js").Criterion): string {
+  const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
+  return `criterion ${node.name}${params} of ${printTypeRef(node.target)} = ${printExpr(node.body)}`;
+}
+
+/** `retrieval <Name>[(<params>)] of <T>` — single-line `= <where>` when no
+ *  `sort`/`loads`, otherwise the `{ where: … sort: … loads: … }` block. */
+function printRetrieval(node: import("../generated/ast.js").Retrieval): string {
+  const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
+  const head = `retrieval ${node.name}${params} of ${printTypeRef(node.target)}`;
+  if (node.sort.length === 0 && node.loads.length === 0) {
+    return `${head} = ${printExpr(node.where)}`;
+  }
+  const items: string[] = [`where: ${printExpr(node.where)}`];
+  if (node.sort.length > 0) {
+    items.push(`sort: [${node.sort.map(printSortItem).join(", ")}]`);
+  }
+  if (node.loads.length > 0) {
+    items.push(`loads: [${node.loads.map(printLoadPath).join(", ")}]`);
+  }
+  return block(head, items);
+}
+
+function printSortItem(node: import("../generated/ast.js").SortItem): string {
+  const dir = node.direction ? ` ${node.direction}` : "";
+  return `${printLoadPath(node.path)}${dir}`;
+}
+
+function printLoadPath(node: import("../generated/ast.js").LoadPath): string {
+  return node.segments.map((s) => `${s.name}${s.collection ? "[]" : ""}`).join(".");
 }
 
 function printWorkflow(node: Workflow): string {

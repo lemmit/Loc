@@ -16,7 +16,6 @@
 //   renderStateInit   — walker/page-shell.ts:625-725 (renderUseState + zeroValueForType)
 //   renderApiCall     — body-walker.ts:594-597 + walker/api-hooks.ts:60-103
 //   renderApiHoisting — walker/page-shell.ts:220-226 (apiHookDecls)
-//   renderHelperImports — walker/import-lines.ts:76-92
 //   renderMatch       — body-walker.ts:635-645 (ternary chain — match
 //                       lowers to ternary in `src/ir/lower/lower-expr.ts`)
 //   renderNavigate    — walker/primitives/controls.ts:199-213 (emitActionThen)
@@ -152,34 +151,6 @@ export const tsxTarget: WalkerTarget = {
       const hookName = u.hookName ?? hookFnName(u.aggregateName, u.operation);
       const args = u.argsRendered ?? [];
       lines.push(`const ${varName} = ${hookName}(${args.join(", ")});`);
-    }
-    return lines;
-  },
-
-  // --- Helper-import seam -------------------------------------------------
-
-  /** Group user-helper imports by source path and emit one
-   *  `import { a, b } from "path"` line per path.  Mirrors
-   *  `renderHelperImports` at `walker/import-lines.ts:76`. */
-  renderHelperImports(
-    used: ReadonlySet<string>,
-    decls: ReadonlyArray<{ name: string; path: string }>,
-  ): string[] {
-    if (used.size === 0) return [];
-    const byPath = new Map<string, Set<string>>();
-    for (const d of decls) {
-      if (!used.has(d.name)) continue;
-      let names = byPath.get(d.path);
-      if (!names) {
-        names = new Set();
-        byPath.set(d.path, names);
-      }
-      names.add(d.name);
-    }
-    const lines: string[] = [];
-    for (const [pathName, names] of [...byPath.entries()].sort()) {
-      const sorted = [...names].sort();
-      lines.push(`import { ${sorted.join(", ")} } from "${pathName}";`);
     }
     return lines;
   },

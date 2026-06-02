@@ -37,7 +37,12 @@ import type { LoadedPack } from "../_packs/loader.js";
 import { isWalkableLayoutBody, walkBodyToTsx } from "./body-walker.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
 import { buildViewPageObject } from "./view-builder.js";
-import { renderCustomLayoutPage, renderUserComponentFile } from "./walker/page-shell.js";
+import {
+  renderCustomLayoutPage,
+  renderExternComponentProps,
+  renderExternComponentShim,
+  renderUserComponentFile,
+} from "./walker/page-shell.js";
 import { buildWalkerPageObject } from "./walker-page-objects.js";
 import { buildWorkflowPageObject } from "./workflow-builder.js";
 
@@ -156,12 +161,10 @@ export function deriveExtraRoutesFromUi(
   const userComponents = new Map<string, readonly ParamIR[]>();
   for (const c of topLevelComponents) userComponents.set(c.name, c.params);
   for (const c of ui.components) userComponents.set(c.name, c.params);
-  // Helper names are also a walker-eligibility signal.
-  const helperNames = new Set(ui.helperImports.map((h) => h.name));
   for (const page of ui.pages) {
     if (!page.route) continue;
     if (page.origin && page.origin.kind !== "custom") continue;
-    if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
+    if (isWalkableLayoutBody(page.body, userComponents)) {
       const route: import("./templating/preparers/app-shell.js").ExtraPageRoute = {
         componentName: page.name,
         importFrom: `./pages/${snake(page.name)}`,
@@ -204,13 +207,28 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
   for (const c of ctx.topLevelComponents) emittedComponents.set(c.name, c);
   for (const c of ui.components) emittedComponents.set(c.name, c);
   for (const c of emittedComponents.values()) {
+    // Extern component: Loom owns a re-export shim at
+    // `src/components/<Name>.tsx` (so call sites import `components/<Name>`
+    // unchanged) plus a typed `<Name>.props.ts`; the user owns the
+    // hand-written module at the `from` path.  No body is walked.
+    if (c.extern) {
+      out.set(
+        `src/components/${c.name}.tsx`,
+        renderExternComponentShim(c.name, c.externPath ?? ""),
+      );
+      out.set(
+        `src/components/${c.name}.props.ts`,
+        renderExternComponentProps(c.name, c.params, ctx.aggregatesByName),
+      );
+      continue;
+    }
     out.set(
       `src/components/${c.name}.tsx`,
       renderUserComponentFile(
         c.name,
         c.params,
         c.state,
-        c.body,
+        c.body!,
         ctx.pack,
         userComponents,
         ctx.aggregatesByName,
@@ -219,10 +237,6 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
       ),
     );
   }
-  // Helper names accumulated for walker-eligibility
-  // checks (`isWalkableLayoutBody`).  Same `ui.helperImports`
-  // array is threaded to the per-page render call below.
-  const helperNames = new Set(ui.helperImports.map((h) => h.name));
 
   for (const page of ui.pages) {
     // Every page (scaffold OR explicit) routes through
@@ -233,7 +247,7 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
     // is always walker-eligible.  `page.origin` distinguishes
     // scaffold-origin (per-aggregate page-object emitter handles
     // those) from `custom` (walker-side per-page page-object).
-    if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
+    if (isWalkableLayoutBody(page.body, userComponents)) {
       // `page.emitPath` overrides the default
       // `src/pages/<page-snake>.tsx` location.  Set by the
       // scaffold expander to land rewritten pages at their
@@ -261,7 +275,6 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
           ui.apiParams,
           ctx.aggregatesByName,
           buildBcByAggregate(ctx),
-          ui.helperImports,
           srcImportPrefix,
           buildWorkflowsByName(ctx),
           buildBcByWorkflow(ctx),
@@ -489,12 +502,11 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
   // whose path is already in `out`.
   const userComponents = buildUserComponentsMap(ui, ctx.topLevelComponents);
   const bcByAggregate = buildBcByAggregate(ctx);
-  const helperNames = new Set(ui.helperImports.map((h) => h.name));
   for (const page of ui.pages) {
     // Skip scaffold-origin pages; per-aggregate page-objects above
     // covered them (with their richer fill/submit/expectRow surface).
     if (page.origin && page.origin.kind !== "custom") continue;
-    if (!isWalkableLayoutBody(page.body, userComponents, helperNames)) continue;
+    if (!isWalkableLayoutBody(page.body, userComponents)) continue;
     if (!page.body) continue;
     const paramNames = new Set(page.params.map((p) => p.name));
     const stateNames = new Set(page.state.map((s) => s.name));
@@ -507,7 +519,6 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
       ui.apiParams,
       ctx.aggregatesByName,
       bcByAggregate,
-      ui.helperImports,
     );
     const path = `e2e/pages/${snake(page.name)}.ts`;
     if (out.has(path)) continue;

@@ -91,6 +91,17 @@ context Sales {
 
   repository Customers for Customer { }
 
+  // Reusable predicate (Specification pattern) over Customer.
+  criterion NamedLike(needle: string) of Customer = this.name == needle
+
+  // Named query bundle (retrieval.md): a composed `where` + `sort`,
+  // executed via `Customers.run(ByName("x"), page?)`.  Emits a
+  // `runByName` repository method; `page` is a call-site argument.
+  retrieval ByName(needle: string) of Customer {
+    where: NamedLike(needle)
+    sort:  [name asc]
+  }
+
   repository Orders for Order {
     // Convention: when no `where` is given, parameters are matched to
     // aggregate properties of the same name (here `customerId`).
