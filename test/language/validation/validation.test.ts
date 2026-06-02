@@ -285,7 +285,9 @@ describe("validation", () => {
           deployable api { platform: hono, contexts: [T], ui: WebApp, port: 3000 }
         }
       `);
-      expect(errors.some((e) => /'ui:' binding is only valid/.test(e))).toBe(true);
+      expect(errors.some((e) => /binding is only valid on platforms that mount a UI/.test(e))).toBe(
+        true,
+      );
     });
 
     it("accepts 'ui:' on a 'platform: dotnet' deployable (fullstack mode)", async () => {
@@ -704,13 +706,13 @@ describe("validation", () => {
       ).toBe(true);
     });
 
-    it("rejects a tsx pack on a phoenixLiveView fullstack deployable", async () => {
+    it("rejects a tsx pack on a phoenix fullstack deployable", async () => {
       const { errors } = await parse(`
         system S {
           subdomain M { context T { } }
           ui WebApp { }
           deployable fullstack {
-            platform: phoenixLiveView
+            platform: phoenix
             contexts: [T]
             ui: WebApp
             port: 4000

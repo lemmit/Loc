@@ -5,22 +5,31 @@
 // error-response dimension compares equal.
 //
 // The body of every declared error response is the shared `ProblemDetails`
-// schema (RFC 7807 core: `type`, `title`, `status`, `detail`, `instance`)
+// schema (RFC 7807 core: `type`, `title`, `status`, `detail`, `instance`,
+// plus the §3.2 `errors[]` extension array on 422 validation responses)
 // served as `application/problem+json`.  Trace correlation rides on the
 // `x-request-id` response header (not the body), so the body stays
 // byte-identical across backends.
 //
-// The matrix is deterministic from route shape — no auth-conditionality —
-// so the three emitters never drift:
-//   create  (POST /<aggs>)            → 400  (domain / validation)
+// The matrix is deterministic from route shape, with one auth-conditional
+// dimension: an operation / workflow carrying a `requires` guard also
+// declares 403 (it denies with ForbiddenError/Exception/`:forbidden` at
+// runtime).  `guarded` is the same predicate on every backend
+// (`operationIsGuarded` / `workflowIsGuarded`), so the three emitters stay
+// in lockstep.
+//   create  (POST /<aggs>)            → 400, 422  (domain / validation)
 //   getById (GET  /<aggs>/{id})       → 404  (not found)
-//   operation (POST /<aggs>/{id}/op)  → 400, 404
+//   operation (POST /<aggs>/{id}/op)  → 400, [403 if guarded], 404, 422
 //   find (optional return)            → 404
-//   workflow (POST /workflows/<wf>)   → 400
+//   workflow (POST /workflows/<wf>)   → 400, [403 if guarded], 422
 //   list / view / non-optional find   → (none beyond the universal 500)
 //
-// 500 is the universal fallback every route can produce; like most specs
-// we don't enumerate it per operation (it would be noise on every path).
+// 422 (Unprocessable Entity) is the validation-failure code declared per
+// docs/proposals/validation-error-extension.md — Phase D.  Body carries the
+// §3.2 `errors[]` extension array (per-field `{ pointer, message }`)
+// consumed by the frontend ACL's `applyServerErrors` (#769).  500 is the
+// universal fallback every route can produce; like most specs we don't
+// enumerate it per operation (it would be noise on every path).
 
 /** Media type for every RFC 7807 error body. */
 export const PROBLEM_JSON = "application/problem+json";
@@ -41,11 +50,15 @@ export type OpErrorKind =
   | "list"
   | "view";
 
-/** The HTTP error statuses a given operation kind declares, ascending. */
-export function errorStatuses(kind: OpErrorKind): number[] {
+/** The HTTP error statuses a given operation kind declares, ascending.
+ *  `guarded` (an op/workflow with a `requires` guard) inserts 403 — the
+ *  authorization-denied outcome — for the `operation` and `workflow`
+ *  kinds; it's inert for every other kind (no kind but those two carries a
+ *  guard). */
+export function errorStatuses(kind: OpErrorKind, guarded = false): number[] {
   switch (kind) {
     case "create":
-      return [400];
+      return [400, 422];
     case "getById":
       return [404];
     // destroy (DELETE /<aggs>/{id}) → 404 (not found) + 409 (still
@@ -53,9 +66,9 @@ export function errorStatuses(kind: OpErrorKind): number[] {
     case "destroy":
       return [404, 409];
     case "operation":
-      return [400, 404];
+      return guarded ? [400, 403, 404, 422] : [400, 404, 422];
     case "workflow":
-      return [400];
+      return guarded ? [400, 403, 422] : [400, 422];
     case "findOptional":
       return [404];
     case "findList":
@@ -80,6 +93,8 @@ export function problemTitle(status: number): string {
       return "Not Found";
     case 409:
       return "Conflict";
+    case 422:
+      return "Unprocessable Entity";
     case 500:
       return "Internal Server Error";
     default:

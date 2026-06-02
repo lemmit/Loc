@@ -47,14 +47,14 @@ describe("saving-shape capability validation", () => {
     expect(await shapeErrors(sys("hono", "embedded"))).toEqual([]);
   });
 
-  it("rejects shape(document) on a phoenixLiveView deployable (no Ash document emitter)", async () => {
+  it("rejects shape(document) on a phoenix deployable (no Ash document emitter)", async () => {
     const errs = await shapeErrors(sys("phoenixLiveView", "document"));
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("shape(document)");
     expect(errs[0]).toContain("Cart");
   });
 
-  it("accepts shape(embedded) on a phoenixLiveView deployable (Ash embedded resources)", async () => {
+  it("accepts shape(embedded) on a phoenix deployable (Ash embedded resources)", async () => {
     expect(await shapeErrors(sys("phoenixLiveView", "embedded"))).toEqual([]);
   });
 
@@ -75,7 +75,7 @@ system Shop {
   }
   storage pg { type: postgres }
   resource shopState { for: Shop, kind: state, use: pg, shape: document }
-  deployable api { platform: phoenixLiveView, contexts: [Shop], dataSources: [shopState], port: 4000 }
+  deployable api { platform: phoenix, contexts: [Shop], dataSources: [shopState], port: 4000 }
 }
 `;
     const errs = await shapeErrors(src);

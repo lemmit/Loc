@@ -74,7 +74,6 @@ describe("WalkerTarget — every shipped target conforms", () => {
       expect(typeof target.buildHookUse).toBe("function");
       expect(typeof target.renderApiCall).toBe("function");
       expect(typeof target.renderApiHoisting).toBe("function");
-      expect(typeof target.renderHelperImports).toBe("function");
       expect(typeof target.renderMatch).toBe("function");
       expect(typeof target.renderNavigate).toBe("function");
       expect(typeof target.defaultInitFor).toBe("function");
@@ -86,7 +85,6 @@ describe("WalkerTarget — every shipped target conforms", () => {
       expect(typeof target.renderStateInit(SAMPLE_STATE_REF.field, undefined)).toBe("string");
       expect(typeof target.renderApiCall(SAMPLE_API_CALL_MUTATION, "{}")).toBe("string");
       expect(Array.isArray(target.renderApiHoisting([SAMPLE_API_CALL_MUTATION]))).toBe(true);
-      expect(Array.isArray(target.renderHelperImports(new Set(), []))).toBe(true);
       expect(typeof target.renderMatch([], undefined)).toBe("string");
       expect(typeof target.renderNavigate("/path", [])).toBe("string");
       expect(typeof target.defaultInitFor({ kind: "primitive", name: "int" })).toBe("string");
@@ -204,15 +202,6 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
       },
     ]);
     expect(tsx).toEqual(["const customerById = useCustomerById(id);"]);
-  });
-
-  it("renderHelperImports diverges: TSX `import { x } from`; HEEx `alias`", () => {
-    const used = new Set(["fmt"]);
-    const decls = [{ name: "fmt", path: "../helpers/fmt" }];
-    const tsx = tsxTarget.renderHelperImports(used, decls);
-    const heex = heexTarget.renderHelperImports(used, decls);
-    expect(tsx[0]).toMatch(/^import \{ fmt \} from "/);
-    expect(heex[0]).toMatch(/^alias .*, as: Fmt$/);
   });
 
   it("renderMatch diverges: TSX ternary chain, HEEx `cond do … end`", () => {

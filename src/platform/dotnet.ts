@@ -1,11 +1,11 @@
 import {
-  type LayoutAdapter,
   type PersistenceAdapter,
   type PlatformAdapterDefaults,
   type PlatformAdapters,
   type StyleAdapter,
   stubAdapter,
 } from "../generator/_adapters/index.js";
+import { byFeatureLayoutAdapter } from "../generator/dotnet/adapters/by-feature-layout.js";
 import { byLayerLayoutAdapter } from "../generator/dotnet/adapters/by-layer-layout.js";
 import { cqrsStyleAdapter } from "../generator/dotnet/adapters/cqrs-style.js";
 import { efcorePersistenceAdapter } from "../generator/dotnet/adapters/efcore-persistence.js";
@@ -39,21 +39,35 @@ const dotnetPlatform: PlatformSurface = {
   // it DOES on Hono — the validator takes the union across all
   // platforms (see `validateLoomModel`).
   reservedRepositoryFindNames: new Set(["saveAsync", "getByIdAsync"]),
-  emitProject({ contexts, deployable, sys, migrations }): Map<string, string> {
+  emitProject({
+    contexts,
+    deployable,
+    sys,
+    migrations,
+    styleAdapter,
+    layoutAdapter,
+  }): Map<string, string> {
     const namespace = deployable.name[0]!.toUpperCase() + deployable.name.slice(1);
     // The orchestrator (`generator/dotnet/index.ts`) dispatches
-    // per-aggregate CQRS emission + byLayer path routing through its
-    // OWN sibling adapters (`src/generator/dotnet/adapters/`), imported
-    // directly — never via `src/platform/`.  Two reasons: the
-    // `package → shared` layering invariant forbids `src/generator/`
-    // importing `src/platform/`, and resolving through `platform/`
-    // would re-enter the load-time cycle (registry → platform/dotnet →
-    // generator/dotnet/index → ir/enrich/enrichments → platformFor →
-    // registry).  Per-deployable `persistence:` / `style:` / `layout:`
-    // overrides resolve through `platform/resolve-adapters.ts` at the
-    // system orchestrator (`src/system/`, which may import
-    // `src/platform/`), not here.
-    return generateDotnetForContexts(contexts, namespace, { deployable, sys, migrations });
+    // per-aggregate CQRS emission + byLayer path routing through the
+    // deployable's RESOLVED style / layout adapters
+    // (D-REALIZATION-AXES `application:` / `directoryLayout:`).  The
+    // resolution itself happens at the system orchestrator (`src/system/`,
+    // which may import `platform/resolve-adapters.ts`); we just FORWARD the
+    // resolved adapters into the generator.  This keeps the generator free
+    // of any `src/generator/* → src/platform/*` edge (the backend-packages
+    // layering invariant) and avoids re-entering the load-time cycle
+    // (registry → platform/dotnet → generator/dotnet/index → ir/enrich →
+    // platformFor → registry).  When the orchestrator passes none (legacy
+    // single-context generate mode), the generator falls back to its own
+    // sibling adapters — byte-identical under the size-1 real menus.
+    return generateDotnetForContexts(contexts, namespace, {
+      deployable,
+      sys,
+      migrations,
+      styleAdapter,
+      layoutAdapter,
+    });
   },
   composeService({ slug }): ComposeServiceShape {
     return {
@@ -73,8 +87,8 @@ const dotnetPlatform: PlatformSurface = {
     };
   },
   // .NET — EF Core + Dapper + Marten persistence; CQRS + layered style;
-  // byLayer + byFeature layout.  `efcore` / `cqrs` / `byLayer` are real
-  // (F5a/b/c); `dapper` / `marten` / `layered` / `byFeature` are stubs.
+  // byLayer + byFeature layout.  `efcore` / `cqrs` / `byLayer` / `byFeature`
+  // are real (F5a/b/c + Phase 5a); `dapper` / `marten` / `layered` are stubs.
   // Built lazily (see PlatformSurface.adapters jsdoc) so the adapter
   // bindings are read after init, not during the load-time cycle.
   adapters(): PlatformAdapters {
@@ -123,13 +137,7 @@ const dotnetPlatform: PlatformSurface = {
       },
       layouts: {
         byLayer: byLayerLayoutAdapter,
-        byFeature: stubAdapter<LayoutAdapter>(
-          "layout",
-          "byFeature",
-          "dotnet",
-          () => Object.keys(menu.layouts),
-          { name: "byFeature" },
-        ),
+        byFeature: byFeatureLayoutAdapter,
       },
     };
     return menu;

@@ -9,9 +9,13 @@
 
 ## Context
 
-`docs/proposals/` is the live design corpus for Loom. The `README.md`
-index is stale per the maintainer; this plan uses per-doc bodies as
-source of truth and verifies state against `origin/main`.
+`docs/proposals/` is the live design corpus for Loom. This plan owns
+the **topological ordering** across the in-scope proposals and verifies
+state against `origin/main`. For the **live per-proposal status** (every
+doc, including the newer corpus that postdates this plan's original
+scope), the refreshed [`README.md`](./README.md) status table is the
+companion source of truth; this plan's audit tables below are kept in
+sync with it.
 
 The goal is a single topological order across the in-scope proposals
 that:
@@ -36,6 +40,15 @@ Major landings since the original plan was drafted:
 | `react: require ui:` (#606) — legacy archetype fallback removed | No more dual codepaths in later UI proposals |
 | Storage adapter taxonomy + orchestrator rewire (#681–#691: F3 contracts, F5/F6/F7 real persistence/style/layout adapters + dispatch) | `persistence`/`style`/`layout` adapter seam is real on all three backends; emit dispatches through it |
 | **D-ADAPTER-HOME dissolve** — central `adapter-registry.ts` removed; each backend carries its menu on its `PlatformSurface`; `resolve-adapters.ts` reads the discovered surface | Adapter contracts done; `resolve*` is the ready seam. Next consumer = the per-deployable adapter-selection feature (below), not standalone wiring |
+| **Lifecycle Phase 1** (#722) — kind-tagged `create`/`destroy` + `creates`/`destroys`/`canonical*` IR; `urlStyle:`/`routeSlug` pinned **D-URLSTYLE** (`lifecycle-url-style.md`) | Phase 1B foundation landed; remaining lifecycle/forms phases carry over |
+| **Criterion core** — declaration + body validation + compile-time inline into every bool position; **filter-capability targeting** on Hono/Drizzle (#760) + Phoenix/Ash (#762) | `criterion.md` core shipped; reified/retrieval deferred tail per its doc |
+| **Aggregate inheritance I1** — abstract aggregates + `inheritanceUsing(…)` surface/IR/validators (no emission); `contains` on a TPH concrete (#768) | Track I started; I2/I3/I4 emission carry over |
+| **Database seeding** — Phase 1 surface→IR→lowering (#803) + all three emitters: Drizzle (#804), EF (#805), Ash (#806) + CI gates (#808) + **D-SEED-PATH**/**D-SEED-IDEMPOTENCY**/**D-SEED-XREF** | `database-seeding.md` mostly shipped; ship-once marker + imperative body carry over |
+| **Platform realization axes** — `platform:` decomposed into `transport`/`foundation`/`style`/`layout`/`persistence` (**D-REALIZATION-AXES**, phases 1–5a #809, 5b real hono/node + .NET `byFeature` #825/#830); `node` is the platform, `hono` a `transport:` value (**D-NODE-PLATFORM**); **D-PHOENIX-SURFACE** decomposed + `platform: phoenix` migration (#831) | Supersedes the framework-version-axis framing of `platform-directory-layout.md` for the realization knobs |
+| **RFC 7807 `errors[]`** (`validation-error-extension.md`) — Hono (#782) + .NET (#829) emit per-field `errors[]` on 422; **frontend-acl** Phases 1+2 (#769) decoder consumes it | Phoenix `errors[]` + the `exception-less` language surface carry over |
+| **extern-component Tier 1 (React)** (#802) — `component … extern` typed leaf | `extern-component-escape-hatch.md` Tier 1 shipped; Tier 2 (`action`) + LiveView carry over |
+| **channels Slice 1** (#797) — `channel`/`channelSource` surface → `ChannelIR`/`ChannelSourceIR` | `channels.md` realtime wire + caching carry over |
+| **retrieval** (#794 surface+IR+lowering; #810 .NET `Run<Name>Async` + workflow `foreach`) | `retrieval.md` Hono/Phoenix emission + `loads` plan carry over |
 
 Per-proposal state on `origin/main`:
 
@@ -46,6 +59,11 @@ Per-proposal state on `origin/main`:
 | `audit-and-logging.md` | PARTIAL — `audited` boolean lands; Hono emits load→mutate→save→audit | Promote to `audited(actions \| access \| events \| off)`; `AuditRecord` shape; before/after snapshots; .NET Mediator behaviour; access-audit query pipeline |
 | `sensitivity-and-compliance.md` | PARTIAL — phases 1 + 2-lite shipped | Phase 2 full (`authorized(<tag>,…)`); Phase 3 (`mask:` DTOs + React); Phase 4 (sink-call classification) |
 | `storage-and-platform-config.md` | PARTIAL — top-level `storage` + `dataSource` + role-keyed slots + the persistence/style/layout **adapter taxonomy** (F3–F7) exist; adapters live on the `PlatformSurface` (D-ADAPTER-HOME) | **Next gated step: per-deployable `persistence:` / `style:` / `layout:` selection** — grammar + `DeployableIR` fields → system orchestrator resolves via `resolve-adapters.ts` + validator capability-checks (`supports`, `supportedLayouts`). This is what *consumes* `resolve*`; build when there's a pull for a non-default adapter. Plus `STORAGE_CAPABILITIES` matrix; per-aggregate `for:` deferred to v2 (D-GRANULARITY) |
+| `criterion.md` | PARTIAL — core (declaration + validation + compile-time inline) + filter-capability targeting on all SQL backends | reified/retrieval/`from`/`when`/auto-`can-<op>`/`private workflow` deferred tail |
+| `lifecycle-operations.md` | PARTIAL — Phase 1 (kind-tagged `create`/`destroy` IR, #722) + D-URLSTYLE | Phase 2+ action surface + `urlStyle:`/`routeSlug` slice |
+| `aggregate-inheritance.md` | PARTIAL — I1 (surface + IR + validators, no emission) | I2 (TPH emit), I3 (TPC emit), I4 (override + TPT docs) |
+| `database-seeding.md` | PARTIAL — Phase 1 + all three backend emitters + CI gates | ship-once `__loom_seed` marker + compose wiring, imperative body, per-row upsert |
+| `frontend-acl.md` | PARTIAL — Phases 1+2 (#769): `applyServerErrors` + `StrictFieldMap` in every React project | schema restructure + per-action FieldMap + `option`-field rendering |
 | Everything else in scope | NOT STARTED | Full per each doc's internal phasing |
 
 ## New proposals on main
@@ -59,6 +77,30 @@ Per-proposal state on `origin/main`:
 | `workflow-and-applier.md` | Ash-style `create` actions, applier separation, sagas deferred | None | TBD per proposal phasing |
 | `platform-directory-layout.md` | Framework-version axis for backend code. **Option A rejected (D-BACKEND-PKG)**; backend layout follows the packaging-split (per-version packages); hono hoist stays as package-staging | packaging-split lands; gated on F-series + `node` rename | per backend, after F-series |
 | `per-package-output-tree.md` | Per-layer **output** packages ("Loom as ORM"). Output-side twin of packaging-split; expressible as a `LayoutAdapter` | playground workspace support | deferred — large one-time bill |
+
+## Newer corpus (postdates this plan's topological scope)
+
+These proposals were authored **after** this plan's in-scope set was
+frozen and are **not yet woven into the topological order** above. Their
+shipped/partial state is already reflected in the audit tables; full
+per-doc status lives in the refreshed [`README.md`](./README.md). They
+are listed here so the plan's audit is complete, not because they have
+been sequenced.
+
+| Proposal | State on main | Sequencing note |
+|---|---|---|
+| `platform-realization-axes.md` | PARTIAL (phases 1–5b) — see Major landings | Pinned D-REALIZATION-AXES; supersedes the realization-knob framing of `platform-directory-layout.md` |
+| `validation-error-extension.md` | PARTIAL (Hono + .NET) | Decoupled wire-format slice of `exception-less.md`; Phoenix tail remains |
+| `channels.md` | PARTIAL (Slice 1) | Fills the async-messaging/caching gap; realtime + Part II caching unsequenced |
+| `retrieval.md` | PARTIAL (surface+IR; .NET emit) | Graduates the `reified-criteria` seam; rides after the criterion family |
+| `database-seeding.md` | PARTIAL (Phase 1 + 3 emitters) | Mirrors the migrations pipeline; near-complete |
+| `extern-component-escape-hatch.md` | PARTIAL (Tier 1, React, #802) | Open-library seam; Tier 2 / LiveView deferred |
+| `extern-function-hook-escape-hatch.md` | PROPOSED | Logic twin of the component hatch; staged after it |
+| `reified-criteria.md` / `criterion-everywhere.md` | PROPOSED / SUPERSEDED-mechanism | The Specification-object reframe of criterion selectability |
+| `render-expr-target-unification.md` | PROPOSED (one slice #793) | Pinned to ride the exception-less A4 PR |
+| `resource-model-and-source-types.md` + `workflow-resource-consumption.md` | PROPOSED | Generalises the data layer (object stores / queues / external APIs) |
+| `bounded-context-model.md`, `embedded-frontend-composition.md`, `elixir-ecto-and-api-only-backends.md`, `document-and-json-hierarchies.md` | PROPOSED / PARTIAL | Structural / backend-matrix reframes; coordinate with storage + realization axes |
+| `multi-target-proxy.md`, `deployable-networking.md`, `kubernetes-helm.md`, `terraform-iac-target.md`, `java-backend.md` | PROPOSED / DEFERRED | Deployment, networking, and backend-matrix follow-ons |
 
 ## In scope
 

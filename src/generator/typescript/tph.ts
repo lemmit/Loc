@@ -72,6 +72,26 @@ export function tphConcretesOf(base: AggregateIR, pool: AggPool): AggregateIR[] 
   return pool.filter((a) => a.extendsAggregate === base.name && isTphConcrete(a, pool));
 }
 
+/** True when `agg` is an abstract base whose hierarchy uses TPC (`ownTable`):
+ *  no base table, each concrete a standalone table.  It owns no storage, but
+ *  is the read home for the polymorphic `find all <Base>` reader (which
+ *  delegates to the concrete repositories). */
+export function isTpcBase(agg: AggregateIR, pool: AggPool): boolean {
+  return !!agg.isAbstract && effectiveLayout(agg, pool) === "ownTable";
+}
+
+/** True when `agg` is a concrete subtype of a TPC (`ownTable`) base — a
+ *  standalone table carrying the merged base fields. */
+export function isTpcConcrete(agg: AggregateIR, pool: AggPool): boolean {
+  const base = baseOf(agg, pool);
+  return !!base?.isAbstract && !agg.isAbstract && effectiveLayout(agg, pool) === "ownTable";
+}
+
+/** The concrete subtypes of a TPC base, in declaration order. */
+export function tpcConcretesOf(base: AggregateIR, pool: AggPool): AggregateIR[] {
+  return pool.filter((a) => a.extendsAggregate === base.name && isTpcConcrete(a, pool));
+}
+
 /** A TPH concrete's OWN fields — its declared fields minus the base fields
  *  the enrichment pass merged in (matched by name). */
 export function ownFieldsOf(concrete: AggregateIR, base: AggregateIR): FieldIR[] {

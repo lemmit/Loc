@@ -1,3 +1,4 @@
+import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -8,8 +9,8 @@ import type {
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
-import { csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
-import { renderCsStatements } from "../render-stmt.js";
+import { collectCsExprUsings, csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
+import { collectCsStmtUsings, renderCsStatements } from "../render-stmt.js";
 
 /** True for a field type that is a collection of references
  * (`Id<T>[]`) — persisted via a join table, not a column. */
@@ -35,6 +36,16 @@ function isRefCollection(t: TypeIR): boolean {
 // project's assembly (handlers ship in the same csproj).
 // ---------------------------------------------------------------------------
 
+/** Identifies the abstract TPC base a concrete aggregate `extends`, so the
+ *  concrete declares `: <Base>` and leaves the base's fields to the inherited
+ *  declarations (see `renderAbstractBaseEntity`).  `fieldNames` is the set of
+ *  base-declared field names the concrete must NOT re-declare (re-declaring
+ *  would trip CS0108 hidden-member → fatal under `/warnaserror`). */
+export interface SuperTypeInfo {
+  readonly name: string;
+  readonly fieldNames: ReadonlySet<string>;
+}
+
 export function renderEntity(
   entity: EnrichedAggregateIR | EnrichedEntityPartIR,
   isRoot: boolean,
@@ -46,6 +57,11 @@ export function renderEntity(
    *  `FromSnapshot(...)` mapping methods the JSONB repository serialises
    *  through.  Additive — byte-identical output when false. */
   document = false,
+  /** Present when this aggregate is a concrete TPC subtype (`extends` an
+   *  abstract `ownTable` base): the class declares `: <Base>` and inherits the
+   *  base fields rather than re-declaring them.  Undefined ⇒ byte-identical
+   *  with the standalone-aggregate output. */
+  superType?: SuperTypeInfo,
 ): string {
   // `operations` is the discriminator between EnrichedAggregateIR and
   // EnrichedEntityPartIR — wrapped in a type predicate so the union
@@ -53,18 +69,29 @@ export function renderEntity(
   const isAgg = (e: typeof entity): e is EnrichedAggregateIR => "operations" in e;
   const idValueType = isAgg(entity) ? entity.idValueType : "guid";
   const operations = isAgg(entity) ? entity.operations : [];
-  const requiredFields = entity.fields.filter((f) => !f.optional);
+  // Public `Create(...)` factory params — the create-input set
+  // (`forCreateInput`, incl. optionals), matching the CreateCommand/handler
+  // call order + wire DTO, so `Agg.Create(cmd.Field, ...)` binds
+  // positionally.  Every constructible aggregate's create is parameterized
+  // by this set; there is no parameterless form.
+  const createInputFieldList = isAgg(entity) ? forCreateInput(entity.fields) : [];
   const hasExtern = operations.some((o) => o.extern);
   const setterVisibility = hasExtern ? "internal" : "private";
-  // Threaded through every render call below.  Renderers add the
-  // non-implicit namespaces they reach into (`System.Text.RegularExpressions`
-  // when an invariant uses `email.matches(...)`); on file assembly the
-  // accumulated set becomes one `using <ns>;` per entry, so the file
-  // imports only what its own expressions actually use.
+  // Non-implicit namespaces this entity's rendered expressions reach
+  // into (`System.Text.RegularExpressions` when an invariant uses
+  // `email.matches(...)`), collected over the same derived / function /
+  // invariant / operation bodies rendered below so the file imports
+  // only what its own expressions actually use.
   const usings = new Set<string>();
+  for (const d of entity.derived) collectCsExprUsings(d.expr, usings);
+  for (const fn of entity.functions) collectCsExprUsings(fn.body, usings);
+  for (const inv of entity.invariants) {
+    collectCsExprUsings(inv.expr, usings);
+    if (inv.guard) collectCsExprUsings(inv.guard, usings);
+  }
+  for (const op of operations) collectCsStmtUsings(op.statements, usings);
   const renderCtx = {
     thisName: "this",
-    usings,
     // Threaded through so render-stmt's collection-mutation path can
     // distinguish ref-collection fields (writable public `Party`)
     // from containment fields (private `_lines` backing).  Entity
@@ -79,6 +106,12 @@ export function renderEntity(
     propLines.push(`    public ${rootName}Id ParentId { get; ${setterVisibility} set; }`);
   }
   for (const f of entity.fields) {
+    // A concrete TPC subtype inherits its base fields from the abstract base
+    // class (renderAbstractBaseEntity declares them).  Re-declaring here would
+    // shadow the inherited member (CS0108, fatal under /warnaserror), so skip
+    // them — the State/ctor/_Create/factory below still set them via the
+    // inherited (internal-set) accessors.
+    if (superType?.fieldNames.has(f.name)) continue;
     const def = f.optional ? " = default;" : " = default!;";
     // Reference-collection (`Id<T>[]`) fields are persisted via a
     // separate join table; the repository (in the Infrastructure
@@ -275,21 +308,29 @@ export function renderEntity(
   createInternalLines.push("        return e;");
   createInternalLines.push("    }");
 
-  const createPublicLines = isRoot
-    ? [
-        `    public static ${entity.name} Create(${requiredFields
-          .map((f) => `${renderCsType(f.type)} ${f.name}`)
-          .join(", ")})`,
-        "    {",
-        `        var e = new ${entity.name}();`,
-        `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
-        ...requiredFields.map((f) => `        e.${upperFirst(f.name)} = ${f.name};`),
-        // Public Create factory — same "<init>" label as the hydration path.
-        emitTrace ? `        e.AssertInvariants("<init>");` : "        e.AssertInvariants();",
-        "        return e;",
-        "    }",
-      ]
-    : [];
+  // Public `Create(...)` factory gated on constructibility — a
+  // non-constructible aggregate exposes no public factory; it is
+  // reconstructed only via `_Create` (hydration).  Assigns each create-input
+  // field from its positional param.
+  const createAssignments = createInputFieldList.map(
+    (f) => `        e.${upperFirst(f.name)} = ${f.name};`,
+  );
+  const createPublicLines =
+    isRoot && isAgg(entity) && hasCreate(entity)
+      ? [
+          `    public static ${entity.name} Create(${createInputFieldList
+            .map((f) => `${renderCsType(f.type)} ${f.name}`)
+            .join(", ")})`,
+          "    {",
+          `        var e = new ${entity.name}();`,
+          `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
+          ...createAssignments,
+          // Public Create factory — same "<init>" label as the hydration path.
+          emitTrace ? `        e.AssertInvariants("<init>");` : "        e.AssertInvariants();",
+          "        return e;",
+          "    }",
+        ]
+      : [];
 
   // Document-shape (shape(document)) round-trip mapping.  Emitted
   // ONLY for entities inside a document aggregate.  Both methods live
@@ -364,10 +405,13 @@ export function renderEntity(
       `using ${ns}.Domain.Enums;`,
       `using ${ns}.Domain.Common;`,
       anyOpUsesCurrentUser ? `using ${ns}.Auth;` : null,
+      // A concrete TPC subtype lives in its own `Domain.<Plural>` namespace
+      // and inherits the abstract base from `Domain.<BasePlural>`.
+      superType ? `using ${ns}.Domain.${plural(superType.name)};` : null,
       "",
       `namespace ${ns}.Domain.${plural(rootName)};`,
       "",
-      `public sealed class ${entity.name}`,
+      `public sealed class ${entity.name}${superType ? ` : ${superType.name}` : ""}`,
       "{",
       ...propLines,
       ...eventBlock,
@@ -390,6 +434,57 @@ export function renderEntity(
       ...createInternalLines,
       ...createPublicLines,
       ...(snapshotLines.length > 0 ? ["", ...snapshotLines] : []),
+      "}",
+    ) + "\n"
+  );
+}
+
+/** The abstract TPC base class (aggregate-inheritance.md, `ownTable`).
+ *
+ *  An abstract `ownTable` base has no table and is never instantiated; each
+ *  concrete subtype is a standalone EF entity carrying the merged base + own
+ *  fields.  This emits the shared C# base the concretes inherit so the
+ *  polymorphic reader can return `IReadOnlyList<<Base>>`.  It declares the
+ *  base's fields with `internal set` accessors (the concrete's hydration —
+ *  ctor / `_Create` / `Create` — assigns them across the same assembly) plus
+ *  any base-declared `derived` getters.
+ *
+ *  Identity stays per-concrete (each concrete keeps its own strongly-typed
+ *  `<Concrete>Id`), so the base declares no `Id`; EF maps each concrete
+ *  standalone via `modelBuilder.Ignore<<Base>>()` (the base is excluded from
+ *  the model, its properties flatten onto each concrete's own table). */
+export function renderAbstractBaseEntity(base: EnrichedAggregateIR, ns: string): string {
+  const renderCtx = { thisName: "this", agg: base };
+  const usings = new Set<string>();
+  for (const d of base.derived) collectCsExprUsings(d.expr, usings);
+  const propLines = base.fields.map((f) => {
+    const def = f.optional ? " = default;" : " = default!;";
+    return `    public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; internal set; }${def}`;
+  });
+  const derivedLines = base.derived.map(
+    (d) =>
+      `    public ${renderCsType(d.type)} ${upperFirst(d.name)} => ${renderCsExpr(d.expr, renderCtx)};`,
+  );
+  const extraUsings = [...usings].sort().map((n) => `using ${n};`);
+  return (
+    lines(
+      "// Auto-generated.",
+      "using System;",
+      "using System.Collections.Generic;",
+      "using System.Linq;",
+      ...extraUsings,
+      `using ${ns}.Domain.Ids;`,
+      `using ${ns}.Domain.ValueObjects;`,
+      `using ${ns}.Domain.Enums;`,
+      "",
+      `namespace ${ns}.Domain.${plural(base.name)};`,
+      "",
+      `// Abstract TPC base — never instantiated; each concrete subtype is its`,
+      `// own EF entity/table.  Excluded from the EF model via Ignore<${base.name}>().`,
+      `public abstract class ${base.name}`,
+      "{",
+      ...propLines,
+      ...(derivedLines.length > 0 ? ["", ...derivedLines] : []),
       "}",
     ) + "\n"
   );

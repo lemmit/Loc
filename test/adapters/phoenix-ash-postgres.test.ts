@@ -34,7 +34,7 @@ system Sys {
   resource ordersState { for: Orders, kind: state, use: primary }
   ui WebApp {}
   deployable webApp {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Orders]
     dataSources: [ordersState]
     ui: WebApp
@@ -46,7 +46,7 @@ system Sys {
 async function buildCtx(): Promise<EmitCtx> {
   const loom = enrichLoomModel(lowerModel(await parseValid(SRC)));
   const sys = loom.systems[0]!;
-  const deployable = sys.deployables.find((d) => d.platform === "phoenixLiveView")!;
+  const deployable = sys.deployables.find((d) => d.platform === "phoenix")!;
   const all: EnrichedBoundedContextIR[] = sys.subdomains.flatMap((s) => s.contexts);
   const contexts = all.filter((c) => deployable.contextNames.includes(c.name));
   return { deployable, contexts, sys, migrations: [] };

@@ -767,9 +767,13 @@ describe(".NET generator", () => {
     const files = generateDotnet(doc.parseResult.value as Model);
 
     // Request DTO uses wire types (Guid for X id, string for datetime).
+    // Required-ness targets the ctor PARAMETER (bare `[Required]`), not the
+    // property — `[property: Required]` on a positional record makes
+    // ASP.NET's record validation throw at model-binding time (500 on every
+    // POST).  Responses keep `[property: Required]`; see dtoParam.
     const req = files.get("Application/Workflows/PlaceOrderRequest.cs")!;
     expect(req).toMatch(
-      /public sealed record PlaceOrderRequest\(\[property: Required\] Guid CustomerId, \[property: Required\] decimal Amount, \[property: Required\] string PlacedAt\)/,
+      /public sealed record PlaceOrderRequest\(\[Required\] Guid CustomerId, \[Required\] decimal Amount, \[Required\] string PlacedAt\)/,
     );
 
     // Command uses domain types (CustomerId, DateTime).
@@ -819,6 +823,40 @@ describe(".NET generator", () => {
       /public async Task<IActionResult> PlaceOrderWorkflow\(\[FromBody\] PlaceOrderRequest request\)/,
     );
     expect(ctrl).toMatch(/new PlaceOrderCommand\(\s*new CustomerId\(request\.CustomerId\)/);
+  });
+
+  it("fills omitted create inputs in a workflow factory-let with their omission values", async () => {
+    // The .NET Create(...) factory takes the full canonical create-input
+    // set as required params (no C# default). A workflow `create` that
+    // names only a subset must still supply every other create input, or
+    // the call fails with CS7036. Each omitted field gets its omission
+    // value: an optional → null, a `= default` → the default literal.
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      context Support {
+        aggregate Ticket {
+          subject: string
+          memo: string?
+          rank: int = 3
+        }
+        repository Tickets for Ticket { }
+        workflow openTicket(subject: string) {
+          let ticket = Ticket.create({ subject: subject })
+        }
+      }
+    `,
+      { validation: true },
+    );
+    const files = generateDotnet(doc.parseResult.value as Model);
+    const handler = files.get("Application/Workflows/OpenTicketHandler.cs")!;
+    // Provided field first, then the omitted optional (null) and the
+    // omitted defaulted field (its literal) — all named, so order-free.
+    expect(handler).toMatch(/Ticket\.Create\(subject: cmd\.Subject/);
+    expect(handler).toMatch(/memo: null/);
+    expect(handler).toMatch(/rank: 3/);
   });
 
   it("emits a transactional workflow with BeginTransactionAsync + Commit + Rollback", async () => {
@@ -1236,6 +1274,24 @@ describe(".NET generator", () => {
     expect(program).toMatch(/c\.DocumentFilter<ListResponseWrapperFilter>\(\)/);
   });
 
+  it("emits a RequiredFromCtorParamFilter that marks request-DTO ctor [Required] params required (#779)", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    // Request DTOs carry parameter-targeted [Required], which Swashbuckle's
+    // DataAnnotations reader ignores; this schema filter restores
+    // request-body required-ness from the ctor params (cross-backend parity).
+    const filter = files.get("Api/RequiredFromCtorParamFilter.cs")!;
+    expect(filter).toMatch(/class RequiredFromCtorParamFilter : ISchemaFilter/);
+    // Reflects the primary ctor's [Required] params and adds the camelCase
+    // property name to schema.Required.
+    expect(filter).toMatch(/GetCustomAttribute<RequiredAttribute>\(\)/);
+    expect(filter).toMatch(/schema\.Required\.Add\(key\)/);
+    expect(filter).toMatch(/JsonNamingPolicy\.CamelCase\.ConvertName/);
+    // Registered as a Swashbuckle schema filter, after the NRT support call.
+    const program = files.get("Program.cs")!;
+    expect(program).toMatch(/c\.SchemaFilter<RequiredFromCtorParamFilter>\(\)/);
+  });
+
   it("DomainExceptionFilter catches unhandled exceptions as sanitized 500", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
@@ -1330,6 +1386,50 @@ describe(".NET generator", () => {
       expect(keys).toContain("Auth/ICurrentUserAccessor.cs");
       expect(keys).toContain("Auth/HttpContextCurrentUserAccessor.cs");
       expect(keys).toContain("Auth/UserMiddleware.cs");
+    });
+
+    // A `requires`-guarded op / workflow denies with ForbiddenException →
+    // 403 at runtime; the controller must DECLARE 403 in [ProducesResponseType].
+    const SRC_GUARDED = `
+      system Acme {
+        user { id: string, role: string }
+        subdomain Sales {
+          context Orders {
+            aggregate Order {
+              customerId: string
+              status: string
+              operation cancel() {
+                requires currentUser.role == "admin"
+                status := "cancelled"
+              }
+              operation touch() {
+                status := "touched"
+              }
+            }
+            repository Orders for Order { }
+            workflow archiveAll() {
+              requires currentUser.role == "admin"
+              let o = Order.create({ customerId: "c", status: "archived" })
+            }
+          }
+        }
+        deployable api { platform: dotnet, contexts: [Orders], port: 8080, auth: required }
+      }
+    `;
+
+    it("declares [ProducesResponseType(ProblemDetails, 403)] on guarded ops/workflows, not unguarded ones", async () => {
+      const files = await emitForAuthSystem(SRC_GUARDED);
+      const ctrl = files.get("Api/OrdersController.cs")!;
+      // The guarded `cancel` action carries 403; the unguarded `touch` does not.
+      const cancelBlock = ctrl.slice(ctrl.indexOf('[HttpPost("{id}/cancel")]'));
+      expect(cancelBlock).toMatch(/\[ProducesResponseType\(typeof\(ProblemDetails\), 403\)\]/);
+      const touchBlock = ctrl
+        .slice(ctrl.indexOf('[HttpPost("{id}/touch")]'))
+        .slice(0, ctrl.slice(ctrl.indexOf('[HttpPost("{id}/touch")]')).indexOf("public async"));
+      expect(touchBlock).not.toMatch(/403/);
+      // The guarded workflow controller also declares 403.
+      const wfCtrl = files.get("Api/OrdersWorkflowsController.cs")!;
+      expect(wfCtrl).toMatch(/\[ProducesResponseType\(typeof\(ProblemDetails\), 403\)\]/);
     });
 
     it("does NOT emit Auth/* files when the deployable has no `auth: required`", async () => {
@@ -1572,11 +1672,23 @@ describe(".NET generator", () => {
       const files = generateDotnet(model);
       const filter = files.get("Api/DomainExceptionFilter.cs")!;
       expect(filter).toMatch(/is FluentValidation\.ValidationException fv/);
-      // Envelope: extends the existing { error, trace_id } shape with a
-      // structured `failures` array.
-      expect(filter).toMatch(/error = "Validation failed"/);
-      expect(filter).toMatch(/failures = fv\.Errors/);
-      expect(filter).toMatch(/new \{ field = e\.PropertyName, message = e\.ErrorMessage \}/);
+      // Envelope: RFC 7807 ProblemDetails with the §3.2 `errors[]`
+      // extension carried on `Extensions["errors"]`, status 422.
+      // Shape matches Hono's defaultHook so the frontend ACL's
+      // `applyServerErrors` works against either backend.  See
+      // docs/proposals/validation-error-extension.md.
+      expect(filter).toMatch(/Title = "Validation failed"/);
+      expect(filter).toMatch(/Status = 422/);
+      expect(filter).toMatch(/problem\.Extensions\["errors"\] = fv\.Errors/);
+      expect(filter).toMatch(
+        /new \{ pointer = PointerOf\(e\.PropertyName\), message = e\.ErrorMessage \}/,
+      );
+      expect(filter).toMatch(/StatusCode = 422/);
+      expect(filter).toMatch(/ContentTypes = \{ "application\/problem\+json" \}/);
+      // The PointerOf helper encodes RFC 6901 JSON pointers — see the
+      // validation-error-extension.test.ts file for the dedicated
+      // assertions on its emitted source.
+      expect(filter).toMatch(/private static string PointerOf\(string propertyName\)/);
     });
 
     it("skips the FluentValidation gate entirely when no aggregate has wire-translatable invariants", async () => {
@@ -1623,6 +1735,7 @@ describe(".NET generator", () => {
               email: string
               derived display: string = email
               invariant email.matches("^[^@]+@.+$")
+              create(email: string) { email := email }
             }
             repository Users for User { }
           }
@@ -1694,6 +1807,7 @@ describe(".NET generator", () => {
               fromTime: int
               toTime:   int
               invariant fromTime < toTime
+              create(fromTime: int, toTime: int) { fromTime := fromTime  toTime := toTime }
             }
             repository Reservations for Reservation { }
           }

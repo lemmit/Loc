@@ -49,7 +49,7 @@ const BANK_THREE_BACKEND = `
     }
     deployable honoApi { platform: hono, contexts: [Banking], port: 3000 }
     deployable dotnetApi { platform: dotnet, contexts: [Banking], port: 3001 }
-    deployable elixirApi { platform: phoenixLiveView, contexts: [Banking], port: 4000 }
+    deployable elixirApi { platform: phoenix, contexts: [Banking], port: 4000 }
     deployable marketingApi { platform: hono, contexts: [Promo], port: 3010 }
     ui WebUi { with scaffold(subdomains: [Accounts]) }
     deployable webApp { platform: static, targets: honoApi, ui: WebUi, port: 8080 }

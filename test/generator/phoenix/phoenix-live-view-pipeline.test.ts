@@ -56,7 +56,7 @@ const FIXTURE_SOURCE = `system MiniLiveView {
   }
 
   deployable phoenixApp {
-    platform: phoenixLiveView,
+    platform: phoenix,
     contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,
@@ -296,7 +296,7 @@ describe("phoenixLiveView pipeline", () => {
     expect(core).toMatch(/def hide_modal\(js \\\\ %JS\{\}, id\)/);
   });
 
-  it("rejects a phoenixLiveView deployable that declares targets:", async () => {
+  it("rejects a phoenix deployable that declares targets:", async () => {
     // A standalone fixture (not a string-replace splice — easier to
     // verify the source by eye).  phoenixApp wrongly declares
     // targets: peer; should fail the "no targets on a fullstack"
@@ -316,7 +316,7 @@ describe("phoenixLiveView pipeline", () => {
     contexts: [Sales]
   }
   deployable phoenixApp {
-    platform: phoenixLiveView,
+    platform: phoenix,
     contexts: [Sales],
     targets: peer,
     serves: SalesApi,
@@ -366,7 +366,7 @@ describe("phoenixLiveView pipeline", () => {
     expect(parsed.lastVersion).toBe("20260101000000");
   });
 
-  it("rejects platform: phoenixLiveView paired with framework: react", async () => {
+  it("rejects platform: phoenix paired with framework: react", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pliv-fw-"));
     const file = path.join(dir, "fw.ddd");
     fs.writeFileSync(
@@ -385,9 +385,7 @@ describe("phoenixLiveView pipeline", () => {
     });
     const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
     expect(
-      errors.some((e) =>
-        /Framework 'react' does not match platform 'phoenixLiveView'/.test(e.message),
-      ),
+      errors.some((e) => /Framework 'react' does not match platform 'phoenix'/.test(e.message)),
     ).toBe(true);
   });
 });
@@ -632,11 +630,13 @@ describe("emitApiControllers (api-emit unit)", () => {
     expect(ctrl).not.toMatch(/TODO|FIXME|HACK/);
     expect(ctrl).toMatch(/Plug\.RequestId/);
     expect(ctrl).toMatch(/x-request-id/);
-    expect(ctrl).toMatch(/get_resp_header\(conn, "x-request-id"\)/);
-    // RFC 7807 (#706): error_response returns application/problem+json and
-    // puts the trace id on the x-request-id response header (off the body).
-    expect(ctrl).toMatch(/put_resp_content_type\("application\/problem\+json"\)/);
-    expect(ctrl).toMatch(/put_resp_header\("x-request-id", trace_id\)/);
+    // RFC 7807 (#706): error_response now delegates to the shared
+    // PhoenixApp.ProblemDetails module (Phase C of
+    // docs/proposals/validation-error-extension.md), so the
+    // application/problem+json content type + x-request-id header live
+    // there.  The controller side asserts the delegation.
+    expect(ctrl).toMatch(/ProblemDetails\.problem_response/);
+    expect(ctrl).toMatch(/ProblemDetails\.validation_error_response/);
   });
 
   it("does NOT emit workflows_controller.ex when deployable serves nothing", () => {
@@ -953,7 +953,7 @@ describe("router wiring (orchestrator integration)", () => {
     permissions: string[]
   }
   deployable phoenixApp {
-    platform: phoenixLiveView,
+    platform: phoenix,
     contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,
@@ -1048,7 +1048,6 @@ describe.skip("integration (parent wires emitters)", () => {
       components: [],
       scaffolds: [],
       apiParams: [],
-      helperImports: [],
     };
     const src = renderSidebarComponent({ ui, appName: "sales", appModule: "Sales" });
     expect(src).toMatch(/defmodule SalesWeb\.Components\.Sidebar/);
@@ -1123,7 +1122,7 @@ describe.skip("integration (parent wires emitters)", () => {
 //
 // Uses the full `examples/acme.ddd` (has workflows + views + parts +
 // value objects), retargeted by adding a third deployable that picks
-// `platform: phoenixLiveView`.
+// `platform: phoenix`.
 // ---------------------------------------------------------------------------
 
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
@@ -1172,7 +1171,7 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
   api SalesApi from Sales
   ui SalesAdmin with scaffold(subdomains: [Sales]) {}
   deployable phoenixApp {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
@@ -1717,7 +1716,7 @@ const ACME_UI_E2E_SOURCE = `system AcmeUI {
   api SalesApi from Sales
   ui SalesAdmin with scaffold(subdomains: [Sales]) {}
   deployable phoenixApp {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
@@ -1810,7 +1809,7 @@ const FORM_FIXTURE = `system AcmeForm {
   api SalesApi from Sales
   ui SalesAdmin with scaffold(subdomains: [Sales]) {}
   deployable phoenixApp {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
@@ -2660,7 +2659,7 @@ describe("Ash 3.x compile-correctness regressions", () => {
             repository People for Person {}
           }
         }
-        deployable api { platform: phoenixLiveView, contexts: [People], port: 4000 }
+        deployable api { platform: phoenix, contexts: [People], port: 4000 }
       }
     `;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-inspect-redact-"));
@@ -2861,7 +2860,7 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
   }
   api RosterApi from Roster
   ui RosterAdmin with scaffold(subdomains: [Roster]) { }
-  deployable phoenixApp { platform: phoenixLiveView  contexts: [Roster]  serves: RosterApi  ui: RosterAdmin  port: 4000 }
+  deployable phoenixApp { platform: phoenix  contexts: [Roster]  serves: RosterApi  ui: RosterAdmin  port: 4000 }
 }
 `;
 
@@ -3003,7 +3002,7 @@ describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
         api SalesApi from Sales
         ui SalesUi with scaffold(subdomains: [Sales]) { }
         deployable phoenixApp {
-          platform: phoenixLiveView
+          platform: phoenix
           contexts: [Sales]
           serves: SalesApi
           ui: SalesUi
@@ -3057,7 +3056,7 @@ describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
         api SalesApi from Sales
         ui SalesUi with scaffold(subdomains: [Sales]) { }
         deployable phoenixApp {
-          platform: phoenixLiveView
+          platform: phoenix
           contexts: [Sales]
           serves: SalesApi
           ui: SalesUi
@@ -3120,7 +3119,7 @@ const WIRE_SOURCE = `system MiniWire {
   }
 
   deployable phoenixApp {
-    platform: phoenixLiveView,
+    platform: phoenix,
     contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,
@@ -3210,15 +3209,26 @@ describe("phoenix wire-surface parity (#716)", () => {
     expect(spec).not.toMatch(/404 => %OpenApiSpex\.Response\{description: "Not found"\}/);
   });
 
-  it("controller error_response returns application/problem+json", async () => {
+  it("controller error_response returns application/problem+json via shared module", async () => {
     const files = await wireFiles();
-    // Orders has no workflow; assert on whichever controller carries the
-    // shared error_response helper (workflows) — fall back to any controller.
+    // RFC 7807 emission now lives in the shared responder at
+    // lib/<app>_web/problem_details.ex (Phase C — Phoenix portion of
+    // docs/proposals/validation-error-extension.md).  Distinct from
+    // the OpenAPI schema MODULE at lib/<app>_web/api/schemas/problem_details.ex
+    // (which defines an OpenApiSpex schema).  Pick the one NOT under
+    // api/schemas/ — that's the helper module the controller delegates to.
+    const helper = [...files.entries()].find(
+      ([k]) => k.endsWith("/problem_details.ex") && !k.includes("/api/schemas/"),
+    )?.[1];
+    expect(helper, "expected lib/<app>_web/problem_details.ex helper to be emitted").toBeDefined();
+    expect(helper!).toMatch(/put_resp_content_type\("application\/problem\+json"\)/);
+    expect(helper!).toMatch(/put_resp_header\("x-request-id", trace_id\)/);
+    // The workflows controller delegates to the shared helper.
     const ctrl = [...files.entries()].find(
       ([k, v]) => k.endsWith("_controller.ex") && v.includes("error_response"),
     )?.[1];
     if (ctrl) {
-      expect(ctrl).toMatch(/put_resp_content_type\("application\/problem\+json"\)/);
+      expect(ctrl).toMatch(/ProblemDetails\.(problem_response|validation_error_response)/);
     }
   });
 });
@@ -3282,5 +3292,16 @@ describe("authorization — requires guards emit Ash policies (403)", () => {
   it("mix.exs declares a SAT solver so Ash policies can solve at runtime", () => {
     const mix = files.get("phoenix_api/mix.exs")!;
     expect(mix).toMatch(/:simple_sat/);
+  });
+
+  it("the OpenAPI spec declares 403 on guarded ops + workflows (matches Hono/.NET)", () => {
+    const spec = files.get("phoenix_api/lib/phoenix_api_web/api/projects_api_spec.ex")!;
+    // showcase guards Project.rename / archive / promote + the
+    // registerProject / promoteToProduction workflows — five 403 responses,
+    // each ProblemDetails under application/problem+json.
+    expect(spec).toMatch(
+      /403 => %OpenApiSpex\.Response\{[\s\S]*?"application\/problem\+json"[\s\S]*?Schemas\.ProblemDetails/,
+    );
+    expect((spec.match(/403 => %OpenApiSpex\.Response\{/g) ?? []).length).toBe(5);
   });
 });

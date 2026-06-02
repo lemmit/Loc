@@ -24,8 +24,8 @@ function actionName(tokens: OpIdTokens): string {
  *  responses for an operation kind (from the shared matrix).  A Swashbuckle
  *  operation filter (see Program.cs) rewrites their content-type to
  *  `application/problem+json` so the emitted spec matches Hono/Phoenix. */
-function producesProblem(kind: OpErrorKind, indent = "    "): string[] {
-  return errorStatuses(kind).map(
+function producesProblem(kind: OpErrorKind, guarded = false, indent = "    "): string[] {
+  return errorStatuses(kind, guarded).map(
     (s) => `${indent}[ProducesResponseType(typeof(ProblemDetails), ${s})]`,
   );
 }
@@ -43,10 +43,22 @@ function producesProblem(kind: OpErrorKind, indent = "    "): string[] {
 interface ControllerShape {
   idClrType: string;
   createCmdArgs: string[];
+  /** When true, the aggregate has a canonical `create` — emit a
+   *  `POST /` action dispatching `Create<Agg>Command`.  A non-constructible
+   *  aggregate (no explicit/`crudish` create) emits no create action,
+   *  request DTO, command, or response. */
+  createAction?: boolean;
   /** When true, the aggregate has a canonical `destroy` — emit a
    *  `DELETE /{id}` action dispatching `Destroy<Agg>Command`. */
   destroyAction?: boolean;
-  publicOps: Array<{ name: string; routeSlug?: string; cmdArgs: string[]; paramNames: string[] }>;
+  publicOps: Array<{
+    name: string;
+    routeSlug?: string;
+    cmdArgs: string[];
+    paramNames: string[];
+    /** Has a `requires` guard → declares 403 (authorization denied). */
+    guarded: boolean;
+  }>;
   finds: Array<{
     name: string;
     isRoot: boolean;
@@ -121,7 +133,7 @@ export function renderController(
       // [ProducesResponseType] is present, Swashbuckle stops inferring the
       // 2xx body from the action signature, so it must be spelled out.
       "    [ProducesResponseType(204)]",
-      ...producesProblem("operation"),
+      ...producesProblem("operation", op.guarded),
       `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}${agg.name}Request request)`,
       "    {",
       ...wireInLine,
@@ -212,26 +224,32 @@ export function renderController(
       `    private readonly ILogger<${className}> _log;`,
       `    public ${className}(IMediator mediator, ILogger<${className}> log) { _mediator = mediator; _log = log; }`,
       "",
-      "    [HttpPost]",
-      `    [ProducesResponseType(typeof(Create${agg.name}Response), 201)]`,
-      ...producesProblem("create"),
-      `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
-      "    {",
-      `        var cmd = new Create${agg.name}Command(`,
-      ...createBody,
-      "        );",
-      "        var id = await _mediator.Send(cmd);",
-      // aggregate_created — business narrative, after the Mediator
-      // command's Send resolves with the new id.  Mirrors the Hono
-      // emission so cross-backend log consumers see the same event +
-      // fields ({Aggregate}, {Id}).
-      `        ${renderDotnetLogCall("aggregateCreated", [
-        { name: "aggregate", valueExpr: `"${agg.name}"` },
-        { name: "id", valueExpr: "id.Value" },
-      ])}`,
-      `        return CreatedAtAction(nameof(${actionName(opGetById(agg.name))}), new { id = id.Value }, new Create${agg.name}Response(id.Value));`,
-      "    }",
-      "",
+      // Create — POST / (gated on a canonical create; non-constructible
+      // aggregates emit no create action/command/DTO/response).
+      ...(shape.createAction !== false
+        ? [
+            "    [HttpPost]",
+            `    [ProducesResponseType(typeof(Create${agg.name}Response), 201)]`,
+            ...producesProblem("create"),
+            `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
+            "    {",
+            `        var cmd = new Create${agg.name}Command(`,
+            ...createBody,
+            "        );",
+            "        var id = await _mediator.Send(cmd);",
+            // aggregate_created — business narrative, after the Mediator
+            // command's Send resolves with the new id.  Mirrors the Hono
+            // emission so cross-backend log consumers see the same event +
+            // fields ({Aggregate}, {Id}).
+            `        ${renderDotnetLogCall("aggregateCreated", [
+              { name: "aggregate", valueExpr: `"${agg.name}"` },
+              { name: "id", valueExpr: "id.Value" },
+            ])}`,
+            `        return CreatedAtAction(nameof(${actionName(opGetById(agg.name))}), new { id = id.Value }, new Create${agg.name}Response(id.Value));`,
+            "    }",
+            "",
+          ]
+        : []),
       '    [HttpGet("{id}")]',
       `    [ProducesResponseType(typeof(${agg.name}Response), 200)]`,
       ...producesProblem("getById"),
@@ -287,7 +305,7 @@ export function renderExceptionFilter(ns: string, options?: { usesValidators?: b
   // Confined to this file — adding `System.Diagnostics` project-wide
   // would expose `Activity` (a common DDD entity name) to every
   // generated source file.
-  return `// Auto-generated.${usesValidators ? "\nusing System.Linq;" : ""}
+  return `// Auto-generated.${usesValidators ? "\nusing System.Collections.Generic;\nusing System.Linq;\nusing System.Text.Json;" : ""}
 using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -322,22 +340,34 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         var trace_id = Activity.Current?.TraceId.ToString() ?? "";${
           usesValidators
             ? `
-        // FluentValidation arm — runs FIRST because
-        // validation failures are the most common 400 cause.  The
-        // envelope extends the existing { error, trace_id } shape
-        // with a structured \`failures\` array carrying field +
-        // message per FluentValidation issue, so frontends can
-        // surface field-level errors next to the right input.
+        // FluentValidation arm — runs FIRST because validation
+        // failures are the most common 4xx cause.  Emits an RFC 7807
+        // ProblemDetails with the §3.2 \`errors[]\` extension carried
+        // on \`Extensions["errors"]\`, status 422 (Unprocessable
+        // Entity, the standard for input-shape errors).  Shape matches
+        // Hono's defaultHook output byte-for-byte so the frontend
+        // ACL's \`applyServerErrors\` works against either backend.
+        // See docs/proposals/validation-error-extension.md and
+        // docs/proposals/frontend-acl.md.
         if (context.Exception is FluentValidation.ValidationException fv)
         {
-            context.Result = new BadRequestObjectResult(new
+            var problem = new ProblemDetails
             {
-                error = "Validation failed",
-                trace_id,
-                failures = fv.Errors
-                    .Select(e => new { field = e.PropertyName, message = e.ErrorMessage })
-                    .ToArray(),
-            });
+                Type = "about:blank",
+                Title = "Validation failed",
+                Status = 422,
+                Detail = "One or more fields are invalid.",
+                Instance = context.HttpContext.Request.Path,
+            };
+            problem.Extensions["errors"] = fv.Errors
+                .Select(e => new { pointer = PointerOf(e.PropertyName), message = e.ErrorMessage })
+                .ToArray();
+            context.HttpContext.Response.Headers["x-request-id"] = trace_id;
+            context.Result = new ObjectResult(problem)
+            {
+                StatusCode = 422,
+                ContentTypes = { "application/problem+json" },
+            };
             context.ExceptionHandled = true;
             return;
         }`
@@ -408,6 +438,45 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             StatusCode = status,
             ContentTypes = { "application/problem+json" },
         };
+    }${
+      usesValidators
+        ? `
+
+    // Convert a FluentValidation property path to an RFC 6901 JSON
+    // pointer matching the wire shape the frontend ACL expects.  The
+    // app's JSON output uses JsonNamingPolicy.CamelCase, so each
+    // PascalCase segment is camel-cased; array indexer notation
+    // (\`Items[0].Qty\`) becomes a numeric segment (\`/items/0/qty\`).
+    // RFC 6901 escapes apply inside each segment (\`~\` → \`~0\`,
+    // \`/\` → \`~1\`).  Empty input → empty pointer (the whole document).
+    private static string PointerOf(string propertyName)
+    {
+        if (string.IsNullOrEmpty(propertyName)) return "";
+        var segments = new List<string>();
+        foreach (var dotPart in propertyName.Split('.'))
+        {
+            var idx = 0;
+            while (idx < dotPart.Length)
+            {
+                var bracket = dotPart.IndexOf('[', idx);
+                if (bracket < 0)
+                {
+                    segments.Add(JsonNamingPolicy.CamelCase.ConvertName(dotPart.Substring(idx)));
+                    break;
+                }
+                if (bracket > idx)
+                {
+                    segments.Add(JsonNamingPolicy.CamelCase.ConvertName(dotPart.Substring(idx, bracket - idx)));
+                }
+                var close = dotPart.IndexOf(']', bracket);
+                if (close < 0) break;
+                segments.Add(dotPart.Substring(bracket + 1, close - bracket - 1));
+                idx = close + 1;
+            }
+        }
+        return "/" + string.Join("/", segments.ConvertAll(s => s.Replace("~", "~0").Replace("/", "~1")));
+    }`
+        : ""
     }
 }
 `;
@@ -421,7 +490,9 @@ public sealed class DomainExceptionFilter : IExceptionFilter
  *  emitted spec's error contract matches Hono / Phoenix (RFC 7807). */
 export function renderProblemDetailsFilter(ns: string): string {
   return `// Auto-generated.
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
@@ -432,6 +503,7 @@ public sealed class ProblemDetailsResponsesFilter : IOperationFilter
     public void Apply(OpenApiOperation operation, OperationFilterContext context)
     {
         var schema = context.SchemaGenerator.GenerateSchema(typeof(ProblemDetails), context.SchemaRepository);
+        AugmentProblemDetailsSchema(context.SchemaRepository);
         foreach (var (code, response) in operation.Responses)
         {
             if (code.Length == 3 && (code[0] == '4' || code[0] == '5'))
@@ -440,6 +512,35 @@ public sealed class ProblemDetailsResponsesFilter : IOperationFilter
                 response.Content["application/problem+json"] = new OpenApiMediaType { Schema = schema };
             }
         }
+    }
+
+    // Augment the auto-generated Microsoft.AspNetCore.Mvc.ProblemDetails
+    // OpenAPI schema with the RFC 7807 §3.2 \`errors[]\` extension array
+    // (per-field \`{ pointer, message }\`) that the FluentValidation arm
+    // of DomainExceptionFilter emits on 422 validation responses.
+    // Consumed by the frontend ACL's \`applyServerErrors\`.  Idempotent;
+    // safe to run per operation.  See
+    // docs/proposals/validation-error-extension.md (Phase D).
+    private static void AugmentProblemDetailsSchema(SchemaRepository repo)
+    {
+        if (!repo.Schemas.TryGetValue("ProblemDetails", out var problem)) return;
+        if (problem.Properties.ContainsKey("errors")) return;
+
+        problem.Properties["errors"] = new OpenApiSchema
+        {
+            Type = "array",
+            Nullable = true,
+            Items = new OpenApiSchema
+            {
+                Type = "object",
+                Required = new HashSet<string> { "pointer", "message" },
+                Properties = new Dictionary<string, OpenApiSchema>
+                {
+                    ["pointer"] = new OpenApiSchema { Type = "string" },
+                    ["message"] = new OpenApiSchema { Type = "string" },
+                },
+            },
+        };
     }
 }
 `;
@@ -513,6 +614,72 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
                     }
                 }
             }
+        }
+    }
+}
+`;
+}
+
+/** Swashbuckle schema filter — marks request-DTO properties `required` in
+ *  the OpenAPI schema from the constructor-parameter `[Required]`
+ *  attributes.
+ *
+ *  Why this is needed: request DTOs are positional records whose required
+ *  fields carry a PARAMETER-targeted `[Required]` (a PROPERTY-targeted
+ *  `[property: Required]` makes ASP.NET's record validation throw at
+ *  model-binding time — see `dtoParam`).  But Swashbuckle 6.x's
+ *  DataAnnotations reader only honours the PROPERTY-targeted form, so
+ *  parameter-targeted `[Required]` never reaches the request-body schema's
+ *  `required` array — leaving .NET request bodies marked nothing-required
+ *  while Hono/Phoenix mark every non-optional field required.
+ *
+ *  This filter closes that gap by reflecting each schema's CLR type: for a
+ *  positional record, it reads the primary-constructor parameters and adds
+ *  the camelCase property name to `schema.Required` for each parameter that
+ *  carries `[Required]`.  Response DTOs carry `[property: Required]` on the
+ *  property (not the parameter), so they're untouched here and keep
+ *  Swashbuckle's own handling — no double-marking.  Mirrors `dtoParam`'s
+ *  required predicate exactly (a non-nullable `bool` request field has no
+ *  `[Required]`, so it's correctly left optional). */
+export function renderRequiredFromCtorParamFilter(ns: string): string {
+  return `// Auto-generated.
+using System;
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
+using System.Reflection;
+using System.Text.Json;
+using Microsoft.OpenApi.Models;
+using Swashbuckle.AspNetCore.SwaggerGen;
+
+namespace ${ns}.Api;
+
+public sealed class RequiredFromCtorParamFilter : ISchemaFilter
+{
+    public void Apply(OpenApiSchema schema, SchemaFilterContext context)
+    {
+        var type = context.Type;
+        if (schema.Properties is null || schema.Properties.Count == 0) return;
+
+        // Positional records expose their declared fields via the primary
+        // constructor.  Pick the longest constructor (the primary one for a
+        // positional record) and mark each [Required] parameter's property.
+        var ctor = type.GetConstructors()
+            .OrderByDescending(c => c.GetParameters().Length)
+            .FirstOrDefault();
+        if (ctor is null) return;
+
+        foreach (var p in ctor.GetParameters())
+        {
+            if (p.Name is null) continue;
+            if (p.GetCustomAttribute<RequiredAttribute>() is null) continue;
+            // Swashbuckle keys schema properties by the serialized name;
+            // the app uses camelCase (PropertyNamingPolicy.CamelCase), so
+            // match on camelCase first, then fall back to the exact key.
+            var camel = JsonNamingPolicy.CamelCase.ConvertName(p.Name);
+            var key = schema.Properties.ContainsKey(camel)
+                ? camel
+                : (schema.Properties.ContainsKey(p.Name) ? p.Name : null);
+            if (key is not null) schema.Required.Add(key);
         }
     }
 }

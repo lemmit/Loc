@@ -1,3 +1,4 @@
+import type { ExprIR } from "../ir/types/loom-ir.js";
 import type {
   ColumnShape,
   ColumnType,
@@ -6,6 +7,7 @@ import type {
   MigrationStep,
   TableShape,
 } from "../ir/types/migrations-ir.js";
+import { plural, snake } from "../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Postgres SQL renderer shared by the TS/Hono and .NET/EF migration emitters.
@@ -119,4 +121,68 @@ export function renderPgType(t: ColumnType): string {
  *  …) would need double-quoting; no current fixture exercises them. */
 function ident(name: string): string {
   return name;
+}
+
+// ---------------------------------------------------------------------------
+// Seed `raw`-path inserts (database-seeding.md §3.1) — a direct Postgres
+// INSERT for one literal row.  Shared by all three backends' seed emitters
+// (executed via Drizzle `db.execute`, EF `ExecuteSqlRawAsync`, Ecto
+// `Ecto.Adapters.SQL`), so the SQL is bit-identical cross-backend.  The
+// table/column naming mirrors the migration builder (`plural(snake(agg))` /
+// `snake(field)`), so the INSERT targets the schema those migrations create.
+// ---------------------------------------------------------------------------
+
+/** INSERT for one `raw` seed row: explicit `id` + literal FK / scalar / enum
+ *  columns.  Value objects / containment columns are unsupported in v1 (the
+ *  validator reports them before this runs). */
+export function renderSeedRowInsert(
+  aggregate: string,
+  fields: { name: string; value: ExprIR }[],
+): string {
+  const table = qIdent(plural(snake(aggregate)));
+  const cols = fields.map((f) => qIdent(snake(f.name))).join(", ");
+  const vals = fields.map((f) => seedSqlLiteral(f.value)).join(", ");
+  return `INSERT INTO ${table} (${cols}) VALUES (${vals})`;
+}
+
+/** Double-quoted identifier — matches the lowercase tables the migrations
+ *  create and is safe for reserved words (`order`, `user`). */
+function qIdent(name: string): string {
+  return `"${name}"`;
+}
+
+/** An ExprIR seed value as a Postgres SQL literal.  Scalars / enum values /
+ *  id literals only; anything else throws (raw v1 limitation). */
+function seedSqlLiteral(e: ExprIR): string {
+  if (e.kind === "literal") {
+    switch (e.lit) {
+      case "string":
+        return sqlStr(e.value);
+      case "money":
+      case "decimal":
+      case "int":
+      case "long":
+        return e.value;
+      case "bool":
+        return e.value === "true" ? "TRUE" : "FALSE";
+      case "null":
+        return "NULL";
+      case "now":
+        return "now()";
+      default:
+        return sqlStr(e.value);
+    }
+  }
+  // Enum value → its stored text (pgEnum stores the value name).
+  if (e.kind === "ref" && e.refKind === "enum-value") {
+    return sqlStr(e.name);
+  }
+  throw new Error(
+    `raw seed: unsupported column value of kind '${e.kind}' — raw rows admit scalar / enum / id literals only`,
+  );
+}
+
+/** Single-quoted SQL string literal (doubling embedded quotes). */
+function sqlStr(v: string): string {
+  return `'${v.replace(/'/g, "''")}'`;
 }

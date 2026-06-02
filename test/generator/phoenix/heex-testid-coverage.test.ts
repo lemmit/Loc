@@ -47,7 +47,7 @@ const phoenixSystem = (uiBody: string): string => `
       }
     }
     deployable phoenixApp {
-      platform: phoenixLiveView, contexts: [C], serves: DemoApi,
+      platform: phoenix, contexts: [C], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }

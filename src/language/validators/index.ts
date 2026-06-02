@@ -3,6 +3,7 @@
 // can pull them from a single import.
 
 export { checkBuilderCallType, checkLegacyConstructorCalls } from "./builder-call.js";
+export { checkChannels } from "./channel.js";
 export { checkCriteria } from "./criterion.js";
 export { checkDataSource } from "./datasource.js";
 export {
@@ -17,6 +18,7 @@ export { checkInheritance } from "./inheritance.js";
 export { checkMacroExpansion } from "./macros.js";
 export { checkMatchExpressions, checkMatcherArity, checkMatchesCalls } from "./match.js";
 export { checkPayloads } from "./payload.js";
+export { checkSeeds } from "./seed.js";
 export {
   checkAssignOrCall,
   checkCallStmt,
@@ -47,10 +49,10 @@ export {
 } from "./types.js";
 export {
   checkApiBodyRefs,
+  checkComponent,
   checkLayout,
   checkMenuBlock,
   checkPage,
   checkTheme,
   checkUi,
-  checkUiHelperImports,
 } from "./ui.js";

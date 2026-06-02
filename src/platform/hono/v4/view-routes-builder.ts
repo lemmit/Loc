@@ -35,6 +35,7 @@ export function buildViewsRoutesFile(
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
+  lines.push(`import { newApp } from "./problem-details";`);
   lines.push(
     `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
   );
@@ -97,7 +98,10 @@ export function buildViewsRoutesFile(
   lines.push(`  db: NodePgDatabase<typeof schema>,`);
   lines.push(`  events: DomainEventDispatcher,`);
   lines.push(`): OpenAPIHono {`);
-  lines.push(`  const app = new OpenAPIHono();`);
+  // `newApp()` from `./problem-details` pre-wires the validation hook
+  // that maps Zod parse failures (query/path params on view endpoints) to
+  // 422 ProblemDetails with `errors[]`.
+  lines.push(`  const app = newApp();`);
   lines.push("");
 
   for (const view of ctx.views) {

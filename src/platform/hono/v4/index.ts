@@ -34,13 +34,13 @@ import { BACKEND_PINS } from "./pins.js";
  *  it is extracted. */
 export const loomManifest: LoomBackendManifest = {
   kind: "backend",
-  family: "hono",
+  family: "node",
   loomVersion: "v4",
   core: "^1.0.0",
 };
 
 const honoPlatform: PlatformSurface = {
-  name: "hono",
+  name: "node",
   defaultPort: 3000,
   needsDb: true,
   mountsUi: false,
@@ -54,13 +54,23 @@ const honoPlatform: PlatformSurface = {
   // one of these names would compile-error with TS2393 "Duplicate
   // function implementation".
   reservedRepositoryFindNames: new Set(["save", "findById", "getById", "delete"]),
-  emitProject({ contexts, deployable, sys, migrations, emitTrace }): Map<string, string> {
+  emitProject({
+    contexts,
+    deployable,
+    sys,
+    migrations,
+    emitTrace,
+    styleAdapter,
+    layoutAdapter,
+  }): Map<string, string> {
     // The package supplies its own pins to the shared emitter —
-    // edge points package → shared, never the reverse.
+    // edge points package → shared, never the reverse.  The deployable's
+    // resolved style / layout adapters (D-REALIZATION-AXES) are forwarded
+    // straight through into the generator's EmitCtx.
     return generateTypeScriptForContexts(
       contexts,
       BACKEND_PINS,
-      { deployable, sys, migrations },
+      { deployable, sys, migrations, styleAdapter, layoutAdapter },
       { emitTrace },
     );
   },
@@ -86,7 +96,7 @@ const honoPlatform: PlatformSurface = {
         prisma: stubAdapter<PersistenceAdapter>(
           "persistence",
           "prisma",
-          "hono",
+          "node",
           () => Object.keys(menu.persistence),
           {
             name: "prisma",
@@ -100,7 +110,7 @@ const honoPlatform: PlatformSurface = {
       },
       styles: {
         layered: layeredStyleAdapter,
-        cqrs: stubAdapter<StyleAdapter>("style", "cqrs", "hono", () => Object.keys(menu.styles), {
+        cqrs: stubAdapter<StyleAdapter>("style", "cqrs", "node", () => Object.keys(menu.styles), {
           name: "cqrs",
           supportedStrategies: ["state"],
           supportedLayouts: ["byLayer", "byFeature"],
@@ -111,7 +121,7 @@ const honoPlatform: PlatformSurface = {
         byFeature: stubAdapter<LayoutAdapter>(
           "layout",
           "byFeature",
-          "hono",
+          "node",
           () => Object.keys(menu.layouts),
           { name: "byFeature" },
         ),

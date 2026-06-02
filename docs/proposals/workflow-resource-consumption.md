@@ -220,12 +220,14 @@ workflow PlaceOrder(cmd: PlaceOrderCmd) {
   (`enqueue`/`publish`) and `api` (`get`/`post`) on hono, with the per-verb
   interface override (`signedUrl`→`rest`, threaded onto `resourceOp.interface`).
   The s3 adapter gains the presigner dep; rabbitmq emits a cached-channel
-  enqueue/publish; restApi emits fetch get/post. **Known limit:** an inline
-  object literal as a verb arg (`enqueue({ id })`) doesn't parse in workflow
-  statement position yet (a pre-existing grammar gap, not resource-specific) —
-  pass a param/`let`-bound value for now; object-literal args are a separable
-  grammar enhancement.
-- **4c** — `.NET` + Phoenix `ResourceAdapter`s for the same verbs.
+  enqueue/publish; restApi emits fetch get/post. **(Resolved)** the earlier
+  object-literal limitation — `enqueue({ id })` — was a narrow grammar bug:
+  `ObjectFieldInit` keyed on bare `ID`, so a reserved field name like `id`/`kind`
+  failed (`{ foo: x }` worked). Fixed by keying the field on `LooseName` (the
+  soft-keyword set `EmitField`/`ThemeProp` already use), so structured json
+  payloads now parse — no resource-specific change needed.
+- **4c** ✓ — `.NET` (#752) + Phoenix (#754) `ResourceAdapter`s for the same
+  verbs, each verified by its `build-generated-*` CI gate.
 - **4d (optional)** — explicit `uses:` / `requires:` authoring on top of the
   proven implicit derivation.
 

@@ -67,8 +67,3 @@ export function renderApiHookImports(
   }
   return groupedImportLines(byPath, byCodeUnit, srcImportPrefix);
 }
-
-// Helper-import emission (`import { fn } from "../helpers/x"`) moved
-// to `walker/tsx-target.ts:renderHelperImports`.  Walker call sites
-// now delegate to the target through the cross-framework contract
-// at src/generator/_walker/target.ts.

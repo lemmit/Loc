@@ -55,8 +55,6 @@ function contextOf(ctx: EmitCtx, aggName: string): EnrichedBoundedContextIR | un
   return ctx.contexts.find((c) => c.aggregates.some((a) => a.name === aggName));
 }
 
-const splitLines = (s: string): Lines => s.split("\n");
-
 export const ashPostgresPersistenceAdapter: PersistenceAdapter = {
   name: "ashPostgres",
   supportedStrategies: ["state"],

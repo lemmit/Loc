@@ -10,7 +10,7 @@ import { viewUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { dtoParam, projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
-import { renderCsExpr } from "./render-expr.js";
+import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // .NET view emission.
@@ -102,11 +102,16 @@ function renderHandler(
   const queryName = `${upperFirst(view.name)}Query`;
   const handlerName = `${upperFirst(view.name)}Handler`;
   const responseRecord = responseRecordName(view, agg);
-  // Accumulator for non-implicit namespaces touched by bind
-  // expressions (e.g. System.Text.RegularExpressions when a bind
-  // calls `field.matches(...)`).  Each handler file imports only the
-  // namespaces its own binds reach into.
+  // Non-implicit namespaces touched by the bind expressions this
+  // handler renders (e.g. System.Text.RegularExpressions when a bind
+  // calls `field.matches(...)`) — collected over the same binds
+  // projectFullForm renders below, so the file imports only what its
+  // own binds reach into.
   const usings = new Set<string>();
+  for (const f of view.output?.fields ?? []) {
+    const bind = view.output?.binds.find((b) => b.name === f.name);
+    if (bind) collectCsExprUsings(bind.expr, usings);
+  }
   // Auxiliaries — sourceField → mapVarName (`customerId` →
   // `customerById`) — drives DI of foreign repos + bulk loads at
   // handler entry, and rewrites `X id` follow refs in the
@@ -158,7 +163,7 @@ function renderHandler(
     pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
   }
   const projection = view.output
-    ? projectFullForm(view, ctx, pathToMap, usings)
+    ? projectFullForm(view, ctx, pathToMap)
     : projectEntityExpr("d", agg, ctx);
   // Imports.  Shorthand needs the aggregate's Responses namespace;
   // full form needs only the local Views namespace (its row record
@@ -205,11 +210,10 @@ function projectFullForm(
   view: ViewIR,
   ctx: EnrichedBoundedContextIR,
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
-  usings: Set<string>,
 ): string {
   const args = view.output!.fields.map((f) => {
     const bind = view.output!.binds.find((b) => b.name === f.name)!;
-    const rendered = renderBindWithFollowsCs(bind.expr, "d", pathToMap, usings);
+    const rendered = renderBindWithFollowsCs(bind.expr, "d", pathToMap);
     return projectToResponse(rendered, f.type, ctx);
   });
   return `new ${upperFirst(view.name)}Row(${args.join(", ")})`;
@@ -224,26 +228,24 @@ function renderBindWithFollowsCs(
   expr: ExprIR,
   thisName: string,
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
-  usings: Set<string>,
 ): string {
   if (expr.kind === "member" && expr.receiverType.kind === "id") {
     const path = idFollowPathCs(expr.receiver);
     if (path) {
       const map = pathToMap.get(path.join("."));
       if (map) {
-        const inner = renderIdReceiverCs(expr.receiver, thisName, pathToMap, usings);
+        const inner = renderIdReceiverCs(expr.receiver, thisName, pathToMap);
         return `${map.mapVar}[${inner}].${upperFirst(expr.member)}`;
       }
     }
   }
-  return renderCsExpr(expr, { thisName, usings });
+  return renderCsExpr(expr, { thisName });
 }
 
 function renderIdReceiverCs(
   expr: ExprIR,
   thisName: string,
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
-  usings: Set<string>,
 ): string {
   if (expr.kind === "ref") {
     return `${thisName}.${upperFirst(expr.name)}`;
@@ -253,12 +255,12 @@ function renderIdReceiverCs(
     if (path) {
       const map = pathToMap.get(path.join("."));
       if (map) {
-        const inner = renderIdReceiverCs(expr.receiver, thisName, pathToMap, usings);
+        const inner = renderIdReceiverCs(expr.receiver, thisName, pathToMap);
         return `${map.mapVar}[${inner}].${upperFirst(expr.member)}`;
       }
     }
   }
-  return renderCsExpr(expr, { thisName, usings });
+  return renderCsExpr(expr, { thisName });
 }
 
 function idFollowPathCs(e: ExprIR): string[] | undefined {

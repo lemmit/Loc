@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 // generated Phoenix project compiles against real Ash 3.x.
 //
 // Mirrors `test/generated-build.test.ts` (the TS-build regression):
-// emit a phoenixLiveView deployable from a fixture, then run
+// emit a phoenix deployable from a fixture, then run
 // `mix deps.get && mix compile --warnings-as-errors` inside the
 // hexpm/elixir Docker image.  Catches Ash 3.x API drift and any
 // other semantic emission bug that the per-file syntax check
@@ -56,6 +56,16 @@ describe.skipIf(!ENABLED)(
       // entity + many_to_many relationship + `manage_relationship` mutations
       // + `exists(...)` filter that Phoenix join-table emission produces.
       { name: "roster.ddd" },
+      // First-boot seeding (database-seeding.md): compiles priv/repo/seeds.exs
+      // (the Ash create-action seed path) + the ecto.setup alias change.
+      { name: "seeding.ddd" },
+      // D-PHOENIX-SURFACE: a phoenix backend that EMBEDS a React SPA
+      // (hosts: a `ui { framework: react }`).  Compiles the
+      // embedded-react Elixir side — the endpoint `/app` Plug.Static,
+      // the router `/app` SpaController fallback, and the SpaController
+      // itself — against real Ash 3.x.  No LiveView pages are emitted;
+      // the React `assets/` half is covered by the react-build matrix.
+      { name: "phoenix-embed-react.ddd" },
     ])("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

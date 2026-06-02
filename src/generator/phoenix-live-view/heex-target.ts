@@ -16,7 +16,6 @@
 //   renderStateInit   — heex-walker.ts:1565-1594 (default + initializer)
 //   renderApiCall     — heex-walker.ts:647-683 (direct context-function call)
 //   renderApiHoisting — empty array (LiveView reads inline; no hoisting)
-//   renderHelperImports — heex-walker.ts:1660-1672 (elixirAliasForHelper)
 //   renderMatch       — heex-walker.ts:543-552 (renderMatch — cond do...end)
 //   renderNavigate    — heex-walker.ts:690-715 (push_navigate + ~p sigil)
 //   defaultInitFor    — Elixir literals per type
@@ -91,28 +90,6 @@ export const heexTarget: WalkerTarget = {
     throw new Error(
       "heexTarget.buildHookUse: Phoenix LiveView does not hoist api calls; this should never be called.",
     );
-  },
-
-  // --- Helper-import seam -------------------------------------------------
-
-  /** `alias Path.To.Module, as: <Pascal>` per referenced user helper.
-   *  Mirrors `elixirAliasForHelper` at heex-walker.ts:1660-1672. */
-  renderHelperImports(
-    used: ReadonlySet<string>,
-    decls: ReadonlyArray<{ name: string; path: string }>,
-  ): string[] {
-    const lines: string[] = [];
-    for (const d of decls) {
-      if (!used.has(d.name)) continue;
-      const moduleName = d.path
-        .replace(/^\.\//, "")
-        .replace(/^\.\.\//g, "")
-        .split("/")
-        .map((seg) => upperFirstLocal(seg.replace(/[^a-zA-Z0-9]/g, "_")))
-        .join(".");
-      lines.push(`alias ${moduleName}, as: ${upperFirstLocal(d.name)}`);
-    }
-    return lines;
   },
 
   // --- Match expression seam ----------------------------------------------
@@ -216,14 +193,4 @@ function snakeLocal(s: string): string {
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
     .toLowerCase();
-}
-
-function upperFirstLocal(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
-}
-
-function pluralLocal(s: string): string {
-  if (s.endsWith("y") && !/[aeiou]y$/.test(s)) return `${s.slice(0, -1)}ies`;
-  if (/(s|x|z|ch|sh)$/.test(s)) return `${s}es`;
-  return `${s}s`;
 }

@@ -5,4 +5,4 @@ using Api.Domain.Enums;
 
 namespace Api.Application.Workflows;
 
-public sealed record PlaceOrderRequest([property: Required] string CustomerId, [property: Required] Guid ProductId, [property: Required] int Quantity);
+public sealed record PlaceOrderRequest([Required] string CustomerId, [Required] Guid ProductId, [Required] int Quantity);

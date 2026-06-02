@@ -9,6 +9,8 @@ import type {
   Api,
   Apply,
   BoundedContext,
+  Channel,
+  ChannelSource,
   Component,
   ConfigEntry,
   ConnectionSource,
@@ -22,11 +24,13 @@ import type {
   EnumDecl,
   EventDecl,
   Expression,
+  ForStmt,
   FunctionDecl,
   Invariant,
   Layout,
   LayoutMainSlot,
   LayoutNamedSlot,
+  LoadPath,
   MenuBlock,
   Model,
   Operation,
@@ -37,6 +41,8 @@ import type {
   Repository,
   Requirement,
   Resource,
+  Retrieval,
+  Seed,
   Solution,
   StateField,
   Statement,
@@ -57,6 +63,8 @@ import {
   isApply,
   isAssignOrCallStmt,
   isBoundedContext,
+  isCallSuffix,
+  isChannel,
   isComponent,
   isContainment,
   isCreate,
@@ -70,6 +78,7 @@ import {
   isEventDecl,
   isExpectStmt,
   isExpectThrowsStmt,
+  isForStmt,
   isFunctionDecl,
   isInvariant,
   isLetStmt,
@@ -86,6 +95,8 @@ import {
   isRequirement,
   isRequiresStmt,
   isResource,
+  isRetrieval,
+  isSeed,
   isSolution,
   isSubdomain,
   isSystem,
@@ -99,12 +110,15 @@ import {
   isWorkflow,
 } from "../../language/generated/ast.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../platform/registry.js";
+import { defaultsFor } from "../../platform/resolve-adapters.js";
 import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
   ApiIR,
   ApplyIR,
   BoundedContextIR,
+  ChannelIR,
+  ChannelSourceIR,
   CodeRefIR,
   CodeRefKind,
   ComponentIR,
@@ -126,6 +140,8 @@ import type {
   IdValueType,
   InvariantIR,
   LayoutIR,
+  LoadPlanIR,
+  LoadSegmentIR,
   MenuBlockIR,
   MenuLinkIR,
   MenuMetaIR,
@@ -144,7 +160,11 @@ import type {
   RequirementIR,
   RequirementStatus,
   RequirementType,
+  RetrievalIR,
+  SeedIR,
+  SeedRowIR,
   SolutionIR,
+  SortTermIR,
   StateFieldIR,
   StmtIR,
   StorageIR,
@@ -158,7 +178,6 @@ import type {
   ThemeIR,
   TypeIR,
   UiApiParamIR,
-  UiHelperImportIR,
   UiIR,
   UiParamBindingIR,
   UserIR,
@@ -167,6 +186,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
+import { applicationDslToAdapter } from "../types/loom-ir.js";
 import { inferExprType, lowerExpr, lowerExprInContext } from "./lower-expr.js";
 import { lowerStatement } from "./lower-stmt.js";
 import {
@@ -204,6 +224,31 @@ function qualifyDesign(raw: string | undefined, fallback: BuiltinPackFamily): st
   return parsed ? parsed.qualified : value;
 }
 
+/** Default values for the three greenfield realization axes
+ *  (D-REALIZATION-AXES) — the axes with no adapter infra yet, so each has
+ *  a single current value per platform.  `application`/`persistence`/
+ *  `directoryLayout` are NOT here: they source their defaults from the
+ *  live adapter menu (`defaultsFor`).  Only ever called for backends
+ *  (frontends carry no realization axes). */
+function greenfieldAxisDefaults(platform: Platform): {
+  foundation: string;
+  transport: string;
+  runtime: string;
+} {
+  return {
+    // Phoenix's domain framework defaults to Ash (matches today's
+    // `phoenixLiveView` behaviour after desugar — D-PHOENIX-SURFACE
+    // open-item 2); every other backend is `vanilla` (no framework).
+    foundation: platform === "phoenix" ? "ash" : "vanilla",
+    // The platform's only current HTTP surface.
+    transport:
+      platform === "dotnet" ? "minimalApi" : platform === "phoenix" ? "phoenixRouter" : "hono",
+    // Repository-loaded, DB-transaction consistency — the only runtime
+    // shipped today (actor runtimes land per-backend later).
+    runtime: "transactional",
+  };
+}
+
 /** Split a `platform:` value into the family (the closed `Platform`
  *  union every consumer branches on) and the fully-qualified ref
  *  (`family@version`, mirrors `qualifyDesign`).  Bareword backend →
@@ -217,11 +262,33 @@ function qualifyPlatform(raw: string | undefined): {
   family: Platform;
   ref: string;
 } {
-  const value = raw ?? "hono";
+  // D-PHOENIX-SURFACE: `phoenix` is the canonical host-platform name.
+  // Legacy *platform* spellings (`phoenixLiveView`, `hono`) are desugared
+  // here at the boundary so every downstream consumer sees only the
+  // canonical family (`phoenix`, `node`).
+  const value = canonicalPlatform(raw ?? "node");
   const parsed = parseBuiltinPlatformRef(value);
   return parsed
     ? { family: parsed.family as Platform, ref: parsed.qualified }
     : { family: value as Platform, ref: value };
+}
+
+/** Canonicalise a legacy *platform* alias to its canonical family
+ *  (`phoenixLiveView` → `phoenix`, `hono` → `node`); everything else
+ *  passes through.  Boundary-only: the alias never reaches the IR or any
+ *  generator.  (The Hono *web framework* keeps the `hono` spelling as the
+ *  `transport:` value; the LiveView *framework* keeps `phoenixLiveView` —
+ *  see `canonicalFramework`.) */
+function canonicalPlatform(value: string): string {
+  if (value === "phoenixLiveView") return "phoenix";
+  if (value === "hono") return "node";
+  return value;
+}
+
+/** Canonicalise a D-PHOENIX-SURFACE framework alias.  `liveview` →
+ *  `phoenixLiveView`; everything else passes through. */
+function canonicalFramework(value: string | undefined): string | undefined {
+  return value === "liveview" ? "phoenixLiveView" : value;
 }
 
 // ---------------------------------------------------------------------------
@@ -508,7 +575,7 @@ function lowerSystem(sys: System): SystemIR {
     //     by Playwright page objects) AND an API spec (driven by
     //     fetch against the deployable's HTTP surface).
     const isFrontendOnly = !!targetPlatform && platformFor(targetPlatform).isFrontend;
-    const isFullstack = targetPlatform === "phoenixLiveView";
+    const isFullstack = targetPlatform === "phoenix";
     if (isFrontendOnly) {
       e2eTests.push(lowerE2E(b, e2eEnv, "ui"));
     } else if (isFullstack) {
@@ -575,6 +642,15 @@ function lowerSystem(sys: System): SystemIR {
   // body is a page-body-shaped expression lowered against the same
   // env shape pages use.  No params or state — layouts are static
   // wrappers, not parametric components.
+  const channelSources = sys.members
+    .filter((m): m is ChannelSource => m.$type === "ChannelSource")
+    .map(
+      (cs): ChannelSourceIR => ({
+        name: cs.name,
+        channelName: cs.channel ?? "",
+        storageName: cs.use?.ref?.name ?? "",
+      }),
+    );
   const layouts = sys.members
     .filter((m): m is Layout => m.$type === "Layout")
     .map((l): LayoutIR => lowerLayout(l));
@@ -589,6 +665,7 @@ function lowerSystem(sys: System): SystemIR {
     apis,
     storages,
     dataSources,
+    channelSources,
     layouts,
   };
   // Scaffold expander always runs.  `page.origin` (set during page
@@ -832,18 +909,19 @@ function lowerDeployable(d: Deployable): DeployableIR {
   // an embedded React SPA when (and only when) the deployable declares
   // `ui:`; backend-only dotnet drops the field.  Other platforms
   // (`hono`) silently drop `design:` and the validator already warns.
+  // D-PHOENIX-SURFACE: `hosts:` declarations the deployable serves.
+  // Resolve the first hosted `Ui` node so `uiName`/`uiFramework` can
+  // fall back to it (and read its own declared framework) when the
+  // legacy `ui:` binding is absent.
+  const hostedUis = (d.hosts ?? []).map((r) => r.ref).filter((u): u is Ui => !!u);
+  const hostedUiNames = hostedUis.map((u) => u.name);
+  const firstHostedUi = hostedUis[0];
   const uiName =
     d.uiSugar?.ref?.ref?.name ??
     d.uiCompose?.ref?.ref?.name ??
     d.uiBlock?.ref?.ref?.name ??
+    firstHostedUi?.name ??
     undefined;
-  const design = platformFor(platform).isFrontend
-    ? qualifyDesign(d.design, "mantine")
-    : platform === "phoenixLiveView"
-      ? qualifyDesign(d.design, "ashPhoenix")
-      : platform === "dotnet" && uiName
-        ? qualifyDesign(d.design, "mantine")
-        : undefined;
   // Page-metamodel UI binding.  The grammar accepts two
   // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
   // (full block).  Both lower to the same `uiName` + optional
@@ -856,15 +934,34 @@ function lowerDeployable(d: Deployable): DeployableIR {
   // from the platform.  Fullstack dotnet renders React; phoenixLiveView
   // renders LiveView; react/static render React.  Backends without a
   // `ui:` binding leave this undefined.
+  // Precedence: explicit `framework:` on the legacy block binding, then
+  // the framework declared on the `hosts:`-ed `ui` itself (D-PHOENIX-SURFACE
+  // phase 2 — the ui owns its framework), then the legacy platform-derived
+  // default.  Computed before `design` so the pack default can branch on
+  // it (a phoenix host embedding react needs a tsx pack, not ashPhoenix).
   const uiFramework =
-    d.uiBlock?.framework ??
+    canonicalFramework(d.uiBlock?.framework) ??
+    canonicalFramework(firstHostedUi?.framework) ??
     (uiName
-      ? platform === "phoenixLiveView"
+      ? platform === "phoenix"
         ? "phoenixLiveView"
         : platformFor(platform).isFrontend || platform === "dotnet"
           ? "react"
           : undefined
       : undefined);
+  // Design pack default depends on what actually renders:
+  //  - frontend platforms + fullstack-dotnet render React → `mantine`;
+  //  - phoenixLiveView renders HEEx → `ashPhoenix`, UNLESS it embeds a
+  //    `framework: react` ui (D-PHOENIX-SURFACE), in which case the SPA
+  //    needs a tsx pack → `mantine`;
+  //  - backends without a `ui:` mount carry no design.
+  const design = platformFor(platform).isFrontend
+    ? qualifyDesign(d.design, "mantine")
+    : platform === "phoenix"
+      ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
+      : platform === "dotnet" && uiName
+        ? qualifyDesign(d.design, "mantine")
+        : undefined;
   // Explicit api composition.
   const serves = (d.serves ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
   const uiBindings = (d.uiCompose?.bindings ?? []).map(
@@ -878,6 +975,39 @@ function lowerDeployable(d: Deployable): DeployableIR {
   // bindings the deployable hosts.
   const contextNames = (d.contextRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
   const dataSourceNames = (d.dataSourceRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
+  // D-REALIZATION-AXES: normalize the six axes.  Backends fill every axis
+  // with a concrete value (an absent knob → the platform default);
+  // frontends (`react`/`static`) carry none — `defaultsFor` is undefined
+  // for them, the validator rejects any axis written on a frontend.  The
+  // three adapter-backed axes source their default from the live adapter
+  // menu (`adapterDefaults`); the three greenfield axes from the table
+  // above.  `application`↔adapter `style`, `directoryLayout`↔`layout`.
+  const adapterDefaults = defaultsFor(platform);
+  const axes =
+    adapterDefaults !== undefined
+      ? (() => {
+          const gf = greenfieldAxisDefaults(platform);
+          return {
+            foundation: d.foundation ?? gf.foundation,
+            // Store the resolved adapter key (`serviceLayer` → `layered`)
+            // so the future codegen passes it straight to `resolveStyle`.
+            application: d.application
+              ? applicationDslToAdapter(d.application)
+              : adapterDefaults.style,
+            persistence: d.persistence ?? adapterDefaults.persistence.state,
+            directoryLayout: d.directoryLayout ?? adapterDefaults.layout,
+            transport: d.transport ?? gf.transport,
+            runtime: d.runtime ?? gf.runtime,
+          };
+        })()
+      : {
+          foundation: undefined,
+          application: undefined,
+          persistence: undefined,
+          directoryLayout: undefined,
+          transport: undefined,
+          runtime: undefined,
+        };
   return {
     name: d.name,
     platform,
@@ -888,8 +1018,15 @@ function lowerDeployable(d: Deployable): DeployableIR {
     targetName: d.targets?.ref?.name,
     auth,
     design,
+    foundation: axes.foundation,
+    application: axes.application,
+    persistence: axes.persistence,
+    directoryLayout: axes.directoryLayout,
+    transport: axes.transport,
+    runtime: axes.runtime,
     uiName,
     uiFramework,
+    hostedUiNames,
     serves,
     uiBindings,
     favicon: d.favicon,
@@ -960,7 +1097,6 @@ function lowerUi(ui: Ui): UiIR {
   const pages: PageIR[] = [];
   const components: ComponentIR[] = [];
   const apiParams: UiApiParamIR[] = [];
-  const helperImports: UiHelperImportIR[] = [];
   let menu: MenuBlockIR | undefined;
   for (const m of ui.members) {
     if (m.$type === "Page") pages.push(lowerPage(m));
@@ -970,8 +1106,6 @@ function lowerUi(ui: Ui): UiIR {
         name: m.name,
         apiName: m.apiRef?.$refText ?? "",
       });
-    } else if (m.$type === "UiHelperImport") {
-      helperImports.push({ name: m.name, path: m.path });
     } else if (m.$type === "MenuBlock") {
       // First menu block wins.  Validator flags a duplicate
       // `menu { ... }` block at ui scope as an error.
@@ -980,11 +1114,11 @@ function lowerUi(ui: Ui): UiIR {
   }
   return {
     name: ui.name,
+    framework: canonicalFramework(ui.framework),
     pages,
     components,
     menu,
     apiParams,
-    helperImports,
   };
 }
 
@@ -1150,6 +1284,13 @@ function lowerComponent(c: Component): ComponentIR {
     name: param.name,
     type: lowerType(param.type),
   }));
+  // An `extern` component declares only its typed param contract —
+  // no body, no state to walk.  Carry the flag + src-relative module
+  // path; the React generator emits a `<Name>.props.ts` interface and
+  // imports the user's module at call sites.
+  if (c.extern) {
+    return { name: c.name, params, state: [], extern: true, externPath: c.externPath };
+  }
   // Component-scoped env: params + state bind so `inferExprType`
   // resolves refs to their declared types (same reason as
   // `lowerPage`; see comment there).
@@ -1166,7 +1307,9 @@ function lowerComponent(c: Component): ComponentIR {
       }
     }
   }
-  const body = lowerExpr(c.body, env);
+  // Non-extern components always carry a body (validator-enforced);
+  // guard defensively so lowering an invalid model can't crash.
+  const body = c.body ? lowerExpr(c.body, env) : undefined;
   return { name: c.name, params, state, body };
 }
 
@@ -1263,6 +1406,9 @@ function lowerContext(
   const workflows: WorkflowIR[] = [];
   const views: ViewIR[] = [];
   const criteria: CriterionIR[] = [];
+  const channels: ChannelIR[] = [];
+  const retrievals: RetrievalIR[] = [];
+  const seeds: SeedIR[] = [];
   // Context-level capabilities propagate to every aggregate inside.
   // Lower them here in the context env (no `this` binding); each
   // aggregate's lowering re-uses the lowered IR directly.  The `this`
@@ -1279,6 +1425,9 @@ function lowerContext(
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
     else if (isView(m)) views.push(lowerView(m, env));
     else if (isCriterion(m)) criteria.push(lowerCriterion(m, env));
+    else if (isChannel(m)) channels.push(lowerChannel(m));
+    else if (isRetrieval(m)) retrievals.push(lowerRetrieval(m, env));
+    else if (isSeed(m)) seeds.push(lowerSeed(m, env));
   }
   return {
     name: ctx.name,
@@ -1296,6 +1445,44 @@ function lowerContext(
     workflows,
     views,
     criteria,
+    channels,
+    retrievals,
+    seeds,
+  };
+}
+
+/** Lower a `channel <Name> { carries: … }` declaration (channels.md, Slice 1)
+ *  to its IR record.  Structural only — no expressions.  Knob defaults
+ *  reproduce today's in-process broadcast/ephemeral dispatch. */
+function lowerChannel(c: Channel): ChannelIR {
+  return {
+    name: c.name,
+    carries: c.carries.map((r) => r.$refText).filter((n) => n.length > 0),
+    delivery: (c.delivery as ChannelIR["delivery"]) ?? "broadcast",
+    retention: (c.retention as ChannelIR["retention"]) ?? "ephemeral",
+    ...(c.key ? { key: c.key } : {}),
+  };
+}
+
+/** Lower a `seed [dataset] [raw] { Aggregate { … } … }` declaration to its
+ *  IR record (database-seeding.md, declarative form).  Each row's value is
+ *  an `ObjectLit` shaped like the aggregate's create parameters; its field
+ *  initialisers are lowered as ordinary expressions in the context scope
+ *  (enum values, value-object object-literals, and pure stdlib builtins like
+ *  `now()` all resolve there).  No `this` binding — seed rows construct fresh
+ *  instances, they do not operate on an existing aggregate. */
+function lowerSeed(s: Seed, env: Env): SeedIR {
+  const rows: SeedRowIR[] = s.rows.map((row) => ({
+    aggregate: row.aggregate.ref?.name ?? "Unknown",
+    fields: row.value.fields.map((f) => ({
+      name: f.name,
+      value: lowerExpr(f.value, env),
+    })),
+  }));
+  return {
+    dataset: s.dataset ?? "default",
+    path: s.raw ? "raw" : "domain",
+    rows,
   };
 }
 
@@ -1322,6 +1509,48 @@ function lowerCriterion(c: Criterion, env: Env): CriterionIR {
     targetType,
     body: lowerExpr(c.body, bodyEnv),
   };
+}
+
+/** Lower a `retrieval <Name>(params) of <T> { where: … sort: … loads: … }`
+ *  declaration to RetrievalIR.  The `where` predicate is lowered in the
+ *  retrieval's own scope exactly like a criterion body (aggregate
+ *  candidate binds `this` + bare field names; parameters become `param`
+ *  locals), so it composes criteria and bare predicates the same way a
+ *  `find … where` does.  `sort` / `loads` are structural paths, not
+ *  expressions — lowered to segment lists.  No `page` (call-site only). */
+function lowerRetrieval(r: Retrieval, env: Env): RetrievalIR {
+  const targetType = lowerType(r.target);
+  let bodyEnv: Env = { ...env, locals: new Map() };
+  if (targetType.kind === "entity") {
+    const candidate = findEntityByName(env, targetType.name);
+    if (candidate && isAggregate(candidate)) bodyEnv = inAggregate(bodyEnv, candidate);
+  }
+  for (const p of r.params) {
+    bodyEnv = withLocal(bodyEnv, p.name, "param", lowerType(p.type));
+  }
+  const sort: SortTermIR[] = r.sort.map((s) => ({
+    path: lowerLoadPath(s.path),
+    direction: (s.direction ?? "asc") as "asc" | "desc",
+  }));
+  const loadPlan: LoadPlanIR =
+    r.loads.length > 0
+      ? { kind: "explicit", paths: r.loads.map(lowerLoadPath) }
+      : { kind: "whole" };
+  return {
+    name: r.name,
+    params: r.params.map((p) => ({ name: p.name, type: lowerType(p.type) })),
+    targetType,
+    where: lowerExpr(r.where, bodyEnv),
+    sort,
+    loadPlan,
+  };
+}
+
+/** Lower a structural `LoadPath` AST node (`this.lines[].product`) to its
+ *  candidate-rooted segment list (`this` already stripped by the grammar
+ *  optionality). */
+function lowerLoadPath(p: LoadPath): LoadSegmentIR[] {
+  return p.segments.map((seg) => ({ name: seg.name, collection: !!seg.collection }));
 }
 
 function lowerEnum(e: EnumDecl): EnumIR {
@@ -2058,6 +2287,39 @@ function lowerActionBody(spec: ActionSpec, env: Env): OperationIR {
 // saves; a repo-let saves only when a later `op-call` targets it.
 // ---------------------------------------------------------------------------
 
+type SaveEntry = { name: string; aggName: string; repoName: string };
+
+/** Compute the bindings to save for a statement list (the dirtiness
+ *  rule): every `factory-let` always, every `repo-let` only when a later
+ *  op-call targets it.  When `loopVar` is supplied (a `for-each` body),
+ *  the loop variable itself is saved if it is the target of any op-call
+ *  in that body — the per-iteration save.  Top-level callers pass no
+ *  loopVar; the result is the flat `savesAtExit` (byte-identical to the
+ *  previous inline computation). */
+function computeSaves(
+  statements: WorkflowStmtIR[],
+  repoForAgg: Map<string, string>,
+  loopVar?: { name: string; aggName: string; repoName: string },
+): SaveEntry[] {
+  const opCallTargets = new Set<string>();
+  for (const st of statements) {
+    if (st.kind === "op-call") opCallTargets.add(st.target);
+  }
+  const saves: SaveEntry[] = [];
+  if (loopVar && opCallTargets.has(loopVar.name)) {
+    saves.push({ name: loopVar.name, aggName: loopVar.aggName, repoName: loopVar.repoName });
+  }
+  for (const st of statements) {
+    if (st.kind === "factory-let") {
+      const repoName = repoForAgg.get(st.aggName) ?? plural(st.aggName);
+      saves.push({ name: st.name, aggName: st.aggName, repoName });
+    } else if (st.kind === "repo-let" && opCallTargets.has(st.name)) {
+      saves.push({ name: st.name, aggName: st.aggName, repoName: st.repoName });
+    }
+  }
+  return saves;
+}
+
 function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR {
   let inner = env;
   const params: ParamIR[] = [];
@@ -2085,26 +2347,7 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
     inner = lowered.envAfter;
     if (lowered.binding) letAggs.set(lowered.binding.name, lowered.binding);
   }
-  // savesAtExit: factory-lets always; repo-lets only when targeted
-  // by a later op-call (validator already restricts which statement
-  // shapes can mutate).
-  const opCallTargets = new Set<string>();
-  for (const st of statements) {
-    if (st.kind === "op-call") opCallTargets.add(st.target);
-  }
-  const savesAtExit: WorkflowIR["savesAtExit"] = [];
-  for (const st of statements) {
-    if (st.kind === "factory-let") {
-      const repoName = repoForAgg.get(st.aggName) ?? plural(st.aggName);
-      savesAtExit.push({ name: st.name, aggName: st.aggName, repoName });
-    } else if (st.kind === "repo-let" && opCallTargets.has(st.name)) {
-      savesAtExit.push({
-        name: st.name,
-        aggName: st.aggName,
-        repoName: st.repoName,
-      });
-    }
-  }
+  const savesAtExit = computeSaves(statements, repoForAgg);
   return {
     name: wf.name,
     params,
@@ -2172,6 +2415,44 @@ function lowerWorkflowStatement(
       envAfter: env,
     };
   }
+  if (isForStmt(stmt)) {
+    // `for <var> in <iterable> { body }` — bind the loop var to the
+    // iterable's element aggregate type, lower the body in that extended
+    // scope, then compute the per-iteration saves over the body.
+    const iterable = lowerExpr(stmt.iterable, env);
+    const iterableType = inferExprType(stmt.iterable, env);
+    const elementType = iterableType.kind === "array" ? iterableType.element : undefined;
+    const varAggName = elementType?.kind === "entity" ? elementType.name : "Unknown";
+    const repoName = repoForAgg.get(varAggName) ?? plural(varAggName);
+    // Bind the loop var to the element type so body op-calls resolve `o`'s
+    // aggregate; fall back to the (possibly Unknown) entity type when the
+    // iterable didn't infer to an array (the validator surfaces that).
+    const varType: TypeIR = elementType ?? { kind: "entity", name: varAggName };
+    const bodyEnv = withLocal(env, stmt.var, "let", varType);
+    const body: WorkflowStmtIR[] = [];
+    let walkEnv = bodyEnv;
+    for (const s of stmt.body) {
+      const lowered = lowerWorkflowStatement(s, walkEnv, aggsByName, reposByName, repoForAgg);
+      body.push(lowered.stmt);
+      walkEnv = lowered.envAfter;
+    }
+    const savesPerIteration = computeSaves(body, repoForAgg, {
+      name: stmt.var,
+      aggName: varAggName,
+      repoName,
+    });
+    return {
+      stmt: {
+        kind: "for-each",
+        var: stmt.var,
+        varAggName,
+        iterable,
+        body,
+        savesPerIteration,
+      },
+      envAfter: env,
+    };
+  }
   if (isLetStmt(stmt)) {
     const expr = stmt.expr;
     // factory-let: `Agg.create({fields})`
@@ -2192,6 +2473,36 @@ function lowerWorkflowStatement(
         },
         envAfter: withLocal(env, stmt.name, "let", aggType),
         binding: { name: stmt.name, aggName: factory.aggName, repoName },
+      };
+    }
+    // repo-run: `Repo.run(<Retrieval>(args), page?)` — binds the
+    // retrieval's result array.  Checked before the generic repo-let so
+    // `run` doesn't fall through to the find-method path.
+    const runCall = matchRetrievalRunCall(expr, reposByName);
+    if (runCall) {
+      const aggName = runCall.repo.aggregate?.ref?.name ?? "Unknown";
+      const repoName = runCall.repo.name;
+      const elementType: TypeIR = { kind: "entity", name: aggName };
+      const arrayType: TypeIR = { kind: "array", element: elementType };
+      return {
+        stmt: {
+          kind: "repo-run",
+          name: stmt.name,
+          repoName,
+          aggName,
+          retrievalName: runCall.retrievalName,
+          retrievalArgs: runCall.retrievalArgs.map((a) => lowerExpr(a, env)),
+          ...(runCall.pageOffset || runCall.pageLimit
+            ? {
+                page: {
+                  ...(runCall.pageOffset ? { offset: lowerExpr(runCall.pageOffset, env) } : {}),
+                  ...(runCall.pageLimit ? { limit: lowerExpr(runCall.pageLimit, env) } : {}),
+                },
+              }
+            : {}),
+          returnType: arrayType,
+        },
+        envAfter: withLocal(env, stmt.name, "let", arrayType),
       };
     }
     // repo-let: `Repo.method(args)`
@@ -2377,4 +2688,58 @@ function matchRepoCall(
     method: s.member,
     args: (s.args ?? []).map((a) => a.value),
   };
+}
+
+interface RetrievalRunMatch {
+  repo: Repository;
+  retrievalName: string;
+  retrievalArgs: Expression[];
+  /** The `page:` object-literal argument's fields, if supplied. */
+  pageOffset?: Expression;
+  pageLimit?: Expression;
+}
+
+/** Recognise `<Repo>.run(<RetrievalRef>(args), page?)`.  The first
+ *  positional arg is itself a call (the retrieval reference); an optional
+ *  named `page:` arg carries an object literal `{ offset?, limit? }`. */
+function matchRetrievalRunCall(
+  expr: Expression | undefined,
+  reposByName: Map<string, Repository>,
+): RetrievalRunMatch | undefined {
+  if (!expr || !isPostfixChain(expr)) return undefined;
+  if (expr.suffixes.length !== 1) return undefined;
+  const s = expr.suffixes[0]!;
+  if (!isMemberSuffix(s) || !s.call || s.member !== "run") return undefined;
+  const recv = expr.head;
+  if (!isNameRef(recv)) return undefined;
+  const repo = reposByName.get(recv.name);
+  if (!repo) return undefined;
+  const callArgs = s.args ?? [];
+  // First positional arg = the retrieval reference `Name(args)`.
+  const refArg = callArgs.find((a) => !a.name);
+  if (!refArg) return undefined;
+  const ref = refArg.value;
+  // Bare `Name` (parameterless retrieval).
+  if (isNameRef(ref)) {
+    return { repo, retrievalName: ref.name, retrievalArgs: [] };
+  }
+  // `Name(args)` — a NameRef head + a single CallSuffix.
+  if (!isPostfixChain(ref) || !isNameRef(ref.head) || ref.suffixes.length !== 1) {
+    return undefined;
+  }
+  const rs = ref.suffixes[0]!;
+  if (!isCallSuffix(rs)) return undefined;
+  const retrievalName = ref.head.name;
+  const retrievalArgs: Expression[] = (rs.args ?? []).map((a) => a.value);
+  // Optional `page:` named arg — an object literal with offset / limit.
+  const pageArg = callArgs.find((a) => a.name === "page");
+  let pageOffset: Expression | undefined;
+  let pageLimit: Expression | undefined;
+  if (pageArg && isObjectLit(pageArg.value)) {
+    for (const f of pageArg.value.fields) {
+      if (f.name === "offset") pageOffset = f.value;
+      else if (f.name === "limit") pageLimit = f.value;
+    }
+  }
+  return { repo, retrievalName, retrievalArgs, pageOffset, pageLimit };
 }

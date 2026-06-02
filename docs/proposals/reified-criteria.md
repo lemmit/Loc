@@ -168,6 +168,45 @@ mechanism** but **keeps their semantics**:
 | Find-parameter threading of `currentUser` (`usesUser`) | **Superseded** — the factory supplies it. |
 | `HasQueryFilter` for non-principal / injected accessor for principal (#767) | **Unified** — one factory-constructed spec, applied uniformly. |
 | `contextFilters` as anonymous inlined predicates | **Reified** — a capability `filter` becomes an (anonymous or named) spec applied by the consumer. |
+| `retrieval`'s `Run<Name>` method ([`retrieval.md`](./retrieval.md), shipped inline: Hono PR #801, .NET PR #810) | **Reified** — the per-aggregate `RunByXAsync` repo method (which hand-composes `.Where(<inlined criterion>).OrderBy().Skip()`) becomes a constructed bundle: the `retrieval` is the `Specification<T>`, its `where:` criteria are `Criterion<T>` objects fed in via `Query.Where(crit.ToExpression())`. The method shrinks to `repo.ListAsync(spec)`. |
+
+### The retrieval `Run<Name>` method is the inline high-water mark for the bundle
+
+`retrieval.md` ships the **bundle** (`criterion` + sort + loads) inline:
+each backend hand-composes a query method (`RunByRegionAsync` on .NET,
+`runByRegion` on Hono) whose `.Where(...)` is the **inlined** criterion
+body. Reification flips this to the constructed-object shape — and the
+.NET target is concretely:
+
+```csharp
+// criterion InRegion → a Criterion<T> (the atom)
+public sealed class InRegion : Criterion<Customer>
+{
+    public InRegion(string rgn) => Where(x => x.Region == rgn);
+}
+
+// retrieval ByRegion → an Ardalis-style Specification<T> (the bundle)
+// that COMPOSES criteria + sort + page — the Criterion<T>-feeds-
+// Specification<T> has-a relationship made real in generated code.
+public sealed class ByRegion : Specification<Customer>
+{
+    public ByRegion(string rgn, (int? offset, int? limit)? page = null)
+    {
+        Query.Where(new InRegion(rgn).ToExpression());   // atom → bundle
+        Query.OrderByDescending(x => x.Name);
+        if (page is { } p) { /* Skip/Take */ }
+    }
+}
+
+// the workflow consumer just applies it
+var matched = await _customers.ListAsync(new ByRegion(rgn, (0, 100)), ct);
+```
+
+`Criterion<T>` / `Specification<T>` stay **generated-C#-local type
+names** (Ardalis's vocabulary) — they never become Loom-level words. Loom
+keeps `criterion` (atom) + `retrieval` (bundle); the inline `Run<Name>`
+methods are simply the pre-reification rendering of the bundle as a
+*call* rather than an *object*.
 
 ### Disposition of the open PRs (decided)
 

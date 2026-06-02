@@ -1,7 +1,9 @@
 # Retrieval — the named query bundle (`criterion` + sort + page + loads)
 
-> Status: **PROPOSED / architectural.** Adds one source keyword,
-> `retrieval`, and one repository builtin, `Repo.run(...)`. A
+> Status: **PARTIAL.** Surface + IR + lowering + validation shipped (#794);
+> .NET `Run<Name>Async` emission + workflow `foreach` shipped (#810). Remaining:
+> Hono/Drizzle + Phoenix/Ash emission and the `loads:` load-plan. Adds one source
+> keyword, `retrieval`, and one repository builtin, `Repo.run(...)`. A
 > `retrieval` names a reusable, pre-shaped query: a composed `criterion`
 > predicate plus `sort` and `loads` shaping. It is the *bundle* layer the
 > criterion family has always implied but never named — Hibernate's
@@ -25,13 +27,13 @@ from a workflow:
 
 ```ddd
 context Sales {
-  criterion ActiveCustomer of Customer = self.active
-  criterion InRegion(region: string) of Customer = self.region == region
+  criterion ActiveCustomer of Customer = this.active
+  criterion InRegion(region: string) of Customer = this.region == region
 
   retrieval ActiveInRegion(region: string) of Customer {
     where:  ActiveCustomer && InRegion(region)   # composed predicate
     sort:   [name asc]                           # ordering (part of the rule)
-    loads:  [self.address]                       # eager-load shape (past default-whole)
+    loads:  [this.address]                       # eager-load shape (past default-whole)
   }
 }
 
@@ -98,6 +100,10 @@ retrieval <Name>(<Param>*) of <T> = <bool expression>
   criteria with `&&` / `||` / `!`, or inlines a bare predicate. The
   selectability rules from [`criterion-everywhere.md`](./criterion-everywhere.md)
   apply unchanged (a retrieval's `where` is a selection position).
+  Candidate references follow the shipped `criterion` convention —
+  **bare field names + `this`** (`this.active`, `region == "EU"`), *not*
+  a `self` receiver. `self` is not a Loom token; the `this.<path>` forms
+  in the `loads:` examples below mean "rooted at the candidate `T`."
 - **`sort`** uses the existing ordering vocabulary (`[name asc, createdAt desc]`).
 - **`loads`** uses the path-expression syntax from
   [`load-specifications.md`](./load-specifications.md) and **transforms
@@ -114,13 +120,13 @@ retrieval AllActive of Customer = ActiveCustomer
 retrieval HighValueInRegion(region: string, floor: Money) of Order {
   where:  InRegion(region) && OrderTotalAtLeast(floor)
   sort:   [total desc, createdAt asc]
-  loads:  [self.lines[].product, self.customer.address]   # eager cross-agg
+  loads:  [this.lines[].product, this.customer.address]   # eager cross-agg
 }
 
 # Restricted load for a high-throughput read path.
 retrieval ActiveIds of Customer {
   where:  ActiveCustomer
-  loads:  [self.id, self.status]                          # subset; skip the owned tree
+  loads:  [this.id, this.status]                          # subset; skip the owned tree
 }
 ```
 
@@ -145,7 +151,7 @@ workflow priceRegional(region: string) {
   let orders = Orders.run(HighValueInRegion(region, Money(1000, "EUR")),
                           page: { offset: 0, limit: 100 })
   for o in orders {
-    o.applyPricing()   # loads: [self.lines[].product] already covers applyPricing's needs
+    o.applyPricing()   # loads: [this.lines[].product] already covers applyPricing's needs
   }
 }
 ```

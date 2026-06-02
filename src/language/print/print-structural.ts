@@ -50,7 +50,6 @@ import type {
   TypeRef,
   Ui,
   UiApiParam,
-  UiHelperImport,
   UserBlock,
   ValueObject,
   View,
@@ -103,7 +102,14 @@ function quote(s: string): string {
   return JSON.stringify(s);
 }
 
-const PLATFORM_KEYWORDS = new Set(["dotnet", "hono", "react", "static", "phoenixLiveView"]);
+const PLATFORM_KEYWORDS = new Set([
+  "dotnet",
+  "hono",
+  "react",
+  "static",
+  "phoenix",
+  "phoenixLiveView",
+]);
 const DESIGN_KEYWORDS = new Set(["mantine", "shadcn", "mui", "chakra", "ashPhoenix"]);
 
 /** Platform / DesignPack are `keyword | STRING` rules: print a known keyword
@@ -167,6 +173,10 @@ export function printStructural(node: AstNode): string {
       return printEntityPart(node as EntityPart);
     case "Operation":
       return printOperation(node as Operation);
+    case "Create":
+      return printCreate(node as import("../generated/ast.js").Create);
+    case "Destroy":
+      return printDestroy(node as import("../generated/ast.js").Destroy);
     case "Apply":
       return printApply(node as import("../generated/ast.js").Apply);
     case "FunctionDecl":
@@ -199,10 +209,14 @@ export function printStructural(node: AstNode): string {
       return printPermissionsBlock(node as PermissionsBlock);
     case "UiApiParam":
       return printUiApiParam(node as UiApiParam);
-    case "UiHelperImport":
-      return printUiHelperImport(node as UiHelperImport);
     case "FindDecl":
       return printFindDecl(node as FindDecl);
+    case "Criterion":
+      return printCriterion(node as import("../generated/ast.js").Criterion);
+    case "Retrieval":
+      return printRetrieval(node as import("../generated/ast.js").Retrieval);
+    case "Seed":
+      return printSeed(node as import("../generated/ast.js").Seed);
     default:
       throw new Error(`printStructural: unhandled node ${node.$type}`);
   }
@@ -373,10 +387,6 @@ function printUiApiParam(node: UiApiParam): string {
   return `api ${node.name}: ${node.apiRef.$refText}`;
 }
 
-function printUiHelperImport(node: UiHelperImport): string {
-  return `import helper ${node.name} from ${quote(node.path)}`;
-}
-
 function printPage(node: Page): string {
   const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
   return block(`page ${node.name}${params}`, node.props.map(printPageProp));
@@ -416,7 +426,16 @@ function printPageProp(node: PageProp): string {
 
 function printComponent(node: Component): string {
   const params = node.params.map(printParameter).join(", ");
-  const items = [...node.decls.map(printStateBlock), `body: ${printExpr(node.body)}`];
+  // An extern component declares no body — its rendering lives in a
+  // hand-written module at the `from` path.
+  if (node.extern) {
+    const header = `component ${node.name}(${params}) extern from ${quote(node.externPath ?? "")}`;
+    return block(header, node.decls.map(printStateBlock));
+  }
+  const items = [
+    ...node.decls.map(printStateBlock),
+    `body: ${node.body ? printExpr(node.body) : ""}`,
+  ];
   return block(`component ${node.name}(${params})`, items);
 }
 
@@ -481,6 +500,16 @@ function printStampDecl(node: import("../generated/ast.js").StampDecl): string {
 /** `implements "<name>"` */
 function printImplementsDecl(node: import("../generated/ast.js").ImplementsDecl): string {
   return `implements ${quote(node.name)}`;
+}
+
+/** `seed [dataset] [raw] { <Agg> { … } … }` (database-seeding.md) */
+function printSeed(node: import("../generated/ast.js").Seed): string {
+  const dataset = node.dataset ? ` ${node.dataset}` : "";
+  const raw = node.raw ? " raw" : "";
+  return block(
+    `seed${dataset}${raw}`,
+    node.rows.map((r) => `${r.aggregate.$refText} ${printExpr(r.value)}`),
+  );
 }
 
 function printContextMember(node: ContextMember): string {
@@ -564,6 +593,41 @@ function printFindDecl(node: FindDecl): string {
   return `find ${node.name}(${params}): ${printTypeRef(node.returnType)}${where}`;
 }
 
+/** `criterion <Name>[(<params>)] of <T> = <expr>` — the single-line form
+ *  round-trips both source variants (the `{ where: … }` block lowers to
+ *  the same `body`). */
+function printCriterion(node: import("../generated/ast.js").Criterion): string {
+  const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
+  return `criterion ${node.name}${params} of ${printTypeRef(node.target)} = ${printExpr(node.body)}`;
+}
+
+/** `retrieval <Name>[(<params>)] of <T>` — single-line `= <where>` when no
+ *  `sort`/`loads`, otherwise the `{ where: … sort: … loads: … }` block. */
+function printRetrieval(node: import("../generated/ast.js").Retrieval): string {
+  const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
+  const head = `retrieval ${node.name}${params} of ${printTypeRef(node.target)}`;
+  if (node.sort.length === 0 && node.loads.length === 0) {
+    return `${head} = ${printExpr(node.where)}`;
+  }
+  const items: string[] = [`where: ${printExpr(node.where)}`];
+  if (node.sort.length > 0) {
+    items.push(`sort: [${node.sort.map(printSortItem).join(", ")}]`);
+  }
+  if (node.loads.length > 0) {
+    items.push(`loads: [${node.loads.map(printLoadPath).join(", ")}]`);
+  }
+  return block(head, items);
+}
+
+function printSortItem(node: import("../generated/ast.js").SortItem): string {
+  const dir = node.direction ? ` ${node.direction}` : "";
+  return `${printLoadPath(node.path)}${dir}`;
+}
+
+function printLoadPath(node: import("../generated/ast.js").LoadPath): string {
+  return node.segments.map((s) => `${s.name}${s.collection ? "[]" : ""}`).join(".");
+}
+
 function printWorkflow(node: Workflow): string {
   const params = node.params.map(printParameter).join(", ");
   let head = `workflow ${node.name}(${params})`;
@@ -597,8 +661,12 @@ function printProperty(node: Property): string {
       ? ` sensitive(${node.sensitivity.tags.join(", ")})`
       : "";
   const access = node.access ? ` ${node.access}` : "";
+  // `= <expr>` default clause — grammar places it after the access modifier
+  // and before `check` (ddd.langium Property rule), so the expression can't
+  // greedily swallow a trailing modifier keyword.
+  const def = node.default ? ` = ${printExpr(node.default)}` : "";
   const check = node.check ? ` check ${printExpr(node.check)}` : "";
-  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${sensitivity}${access}${check}`;
+  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${sensitivity}${access}${def}${check}`;
 }
 
 function printContainment(node: Containment): string {
@@ -629,6 +697,23 @@ function printOperation(node: Operation): string {
     `${priv}operation ${node.name}(${params})${extern}${audited}`,
     node.body.map(printStmt),
   );
+}
+
+function printCreate(node: import("../generated/ast.js").Create): string {
+  // Lifecycle factory.  Unnamed (`create(...)`) is the canonical creator;
+  // a name is optional.  Parens are always present in the grammar.
+  const name = node.name ? ` ${node.name}` : "";
+  const params = node.params.map(printParameter).join(", ");
+  return block(`create${name}(${params})`, node.body.map(printStmt));
+}
+
+function printDestroy(node: import("../generated/ast.js").Destroy): string {
+  // Lifecycle terminator.  Both the name and the parameter list are
+  // optional — the canonical hard delete reads `destroy { }`.
+  const name = node.name ? ` ${node.name}` : "";
+  const params = node.params.map(printParameter).join(", ");
+  const paramClause = node.params.length > 0 || node.name ? `(${params})` : "";
+  return block(`destroy${name}${paramClause}`, node.body.map(printStmt));
 }
 
 function printApply(node: import("../generated/ast.js").Apply): string {

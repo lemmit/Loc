@@ -279,8 +279,6 @@ system DevPlatform {
         api Delivery: DeliveryApi
         api Accounts: AccountsApi
 
-        import helper fmtPrice from "./helpers/price"
-
         // Project list — Stack / Breadcrumbs / Anchor / Text / Toolbar /
         // Heading / Button / QueryView / Skeleton / Alert / Empty / Paper /
         // Table / Column / IdLink / EnumBadge / DateDisplay.
@@ -454,7 +452,7 @@ system DevPlatform {
     }
 
     deployable phoenixApi {
-        platform: phoenixLiveView
+        platform: phoenix
         contexts: [Catalog, Builds, People]
         dataSources: [catalogState, buildsState, peopleState]
         serves: ProjectsApi, DeliveryApi, AccountsApi

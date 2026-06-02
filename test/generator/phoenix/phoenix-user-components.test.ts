@@ -39,7 +39,7 @@ const SOURCE = `system MiniLiveView {
   }
 
   deployable phoenixApp {
-    platform: phoenixLiveView,
+    platform: phoenix,
     contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,

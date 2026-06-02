@@ -44,6 +44,9 @@ export function renderProgram(
      *  `PendingModelChangesWarning` that fires because our
      *  ModelSnapshot stub is intentionally empty. */
     hasMigrations?: boolean;
+    /** When true (a `seed` block is present), adds a `Seed.RunSeeds(...)`
+     *  startup call after `Database.Migrate()` (database-seeding.md). */
+    hasSeeds?: boolean;
     /** When true, register `DomainLogBehavior` (a Mediator pipeline
      *  behavior) so the request-scoped ILogger reaches the domain
      *  layer via `DomainLog.Current` — used by --trace-injected
@@ -57,6 +60,18 @@ export function renderProgram(
   const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   const hasMigrations = !!options?.hasMigrations;
+  const hasSeeds = !!options?.hasSeeds;
+  const seedBlock = hasSeeds
+    ? `
+// Apply first-boot seed data after migrations (database-seeding.md).
+// Ship-once per dataset via the __loom_seed marker; idempotent across boots.
+using (var seedScope = app.Services.CreateScope())
+{
+    var seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await ${ns}.Infrastructure.Persistence.Seed.RunSeeds(seedDb, seedScope.ServiceProvider);
+}
+`
+    : "";
   const emitTrace = !!options?.emitTrace;
   const repoRegistrations = ctx.aggregates
     .map(
@@ -296,6 +311,13 @@ builder.Services.AddSwaggerGen(c =>
     // schema — matches Hono/Phoenix, which mark every non-optional field
     // required.  Without this Swashbuckle leaves the required set empty.
     c.SupportNonNullableReferenceTypes();
+    // Request DTOs carry [Required] on the record's CONSTRUCTOR PARAMETER
+    // (a property-targeted [property: Required] makes ASP.NET record
+    // validation throw at model-binding time), but Swashbuckle only reads
+    // property-targeted attributes — so it misses request-body required-ness.
+    // This filter marks those properties required from the ctor params,
+    // restoring cross-backend required-set parity.
+    c.SchemaFilter<RequiredFromCtorParamFilter>();
     // operationId parity: the generated controller action method names are
     // the PascalCase of the shared operationId (createProject, allProject,
     // getProjectById, …).  Lower-casing the first char yields the exact
@@ -324,7 +346,7 @@ using (var migrationScope = app.Services.CreateScope())
 }
 `
     : ""
-}
+}${seedBlock}
 // Catalog server-lifecycle events.  Same event names + level Hono and
 // Phoenix emit so a cross-backend dashboard pivots on one identity.
 // A separate logger keeps these lines distinct from per-request

@@ -8,12 +8,14 @@
 // zod-refine) in core.
 
 // Hono-framework builders now live in this package (P2b) — siblings.
-import type { EmitCtx } from "../../../generator/_adapters/index.js";
+import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../../../generator/_adapters/index.js";
 import {
   buildBaseReaderFile,
   buildBaseUnionFile,
+  buildTpcBaseReaderFile,
 } from "../../../generator/typescript/base-reader-builder.js";
 import { emitTypescriptMigrations } from "../../../generator/typescript/emit/migrations.js";
+import { emitTypescriptSeeds } from "../../../generator/typescript/emit/seed.js";
 import {
   renderAggregate,
   renderEnumsAndValueObjects,
@@ -28,7 +30,12 @@ import { buildRepositoryFile } from "../../../generator/typescript/repository-bu
 import { buildDocumentRepositoryFile } from "../../../generator/typescript/repository-document-builder.js";
 import { buildEmbeddedRepositoryFile } from "../../../generator/typescript/repository-embedded-builder.js";
 import { buildEventSourcedRepositoryFile } from "../../../generator/typescript/repository-eventsourced-builder.js";
-import { isTphBase, tphConcretesOf } from "../../../generator/typescript/tph.js";
+import {
+  isTpcBase,
+  isTphBase,
+  tpcConcretesOf,
+  tphConcretesOf,
+} from "../../../generator/typescript/tph.js";
 import { enrichLoomModel } from "../../../ir/enrich/enrichments.js";
 import { lowerModel } from "../../../ir/lower/lower.js";
 import {
@@ -98,6 +105,91 @@ export class ExternHandlerError extends Error {
 }
 `;
 
+/** Shared HTTP error shape — RFC 7807 ProblemDetails with the §3.2 `errors[]`
+ *  extension for per-field validation failures.  See
+ *  docs/proposals/validation-error-extension.md.
+ *
+ *  Emitted once per project at `http/problem-details.ts`; the three router
+ *  files (`http/<agg>.ts`, `http/workflows.ts`, `http/views.ts`) import the
+ *  `ProblemDetails` Zod schema (for OpenAPI declarations) and the
+ *  `defaultHook` (passed to `new OpenAPIHono({ defaultHook })` so Zod parse
+ *  failures translate to 422 ProblemDetails with per-field `errors[]`
+ *  consumed by the frontend ACL's `applyServerErrors`). */
+const PROBLEM_DETAILS_TS = `// Auto-generated.  Do not edit by hand.
+import { z } from "zod";
+import { OpenAPIHono } from "@hono/zod-openapi";
+import type { Context } from "hono";
+
+/** RFC 7807 ProblemDetails body — the base 5 spec fields plus the §3.2
+ *  \`errors[]\` extension (per-field \`{ pointer, message }\` array) that
+ *  the runtime emits on 422 validation responses.  Consumed by the
+ *  frontend ACL's \`applyServerErrors\` (see docs/proposals/frontend-acl.md).
+ *  All fields nullable / optional — base 5 per the spec core; \`errors\` is
+ *  only present on 422 validation responses.  Phase D of
+ *  docs/proposals/validation-error-extension.md — all three backends
+ *  (Hono / .NET / Phoenix) declare the same shape in lockstep so the
+ *  cross-backend parity gate stays green. */
+export const ProblemDetails = z.object({
+  type: z.string().nullish(),
+  title: z.string().nullish(),
+  status: z.number().int().nullish(),
+  detail: z.string().nullish(),
+  instance: z.string().nullish(),
+  errors: z.array(z.object({ pointer: z.string(), message: z.string() })).nullish(),
+}).openapi("ProblemDetails");
+
+/** RFC 6901 JSON pointer from a Zod issue path.  Empty path → empty
+ *  pointer (\`""\`, "the whole document").  Segments are slash-joined;
+ *  literal \`~\` and \`/\` inside a segment are escaped to \`~0\` / \`~1\`. */
+function pointerOf(path: ReadonlyArray<string | number>): string {
+  if (path.length === 0) return "";
+  return "/" + path.map((seg) =>
+    typeof seg === "number"
+      ? String(seg)
+      : seg.replace(/~/g, "~0").replace(/\\//g, "~1"),
+  ).join("/");
+}
+
+/** Default Zod-validation hook.  When a route's request validator
+ *  rejects input, this fires before the handler runs and produces a 422
+ *  ProblemDetails with the per-field \`errors[]\` extension.  The shape
+ *  is the contract consumed by the frontend ACL — see
+ *  docs/proposals/frontend-acl.md and apply-server-errors.ts in the
+ *  generated React project.
+ *
+ *  Validation failures get 422 (Unprocessable Entity, RFC 7807 standard
+ *  for input-shape errors).  Domain-rule violations carried by
+ *  DomainError continue to emit 400 via the router's \`app.onError\`
+ *  catch-all (different fault class, different code). */
+export function defaultHook(result: { success: boolean; error?: { issues: ReadonlyArray<{ path: ReadonlyArray<string | number>; message: string }> } }, c: Context): Response | undefined {
+  if (result.success) return undefined;
+  const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
+  const errors = (result.error?.issues ?? []).map((issue) => ({
+    pointer: pointerOf(issue.path),
+    message: issue.message,
+  }));
+  return c.body(
+    JSON.stringify({
+      type: "about:blank",
+      title: "Validation failed",
+      status: 422,
+      detail: "One or more fields are invalid.",
+      instance: c.req.path,
+      errors,
+    }),
+    422,
+    { "content-type": "application/problem+json", "x-request-id": trace_id },
+  );
+}
+
+/** Factory: \`new OpenAPIHono()\` with the validation \`defaultHook\` pre-wired.
+ *  Routers import this instead of constructing OpenAPIHono directly so the
+ *  hook is always installed without per-router boilerplate. */
+export function newApp(): OpenAPIHono {
+  return new OpenAPIHono({ defaultHook });
+}
+`;
+
 /** Provenance lineage types — emitted only when the model declares at
  *  least one `provenanced` field that is actually written.  Each
  *  provenanced write builds a `ProvLineage` referencing the compile-time
@@ -149,7 +241,13 @@ export function generateTypeScript(
 export function generateTypeScriptForContexts(
   contexts: EnrichedBoundedContextIR[],
   pins: BackendPins,
-  system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
+  system?: {
+    deployable: DeployableIR;
+    sys: SystemIR;
+    migrations?: MigrationsIR[];
+    styleAdapter?: StyleAdapter;
+    layoutAdapter?: LayoutAdapter;
+  },
   options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
   const emitTrace = !!options.emitTrace;
@@ -187,12 +285,16 @@ export function generateTypeScriptForContexts(
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
     criteria: contexts.flatMap((c) => c.criteria),
+    channels: contexts.flatMap((c) => c.channels),
+    retrievals: contexts.flatMap((c) => c.retrievals),
+    seeds: contexts.flatMap((c) => c.seeds),
   };
 
   out.set("domain/ids.ts", renderIds(merged));
   out.set("domain/value-objects.ts", renderEnumsAndValueObjects(merged));
   out.set("domain/events.ts", renderEvents(merged));
   out.set("domain/errors.ts", ERRORS_TS);
+  out.set("http/problem-details.ts", PROBLEM_DETAILS_TS);
   if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);
   // Per-aggregate dataSource lookup — feeds `pgSchema(...)` /
   // `<schema>.table(...)` / `tablePrefix` routing in `renderSchema`.
@@ -247,6 +349,8 @@ export function generateTypeScriptForContexts(
         sys: system.sys,
         migrations: system.migrations,
         emitTrace,
+        styleAdapter: system.styleAdapter,
+        layoutAdapter: system.layoutAdapter,
       }
     : undefined;
   // Per-aggregate emission stays per-context — each aggregate file
@@ -288,9 +392,14 @@ export function generateTypeScriptForContexts(
       // emitAudit, emitProvenance, emitTrace)` byte-for-byte); direct
       // call in legacy single-context mode.
       if (emitCtx) {
-        const artifacts = layeredStyleAdapter.emitForAggregate?.(agg, emitCtx) ?? [];
+        // Resolved style / layout selection (D-REALIZATION-AXES) when
+        // threaded in; sibling default otherwise.  Size-1 menus → same
+        // object → byte-identical.
+        const style = emitCtx.styleAdapter ?? layeredStyleAdapter;
+        const layout = emitCtx.layoutAdapter ?? byLayerLayoutAdapter;
+        const artifacts = style.emitForAggregate?.(agg, emitCtx) ?? [];
         for (const artifact of artifacts) {
-          out.set(byLayerLayoutAdapter.pathFor(artifact, emitCtx), artifact.content);
+          out.set(layout.pathFor(artifact, emitCtx), artifact.content);
         }
       } else {
         out.set(
@@ -321,6 +430,25 @@ export function generateTypeScriptForContexts(
         buildBaseReaderFile(base, concretes, ctx),
       );
     }
+    // TPC (aggregate-inheritance.md, ownTable): the base owns no table, but is
+    // the read home for the polymorphic `find all <Base>`.  Emit the `<Base>`
+    // discriminated union + a read-only `<Base>Repository` that delegates to
+    // the concrete repositories (findAll = union of each concrete's `all()`;
+    // findById tries each).  The concretes are full standalone tables, so this
+    // reuses their loaders rather than hand-rolling a column-aligned unionAll.
+    for (const base of ctx.aggregates) {
+      if (!isTpcBase(base, ctx.aggregates)) continue;
+      const concretes = tpcConcretesOf(base, ctx.aggregates) as typeof ctx.aggregates;
+      if (concretes.length === 0) continue;
+      out.set(
+        `domain/${lowerFirst(base.name)}.ts`,
+        buildBaseUnionFile(base, concretes, "ownTable"),
+      );
+      out.set(
+        `db/repositories/${lowerFirst(base.name)}-repository.ts`,
+        buildTpcBaseReaderFile(base, concretes),
+      );
+    }
   }
 
   if (authRequired && system?.sys) {
@@ -334,6 +462,13 @@ export function generateTypeScriptForContexts(
   if (hasMigrations) {
     emitTypescriptMigrations(system!.migrations!, out);
   }
+  // First-boot seed data (database-seeding.md, Phase 2) — emits `db/seed.ts`
+  // when the served contexts declare any `seed` block.  Through the domain
+  // `create` (D-SEED-PATH), ship-once per dataset (D-SEED-IDEMPOTENCY).
+  if (merged.seeds.length > 0) {
+    emitTypescriptSeeds(merged, out);
+  }
+  const hasSeeds = out.has("db/seed.ts");
   // decimal.js is conditional: only depended on when at least one
   // aggregate in any of the served contexts uses a `money` field.
   // Server bundle size matters; client-side React always ships the
@@ -378,7 +513,10 @@ export function generateTypeScriptForContexts(
   }
 
   const projectUsesMoney = contexts.some(contextUsesMoney);
-  out.set("package.json", projectPackageJson(pins, { withMoney: projectUsesMoney, resourceDeps }));
+  out.set(
+    "package.json",
+    projectPackageJson(pins, { withMoney: projectUsesMoney, resourceDeps, hasSeeds }),
+  );
   // Shared primitive-schema helpers — one home for non-trivial wire
   // shapes (today: `moneySchema`).  Emitted only when something in
   // the project uses money so non-money projects' tsc surface stays
@@ -394,6 +532,7 @@ export function generateTypeScriptForContexts(
       hasMigrations,
       authRequired ? system?.sys.user : undefined,
       resourceImports,
+      hasSeeds,
     ),
   );
   out.set("drizzle.config.ts", DRIZZLE_CONFIG);
@@ -420,7 +559,7 @@ export interface BackendPins {
 
 function projectPackageJson(
   pins: BackendPins,
-  opts: { withMoney: boolean; resourceDeps?: Record<string, string> },
+  opts: { withMoney: boolean; resourceDeps?: Record<string, string>; hasSeeds?: boolean },
 ): string {
   return (
     JSON.stringify(
@@ -444,6 +583,9 @@ function projectPackageJson(
           "db:migrate": "drizzle-kit migrate",
           "db:push": "drizzle-kit push",
           "db:studio": "drizzle-kit studio",
+          // First-boot seed runner (database-seeding.md) — emitted only when
+          // the model declares a `seed` block, else `db/seed.ts` doesn't exist.
+          ...(opts.hasSeeds ? { "db:seed": "tsx db/seed.ts" } : {}),
         },
         dependencies: {
           ...pins.dependencies,
@@ -561,6 +703,7 @@ function renderProjectIndexTs(
   runMigrationsAtBoot: boolean,
   userShape?: UserIR,
   resourceImports: readonly string[] = [],
+  runSeedsAtBoot = false,
 ): string {
   // Side-effect imports for the resource-client modules (objectStore /
   // queue / api) so their clients instantiate at boot.  Empty for
@@ -568,6 +711,10 @@ function renderProjectIndexTs(
   const resourceImportBlock = resourceImports.length > 0 ? `${resourceImports.join("\n")}\n` : "";
   const migImport = runMigrationsAtBoot
     ? `import { migrate } from "drizzle-orm/node-postgres/migrator";\n`
+    : "";
+  const seedImport = runSeedsAtBoot ? `import { runSeeds } from "./db/seed";\n` : "";
+  const seedCall = runSeedsAtBoot
+    ? `\n// Apply first-boot seed data after migrations (database-seeding.md).\n// Ship-once per dataset via the __loom_seed marker; idempotent across boots.\nawait runSeeds(db);\n`
     : "";
   const migCall = runMigrationsAtBoot
     ? `\n// Apply pending schema migrations before serving traffic.  Drizzle's\n// runtime migrator reads db/migrations/meta/_journal.json + each\n// referenced .sql file, tracking state in \`__drizzle_migrations\`;\n// idempotent across boots.\nawait migrate(db, { migrationsFolder: "./db/migrations" });\n`
@@ -588,7 +735,7 @@ import pg from "pg";
 import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
-${migImport}${authStubImport}import { baseLogger } from "./obs/log";
+${migImport}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";
 ${resourceImportBlock}
 // Persistence connection — owned by the drizzle PersistenceAdapter
 // (DATABASE_URL guard → pg pool → pool-error logging → drizzle db).
@@ -596,7 +743,7 @@ ${DRIZZLE_CONNECTION_SETUP.join("\n")}
 
 const port = Number(process.env.PORT ?? 3000);
 baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
-${migCall}${authStubCall}const app = createApp(db);
+${migCall}${seedCall}${authStubCall}const app = createApp(db);
 const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });
 

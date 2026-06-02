@@ -149,6 +149,25 @@ export interface FieldIR {
   default?: ExprIR;
 }
 
+/** One entry in an aggregate's reified **create-input contract** — the
+ *  single source of truth every create surface derives from (wire DTO,
+ *  domain factory, page-object fill, OpenAPI, cross-backend parity).
+ *  Built once by `enrichLoomModel` (see `buildCreateInput`) so every
+ *  backend reads the same field set AND the same per-field required-ness,
+ *  instead of each re-deriving it — the divergence the per-backend
+ *  required-set hacks papered over. */
+export interface CreateInputFieldIR {
+  field: FieldIR;
+  /** Whether the client MUST supply this field on create.  A field is
+   *  required input iff it is non-optional, carries no explicit default,
+   *  and has no language-defined implicit default (a bare `bool` defaults
+   *  to `false`).  A default — explicit or implicit — collapses a field
+   *  onto the same "client may omit" axis as `optional`; whether the
+   *  *aggregate* gets a create at all is a separate, invariant-based
+   *  decision and does not consult this flag. */
+  requiredInput: boolean;
+}
+
 export interface ContainmentIR {
   name: string;
   partName: string;
@@ -345,6 +364,11 @@ export interface AggregateIR {
   /** Canonical JSON-on-the-wire field list.  Populated by
    * `enrichLoomModel`. */
   wireShape?: WireField[];
+  /** Reified create-input contract — the client-suppliable field set with
+   * per-field required-ness.  Populated by `enrichLoomModel`
+   * (`buildCreateInput`); the single source backends consume instead of
+   * re-deriving the create payload.  See {@link CreateInputFieldIR}. */
+  createInput?: CreateInputFieldIR[];
   /** Many-to-many associations derived from `Target id[]` fields.
    * Populated by `enrichLoomModel`; one entry per reference-collection
    * field.  Empty array when the aggregate has none. */
@@ -520,6 +544,23 @@ export interface EventIR {
   fields: FieldIR[];
 }
 
+/** A channel — the publisher-side contract for how a context's events are
+ *  transported (channels.md, Slice 1).  Declared as a context member; its
+ *  `carries` list names events of the enclosing context, and the orthogonal
+ *  `delivery` x `retention` knobs select pub/sub vs work-queue vs durable
+ *  stream.  The contract is transport-neutral — a `ChannelSourceIR` binds it
+ *  to a physical storage at system scope.  Defaults (when a knob is omitted)
+ *  reproduce today's in-process broadcast/ephemeral behaviour. */
+export interface ChannelIR {
+  name: string;
+  /** Carried event type names (resolved). */
+  carries: string[];
+  delivery: "broadcast" | "queue";
+  retention: "ephemeral" | "log" | "work";
+  /** Partition/ordering key — a field common to the carried events. */
+  key?: string;
+}
+
 /** The payload-family discriminator (payload-transport-layer.md, P1).
  *  `payload` is the umbrella; `event` / `command` / `query` / `response`
  *  / `error` are sugar subtypes carrying the same structural-record wire
@@ -581,6 +622,51 @@ export interface CriterionIR {
   body: ExprIR;
 }
 
+/** One `sort` term of a retrieval — a structural path through the
+ *  candidate aggregate plus an ordering direction. */
+export interface SortTermIR {
+  /** Dotted path segments, candidate-rooted (`this` stripped).  A
+   *  segment flagged `collection` carried a `[]` marker. */
+  path: LoadSegmentIR[];
+  direction: "asc" | "desc";
+}
+
+/** One segment of a structural `loads` / `sort` path. */
+export interface LoadSegmentIR {
+  name: string;
+  /** True when the segment carried a `[]` collection marker. */
+  collection: boolean;
+}
+
+/** The fetch shape for a retrieval (load-specifications.md /
+ *  reified-criteria.md §"The internal seam").  `kind: "whole"` is the
+ *  default-whole load (full owned aggregate tree, cross-aggregate refs
+ *  as ids) — structural, no analysis.  `kind: "explicit"` carries the
+ *  author's `loads:` paths, which restrict or expand the default. */
+export type LoadPlanIR = { kind: "whole" } | { kind: "explicit"; paths: LoadSegmentIR[][] };
+
+/** A named query *bundle* (retrieval.md): a composed predicate plus the
+ *  shaping a real query carries — ordering and a load shape.  Lowered
+ *  from a `retrieval` declaration; the source-level realisation of the
+ *  RetrievalIR bundle node (reified-criteria.md).
+ *
+ *  No `page` field — pagination is a call-site argument on
+ *  `Repo.run(R(args), page?)`, never part of the declaration. */
+export interface RetrievalIR {
+  name: string;
+  params: ParamIR[];
+  /** The `of <T>` candidate type (entity aggregate). */
+  targetType: TypeIR;
+  /** The lowered `where` predicate, in the retrieval's own scope
+   *  (parameters as `param` refs, candidate fields as `this-prop`).
+   *  Composes criteria + bare predicates like a `find … where`. */
+  where: ExprIR;
+  /** Ordering terms, in declaration order.  Empty when no `sort:`. */
+  sort: SortTermIR[];
+  /** Fetch shape; `{ kind: "whole" }` when no `loads:` clause. */
+  loadPlan: LoadPlanIR;
+}
+
 export interface BoundedContextIR {
   name: string;
   enums: EnumIR[];
@@ -598,6 +684,41 @@ export interface BoundedContextIR {
   views: ViewIR[];
   /** Named predicate specifications declared in this context. */
   criteria: CriterionIR[];
+  /** Channel declarations in this context (channels.md, Slice 1) — the
+   *  publisher-side transport contracts over this context's events. */
+  channels: ChannelIR[];
+  /** Named query bundles declared in this context (retrieval.md). */
+  retrievals: RetrievalIR[];
+  /** First-boot seed datasets declared in this context (database-seeding.md).
+   *  Platform-neutral; the system-level seed builder (phase ⑨) groups these
+   *  per (module, dataset) and the backends emit native seeders. */
+  seeds: SeedIR[];
+}
+
+/** A first-boot seed dataset for a context's aggregates
+ *  (database-seeding.md).  Declarative form only in this slice: each row is
+ *  the create-parameter shape of one aggregate, lowered through the domain
+ *  `create` by default (D-SEED-PATH).  `module` is attached later by the
+ *  system-level builder; at context-lowering time only `dataset`/`path`/`rows`
+ *  are known. */
+export interface SeedIR {
+  /** Dataset name; `"default"` runs unconditionally, others gate on
+   *  `LOOM_SEED` / the test harness.  Defaults to `"default"` when the
+   *  source omits it. */
+  dataset: string;
+  /** Through the domain `create` (default) or straight to tables (`raw`). */
+  path: "domain" | "raw";
+  /** Ordered records, in source order.  (Topological reorder by `@handle`
+   *  cross-row refs is a later slice.) */
+  rows: SeedRowIR[];
+}
+
+/** One seeded aggregate instance — the create-parameter shape, no `id`. */
+export interface SeedRowIR {
+  /** Target aggregate name. */
+  aggregate: string;
+  /** Field initialisers, fully-resolved to `ExprIR`. */
+  fields: { name: string; value: ExprIR }[];
 }
 
 /** A saved, strongly-typed query over one source aggregate.  Two
@@ -704,11 +825,40 @@ export type WorkflowStmtIR =
       expr: ExprIR;
     }
   | {
+      // `let xs = Repo.run(<Retrieval>(args), page?)` — bind the named
+      // query bundle's result array (retrieval.md).  Distinct from
+      // `repo-let` (which forbids array returns): a `repo-run` is always
+      // an aggregate array, consumable only by a `for-each` loop.
+      kind: "repo-run";
+      name: string;
+      repoName: string;
+      aggName: string;
+      retrievalName: string;
+      retrievalArgs: ExprIR[];
+      page?: { offset?: ExprIR; limit?: ExprIR };
+      /** Element aggregate array type `{ kind: "array", element: entity }`. */
+      returnType: TypeIR;
+    }
+  | {
       kind: "op-call";
       target: string;
       aggName: string;
       op: string;
       args: ExprIR[];
+    }
+  | {
+      // `for <var> in <iterable> { <body> }` (retrieval.md).  Iterates an
+      // aggregate array, binding each element to `var`.  Mutations to
+      // `var` inside the body persist via `savesPerIteration` — the same
+      // dirtiness rule as workflow-exit saves, applied to the loop scope
+      // and emitted INSIDE the loop (the flat workflow-level `savesAtExit`
+      // can't express a per-element save).
+      kind: "for-each";
+      var: string;
+      varAggName: string;
+      iterable: ExprIR;
+      body: WorkflowStmtIR[];
+      savesPerIteration: { name: string; aggName: string; repoName: string }[];
     }
   | {
       // A bare (unbound) resource-op call statement — `files.put(k, v)`
@@ -801,6 +951,9 @@ export type EnrichedAggregateIR = AggregateIR & {
   wireShape: WireField[];
   /** Always populated by `enrichLoomModel` (empty when none derived). */
   associations: AssociationIR[];
+  /** Always populated by `enrichLoomModel` (empty when the aggregate has
+   * no client-suppliable create fields). */
+  createInput: CreateInputFieldIR[];
   parts: EnrichedEntityPartIR[];
 };
 
@@ -1029,11 +1182,25 @@ export interface SystemIR {
    *  …).  Deployables list which dataSources they host via the
    *  `dataSources:` clause. */
   dataSources: DataSourceIR[];
+  /** ChannelSource declarations at system scope (channels.md, Slice 1) —
+   *  the physical binding of a `channel` to a `storage`, the messaging twin
+   *  of `dataSource`.  Deployables will list which they wire in a later
+   *  slice; Slice 1 carries the bindings and emits `.loom/asyncapi.yaml`. */
+  channelSources: ChannelSourceIR[];
   /** Named `layout <Name> { … }` SystemMembers (Phase 8).  Pages
    *  reference one via `layout: <Name>` — the React generator emits
    *  one `<Name>Layout` wrapper component per entry and routes
    *  matching pages through it. */
   layouts: LayoutIR[];
+}
+
+/** Physical binding of a `channel` to a `storage` (channels.md, Slice 1).
+ *  System-scope, mirroring `DataSourceIR`.  `channelName` is the bare
+ *  channel name; `storageName` the bound storage instance. */
+export interface ChannelSourceIR {
+  name: string;
+  channelName: string;
+  storageName: string;
 }
 
 /** A single typed storage instance.  v0 type enum covers the
@@ -1178,6 +1345,13 @@ export interface TestE2EIR {
  *  page is a first-class PageIR with no special-cased provenance. */
 export interface UiIR {
   name: string;
+  /** D-PHOENIX-SURFACE: the framework this UI renders against, declared
+   *  on the `ui { framework: … }` block itself rather than derived from
+   *  the hosting deployable's platform.  `undefined` when the source
+   *  omits it (the legacy path: the deployable's `uiFramework` still
+   *  derives from its platform).  Values are `Framework` grammar
+   *  strings (`react` | `phoenixLiveView`). */
+  framework?: string;
   pages: PageIR[];
   components: ComponentIR[];
   /** Optional ui-level menu block.  When undefined the sidebar is
@@ -1188,22 +1362,6 @@ export interface UiIR {
    *  declares.  Composition is supplied by the deployable that
    *  deploys this UI. */
   apiParams: UiApiParamIR[];
-  /** User-authored TS helpers brought into the walker
-   *  stdlib via `import helper <name> from "<path>"`.  Body refs to
-   *  `<name>(...)` emit a TS `import { <name> } from "<path>"` at
-   *  the top of the generated page TSX. */
-  helperImports: UiHelperImportIR[];
-}
-
-/** UI helper import — `import helper formatPrice from "./helpers/price"`.
- *  The path is preserved verbatim; the page TSX includes it as a
- *  named import. */
-export interface UiHelperImportIR {
-  /** Helper function name (referenced in page bodies). */
-  name: string;
-  /** Module path (preserved verbatim — caller decides absolute /
-   *  relative / package). */
-  path: string;
 }
 
 /** API declaration — first-class contract derived from a module's
@@ -1345,7 +1503,17 @@ export interface ComponentIR {
   name: string;
   params: ParamIR[];
   state: StateFieldIR[];
-  body: ExprIR;
+  /** Walked region tree.  Absent for an `extern` component, whose
+   *  rendering is owned by a hand-written file. */
+  body?: ExprIR;
+  /** True when the component is `extern` — the generator emits a
+   *  typed `<Name>.props.ts` interface and imports the user's module
+   *  at call sites instead of generating a body. */
+  extern?: boolean;
+  /** Module specifier for the hand-written component, relative to the
+   *  generated project's `src/` root (the `from "<path>"` clause).
+   *  Always present when `extern` is true. */
+  externPath?: string;
 }
 
 /** One reactive local field, inside a `page` or `component`. */
@@ -1503,7 +1671,25 @@ export interface NeedIR {
 // `ashPhoenix` HEEx pack.  Unlike `react`/`static` it owns its own
 // database (`needsDb: true`) and never declares `targets:` —
 // validator enforces both.
-export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView";
+export type Platform = "dotnet" | "node" | "react" | "static" | "phoenix";
+
+// D-REALIZATION-AXES — the `application:` axis is the one axis whose DSL
+// spelling differs from its backing D-ADAPTER-HOME adapter key: the
+// decision renamed the service-layer value to `serviceLayer`, while the
+// `style` adapter key stays `layered`.  `cqrs`/`flat` map to themselves.
+// Lives here (not in the validator) so lowering AND the validator share
+// one source of truth — the lowered `DeployableIR.application` carries the
+// resolved ADAPTER key, ready for `resolveStyle`.
+
+/** DSL `application:` value → `style` adapter key. */
+export function applicationDslToAdapter(v: string): string {
+  return v === "serviceLayer" ? "layered" : v;
+}
+
+/** `style` adapter key → DSL `application:` value (for menus / display). */
+export function applicationAdapterToDsl(v: string): string {
+  return v === "layered" ? "serviceLayer" : v;
+}
 
 /** Saving shapes (D-DOCUMENT-AXIS `shape(…)`) each backend platform can
  *  EMIT today — the single source of truth for the `supportedShapes`
@@ -1516,19 +1702,19 @@ export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView
  *  (`PersistenceAdapter.supportedShapes`). */
 export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingShape[]>> = {
   dotnet: ["relational", "embedded", "document"],
-  hono: ["relational", "embedded", "document"],
+  node: ["relational", "embedded", "document"],
   // Phoenix/Ash emits relational + embedded (Ash embedded resources);
   // `document` (a single opaque `:map` — non-idiomatic for Ash) is a
   // future allowed-but-warned addition.
-  phoenixLiveView: ["relational", "embedded"],
+  phoenix: ["relational", "embedded"],
 };
 
 export interface DeployableIR {
   name: string;
-  /** The platform **family** (`"hono"`, `"dotnet"`, `"react"`, …) —
+  /** The platform **family** (`"node"`, `"dotnet"`, `"react"`, …) —
    *  the closed union every downstream consumer branches on.  A
    *  `family@version` pin in the source is normalised here to its
-   *  family so `platform === "hono"` etc. stay valid. */
+   *  family so `platform === "node"` etc. stay valid. */
   platform: Platform;
   /** The fully-qualified backend ref (`"hono@v4"`) after lowering,
    *  mirroring `design?`.  Bareword `platform: hono` resolves through
@@ -1556,7 +1742,7 @@ export interface DeployableIR {
    *  "ashPhoenix".  A string starting with "./" or "/" is a custom
    *  pack path resolved relative to the .ddd file (a directory
    *  containing pack.json).  Only meaningful when platform === "react"
-   *  (or "static"/"dotnet" with a UI mount, or "phoenixLiveView");
+   *  (or "static"/"dotnet" with a UI mount, or "phoenix");
    *  ignored otherwise.
    *
    *  After lowering this field is always fully qualified
@@ -1573,6 +1759,25 @@ export interface DeployableIR {
    *  `ui` a keyword in the deployable block would shadow the test-DSL
    *  accessor and break parsing of existing examples. */
   design?: string;
+  /** Realization axes (D-REALIZATION-AXES).  Each decomposes the
+   *  platform bundle into one orthogonal concern.  All optional in the
+   *  type but **always concrete on backend deployables post-lowering**
+   *  (normalized to the platform's default, mirroring how `design` is
+   *  resolved via `BUILTIN_PACK_LATEST`); left `undefined` on frontend
+   *  (`react`/`static`) deployables, which carry no domain realization.
+   *  This PR is DSL-surface-only: the fields are carried through lowering
+   *  and validated, but no generator consumes them yet.
+   *
+   *  `application`/`directoryLayout` map onto the existing
+   *  D-ADAPTER-HOME adapter kinds `style`/`layout`; `persistence` onto
+   *  the `persistence` adapter; `foundation`/`transport`/`runtime` are
+   *  greenfield (no adapter infra yet, single default value each). */
+  foundation?: string;
+  application?: string;
+  persistence?: string;
+  directoryLayout?: string;
+  transport?: string;
+  runtime?: string;
   /** Per-deployable auth opt-in.  Populated when the source declares
    *  `auth: required` on the deployable.  Backends with
    *  `auth.required === true` emit JWT-decode middleware + a verifier
@@ -1592,6 +1797,15 @@ export interface DeployableIR {
    *  Future LiveView / Blazor backends extend this enum without
    *  breaking the deployable IR. */
   uiFramework?: string;
+  /** D-PHOENIX-SURFACE: the `ui` declarations this deployable `hosts:`.
+   *  The host↔ui relation that supersedes `uiName` (the legacy single
+   *  `ui:` binding).  A list from day one so a deployable can host
+   *  several UIs (the deferred one-ui-many-frameworks case).  Empty
+   *  when the source uses the legacy `ui:` binding instead.  When
+   *  present and the legacy binding is absent, `uiName`/`uiFramework`
+   *  fall back to the first entry (the framework comes from the `ui`
+   *  declaration itself, not the platform). */
+  hostedUiNames: string[];
   /** Apis this backend deployable serves.  Each
    *  entry references an `Api` declared at system scope.  Empty
    *  for frontend deployables and for backends that haven't yet
@@ -1972,6 +2186,20 @@ export function operationUsesCurrentUser(op: OperationIR): boolean {
   return op.statements.some(stmtUsesCurrentUser);
 }
 
+/** True when the operation has at least one `requires` guard.  A guarded
+ *  op denies with HTTP 403 at runtime (ForbiddenError/Exception/
+ *  `:forbidden`), so every backend declares a 403 ProblemDetails response
+ *  for it in the generated OpenAPI. */
+export function operationIsGuarded(op: OperationIR): boolean {
+  return op.statements.some((s) => s.kind === "requires");
+}
+
+/** True when the workflow has at least one `requires` guard — same 403
+ *  contract as a guarded operation. */
+export function workflowIsGuarded(wf: WorkflowIR): boolean {
+  return wf.statements.some((s) => s.kind === "requires");
+}
+
 /** True when any of the workflow's statements (or a sub-expression
  *  inside one) references `currentUser`.  When true, a backend's
  *  workflow handler must materialise a `currentUser` binding (from the
@@ -1994,6 +2222,14 @@ function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
     case "repo-let":
     case "op-call":
       return s.args.some(exprUsesCurrentUser);
+    case "repo-run":
+      return (
+        s.retrievalArgs.some(exprUsesCurrentUser) ||
+        (s.page?.offset ? exprUsesCurrentUser(s.page.offset) : false) ||
+        (s.page?.limit ? exprUsesCurrentUser(s.page.limit) : false)
+      );
+    case "for-each":
+      return exprUsesCurrentUser(s.iterable) || s.body.some(workflowStmtUsesCurrentUser);
     case "resource-call":
       return exprUsesCurrentUser(s.call);
   }

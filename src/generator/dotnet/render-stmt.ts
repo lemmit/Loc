@@ -1,7 +1,7 @@
 import type { ExprIR, PathIR, StmtIR } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import type { CsRenderContext } from "./render-expr.js";
-import { renderCsExpr } from "./render-expr.js";
+import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 
 const INDENT = "        ";
 const DEFAULT_CTX: CsRenderContext = { thisName: "this" };
@@ -26,6 +26,35 @@ export function renderCsStatements(
   traceCtx: TraceCtx = NO_TRACE,
 ): string {
   return stmts.map((s, i) => renderCsStatement(s, i, ctx, traceCtx)).join("\n");
+}
+
+/** Namespaces a statement body reaches into beyond the SDK's implicit
+ *  usings — the union of `collectCsExprUsings` over every expression
+ *  these statements render through `renderCsExpr`.  Mirrors the
+ *  per-kind expression set of `renderCsStatement`. */
+export function collectCsStmtUsings(stmts: StmtIR[], into: Set<string> = new Set()): Set<string> {
+  for (const s of stmts) {
+    switch (s.kind) {
+      case "precondition":
+      case "requires":
+      case "let":
+      case "expression":
+        collectCsExprUsings(s.expr, into);
+        break;
+      case "assign":
+      case "add":
+      case "remove":
+        collectCsExprUsings(s.value, into);
+        break;
+      case "emit":
+        for (const f of s.fields) collectCsExprUsings(f.value, into);
+        break;
+      case "call":
+        for (const a of s.args) collectCsExprUsings(a, into);
+        break;
+    }
+  }
+  return into;
 }
 
 function renderCsStatement(

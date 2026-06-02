@@ -14,11 +14,11 @@ context     →   domain primitives (aggregates / workflows / views)
 subdomain   →   group of contexts                                  [domain]
 
 api         →   contract derived from a subdomain                  [contract]
-storage     →   typed physical store                               [infra]
-dataSource  →   (context, kind) → storage routing                  [infra]
+storage     →   typed physical store / service                     [infra]
+resource    →   (context, kind) → storage binding + config         [infra]
 ui          →   declares api dependencies, renders pages           [consumer]
 
-deployable  →   composes platform + contexts + api + UI + dataSources [composition]
+deployable  →   composes platform + contexts + api + UI + resources  [composition]
 ```
 
 Read any single declaration and you see its full picture; no
@@ -67,8 +67,10 @@ deployables `serves:` apis.
 
 ## Storage instances
 
-`storage X { type: T }` declares a typed physical store — reusable
-across deployables, contexts, and bindings.  v0 type enum:
+`storage X { type: T }` declares a typed physical store or service —
+reusable across deployables, contexts, and bindings.  `type:` names the
+built-in **sourceType** that realizes it (see [`resources.md`](resources.md)).
+v0 type enum:
 
 | Category | Types |
 |---|---|
@@ -77,38 +79,47 @@ across deployables, contexts, and bindings.  v0 type enum:
 | Search | `elastic`, `meilisearch` |
 | Events | `kafka` |
 | Analytics | `clickhouse`, `bigquery` |
+| Object store | `s3` |
+| Queue | `rabbitmq` |
+| External API | `restApi` |
 
 ```ddd
 storage primarySql   { type: postgres }
 storage hotCache     { type: redis    }
-storage warehouse    { type: clickhouse }
+storage files        { type: s3, config: { region: "eu-central-1", bucket: "app-files" } }
+storage jobBus       { type: rabbitmq }
 ```
 
-Only `postgres` has full generator support today.  Other types
-parse + validate but don't yet activate generator output.
+`postgres` has full persistence support; `s3` / `rabbitmq` / `restApi`
+activate dev-compose sidecars + per-backend client emission (consumed
+from workflows — see [`resources.md`](resources.md)).  The remaining
+types parse + validate but don't yet activate generator output.  A
+`config { k: v }` map carries vendor parameters, validated per sourceType.
 
 
-## DataSource bindings
+## Resource bindings
 
-`storage` says *what physical store exists*; `dataSource` says
-*which context's data of which kind lands where*.  The split
-(D-STORAGE-SPLIT) means a single `storage` instance can back
+`storage` says *what physical store exists*; `resource` (renamed from
+`dataSource`) says *which context's data of which kind lands where*.
+The split (D-STORAGE-SPLIT) means a single `storage` instance can back
 multiple contexts (each in its own Postgres schema), and a single
 context can route different data kinds (state vs eventLog vs cache)
-to different stores.
+to different stores.  The full model — sourceType registry, capabilities,
+interfaces, and workflow-level consumption — is in [`resources.md`](resources.md);
+this section covers the persistence-routing essentials.
 
 ```ddd
-dataSource ordersState {
+resource ordersState {
   for: Orders, kind: state, use: primarySql
-  // optional: schema, tablePrefix, isolationLevel, ttl, every, retain, normalised, …
+  // optional: schema, tablePrefix, isolationLevel, ttl, every, retain, shape, config, …
 }
-dataSource ordersCache {
+resource ordersCache {
   for: Orders, kind: cache, use: hotCache, ttl: 60
 }
 ```
 
-Kinds (`state`, `eventLog`, `snapshot`, `cache`, `replica`) match
-storage types via an enforced compatibility matrix:
+The surface `kind:` matches the storage's sourceType via an enforced
+compatibility matrix:
 
 | Kind | Compatible storage types | Aggregate predicate |
 |---|---|---|
@@ -117,14 +128,18 @@ storage types via an enforced compatibility matrix:
 | `snapshot` | postgres, mysql, sqlite, inMemory | at least one `persistedAs(eventLog)` aggregate (snapshot policy) |
 | `cache` | redis, inMemory | any aggregate |
 | `replica` | postgres, mysql, sqlite | any aggregate |
+| `objectStore` | s3 | consumed from a workflow (`files.put(…)` etc.) |
+| `queue` | rabbitmq | consumed from a workflow (`jobs.enqueue(…)`) |
+| `api` | restApi | consumed from a workflow (`rates.get(…)`) |
 
 Defaults applied at emit time:
 
 - `schema:` omitted → defaults to `snake(contextName)` on relational stores; non-relational stores have no schema concept.
 - `normalised:` omitted → defaults to `true` (relational tables).  `normalised: false` marks the `state` / `snapshot` data as one JSON document (D-DOCUMENT-AXIS); the document persistence *emission* is a later slice, so today the knob is parsed and carried but does not yet change generated output.
 
-Backend deployables list which dataSources they wire up (see
-"Backend deployables" below).  The validators enforce that every
+Backend deployables list which resources they wire up via the
+`dataSources:` clause (see "Backend deployables" below).  The
+validators enforce that every
 hosted `(context, persistence-kind)` pair has a matching binding,
 that every listed binding actually routes data, and that knob/kind/
 storage triples are coherent.
@@ -211,17 +226,17 @@ deployable salesApi {
 The `serves:` field lists api contracts implemented by this
 backend.  The `contexts:` field names which bounded contexts this
 deployable hosts.  The `dataSources:` field lists the
-system-scope `dataSource` decls that route those contexts'
-persistence — see "DataSource bindings" above.
+system-scope `resource` decls that route those contexts'
+persistence — see "Resource bindings" above.
 
 Validators enforce:
 
 - Every hosted `(context, aggregate.persistedAs)` pair (the
-  `persistedAs(…)` value *is* the dataSource kind) must have a matching
-  dataSource listed (no under-binding).
-- Every listed dataSource must cover at least one aggregate in the
+  `persistedAs(…)` value *is* the resource kind) must have a matching
+  resource listed (no under-binding).
+- Every listed resource must cover at least one aggregate in the
   hosted contexts (no dead binding — warning, not error).
-- Every dataSource's `for: <ctx>` must be in this deployable's
+- Every resource's `for: <ctx>` must be in this deployable's
   `contexts:`.
 
 Multiple contexts hosted by one deployable is the common case:
@@ -312,7 +327,7 @@ system Acme {
 
   api SalesApi from Sales
   storage primarySql { type: postgres }
-  dataSource ordersState { for: Orders, kind: state, use: primarySql }
+  resource ordersState { for: Orders, kind: state, use: primarySql }
 
   ui WebApp {
     api Sales: SalesApi
@@ -349,9 +364,9 @@ What the reader gets from any single declaration:
 | `context Orders { aggregate Customer { ... } }` | the domain — pure, persistence-agnostic |
 | `api SalesApi from Sales` | the contract — derived from a subdomain |
 | `storage primarySql { type: postgres }` | a typed physical store |
-| `dataSource ordersState { for: Orders, kind: state, use: primarySql }` | which context's data of which kind lands where |
+| `resource ordersState { for: Orders, kind: state, use: primarySql }` | which context's data of which kind lands where |
 | `ui WebApp { api Sales: SalesApi, ... }` | the UI takes Sales of contract SalesApi |
-| `deployable salesApi` | what's served, which contexts hosted, which dataSources wire them up |
+| `deployable salesApi` | what's served, which contexts hosted, which resources wire them up |
 | `deployable webApp` | what UI runs, which backend fills each api param |
 
 
@@ -410,11 +425,11 @@ shape end-to-end.
 | Backend doesn't serve a bound api | "Deployable 'X' does not 'serves: Y'" |
 | Missing UI param binding | "Deployable 'D' is missing a binding for ui parameter 'X: Y'" |
 | Duplicate storage names | "Duplicate storage 'X'" |
-| Duplicate dataSource names | "Duplicate dataSource 'X'" |
-| Backend hosts an aggregate with no matching dataSource | "Deployable 'X' hosts aggregate 'C.A' (persistedAs: state, needs dataSource kind: state) but lists no matching dataSource." |
-| dataSource kind ↔ storage type mismatch | "dataSource 'X' kind 'cache' is incompatible with storage 'pg' of type 'postgres'.  kind 'cache' requires a storage of type inMemory or redis." |
-| dataSource listed but covers no aggregate (warning) | "Deployable 'X' lists dataSource 'Y' (kind: eventLog) for context 'C', but no aggregate is eventSourced — this binding routes no data." |
-| Knob incompatible with kind | "dataSource 'X': 'ttl' is only meaningful on kind: cache.  Got kind: state." |
+| Duplicate resource names | "Duplicate resource 'X'" |
+| Backend hosts an aggregate with no matching resource | "Deployable 'X' hosts aggregate 'C.A' (persistedAs: state, needs resource kind: state) but lists no matching resource." |
+| resource kind ↔ storage type mismatch | "resource 'X' kind 'cache' is incompatible with storage 'pg' of type 'postgres'.  kind 'cache' requires a storage of type inMemory or redis." |
+| resource listed but covers no aggregate (warning) | "Deployable 'X' lists resource 'Y' (kind: eventLog) for context 'C', but no aggregate is eventSourced — this binding routes no data." |
+| Knob incompatible with kind | "resource 'X': 'ttl' is only meaningful on kind: cache.  Got kind: state." |
 
 
 ## Generator wiring (today)
@@ -425,9 +440,10 @@ shape end-to-end.
 | `api X from <Ctx>` | Per-aggregate `api/<name>.ts` with React Query hooks (existing scaffold output) |
 | `storage X { type: postgres }` | Drizzle config + Phoenix/Hono/.NET Postgres migrations via the platform-neutral MigrationsIR (`src/ir/types/migrations-ir.ts` + `src/system/migrations-builder.ts`); per-backend emitters in `src/generator/{phoenix-live-view,typescript,dotnet}/emit/migrations*.ts` |
 | `storage X { type: <other> }` | Parses + validates; no generator output yet |
-| `dataSource X { for: C, kind: state, use: Y, schema: "...", tablePrefix: "..." }` | EF Core `ToTable("name", "schema")`, Drizzle `pgSchema("...").table(...)`, AshPostgres `schema "..." + table "prefix_..."`.  Schema defaults to `snake(contextName)` when omitted on a relational store. |
-| `dataSource X { ..., isolationLevel: <level> }` | Default isolation for transactional workflows in the bound context, overridden by per-workflow `transactional(<level>)`. |
-| `dataSource X { ..., ttl/every/retain/readonly/keyPrefix: ... }` | Validated for shape and compatibility; emitters do not yet consume — the IR validator warns at emit time so authors don't believe no-op knobs have effect. |
+| `resource X { for: C, kind: state, use: Y, schema: "...", tablePrefix: "..." }` | EF Core `ToTable("name", "schema")`, Drizzle `pgSchema("...").table(...)`, AshPostgres `schema "..." + table "prefix_..."`.  Schema defaults to `snake(contextName)` when omitted on a relational store. |
+| `resource X { ..., isolationLevel: <level> }` | Default isolation for transactional workflows in the bound context, overridden by per-workflow `transactional(<level>)`. |
+| `resource X { ..., ttl/every/retain/readonly/keyPrefix: ... }` | Validated for shape and compatibility; emitters do not yet consume — the IR validator warns at emit time so authors don't believe no-op knobs have effect. |
+| `resource X { for: C, kind: objectStore\|queue\|api, use: Y }` | Per-backend client module + dev-compose sidecar; consumed from workflows via the verb vocabulary.  See [`resources.md`](resources.md). |
 | UI `api X: Y` parameter + body refs | Walker hook injection (slices 11.24–11.25) |
 | Deployable `serves:` / `ui: X { ... }` | Validator + composition checks (slice 11.26) |
 | Deployable `contexts:` / `dataSources:` | IR-level coverage validator (every hosted (context, kind) pair must have a matching binding; every listed binding must cover at least one aggregate).  `migrationsOwner` derives one backend per subdomain for schema-migration emission. |

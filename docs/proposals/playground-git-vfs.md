@@ -10,11 +10,17 @@
 > are untouched — this was a `web/`-only change. Build order:
 > [`../plans/playground-git-vfs-implementation.md`](../plans/playground-git-vfs-implementation.md).
 >
-> **Deferred (not yet shipped):** an in-editor conflict-marker
-> indicator when a regenerated file carries `<<<<<<<` markers (today the
-> markers are plain text and a conflicted file won't bundle until
-> resolved). Remotes (clone/push/pull) remain out of scope per the
-> design below.
+> **Follow-ups shipped** (beyond the original design note below): the
+> workspace history is now visible — a **History** dock/mobile tab
+> listing commits + per-commit file changes (#766); **restore to a past
+> commit** via `GitStore.restoreCommit` (#773); an **in-editor conflict
+> indicator** — the Output panel's "Conflicts" stream/dot when a
+> regenerated file carries `<<<<<<<` markers (#778, closing the deferral
+> noted in earlier revisions); and Playwright **e2e** for history,
+> restore, and conflicts (#814).
+>
+> **Still out of scope:** remotes (clone/push/pull), per the design
+> below.
 >
 > The text below is the original design note, preserved for context.
 

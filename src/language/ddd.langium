@@ -34,7 +34,7 @@ System:
     '}';
 
 SystemMember:
-    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | Resource | Layout;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -106,7 +106,23 @@ PermissionDecl:
 
 Deployable:
     'deployable' name=LooseName '{'
-        ('platform' ':' platform=Platform ','?)
+        // D-REALIZATION-AXES: the optional `{ … }` block decomposes the
+        // platform bundle into six orthogonal realization axes.  `platform`
+        // stays a direct string property (every AST/IR consumer reads
+        // `d.platform` as a string); the block is additive and optional, so
+        // bare `platform: dotnet` parses unchanged.  Axis values are
+        // `LooseName` — the menu is enforced by the validator, not the
+        // parser (the `design:` precedent).
+        ('platform' ':' platform=Platform
+            ('{' (
+                  'foundation' ':' foundation=LooseName ','?
+                | 'application' ':' application=LooseName ','?
+                | 'persistence' ':' persistence=LooseName ','?
+                | 'directoryLayout' ':' directoryLayout=LooseName ','?
+                | 'transport' ':' transport=LooseName ','?
+                | 'runtime' ':' runtime=LooseName ','?
+            )* '}')?
+            ','?)
         // D-STORAGE-SPLIT: contexts the deployable hosts (semantic
         // change from the legacy `modules:` clause — refs are
         // BoundedContext, not the subdomain wrappers).  All v1
@@ -139,6 +155,22 @@ Deployable:
         // value is one of the v0 allowed values, and every UI api
         // parameter has a binding when the UI declares any.
         (uiSugar=UiSugarBinding | uiCompose=UiComposeBinding | uiBlock=UiBlockBinding)?
+        // D-PHOENIX-SURFACE: `hosts:` is the host↔ui relation that
+        // supersedes the `ui:`/`ui {}` bindings above.  A deployable
+        // hosts one or more `ui` declarations; the framework lives on
+        // the `ui` (phase 2), not derived from the platform.  Two forms:
+        // bare single (`hosts: WebApp`) and bracketed multi
+        // (`hosts: [Web, Admin]`) — the bracketed form mirrors
+        // `contexts:`/`dataSources:` and avoids the unbracketed-comma
+        // ambiguity where a following soft-keyword clause (`design`)
+        // would be swallowed as another ref.  A list type from day one
+        // so the deferred one-ui-many-frameworks case needs no grammar
+        // change.  Additive in this phase — parses alongside the legacy
+        // bindings; later phases make it canonical and retire `ui:`.
+        ('hosts' ':' (
+            '[' hosts+=[Ui:ID] (',' hosts+=[Ui:ID])* ','? ']'
+          | hosts+=[Ui:ID]
+        ) ','?)?
         ('port' ':' port=INT ','?)?
         ('auth' ':' auth=AuthMode ','?)?
         ('design' ':' design=DesignPack ','?)?
@@ -200,19 +232,24 @@ UiBlockBinding:
 // Frameworks the `ui:` mount lowers against.  `react` renders TSX
 // against a design pack (`mantine`/`shadcn`); `phoenixLiveView`
 // renders HEEx against the `ashPhoenix` pack as part of a fullstack
-// Elixir/Ash deployable.  Future values (`blazor-wasm`,
-// `blazor-server`, …) extend this enum when their codegen backends
-// land.
+// Elixir/Ash deployable.  `liveview` is the D-PHOENIX-SURFACE spelling
+// of `phoenixLiveView` (the framework, decoupled from the host
+// platform name); lowering canonicalises it to `phoenixLiveView`.
+// Future values (`blazor-wasm`, `blazor-server`, …) extend this enum
+// when their codegen backends land.
 Framework returns string:
-    'react' | 'phoenixLiveView';
+    'react' | 'phoenixLiveView' | 'liveview';
 
 // Backend platforms accept a quoted `family@version` pin
 // (`platform: "hono@v4"`) via the STRING alternative — symmetric
 // with `DesignPack` below.  Bareword keywords are unchanged so
 // every existing source parses identically; the validator + lowering
 // (`parseBuiltinPlatformRef`) are the resolution authority.
+// `phoenix` is the D-PHOENIX-SURFACE host-platform name; lowering
+// canonicalises it to `phoenixLiveView` until the literal-rename
+// cleanup phase.
 Platform returns string:
-    'dotnet' | 'hono' | 'react' | 'static' | 'phoenixLiveView' | STRING;
+    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,
@@ -249,27 +286,17 @@ AuthMode returns string:
 
 Ui:
     'ui' name=ID withClause=WithClause? '{'
+        // D-PHOENIX-SURFACE: the UI's framework is part of its own
+        // technical identity, not derived from the host backend.
+        // Optional + additive — existing sources omit it and keep the
+        // legacy "framework derived from the deployable's platform"
+        // path until the `hosts:` work consumes it.
+        ('framework' ':' framework=Framework ','?)?
         members+=UiMember*
     '}';
 
 UiMember:
-    UiApiParam | UiHelperImport | Page | Component | MenuBlock;
-
-// ---- helper import (UI-level) ----------------------------------
-//
-// Surfaces a user-authored TS helper into the walker stdlib so a
-// page body can reference `<name>(args…)` and the emitted page
-// TSX gets a matching `import { <name> } from "<path>";` at the
-// top.  Paths are emitted verbatim and are resolved against the
-// generated page's source location (typically `web/src/pages/`),
-// so `"./helpers/x"` resolves to `web/src/pages/helpers/x.ts`.
-//
-//   import helper formatPrice from "./helpers/price"
-//
-// Validator rejects names that shadow walker stdlib primitives so
-// helper authors never silently override `Stack` / `Form` / etc.
-UiHelperImport:
-    'import' 'helper' name=ID 'from' path=STRING;
+    UiApiParam | Page | Component | MenuBlock;
 
 // ---- api declaration (system-level) ----------------------------
 //
@@ -329,7 +356,7 @@ StorageType returns string:
     | 'elastic' | 'meilisearch'
     | 'kafka'
     | 'clickhouse' | 'bigquery'
-    | 's3' | 'rabbitmq' | 'restApi';
+    | 's3' | 'rabbitmq' | 'nats' | 'restApi';
 
 ConnectionSource:
       {infer ServiceConnectionSource} 'service' '(' service=ID ')'
@@ -402,8 +429,8 @@ LayoutProp:
 //
 // Each slot's body is a single Expression evaluated in the same
 // scope as a page body — so it can reference walker-stdlib primitives
-// (Sticky, Container, Group, …), user-declared components, and
-// helper imports.  `main` is a special slot with no body — it marks
+// (Sticky, Container, Group, …) and user-declared components.
+// `main` is a special slot with no body — it marks
 // where React Router's `<Outlet />` lands; every layout must declare
 // exactly one `main`.  Validator enforces.
 Layout:
@@ -441,11 +468,22 @@ MenuMetaEntry:
 
 // ---- component ----------------------------------------------------------
 
+// A `component` is normally a typed function from params to a walked
+// body.  An `extern` component instead hands rendering to a
+// hand-written file: `component X(...) extern from "<src-relative
+// path>"` declares the typed param contract but no `body:` — the
+// generator imports the user's module at call sites and emits a
+// `<Name>.props.ts` typed-props interface (the UI escape hatch; see
+// docs/proposals/extern-component-escape-hatch.md).  The `extern`
+// keyword always carries its `from` path; the body is omitted (the
+// validator pins both halves of this exclusivity).
 Component:
-    'component' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
-        decls+=ComponentDecl*
-        'body' ':' body=Expression
-    '}';
+    'component' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+        (extern?='extern' 'from' externPath=STRING)?
+        ('{'
+            decls+=ComponentDecl*
+            ('body' ':' body=Expression)?
+        '}')?;
 
 ComponentDecl:
     StateBlock;
@@ -609,7 +647,7 @@ BoundedContext:
 
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
-    | Criterion | FilterDecl | StampDecl | ImplementsDecl;
+    | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl | Channel;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -788,6 +826,34 @@ EventDecl:
         (fields+=Property (','? fields+=Property)* ','?)?
     '}';
 
+// Channel — the publisher-side contract for how a context's events are
+// transported (channels.md, Slice 1).  A context member, declared beside
+// its events; `carries:` selects a subset of the context's events, and the
+// orthogonal `delivery` x `retention` knobs express pub/sub vs work-queue
+// vs durable stream.  The contract names no transport — `channelSource`
+// (system scope) binds it to a physical `storage`.  `key:` is the
+// partition/ordering field (validated to exist on the carried events).
+Channel:
+    'channel' name=ID '{'
+        ('carries'   ':' carries+=[EventDecl:ID] (',' carries+=[EventDecl:ID])* ','?)
+        ('delivery'  ':' delivery=ChannelDelivery ','?)?
+        ('retention' ':' retention=ChannelRetention ','?)?
+        ('key'       ':' key=ID ','?)?
+    '}';
+
+ChannelDelivery  returns string: 'broadcast' | 'queue';
+ChannelRetention returns string: 'ephemeral' | 'log' | 'work';
+
+// ChannelSource — the physical binding for a channel, system-scope, the
+// messaging twin of `dataSource`/`Resource`.  `for:` names the channel
+// (bare name; Slice 1), `use:` the `storage` that realises it.  The
+// channel<->storage compatibility matrix is enforced by the validator.
+ChannelSource:
+    'channelSource' name=LooseName '{'
+        ('for' ':' channel=ID ','?)
+        ('use' ':' use=[Storage:LooseName] ','?)?
+    '}';
+
 // Payload — a structured-data carrier crossing a boundary
 // (payload-transport-layer.md, P1).  `payload` is the umbrella; the four
 // sugar keywords carry intent (command / query / response / error) but
@@ -862,6 +928,21 @@ View:
 BindEntry:
     name=ID '=' expr=Expression;
 
+// Seed — first-boot data for a context's aggregates (database-seeding.md).
+// Declarative form: a named dataset of typed records, each lowering through
+// the aggregate's canonical create (D-SEED-PATH), so invariants hold.  `raw`
+// opts a block into table-level inserts.  The imperative (workflow-shaped)
+// body, `@handle` cross-row refs, and the deferred `key` clause are later
+// slices.  Each row's value is an ObjectLit shaped like the aggregate's
+// create parameters — no `id` field; the framework mints ids.
+Seed:
+    'seed' (dataset=ID)? (raw?='raw')? '{'
+        rows+=SeedRow*
+    '}';
+
+SeedRow:
+    aggregate=[Aggregate:ID] value=ObjectLit;
+
 // Criterion — a named, parameterised, pure boolean predicate over a
 // candidate type `T` (the Specification Pattern, Evans / Spring-Data
 // style).  See docs/criterion.md.
@@ -889,6 +970,57 @@ Criterion:
         '=' body=Expression
       | '{' 'where' ':' body=Expression '}'
     );
+
+// Retrieval — a named query *bundle*: a composed predicate (`where`,
+// the same expression position as `criterion`/`find … where`, so it
+// references criteria and `this.<field>` candidate refs) plus the
+// shaping a real query carries — `sort` ordering and a `loads` fetch
+// shape.  Pagination is NOT a slot here: `page` is a call-site argument
+// on `Repo.run(R(args), page?)`, never part of the declaration.  See
+// docs/proposals/retrieval.md.  Lowers to RetrievalIR
+// (docs/proposals/reified-criteria.md).
+//
+//   retrieval AllActive of Customer = ActiveCustomer
+//   retrieval HighValueInRegion(region: string) of Order {
+//     where: InRegion(region) && OrderTotalAtLeast(1000)
+//     sort:  [total desc, createdAt asc]
+//     loads: [this.lines[].product]
+//   }
+//
+// `sort` / `loads` admit the `sort`/`loads`/`asc`/`desc` keywords as
+// soft keywords (LooseName / NameRefIdent) so user code naming a field
+// `sort` / `loads` / `asc` / `desc` keeps parsing.
+Retrieval:
+    'retrieval' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? 'of' target=TypeRef
+    (
+        '=' where=Expression
+      | '{' 'where' ':' where=Expression
+            ('sort'  ':' '[' (sort+=SortItem (',' sort+=SortItem)*)? ']')?
+            ('loads' ':' '[' (loads+=LoadPath (',' loads+=LoadPath)*)? ']')?
+        '}'
+    );
+
+// A single sort term — a candidate path and a direction.  `direction`
+// is a discriminator field (not an `{infer}` action) per the grammar
+// convention; defaults to ascending when omitted.
+SortItem:
+    path=LoadPath (direction=SortDirection)?;
+
+SortDirection returns string:
+    'asc' | 'desc';
+
+// A structural path through the candidate aggregate for `sort` / `loads`
+// — flat-list rule (head + dotted tail), with an optional `[]` marker on
+// any segment meaning "across the collection" (mirrors `contains`
+// syntax).  Not an Expression: load-specifications.md restricts these to
+// structural paths (no filters / lambdas).  A leading `this` is admitted
+// and stripped at lowering so `this.lines[].product` and
+// `lines[].product` are equivalent.
+LoadPath:
+    ('this' '.')? segments+=LoadSegment ('.' segments+=LoadSegment)*;
+
+LoadSegment:
+    name=LooseName (collection?='[]')?;
 
 // ---------------------------------------------------------------------------
 // Members
@@ -938,7 +1070,11 @@ Property:
         // `query`, etc. (e.g. `event Foo { payload: string }`) keep parsing.
         // They act as hard keywords only at `ContextMember` position, where
         // `PayloadDecl` (`kind=PayloadKind name=ID '{'`) begins.
-        | 'payload' | 'command' | 'query' | 'response' | 'error')
+        | 'payload' | 'command' | 'query' | 'response' | 'error'
+        // Retrieval keywords (retrieval.md) — soft in property position so
+        // user-declared fields named `sort` / `loads` / `asc` / `desc` /
+        // `retrieval` keep parsing.  Hard only inside the `Retrieval` slots.
+        | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1087,7 +1223,19 @@ LooseName returns string:
     // Payload-family keywords (payload-transport-layer.md, P1) admitted as
     // soft in loose-name positions; hard only at `ContextMember`
     // (`PayloadDecl`).
-    | 'payload' | 'command' | 'query' | 'response' | 'error';
+    | 'payload' | 'command' | 'query' | 'response' | 'error'
+    // D-REALIZATION-AXES — the six platform-block axis keywords admitted
+    // as soft so user code can still name a field `application`,
+    // `transport`, `runtime`, etc.  `transactional` is the `runtime`
+    // default value and is ALSO the storage-isolation flag keyword
+    // (`transactional?='transactional'`) — admit it here so it parses as
+    // a `LooseName` value in the `runtime:` slot.
+    | 'foundation' | 'application' | 'persistence' | 'directoryLayout'
+    | 'transport' | 'runtime' | 'transactional'
+    // Retrieval keywords (retrieval.md) admitted as soft so user code can
+    // still name a field `retrieval` / `sort` / `loads` / `asc` / `desc`.
+    // Hard only inside the `Retrieval` rule's slots.
+    | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1128,7 +1276,28 @@ Statement:
   | RequiresStmt
   | LetStmt
   | EmitStmt
+  | ForStmt
   | AssignOrCallStmt;
+
+// `for <var> in <iterable> { <body> }` — iterate an aggregate array
+// (typically `Repo.run(<Retrieval>(args), page?)`), binding each element
+// to `<var>` in the body.  The body reuses `Statement*`, so op-calls,
+// lets, emits, and nested loops all parse.  Each iteration's mutations to
+// `<var>` persist via a per-iteration save (see the for-each lowering).
+// `for` is already a hard keyword elsewhere (`repository X for Agg`); the
+// leading statement position disambiguates the loop.
+ForStmt:
+    'for' var=ID 'in' iterable=ForIterable '{'
+        body+=Statement*
+    '}';
+
+// The loop iterable is restricted to a name or a postfix chain
+// (`customers`, `Customers.run(R(args), …)`) — deliberately NOT the full
+// `Expression`, because `BuilderCall` (`Name { … }`) would otherwise
+// swallow the loop's own `{ body }` block.  These are the only forms
+// that produce an aggregate array in v1 anyway.
+ForIterable infers Expression:
+    NameRef ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+)?;
 
 PreconditionStmt:
     'precondition' expr=Expression;
@@ -1349,7 +1518,7 @@ ObjectLit:
     '{' (fields+=ObjectFieldInit (',' fields+=ObjectFieldInit)* ','?)? '}';
 
 ObjectFieldInit:
-    name=ID ':' value=Expression;
+    name=LooseName ':' value=Expression;
 
 ParenExpr:
     '(' inner=Expression ')';
@@ -1475,7 +1644,11 @@ NameRefIdent returns string:
        // Payload-family keywords (payload-transport-layer.md, P1) admitted as
        // bare NameRefs so expressions can read a field named `payload`,
        // `error`, `query`, etc.  Hard only at `ContextMember` (`PayloadDecl`).
-       | 'payload' | 'command' | 'query' | 'response' | 'error';
+       | 'payload' | 'command' | 'query' | 'response' | 'error'
+       // Retrieval keywords (retrieval.md) admitted as bare NameRefs so an
+       // expression can read a field named `retrieval` / `sort` / `loads` /
+       // `asc` / `desc`.  Hard only inside the `Retrieval` rule's slots.
+       | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc';
 
 // ---------------------------------------------------------------------------
 // Terminals

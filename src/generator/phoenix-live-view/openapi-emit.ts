@@ -1,5 +1,9 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { forApiRead, forCreateInput } from "../../ir/enrich/wire-projection.js";
+import {
+  createInputFields,
+  forApiRead,
+  wireCreateDefault,
+} from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -15,6 +19,7 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../ir/types/loom-ir.js";
+import { operationIsGuarded, workflowIsGuarded } from "../../ir/types/loom-ir.js";
 import {
   peelCollection,
   peelNullable,
@@ -247,8 +252,8 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
  *  carries the `ProblemDetails` schema MODULE under `application/problem+json`
  *  — matching Hono/.NET so the conformance gate's error-response dimension
  *  compares equal. */
-function errorResponseEntries(kind: OpErrorKind, schemasModule: string): string {
-  return errorStatuses(kind)
+function errorResponseEntries(kind: OpErrorKind, schemasModule: string, guarded = false): string {
+  return errorStatuses(kind, guarded)
     .map(
       (s) => `,
             ${s} => %OpenApiSpex.Response{
@@ -299,7 +304,7 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "Success",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :object}}}
-            }${errorResponseEntries("workflow", schemasModule)}
+            }${errorResponseEntries("workflow", schemasModule, workflowIsGuarded(wf))}
           }
         }
       }`);
@@ -447,7 +452,7 @@ function renderApiSpec(
             }
           },
           responses: %{
-            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("operation", schemasModule)}
+            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("operation", schemasModule, operationIsGuarded(op))}
           }
         }
       }`,
@@ -616,7 +621,7 @@ function openApiType(t: TypeIR, schemasModule: string): string {
  *  backend marks request bools required — matching keeps the parity gate
  *  green. */
 function renderProperties(
-  fields: Array<{ name: string; type: TypeIR; optional: boolean }>,
+  fields: Array<{ name: string; type: TypeIR; optional: boolean; wireDefault?: boolean }>,
   schemasModule: string,
   isRequest = false,
 ): {
@@ -640,7 +645,9 @@ function renderProperties(
     const info = wireTypeInfo(f.type, isRequest ? "request" : "response");
     const optionalBoolRequest =
       isRequest && !info.isNullable && info.refKind === "primitive" && info.primitive === "bool";
-    if (!f.optional && !optionalBoolRequest) requiredAtoms.push(`:${key}`);
+    // An explicitly-defaulted request field is optional input (Ash applies
+    // the default on omission), so it drops from the required set too.
+    if (!f.optional && !optionalBoolRequest && !f.wireDefault) requiredAtoms.push(`:${key}`);
   }
 
   return { propsLines, requiredAtoms };
@@ -656,7 +663,7 @@ function wireFieldsToProps(
 function renderSchemaModule(
   moduleName: string,
   schemaTitle: string,
-  fields: Array<{ name: string; type: TypeIR; optional: boolean }>,
+  fields: Array<{ name: string; type: TypeIR; optional: boolean; wireDefault?: boolean }>,
   schemasModule: string,
   isRequest = false,
 ): string {
@@ -682,9 +689,14 @@ end
 `;
 }
 
-/** RFC 7807 ProblemDetails schema module — the shared error body.  All
- *  fields optional (matching .NET's framework schema + the Hono zod schema),
- *  so the cross-backend field/required sets compare equal. */
+/** RFC 7807 ProblemDetails schema module — the shared error body.  Base 5
+ *  spec fields + the §3.2 `errors[]` extension (per-field `{ pointer,
+ *  message }` array) that the runtime emits on 422 validation responses.
+ *  All fields optional — base 5 per the spec core; `errors` is only
+ *  present on 422 validation responses (consumed by the frontend ACL's
+ *  `applyServerErrors`).  Phase D of validation-error-extension.md —
+ *  all three backends (Hono / .NET / Phoenix) declare the same shape in
+ *  lockstep so the cross-backend parity gate stays green. */
 function renderProblemDetailsSchema(webModule: string): string {
   return `# Auto-generated.
 defmodule ${webModule}.Api.Schemas.ProblemDetails do
@@ -700,7 +712,18 @@ defmodule ${webModule}.Api.Schemas.ProblemDetails do
       title: %OpenApiSpex.Schema{type: :string},
       status: %OpenApiSpex.Schema{type: :integer},
       detail: %OpenApiSpex.Schema{type: :string},
-      instance: %OpenApiSpex.Schema{type: :string}
+      instance: %OpenApiSpex.Schema{type: :string},
+      errors: %OpenApiSpex.Schema{
+        type: :array,
+        items: %OpenApiSpex.Schema{
+          type: :object,
+          required: [:pointer, :message],
+          properties: %{
+            pointer: %OpenApiSpex.Schema{type: :string},
+            message: %OpenApiSpex.Schema{type: :string}
+          }
+        }
+      }
     }
   })
 end
@@ -808,15 +831,19 @@ end
 
 function renderCreateRequestSchema(agg: AggregateIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.Create${agg.name}Request`;
-  // Create request carries required (non-optional) fields that the
-  // client may supply.  `forCreateInput` drops server-controlled fields
-  // (`managed`, `token`, `internal`); keeps `immutable` and `secret`.
-  // Matches the .NET / Hono / React CreateRequest shapes.
-  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = forCreateInput(
-    agg.fields,
-  )
-    .filter((f: FieldIR) => !f.optional)
-    .map((f: FieldIR) => ({ name: f.name, type: f.type, optional: false }));
+  // Create request carries the canonical create-input set the client may
+  // supply.  `createInputFields` = `forCreateInput` (drops `managed`,
+  // `token`, `internal`; keeps `immutable` and `secret`) INCLUDING
+  // optionals — which ride their own type nullability into the `required`
+  // list (see `renderProperties`).  Matches the .NET / Hono / React
+  // CreateRequest shapes so the parity gate's property + required sets agree.
+  const fields: Array<{ name: string; type: TypeIR; optional: boolean; wireDefault?: boolean }> =
+    createInputFields(agg).map((f: FieldIR) => ({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      wireDefault: wireCreateDefault(f) !== undefined,
+    }));
   return renderSchemaModule(
     moduleName,
     `Create${agg.name}Request`,

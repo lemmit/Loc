@@ -2,7 +2,7 @@ import type { Platform } from "../ir/types/loom-ir.js";
 import dotnetPlatform from "./dotnet.js";
 import honoPlatform, { loomManifest as honoV4Manifest } from "./hono/v4/index.js";
 import type { LoomBackendManifest } from "./manifest.js";
-import phoenixLiveViewPlatform from "./phoenix-live-view.js";
+import phoenixPlatform from "./phoenix-live-view.js";
 import reactPlatform from "./react.js";
 import type { PlatformSurface } from "./surface.js";
 
@@ -27,7 +27,7 @@ import type { PlatformSurface } from "./surface.js";
 
 const platforms: Record<Platform, PlatformSurface> = {
   dotnet: dotnetPlatform,
-  hono: honoPlatform,
+  node: honoPlatform,
   react: reactPlatform,
   // `static` is the page-metamodel's UI-only deployable kind.  It
   // shares the React surface — a deployable declared as
@@ -37,7 +37,7 @@ const platforms: Record<Platform, PlatformSurface> = {
   // Fullstack Elixir/Ash + Phoenix LiveView platform.  Owns its own
   // database, mounts a `ui:`, and (when populated) `serves:` an
   // Ash-derived API.
-  phoenixLiveView: phoenixLiveViewPlatform,
+  phoenix: phoenixPlatform,
 };
 
 // ---------------------------------------------------------------------------
@@ -49,9 +49,9 @@ const platforms: Record<Platform, PlatformSurface> = {
 // `platforms`.
 // ---------------------------------------------------------------------------
 export const BUILTIN_PLATFORM_LATEST = {
-  hono: "v4",
+  node: "v4",
   dotnet: "v8",
-  phoenixLiveView: "v1",
+  phoenix: "v1",
 } as const satisfies Partial<Record<Platform, string>>;
 
 export type BackendFamily = keyof typeof BUILTIN_PLATFORM_LATEST;
@@ -90,11 +90,11 @@ const inTreeBackends: DiscoveredBackend[] = [
   {
     manifest: {
       kind: "backend",
-      family: "phoenixLiveView",
+      family: "phoenix",
       loomVersion: "v1",
       core: "^1.0.0",
     },
-    surface: phoenixLiveViewPlatform,
+    surface: phoenixPlatform,
   },
 ];
 
@@ -149,16 +149,46 @@ export interface ParsedBuiltinPlatformRef {
   qualified: string;
 }
 
+/** Legacy platform name → canonical family.  Each canonical name
+ *  decouples the *platform* (runtime) from the *framework* it was once
+ *  conflated with: `phoenixLiveView` → `phoenix` (D-PHOENIX-SURFACE; the
+ *  LiveView *framework* keeps the `phoenixLiveView` spelling), `hono` →
+ *  `node` (D-NODE-PLATFORM; the Hono *web framework* lives on as the
+ *  `transport: hono` value). */
+const LEGACY_PLATFORM_ALIASES: Record<string, string> = {
+  phoenixLiveView: "phoenix",
+  hono: "node",
+};
+
+/** Desugar a legacy platform name to its canonical family, preserving any
+ *  `@version` pin (`hono@v4` → `node@v4`). */
+function aliasPlatform(s: string): string {
+  const at = s.indexOf("@");
+  const family = at === -1 ? s : s.slice(0, at);
+  const canonical = LEGACY_PLATFORM_ALIASES[family];
+  if (canonical === undefined) return s;
+  return at === -1 ? canonical : `${canonical}${s.slice(at)}`;
+}
+
 /** Parse a `platform:` value.  Mirrors `parseBuiltinDesignRef`
  *  (builtin-formats.ts): bareword backend → default version;
  *  `family@version` → that pin; frontend / unknown → `null`.
  *  Pure; exported so the validator + lowering share one
  *  resolution authority. */
 export function parseBuiltinPlatformRef(s: string): ParsedBuiltinPlatformRef | null {
-  const at = s.indexOf("@");
-  const family = (at === -1 ? s : s.slice(0, at)) as BackendFamily;
+  // D-PHOENIX-SURFACE: `phoenix` is the host-platform alias for the
+  // `phoenix` canonical family.  Canonicalise the legacy alias here, the
+  // shared resolution authority, so validator + lowering + `platformFor`
+  // all accept the new spelling identically.  The literal-rename cleanup
+  // phase flips which name is canonical.
+  const canonical = aliasPlatform(s);
+  const at = canonical.indexOf("@");
+  const family = (at === -1 ? canonical : canonical.slice(0, at)) as BackendFamily;
   if (!(family in BUILTIN_PLATFORM_LATEST)) return null;
-  const version = at === -1 ? BUILTIN_PLATFORM_LATEST[family] : s.slice(at + 1);
+  // Slice the version off `canonical`, not the original `s` — the alias may
+  // change the family's length (`phoenixLiveView@v1` → `phoenix@v1`), so the
+  // `@` index from `canonical` only lines up with `canonical`.
+  const version = at === -1 ? BUILTIN_PLATFORM_LATEST[family] : canonical.slice(at + 1);
   return { family, version, qualified: `${family}@${version}` };
 }
 

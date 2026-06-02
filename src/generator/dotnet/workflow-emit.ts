@@ -1,3 +1,4 @@
+import { createInputFields, createOmissionValue } from "../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
@@ -6,20 +7,23 @@ import {
   type SystemIR,
   type WorkflowIR,
   type WorkflowStmtIR,
+  workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+import { errorStatuses } from "../../ir/util/openapi-errors.js";
 import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { dotnetResourceAdapterFor, resourceClassName } from "./adapters/resource-clients.js";
 import {
+  collectWireUsings,
   csIdValueClrType,
   domainToRequestExpr,
   dtoParam,
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
-import { renderCsExpr, renderCsType } from "./render-expr.js";
+import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // .NET workflow emission.
@@ -120,20 +124,26 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
   for (const save of wf.savesAtExit) {
     repos.set(save.repoName, save.aggName);
   }
-  for (const st of wf.statements) {
-    if (st.kind === "repo-let") {
-      repos.set(st.repoName, st.aggName);
-    } else if (st.kind === "emit") {
-      hasEmit = true;
-    } else if (st.kind === "op-call") {
-      const agg = aggsByName.get(st.aggName);
-      const op = agg?.operations.find((o) => o.name === st.op);
-      if (op?.extern) {
-        const key = `${st.aggName}.${st.op}`;
-        externs.set(key, { aggName: st.aggName, opName: st.op });
+  const walk = (stmts: WorkflowStmtIR[]): void => {
+    for (const st of stmts) {
+      if (st.kind === "repo-let" || st.kind === "repo-run") {
+        repos.set(st.repoName, st.aggName);
+      } else if (st.kind === "emit") {
+        hasEmit = true;
+      } else if (st.kind === "for-each") {
+        for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
+        walk(st.body);
+      } else if (st.kind === "op-call") {
+        const agg = aggsByName.get(st.aggName);
+        const op = agg?.operations.find((o) => o.name === st.op);
+        if (op?.extern) {
+          const key = `${st.aggName}.${st.op}`;
+          externs.set(key, { aggName: st.aggName, opName: st.op });
+        }
       }
     }
-  }
+  };
+  walk(wf.statements);
   return { repos, hasEmit, externs };
 }
 
@@ -262,7 +272,13 @@ function renderHandler(
   const resourceClasses = buildResourceClasses(sys);
   if (resourceClasses.size > 0 && workflowUsesResourceOp(wf)) usings.add(`${ns}.Resources`);
   const renderArg = (e: import("../../ir/types/loom-ir.js").ExprIR): string => {
-    return renderExprWithCmdParams(e, paramNames, usings, resourceClasses);
+    // Collect the rendered expression's non-implicit namespaces adjacent
+    // to rendering (`renderArg` is the single choke point for every
+    // workflow expression the handler emits) instead of threading a Set
+    // through the renderer.  The cmd-param rewrite only renames refs, so
+    // the `matches` shape collectCsExprUsings keys off is unchanged.
+    collectCsExprUsings(e, usings);
+    return renderExprWithCmdParams(e, paramNames, resourceClasses);
   };
 
   for (const st of wf.statements) {
@@ -365,6 +381,24 @@ function csIsolationLevel(level: import("../../ir/types/loom-ir.js").IsolationLe
   }
 }
 
+/** Render the omission value of a create-input field the workflow `create`
+ * left unset, into the C# the named-arg `Create(...)` call passes for it:
+ * a `= default`'s literal (via the workflow expr renderer), a bare bool's
+ * `false`, or an optional's `null`. */
+function renderCsOmission(
+  v: ReturnType<typeof createOmissionValue>,
+  renderArg: (e: import("../../ir/types/loom-ir.js").ExprIR) => string,
+): string {
+  switch (v.kind) {
+    case "default":
+      return renderArg(v.expr);
+    case "false":
+      return "false";
+    case "null":
+      return "null";
+  }
+}
+
 function renderStatement(
   st: WorkflowStmtIR,
   renderArg: (e: import("../../ir/types/loom-ir.js").ExprIR) => string,
@@ -394,7 +428,21 @@ function renderStatement(
       // (matching the source field name), so the named-arg call site
       // must use the same casing — PascalCase here would fail with
       // CS1739 "best overload does not have a parameter named X".
-      const args = st.fields.map((f) => `${f.name}: ${renderArg(f.value)}`).join(", ");
+      const provided = st.fields.map((f) => `${f.name}: ${renderArg(f.value)}`);
+      // The .NET Create(...) factory declares *every* canonical create
+      // input as a required parameter (no C# default — optionals would
+      // have to trail the required params, which the wire-shape ordering
+      // doesn't guarantee). A workflow `create` names only a subset, so
+      // every create input the DSL omitted must be supplied explicitly
+      // with its omission value (an optional → null, a `= default` → the
+      // default literal, a bare bool → false) or the call fails to compile
+      // with CS7036. Named args keep this order-free.
+      const named = new Set(st.fields.map((f) => f.name));
+      const agg = ctx.aggregates.find((a) => a.name === st.aggName);
+      const omitted = (agg ? createInputFields(agg) : [])
+        .filter((f) => !named.has(f.name))
+        .map((f) => `${f.name}: ${renderCsOmission(createOmissionValue(f), renderArg)}`);
+      const args = [...provided, ...omitted].join(", ");
       // C# doesn't support reordering positional args; using named
       // args lets the user write fields in any order in the .ddd source.
       return [`${INDENT}var ${st.name} = ${st.aggName}.Create(${args});`];
@@ -448,6 +496,40 @@ function renderStatement(
       const exprText = renderArg(st.expr);
       return [`${INDENT}var ${st.name} = ${isResourceOp ? "await " : ""}${exprText};`];
     }
+    case "repo-run": {
+      // `Repo.run(<Retrieval>(args), page?)` → the generated
+      // `Run<Name>Async(args, page?, ct)` repository method.
+      const fieldName = `_${st.repoName.charAt(0).toLowerCase() + st.repoName.slice(1)}`;
+      const args = st.retrievalArgs.map(renderArg);
+      if (st.page) {
+        const off = st.page.offset ? renderArg(st.page.offset) : "null";
+        const lim = st.page.limit ? renderArg(st.page.limit) : "null";
+        args.push(`(${off}, ${lim})`);
+      }
+      const callArgs = [...args, "ct"].join(", ");
+      return [
+        `${INDENT}var ${st.name} = await ${fieldName}.Run${upperFirst(st.retrievalName)}Async(${callArgs});`,
+      ];
+    }
+    case "for-each": {
+      // `for o in xs { … }` → C# `foreach`; body recurses at +4 indent,
+      // then each iteration's dirty bindings save inside the loop (the
+      // aggregate's events drain through SaveAsync).
+      const bodyLines = st.body
+        .flatMap((s) => renderStatement(s, renderArg, ctx, usage))
+        .map((l) => `    ${l}`);
+      const saveLines = st.savesPerIteration.map((sv) => {
+        const fieldName = `_${sv.repoName.charAt(0).toLowerCase() + sv.repoName.slice(1)}`;
+        return `${INDENT}    await ${fieldName}.SaveAsync(${sv.name}, ct);`;
+      });
+      return [
+        `${INDENT}foreach (var ${st.var} in ${renderArg(st.iterable)})`,
+        `${INDENT}{`,
+        ...bodyLines,
+        ...saveLines,
+        `${INDENT}}`,
+      ];
+    }
     case "resource-call":
       // 4c: bare resource-op statement (`files.put(k, v)`) → awaited async
       // helper call.
@@ -459,7 +541,6 @@ function renderStatement(
 function renderExprWithCmdParams(
   e: import("../../ir/types/loom-ir.js").ExprIR,
   paramNames: Set<string>,
-  usings?: Set<string>,
   resourceClasses?: Map<string, string>,
 ): string {
   // Substitute by rewriting the IR before renderCsExpr.
@@ -517,7 +598,7 @@ function renderExprWithCmdParams(
     }
     return e;
   };
-  return renderCsExpr(rewrite(e), { thisName: "this", usings, resourceClasses });
+  return renderCsExpr(rewrite(e), { thisName: "this", resourceClasses });
 }
 
 // ---------------------------------------------------------------------------
@@ -533,15 +614,21 @@ function renderController(ctx: EnrichedBoundedContextIR, ns: string, routePrefix
   const usings = new Set<string>();
   const blocks: string[] = [];
   for (const wf of ctx.workflows) {
+    for (const p of wf.params) collectWireUsings(p.type, ctx, usings);
     const cmdArgs = wf.params
-      .map((p) => wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx, usings))
+      .map((p) => wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx))
       .join(",\n            ");
+    // Error responses from the shared matrix: 400 always, + 403 when the
+    // workflow has a `requires` guard (denies with ForbiddenException).
+    const errorAttrs = errorStatuses("workflow", workflowIsGuarded(wf))
+      .map((s) => `    [ProducesResponseType(typeof(ProblemDetails), ${s})]\n`)
+      .join("");
     blocks.push(
       `    [HttpPost("${snake(wf.name)}")]\n` +
         // Explicit success (NoContent → 204) so the added error
         // [ProducesResponseType] doesn't suppress Swashbuckle's 2xx inference.
         `    [ProducesResponseType(204)]\n` +
-        `    [ProducesResponseType(typeof(ProblemDetails), 400)]\n` +
+        errorAttrs +
         `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflow(wf.name)))}([FromBody] ${upperFirst(wf.name)}Request request)\n` +
         `    {\n` +
         `        var cmd = new ${upperFirst(wf.name)}Command(\n            ${cmdArgs});\n` +

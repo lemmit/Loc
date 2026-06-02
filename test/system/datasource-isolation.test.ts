@@ -158,7 +158,7 @@ describe("resource isolationLevel — end-to-end emit", () => {
           for: C, kind: state, use: pg, isolationLevel: repeatableRead
         }
         deployable phoenixApp {
-          platform: phoenixLiveView, contexts: [C], dataSources: [cState],
+          platform: phoenix, contexts: [C], dataSources: [cState],
           serves: CApi, ui: Admin, port: 4000
         }
       }

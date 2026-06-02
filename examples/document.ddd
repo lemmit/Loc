@@ -24,12 +24,24 @@ context Shopping {
   aggregate Customer {
     name: string
     invariant name.length > 0
+
+    // Explicit canonical create — makes the aggregate constructible
+    // without `crudish` (whose canonical `destroy` would require a hard
+    // delete the document/embedded-shape repositories don't yet emit).
+    create(name: string) { name := name }
   }
 
   aggregate Cart shape(document) {
     customerId: Customer id
     status: CartStatus
     contains items: CartItem[]
+
+    // Explicit canonical create (see Customer) — no crudish destroy on a
+    // document-shaped aggregate.
+    create(customerId: Customer id, status: CartStatus) {
+      customerId := customerId
+      status := status
+    }
 
     derived total: Money =
       Money { amount: items.sum(i => i.lineTotal.amount), currency: "USD" }
@@ -78,6 +90,13 @@ context Shopping {
     contains items: WishItem[]
 
     invariant label.length > 0
+
+    // Explicit canonical create (see Customer) — no crudish destroy on an
+    // embedded-shaped aggregate.
+    create(customerId: Customer id, label: string) {
+      customerId := customerId
+      label := label
+    }
 
     operation addItem(sku: string) {
       items += WishItem { sku: sku }

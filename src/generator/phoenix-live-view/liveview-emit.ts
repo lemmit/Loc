@@ -274,7 +274,6 @@ function renderLiveView(a: RenderArgs): string {
   );
   const heex = walked.heex;
   const handlers: HandleEventClause[] = walked.handlers;
-  const aliasLines: string[] = walked.aliasLines;
 
   const mount = renderMount(
     page,
@@ -301,12 +300,11 @@ function renderLiveView(a: RenderArgs): string {
   const handleEventClauses =
     renderHandleEventClauses([...handlers, ...actionHandlers]) +
     renderOperationEventClauses(walked.formBindings, detailBaseRoute);
-  const aliasBlock = aliasLines.length > 0 ? aliasLines.join("\n") + "\n" : "";
 
   return `# Auto-generated.
 defmodule ${liveModule} do
   use ${webModule}, :live_view
-${aliasBlock}
+
 ${mount}
 
 ${handleParams}

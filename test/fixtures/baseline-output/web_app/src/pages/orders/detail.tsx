@@ -1,6 +1,6 @@
 // Auto-generated.  Do not edit by hand.
 import { useParams, Link as RouterLink } from "react-router";
-import { AddLineRequest, ConfirmRequest, UpdateRequest, useAddLineOrder, useConfirmOrder, useUpdateOrder } from "../../api/order";
+import { AddLineOrderRequest, ConfirmOrderRequest, UpdateOrderRequest, useAddLineOrder, useConfirmOrder, useUpdateOrder } from "../../api/order";
 import { useAllProducts } from "../../api/product";
 import { applyServerErrors } from "../../lib/apply-server-errors";
 import { DateTimeValue, IdValue, KeyValueRow } from "../../lib/format";
@@ -19,8 +19,8 @@ function openAddLineModal(mut: ReturnType<typeof useAddLineOrder>): void {
 
 function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>; onClose: () => void }) {
   const __products = useAllProducts();
-  const { handleSubmit, setError, control } = useForm<AddLineRequest>({
-    resolver: zodResolver(AddLineRequest),
+  const { handleSubmit, setError, control } = useForm<AddLineOrderRequest>({
+    resolver: zodResolver(AddLineOrderRequest),
     defaultValues: { productId: "", qty: 0 },
   });
   return (
@@ -74,8 +74,8 @@ function openConfirmModal(mut: ReturnType<typeof useConfirmOrder>): void {
 }
 
 function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>; onClose: () => void }) {
-  const { handleSubmit, setError } = useForm<ConfirmRequest>({
-    resolver: zodResolver(ConfirmRequest),
+  const { handleSubmit, setError } = useForm<ConfirmOrderRequest>({
+    resolver: zodResolver(ConfirmOrderRequest),
     defaultValues: {  },
   });
   return (
@@ -114,8 +114,8 @@ function openUpdateModal(mut: ReturnType<typeof useUpdateOrder>): void {
 }
 
 function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateOrder>; onClose: () => void }) {
-  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<UpdateRequest>({
-    resolver: zodResolver(UpdateRequest),
+  const { register, handleSubmit, setError, control, formState: { errors } } = useForm<UpdateOrderRequest>({
+    resolver: zodResolver(UpdateOrderRequest),
     defaultValues: { customerId: "", status: "Draft", placedAt: "" },
   });
   return (

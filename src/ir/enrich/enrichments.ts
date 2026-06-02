@@ -35,6 +35,7 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../types/loom-ir.js";
+import { buildCreateInput } from "./wire-projection.js";
 
 // ---------------------------------------------------------------------------
 // Loom IR enrichments — pure derivations layered on top of the IR
@@ -393,6 +394,7 @@ function enrichAggregate(
     parts,
     wireShape: wireFieldsForAggregate(resolved),
     associations: associationsForAggregate(resolved),
+    createInput: buildCreateInput(resolved),
     displayDerived: derived.find((d) => d.name === "display"),
     inspectDerived,
   };

@@ -23,7 +23,7 @@ export interface LoomBackendManifest {
   /** Discriminates backend packages from future design-pack
    *  packages discovered through the same mechanism. */
   readonly kind: "backend";
-  /** The `platform:` bareword this package provides (`"hono"`). */
+  /** The `platform:` bareword this package provides (`"node"`). */
   readonly family: string;
   /** The `@vN` pin segment (`"v4"`).  `family@loomVersion` is the
    *  canonical identity; the npm package version is independent

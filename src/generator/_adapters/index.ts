@@ -11,6 +11,7 @@ export type {
   LayoutCapabilities,
 } from "./layout-surface.js";
 export {
+  ADAPTER_IS_STUB,
   type AdapterKind,
   AdapterNotImplementedError,
   stubAdapter,

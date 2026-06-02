@@ -74,7 +74,7 @@ system Acme {
   }
 
   storage primary { type: postgres }
-  dataSource ordersState { for: Orders, kind: state, use: primary }
+  resource ordersState { for: Orders, kind: state, use: primary }
 
   deployable api    { platform: dotnet, contexts: [Orders], dataSources: [ordersState], port: 8080 }
   deployable webApp { platform: react,  targets: api, ui: SalesAdmin, port: 3001 }
@@ -577,15 +577,17 @@ Ui:
     '}';
 
 UiMember:
-    UiApiParam | UiHelperImport | Page | Component | MenuBlock;
+    UiApiParam | Page | Component | MenuBlock;
 
 // 3a. UI api parameter — local handle on a system-level `api` contract.
 UiApiParam:
     'api' name=ID ':' contract=[Api:ID];
 
-// 3b. Pack-author-supplied helper import (TS function exposed to pages).
-UiHelperImport:
-    'import' 'helper' name=ID 'from' path=STRING;
+// (An earlier draft also shipped `import helper <name> from "<path>"`
+//  (UiHelperImport) — a TS-function escape hatch.  It was removed
+//  (unused, untyped, and it overloaded the `import` keyword used for
+//  Loom-file imports); a future typed foreign-code hatch would live in
+//  the `extern` family, not under `import`.)
 
 // 4. Page
 Page:
@@ -702,7 +704,6 @@ lowers the IR onto Phoenix LiveView semantics.  Per-construct mapping:
 | `navigate(<Page>, {…})` (in a lambda) | `push_navigate(socket, to: ~p"/route?…")` with the target page's route + interpolated args. |
 | `Form { creates: T }` / `Form { into: state }` | `<.simple_form for={@form} phx-submit="save">` over `AshPhoenix.Form.for_create/3` (or a draft assign for wizard steps). |
 | Body of an aggregate-scaffolded page | `pack.render("page-list" | "page-new" | "page-detail", vm)` → HEEx inline in the LiveView's `render/1` — the same framework-neutral preparer VMs the React generator uses (`src/generator/react/templating/preparers/`). |
-| `import helper X from "path"` | Elixir `alias` / `import` directives at the LiveView module top (vs JS `import` in TSX). |
 | `Sales.Customer.create.mutate(args)` (api binding) | direct context call `<App>.Sales.create_customer!(args)` — no hook hoisting, since LiveView reads in `mount/3` / `handle_event/3`. |
 | Page object emission | unchanged — Playwright drives any rendered HTML, including LiveView, via the same testid-keyed page objects. |
 

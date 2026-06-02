@@ -1,4 +1,9 @@
-import type { PlatformAdapterDefaults, PlatformAdapters } from "../generator/_adapters/index.js";
+import type {
+  LayoutAdapter,
+  PlatformAdapterDefaults,
+  PlatformAdapters,
+  StyleAdapter,
+} from "../generator/_adapters/index.js";
 import type {
   ComponentIR,
   DeployableIR,
@@ -32,7 +37,7 @@ export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set(["react", "
 // A small public interface every platform implementation
 // (dotnet / hono / react) exposes to the system orchestrator.
 // Lets `system/index.ts` dispatch over a registry instead of
-// `if (platform === "dotnet") ... else if (platform === "hono") ...`
+// `if (platform === "dotnet") ... else if (platform === "node") ...`
 // branches, while INTENTIONALLY leaving each platform's internal
 // emission strategy unconstrained — Hono uses procedural routes
 // builders, .NET uses CQRS templates, React uses procedural TSX.
@@ -175,6 +180,16 @@ export interface PlatformSurface {
      *  `src/components/<Name>.tsx` per ui that references the
      *  component); other platforms ignore the arg. */
     topLevelComponents?: ComponentIR[];
+    /** The deployable's resolved STYLE / LAYOUT adapters
+     *  (D-REALIZATION-AXES `application:` / `directoryLayout:`).  The
+     *  system orchestrator resolves these from the deployable's axis
+     *  selection via `resolveStyle` / `resolveLayout` and passes them
+     *  here; the surface forwards them into its generator's `EmitCtx`.
+     *  Absent for frontends and in legacy single-context generate mode —
+     *  the generator then falls back to its hardcoded default sibling
+     *  (byte-identical under today's size-1 menus). */
+    styleAdapter?: StyleAdapter;
+    layoutAdapter?: LayoutAdapter;
   }): Map<string, string>;
   /** Inputs for the deployable's docker-compose service stanza. */
   composeService(args: {

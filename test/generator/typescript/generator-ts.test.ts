@@ -1384,7 +1384,7 @@ describe("typescript generator", () => {
       );
       const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
       const sys = loom.systems[0]!;
-      const dep = sys.deployables.find((d) => d.platform === "hono")!;
+      const dep = sys.deployables.find((d) => d.platform === "node")!;
       const contexts = sys.subdomains.flatMap((m) => m.contexts);
       return generateTypeScriptForContexts(contexts, HONO_V4_PINS, { deployable: dep, sys });
     }
@@ -1530,6 +1530,48 @@ describe("typescript generator", () => {
       // The binding is conditional: only the guarded workflow's handler
       // gets it — `touchOne` never references currentUser.
       expect((wf.match(/httpCtx\.get\("currentUser"\)/g) ?? []).length).toBe(1);
+      // The guarded workflow DECLARES 403 in its OpenAPI responses (the
+      // unguarded `touchOne` does not) — exactly one 403 across the file.
+      expect(wf).toMatch(
+        /403: \{ description: "Forbidden", content: \{ "application\/problem\+json": \{ schema: ProblemDetails \} \} \}/,
+      );
+      expect((wf.match(/403: \{ description: "Forbidden"/g) ?? []).length).toBe(1);
+    });
+
+    it("a `requires`-guarded operation declares 403 in its route responses; an unguarded one does not", async () => {
+      // A `requires` guard (not a precondition) denies with ForbiddenError →
+      // 403; the route's `responses` block gains a 403 ProblemDetails entry.
+      // `block` is guarded, `nudge` is not — exactly one 403 in the file.
+      const src = `
+        system Acme {
+          user { id: string, role: string }
+          subdomain Sales {
+            context Orders {
+              aggregate Order {
+                customerId: string
+                status: string
+                operation block() {
+                  requires currentUser.role == "admin"
+                  status := "blocked"
+                }
+                operation nudge() {
+                  status := "nudged"
+                }
+              }
+              repository Orders for Order { }
+            }
+          }
+          deployable api { platform: hono, contexts: [Orders], port: 3000, auth: required }
+        }
+      `;
+      const files = await emitForAuthSystem(src);
+      const route = files.get("http/order.routes.ts")!;
+      expect(route).toMatch(/operationId: "blockOrder"/);
+      expect(route).toMatch(
+        /403: \{ description: "Forbidden", content: \{ "application\/problem\+json": \{ schema: ProblemDetails \} \} \}/,
+      );
+      // Only the guarded op declares it.
+      expect((route.match(/403: \{ description: "Forbidden"/g) ?? []).length).toBe(1);
     });
 
     // -----------------------------------------------------------------------
@@ -1720,6 +1762,7 @@ describe("typescript generator", () => {
               email: string
               derived display: string = email
               invariant email.matches("^[^@]+@.+$")
+              create(email: string) { email := email }
             }
             repository Users for User { }
           }
@@ -1768,6 +1811,7 @@ describe("typescript generator", () => {
               fromTime: int
               toTime:   int
               invariant fromTime < toTime
+              create(fromTime: int, toTime: int) { fromTime := fromTime  toTime := toTime }
             }
             repository Reservations for Reservation { }
           }

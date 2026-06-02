@@ -141,6 +141,11 @@ export interface LayoutCtx {
   errorCount: number;
   warningCount: number;
 
+  /** Workspace-relative `/workspace/generated` paths that currently carry
+   *  unresolved regenerate-merge conflict markers.  Drives the Output
+   *  "Conflicts" stream + dot; self-clears as the user resolves them. */
+  generatedConflicts: string[];
+
   // Pipeline state + selectors
   pipeline: PipelineState;
   generateResult: GenerateResult | null;

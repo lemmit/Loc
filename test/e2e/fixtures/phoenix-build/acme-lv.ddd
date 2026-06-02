@@ -45,7 +45,7 @@ system AcmeLV {
   resource salesState { for: Sales, kind: state, use: primary }
   resource shoppingState { for: Shopping, kind: state, use: primary }
   deployable phoenixApp {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Sales, Shopping]
     dataSources: [salesState, shoppingState]
     serves: SalesApi
