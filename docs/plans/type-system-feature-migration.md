@@ -148,6 +148,17 @@ heavily**.
   field written from an operation whose body uses `?` propagation;
   assert the emitted trace capture is well-formed and the snapshot
   still content-addresses. Treat this as a gate on the A4 PR.
+- **Opportunity (fold in, don't do separately):** the per-backend
+  `render-expr.ts` carry a structurally identical ~17-arm dispatch over
+  `ExprIR` (TS / .NET / Phoenix), diverging only in leaf emission. Since
+  A4 already rewrites these files heavily, that is the cheap moment to
+  unify the dispatch behind an `ExprTarget` contract (leaf emitters +
+  the framework-shaped seams), mirroring the `WalkerTarget` extraction
+  the body-walker already uses (`src/generator/_walker/target.ts`; PRs
+  #607–#627). Extracting it *before* A4 means re-doing it; doing it as
+  part of A4 is close to free. The pure `refCollectionFieldName` query
+  was already hoisted to `src/ir/util/ref-collection.ts` (#793) as the
+  one A4-independent slice — the rest waits for A4.
 
 ### 5.2 Provenance × wireShape, and the `managed`-on-wire option
 
@@ -230,7 +241,7 @@ cost and owner, rather than silently re-greening.
 | ID | Feature | Hono | .NET | Phoenix | React | Cleared by |
 |---|---|---|---|---|---|---|
 | DBT-1 | **`provenanced` runtime** (trace capture + history) | ✓ full (`routes-builder.ts:80`, `render-stmt.ts:107`, `repository-save-builder.ts:160`) | ✗ parsed, no-op (`generators.md:38`) | ✗ parsed, no-op (`generators.md:38`) | n/a | Implement EF + Ash trace runtime; then drop the `ProvenanceLineage` parity filter |
-| DBT-2 | **`where`-clause finds** | ⚠ convention or TODO comment (Drizzle has no lambda→SQL) (`generators.md:166`) | ✓ full LINQ `.Where(…)` | ✓ Ash `expr` | ⚠ hook-only (deferred) | Drizzle predicate lowering for Hono; React filter mode |
+| DBT-2 | **`where`-clause finds** | ✓ `lowerToDrizzle` over the queryable subset — comparisons, `&&`/`||`, `!`, bare-bool, VO sub-columns, `currentUser`, enum values, `refColl.contains` (`repository-find-builder.ts`); validator-gated by `firstNonQueryableNode` (#760) | ✓ full LINQ `.Where(…)` | ✓ Ash `expr` | ⚠ hook-only (deferred → DBT-4) | **Hono/.NET/Phoenix cleared.** Only the React list-page filter mode remains — tracked as DBT-4 |
 | DBT-3 | **`X id[]` reference ordering** | ✓ `ordinal` column | ✓ `ordinal` column | ✗ unordered / set semantics (`generators.md:751`) | display-only | Ash `ordinal` ordering, or ratify set semantics as the contract |
 | DBT-4 | **React list-page filter mode** | n/a | n/a | n/a | ✗ deferred; v1 emits hook only (`generators.md:43`; `body-walker.ts:658` `unsupported expr` fallback) | Implement filter-mode walker |
 | DBT-5 | **Page `requires <pred>` guard** | n/a | n/a | ⚠ v0 stub: bind-only (`generators.md:624`) | n/a | Full guard in `handle_params/3` |

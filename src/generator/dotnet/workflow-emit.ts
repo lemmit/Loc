@@ -496,18 +496,40 @@ function renderStatement(
       const exprText = renderArg(st.expr);
       return [`${INDENT}var ${st.name} = ${isResourceOp ? "await " : ""}${exprText};`];
     }
-    case "repo-run":
-    case "for-each":
-      // The named-query `Repo.run(...)` + the `for` loop that consumes it
-      // are wired end-to-end on Hono first (PR3-B).  The .NET run-method
-      // emission + foreach lands in a follow-up slice; gate here so the
-      // IR stays backend-neutral and the failure is explicit rather than
-      // a call to an unemitted `Run<Name>Async` method.
-      throw new Error(
-        `.NET backend: workflow uses '${st.kind}', which the .NET generator does not yet ` +
-          `support (run-method emission + foreach is a follow-up slice).  Target a Hono ` +
-          `deployable, or omit the retrieval loop for .NET.`,
-      );
+    case "repo-run": {
+      // `Repo.run(<Retrieval>(args), page?)` → the generated
+      // `Run<Name>Async(args, page?, ct)` repository method.
+      const fieldName = `_${st.repoName.charAt(0).toLowerCase() + st.repoName.slice(1)}`;
+      const args = st.retrievalArgs.map(renderArg);
+      if (st.page) {
+        const off = st.page.offset ? renderArg(st.page.offset) : "null";
+        const lim = st.page.limit ? renderArg(st.page.limit) : "null";
+        args.push(`(${off}, ${lim})`);
+      }
+      const callArgs = [...args, "ct"].join(", ");
+      return [
+        `${INDENT}var ${st.name} = await ${fieldName}.Run${upperFirst(st.retrievalName)}Async(${callArgs});`,
+      ];
+    }
+    case "for-each": {
+      // `for o in xs { … }` → C# `foreach`; body recurses at +4 indent,
+      // then each iteration's dirty bindings save inside the loop (the
+      // aggregate's events drain through SaveAsync).
+      const bodyLines = st.body
+        .flatMap((s) => renderStatement(s, renderArg, ctx, usage))
+        .map((l) => `    ${l}`);
+      const saveLines = st.savesPerIteration.map((sv) => {
+        const fieldName = `_${sv.repoName.charAt(0).toLowerCase() + sv.repoName.slice(1)}`;
+        return `${INDENT}    await ${fieldName}.SaveAsync(${sv.name}, ct);`;
+      });
+      return [
+        `${INDENT}foreach (var ${st.var} in ${renderArg(st.iterable)})`,
+        `${INDENT}{`,
+        ...bodyLines,
+        ...saveLines,
+        `${INDENT}}`,
+      ];
+    }
     case "resource-call":
       // 4c: bare resource-op statement (`files.put(k, v)`) → awaited async
       // helper call.

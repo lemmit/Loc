@@ -106,7 +106,23 @@ PermissionDecl:
 
 Deployable:
     'deployable' name=LooseName '{'
-        ('platform' ':' platform=Platform ','?)
+        // D-REALIZATION-AXES: the optional `{ … }` block decomposes the
+        // platform bundle into six orthogonal realization axes.  `platform`
+        // stays a direct string property (every AST/IR consumer reads
+        // `d.platform` as a string); the block is additive and optional, so
+        // bare `platform: dotnet` parses unchanged.  Axis values are
+        // `LooseName` — the menu is enforced by the validator, not the
+        // parser (the `design:` precedent).
+        ('platform' ':' platform=Platform
+            ('{' (
+                  'foundation' ':' foundation=LooseName ','?
+                | 'application' ':' application=LooseName ','?
+                | 'persistence' ':' persistence=LooseName ','?
+                | 'directoryLayout' ':' directoryLayout=LooseName ','?
+                | 'transport' ':' transport=LooseName ','?
+                | 'runtime' ':' runtime=LooseName ','?
+            )* '}')?
+            ','?)
         // D-STORAGE-SPLIT: contexts the deployable hosts (semantic
         // change from the legacy `modules:` clause — refs are
         // BoundedContext, not the subdomain wrappers).  All v1
@@ -233,7 +249,7 @@ Framework returns string:
 // canonicalises it to `phoenixLiveView` until the literal-rename
 // cleanup phase.
 Platform returns string:
-    'dotnet' | 'hono' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | STRING;
+    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,
@@ -1208,6 +1224,14 @@ LooseName returns string:
     // soft in loose-name positions; hard only at `ContextMember`
     // (`PayloadDecl`).
     | 'payload' | 'command' | 'query' | 'response' | 'error'
+    // D-REALIZATION-AXES — the six platform-block axis keywords admitted
+    // as soft so user code can still name a field `application`,
+    // `transport`, `runtime`, etc.  `transactional` is the `runtime`
+    // default value and is ALSO the storage-isolation flag keyword
+    // (`transactional?='transactional'`) — admit it here so it parses as
+    // a `LooseName` value in the `runtime:` slot.
+    | 'foundation' | 'application' | 'persistence' | 'directoryLayout'
+    | 'transport' | 'runtime' | 'transactional'
     // Retrieval keywords (retrieval.md) admitted as soft so user code can
     // still name a field `retrieval` / `sort` / `loads` / `asc` / `desc`.
     // Hard only inside the `Retrieval` rule's slots.

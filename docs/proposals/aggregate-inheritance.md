@@ -1,22 +1,33 @@
 # Aggregate inheritance and storage strategies
 
-> Status: **Phase I1 shipped** — `abstract aggregate`, `extends <Base>`, and
-> the `inheritanceUsing(sharedTable | ownTable)` header modifier parse and
-> lower (`AggregateIR.isAbstract` / `.extendsAggregate` / `.inheritanceUsing`);
-> the I1 validator rules are live (`loom.extends-non-abstract`,
-> `loom.extends-self`, `loom.inheritance-modifier-misplaced`,
-> `loom.abstract-aggregate-behavior`, `loom.abstract-repository`, and the
-> D-ES-TPH `loom.es-tph-forced-own-table`).  The **I2 foundation** has also
-> landed: enrichment merges a concrete's inherited base fields into its
-> `wireShape` (base fields after `id`, then own; own shadows a like-named
-> base field), so DTOs carry the shared shape — backend-neutral, needed by
-> both strategies.  **Storage emission is still pending** — abstract
-> aggregates produce no table/repo/routes and the `sharedTable`/`ownTable`
-> strategies, the `kind` discriminator, polymorphic `X id` refs, and
-> base-type queries are not yet generated (an `inheritance storage emission
-> is not wired` IR-validate warning says so).  I2 (TPH) / I3 (TPC) emission
-> hooks the per-backend `PersistenceAdapter` seam (D-ADAPTER-HOME), not the
-> route/repo builders directly.
+> Status: **I1–I3 shipped** — surface, both storage strategies, and the
+> polymorphic read path.  This proposal is now reference-documented in
+> [`../inheritance.md`](../inheritance.md); the design discussion below is
+> retained for rationale and the deferred patterns.
+>
+> - **I1** — `abstract aggregate`, `extends <Base>`, and the
+>   `inheritanceUsing(sharedTable | ownTable)` header modifier parse, lower, and
+>   validate (`loom.extends-non-abstract`, `loom.extends-self`,
+>   `loom.inheritance-modifier-misplaced`, `loom.abstract-aggregate-behavior`,
+>   `loom.abstract-repository`, D-ES-TPH `loom.es-tph-forced-own-table`).
+> - **I2 foundation** — enrichment merges a concrete's inherited base fields
+>   into its `wireShape` (base fields after `id`, then own; own shadows a
+>   like-named base field), so every backend DTO carries the shared shape.
+> - **I3 — `ownTable`/TPC, all four backends** — abstract base dropped from each
+>   backend's table emission; each concrete a standalone table carrying the
+>   merged fields.  Polymorphic `find all <Base>` read home on node/Hono, .NET
+>   (abstract C# base + `Ignore<Base>()` + delegating reader → `IReadOnlyList<Base>`),
+>   and Phoenix (`list_<bases>!/0` on the Ash.Domain).  `Base id` refs rejected
+>   (`loom.polymorphic-id-ref-unsupported`).
+> - **I2 — `sharedTable`/TPH, node/Hono only** — one shared table + `kind`
+>   discriminator + nullable per-concrete columns; `Base id` refs + base reader
+>   supported.  A TPH hierarchy with no node/Hono host is an IR-validate error.
+> - **Gated corners** — mixed strategy (Pattern 3:
+>   `loom.tph-own-override-unsupported` / `loom.polymorphic-id-ref-mixed-strategy`)
+>   and `contains` on a TPH concrete (Pattern 4: `loom.tph-contains-unsupported`)
+>   are rejected, not emitted.
+>
+> **Deferred**: TPH on .NET / Phoenix / React; Patterns 3 and 4.
 >
 > **Sister proposal**:
 > [`payload-transport-layer.md`](./payload-transport-layer.md) — they together

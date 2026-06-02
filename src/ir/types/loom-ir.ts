@@ -1671,7 +1671,25 @@ export interface NeedIR {
 // `ashPhoenix` HEEx pack.  Unlike `react`/`static` it owns its own
 // database (`needsDb: true`) and never declares `targets:` —
 // validator enforces both.
-export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView";
+export type Platform = "dotnet" | "node" | "react" | "static" | "phoenix";
+
+// D-REALIZATION-AXES — the `application:` axis is the one axis whose DSL
+// spelling differs from its backing D-ADAPTER-HOME adapter key: the
+// decision renamed the service-layer value to `serviceLayer`, while the
+// `style` adapter key stays `layered`.  `cqrs`/`flat` map to themselves.
+// Lives here (not in the validator) so lowering AND the validator share
+// one source of truth — the lowered `DeployableIR.application` carries the
+// resolved ADAPTER key, ready for `resolveStyle`.
+
+/** DSL `application:` value → `style` adapter key. */
+export function applicationDslToAdapter(v: string): string {
+  return v === "serviceLayer" ? "layered" : v;
+}
+
+/** `style` adapter key → DSL `application:` value (for menus / display). */
+export function applicationAdapterToDsl(v: string): string {
+  return v === "layered" ? "serviceLayer" : v;
+}
 
 /** Saving shapes (D-DOCUMENT-AXIS `shape(…)`) each backend platform can
  *  EMIT today — the single source of truth for the `supportedShapes`
@@ -1684,19 +1702,19 @@ export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView
  *  (`PersistenceAdapter.supportedShapes`). */
 export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingShape[]>> = {
   dotnet: ["relational", "embedded", "document"],
-  hono: ["relational", "embedded", "document"],
+  node: ["relational", "embedded", "document"],
   // Phoenix/Ash emits relational + embedded (Ash embedded resources);
   // `document` (a single opaque `:map` — non-idiomatic for Ash) is a
   // future allowed-but-warned addition.
-  phoenixLiveView: ["relational", "embedded"],
+  phoenix: ["relational", "embedded"],
 };
 
 export interface DeployableIR {
   name: string;
-  /** The platform **family** (`"hono"`, `"dotnet"`, `"react"`, …) —
+  /** The platform **family** (`"node"`, `"dotnet"`, `"react"`, …) —
    *  the closed union every downstream consumer branches on.  A
    *  `family@version` pin in the source is normalised here to its
-   *  family so `platform === "hono"` etc. stay valid. */
+   *  family so `platform === "node"` etc. stay valid. */
   platform: Platform;
   /** The fully-qualified backend ref (`"hono@v4"`) after lowering,
    *  mirroring `design?`.  Bareword `platform: hono` resolves through
@@ -1724,7 +1742,7 @@ export interface DeployableIR {
    *  "ashPhoenix".  A string starting with "./" or "/" is a custom
    *  pack path resolved relative to the .ddd file (a directory
    *  containing pack.json).  Only meaningful when platform === "react"
-   *  (or "static"/"dotnet" with a UI mount, or "phoenixLiveView");
+   *  (or "static"/"dotnet" with a UI mount, or "phoenix");
    *  ignored otherwise.
    *
    *  After lowering this field is always fully qualified
@@ -1741,6 +1759,25 @@ export interface DeployableIR {
    *  `ui` a keyword in the deployable block would shadow the test-DSL
    *  accessor and break parsing of existing examples. */
   design?: string;
+  /** Realization axes (D-REALIZATION-AXES).  Each decomposes the
+   *  platform bundle into one orthogonal concern.  All optional in the
+   *  type but **always concrete on backend deployables post-lowering**
+   *  (normalized to the platform's default, mirroring how `design` is
+   *  resolved via `BUILTIN_PACK_LATEST`); left `undefined` on frontend
+   *  (`react`/`static`) deployables, which carry no domain realization.
+   *  This PR is DSL-surface-only: the fields are carried through lowering
+   *  and validated, but no generator consumes them yet.
+   *
+   *  `application`/`directoryLayout` map onto the existing
+   *  D-ADAPTER-HOME adapter kinds `style`/`layout`; `persistence` onto
+   *  the `persistence` adapter; `foundation`/`transport`/`runtime` are
+   *  greenfield (no adapter infra yet, single default value each). */
+  foundation?: string;
+  application?: string;
+  persistence?: string;
+  directoryLayout?: string;
+  transport?: string;
+  runtime?: string;
   /** Per-deployable auth opt-in.  Populated when the source declares
    *  `auth: required` on the deployable.  Backends with
    *  `auth.required === true` emit JWT-decode middleware + a verifier

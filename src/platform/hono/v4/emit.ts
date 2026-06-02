@@ -8,7 +8,7 @@
 // zod-refine) in core.
 
 // Hono-framework builders now live in this package (P2b) — siblings.
-import type { EmitCtx } from "../../../generator/_adapters/index.js";
+import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../../../generator/_adapters/index.js";
 import {
   buildBaseReaderFile,
   buildBaseUnionFile,
@@ -155,7 +155,13 @@ export function generateTypeScript(
 export function generateTypeScriptForContexts(
   contexts: EnrichedBoundedContextIR[],
   pins: BackendPins,
-  system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
+  system?: {
+    deployable: DeployableIR;
+    sys: SystemIR;
+    migrations?: MigrationsIR[];
+    styleAdapter?: StyleAdapter;
+    layoutAdapter?: LayoutAdapter;
+  },
   options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
   const emitTrace = !!options.emitTrace;
@@ -256,6 +262,8 @@ export function generateTypeScriptForContexts(
         sys: system.sys,
         migrations: system.migrations,
         emitTrace,
+        styleAdapter: system.styleAdapter,
+        layoutAdapter: system.layoutAdapter,
       }
     : undefined;
   // Per-aggregate emission stays per-context — each aggregate file
@@ -292,9 +300,14 @@ export function generateTypeScriptForContexts(
       // emitAudit, emitProvenance, emitTrace)` byte-for-byte); direct
       // call in legacy single-context mode.
       if (emitCtx) {
-        const artifacts = layeredStyleAdapter.emitForAggregate?.(agg, emitCtx) ?? [];
+        // Resolved style / layout selection (D-REALIZATION-AXES) when
+        // threaded in; sibling default otherwise.  Size-1 menus → same
+        // object → byte-identical.
+        const style = emitCtx.styleAdapter ?? layeredStyleAdapter;
+        const layout = emitCtx.layoutAdapter ?? byLayerLayoutAdapter;
+        const artifacts = style.emitForAggregate?.(agg, emitCtx) ?? [];
         for (const artifact of artifacts) {
-          out.set(byLayerLayoutAdapter.pathFor(artifact, emitCtx), artifact.content);
+          out.set(layout.pathFor(artifact, emitCtx), artifact.content);
         }
       } else {
         out.set(

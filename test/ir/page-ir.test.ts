@@ -595,7 +595,7 @@ describe("page metamodel — IR shape", () => {
       return d;
     }
 
-    it("platform: phoenix canonicalises to the phoenixLiveView family", async () => {
+    it("platform: phoenix is the canonical family literal", async () => {
       const loom = await buildLoom(`
         system Acme {
           subdomain M { context C { } }
@@ -603,7 +603,18 @@ describe("page metamodel — IR shape", () => {
           deployable app { platform: phoenix, contexts: [C], hosts: Admin, port: 4000 }
         }
       `);
-      expect(deployableByName(loom, "app").platform).toBe("phoenixLiveView");
+      expect(deployableByName(loom, "app").platform).toBe("phoenix");
+    });
+
+    it("legacy platform: phoenixLiveView desugars to the canonical phoenix", async () => {
+      const loom = await buildLoom(`
+        system Acme {
+          subdomain M { context C { } }
+          ui Admin { framework: liveview }
+          deployable app { platform: phoenixLiveView, contexts: [C], hosts: Admin, port: 4000 }
+        }
+      `);
+      expect(deployableByName(loom, "app").platform).toBe("phoenix");
     });
 
     it("framework: liveview canonicalises to phoenixLiveView on the ui", async () => {

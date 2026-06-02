@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import { AdapterNotImplementedError } from "../../src/generator/_adapters/index.js";
 import {
   adaptersFor,
+  allAdapterNames,
+  availableAdapterNames,
   defaultsFor,
   hasAdapters,
   resolveLayout,
@@ -100,5 +102,37 @@ describe("adapter registry — lookup", () => {
         expect(Array.isArray(adapter.supportedLayouts)).toBe(true);
       }
     }
+  });
+});
+
+describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 menu)", () => {
+  it("excludes stubs on dotnet (efcore/cqrs/byLayer/byFeature real; dapper/marten/layered stubs)", () => {
+    expect(availableAdapterNames("dotnet", "persistence")).toEqual(["efcore"]);
+    expect(availableAdapterNames("dotnet", "style")).toEqual(["cqrs"]);
+    // byFeature became real in Phase 5a — both layouts are now selectable.
+    expect(availableAdapterNames("dotnet", "layout")).toEqual(["byFeature", "byLayer"]);
+  });
+
+  it("excludes stubs on hono (drizzle/layered/byLayer real)", () => {
+    expect(availableAdapterNames("hono", "persistence")).toEqual(["drizzle"]);
+    expect(availableAdapterNames("hono", "style")).toEqual(["layered"]);
+  });
+
+  it("phoenix is 100% real", () => {
+    expect(availableAdapterNames("phoenixLiveView", "persistence")).toEqual(["ashPostgres"]);
+    expect(availableAdapterNames("phoenixLiveView", "style")).toEqual(["ash"]);
+    expect(availableAdapterNames("phoenixLiveView", "layout")).toEqual(["byFeature"]);
+  });
+
+  it("frontends expose no adapter names", () => {
+    expect(availableAdapterNames("react", "persistence")).toEqual([]);
+    expect(availableAdapterNames("static", "style")).toEqual([]);
+  });
+
+  it("allAdapterNames includes reserved stubs (so 'reserved' can be told from 'unknown')", () => {
+    const all = allAdapterNames("dotnet", "persistence");
+    expect(all).toContain("efcore");
+    expect(all).toContain("dapper"); // a registered stub
+    expect(availableAdapterNames("dotnet", "persistence")).not.toContain("dapper");
   });
 });

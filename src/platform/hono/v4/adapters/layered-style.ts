@@ -61,7 +61,7 @@ export const layeredStyleAdapter: StyleAdapter = {
     // per-op `OpenAPIHono.openapi(...)` registration.  Deferred to
     // F6d (orchestrator rewire) where the per-aggregate routes file
     // gets decomposed.
-    throw new AdapterNotImplementedError("style", "layered", "hono", realSiblings());
+    throw new AdapterNotImplementedError("style", "layered", "node", realSiblings());
   },
 
   emitHandlerOrService(_op: OperationIR, _ctx: EmitCtx): readonly EmittedArtifact[] {
@@ -69,7 +69,7 @@ export const layeredStyleAdapter: StyleAdapter = {
     // file holds every op's handler body inline.  Per-op extraction
     // would require synthesising file boundaries that don't exist
     // today; deferred to F6d.
-    throw new AdapterNotImplementedError("style", "layered", "hono", realSiblings());
+    throw new AdapterNotImplementedError("style", "layered", "node", realSiblings());
   },
 
   emitDi(_ctx: EmitCtx): Lines {

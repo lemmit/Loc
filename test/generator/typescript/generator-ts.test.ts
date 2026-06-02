@@ -1384,7 +1384,7 @@ describe("typescript generator", () => {
       );
       const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
       const sys = loom.systems[0]!;
-      const dep = sys.deployables.find((d) => d.platform === "hono")!;
+      const dep = sys.deployables.find((d) => d.platform === "node")!;
       const contexts = sys.subdomains.flatMap((m) => m.contexts);
       return generateTypeScriptForContexts(contexts, HONO_V4_PINS, { deployable: dep, sys });
     }

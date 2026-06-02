@@ -26,8 +26,8 @@ import {
 // `PlatformSurface` wiring that delegates to the orchestrator.
 // ---------------------------------------------------------------------------
 
-const phoenixLiveViewPlatform: PlatformSurface = {
-  name: "phoenixLiveView",
+const phoenixPlatform: PlatformSurface = {
+  name: "phoenix",
   defaultPort: 4000,
   needsDb: true,
   mountsUi: true,
@@ -42,8 +42,25 @@ const phoenixLiveViewPlatform: PlatformSurface = {
   // of these would collide with the auto-generated CRUD action of
   // the same name on the resource module.
   reservedRepositoryFindNames: new Set(["get", "read", "create", "update", "destroy"]),
-  emitProject({ contexts, deployable, sys, migrations, emitTrace }): Map<string, string> {
-    return generatePhoenixLiveViewProject({ contexts, deployable, sys, migrations, emitTrace });
+  emitProject({
+    contexts,
+    deployable,
+    sys,
+    migrations,
+    emitTrace,
+    styleAdapter,
+  }): Map<string, string> {
+    // Forward the deployable's resolved style adapter (D-REALIZATION-AXES
+    // `application:`) into the generator's EmitCtx; the layout axis has no
+    // Phoenix consumer (Ash owns the byFeature layout), so it's dropped.
+    return generatePhoenixLiveViewProject({
+      contexts,
+      deployable,
+      sys,
+      migrations,
+      emitTrace,
+      styleAdapter,
+    });
   },
   composeService({ slug }): ComposeServiceShape {
     return {
@@ -82,4 +99,4 @@ const phoenixLiveViewPlatform: PlatformSurface = {
   },
 };
 
-export default phoenixLiveViewPlatform;
+export default phoenixPlatform;

@@ -43,8 +43,8 @@ describe("platform pin grammar + validation", () => {
 
   it("rejects an unregistered version with an available-list error", async () => {
     const { errors } = await parse(sys(`"hono@v9"`));
-    expect(errors.some((e) => /no version 'v9' of backend 'hono'/.test(e))).toBe(true);
-    expect(errors.some((e) => /'hono@v4'/.test(e))).toBe(true);
+    expect(errors.some((e) => /no version 'v9' of backend 'node'/.test(e))).toBe(true);
+    expect(errors.some((e) => /'node@v4'/.test(e))).toBe(true);
   });
 
   it("rejects an unknown platform name (STRING no longer a free pass)", async () => {
@@ -77,16 +77,16 @@ describe("lowering normalises platform + platformRef", () => {
 
   it("bareword: platform=family, platformRef=family@latest", async () => {
     const d = await lowerDeployable("hono");
-    expect(d.platform).toBe("hono"); // byte-identical union value
-    expect(d.platformRef).toBe("hono@v4");
+    expect(d.platform).toBe("node"); // byte-identical union value
+    expect(d.platformRef).toBe("node@v4");
   });
 
   it("pin: platform=family (NOT the pin), platformRef=the pin", async () => {
     const d = await lowerDeployable(`"hono@v4"`);
-    // The crux of byte-identity: every `platform === "hono"` check
-    // downstream still holds; the pin is carried separately.
-    expect(d.platform).toBe("hono");
-    expect(d.platformRef).toBe("hono@v4");
+    // The legacy `hono@v4` pin desugars to the canonical `node@v4`
+    // family; the pin is carried separately on platformRef.
+    expect(d.platform).toBe("node");
+    expect(d.platformRef).toBe("node@v4");
   });
 
   it("frontend: platform and platformRef both the bareword", async () => {

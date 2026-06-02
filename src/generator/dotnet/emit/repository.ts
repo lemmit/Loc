@@ -4,6 +4,7 @@ import type {
   EnrichedAggregateIR,
   ParamIR,
   RepositoryIR,
+  RetrievalIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
@@ -23,6 +24,7 @@ export function renderRepositoryInterface(
   agg: AggregateIR,
   repo: RepositoryIR | undefined,
   ns: string,
+  retrievals: RetrievalIR[] = [],
 ): string {
   const finds = repo?.finds ?? [];
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
@@ -30,6 +32,11 @@ export function renderRepositoryInterface(
     const usesUser = findUsesCurrentUser(f);
     return `    Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)});`;
   });
+  // `Run<Name>Async(args, page?, ct)` per context retrieval (retrieval.md).
+  const retrievalLines = retrievals.map(
+    (r) =>
+      `    Task<IReadOnlyList<${agg.name}>> Run${upperFirst(r.name)}Async(${renderRetrievalParamsWithCt(r.params)});`,
+  );
   return (
     lines(
       "// Auto-generated.",
@@ -49,6 +56,7 @@ export function renderRepositoryInterface(
         ? [`    Task DeleteAsync(${agg.name} aggregate, CancellationToken ct = default);`]
         : []),
       ...findLines,
+      ...retrievalLines,
       "}",
     ) + "\n"
   );
@@ -71,6 +79,10 @@ export function renderRepositoryImpl(
     /** True when --trace is in effect — brackets the EF
      *  SaveChangesAsync with tx_begin / tx_commit / tx_rollback. */
     emitTrace?: boolean;
+    /** Context retrievals targeting this aggregate + their LINQ body
+     *  fragments — emit a `Run<Name>Async` method each. */
+    retrievals?: RetrievalIR[];
+    retrievalBodies?: Array<{ name: string; whereClause: string; orderByClause: string }>;
   },
 ): string {
   const emitTrace = !!options?.emitTrace;
@@ -110,6 +122,33 @@ export function renderRepositoryImpl(
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "find", valueExpr: `"${f.name}"` },
         { name: "rows", valueExpr: rowsExpr },
+      ])}`,
+      "        return result;",
+      "    }",
+    ];
+  });
+  // `Run<Name>Async` per context retrieval: where + sort baked in; page
+  // applied from the call-site argument; default-whole projection.
+  const retrievals = options?.retrievals ?? [];
+  const retrievalBodies = options?.retrievalBodies ?? [];
+  const retrievalMethodLines = retrievals.flatMap((r) => {
+    const body = retrievalBodies.find((b) => b.name === r.name);
+    const where = body?.whereClause ?? "";
+    const orderBy = body?.orderByClause ?? "";
+    return [
+      `    public async Task<IReadOnlyList<${agg.name}>> Run${upperFirst(r.name)}Async(${renderRetrievalParamsWithCt(r.params)})`,
+      "    {",
+      `        var query = _db.${setName}${where}${orderBy}.AsQueryable();`,
+      "        if (page is { } p)",
+      "        {",
+      "            if (p.offset is { } off) query = query.Skip(off);",
+      "            if (p.limit is { } lim) query = query.Take(lim);",
+      "        }",
+      "        var result = await query.ToListAsync(ct);",
+      `        ${renderDotnetLogCall("findExecuted", [
+        { name: "aggregate", valueExpr: `"${agg.name}"` },
+        { name: "find", valueExpr: `"Run${upperFirst(r.name)}"` },
+        { name: "rows", valueExpr: "result.Count" },
       ])}`,
       "        return result;",
       "    }",
@@ -253,6 +292,7 @@ export function renderRepositoryImpl(
           ]
         : []),
       ...findMethodLines,
+      ...retrievalMethodLines,
       "}",
     ) + "\n"
   );
@@ -523,4 +563,16 @@ function renderParamsWithCt(params: ParamIR[], usesUser: boolean = false): strin
   return head.length > 0
     ? `${head}, CancellationToken ct = default`
     : "CancellationToken ct = default";
+}
+
+/** Retrieval params + an optional call-site `page` argument
+ *  (`(int? offset, int? limit)? page`) + CancellationToken.  `page` is
+ *  never part of the retrieval declaration (retrieval.md) — it rides on
+ *  the run method. */
+function renderRetrievalParamsWithCt(params: ParamIR[]): string {
+  const head = [
+    ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
+    "(int? offset, int? limit)? page = null",
+  ].join(", ");
+  return `${head}, CancellationToken ct = default`;
 }

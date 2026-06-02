@@ -1,8 +1,10 @@
 # Implementation plan — playground git-backed VFS
 
-> **Status:** SHIPPED — landed across #748 / #757 / #761. This is the
-> build order that was followed (PR 0–5 below map to the merged work);
-> kept as the historical record. Implements
+> **Status:** SHIPPED — core landed across #748 / #757 / #761 (PR 0–5
+> below map to that merged work); UX follow-ups landed in #766 (visible
+> History tab), #773 (restore to a commit), #778 (Output conflict
+> indicator), and #814 (Playwright e2e). Kept as the historical record.
+> Implements
 > [`../proposals/playground-git-vfs.md`](../proposals/playground-git-vfs.md).
 > Scope is **`web/`-only** at the source layer (plus the playground
 > unit tests under `test/playground/`, which run in the root vitest

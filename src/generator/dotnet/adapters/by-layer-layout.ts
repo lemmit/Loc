@@ -25,9 +25,9 @@
 //   <root>/                      — Program.cs, <Ns>.csproj, Dockerfile,
 //                                  Middleware/, certs/, ...
 //
-// `byFeature` (the sibling adapter, still stub) colocates everything
-// for one aggregate under `Features/<Aggregate>/` — same artifacts,
-// different on-disk arrangement.
+// `byFeature` (the real sibling adapter, `./by-feature-layout.ts`)
+// colocates one aggregate's application + API artifacts under
+// `Features/<Aggregate>/` — same artifacts, different on-disk arrangement.
 // ---------------------------------------------------------------------------
 
 import { plural, upperFirst } from "../../../util/naming.js";
