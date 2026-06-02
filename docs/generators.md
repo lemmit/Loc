@@ -41,7 +41,7 @@ fastest way to read this matrix concretely.
 | `operation` | Public method (or private if marked) that enforces preconditions, mutates state, queues events, and re-asserts invariants | Same shape; visibility honoured | Mantine button on the detail page; opens a modal whose form binds to `<Op>Request`; submit calls `use<Op><Agg>()` |
 | `precondition` | `if (!cond) throw new DomainError(<source>)` | `if (!cond) throw new DomainException(<source>)` | (server-side; HTTP 400 surfaces as a Mantine error notification) |
 | `emit` | `_events.push({ type: "X", … })` | `_events.Add(new X(...))` | (server-side) |
-| `repository` find | Method on `<Agg>Repository`; convention-based predicate or TODO comment for `where` clauses | Method on `I<Agg>Repository`; LINQ `.Where(x => …)` for both convention and `where` forms | `use<FindName><Agg>(query)` React Query hook + a list-page filter mode (deferred; v1 emits the hook only) |
+| `repository` find | Method on `<Agg>Repository`; `where` clauses lower to Drizzle predicates (`lowerToDrizzle`) over the queryable subset, paramless finds fall back to convention-matching | Method on `I<Agg>Repository`; LINQ `.Where(x => …)` for both convention and `where` forms | `use<FindName><Agg>(query)` React Query hook + a list-page filter mode (deferred; v1 emits the hook only) |
 | Auto `findById` / `getById` | Yes — load root + parts in a transaction; `getById` throws on missing | Yes — `GetByIdAsync` returns `Order?`, `getById` is implicit via the controller raising 404 | `use<Agg>ById(id)` hook, used by the detail page |
 | Auto `find all` | Yes — `GET /<plural>`, loads with master-detail | Yes — `GET /<plural>` via `GetAllQuery` + handler | `useAll<Agg>()` hook, used by the list page |
 | `test "name" { … }` | Vitest at `domain/<aggregate>.test.ts` | xUnit at `Tests/<Plural>/<Aggregate>Tests.cs` | (n/a — backend-only) |
@@ -163,9 +163,15 @@ and the React Select picker.
   current pairs carrying their `ordinal` position so reorders persist)
   in a transaction, drain events via `dispatcher.dispatch`
 - `all()` — auto-included; loads all rows and hydrates with parts
-- `<find>(...)` — one method per user-declared `find`; convention-
-  based predicate or a TODO comment for `where` clauses (Drizzle has
-  no general lambda → SQL translator)
+- `<find>(...)` — one method per user-declared `find`; a `where`
+  clause lowers to a Drizzle predicate (`lowerToDrizzle` in
+  `repository-find-builder.ts`) over the queryable subset
+  (comparisons, `&&`/`||`, `!`, bare-boolean columns, value-object
+  sub-columns, `currentUser.<field>`, enum values, and
+  `<refColl>.contains(x)` join-table subqueries); a paramless find
+  falls back to convention-matching its params to columns. The IR
+  validator (`firstNonQueryableNode`) gates `where` clauses to exactly
+  this subset, so lowering never silently drops a predicate.
 - `toWire(root)` — domain → wire DTO projection used by route
   handlers
 
