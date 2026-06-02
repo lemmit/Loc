@@ -508,7 +508,9 @@ function printSeed(node: import("../generated/ast.js").Seed): string {
   const raw = node.raw ? " raw" : "";
   return block(
     `seed${dataset}${raw}`,
-    node.rows.map((r) => `${r.aggregate.$refText} ${printExpr(r.value)}`),
+    node.rows.map(
+      (r) => `${r.aggregate.$refText}${r.handle ? ` @${r.handle}` : ""} ${printExpr(r.value)}`,
+    ),
   );
 }
 

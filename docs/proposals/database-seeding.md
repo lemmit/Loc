@@ -486,10 +486,20 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
    ignore it; Phoenix emits `%Ctx.Money{amount: …, currency: …}`), which
    also fixes the same latent bug for VO construction in Phoenix
    *operation bodies*.
-4. Imperative (workflow-body) form — reuses statement lowering.
-5. `seed-spec.json` artifact + compose seed step (`LOOM_SEED` dataset
-   gating already landed in phase 2); quick-start `saas` template
-   consumes it (closes the quickstart proposal's §5.4 dependency).
+4. Imperative (workflow-body) form — reuses statement lowering. **Not
+   started** — the grammar disambiguation is proven feasible
+   (`( rows | body )` parses cleanly), but the statement-execution +
+   auto-save semantics are a standalone project, deferred.
+5. **`@handle` cross-row references ✅ Done.** `SeedRow @h { … }` binds
+   the created instance; `@h` in a later row's field lowers to a
+   `seed-ref` `ExprIR` (rendered as `<h>.id` / `<h>.Id`). Lowering
+   topologically orders rows by the reference edges (a binder precedes
+   its references); validators cover unresolved refs
+   (`loom.seed-unresolved-ref`), cycles (`loom.seed-cycle`), and
+   duplicate handles (`loom.seed-duplicate-handle`). All three backends
+   emit a named local for handled rows. (Remaining Phase-5 items —
+   `seed-spec.json` artifact, compose seed step, quick-start `saas`
+   template — still open.)
 6. `ddd seed` runner + `--reset`; then (only on demand) the `key:`
    upsert path for evolving reference data (§10).
 

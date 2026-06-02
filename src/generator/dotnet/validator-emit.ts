@@ -216,6 +216,8 @@ function chainSingleFieldFluent(p: SingleFieldPattern): string {
 
 function renderFluentPredicate(e: ExprIR): string {
   switch (e.kind) {
+    case "seed-ref":
+      return e.handle; // seed-only; never reached here
     case "literal":
       return renderLit(e.lit, e.value);
     case "ref":

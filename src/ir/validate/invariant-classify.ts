@@ -83,6 +83,8 @@ function constructionEvaluable(
   scope: ReadonlySet<string> = available,
 ): boolean {
   switch (e.kind) {
+    case "seed-ref":
+      return false; // seed-only; never reached here
     case "literal":
       // The factory runs server-side: clock (`now`) and Decimal (`money`)
       // are both in hand, unlike the browser-JS wire context.
@@ -172,6 +174,8 @@ function exprIsTranslatable(
   scope: ReadonlySet<string> = ctx.available,
 ): boolean {
   switch (e.kind) {
+    case "seed-ref":
+      return false; // seed-only; never reached here
     case "literal":
       // `now()` is server-side — every other literal is fine,
       // EXCEPT money literals: client-side JS can't faithfully compare
@@ -483,6 +487,8 @@ export function pickErrorPath(inv: InvariantIR): string | null {
 
 function firstFieldRef(e: ExprIR): string | null {
   switch (e.kind) {
+    case "seed-ref":
+      return null; // seed-only; never reached here
     case "ref":
       if (e.refKind === "this-prop" || e.refKind === "this-vo-prop" || e.refKind === "param") {
         return e.name;

@@ -26,6 +26,7 @@ const EMPTY_STUB = "# Auto-generated — empty seeds stub.\n";
 interface SeedEntry {
   ctxModule: string;
   agg: string;
+  handle?: string;
   fields: { name: string; value: ExprIR }[];
 }
 
@@ -54,7 +55,12 @@ export function renderSeedsExs(appModule: string, contexts: BoundedContextIR[]):
           byDataset.set(seed.dataset, list);
           order.push(seed.dataset);
         }
-        list.push({ ctxModule, agg: row.aggregate, fields: row.fields });
+        list.push({
+          ctxModule,
+          agg: row.aggregate,
+          ...(row.handle ? { handle: row.handle } : {}),
+          fields: row.fields,
+        });
       }
     }
   }
@@ -111,7 +117,11 @@ function renderDatasetBlock(dataset: string, entries: SeedEntry[]): string {
 function renderCreate(e: SeedEntry): string {
   const ctx = { thisName: "record", contextModule: e.ctxModule };
   const fields = e.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`).join(", ");
-  return `${e.ctxModule}.create_${snake(e.agg)}!(%{${fields}})`;
+  const call = `${e.ctxModule}.create_${snake(e.agg)}!(%{${fields}})`;
+  // A `@handle` row binds the created struct to a variable so later rows
+  // reference its id (`<handle>.id`, rendered by render-expr's seed-ref case);
+  // rows are topologically ordered (lowering), so the binding precedes use.
+  return e.handle ? `${e.handle} = ${call}` : call;
 }
 
 function elixirStr(s: string): string {

@@ -96,6 +96,8 @@ export function refineClauseFor(inv: InvariantIR, ctx: ClassifyContext): string 
 
 function renderRefineExpr(e: ExprIR): string {
   switch (e.kind) {
+    case "seed-ref":
+      return "true"; // seed-only; never reached here
     case "literal":
       return renderLiteral(e.lit, e.value);
     case "ref":

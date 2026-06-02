@@ -86,9 +86,18 @@ function renderDatasetFn(
   const repoDecls = aggs.map(
     (a) => `        var ${repoVar(a)} = sp.GetRequiredService<I${a}Repository>();`,
   );
-  const saveLines = rows.map((r) => {
+  // A `@handle` row binds the created instance to a `var` so later rows
+  // reference its id (`<handle>.Id`, rendered by render-expr's seed-ref case);
+  // rows are topologically ordered (lowering), so the var is in scope first.
+  const saveLines = rows.flatMap((r) => {
     const agg = aggByName.get(r.aggregate)!;
-    return `        await ${repoVar(r.aggregate)}.SaveAsync(${r.aggregate}.Create(${renderArgs(r, agg)}), ct);`;
+    const create = `${r.aggregate}.Create(${renderArgs(r, agg)})`;
+    return r.handle
+      ? [
+          `        var ${r.handle} = ${create};`,
+          `        await ${repoVar(r.aggregate)}.SaveAsync(${r.handle}, ct);`,
+        ]
+      : [`        await ${repoVar(r.aggregate)}.SaveAsync(${create}, ct);`];
   });
   return lines(
     `    private static async Task Seed${upperFirst(dataset)}(`,

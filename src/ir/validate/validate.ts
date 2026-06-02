@@ -981,6 +981,8 @@ function describeColumnRef(e: ExprIR): string {
  * can be specific. */
 function firstNonQueryableNode(e: ExprIR): string | null {
   switch (e.kind) {
+    case "seed-ref":
+      return "seed reference"; // seed-only; never reached here
     case "literal":
     case "this":
     case "id":

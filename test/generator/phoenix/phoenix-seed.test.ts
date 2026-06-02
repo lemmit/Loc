@@ -92,3 +92,32 @@ describe("phoenix database seeding (Phase 3b, domain path)", () => {
     expect(files.get("web/mix.exs")!).not.toContain("run priv/repo/seeds.exs");
   });
 });
+
+describe("phoenix seeding — @handle cross-row references", () => {
+  const HANDLE = `system S {
+    subdomain Sales { context Sales {
+      aggregate Customer with crudish { name: string }
+      aggregate Order with crudish { customerId: Customer id status: string }
+      repository Customers for Customer { }
+      repository Orders for Order { }
+      seed demo {
+        Order { customerId: @acme, status: "new" }
+        Customer @acme { name: "Acme" }
+      }
+    } }
+    api A from Sales
+    ui U with scaffold(subdomains: [Sales]) { }
+    storage p { type: postgres }
+    resource st { for: Sales, kind: state, use: p }
+    deployable web { platform: phoenixLiveView contexts: [Sales] dataSources: [st] serves: A ui: U port: 4000 }
+  }`;
+
+  it("binds a handled row to a variable (topo-first) and references its id", async () => {
+    const seeds = (await build(HANDLE)).get("web/priv/repo/seeds.exs")!;
+    expect(seeds).toContain('acme = Web.Sales.create_customer!(%{name: "Acme"})');
+    expect(seeds).toContain("customer_id: acme.id");
+    expect(seeds.indexOf("acme = Web.Sales.create_customer!")).toBeLessThan(
+      seeds.indexOf("customer_id: acme.id"),
+    );
+  });
+});

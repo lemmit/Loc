@@ -394,6 +394,8 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
   if (uiCall) return renderUiCall(uiCall, ctx);
 
   switch (e.kind) {
+    case "seed-ref":
+      return e.handle; // seed-only; never reached here
     case "literal":
       return renderLiteral(e.lit, e.value);
     case "ref":

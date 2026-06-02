@@ -84,6 +84,10 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
       // No domain-expression position consumes one today; emit a TS array
       // literal so unexpected uses still compile.
       return `[${e.elements.map((el) => renderTsExpr(el, ctx)).join(", ")}]`;
+    case "seed-ref":
+      // `@<handle>` (database-seeding.md) — the seed emitter binds each
+      // handled row to a local `const <handle>`; the reference is its id.
+      return `${e.handle}.id`;
   }
 }
 

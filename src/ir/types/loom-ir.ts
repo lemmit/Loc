@@ -688,8 +688,8 @@ export interface SeedIR {
   dataset: string;
   /** Through the domain `create` (default) or straight to tables (`raw`). */
   path: "domain" | "raw";
-  /** Ordered records, in source order.  (Topological reorder by `@handle`
-   *  cross-row refs is a later slice.) */
+  /** Records, topologically ordered by `@handle` cross-row references (a row
+   *  binding `@h` precedes any row referencing it); source order otherwise. */
   rows: SeedRowIR[];
 }
 
@@ -697,6 +697,9 @@ export interface SeedIR {
 export interface SeedRowIR {
   /** Target aggregate name. */
   aggregate: string;
+  /** `@<handle>` bound by this row, if any — other rows reference the
+   *  created instance's id via a `seed-ref` ExprIR (database-seeding.md). */
+  handle?: string;
   /** Field initialisers, fully-resolved to `ExprIR`. */
   fields: { name: string; value: ExprIR }[];
 }
@@ -2066,7 +2069,15 @@ export type ExprIR =
       kind: "match";
       arms: { cond: ExprIR; value: ExprIR }[];
       otherwise?: ExprIR;
-    };
+    }
+  /**
+   * `@<handle>` — a reference to a seed handle bound by an earlier
+   * `SeedRow` in the same seed block (database-seeding.md §3.1).  Renders
+   * to the created instance's id (`<handle>.id` / `<handle>.Id`).  Only
+   * appears in seed-row field initialisers; the seed builder topologically
+   * orders rows so the bound row is created before any referencing row.
+   */
+  | { kind: "seed-ref"; handle: string };
 
 // Convenience constructors used by the lowering layer.
 export const lit = (kind: LiteralKind, value: string): ExprIR => ({

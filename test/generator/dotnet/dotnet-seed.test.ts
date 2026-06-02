@@ -118,3 +118,28 @@ describe("dotnet database seeding (Phase 3a, domain path)", () => {
     expect(program).not.toContain("Seed.RunSeeds(");
   });
 });
+
+describe("dotnet seeding — @handle cross-row references", () => {
+  const HANDLE = `system S {
+    subdomain Sales { context Sales {
+      aggregate Customer with crudish { name: string }
+      aggregate Order with crudish { customerId: Customer id status: string }
+      repository Customers for Customer { }
+      repository Orders for Order { }
+      seed demo {
+        Order { customerId: @acme, status: "new" }
+        Customer @acme { name: "Acme" }
+      }
+    } }
+    api A from Sales
+    deployable api { platform: dotnet contexts: [Sales] serves: A port: 8080 }
+  }`;
+
+  it("binds a handled row to a var (topo-first) and references its Id", async () => {
+    const seed = find(await build(HANDLE), /Seed\.cs$/);
+    expect(seed).toContain('var acme = Customer.Create("Acme");');
+    expect(seed).toContain("await customerRepo.SaveAsync(acme, ct);");
+    expect(seed).toContain("Order.Create(acme.Id,");
+    expect(seed.indexOf("var acme =")).toBeLessThan(seed.indexOf("acme.Id"));
+  });
+});

@@ -6,9 +6,10 @@
 // The Phoenix gate uses the system-wrapped twin at
 // test/e2e/fixtures/phoenix-build/seeding.ddd.
 //
-// Fields are scalar + enum only (no value objects, no cross-aggregate `X id`
-// refs) so every backend's seeder produces trivially compilable output.  VO /
-// money construction in seeds is covered by the per-backend unit tests.
+// Scalar/enum fields keep most rows trivially compilable; the `wired` dataset
+// additionally compile-checks `@handle` cross-row references (a guid `Widget
+// id` captured from a handled row).  VO / money construction in seeds is
+// covered by the per-backend unit tests.
 context Catalog {
   enum Tier { Free, Pro }
 
@@ -20,7 +21,13 @@ context Catalog {
     derived display: string = name
   }
 
+  aggregate Gadget with crudish {
+    widgetId: Widget id
+    label: string
+  }
+
   repository Widgets for Widget { }
+  repository Gadgets for Gadget { }
 
   seed default {
     Widget { name: "Alpha", size: 1, tier: Free }
@@ -28,5 +35,12 @@ context Catalog {
   }
   seed demo {
     Widget { name: "Gamma", size: 3, tier: Pro }
+  }
+  // `@handle` cross-row reference: the Gadget row (written first) forward-refs
+  // the handled Widget; lowering topologically orders the binder ahead of it,
+  // so the generated `<handle>.id` / `.Id` is in scope.
+  seed wired {
+    Gadget { widgetId: @anchor, label: "g1" }
+    Widget @anchor { name: "Anchor", size: 4, tier: Free }
   }
 }

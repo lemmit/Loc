@@ -62,3 +62,34 @@ describe("seed — lowering", () => {
     expect(ctx.seeds[0].path).toBe("raw");
   });
 });
+
+describe("seed — @handle topological lowering", () => {
+  const HANDLE_SRC = `
+    system S { subdomain M {
+      context Sales {
+        aggregate Customer with crudish { name: string }
+        aggregate Order with crudish { customerId: Customer id status: string }
+        repository Customers for Customer { }
+        repository Orders for Order { }
+        seed demo {
+          Order { customerId: @acme, status: "new" }
+          Customer @acme { name: "Acme" }
+        }
+      }
+    }}
+  `;
+
+  it("reorders rows so a @handle binding precedes its reference, and lowers @ref to seed-ref", async () => {
+    const loom = await buildLoomModel(HANDLE_SRC);
+    const seed = allContexts(loom).find((c) => c.name === "Sales")!.seeds[0];
+
+    // Topo: the Customer @acme row (written second) is emitted first.
+    expect(seed.rows.map((r) => r.aggregate)).toEqual(["Customer", "Order"]);
+    expect(seed.rows[0].handle).toBe("acme");
+
+    // The Order row's customerId references the handle via a seed-ref ExprIR.
+    const order = seed.rows[1];
+    const customerId = order.fields.find((f) => f.name === "customerId")!;
+    expect(customerId.value).toMatchObject({ kind: "seed-ref", handle: "acme" });
+  });
+});

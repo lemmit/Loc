@@ -59,6 +59,7 @@ import {
   isPrimitiveType,
   isProperty,
   isRequiresStmt,
+  isSeedRef,
   isSlotType,
   isStringLit,
   isTernaryExpr,
@@ -521,6 +522,10 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   }
   if (isBuilderCall(expr)) {
     return lowerBuilderCall(expr, env);
+  }
+  if (isSeedRef(expr)) {
+    // `@<handle>` — a seed cross-row id reference (database-seeding.md).
+    return { kind: "seed-ref", handle: expr.handle ?? "" };
   }
   if (isPostfixChain(expr)) {
     return lowerPostfixChain(expr, env);

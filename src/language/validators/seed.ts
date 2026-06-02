@@ -8,8 +8,8 @@
 // warning are later slices.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
-import type { Model, Seed } from "../generated/ast.js";
-import { isBoundedContext, isSeed } from "../generated/ast.js";
+import type { Model, Seed, SeedRef, SeedRow } from "../generated/ast.js";
+import { isBoundedContext, isSeed, isSeedRef } from "../generated/ast.js";
 
 export function checkSeeds(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
@@ -51,4 +51,84 @@ function checkSeed(seed: Seed, accept: ValidationAcceptor): void {
       seen.add(f.name);
     }
   }
+
+  checkSeedHandles(seed, accept);
+}
+
+/** `@handle` reference rules (database-seeding.md §3.1):
+ *  - a handle is bound by at most one row (`loom.seed-duplicate-handle`);
+ *  - every `@ref` resolves to a bound handle (`loom.seed-unresolved-ref`);
+ *  - the reference graph is acyclic (`loom.seed-cycle`). */
+function checkSeedHandles(seed: Seed, accept: ValidationAcceptor): void {
+  // Bound handles → the row that binds each (first binding wins).
+  const boundBy = new Map<string, SeedRow>();
+  for (const row of seed.rows) {
+    if (!row.handle) continue;
+    if (boundBy.has(row.handle)) {
+      accept("error", `Duplicate seed handle '@${row.handle}' in this seed block.`, {
+        node: row,
+        property: "handle",
+        code: "loom.seed-duplicate-handle",
+      });
+      continue;
+    }
+    boundBy.set(row.handle, row);
+  }
+
+  // Unresolved refs.
+  for (const ref of seedRefsIn(seed)) {
+    const h = ref.handle;
+    if (h && !boundBy.has(h)) {
+      accept("error", `Seed reference '@${h}' does not match any '@handle' in this seed block.`, {
+        node: ref,
+        property: "handle",
+        code: "loom.seed-unresolved-ref",
+      });
+    }
+  }
+
+  // Cycle detection over row → referenced-handle edges.
+  const rowRefs = new Map<SeedRow, Set<string>>();
+  for (const row of seed.rows) {
+    const refs = new Set<string>();
+    for (const ref of AstUtils.streamAllContents(row.value)) {
+      if (isSeedRef(ref) && ref.handle && boundBy.has(ref.handle)) refs.add(ref.handle);
+    }
+    rowRefs.set(row, refs);
+  }
+  const state = new Map<SeedRow, 0 | 1 | 2>();
+  const visit = (row: SeedRow): boolean => {
+    if (state.get(row) === 2) return false;
+    if (state.get(row) === 1) return true; // back-edge → cycle
+    state.set(row, 1);
+    for (const h of rowRefs.get(row) ?? []) {
+      const dep = boundBy.get(h);
+      if (dep && dep !== row && visit(dep)) {
+        state.set(row, 2);
+        return true;
+      }
+    }
+    state.set(row, 2);
+    return false;
+  };
+  for (const row of seed.rows) {
+    if (visit(row)) {
+      accept("error", "Seed rows form a `@handle` reference cycle.", {
+        node: row,
+        code: "loom.seed-cycle",
+      });
+      break;
+    }
+  }
+}
+
+/** Every `@ref` expression anywhere inside a seed's rows. */
+function seedRefsIn(seed: Seed): SeedRef[] {
+  const out: SeedRef[] = [];
+  for (const row of seed.rows) {
+    for (const n of AstUtils.streamAllContents(row.value)) {
+      if (isSeedRef(n)) out.push(n);
+    }
+  }
+  return out;
 }

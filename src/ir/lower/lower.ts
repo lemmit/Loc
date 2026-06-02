@@ -1443,6 +1443,7 @@ function lowerContext(
 function lowerSeed(s: Seed, env: Env): SeedIR {
   const rows: SeedRowIR[] = s.rows.map((row) => ({
     aggregate: row.aggregate.ref?.name ?? "Unknown",
+    ...(row.handle ? { handle: row.handle } : {}),
     fields: row.value.fields.map((f) => ({
       name: f.name,
       value: lowerExpr(f.value, env),
@@ -1451,8 +1452,64 @@ function lowerSeed(s: Seed, env: Env): SeedIR {
   return {
     dataset: s.dataset ?? "default",
     path: s.raw ? "raw" : "domain",
-    rows,
+    // Topologically order so a row binding `@h` precedes any row whose field
+    // values reference `@h` (database-seeding.md §3.1).  A cycle / unresolved
+    // handle leaves source order intact — the validator reports it.
+    rows: topoSortSeedRows(rows),
   };
+}
+
+/** Stable topological sort of seed rows by `@handle` reference edges: a row
+ *  referencing `@h` must come after the row binding `@h`.  Preserves source
+ *  order among independent rows; falls back to source order on a cycle. */
+function topoSortSeedRows(rows: SeedRowIR[]): SeedRowIR[] {
+  const byHandle = new Map<string, number>();
+  rows.forEach((r, i) => {
+    if (r.handle && !byHandle.has(r.handle)) byHandle.set(r.handle, i);
+  });
+  const deps = rows.map((r, i) => {
+    const refs = new Set<number>();
+    for (const f of r.fields) {
+      for (const h of seedRefHandles(f.value)) {
+        const j = byHandle.get(h);
+        if (j !== undefined && j !== i) refs.add(j);
+      }
+    }
+    return refs;
+  });
+  const out: SeedRowIR[] = [];
+  const state = new Array<number>(rows.length).fill(0); // 0=unvisited 1=visiting 2=done
+  let cyclic = false;
+  const visit = (i: number): void => {
+    if (state[i] === 2) return;
+    if (state[i] === 1) {
+      cyclic = true;
+      return;
+    }
+    state[i] = 1;
+    for (const j of deps[i]) visit(j);
+    state[i] = 2;
+    out.push(rows[i]);
+  };
+  for (let i = 0; i < rows.length; i++) visit(i);
+  return cyclic || out.length !== rows.length ? rows : out;
+}
+
+/** All `@handle` names referenced anywhere inside an `ExprIR`. */
+function seedRefHandles(e: ExprIR): string[] {
+  switch (e.kind) {
+    case "seed-ref":
+      return [e.handle];
+    case "object":
+    case "new":
+      return e.fields.flatMap((f) => seedRefHandles(f.value));
+    case "call":
+      return e.args.flatMap(seedRefHandles);
+    case "list":
+      return e.elements.flatMap(seedRefHandles);
+    default:
+      return [];
+  }
 }
 
 /** Lower a `criterion <Name>(params) of <T> = <expr>` declaration to

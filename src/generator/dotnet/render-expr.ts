@@ -160,6 +160,10 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
       }
       return out;
     }
+    case "seed-ref":
+      // `@<handle>` (database-seeding.md) — the seed emitter binds each
+      // handled row to a local `var <handle>`; the reference is its Id.
+      return `${e.handle}.Id`;
   }
 }
 

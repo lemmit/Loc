@@ -85,8 +85,17 @@ function renderDatasetFn(dataset: string, rows: SeedRowIR[]): string {
   const repoDecls = aggs.map(
     (a) => `  const ${repoVar(a)} = new ${a}Repository(db, NoopDomainEventDispatcher);`,
   );
-  const saveLines = rows.map(
-    (r) => `  await ${repoVar(r.aggregate)}.save(${r.aggregate}.create(${renderInput(r)}));`,
+  // A `@handle` row binds the created instance to a `const` so later rows
+  // reference its id (`<handle>.id`, rendered by render-expr's seed-ref case);
+  // rows are already topologically ordered (lowering), so the const is in
+  // scope by the time a referencing row runs.
+  const saveLines = rows.flatMap((r) =>
+    r.handle
+      ? [
+          `  const ${r.handle} = ${r.aggregate}.create(${renderInput(r)});`,
+          `  await ${repoVar(r.aggregate)}.save(${r.handle});`,
+        ]
+      : [`  await ${repoVar(r.aggregate)}.save(${r.aggregate}.create(${renderInput(r)}));`],
   );
   return lines(
     `async function seed${upperFirst(dataset)}(db: Db, requested: Set<string>): Promise<void> {`,

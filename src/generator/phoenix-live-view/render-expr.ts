@@ -104,6 +104,10 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
       // no domain-expression position consumes one today, but keep total
       // with an Elixir-list emit so unexpected uses still compile.
       return `[${e.elements.map((el) => renderExpr(el, ctx)).join(", ")}]`;
+    case "seed-ref":
+      // `@<handle>` (database-seeding.md) — the seeds.exs emitter binds each
+      // handled row to a variable `<handle>`; the reference is its id.
+      return `${e.handle}.id`;
   }
 }
 

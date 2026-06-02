@@ -913,7 +913,13 @@ Seed:
     '}';
 
 SeedRow:
-    aggregate=[Aggregate:ID] value=ObjectLit;
+    aggregate=[Aggregate:ID] ('@' handle=ID)? value=ObjectLit;
+
+// `@<handle>` — a reference to a handle bound by an earlier SeedRow in the
+// same seed block (database-seeding.md §3.1).  Resolves to the created
+// instance's id; only valid inside a seed (validator-gated).
+SeedRef:
+    {infer SeedRef} '@' handle=ID;
 
 // Criterion — a named, parameterised, pure boolean predicate over a
 // candidate type `T` (the Specification Pattern, Evans / Spring-Data
@@ -1449,6 +1455,7 @@ PrimaryExpr infers Expression:
     | MoneyLit
     | PrimitiveConversion
     | NowExpr
+    | SeedRef
     | ThisRef
     | IdRef
     | NameRef;

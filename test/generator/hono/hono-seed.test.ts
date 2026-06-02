@@ -117,3 +117,31 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
     expect(pkg.scripts["db:seed"]).toBeUndefined();
   });
 });
+
+describe("Hono seeding — @handle cross-row references", () => {
+  const HANDLE = `system S {
+    subdomain Sales { context Sales {
+      aggregate Customer with crudish { name: string }
+      aggregate Order with crudish { customerId: Customer id status: string }
+      repository Customers for Customer { }
+      repository Orders for Order { }
+      seed demo {
+        Order { customerId: @acme, status: "new" }
+        Customer @acme { name: "Acme" }
+      }
+    } }
+    api A from Sales
+    deployable api { platform: hono contexts: [Sales] serves: A port: 3000 }
+  }`;
+
+  it("binds a handled row to a const (topo-first) and references its id", async () => {
+    const { model, errors } = await parseString(HANDLE);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const seed = find(generateSystems(model).files, /\/db\/seed\.ts$/);
+    expect(seed).toContain('const acme = Customer.create({ name: "Acme" });');
+    expect(seed).toContain("await customerRepo.save(acme);");
+    expect(seed).toContain("customerId: acme.id");
+    // Topo: the handle binding precedes the referencing row.
+    expect(seed.indexOf("const acme =")).toBeLessThan(seed.indexOf("customerId: acme.id"));
+  });
+});

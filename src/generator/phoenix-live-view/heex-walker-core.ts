@@ -281,6 +281,8 @@ export function walkBodyToHeex(
 
 export function renderExpr(expr: ExprIR, ctx: WalkContext): string {
   switch (expr.kind) {
+    case "seed-ref":
+      return ""; // seed-only; never reached here
     case "literal":
       return renderLiteral(expr.lit, expr.value);
     case "this":
