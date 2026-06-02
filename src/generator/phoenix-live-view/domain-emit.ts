@@ -1,3 +1,4 @@
+import { wireCreateDefault } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -366,7 +367,12 @@ function renderPrimaryKey(idValueType: string): string {
 function renderAttribute(f: FieldIR, ctxModule: string): string {
   const ashType = renderAshType(f.type, ctxModule);
   const allowNil = f.optional ? "true" : "false";
-  return `attribute :${snake(f.name)}, ${ashType}, allow_nil?: ${allowNil}`;
+  // An explicit `= default` makes the field optional input: Ash applies the
+  // default when the create action omits it, so it drops from the required
+  // set (see `wireCreateDefault`).  Bool/optional optionality is unchanged.
+  const d = wireCreateDefault(f);
+  const def = d ? `, default: ${renderExpr(d)}` : "";
+  return `attribute :${snake(f.name)}, ${ashType}, allow_nil?: ${allowNil}${def}`;
 }
 
 // ---------------------------------------------------------------------------

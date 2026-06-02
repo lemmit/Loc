@@ -26,6 +26,7 @@ system Sys {
         name: string
         status: int
         invariant name.length > 0
+        create(name: string, status: int) { name := name  status := status }
         operation confirm() {
           precondition status == 0
           status := 1

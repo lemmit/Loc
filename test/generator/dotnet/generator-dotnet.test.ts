@@ -825,6 +825,40 @@ describe(".NET generator", () => {
     expect(ctrl).toMatch(/new PlaceOrderCommand\(\s*new CustomerId\(request\.CustomerId\)/);
   });
 
+  it("fills omitted create inputs in a workflow factory-let with their omission values", async () => {
+    // The .NET Create(...) factory takes the full canonical create-input
+    // set as required params (no C# default). A workflow `create` that
+    // names only a subset must still supply every other create input, or
+    // the call fails with CS7036. Each omitted field gets its omission
+    // value: an optional → null, a `= default` → the default literal.
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      context Support {
+        aggregate Ticket {
+          subject: string
+          memo: string?
+          rank: int = 3
+        }
+        repository Tickets for Ticket { }
+        workflow openTicket(subject: string) {
+          let ticket = Ticket.create({ subject: subject })
+        }
+      }
+    `,
+      { validation: true },
+    );
+    const files = generateDotnet(doc.parseResult.value as Model);
+    const handler = files.get("Application/Workflows/OpenTicketHandler.cs")!;
+    // Provided field first, then the omitted optional (null) and the
+    // omitted defaulted field (its literal) — all named, so order-free.
+    expect(handler).toMatch(/Ticket\.Create\(subject: cmd\.Subject/);
+    expect(handler).toMatch(/memo: null/);
+    expect(handler).toMatch(/rank: 3/);
+  });
+
   it("emits a transactional workflow with BeginTransactionAsync + Commit + Rollback", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
@@ -1689,6 +1723,7 @@ describe(".NET generator", () => {
               email: string
               derived display: string = email
               invariant email.matches("^[^@]+@.+$")
+              create(email: string) { email := email }
             }
             repository Users for User { }
           }
@@ -1760,6 +1795,7 @@ describe(".NET generator", () => {
               fromTime: int
               toTime:   int
               invariant fromTime < toTime
+              create(fromTime: int, toTime: int) { fromTime := fromTime  toTime := toTime }
             }
             repository Reservations for Reservation { }
           }

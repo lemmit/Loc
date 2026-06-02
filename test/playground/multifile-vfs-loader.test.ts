@@ -179,6 +179,7 @@ describe("playground project loader (VFS-backed)", () => {
               aggregate Product {
                 sku: string
                 price: Money
+                create(sku: string, price: Money) { sku := sku  price := price }
               }
               repository Products for Product { }
             }

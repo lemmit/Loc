@@ -132,7 +132,15 @@ export function dtoParam(
   csType: string,
   name: string,
   dir: "request" | "response" = "response",
+  /** Rendered C# literal for an explicitly-defaulted request field.  When
+   *  present the parameter becomes optional via a record default value
+   *  (`Type Name = <lit>`) and carries no `[Required]` — STJ applies the
+   *  default when the field is omitted, dropping it from the required-set. */
+  defaultLiteral?: string,
 ): string {
+  if (defaultLiteral !== undefined && dir === "request") {
+    return `${csType} ${name} = ${defaultLiteral}`;
+  }
   const optionalBoolRequest = dir === "request" && csType === "bool";
   const required = !csType.endsWith("?") && !optionalBoolRequest;
   if (!required) return `${csType} ${name}`;
