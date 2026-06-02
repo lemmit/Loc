@@ -21,6 +21,7 @@ import {
   isLValue,
   isMemberSuffix,
   isNameRef,
+  isOnDecl,
   isOperation,
   isPostfixChain,
   isValueObject,
@@ -130,9 +131,19 @@ function localShadows(node: AstNode, name: string): boolean {
     ) {
       return true;
     }
-    // Operation/Workflow bodies are `Statement[]`; a `let` of the same name
-    // shadows the member. (FunctionDecl.body is a single Expression — no lets.)
-    if ((isOperation(n) || isWorkflow(n)) && n.body.some((s) => isLetStmt(s) && s.name === name)) {
+    // Operation bodies are `Statement[]`; a `let` of the same name shadows the
+    // member. (FunctionDecl.body is a single Expression — no lets.)
+    if (isOperation(n) && n.body.some((s) => isLetStmt(s) && s.name === name)) {
+      return true;
+    }
+    // A workflow body is a `WorkflowMember[]` (statements interleaved with
+    // `on(...)` reactors); a top-level `let` shadows the member.
+    if (isWorkflow(n) && n.members.some((s) => isLetStmt(s) && s.name === name)) {
+      return true;
+    }
+    // Inside an `on(e: Event) { … }` reactor, the event binding and the
+    // reactor body's own lets shadow.
+    if (isOnDecl(n) && (n.param === name || n.body.some((s) => isLetStmt(s) && s.name === name))) {
       return true;
     }
     n = n.$container;

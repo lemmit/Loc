@@ -33,6 +33,7 @@ import type {
   LoadPath,
   MenuBlock,
   Model,
+  OnDecl,
   Operation,
   Page,
   Parameter,
@@ -85,6 +86,7 @@ import {
   isMemberSuffix,
   isNameRef,
   isObjectLit,
+  isOnDecl,
   isOperation,
   isPayloadDecl,
   isPermissionsBlock,
@@ -145,6 +147,7 @@ import type {
   MenuBlockIR,
   MenuLinkIR,
   MenuMetaIR,
+  OnIR,
   OperationIR,
   OperationKind,
   PageIR,
@@ -2339,14 +2342,34 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
       if (target?.name) repoForAgg.set(target.name, m.name);
     }
   }
+  // Base env after params — the reactor (`on(...)`) bodies branch off this,
+  // not off the sequential statement flow (each `on` is a distinct
+  // continuation entry point, so it must not see the starter statements' lets).
+  const paramEnv = inner;
   const letAggs = new Map<string, { aggName: string; repoName: string }>();
   const statements: WorkflowStmtIR[] = [];
-  for (const s of wf.body) {
-    const lowered = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
+  const subscriptions: OnIR[] = [];
+  // Workflow state fields (`Property` members) — the correlation field +
+  // saga state (workflow-and-applier.md A2-S2).  Lowered with the same
+  // `lowerField` every aggregate / value-object field uses.
+  const stateFields: FieldIR[] = wf.members.filter(isProperty).map((p) => lowerField(p, paramEnv));
+  for (const m of wf.members) {
+    if (isOnDecl(m)) {
+      subscriptions.push(lowerOn(m, paramEnv, aggsByName, reposByName, repoForAgg));
+      continue;
+    }
+    if (isProperty(m)) continue; // handled above
+    const lowered = lowerWorkflowStatement(m, inner, aggsByName, reposByName, repoForAgg);
     statements.push(lowered.stmt);
     inner = lowered.envAfter;
     if (lowered.binding) letAggs.set(lowered.binding.name, lowered.binding);
   }
+  // Correlation field inference: the single id-shaped state field is the one
+  // the runtime routes inbound events to (workflow-and-applier.md §"Identity
+  // and correlation").  Ambiguity (>1 id field) / absence are diagnosed by the
+  // IR validator, not here — lowering just records the unambiguous case.
+  const idFields = stateFields.filter((f) => f.type.kind === "id");
+  const correlationField = idFields.length === 1 ? idFields[0].name : undefined;
   const savesAtExit = computeSaves(statements, repoForAgg);
   return {
     name: wf.name,
@@ -2360,6 +2383,41 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
       | undefined,
     statements,
     savesAtExit,
+    ...(subscriptions.length > 0 ? { subscriptions } : {}),
+    ...(stateFields.length > 0 ? { stateFields } : {}),
+    ...(correlationField ? { correlationField } : {}),
+  };
+}
+
+// Lower an `on(e: Event) { … }` reactor member to its IR (workflow-and-applier.md
+// Phase A2, surface slice).  Mirrors `lowerApply`: the event instance binds as a
+// `refKind: "param"` local typed as the event entity, so `e.field` accesses
+// resolve through the same machinery.  The body reuses `lowerWorkflowStatement`
+// (a reactor is a workflow continuation and may load/save aggregates and emit).
+// The `by <expr>` routing clause (A2-S3) is lowered in the event-binding scope;
+// its type-check against the workflow's correlation field lives in the validator.
+function lowerOn(
+  o: OnDecl,
+  baseEnv: Env,
+  aggsByName: Map<string, Aggregate>,
+  reposByName: Map<string, Repository>,
+  repoForAgg: Map<string, string>,
+): OnIR {
+  const eventName = o.event.ref?.name ?? o.event.$refText;
+  const inner = withLocal(baseEnv, o.param, "param", { kind: "entity", name: eventName });
+  const correlation = o.correlation ? lowerExpr(o.correlation, inner) : undefined;
+  const statements: WorkflowStmtIR[] = [];
+  let bodyEnv = inner;
+  for (const s of o.body) {
+    const lowered = lowerWorkflowStatement(s, bodyEnv, aggsByName, reposByName, repoForAgg);
+    statements.push(lowered.stmt);
+    bodyEnv = lowered.envAfter;
+  }
+  return {
+    event: eventName,
+    param: o.param,
+    ...(correlation ? { correlation } : {}),
+    statements,
   };
 }
 

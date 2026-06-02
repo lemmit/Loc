@@ -24,6 +24,7 @@ import type {
   TestE2EIR,
   TestStmtIR,
   TypeIR,
+  WorkflowIR,
 } from "../types/loom-ir.js";
 import { allContexts, exprUsesCurrentUser, findUsesCurrentUser } from "../types/loom-ir.js";
 import {
@@ -2021,6 +2022,97 @@ function validateWorkflows(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void
       });
     }
     validateWorkflowBody(ctx, wf, diags);
+    validateWorkflowCorrelation(ctx, wf, diags);
+  }
+}
+
+/** The resolved type a `by <expr>` correlation expression yields — a member
+ *  access carries `memberType`, a bare ref carries `type`. */
+function correlationExprType(e: ExprIR): TypeIR | undefined {
+  if (e.kind === "member") return e.memberType;
+  if (e.kind === "ref") return e.type;
+  return undefined;
+}
+
+const idTarget = (t: TypeIR | undefined): string | undefined =>
+  t && t.kind === "id" ? t.targetName : undefined;
+
+// Correlation-field rules (workflow-and-applier.md A2-S2 + A2-S3).  A workflow
+// with event reactors routes inbound events to exactly one id-shaped state
+// field — the correlation field.
+//
+//   - rule 10 (`loom.workflow-correlation-required`) — no id-shaped field.
+//   - rule 19 (`loom.correlation-field-ambiguous`)   — more than one.
+//   - rule 12 (`loom.correlation-type-mismatch`)     — a `by <expr>` yields a
+//     value of a different id type than the correlation field.
+//   - (`loom.correlation-uninferrable`) — a reactor omits `by` but its event
+//     has no field whose name matches the correlation field, so routing can't
+//     be inferred by name-match.
+function validateWorkflowCorrelation(
+  ctx: BoundedContextIR,
+  wf: WorkflowIR,
+  diags: LoomDiagnostic[],
+): void {
+  const subs = wf.subscriptions ?? [];
+  if (subs.length === 0) return;
+  const src = `${ctx.name}/${wf.name}`;
+  const idFields = (wf.stateFields ?? []).filter((f) => f.type.kind === "id");
+  if (idFields.length === 0) {
+    diags.push({
+      severity: "error",
+      message:
+        `workflow '${wf.name}' has on(...) reactors but no correlation field. ` +
+        `Declare one id-shaped state field (e.g. 'orderId: Order id') for the runtime to route inbound events to.`,
+      source: src,
+      code: "loom.workflow-correlation-required",
+    });
+    return;
+  }
+  if (idFields.length > 1) {
+    diags.push({
+      severity: "error",
+      message:
+        `workflow '${wf.name}' has ${idFields.length} id-shaped state fields ` +
+        `(${idFields.map((f) => f.name).join(", ")}); the correlation field can't be inferred. ` +
+        `A workflow with reactors must declare exactly one id-shaped field.`,
+      source: src,
+      code: "loom.correlation-field-ambiguous",
+    });
+    return;
+  }
+  // Exactly one correlation field — type-check each reactor's routing.
+  const corr = idFields[0];
+  const corrTarget = idTarget(corr.type);
+  for (const sub of subs) {
+    if (sub.correlation) {
+      const byTarget = idTarget(correlationExprType(sub.correlation));
+      if (byTarget !== corrTarget) {
+        diags.push({
+          severity: "error",
+          message:
+            `workflow '${wf.name}': the 'by' expression on on(${sub.event}) yields ` +
+            `${byTarget ? `'${byTarget} id'` : "a non-id value"}, but the correlation field ` +
+            `'${corr.name}' is '${corrTarget} id'. A 'by' clause must route by the correlation field's type.`,
+          source: src,
+          code: "loom.correlation-type-mismatch",
+        });
+      }
+    } else {
+      // Omitted `by` — route by name-match: the event must carry a field of
+      // the correlation field's name.
+      const ev = ctx.events.find((e) => e.name === sub.event);
+      const hasMatch = ev?.fields.some((f) => f.name === corr.name) ?? false;
+      if (!hasMatch) {
+        diags.push({
+          severity: "error",
+          message:
+            `workflow '${wf.name}': on(${sub.event}) omits 'by' but event '${sub.event}' has no ` +
+            `field named '${corr.name}' to infer routing from. Add a 'by <expr>' clause.`,
+          source: src,
+          code: "loom.correlation-uninferrable",
+        });
+      }
+    }
   }
 }
 

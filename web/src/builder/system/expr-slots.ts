@@ -1,6 +1,7 @@
 import { AstUtils, type AstNode } from "langium";
 import {
   isBoundedContext,
+  isStatement,
   type Aggregate,
   type AssignOrCallStmt,
   type BindEntry,
@@ -179,6 +180,14 @@ function findWorkflow(ast: Model, name: string): Workflow | null {
   return null;
 }
 
+/** A workflow body is a `WorkflowMember[]` (statements interleaved with
+ *  `on(...)` reactors and `Property` state fields); the statement editor / slot
+ *  indices operate on the statement members only.  Used everywhere a `wfStmt`
+ *  index is produced or read so the indices stay aligned. */
+function wfStatements(wf: Workflow): Statement[] {
+  return wf.members.filter(isStatement);
+}
+
 function findView(ast: Model, name: string): View | null {
   for (const n of AstUtils.streamAst(ast)) {
     if (n.$type === "View" && (n as View).name === name) return n as View;
@@ -211,7 +220,8 @@ export function slotExpr(ast: Model, slot: ExprSlot): Expression | null {
     return stmt ? stmtSlotExpr(stmt, slot.field) : null;
   }
   if (slot.kind === "wfStmt") {
-    const stmt = findWorkflow(ast, slot.owner)?.body[slot.index];
+    const wf = findWorkflow(ast, slot.owner);
+    const stmt = wf ? wfStatements(wf)[slot.index] : undefined;
     return stmt ? stmtSlotExpr(stmt, slot.field) : null;
   }
   const owner = findOwner(ast, slot.owner);
@@ -273,7 +283,7 @@ export function workflowSlotOptions(node: AstNode): SlotOption[] {
   const out: SlotOption[] = [];
   pushStatementOptions(
     out,
-    wf.body,
+    wfStatements(wf),
     "",
     (index, field) => ({ kind: "wfStmt", owner: wf.name, index, ...(field !== undefined ? { field } : {}) }),
     (index, field) => (field !== undefined ? `wf:${index}:${field}` : `wf:${index}`),
@@ -348,7 +358,7 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
     if (!wf) return null;
     const ctx = AstUtils.getContainerOfType(wf, isBoundedContext);
     const base: Env = ctx ? newEnv(ctx) : { ctx: undefined, locals: new Map() };
-    return withParamsAndLets(base, wf.params, letsBefore(wf.body, slot.index));
+    return withParamsAndLets(base, wf.params, letsBefore(wfStatements(wf), slot.index));
   }
 
   let owner: AstNode | null = null;
