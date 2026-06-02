@@ -1,6 +1,10 @@
 # Channels, realtime & caching
 
-> Status: **PROPOSAL** — not adopted. The async-messaging / realtime **and** the
+> Status: **PARTIAL** — Slice 1 shipped (#797): the `channel { carries / delivery /
+> retention / key }` context-member surface and the system-scope `channelSource`
+> binding lower to `ChannelIR` / `ChannelSourceIR` (`src/ir/types/loom-ir.ts`). The
+> realtime wire (SSE/WebSocket + edge relay + router) and **Part II** caching /
+> invalidation are unstarted. The async-messaging / realtime **and** the
 > read-side caching tiers, designed together. Fills the "async messaging/outbox"
 > and "caching & invalidation" gaps in `production-readiness.md` (§3.3–3.4).
 > Depends on / reuses: the publish-subscribe placement + `on(e: Event)` /
