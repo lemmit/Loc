@@ -613,7 +613,7 @@ export function isValueObjectMember(item: unknown): item is ValueObjectMember {
     return reflection.isInstance(item, ValueObjectMember);
 }
 
-export type WorkflowMember = OnDecl | Statement;
+export type WorkflowMember = OnDecl | Property | Statement;
 
 export const WorkflowMember = 'WorkflowMember';
 
@@ -1876,7 +1876,7 @@ export function isPrimitiveType(item: unknown): item is PrimitiveType {
 }
 
 export interface Property extends AstNode {
-    readonly $container: Aggregate | EntityPart | EventDecl | PayloadDecl | ValueObject | View;
+    readonly $container: Aggregate | EntityPart | EventDecl | PayloadDecl | ValueObject | View | Workflow;
     readonly $type: 'Property';
     access?: FieldAccess;
     check?: Expression;
@@ -2785,8 +2785,7 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case DerivedProp:
             case FunctionDecl:
-            case Invariant:
-            case Property: {
+            case Invariant: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype) || this.isSubtype(ValueObjectMember, supertype);
             }
             case EntityPart: {
@@ -2848,6 +2847,9 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case Operation: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(Targetable, supertype);
+            }
+            case Property: {
+                return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype) || this.isSubtype(ValueObjectMember, supertype) || this.isSubtype(WorkflowMember, supertype);
             }
             case Requirement:
             case Solution:

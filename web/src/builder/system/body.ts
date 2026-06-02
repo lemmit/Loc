@@ -9,6 +9,7 @@ import type {
   ValueObject,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
+import { isStatement } from "../../../../src/language/generated/ast.js";
 import { applyEdits } from "../edit-engine";
 import { parseDdd } from "../parse";
 
@@ -47,11 +48,9 @@ function resolveBody(ast: Model, loc: BodyLocator): Body | null {
     for (const n of AstUtils.streamAst(ast)) {
       if (n.$type === "Workflow" && (n as Workflow).name === loc.name) {
         // A workflow body is a `WorkflowMember[]` (statements interleaved with
-        // `on(...)` reactors); the statement editor operates on the statement
-        // members only.
-        const statements = (n as Workflow).members.filter(
-          (m): m is Statement => m.$type !== "OnDecl",
-        );
+        // `on(...)` reactors and `Property` state fields); the statement editor
+        // operates on the statement members only.
+        const statements = (n as Workflow).members.filter(isStatement);
         return { owner: n, statements };
       }
     }

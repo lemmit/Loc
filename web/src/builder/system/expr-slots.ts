@@ -1,6 +1,7 @@
 import { AstUtils, type AstNode } from "langium";
 import {
   isBoundedContext,
+  isStatement,
   type Aggregate,
   type AssignOrCallStmt,
   type BindEntry,
@@ -180,11 +181,11 @@ function findWorkflow(ast: Model, name: string): Workflow | null {
 }
 
 /** A workflow body is a `WorkflowMember[]` (statements interleaved with
- *  `on(...)` reactors); the statement editor / slot indices operate on the
- *  statement members only.  Used everywhere a `wfStmt` index is produced or
- *  read so the indices stay aligned. */
+ *  `on(...)` reactors and `Property` state fields); the statement editor / slot
+ *  indices operate on the statement members only.  Used everywhere a `wfStmt`
+ *  index is produced or read so the indices stay aligned. */
 function wfStatements(wf: Workflow): Statement[] {
-  return wf.members.filter((m): m is Statement => m.$type !== "OnDecl");
+  return wf.members.filter(isStatement);
 }
 
 function findView(ast: Model, name: string): View | null {

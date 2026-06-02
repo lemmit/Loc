@@ -7,6 +7,7 @@ import type {
   Statement,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
+import { isStatement } from "../../../../src/language/generated/ast.js";
 import { applyEdits } from "../edit-engine";
 import { parseDdd } from "../parse";
 import type { NodeKind } from "./model";
@@ -57,10 +58,7 @@ export function listEmits(node: AstNode): EmitRef[] {
   } else if (node.$type === "Workflow") {
     // A workflow body is a `WorkflowMember[]`; collect emits from its statement
     // members (emits inside `on(...)` reactor bodies are a later concern).
-    const stmts = (node as Workflow).members.filter(
-      (m): m is Statement => m.$type !== "OnDecl",
-    );
-    collectEmits(stmts, undefined, out);
+    collectEmits((node as Workflow).members.filter(isStatement), undefined, out);
   }
   return out;
 }
@@ -69,8 +67,7 @@ function emitBodyOf(ast: Model, kind: NodeKind, owner: string, op: string | unde
   const wantType = kind === "workflow" ? "Workflow" : "Aggregate";
   for (const n of AstUtils.streamAst(ast)) {
     if (n.$type === wantType && (n as { name?: unknown }).name === owner) {
-      if (kind === "workflow")
-        return (n as Workflow).members.filter((m): m is Statement => m.$type !== "OnDecl");
+      if (kind === "workflow") return (n as Workflow).members.filter(isStatement);
       const operation = (n as Aggregate).members.find((m): m is Operation => m.$type === "Operation" && (m as Operation).name === op);
       return operation?.body ?? null;
     }

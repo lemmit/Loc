@@ -24,6 +24,7 @@ import type {
   TestE2EIR,
   TestStmtIR,
   TypeIR,
+  WorkflowIR,
 } from "../types/loom-ir.js";
 import { allContexts, exprUsesCurrentUser, findUsesCurrentUser } from "../types/loom-ir.js";
 import {
@@ -2021,6 +2022,41 @@ function validateWorkflows(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void
       });
     }
     validateWorkflowBody(ctx, wf, diags);
+    validateWorkflowCorrelation(ctx, wf, diags);
+  }
+}
+
+// Correlation-field rules (workflow-and-applier.md A2-S2).  A workflow with
+// event reactors must route inbound events to exactly one id-shaped state
+// field — the correlation field.  Rule 10: absent → error; rule 19: more than
+// one id-shaped field → ambiguous.  (Backed by the `by` clause's type-check in
+// a later slice; here the trigger is the presence of `on(...)` reactors.)
+function validateWorkflowCorrelation(
+  ctx: BoundedContextIR,
+  wf: WorkflowIR,
+  diags: LoomDiagnostic[],
+): void {
+  if ((wf.subscriptions?.length ?? 0) === 0) return;
+  const idFields = (wf.stateFields ?? []).filter((f) => f.type.kind === "id");
+  if (idFields.length === 0) {
+    diags.push({
+      severity: "error",
+      message:
+        `workflow '${wf.name}' has on(...) reactors but no correlation field. ` +
+        `Declare one id-shaped state field (e.g. 'orderId: Order id') for the runtime to route inbound events to.`,
+      source: `${ctx.name}/${wf.name}`,
+      code: "loom.workflow-correlation-required",
+    });
+  } else if (idFields.length > 1) {
+    diags.push({
+      severity: "error",
+      message:
+        `workflow '${wf.name}' has ${idFields.length} id-shaped state fields ` +
+        `(${idFields.map((f) => f.name).join(", ")}); the correlation field can't be inferred. ` +
+        `A workflow with reactors must declare exactly one id-shaped field.`,
+      source: `${ctx.name}/${wf.name}`,
+      code: "loom.correlation-field-ambiguous",
+    });
   }
 }
 

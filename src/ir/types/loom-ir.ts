@@ -800,6 +800,17 @@ export interface WorkflowIR {
    *  slices, mirroring how Phase A1 landed `apply(...)` appliers ahead of any
    *  event-store emission. */
   subscriptions?: OnIR[];
+  /** Workflow state fields declared as `Property` members — the correlation
+   *  field plus saga state (workflow-and-applier.md A2-S2).  Lowered with the
+   *  same `lowerField` as aggregate fields.  Omitted when the workflow
+   *  declares none.  Not yet emitted by backends (a persisted workflow row is
+   *  a later slice). */
+  stateFields?: FieldIR[];
+  /** The single id-shaped state field the runtime routes inbound events to
+   *  (workflow-and-applier.md §"Identity and correlation").  Set only when
+   *  exactly one id-shaped state field exists; absence / ambiguity are
+   *  diagnosed by the IR validator. */
+  correlationField?: string;
 }
 
 /** A `on(e: Event) [by <expr>] { … }` reactor on a workflow — an extrinsic

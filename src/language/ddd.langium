@@ -889,14 +889,17 @@ Workflow:
         members+=WorkflowMember*
     '}';
 
-// A2-S1 (workflow-and-applier.md): the workflow body is a flat member list
+// A2-S1/S2 (workflow-and-applier.md): the workflow body is a flat member list
 // that still admits every legacy statement form (precondition / let / emit /
-// call — unchanged) plus the new `on(...)` reactor member.  This is the
-// additive, non-breaking shape — the full workflow-as-aggregate reshape
-// (Properties + create/handle members) is a later slice.  Statement-vs-OnDecl
-// is unambiguous: `on` is a keyword, so it can never start a Statement.
+// call — unchanged) plus the new `on(...)` reactor member (S1) and workflow
+// state `Property` fields (S2 — the correlation field + saga state).  This is
+// the additive, non-breaking shape — the full workflow-as-aggregate reshape
+// (Properties + create/handle members, no free statements) is a later slice.
+// `Property` (`name ':' …`) is unambiguous against `AssignOrCallStmt` (whose
+// LValue continues with `:=`/`.`/`(`, never a bare `:`), and `on` is a keyword
+// so it can never start a Statement.
 WorkflowMember:
-    OnDecl | Statement;
+    OnDecl | Property | Statement;
 
 // Extrinsic event subscription / continuation: `on(paid: PaymentReceived)
 // { … }` reacts to a fact from outside the workflow's own scope.  Mirrors the

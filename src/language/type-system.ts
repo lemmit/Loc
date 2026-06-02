@@ -58,6 +58,7 @@ import {
   isPrimitiveType,
   isProperty,
   isSlotType,
+  isStatement,
   isStringLit,
   isTernaryExpr,
   isThisRef,
@@ -1002,10 +1003,9 @@ export function envForNode(node: AstNode): Env {
   if (op) {
     for (const [name, b] of collectLetBindings(op.body)) bindings.set(name, b);
   } else if (wf) {
-    const stmts = wf.members.filter(
-      (m): m is import("./generated/ast.js").Statement => !isOnDecl(m),
-    );
-    for (const [name, b] of collectLetBindings(stmts)) bindings.set(name, b);
+    for (const [name, b] of collectLetBindings(wf.members.filter(isStatement))) {
+      bindings.set(name, b);
+    }
   }
   // An `on(e: Event) { … }` reactor's own body lets are in scope inside it.
   const on = AstUtils.getContainerOfType(node, isOnDecl);

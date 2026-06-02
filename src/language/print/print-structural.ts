@@ -637,7 +637,13 @@ function printWorkflow(node: Workflow): string {
   }
   return block(
     head,
-    node.members.map((m) => (m.$type === "OnDecl" ? printOnDecl(m) : printStmt(m))),
+    node.members.map((m) =>
+      m.$type === "OnDecl"
+        ? printOnDecl(m)
+        : m.$type === "Property"
+          ? printProperty(m)
+          : printStmt(m),
+    ),
   );
 }
 

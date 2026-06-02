@@ -2349,16 +2349,27 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
   const letAggs = new Map<string, { aggName: string; repoName: string }>();
   const statements: WorkflowStmtIR[] = [];
   const subscriptions: OnIR[] = [];
+  // Workflow state fields (`Property` members) — the correlation field +
+  // saga state (workflow-and-applier.md A2-S2).  Lowered with the same
+  // `lowerField` every aggregate / value-object field uses.
+  const stateFields: FieldIR[] = wf.members.filter(isProperty).map((p) => lowerField(p, paramEnv));
   for (const m of wf.members) {
     if (isOnDecl(m)) {
       subscriptions.push(lowerOn(m, paramEnv, aggsByName, reposByName, repoForAgg));
       continue;
     }
+    if (isProperty(m)) continue; // handled above
     const lowered = lowerWorkflowStatement(m, inner, aggsByName, reposByName, repoForAgg);
     statements.push(lowered.stmt);
     inner = lowered.envAfter;
     if (lowered.binding) letAggs.set(lowered.binding.name, lowered.binding);
   }
+  // Correlation field inference: the single id-shaped state field is the one
+  // the runtime routes inbound events to (workflow-and-applier.md §"Identity
+  // and correlation").  Ambiguity (>1 id field) / absence are diagnosed by the
+  // IR validator, not here — lowering just records the unambiguous case.
+  const idFields = stateFields.filter((f) => f.type.kind === "id");
+  const correlationField = idFields.length === 1 ? idFields[0].name : undefined;
   const savesAtExit = computeSaves(statements, repoForAgg);
   return {
     name: wf.name,
@@ -2373,6 +2384,8 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
     statements,
     savesAtExit,
     ...(subscriptions.length > 0 ? { subscriptions } : {}),
+    ...(stateFields.length > 0 ? { stateFields } : {}),
+    ...(correlationField ? { correlationField } : {}),
   };
 }
 

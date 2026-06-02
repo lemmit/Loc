@@ -24,6 +24,7 @@ import type {
   View,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
+import { isStatement } from "../../../../src/language/generated/ast.js";
 import { computeAggregateRelations } from "./aggregate-edges";
 
 export interface ContextRelations {
@@ -135,7 +136,7 @@ function collectWorkflow(
   const usesRepo = new Set<string>();
   const emitsSet = new Set<string>();
   for (const s of wf.members) {
-    if (s.$type === "OnDecl") continue; // reactor members handled elsewhere
+    if (!isStatement(s)) continue; // skip on(...) reactors + Property state fields
     if (s.$type === "AssignOrCallStmt") {
       const a = s as AssignOrCallStmt;
       // A method-call target like `Account.deposit` has LValue.head =
