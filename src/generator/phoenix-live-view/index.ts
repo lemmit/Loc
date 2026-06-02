@@ -228,6 +228,14 @@ export function generatePhoenixLiveViewProject(
       out.set(path, content);
     }
     out.set("assets/.gitignore", "node_modules\ndist\n");
+
+    // SpaController — serves the built SPA's index.html for any client-side
+    // `/app/*` deep link (the router catch-all, phase 6b).  Reads the file
+    // the Dockerfile dropped at `priv/static/app/index.html`.
+    out.set(
+      `lib/${appName}_web/controllers/spa_controller.ex`,
+      renderSpaController(appName, appModule),
+    );
   }
 
   // --- Theme CSS -------------------------------------------------
@@ -558,6 +566,14 @@ function emitShellFiles(
   migrations: MigrationsIR[],
 ): void {
   const port = deployable.port ?? 4000;
+  // D-PHOENIX-SURFACE phase 6b: when the deployable embeds a React SPA
+  // (its hosted ui is `framework: react`), the shell files gain the
+  // serve-wiring that makes the built bundle reachable — a multi-stage
+  // Dockerfile that runs the SPA's Vite build, a `Plug.Static` that
+  // serves it from `priv/static`, and a router catch-all serving
+  // `index.html` for client-side deep links.  Same flag the orchestrator
+  // uses for the emit branch.
+  const embedReact = deployable.uiFramework === "react";
 
   // Resource client modules (objectStore / queue / api) + their Hex
   // deps (Phase 4c).  Empty when the deployable wires no consumable
@@ -569,7 +585,7 @@ function emitShellFiles(
     renderMixExs(appName, appModule, resourceEmission.hexDeps, contextsHaveSeeds(contexts)),
   );
   out.set(".formatter.exs", renderFormatterExs());
-  out.set("Dockerfile", renderDockerfile(appName));
+  out.set("Dockerfile", renderDockerfile(appName, embedReact));
   out.set(".dockerignore", renderDockerignore());
   // certs/ is the CA-bake landing slot — see the COPY in renderDockerfile.
   // .gitkeep keeps the dir present in git so the COPY is a no-op when
@@ -603,12 +619,12 @@ function emitShellFiles(
   out.set(`lib/${appName}_web.ex`, renderWebModule(appName, appModule));
 
   // lib/<app>_web/endpoint.ex
-  out.set(`lib/${appName}_web/endpoint.ex`, renderEndpoint(appName, appModule));
+  out.set(`lib/${appName}_web/endpoint.ex`, renderEndpoint(appName, appModule, embedReact));
 
   // lib/<app>_web/router.ex
   out.set(
     `lib/${appName}_web/router.ex`,
-    renderRouter(appName, appModule, liveRoutes, apiRoutes, authEnabled),
+    renderRouter(appName, appModule, liveRoutes, apiRoutes, authEnabled, embedReact),
   );
 
   // lib/<app>_web/components/core_components.ex — minimal stub so
@@ -769,7 +785,29 @@ function renderFormatterExs(): string {
 `;
 }
 
-function renderDockerfile(appName: string): string {
+function renderDockerfile(appName: string, embedReact = false): string {
+  // Embedded-React mode: a first `spa-build` stage runs the SPA's own
+  // Vite build (the React project the orchestrator emitted under
+  // `assets/`), then the builder stage copies its `dist/` into
+  // `priv/static/app` so `mix release` packages it and `Plug.Static`
+  // (at `/app`) serves it.  Mirrors the .NET multi-stage embed
+  // (spa-build → app build → runtime).
+  const spaBuildStage = embedReact
+    ? `FROM node:20-alpine AS spa-build
+WORKDIR /spa
+COPY assets/package.json assets/package-lock.json* ./
+RUN npm ci --prefer-offline --no-audit --no-fund || npm install
+COPY assets/ ./
+RUN npm run build
+
+`
+    : "";
+  // In embedded mode, drop the built SPA into priv/static/app before
+  // `mix compile`/`mix release` so the release overlay includes it.
+  const spaCopy = embedReact
+    ? `COPY --from=spa-build /spa/dist priv/static/app
+`
+    : "";
   return `# syntax=docker/dockerfile:1
 # Auto-generated.
 
@@ -780,7 +818,7 @@ ARG DEBIAN_VERSION=bookworm-20240722-slim
 ARG BUILDER_IMAGE="hexpm/elixir:\${ELIXIR_VERSION}-erlang-\${OTP_VERSION}-debian-\${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:\${DEBIAN_VERSION}"
 
-FROM \${BUILDER_IMAGE} AS build
+${spaBuildStage}FROM \${BUILDER_IMAGE} AS build
 RUN apt-get update -y && apt-get install -y build-essential git ca-certificates \\
     && apt-get clean && rm -f /var/lib/apt/lists/*_*
 WORKDIR /app
@@ -804,7 +842,7 @@ RUN mkdir config
 COPY config/config.exs config/$MIX_ENV.exs config/
 RUN mix deps.compile
 COPY priv priv
-COPY lib lib
+${spaCopy}COPY lib lib
 RUN mix compile
 COPY config/runtime.exs config/
 COPY rel rel
@@ -1123,8 +1161,24 @@ end
 `;
 }
 
-function renderEndpoint(appName: string, appModule: string): string {
+function renderEndpoint(appName: string, appModule: string, embedReact = false): string {
   const webModule = `${appModule}Web`;
+  // Embedded-React mode: the SPA bundle lands in `priv/static/app/`
+  // (the React generator builds under `assets/` → `dist/`, which the
+  // Dockerfile copies to `priv/static/app`).  Serve it from `/app`
+  // alongside the existing LiveView static allowlist — a dedicated
+  // `Plug.Static` so the SPA's own asset hashes don't have to join the
+  // `~w(...)` allowlist.  No LiveView socket is needed (no live pages),
+  // but keeping it is harmless and avoids a second endpoint variant.
+  const spaStatic = embedReact
+    ? `
+  plug Plug.Static,
+    at: "/app",
+    from: {:${appName}, "priv/static/app"},
+    gzip: false,
+    only: ~w(assets index.html favicon.ico)
+`
+    : "";
   return `# Auto-generated.
 defmodule ${webModule}.Endpoint do
   use Phoenix.Endpoint, otp_app: :${appName}
@@ -1143,6 +1197,7 @@ defmodule ${webModule}.Endpoint do
     from: :${appName},
     gzip: false,
     only: ~w(assets fonts images favicon.ico robots.txt)
+${spaStatic}
 
   if code_reloading? do
     plug Phoenix.CodeReloader
@@ -1171,6 +1226,7 @@ function renderRouter(
   liveRoutes: LiveRoute[],
   apiRoutes: ApiRoute[],
   authEnabled: boolean,
+  embedReact = false,
 ): string {
   void appName;
   const webModule = `${appModule}Web`;
@@ -1221,6 +1277,23 @@ ${inner}
   // Auth plug line in the :api pipeline — only when auth is enabled.
   const authApiPlug = authEnabled ? `\n    plug ${webModule}.Auth` : "";
 
+  // Embedded-React SPA fallback (D-PHOENIX-SURFACE phase 6b): deep links
+  // under `/app/*` are client-side routes, so serve the SPA's
+  // `index.html` for any unmatched `/app` path — the Phoenix analogue
+  // of .NET's `MapFallbackToFile("index.html")`.  `Plug.Static` (in the
+  // endpoint) handles the real asset files first; this catch-all only
+  // fires for routes the SPA owns.  In LiveView mode this block is
+  // absent (live routes are explicit).
+  const spaFallback = embedReact
+    ? `
+  scope "/app", ${webModule} do
+    pipe_through :browser
+
+    get "/*path", SpaController, :index
+  end
+`
+    : "";
+
   return `# Auto-generated.
 defmodule ${webModule}.Router do
   use ${webModule}, :router
@@ -1248,8 +1321,30 @@ ${liveScopeBody}
 
 ${scopedBody}
   end
-
+${spaFallback}
 ${rootLines}
+end
+`;
+}
+
+/** SpaController (D-PHOENIX-SURFACE phase 6b) — serves the embedded
+ *  React SPA's `index.html` for any `/app/*` client-side route.  Only
+ *  emitted in embedded-react mode; the router's `/app` catch-all points
+ *  here.  Reads the bundle the Dockerfile placed at
+ *  `priv/static/app/index.html`. */
+function renderSpaController(appName: string, appModule: string): string {
+  const webModule = `${appModule}Web`;
+  return `# Auto-generated.
+defmodule ${webModule}.SpaController do
+  use ${webModule}, :controller
+
+  @index_path Path.join(:code.priv_dir(:${appName}), "static/app/index.html")
+
+  def index(conn, _params) do
+    conn
+    |> put_resp_content_type("text/html")
+    |> send_file(200, @index_path)
+  end
 end
 `;
 }
