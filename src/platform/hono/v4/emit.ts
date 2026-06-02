@@ -27,6 +27,7 @@ import { buildExternHandlersFile } from "../../../generator/typescript/extern-bu
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import { buildDocumentRepositoryFile } from "../../../generator/typescript/repository-document-builder.js";
 import { buildEmbeddedRepositoryFile } from "../../../generator/typescript/repository-embedded-builder.js";
+import { buildEventSourcedRepositoryFile } from "../../../generator/typescript/repository-eventsourced-builder.js";
 import { isTphBase, tphConcretesOf } from "../../../generator/typescript/tph.js";
 import { enrichLoomModel } from "../../../ir/enrich/enrichments.js";
 import { lowerModel } from "../../../ir/lower/lower.js";
@@ -263,18 +264,23 @@ export function generateTypeScriptForContexts(
         `domain/${lowerFirst(agg.name)}.ts`,
         renderAggregate(agg, ctx, emitProvenance, emitTrace),
       );
-      // Saving-shape routing: `document` → one jsonb blob + JSON
+      // Persistence routing.  Event-sourced (`persistedAs(eventLog)`) wins
+      // over the saving-shape axis — its repository appends to / folds the
+      // event stream rather than reading a state table.  Otherwise the
+      // saving-shape routing applies: `document` → one jsonb blob + JSON
       // round-trip via `_create`; `embedded` → queryable root columns +
       // containments in jsonb columns; `relational` (default) → the
       // normalised table-per-entity hydrate.
       const shape = effectiveSavingShape(agg, resolveDataSource?.(agg));
       out.set(
         `db/repositories/${lowerFirst(agg.name)}-repository.ts`,
-        shape === "document"
-          ? buildDocumentRepositoryFile(agg, repo, ctx, emitTrace)
-          : shape === "embedded"
-            ? buildEmbeddedRepositoryFile(agg, repo, ctx, emitTrace)
-            : buildRepositoryFile(agg, repo, ctx, emitTrace),
+        agg.persistedAs === "eventLog"
+          ? buildEventSourcedRepositoryFile(agg, repo, ctx, emitTrace)
+          : shape === "document"
+            ? buildDocumentRepositoryFile(agg, repo, ctx, emitTrace)
+            : shape === "embedded"
+              ? buildEmbeddedRepositoryFile(agg, repo, ctx, emitTrace)
+              : buildRepositoryFile(agg, repo, ctx, emitTrace),
       );
       // Routes file — adapter-dispatched in system mode (the layered
       // StyleAdapter re-derives audit / provenance gates from

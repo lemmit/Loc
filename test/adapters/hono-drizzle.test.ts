@@ -58,11 +58,16 @@ describe("drizzle PersistenceAdapter (real)", () => {
   });
 
   it("answers capability fields directly (no stub-throw)", () => {
-    expect(drizzlePersistenceAdapter.supportedStrategies).toEqual(["state"]);
+    expect(drizzlePersistenceAdapter.supportedStrategies).toEqual(["state", "eventLog"]);
     expect(drizzlePersistenceAdapter.supports("postgres", "state", "state")).toBe(true);
     expect(drizzlePersistenceAdapter.supports("mysql", "state", "state")).toBe(true);
     expect(drizzlePersistenceAdapter.supports("redis", "state", "state")).toBe(false);
     expect(drizzlePersistenceAdapter.supports("postgres", "eventLog", "state")).toBe(false);
+    // Event-sourced streams (appliers A2): an `eventLog` aggregate routed to
+    // an `eventLog` binding on a relational store is supported; a `state`
+    // binding for an event-sourced aggregate is not.
+    expect(drizzlePersistenceAdapter.supports("postgres", "eventLog", "eventLog")).toBe(true);
+    expect(drizzlePersistenceAdapter.supports("redis", "eventLog", "eventLog")).toBe(false);
     expect(drizzlePersistenceAdapter.supports("postgres", "state", "eventLog")).toBe(false);
   });
 

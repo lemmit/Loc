@@ -86,9 +86,14 @@ const persistenceDevDeps = (): Lines => [
 
 export const drizzlePersistenceAdapter: PersistenceAdapter = {
   name: "drizzle",
-  supportedStrategies: ["state"],
+  supportedStrategies: ["state", "eventLog"],
 
   supports(storageType, kind, persistenceStrategy) {
+    // Event-sourced streams (appliers A2): an append-only `<agg>_events`
+    // table on the same relational store, folded at load.
+    if (persistenceStrategy === "eventLog") {
+      return ["postgres", "mysql", "sqlite"].includes(storageType) && kind === "eventLog";
+    }
     return (
       persistenceStrategy === "state" &&
       ["postgres", "mysql", "sqlite"].includes(storageType) &&

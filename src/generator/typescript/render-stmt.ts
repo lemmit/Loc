@@ -13,6 +13,12 @@ export interface TraceCtx {
   emitTrace: boolean;
   aggregate: string;
   op: string;
+  /** True when rendering a body on an event-sourced (`persistedAs(eventLog)`)
+   *  aggregate.  An `emit` then both records the event AND folds it into
+   *  state via `this._apply(ev)` so the in-memory aggregate stays consistent
+   *  for the command's response — the state transition the appliers own.
+   *  Off ⇒ `emit` is byte-identical to the legacy notification-event push. */
+  eventSourced?: boolean;
 }
 
 const NO_TRACE: TraceCtx = { emitTrace: false, aggregate: "", op: "" };
@@ -63,7 +69,14 @@ function renderTsStatement(
     }
     case "emit": {
       const fields = s.fields.map((f) => `${f.name}: ${renderTsExpr(f.value)}`).join(", ");
-      return `${INDENT}this._events.push({ type: ${JSON.stringify(s.eventName)}, ${fields} });`;
+      const ev = `{ type: ${JSON.stringify(s.eventName)}, ${fields} }`;
+      // Event-sourced: record the event and fold it immediately, so the
+      // aggregate's in-memory state reflects the transition before the
+      // command returns (the applier is the only place state changes).
+      if (traceCtx.eventSourced) {
+        return `${INDENT}{ const __ev = ${ev}; this._events.push(__ev); this._apply(__ev); }`;
+      }
+      return `${INDENT}this._events.push(${ev});`;
     }
     case "call": {
       const args = s.args.map((a) => renderTsExpr(a)).join(", ");

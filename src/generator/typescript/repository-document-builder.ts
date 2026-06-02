@@ -182,7 +182,7 @@ function documentFindMethod(
 
 /** In-memory predicate `(x) => …` for a document find, or `undefined`
  *  for a parameterless filter-less find (findAll). */
-function findPredicate(
+export function findPredicate(
   agg: AggregateIR,
   find: FindIR,
   ctx: EnrichedBoundedContextIR,
@@ -275,7 +275,7 @@ function isPart(e: AggregateIR | EntityPartIR): e is EntityPartIR {
   return !("operations" in e);
 }
 
-function serializeField(t: TypeIR, accessor: string, ctx: EnrichedBoundedContextIR): string {
+export function serializeField(t: TypeIR, accessor: string, ctx: EnrichedBoundedContextIR): string {
   if (t.kind === "optional") {
     return `(${accessor} == null ? null : ${serializeField(t.inner, accessor, ctx)})`;
   }
@@ -298,7 +298,11 @@ function serializeField(t: TypeIR, accessor: string, ctx: EnrichedBoundedContext
   return accessor;
 }
 
-function deserializeField(t: TypeIR, accessor: string, ctx: EnrichedBoundedContextIR): string {
+export function deserializeField(
+  t: TypeIR,
+  accessor: string,
+  ctx: EnrichedBoundedContextIR,
+): string {
   if (t.kind === "optional") {
     return `(${accessor} == null ? null : ${deserializeField(t.inner, accessor, ctx)})`;
   }
@@ -324,7 +328,7 @@ function deserializeField(t: TypeIR, accessor: string, ctx: EnrichedBoundedConte
   return accessor;
 }
 
-function docFieldType(t: TypeIR, ctx: EnrichedBoundedContextIR): string {
+export function docFieldType(t: TypeIR, ctx: EnrichedBoundedContextIR): string {
   if (t.kind === "optional") return `${docFieldType(t.inner, ctx)} | null`;
   if (t.kind === "primitive") {
     switch (t.name) {
@@ -351,7 +355,7 @@ function docFieldType(t: TypeIR, ctx: EnrichedBoundedContextIR): string {
   return "unknown";
 }
 
-function tsParamType(t: TypeIR): string {
+export function tsParamType(t: TypeIR): string {
   if (t.kind === "id") return `Ids.${t.targetName}Id`;
   if (t.kind === "enum") return t.name;
   if (t.kind === "primitive") {
