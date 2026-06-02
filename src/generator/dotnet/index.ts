@@ -364,7 +364,14 @@ function emitContext(
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
   const usesStamping = ctx.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
-  emitProject(ctx, ns, out, { usesValidators, usesStamping, emitTrace });
+  // First-boot seed data (database-seeding.md) — the legacy per-context path
+  // emits the seeder too (consistent with `generate ts`), so `generate dotnet`
+  // on a seeded model produces + wires Seed.cs.
+  if (ctx.seeds.length > 0) {
+    emitDotnetSeeds(ctx, ns, out);
+  }
+  const hasSeeds = out.has("Infrastructure/Persistence/Seed.cs");
+  emitProject(ctx, ns, out, { usesValidators, usesStamping, emitTrace, hasSeeds });
   emitTestProject(ctx, ns, out);
 }
 
