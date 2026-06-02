@@ -47,9 +47,7 @@ jobs:
         run: npm ci
 
       - name: Render landing page + docs
-        run: |
-          npm install --no-save marked@^14
-          node docs/build.mjs
+        run: node docs/build.mjs
 
       - name: Install playground deps
         working-directory: web
