@@ -40,6 +40,7 @@ import type {
   Requirement,
   Resource,
   Retrieval,
+  Seed,
   Solution,
   StateField,
   Statement,
@@ -92,6 +93,7 @@ import {
   isRequiresStmt,
   isResource,
   isRetrieval,
+  isSeed,
   isSolution,
   isSubdomain,
   isSystem,
@@ -153,6 +155,8 @@ import type {
   RequirementStatus,
   RequirementType,
   RetrievalIR,
+  SeedIR,
+  SeedRowIR,
   SolutionIR,
   SortTermIR,
   StateFieldIR,
@@ -1315,6 +1319,7 @@ function lowerContext(
   const views: ViewIR[] = [];
   const criteria: CriterionIR[] = [];
   const retrievals: RetrievalIR[] = [];
+  const seeds: SeedIR[] = [];
   // Context-level capabilities propagate to every aggregate inside.
   // Lower them here in the context env (no `this` binding); each
   // aggregate's lowering re-uses the lowered IR directly.  The `this`
@@ -1332,6 +1337,7 @@ function lowerContext(
     else if (isView(m)) views.push(lowerView(m, env));
     else if (isCriterion(m)) criteria.push(lowerCriterion(m, env));
     else if (isRetrieval(m)) retrievals.push(lowerRetrieval(m, env));
+    else if (isSeed(m)) seeds.push(lowerSeed(m, env));
   }
   return {
     name: ctx.name,
@@ -1350,6 +1356,29 @@ function lowerContext(
     views,
     criteria,
     retrievals,
+    seeds,
+  };
+}
+
+/** Lower a `seed [dataset] [raw] { Aggregate { … } … }` declaration to its
+ *  IR record (database-seeding.md, declarative form).  Each row's value is
+ *  an `ObjectLit` shaped like the aggregate's create parameters; its field
+ *  initialisers are lowered as ordinary expressions in the context scope
+ *  (enum values, value-object object-literals, and pure stdlib builtins like
+ *  `now()` all resolve there).  No `this` binding — seed rows construct fresh
+ *  instances, they do not operate on an existing aggregate. */
+function lowerSeed(s: Seed, env: Env): SeedIR {
+  const rows: SeedRowIR[] = s.rows.map((row) => ({
+    aggregate: row.aggregate.ref?.name ?? "Unknown",
+    fields: row.value.fields.map((f) => ({
+      name: f.name,
+      value: lowerExpr(f.value, env),
+    })),
+  }));
+  return {
+    dataset: s.dataset ?? "default",
+    path: s.raw ? "raw" : "domain",
+    rows,
   };
 }
 

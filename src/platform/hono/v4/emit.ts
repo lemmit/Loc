@@ -193,6 +193,7 @@ export function generateTypeScriptForContexts(
     views: contexts.flatMap((c) => c.views),
     criteria: contexts.flatMap((c) => c.criteria),
     retrievals: contexts.flatMap((c) => c.retrievals),
+    seeds: contexts.flatMap((c) => c.seeds),
   };
 
   out.set("domain/ids.ts", renderIds(merged));
