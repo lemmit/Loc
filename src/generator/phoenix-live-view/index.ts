@@ -7,6 +7,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import { isTpcBase, isTpcConcrete } from "../../ir/util/inheritance.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx } from "../_adapters/index.js";
@@ -298,6 +299,9 @@ function emitContext(
   });
   for (const [path, content] of aggFiles) out.set(path, content);
   for (const agg of ctx.aggregates) {
+    // Abstract TPC base: no Ash.Resource is emitted for it, so it is not
+    // registered on the domain (and has no parts / join resources).
+    if (agg.isAbstract) continue;
     allResources.push(`${contextModule}.${upperFirst(agg.name)}`);
     for (const part of agg.parts) {
       allResources.push(`${contextModule}.${upperFirst(part.name)}`);
@@ -320,6 +324,7 @@ function emitContext(
   // emitAggregateResources accepts customFinds, the orchestrator
   // keeps its repository-find responsibility here as a post-pass.
   for (const agg of ctx.aggregates) {
+    if (agg.isAbstract) continue;
     const repo = findRepoFor(ctx, agg.name);
     const repoWithViews = mergeViewFindsForAgg(agg, repo, ctx);
     if (!repoWithViews) continue;
@@ -490,13 +495,38 @@ function renderDomainModule(
     resourceBlocks.push(`    resource ${r} do\n${defines.join("\n")}\n    end`);
   }
 
+  // Polymorphic read home for each abstract TPC (`ownTable`) base
+  // (aggregate-inheritance.md, `find all <Base>`).  The base owns no resource;
+  // its read is the union of its concrete subtypes' generated `list_<concrete>`
+  // code-interface functions.  Emitted as plain module functions (Ash has no
+  // cross-resource read action) — read-only; writes go through the concretes.
+  const baseBlocks: string[] = [];
+  for (const base of ctx.aggregates) {
+    if (!isTpcBase(base, ctx.aggregates)) continue;
+    const concretes = ctx.aggregates.filter(
+      (a) => a.extendsAggregate === base.name && isTpcConcrete(a, ctx.aggregates),
+    );
+    if (concretes.length === 0) continue;
+    const listName = `list_${snake(plural(base.name))}`;
+    const union = concretes.map((c) => `list_${snake(plural(c.name))}!()`).join(" ++ ");
+    baseBlocks.push(
+      [
+        `  @doc "Polymorphic read of the abstract base ${upperFirst(base.name)} — the union of its concrete subtypes."`,
+        `  def ${listName}!, do: ${union}`,
+        `  def ${listName}, do: {:ok, ${listName}!()}`,
+      ].join("\n"),
+    );
+  }
+  // Byte-identical with the pre-inheritance output when there is no TPC base.
+  const readerSection = baseBlocks.length > 0 ? `\n\n${baseBlocks.join("\n\n")}` : "";
+
   return `# Auto-generated.
 defmodule ${contextModule} do
   use Ash.Domain
 
   resources do
 ${resourceBlocks.join("\n")}
-  end
+  end${readerSection}
 end
 `;
 }

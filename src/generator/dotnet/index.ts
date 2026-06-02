@@ -9,6 +9,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import { isTpcBase, isTpcConcrete } from "../../ir/util/inheritance.js";
 import {
   effectiveSavingShape,
   isDocumentShaped,
@@ -29,7 +30,10 @@ import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import { emitDotnetSeeds } from "./emit/seed.js";
 import {
   joinEntityName,
+  renderAbstractBaseEntity,
   renderAuditableInterceptor,
+  renderBaseReaderImpl,
+  renderBaseReaderInterface,
   renderCommon,
   renderConfiguration,
   renderCsproj,
@@ -190,6 +194,7 @@ function emitProjectFromContexts(
     for (const agg of ctx.aggregates) {
       emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace, emitCtx);
     }
+    emitBaseReaders(ctx, ns, out);
     emitWorkflows(ctx, ns, out, { routePrefix, sys: system?.sys });
     emitViews(ctx, ns, out, { routePrefix });
   }
@@ -322,6 +327,9 @@ function listWrapperPairs(
   const pairs: Array<{ element: string; wrapper: string }> = [];
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) {
+      // Abstract TPC bases emit no DTOs (no routes / handlers), so there is no
+      // `<Base>Response` to wrap.
+      if (agg.isAbstract) continue;
       pairs.push({ element: `${agg.name}Response`, wrapper: `${agg.name}ListResponse` });
     }
     for (const view of ctx.views) {
@@ -351,6 +359,7 @@ function emitContext(
   for (const agg of ctx.aggregates) {
     emitAggregate(agg, ctx, ns, out, undefined, emitTrace);
   }
+  emitBaseReaders(ctx, ns, out);
   emitWorkflows(ctx, ns, out);
   emitViews(ctx, ns, out);
   // Stamping interceptor — same gating as the system path.
@@ -402,6 +411,9 @@ function emitStampingInterceptor(
 
 function emitIds(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
   for (const agg of ctx.aggregates) {
+    // An abstract TPC base keeps no identity of its own (each concrete carries
+    // its own strongly-typed `<Concrete>Id`), so it contributes no `<Base>Id`.
+    if (agg.isAbstract) continue;
     out.set(`Domain/Ids/${agg.name}Id.cs`, renderId(agg.name, agg.idValueType, ns));
     for (const part of agg.parts) {
       out.set(`Domain/Ids/${part.name}Id.cs`, renderId(part.name, agg.idValueType, ns));
@@ -447,6 +459,33 @@ function emitDispatcher(ns: string, out: Map<string, string>): void {
   out.set("Infrastructure/Events/NoopDomainEventDispatcher.cs", renderNoopDispatcher(ns));
 }
 
+/** Polymorphic read home for each abstract TPC (`ownTable`) base in the
+ *  context: a read-only `I<Base>Repository` / `<Base>Repository` pair that
+ *  delegates to the concrete repositories and concatenates (aggregate-
+ *  inheritance.md, `find all <Base>`).  Emits nothing when the context has no
+ *  TPC base. */
+function emitBaseReaders(
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+  out: Map<string, string>,
+): void {
+  for (const base of ctx.aggregates) {
+    if (!isTpcBase(base, ctx.aggregates)) continue;
+    const concretes = ctx.aggregates.filter(
+      (a) => a.extendsAggregate === base.name && isTpcConcrete(a, ctx.aggregates),
+    );
+    if (concretes.length === 0) continue;
+    out.set(
+      `Domain/${plural(base.name)}/I${base.name}Repository.cs`,
+      renderBaseReaderInterface(base, ns),
+    );
+    out.set(
+      `Infrastructure/Repositories/${base.name}Repository.cs`,
+      renderBaseReaderImpl(base, concretes, ns),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Per-aggregate emission
 // ---------------------------------------------------------------------------
@@ -468,6 +507,24 @@ function emitAggregate(
   emitCtx?: EmitCtx,
 ): void {
   const aggFolder = plural(agg.name);
+  // An abstract TPC (`ownTable`) base owns no table, no repository, no routes
+  // — it is kept in the generation view only to anchor the polymorphic reader
+  // (emitBaseReaders) and to give the concretes a C# base class to inherit.
+  // Emit just the abstract class and stop; everything else below is per
+  // instantiable aggregate.
+  if (agg.isAbstract) {
+    out.set(`Domain/${aggFolder}/${agg.name}.cs`, renderAbstractBaseEntity(agg, ns));
+    return;
+  }
+  // A concrete TPC subtype inherits the abstract base's fields from the base
+  // class instead of re-declaring them; thread the base name + its field set
+  // through so renderEntity emits `: <Base>` and skips the inherited fields.
+  const tpcBase = agg.extendsAggregate
+    ? ctx.aggregates.find((a) => a.name === agg.extendsAggregate && isTpcBase(a, ctx.aggregates))
+    : undefined;
+  const superType = tpcBase
+    ? { name: tpcBase.name, fieldNames: new Set(tpcBase.fields.map((f) => f.name)) }
+    : undefined;
   const repo = findRepoFor(ctx, agg.name);
   // dataSource resolution drives BOTH the table-mapping knobs (schema /
   // tablePrefix) and the saving SHAPE.  `isDoc` (shape(document))
@@ -489,7 +546,7 @@ function emitAggregate(
   }
   out.set(
     `Domain/${aggFolder}/${agg.name}.cs`,
-    renderEntity(agg, true, ns, agg.name, emitTrace, isDoc),
+    renderEntity(agg, true, ns, agg.name, emitTrace, isDoc, superType),
   );
   // Views whose source is this aggregate become parameterless,
   // filtered, list-returning finds on the repository.  Synthesised

@@ -243,8 +243,9 @@ function collectContextsFor(
   // `sharedTable` (TPH) base on the Hono backend, the one backend that
   // implements TPH (v1).  Otherwise it emits nothing of its own (no table /
   // repository / routes) and is stripped here, a single chokepoint:
-  //   - `ownTable` (TPC) base, any backend → dropped; each concrete is a
-  //     standalone table carrying the merged base fields.
+  //   - `ownTable` (TPC) base, any backend → kept for the base-reader pass
+  //     (see keepsForBaseReader); it contributes no table of its own, but is
+  //     the read home for `find all <Base>`.
   //   - `sharedTable` (TPH) base on a non-Hono backend → dropped; TPH is
   //     gated as not-implemented there by IR-validate, so it never generates.
   // Concretes always stay; the per-aggregate emit loop skips abstract bases
@@ -252,13 +253,15 @@ function collectContextsFor(
   const isHono = d.platform === "hono";
   const keepsTable = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
     !!a.isAbstract && isHono && (a.inheritanceUsing ?? "sharedTable") === "sharedTable";
-  // On Hono, a TPC (`ownTable`) base is also kept in the view — not for a table
-  // of its own (the per-aggregate emit loop skips abstract aggregates), but so
-  // the base-reader pass can see it and emit the polymorphic `find all <Base>`
-  // reader that delegates to the concrete repositories.  Other backends still
-  // drop it (no TPC base reader there yet).
+  // A TPC (`ownTable`) base is kept in the view on every backend that
+  // implements the polymorphic read home — not for a table of its own (the
+  // per-aggregate emit loop skips abstract aggregates), but so the base-reader
+  // pass can see it and emit `find all <Base>`: Hono delegates to the concrete
+  // Drizzle repositories, .NET to the concrete EF repositories (returning the
+  // abstract-base union type), Phoenix to the concrete Ash reads.  Frontend
+  // platforms never host a context, so they never reach here.
   const keepsForBaseReader = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
-    !!a.isAbstract && isHono && a.inheritanceUsing === "ownTable";
+    !!a.isAbstract && a.inheritanceUsing === "ownTable";
   const dropped = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
     !!a.isAbstract && !keepsTable(a) && !keepsForBaseReader(a);
   for (const mod of modulesByName.values()) {
