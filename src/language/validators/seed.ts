@@ -38,9 +38,11 @@ function checkSeed(seed: Seed, accept: ValidationAcceptor): void {
       }
     }
 
-    // Rule 2 — a record may not repeat a field name.
+    // Rule 2 — a record may not repeat a field name.  `row.value` can be
+    // undefined on a partially-parsed AST (langium validates broken input);
+    // guard so the validator reports the parse error rather than throwing.
     const seen = new Set<string>();
-    for (const f of row.value.fields) {
+    for (const f of row.value?.fields ?? []) {
       if (seen.has(f.name)) {
         accept("error", `Duplicate field '${f.name}' in seed row '${agg?.name ?? "?"}'.`, {
           node: f,
