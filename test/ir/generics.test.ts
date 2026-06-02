@@ -6,11 +6,20 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
-import { GENERIC_SHAPES, genericShape } from "../../src/ir/stdlib/generics.js";
-import type { TypeIR } from "../../src/ir/types/loom-ir.js";
+import { GENERIC_SHAPES, genericInstanceName, genericShape } from "../../src/ir/stdlib/generics.js";
+import type { PayloadIR, TypeIR } from "../../src/ir/types/loom-ir.js";
 import { allContexts } from "../../src/ir/types/loom-ir.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { parseString } from "../_helpers/parse.js";
+
+/** Enrich (link-free, validation-skipped) and return a context's payloads. */
+async function payloadsOf(src: string, ctxName: string): Promise<PayloadIR[]> {
+  const { model } = await parseString(src, { validate: false });
+  const enriched = enrichLoomModel(lowerModel(model));
+  const ctx = allContexts(enriched).find((c) => c.name === ctxName);
+  if (!ctx) throw new Error(`context ${ctxName} not found`);
+  return ctx.payloads;
+}
 
 /** Lower (link-free, validation-skipped) and return the named value object's
  *  field type — the gate is IR-level, so we deliberately bypass the Langium
@@ -94,6 +103,78 @@ describe("generics — stdlib shape registry (P3a)", () => {
 
   it("exposes exactly the blessed closed set", () => {
     expect(Object.keys(GENERIC_SHAPES).sort()).toEqual(["envelope", "paged"]);
+  });
+});
+
+describe("generics — naming (P3b)", () => {
+  it("names instances <ArgName><Ctor>", () => {
+    expect(genericInstanceName("paged", { kind: "primitive", name: "string" })).toBe("StringPaged");
+    expect(
+      genericInstanceName("paged", { kind: "id", targetName: "Order", valueType: "guid" }),
+    ).toBe("OrderIdPaged");
+    expect(genericInstanceName("envelope", { kind: "entity", name: "OrderPlaced" })).toBe(
+      "OrderPlacedEnvelope",
+    );
+  });
+});
+
+describe("generics — monomorphization (P3b)", () => {
+  it("synthesizes a named payload for `string paged` from a field type", async () => {
+    const payloads = await payloadsOf(
+      `system S { subdomain D { context C { valueobject V { items: string paged } } } }`,
+      "C",
+    );
+    const sp = payloads.find((p) => p.name === "StringPaged");
+    expect(sp).toBeDefined();
+    expect(sp!.synthesized).toBe(true);
+    expect(sp!.kind).toBe("payload");
+    expect(sp!.fields.map((f) => f.name)).toEqual([
+      "items",
+      "page",
+      "pageSize",
+      "total",
+      "totalPages",
+    ]);
+    expect(sp!.fields[0]!.type).toEqual({
+      kind: "array",
+      element: { kind: "primitive", name: "string" },
+    });
+  });
+
+  it("synthesizes from a repository find return", async () => {
+    const payloads = await payloadsOf(
+      `system S { subdomain D { context C {
+         aggregate Order ids guid { ref: string }
+         repository Orders for Order { find recent(): Order id paged }
+       } } }`,
+      "C",
+    );
+    expect(payloads.some((p) => p.name === "OrderIdPaged")).toBe(true);
+  });
+
+  it("dedupes repeated instantiations into one payload", async () => {
+    const payloads = await payloadsOf(
+      `system S { subdomain D { context C {
+         valueobject V { a: string paged b: string paged }
+       } } }`,
+      "C",
+    );
+    expect(payloads.filter((p) => p.name === "StringPaged")).toHaveLength(1);
+  });
+
+  it("is idempotent — enrich(enrich(m)) yields the same payload set", async () => {
+    const { model } = await parseString(
+      `system S { subdomain D { context C { valueobject V { items: string paged } } } }`,
+      { validate: false },
+    );
+    const once = enrichLoomModel(lowerModel(model));
+    const twice = enrichLoomModel(once as never);
+    const names = (m: typeof once): string[] =>
+      allContexts(m)
+        .find((c) => c.name === "C")!
+        .payloads.map((p) => p.name)
+        .sort();
+    expect(names(twice)).toEqual(names(once));
   });
 });
 

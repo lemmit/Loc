@@ -21,6 +21,7 @@
  *   envelope(T) → { id: string; ts: datetime; body: T }
  */
 
+import { upperFirst } from "../../util/naming.js";
 import type { FieldIR, GenericCtorName, TypeIR } from "../types/loom-ir.js";
 
 /** A blessed generic-carrier shape: its single type-parameter name (for docs
@@ -70,4 +71,64 @@ export const GENERIC_CTOR_NAMES = Object.keys(GENERIC_SHAPES) as GenericCtorName
 /** Look up a blessed shape by constructor name. */
 export function genericShape(ctor: GenericCtorName): GenericShape {
   return GENERIC_SHAPES[ctor];
+}
+
+/** PascalCase base name for a carrier argument — the stem of a monomorphized
+ *  payload name.  v1 carriers are always a primitive / id / enum / value
+ *  object / entity (the carrier-bound check rejects slot + nesting), so the
+ *  default branch is defensive only. */
+function genericArgName(arg: TypeIR): string {
+  switch (arg.kind) {
+    case "primitive":
+      return upperFirst(arg.name);
+    case "id":
+      return `${upperFirst(arg.targetName)}Id`;
+    case "enum":
+    case "valueobject":
+    case "entity":
+      return arg.name;
+    case "array":
+      return `${genericArgName(arg.element)}List`;
+    case "optional":
+      return genericArgName(arg.inner);
+    case "genericInstance":
+      return genericInstanceName(arg.ctor, arg.arg);
+    case "slot":
+      return "Slot";
+  }
+}
+
+/** Deterministic name of the concrete payload a `genericInstance` monomorphizes
+ *  to: `<ArgName><Ctor>` — `string paged` → `StringPaged`, `Customer id paged`
+ *  → `CustomerIdPaged`, `OrderPlaced envelope` → `OrderPlacedEnvelope`.  The
+ *  single source of truth shared by enrichment (which synthesizes the payload
+ *  under this name) and every backend (which maps a `genericInstance` reference
+ *  to it). */
+export function genericInstanceName(ctor: GenericCtorName, arg: TypeIR): string {
+  return `${genericArgName(arg)}${upperFirst(ctor)}`;
+}
+
+/** Visit every `genericInstance` reachable from a type, descending array /
+ *  optional / nested-instance wrappers.  Shared by the enrichment collector
+ *  and any other phase that needs to find instantiations inside a type. */
+export function forEachGenericInstance(
+  type: TypeIR,
+  visit: (inst: { ctor: GenericCtorName; arg: TypeIR }) => void,
+): void {
+  switch (type.kind) {
+    case "genericInstance":
+      // Visit the outer instance, then descend into its argument so a nested
+      // instance (forward-compatible; v1 rejects it at validate) is still seen.
+      visit({ ctor: type.ctor, arg: type.arg });
+      forEachGenericInstance(type.arg, visit);
+      return;
+    case "array":
+      forEachGenericInstance(type.element, visit);
+      return;
+    case "optional":
+      forEachGenericInstance(type.inner, visit);
+      return;
+    default:
+      return;
+  }
 }
