@@ -10,7 +10,6 @@
 // ---------------------------------------------------------------------------
 
 import {
-  type LayoutAdapter,
   type PersistenceAdapter,
   type PlatformAdapterDefaults,
   type PlatformAdapters,
@@ -23,6 +22,7 @@ import {
   type PlatformSurface,
   STATIC_BUNDLE_FRAMEWORKS,
 } from "../../surface.js";
+import { byFeatureLayoutAdapter } from "./adapters/by-feature-layout.js";
 import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
 import { drizzlePersistenceAdapter } from "./adapters/drizzle-persistence.js";
 import { layeredStyleAdapter } from "./adapters/layered-style.js";
@@ -118,13 +118,7 @@ const honoPlatform: PlatformSurface = {
       },
       layouts: {
         byLayer: byLayerLayoutAdapter,
-        byFeature: stubAdapter<LayoutAdapter>(
-          "layout",
-          "byFeature",
-          "node",
-          () => Object.keys(menu.layouts),
-          { name: "byFeature" },
-        ),
+        byFeature: byFeatureLayoutAdapter,
       },
     };
     return menu;
