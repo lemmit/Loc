@@ -49,6 +49,7 @@ import {
   isNameRef,
   isNowExpr,
   isNullLit,
+  isOnDecl,
   isOperation,
   isPage,
   isParenExpr,
@@ -996,9 +997,20 @@ export function envForNode(node: AstNode): Env {
   for (const p of params) bindings.set(p.name, { type: paramType(p), origin: p });
 
   // 3. let-bindings from preceding statements in the enclosing operation / workflow.
-  const bodyOwner = op ?? wf;
-  if (bodyOwner) {
-    for (const [name, b] of collectLetBindings(bodyOwner.body)) bindings.set(name, b);
+  //    A workflow body is a `WorkflowMember[]` (statements interleaved with
+  //    `on(...)` reactors); only the statement members carry top-level lets.
+  if (op) {
+    for (const [name, b] of collectLetBindings(op.body)) bindings.set(name, b);
+  } else if (wf) {
+    const stmts = wf.members.filter(
+      (m): m is import("./generated/ast.js").Statement => !isOnDecl(m),
+    );
+    for (const [name, b] of collectLetBindings(stmts)) bindings.set(name, b);
+  }
+  // An `on(e: Event) { … }` reactor's own body lets are in scope inside it.
+  const on = AstUtils.getContainerOfType(node, isOnDecl);
+  if (on) {
+    for (const [name, b] of collectLetBindings(on.body)) bindings.set(name, b);
   }
 
   // 4. Lambda params — a lambda used as a collection-op arg binds its param to

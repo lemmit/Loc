@@ -35,12 +35,22 @@ export function renderAsyncApi(sys: SystemIR): string {
     ctx.channels.map((ch) => ({ ctx: ctx.name, ch })),
   );
 
-  if (channelEntries.length === 0) {
+  // Workflow `on(e: Event) [by …]` reactors surface as AsyncAPI `receive`
+  // operations (workflow-and-applier.md A2).  A reviewer sees "this workflow
+  // now reacts to PaymentReceived" in the PR diff.  Gated on existence so a
+  // channel-only system's output stays byte-identical.
+  const subscriptionEntries = contexts.flatMap((ctx) =>
+    (ctx.workflows ?? []).flatMap((wf) =>
+      (wf.subscriptions ?? []).map((sub) => ({ ctx: ctx.name, wf: wf.name, sub })),
+    ),
+  );
+
+  if (channelEntries.length === 0 && subscriptionEntries.length === 0) {
     out.push("channels: {}");
     return `${out.join("\n")}\n`;
   }
 
-  out.push("channels:");
+  out.push(channelEntries.length === 0 ? "channels: {}" : "channels:");
   for (const { ctx, ch } of channelEntries) {
     const address = `${ctx}.${ch.name}`;
     out.push(`  ${yamlStr(address)}:`);
@@ -60,6 +70,18 @@ export function renderAsyncApi(sys: SystemIR): string {
     if (ch.key) out.push(`      key: ${yamlStr(ch.key)}`);
     const storage = bindingByChannel.get(ch.name);
     out.push(`      transport: ${storage ? yamlStr(storage) : "in-process"}`);
+  }
+
+  if (subscriptionEntries.length > 0) {
+    out.push("operations:");
+    for (const { ctx, wf, sub } of subscriptionEntries) {
+      const opName = `${ctx}.${wf}.on.${sub.event}`;
+      out.push(`  ${yamlStr(opName)}:`);
+      out.push("    action: receive");
+      out.push("    x-loom:");
+      out.push(`      workflow: ${yamlStr(`${ctx}.${wf}`)}`);
+      out.push(`      event: ${yamlStr(sub.event)}`);
+    }
   }
   return `${out.join("\n")}\n`;
 }

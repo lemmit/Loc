@@ -793,6 +793,30 @@ export interface WorkflowIR {
    *  saves; `Repo.getById(...)`/find saves only if a later op-call
    *  targets the binding. */
   savesAtExit: { name: string; aggName: string; repoName: string }[];
+  /** Event-subscription reactors declared via `on(e: Event) [by <expr>] { … }`
+   *  members (workflow-and-applier.md Phase A2, surface slice).  Omitted when
+   *  the workflow declares none.  Not yet consumed by backends — backend
+   *  emission and the `by` correlation-field type-check are deferred to later
+   *  slices, mirroring how Phase A1 landed `apply(...)` appliers ahead of any
+   *  event-store emission. */
+  subscriptions?: OnIR[];
+}
+
+/** A `on(e: Event) [by <expr>] { … }` reactor on a workflow — an extrinsic
+ *  event subscription / continuation handler.  Mirrors `ApplyIR`: the event
+ *  instance binds as a `refKind: "param"` local in the body.  Distinct from an
+ *  applier in that the body is a workflow continuation (it may load/save
+ *  aggregates and emit), so its statements are `WorkflowStmtIR`. */
+export interface OnIR {
+  /** The event type this reactor subscribes to, by name (resolved to a
+   *  context `EventDecl`). */
+  event: string;
+  /** The parameter name the inbound event instance binds to in the body
+   *  (e.g. `paid` in `on(paid: PaymentReceived)`). */
+  param: string;
+  /** The reactor body — workflow statements (emit / let / op-call / …).
+   *  The `by <expr>` routing/correlation clause is deferred to a later slice. */
+  statements: WorkflowStmtIR[];
 }
 
 export type WorkflowStmtIR =

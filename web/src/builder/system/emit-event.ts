@@ -55,7 +55,12 @@ export function listEmits(node: AstNode): EmitRef[] {
       if (m.$type === "Operation") collectEmits((m as Operation).body, (m as Operation).name, out);
     }
   } else if (node.$type === "Workflow") {
-    collectEmits((node as Workflow).body, undefined, out);
+    // A workflow body is a `WorkflowMember[]`; collect emits from its statement
+    // members (emits inside `on(...)` reactor bodies are a later concern).
+    const stmts = (node as Workflow).members.filter(
+      (m): m is Statement => m.$type !== "OnDecl",
+    );
+    collectEmits(stmts, undefined, out);
   }
   return out;
 }
@@ -64,7 +69,8 @@ function emitBodyOf(ast: Model, kind: NodeKind, owner: string, op: string | unde
   const wantType = kind === "workflow" ? "Workflow" : "Aggregate";
   for (const n of AstUtils.streamAst(ast)) {
     if (n.$type === wantType && (n as { name?: unknown }).name === owner) {
-      if (kind === "workflow") return (n as Workflow).body;
+      if (kind === "workflow")
+        return (n as Workflow).members.filter((m): m is Statement => m.$type !== "OnDecl");
       const operation = (n as Aggregate).members.find((m): m is Operation => m.$type === "Operation" && (m as Operation).name === op);
       return operation?.body ?? null;
     }

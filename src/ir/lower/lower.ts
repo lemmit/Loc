@@ -33,6 +33,7 @@ import type {
   LoadPath,
   MenuBlock,
   Model,
+  OnDecl,
   Operation,
   Page,
   Parameter,
@@ -85,6 +86,7 @@ import {
   isMemberSuffix,
   isNameRef,
   isObjectLit,
+  isOnDecl,
   isOperation,
   isPayloadDecl,
   isPermissionsBlock,
@@ -145,6 +147,7 @@ import type {
   MenuBlockIR,
   MenuLinkIR,
   MenuMetaIR,
+  OnIR,
   OperationIR,
   OperationKind,
   PageIR,
@@ -2339,10 +2342,19 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
       if (target?.name) repoForAgg.set(target.name, m.name);
     }
   }
+  // Base env after params — the reactor (`on(...)`) bodies branch off this,
+  // not off the sequential statement flow (each `on` is a distinct
+  // continuation entry point, so it must not see the starter statements' lets).
+  const paramEnv = inner;
   const letAggs = new Map<string, { aggName: string; repoName: string }>();
   const statements: WorkflowStmtIR[] = [];
-  for (const s of wf.body) {
-    const lowered = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
+  const subscriptions: OnIR[] = [];
+  for (const m of wf.members) {
+    if (isOnDecl(m)) {
+      subscriptions.push(lowerOn(m, paramEnv, aggsByName, reposByName, repoForAgg));
+      continue;
+    }
+    const lowered = lowerWorkflowStatement(m, inner, aggsByName, reposByName, repoForAgg);
     statements.push(lowered.stmt);
     inner = lowered.envAfter;
     if (lowered.binding) letAggs.set(lowered.binding.name, lowered.binding);
@@ -2360,7 +2372,33 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
       | undefined,
     statements,
     savesAtExit,
+    ...(subscriptions.length > 0 ? { subscriptions } : {}),
   };
+}
+
+// Lower an `on(e: Event) { … }` reactor member to its IR (workflow-and-applier.md
+// Phase A2, surface slice).  Mirrors `lowerApply`: the event instance binds as a
+// `refKind: "param"` local typed as the event entity, so `e.field` accesses
+// resolve through the same machinery.  The body reuses `lowerWorkflowStatement`
+// (a reactor is a workflow continuation and may load/save aggregates and emit).
+// The `by` routing/correlation clause is deferred to a later slice.
+function lowerOn(
+  o: OnDecl,
+  baseEnv: Env,
+  aggsByName: Map<string, Aggregate>,
+  reposByName: Map<string, Repository>,
+  repoForAgg: Map<string, string>,
+): OnIR {
+  const eventName = o.event.ref?.name ?? o.event.$refText;
+  const inner = withLocal(baseEnv, o.param, "param", { kind: "entity", name: eventName });
+  const statements: WorkflowStmtIR[] = [];
+  let bodyEnv = inner;
+  for (const s of o.body) {
+    const lowered = lowerWorkflowStatement(s, bodyEnv, aggsByName, reposByName, repoForAgg);
+    statements.push(lowered.stmt);
+    bodyEnv = lowered.envAfter;
+  }
+  return { event: eventName, param: o.param, statements };
 }
 
 function plural(s: string): string {

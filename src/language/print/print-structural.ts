@@ -28,6 +28,7 @@ import type {
   MenuBlock,
   MenuLink,
   MenuSection,
+  OnDecl,
   Operation,
   Page,
   PageProp,
@@ -634,6 +635,15 @@ function printWorkflow(node: Workflow): string {
   if (node.transactional) {
     head += node.isolation ? ` transactional(${node.isolation})` : " transactional";
   }
+  return block(
+    head,
+    node.members.map((m) => (m.$type === "OnDecl" ? printOnDecl(m) : printStmt(m))),
+  );
+}
+
+// `on(e: Event) { … }` reactor member (workflow-and-applier.md A2).
+function printOnDecl(node: OnDecl): string {
+  const head = `on(${node.param}: ${node.event.$refText})`;
   return block(head, node.body.map(printStmt));
 }
 

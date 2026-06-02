@@ -886,6 +886,26 @@ Workflow:
     'workflow' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
         (transactional?='transactional' ('(' isolation=IsolationLevel ')')?)?
     '{'
+        members+=WorkflowMember*
+    '}';
+
+// A2-S1 (workflow-and-applier.md): the workflow body is a flat member list
+// that still admits every legacy statement form (precondition / let / emit /
+// call — unchanged) plus the new `on(...)` reactor member.  This is the
+// additive, non-breaking shape — the full workflow-as-aggregate reshape
+// (Properties + create/handle members) is a later slice.  Statement-vs-OnDecl
+// is unambiguous: `on` is a keyword, so it can never start a Statement.
+WorkflowMember:
+    OnDecl | Statement;
+
+// Extrinsic event subscription / continuation: `on(paid: PaymentReceived)
+// { … }` reacts to a fact from outside the workflow's own scope.  Mirrors the
+// aggregate `Apply` rule.  See workflow-and-applier.md §"Member forms".  The
+// `by <expr>` routing clause is deferred to the correlation slice (it carries
+// no surface meaning without workflow correlation fields, and `by` collides
+// with existing identifier usage until handled as a soft keyword there).
+OnDecl:
+    'on' '(' param=LooseName ':' event=[EventDecl:ID] ')' '{'
         body+=Statement*
     '}';
 

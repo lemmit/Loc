@@ -12,6 +12,7 @@ import type {
   EntityPart,
   Model,
   ValueObject,
+  Workflow,
 } from "../generated/ast.js";
 import {
   isAggregate,
@@ -25,11 +26,13 @@ import {
   isEntityPart,
   isFunctionDecl,
   isInvariant,
+  isOnDecl,
   isOperation,
   isPreconditionStmt,
   isPrimitiveType,
   isProperty,
   isValueObject,
+  isWorkflow,
 } from "../generated/ast.js";
 import { envForAggregate, envForPart, envForValueObject } from "./_shared.js";
 import { checkCreate, checkDestroy, checkOperation } from "./statements.js";
@@ -133,6 +136,31 @@ export function checkContext(ctx: BoundedContext, accept: ValidationAcceptor): v
   for (const member of ctx.members) {
     if (isAggregate(member)) checkAggregate(member, accept);
     else if (isValueObject(member)) checkValueObject(member, accept);
+    else if (isWorkflow(member)) checkWorkflow(member, accept);
+  }
+}
+
+// `on(e: Event) [by <expr>] { … }` reactor discipline (workflow-and-applier.md
+// Phase A2, surface slice).  Each inbound event routes to exactly one reactor,
+// so two `on(...)` members for the same event type are almost certainly a
+// mistake.  Until the `by` correlation clause is type-checked against the
+// workflow's correlation field (a later slice), this is a warning rather than
+// an error — intentional alternates distinguished only by `by` are still
+// allowed.  Mirrors the applier "one applier per event type" rule above.
+function checkWorkflow(wf: Workflow, accept: ValidationAcceptor): void {
+  const reactors = wf.members.filter(isOnDecl);
+  const eventName = (o: (typeof reactors)[number]): string => o.event.ref?.name ?? o.event.$refText;
+  const counts = new Map<string, number>();
+  for (const o of reactors) counts.set(eventName(o), (counts.get(eventName(o)) ?? 0) + 1);
+  for (const o of reactors) {
+    if ((counts.get(eventName(o)) ?? 0) > 1) {
+      accept(
+        "warning",
+        `Workflow '${wf.name}' declares more than one on(...) reactor for event '${eventName(o)}'. ` +
+          `Each inbound event routes to one reactor; if these are intentional alternates, distinguish them by their 'by' clause.`,
+        { node: o, property: "event", code: "loom.on-duplicate-subscription" },
+      );
+    }
   }
 }
 

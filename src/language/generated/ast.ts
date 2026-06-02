@@ -174,6 +174,7 @@ export type DddKeywordNames =
     | "objectStore"
     | "of"
     | "ogImage"
+    | "on"
     | "onCreate"
     | "onUpdate"
     | "operation"
@@ -612,6 +613,14 @@ export function isValueObjectMember(item: unknown): item is ValueObjectMember {
     return reflection.isInstance(item, ValueObjectMember);
 }
 
+export type WorkflowMember = OnDecl | Statement;
+
+export const WorkflowMember = 'WorkflowMember';
+
+export function isWorkflowMember(item: unknown): item is WorkflowMember {
+    return reflection.isInstance(item, WorkflowMember);
+}
+
 export interface Aggregate extends AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'Aggregate';
@@ -661,7 +670,7 @@ export function isApply(item: unknown): item is Apply {
 }
 
 export interface AssignOrCallStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | Operation | StampDecl | TestBlock | TestE2E | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | OnDecl | Operation | StampDecl | TestBlock | TestE2E | Workflow;
     readonly $type: 'AssignOrCallStmt';
     op?: '+=' | '-=' | ':=';
     target: LValue;
@@ -1015,7 +1024,7 @@ export function isEmitField(item: unknown): item is EmitField {
 }
 
 export interface EmitStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | Operation | TestBlock | TestE2E | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | Workflow;
     readonly $type: 'EmitStmt';
     event: Reference<EventDecl>;
     fields: Array<EmitField>;
@@ -1143,7 +1152,7 @@ export function isFindDecl(item: unknown): item is FindDecl {
 }
 
 export interface ForStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | Operation | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | OnDecl | Operation | Workflow;
     readonly $type: 'ForStmt';
     body: Array<Statement>;
     iterable: Expression;
@@ -1320,7 +1329,7 @@ export function isLayoutProp(item: unknown): item is LayoutProp {
 }
 
 export interface LetStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | Operation | TestBlock | TestE2E | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | Workflow;
     readonly $type: 'LetStmt';
     expr: Expression;
     name: string;
@@ -1696,6 +1705,20 @@ export function isOgImageProp(item: unknown): item is OgImageProp {
     return reflection.isInstance(item, OgImageProp);
 }
 
+export interface OnDecl extends AstNode {
+    readonly $container: Workflow;
+    readonly $type: 'OnDecl';
+    body: Array<Statement>;
+    event: Reference<EventDecl>;
+    param: LooseName;
+}
+
+export const OnDecl = 'OnDecl';
+
+export function isOnDecl(item: unknown): item is OnDecl {
+    return reflection.isInstance(item, OnDecl);
+}
+
 export interface Operation extends AstNode {
     readonly $container: Aggregate;
     readonly $type: 'Operation';
@@ -1816,7 +1839,7 @@ export function isPostfixChain(item: unknown): item is PostfixChain {
 }
 
 export interface PreconditionStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | Operation | TestBlock | TestE2E | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | Workflow;
     readonly $type: 'PreconditionStmt';
     expr: Expression;
 }
@@ -1924,7 +1947,7 @@ export function isRequiresProp(item: unknown): item is RequiresProp {
 }
 
 export interface RequiresStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | Operation | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | Lambda | OnDecl | Operation | Workflow;
     readonly $type: 'RequiresStmt';
     expr: Expression;
 }
@@ -2480,8 +2503,8 @@ export function isWithClause(item: unknown): item is WithClause {
 export interface Workflow extends AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'Workflow';
-    body: Array<Statement>;
     isolation?: IsolationLevel;
+    members: Array<WorkflowMember>;
     name: string;
     params: Array<Parameter>;
     transactional: boolean;
@@ -2589,6 +2612,7 @@ export type DddAstType = {
     ObjectFieldInit: ObjectFieldInit
     ObjectLit: ObjectLit
     OgImageProp: OgImageProp
+    OnDecl: OnDecl
     Operation: Operation
     Page: Page
     PageMenuMeta: PageMenuMeta
@@ -2656,12 +2680,13 @@ export type DddAstType = {
     View: View
     WithClause: WithClause
     Workflow: Workflow
+    WorkflowMember: WorkflowMember
 }
 
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
+        return [Aggregate, AggregateMember, Api, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow, WorkflowMember];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2817,6 +2842,10 @@ export class DddAstReflection extends AbstractAstReflection {
             case UiApiParam: {
                 return this.isSubtype(UiMember, supertype);
             }
+            case OnDecl:
+            case Statement: {
+                return this.isSubtype(WorkflowMember, supertype);
+            }
             case Operation: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(Targetable, supertype);
             }
@@ -2852,7 +2881,8 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case 'Apply:event':
             case 'Channel:carries':
-            case 'EmitStmt:event': {
+            case 'EmitStmt:event':
+            case 'OnDecl:event': {
                 return EventDecl;
             }
             case 'ChannelSource:use':
@@ -3648,6 +3678,16 @@ export class DddAstReflection extends AbstractAstReflection {
                     ]
                 };
             }
+            case OnDecl: {
+                return {
+                    name: OnDecl,
+                    properties: [
+                        { name: 'body', defaultValue: [] },
+                        { name: 'event' },
+                        { name: 'param' }
+                    ]
+                };
+            }
             case Operation: {
                 return {
                     name: Operation,
@@ -4194,8 +4234,8 @@ export class DddAstReflection extends AbstractAstReflection {
                 return {
                     name: Workflow,
                     properties: [
-                        { name: 'body', defaultValue: [] },
                         { name: 'isolation' },
+                        { name: 'members', defaultValue: [] },
                         { name: 'name' },
                         { name: 'params', defaultValue: [] },
                         { name: 'transactional', defaultValue: false }

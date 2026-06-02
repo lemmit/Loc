@@ -1137,7 +1137,8 @@ function operationView(ast: Model, aggName: string, opName: string): ViewGraph {
 function workflowView(ast: Model, name: string): ViewGraph {
   const wf = findWorkflow(ast, name);
   if (!wf) return { title: `workflow ${name}`, nodes: [], edges: [] };
-  return stmtFlow(`workflow ${name}()`, wf.body, "workflow", `${name}()`);
+  const stmts = wf.members.filter((m): m is Statement => m.$type !== "OnDecl");
+  return stmtFlow(`workflow ${name}()`, stmts, "workflow", `${name}()`);
 }
 
 function findRepository(ast: Model, name: string): Repository | undefined {

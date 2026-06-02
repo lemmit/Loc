@@ -46,7 +46,13 @@ function resolveBody(ast: Model, loc: BodyLocator): Body | null {
   if (loc.kind === "workflow") {
     for (const n of AstUtils.streamAst(ast)) {
       if (n.$type === "Workflow" && (n as Workflow).name === loc.name) {
-        return { owner: n, statements: (n as Workflow).body };
+        // A workflow body is a `WorkflowMember[]` (statements interleaved with
+        // `on(...)` reactors); the statement editor operates on the statement
+        // members only.
+        const statements = (n as Workflow).members.filter(
+          (m): m is Statement => m.$type !== "OnDecl",
+        );
+        return { owner: n, statements };
       }
     }
     return null;

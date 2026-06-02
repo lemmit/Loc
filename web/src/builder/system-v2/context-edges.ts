@@ -134,7 +134,8 @@ function collectWorkflow(
   const usesAgg = new Set<string>();
   const usesRepo = new Set<string>();
   const emitsSet = new Set<string>();
-  for (const s of wf.body) {
+  for (const s of wf.members) {
+    if (s.$type === "OnDecl") continue; // reactor members handled elsewhere
     if (s.$type === "AssignOrCallStmt") {
       const a = s as AssignOrCallStmt;
       // A method-call target like `Account.deposit` has LValue.head =
