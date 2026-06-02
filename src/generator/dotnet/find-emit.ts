@@ -1,4 +1,10 @@
-import type { EnrichedAggregateIR, FindIR, RepositoryIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type {
+  EnrichedAggregateIR,
+  FindIR,
+  RepositoryIR,
+  RetrievalIR,
+  TypeIR,
+} from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 
@@ -39,6 +45,52 @@ export function collectFindBodyUsings(
   for (const find of repo?.finds ?? []) {
     if (find.filter) collectCsExprUsings(find.filter, into);
   }
+  return into;
+}
+
+/** LINQ clause fragments for a `retrieval`'s `Run<Name>Async` method
+ *  (retrieval.md): the `where` predicate, the `sort` ordering, and the
+ *  default-whole projection.  Paging (`Skip`/`Take`) is spliced from the
+ *  call-site `page` argument by the impl emitter, not here. */
+export function buildRetrievalBodies(
+  agg: EnrichedAggregateIR,
+  retrievals: RetrievalIR[],
+): Array<{ name: string; whereClause: string; orderByClause: string }> {
+  return retrievals.map((r) => ({
+    name: r.name,
+    whereClause: `.Where(x => ${renderCsExpr(r.where, { thisName: "x", agg })})`,
+    orderByClause: orderByClauseFor(r),
+  }));
+}
+
+/** `.OrderBy(x => x.Col)[.ThenBy…]` for a retrieval's sort terms (empty
+ *  when unsorted).  Only the first path segment is used in v1 (a direct
+ *  column), matching the Hono emitter + validateRetrievals gating. */
+function orderByClauseFor(r: RetrievalIR): string {
+  if (r.sort.length === 0) return "";
+  return r.sort
+    .map((s, i) => {
+      const col = upperFirst(s.path[0]!.name);
+      const method =
+        i === 0
+          ? s.direction === "desc"
+            ? "OrderByDescending"
+            : "OrderBy"
+          : s.direction === "desc"
+            ? "ThenByDescending"
+            : "ThenBy";
+      return `.${method}(x => x.${col})`;
+    })
+    .join("");
+}
+
+/** Namespaces a retrieval's `where` predicates reach into — same role as
+ *  `collectFindBodyUsings` for finds. */
+export function collectRetrievalBodyUsings(
+  retrievals: RetrievalIR[],
+  into: Set<string> = new Set(),
+): Set<string> {
+  for (const r of retrievals) collectCsExprUsings(r.where, into);
   return into;
 }
 

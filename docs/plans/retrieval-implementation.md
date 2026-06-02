@@ -37,8 +37,8 @@ no emission" — CI-safe because nothing consumes the new IR yet).
 2. **PR2 — validation** (selectability, sort/path checks). ✅ **MERGED** (#794).
 3. **PR3-A — `run<Name>` repository method emission (Hono/Drizzle)** + `LOOM_TS_BUILD` gate. ✅ **DONE** (PR #800). The method exists + tsc-compiles; not yet callable from a workflow.
 4. **PR3-B — workflow `for` loop + `Repo.run` call wiring + save-model reshape (Hono)**. ✅ **DONE** (this branch). Grammar `ForStmt` (+ block-safe `ForIterable`), IR `repo-run` / `for-each` variants + `savesPerIteration`, `computeSaves` extraction, validator (array-binding iteration + retrieval/target checks), Hono `for…of` + per-iteration save. **.NET and Phoenix gate `repo-run`/`for-each` with an explicit "not yet supported" throw** — they need their own run-method emission (.NET) and the `Enum.reduce_while` reshape (Phoenix). Full `Repo.run` + loop tsc-compiles on Hono.
-5. **PR3-C — .NET run-method emission + `foreach`** + `dotnet-build` gate.
-6. **PR3-D — Phoenix `Enum.reduce_while` reshape** + `phoenix-build` gate.
+5. **PR3-C — .NET `Run<Name>Async` emission + `foreach`**. ✅ **DONE** (this branch). `buildRetrievalBodies` → `.Where(x=>…).OrderBy[Descending](x=>x.Col).AsQueryable()` + conditional `Skip`/`Take` from a `(int? offset, int? limit)? page` arg; workflow `repo-run`→`Run<Name>Async(args, (off,lim), ct)`, `for-each`→`foreach` + per-iteration `SaveAsync`. Document-shaped aggregates skip retrievals in v1. Exercised by the `sales.ddd` `verifyByName` workflow under the `dotnet-build` + `hono-build` gates.
+6. **PR3-D — Phoenix `Enum.reduce_while` reshape** + `phoenix-build` gate. ← remaining (still gated with an explicit throw).
 7. **PR4 — explicit `loads` / LoadPlanIR fetch realisation + loads-sufficiency** (the actual eager-fetch wiring; backends honour `whole` only until here).
 
 ### PR3 grounding (what the `Repo.run` lowering must reuse)
