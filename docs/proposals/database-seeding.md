@@ -469,7 +469,19 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
    table is created by `seed.ts` (`CREATE TABLE IF NOT EXISTS`) rather
    than a synthetic migration step, and `raw` blocks still route
    through the domain `create` (true table-insert `raw` is a follow-up).
-3. .NET seeder + Phoenix `seeds.exs`. Per-backend build gates.
+3. **.NET ✅ Done** (`src/generator/dotnet/emit/seed.ts`):
+   `Infrastructure/Persistence/Seed.cs` going through the positional
+   `<Agg>.Create(…)` (fields ordered to the factory's required-field
+   order) + DI-resolved `I<Agg>Repository.SaveAsync`, ship-once
+   `__loom_seed` marker (ADO `ExecuteScalar`), `LOOM_SEED` gating, and a
+   `Seed.RunSeeds(…)` boot call after `Database.Migrate()`. **Phoenix
+   `seeds.exs` is still pending** — it's blocked on a real finding: the
+   Phoenix `value-object-ctor` renderer emits *positional* struct args
+   (`%Ctx.Money{9.99, "USD"}`, asserted in `phoenix-render-expr.test.ts`),
+   which is **invalid Elixir** (structs need named fields). The Phoenix
+   seeder must construct value objects with named fields itself (or the
+   underlying renderer be fixed, since `Money { … }` in a Phoenix
+   *operation body* has the same latent bug). Tracked as the next slice.
 4. Imperative (workflow-body) form — reuses statement lowering.
 5. `seed-spec.json` artifact + compose seed step (`LOOM_SEED` dataset
    gating already landed in phase 2); quick-start `saas` template
