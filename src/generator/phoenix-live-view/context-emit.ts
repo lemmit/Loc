@@ -12,7 +12,12 @@ import { emitAggregateResources } from "./domain-emit.js";
 import { renderJasonEncoderImpl } from "./jason-camel-emit.js";
 import { joinEntityName, renderJoinResource } from "./join-resource-emit.js";
 import { renderAshType } from "./render-expr.js";
-import { buildFindActions, findRepoFor, mergeViewFindsForAgg } from "./repository-emit.js";
+import {
+  buildFindActions,
+  buildRetrievalActions,
+  findRepoFor,
+  mergeViewFindsForAgg,
+} from "./repository-emit.js";
 
 // ---------------------------------------------------------------------------
 // Context emission — one Ash.Resource per aggregate + one Ash.Domain per ctx
@@ -88,7 +93,12 @@ export function emitContext(
     const repo = findRepoFor(ctx, agg.name);
     const repoWithViews = mergeViewFindsForAgg(agg, repo, ctx);
     if (!repoWithViews) continue;
-    const customFinds = buildFindActions(repoWithViews, agg, contextModule);
+    // Retrieval read actions (retrieval.md) join the custom finds — both
+    // splice into the resource's `actions do` block the same way.
+    const customFinds = [
+      ...buildFindActions(repoWithViews, agg, contextModule),
+      ...buildRetrievalActions(ctx, agg, contextModule),
+    ];
     if (customFinds.length === 0) continue;
     const path = `lib/${appName}/${ctxSnake}/${snake(agg.name)}.ex`;
     const existing = out.get(path);
@@ -250,6 +260,16 @@ function renderDomainModule(
           `      define :${snake(find.name)}_${snake(agg.name)}, action: :${snake(find.name)}${argsClause}`,
         );
       }
+    }
+    // Retrieval code-interface defines (retrieval.md): `run_<name>_<agg>`
+    // invokes the retrieval's read action; `page:` rides as a call opt.
+    for (const r of ctx.retrievals ?? []) {
+      if (r.targetType.kind !== "entity" || r.targetType.name !== agg.name) continue;
+      const argsList = r.params.map((p) => `:${snake(p.name)}`).join(", ");
+      const argsClause = argsList ? `, args: [${argsList}]` : "";
+      defines.push(
+        `      define :run_${snake(r.name)}_${snake(agg.name)}, action: :${snake(r.name)}${argsClause}`,
+      );
     }
     // Operation actions (`update :<op>`) get a code-interface define so a
     // one-click `Action(<instance>.<op>)` can invoke them directly

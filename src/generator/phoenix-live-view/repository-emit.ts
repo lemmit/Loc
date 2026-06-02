@@ -4,6 +4,7 @@ import type {
   EnrichedAggregateIR,
   FindIR,
   RepositoryIR,
+  RetrievalIR,
 } from "../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
@@ -46,6 +47,71 @@ export function buildFindActions(
   // duplicate `define :all_X, action: :all` which adds noise without
   // adding behaviour.
   return repo.finds.filter((f) => f.name !== "all").map((find) => renderFindAction(find, agg, ctx));
+}
+
+/** Build Ash read-action snippets for each context retrieval targeting
+ *  `agg` (retrieval.md) — the Phoenix analog of Hono's `run<Name>` /
+ *  .NET's `Run<Name>Async`.  Each becomes a paginated, sorted read whose
+ *  `where` is rendered as an Ash `filter expr(...)` with read-action
+ *  arguments bound via `^arg(:name)`. */
+export function buildRetrievalActions(
+  ctx: BoundedContextIR,
+  agg: EnrichedAggregateIR,
+  contextModule: string,
+): string[] {
+  const rctx: RenderCtx = { thisName: "record", contextModule, agg };
+  return (ctx.retrievals ?? [])
+    .filter((r) => r.targetType.kind === "entity" && r.targetType.name === agg.name)
+    .map((r) => renderRetrievalAction(r, rctx));
+}
+
+function renderRetrievalAction(r: RetrievalIR, ctx: RenderCtx): string {
+  const lines: string[] = [];
+  lines.push(`    read :${snake(r.name)} do`);
+  for (const p of r.params) {
+    lines.push(`      argument :${snake(p.name)}, ${ashArgType(p.type)}`);
+  }
+  // Offset pagination — the call-site `page: [offset:, limit:]` rides
+  // here; `required?: false` keeps an unpaged call returning a plain list.
+  lines.push(`      pagination offset?: true, required?: false`);
+  // Sort → `prepare build(sort: [field: :dir, ...])` (first path segment
+  // per term, mirroring the Hono/.NET v1 single-column sort).
+  if (r.sort.length > 0) {
+    const terms = r.sort.map((s) => `${snake(s.path[0]!.name)}: :${s.direction}`).join(", ");
+    lines.push(`      prepare build(sort: [${terms}])`);
+  }
+  // `where` → Ash filter.  Render with read-action arg binding (^arg)
+  // and strip the `record.` receiver Ash filters don't use (bare
+  // attribute names — same convention as the #762 base_filter).
+  const rendered = renderExpr(r.where, { ...ctx, thisName: "record", filterArgs: true }).replace(
+    /\brecord\./g,
+    "",
+  );
+  lines.push(`      filter expr(${rendered})`);
+  lines.push(`    end`);
+  return lines.join("\n");
+}
+
+/** Map a Loom param type to the Ash argument type atom.  Conservative:
+ *  the common scalars; anything else falls back to `:string` (the prior
+ *  hardcoded behaviour for find args). */
+function ashArgType(type: import("../../ir/types/loom-ir.js").TypeIR): string {
+  if (type.kind === "primitive") {
+    switch (type.name) {
+      case "int":
+        return ":integer";
+      case "decimal":
+        return ":decimal";
+      case "bool":
+        return ":boolean";
+      case "datetime":
+        return ":utc_datetime";
+      default:
+        return ":string";
+    }
+  }
+  if (type.kind === "id") return ":uuid";
+  return ":string";
 }
 
 function renderFindAction(find: FindIR, agg: AggregateIR, ctx: RenderCtx): string {
