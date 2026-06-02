@@ -1466,7 +1466,7 @@ ObjectLit:
     '{' (fields+=ObjectFieldInit (',' fields+=ObjectFieldInit)* ','?)? '}';
 
 ObjectFieldInit:
-    name=ID ':' value=Expression;
+    name=LooseName ':' value=Expression;
 
 ParenExpr:
     '(' inner=Expression ')';
