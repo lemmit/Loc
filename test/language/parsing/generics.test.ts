@@ -74,10 +74,39 @@ describe("generics — carrier-bound validator (P3a)", () => {
     expect(errorCodes(diagnostics)).toContain("loom.generic-arg-not-carrier");
   });
 
-  it("accepts a single carrier on a primitive (no carrier-bound error)", async () => {
+  it("accepts a single carrier in a transport position (payload field)", async () => {
+    const { diagnostics } = await parseString(`context C { response R { items: string paged } }`);
+    expect(errorCodes(diagnostics)).not.toContain("loom.generic-arg-not-carrier");
+    expect(errorCodes(diagnostics)).not.toContain("loom.generic-position");
+  });
+});
+
+describe("generics — position restriction (P3b)", () => {
+  it("allows a carrier as a payload field", async () => {
+    const { diagnostics } = await parseString(`context C { response R { items: string paged } }`);
+    expect(errorCodes(diagnostics)).not.toContain("loom.generic-position");
+  });
+
+  it("allows a carrier as a repository find return", async () => {
+    const { diagnostics } = await parseString(`context C {
+      aggregate Order ids guid { ref: string }
+      repository Orders for Order { find recent(): Order id paged }
+    }`);
+    expect(errorCodes(diagnostics)).not.toContain("loom.generic-position");
+  });
+
+  it("rejects a carrier as a stored aggregate/value-object field (loom.generic-position)", async () => {
     const { diagnostics } = await parseString(
       `context C { valueobject V { items: string paged } }`,
     );
-    expect(errorCodes(diagnostics)).not.toContain("loom.generic-arg-not-carrier");
+    expect(errorCodes(diagnostics)).toContain("loom.generic-position");
+  });
+
+  it("rejects a carrier as a find parameter", async () => {
+    const { diagnostics } = await parseString(`context C {
+      aggregate Order ids guid { ref: string }
+      repository Orders for Order { find weird(p: string paged): Order[] }
+    }`);
+    expect(errorCodes(diagnostics)).toContain("loom.generic-position");
   });
 });

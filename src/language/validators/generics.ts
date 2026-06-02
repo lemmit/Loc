@@ -15,15 +15,45 @@
 // The grammar (`base (ctors+=GenericCtor)*`) admits both forms so the surface
 // and IR stay forward-compatible, and lowering folds them faithfully; this
 // model-level check is what restricts v1 to the supported subset.
+//
+// A second rule pins *position*: a generic carrier is a transport shape, so it
+// may only appear as a repository find's return type or as a payload field —
+// never as a stored property, parameter, or signature elsewhere.  This keeps
+// `genericInstance` out of the storage-side emitters entirely.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type { Model, TypeRef } from "../generated/ast.js";
-import { isSlotType, isTypeRef } from "../generated/ast.js";
+import { isFindDecl, isPayloadDecl, isProperty, isSlotType, isTypeRef } from "../generated/ast.js";
 
 export function checkGenericCarriers(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
-    if (isTypeRef(node)) checkTypeRefCarrier(node, accept);
+    if (isTypeRef(node)) {
+      checkTypeRefCarrier(node, accept);
+      checkTypeRefPosition(node, accept);
+    }
   }
+}
+
+/** A generic carrier is a transport shape, not a stored value — it may only
+ *  appear as a repository find's return type or as a field of a payload
+ *  (payload-transport-layer.md, P3b).  Anywhere else (a stored aggregate /
+ *  value-object property, a parameter, a derived/state field, a function
+ *  signature) is rejected, which also keeps the storage-side emitters
+ *  (migrations, schema columns, wire-spec) free of `genericInstance`. */
+function checkTypeRefPosition(t: TypeRef, accept: ValidationAcceptor): void {
+  if (t.ctors.length === 0) return;
+  const container = t.$container;
+  // A find's return type: the TypeRef sits directly on the FindDecl (its
+  // params are wrapped in `Parameter` nodes, so they don't match here).
+  if (isFindDecl(container)) return;
+  // A payload field: a `Property` whose owner is a `PayloadDecl`.
+  if (isProperty(container) && isPayloadDecl(container.$container)) return;
+  accept(
+    "error",
+    `A generic carrier ('${t.ctors.join(" ")}') is a transport shape — it may only appear as a ` +
+      `repository find return type or a payload field, not in this position.`,
+    { node: t, property: "ctors", code: "loom.generic-position" },
+  );
 }
 
 function checkTypeRefCarrier(t: TypeRef, accept: ValidationAcceptor): void {
