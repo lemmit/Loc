@@ -50,7 +50,6 @@ import type {
   TypeRef,
   Ui,
   UiApiParam,
-  UiHelperImport,
   UserBlock,
   ValueObject,
   View,
@@ -199,8 +198,6 @@ export function printStructural(node: AstNode): string {
       return printPermissionsBlock(node as PermissionsBlock);
     case "UiApiParam":
       return printUiApiParam(node as UiApiParam);
-    case "UiHelperImport":
-      return printUiHelperImport(node as UiHelperImport);
     case "FindDecl":
       return printFindDecl(node as FindDecl);
     case "Criterion":
@@ -375,10 +372,6 @@ function printUi(node: Ui): string {
 
 function printUiApiParam(node: UiApiParam): string {
   return `api ${node.name}: ${node.apiRef.$refText}`;
-}
-
-function printUiHelperImport(node: UiHelperImport): string {
-  return `import helper ${node.name} from ${quote(node.path)}`;
 }
 
 function printPage(node: Page): string {

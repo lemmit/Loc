@@ -55,7 +55,6 @@ import type {
   ParamIR,
   StmtIR,
   UiApiParamIR,
-  UiHelperImportIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../language/walker-stdlib.js";
@@ -80,8 +79,7 @@ import { tsxTarget } from "./walker/tsx-target.js";
 export type ImportMap = Map<string, Set<string>>;
 
 // The page-top import-block renderers (renderImportLines,
-// renderApiHookImports, renderHelperImports) live in
-// walker/import-lines.ts.
+// renderApiHookImports) live in walker/import-lines.ts.
 
 export interface WalkResult {
   tsx: string;
@@ -139,11 +137,6 @@ export interface WalkResult {
    *  reads this set to surface one typed `Locator` getter per
    *  testid in the generated `e2e/pages/<page-snake>.ts` class. */
   collectedTestids: Set<string>;
-  /** Names of UI-declared helpers the body actually
-   *  invoked.  The shell emits one `import { <name> } from
-   *  "<path>"` line per used helper; declared-but-unused helpers
-   *  don't pollute the page TSX. */
-  usedHelpers: Set<string>;
   /** `Action(<instance>.<op>)` mutation wiring.  Each entry tells the
    *  shell to declare `const <localVar> = <hookName>(<idExpr>)` at
    *  function top and import the hook from `<prefix>api/<aggCamel>`. */
@@ -240,27 +233,21 @@ export const STDLIB_LAYOUT_COMPONENTS: ReadonlySet<string> = new Set(
 export function isWalkableLayoutBody(
   body: ExprIR | undefined,
   userComponents: ReadonlyMap<string, readonly ParamIR[]> = new Map(),
-  helperNames: ReadonlySet<string> = new Set(),
 ): boolean {
   if (!body) return false;
   if (body.kind === "call") {
     if (STDLIB_LAYOUT_COMPONENTS.has(body.name)) return true;
     // Calls to user-defined components are walker-
     // eligible too (resolved via the supplied map).
-    if (userComponents.has(body.name)) return true;
-    // A body whose top-level call is a UI-declared
-    // helper is walker-eligible: the helper renders the page's
-    // JSX in user land.  Without this, `body: RenderBanner("hi")`
-    // would be silently skipped.
-    return helperNames.has(body.name);
+    return userComponents.has(body.name);
   }
   // Top-level conditional bodies dispatch through the
   // walker as long as either branch is walkable.  Powers patterns
   // like `body: loading ? Empty("…") : Stack(…)`.
   if (body.kind === "ternary") {
     return (
-      isWalkableLayoutBody(body.then, userComponents, helperNames) ||
-      isWalkableLayoutBody(body.otherwise, userComponents, helperNames)
+      isWalkableLayoutBody(body.then, userComponents) ||
+      isWalkableLayoutBody(body.otherwise, userComponents)
     );
   }
   return false;
@@ -304,11 +291,6 @@ export function walkBodyToTsx(
    *  form-field preparer needs the BC to resolve enum / value-
    *  object types declared alongside the aggregate. */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
-  /** User-authored helper imports declared at the UI
-   *  level via `import helper <name> from "<path>"`.  Body refs
-   *  matching one of these names emit as plain JS calls and the
-   *  shell adds the matching `import { <name> } from "<path>"`. */
-  helperImports: ReadonlyArray<UiHelperImportIR> = [],
   /** Workflows reachable from this UI's deployable.
    *  `Form(runs: <wf>)` looks up the workflow's IR here (param
    *  list for form dispatch, owning BC for enum resolution). */
@@ -325,8 +307,6 @@ export function walkBodyToTsx(
 ): WalkResult {
   const apiParamNames = new Map<string, string>();
   for (const p of apiParams) apiParamNames.set(p.name, p.apiName);
-  const helperNameToPath = new Map<string, string>();
-  for (const h of helperImports) helperNameToPath.set(h.name, h.path);
   const ctx: WalkContext = {
     imports: new Map(),
     pack,
@@ -352,8 +332,6 @@ export function walkBodyToTsx(
     formOfs: [],
     actionMutations: [],
     collectedTestids: new Set(),
-    helperImports: helperNameToPath,
-    usedHelpers: new Set(),
     usesCodeBlock: false,
   };
   const tsx = walk(body, ctx, 0);
@@ -370,7 +348,6 @@ export function walkBodyToTsx(
     formOfs: ctx.formOfs,
     actionMutations: ctx.actionMutations,
     collectedTestids: ctx.collectedTestids,
-    usedHelpers: ctx.usedHelpers,
     usesCodeBlock: ctx.usesCodeBlock,
   };
 }
@@ -433,11 +410,6 @@ export interface WalkEnv {
   workflowsByName: ReadonlyMap<string, WorkflowIR>;
   /** Owning bounded context per workflow. */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR>;
-  /** UI helper-import lookup (name → import path).
-   *  Populated by `walkBodyToTsx` from the UI's `helperImports`
-   *  parameter; consulted by `emitComponent`'s fallthrough so
-   *  body calls to a helper name emit as plain JS calls. */
-  helperImports: ReadonlyMap<string, string>;
 }
 
 /** Mutable accumulators written during the walk; read by the page
@@ -464,10 +436,6 @@ export interface Sink {
   /** Accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
   collectedTestids: Set<string>;
-  /** Names of helpers the body actually called.  The
-   *  shell emits one import line per used helper; declared-but-
-   *  unused helpers don't pollute the page TSX. */
-  usedHelpers: Set<string>;
   /** True when a `CodeBlock { … }` primitive emitted from this body.
    *  Read by the React orchestrator (aggregated across all pages)
    *  to drive conditional injection of the highlight.js CDN payload
@@ -671,15 +639,6 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
   // component invocation when they match a registered ComponentIR.
   if (ctx.userComponents.has(call.name)) {
     return emitUserComponent(call, ctx, depth);
-  }
-  // UI-declared helper imports (`import helper <name> from "..."`)
-  // emit as plain JS calls in JSX-child position (brace-wrapped).
-  // The shell adds the matching import line once `usedHelpers` is
-  // populated.
-  if (ctx.helperImports.has(call.name)) {
-    ctx.usedHelpers.add(call.name);
-    const args = call.args.map((a) => emitExpr(a, ctx)).join(", ");
-    return `{${call.name}(${args})}`;
   }
   // Registered primitive without a TSX renderer (e.g. `For`, `List`,
   // `Detail` — source-admissible but unimplemented by the React
@@ -912,13 +871,6 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // user to import / declare `<name>` somewhere in their app
       // shell.  Powers patterns like `let n = inc(count)` and the
       // statement form `Button("…", onClick: e => { saveOrder() })`.
-      //
-      // UI-declared helper imports take this path too:
-      // tracking `usedHelpers` so the shell emits the matching
-      // `import { <name> } from "<path>"` line.
-      if (ctx.helperImports.has(expr.name)) {
-        ctx.usedHelpers.add(expr.name);
-      }
       const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
       return `${expr.name}(${args})`;
     }
@@ -1273,15 +1225,10 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
   // expression.  Powers patterns like `Heading("Welcome, " +
   // name)`, `Text(count + 1)`, `Stat("Count", count * step)`.
   //
-  // UI-declared helper calls also belong in text
-  // position; route them through `emitExpr` so they emit as
-  // plain JS calls (`{formatPrice(99)}`).  Stdlib-primitive
-  // calls still fall through to undefined — those are child
-  // components and the caller should `walk` them instead.
+  // A bare `call` in text position is a stdlib-primitive / user-
+  // component invocation — fall through to undefined so the caller
+  // `walk`s it as a child component rather than emitting a JS call.
   if (expr.kind === "call") {
-    if (ctx.helperImports.has(expr.name)) {
-      return `{${emitExpr(expr, ctx)}}`;
-    }
     return undefined;
   }
   return `{${emitExpr(expr, ctx)}}`;

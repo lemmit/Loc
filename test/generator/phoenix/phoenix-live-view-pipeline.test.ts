@@ -1048,7 +1048,6 @@ describe.skip("integration (parent wires emitters)", () => {
       components: [],
       scaffolds: [],
       apiParams: [],
-      helperImports: [],
     };
     const src = renderSidebarComponent({ ui, appName: "sales", appModule: "Sales" });
     expect(src).toMatch(/defmodule SalesWeb\.Components\.Sidebar/);

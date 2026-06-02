@@ -172,7 +172,6 @@ import type {
   ThemeIR,
   TypeIR,
   UiApiParamIR,
-  UiHelperImportIR,
   UiIR,
   UiParamBindingIR,
   UserIR,
@@ -1014,7 +1013,6 @@ function lowerUi(ui: Ui): UiIR {
   const pages: PageIR[] = [];
   const components: ComponentIR[] = [];
   const apiParams: UiApiParamIR[] = [];
-  const helperImports: UiHelperImportIR[] = [];
   let menu: MenuBlockIR | undefined;
   for (const m of ui.members) {
     if (m.$type === "Page") pages.push(lowerPage(m));
@@ -1024,8 +1022,6 @@ function lowerUi(ui: Ui): UiIR {
         name: m.name,
         apiName: m.apiRef?.$refText ?? "",
       });
-    } else if (m.$type === "UiHelperImport") {
-      helperImports.push({ name: m.name, path: m.path });
     } else if (m.$type === "MenuBlock") {
       // First menu block wins.  Validator flags a duplicate
       // `menu { ... }` block at ui scope as an error.
@@ -1039,7 +1035,6 @@ function lowerUi(ui: Ui): UiIR {
     components,
     menu,
     apiParams,
-    helperImports,
   };
 }
 

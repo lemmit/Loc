@@ -120,7 +120,6 @@ export type DddKeywordNames =
     | "function"
     | "guid"
     | "header"
-    | "helper"
     | "hono"
     | "hosts"
     | "id"
@@ -561,7 +560,7 @@ export function isTruthKind(item: unknown): item is TruthKind {
     return item === 'eventLog' || item === 'state';
 }
 
-export type UiMember = Component | MenuBlock | Page | UiApiParam | UiHelperImport;
+export type UiMember = Component | MenuBlock | Page | UiApiParam;
 
 export const UiMember = 'UiMember';
 
@@ -2308,19 +2307,6 @@ export function isUiComposeBinding(item: unknown): item is UiComposeBinding {
     return reflection.isInstance(item, UiComposeBinding);
 }
 
-export interface UiHelperImport extends AstNode {
-    readonly $container: Ui;
-    readonly $type: 'UiHelperImport';
-    name: string;
-    path: string;
-}
-
-export const UiHelperImport = 'UiHelperImport';
-
-export function isUiHelperImport(item: unknown): item is UiHelperImport {
-    return reflection.isInstance(item, UiHelperImport);
-}
-
 export interface UiParamBinding extends AstNode {
     readonly $container: UiComposeBinding;
     readonly $type: 'UiParamBinding';
@@ -2591,7 +2577,6 @@ export type DddAstType = {
     UiApiParam: UiApiParam
     UiBlockBinding: UiBlockBinding
     UiComposeBinding: UiComposeBinding
-    UiHelperImport: UiHelperImport
     UiMember: UiMember
     UiParamBinding: UiParamBinding
     UiSugarBinding: UiSugarBinding
@@ -2608,7 +2593,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiHelperImport, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
+        return [Aggregate, AggregateMember, Api, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2759,8 +2744,7 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case MenuBlock:
             case Page:
-            case UiApiParam:
-            case UiHelperImport: {
+            case UiApiParam: {
                 return this.isSubtype(UiMember, supertype);
             }
             case Operation: {
@@ -4031,15 +4015,6 @@ export class DddAstReflection extends AbstractAstReflection {
                     properties: [
                         { name: 'bindings', defaultValue: [] },
                         { name: 'ref' }
-                    ]
-                };
-            }
-            case UiHelperImport: {
-                return {
-                    name: UiHelperImport,
-                    properties: [
-                        { name: 'name' },
-                        { name: 'path' }
                     ]
                 };
             }

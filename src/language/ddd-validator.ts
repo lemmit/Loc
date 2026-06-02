@@ -43,7 +43,6 @@ import {
   checkTraceability,
   checkTypeReferences,
   checkUi,
-  checkUiHelperImports,
 } from "./validators/index.js";
 
 export class DddValidator {
@@ -93,11 +92,6 @@ export class DddValidator {
     // targets (VO / EntityPart / user-component / walker primitive) and
     // errors on misses.
     checkBuilderCallType(model, accept, this.services);
-    // `import helper <name> from "..."` declarations.
-    // Reject names that shadow walker stdlib primitives so a typo
-    // never silently overrides Stack / Form / etc.  Also flag
-    // duplicate helper names within the same UI.
-    checkUiHelperImports(model, accept);
     // `component` declarations: enforce the extern↔body exclusivity the
     // grammar admits but can't constrain (extern ⇒ no body; normal ⇒ body).
     checkComponent(model, accept);

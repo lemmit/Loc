@@ -13,14 +13,8 @@ import type {
   ThemeBlock,
   Ui,
   UiApiParam,
-  UiHelperImport,
 } from "../generated/ast.js";
 import { isComponent, isMemberSuffix, isPostfixChain } from "../generated/ast.js";
-import {
-  WALKER_LAYOUT_PRIMITIVES,
-  WALKER_SCAFFOLD_PRIMITIVES,
-  WALKER_SUB_PRIMITIVES,
-} from "../walker-stdlib.js";
 import {
   findAggregateInModule,
   isScaffoldOriginPageBody,
@@ -28,54 +22,6 @@ import {
   listValidApiOperations,
   pagePropDisplayName,
 } from "./_shared.js";
-
-/** Union of all walker-stdlib primitive names — derived once from the
- *  `walker-stdlib.ts` SSOT and reused across `checkUiHelperImports`
- *  invocations.  Drift between this set and the registry surfaces as
- *  a `walker-stdlib-completeness.test.ts` failure, not as a silent
- *  validation gap. */
-const STDLIB_PRIMITIVES: ReadonlySet<string> = new Set<string>([
-  ...WALKER_LAYOUT_PRIMITIVES,
-  ...WALKER_SUB_PRIMITIVES,
-  ...WALKER_SCAFFOLD_PRIMITIVES,
-]);
-
-/** `import helper <name> from "<path>"` at the UI
- *  level.  Validate two invariants:
- *   1. Helper names don't shadow any walker stdlib primitive
- *      (else a typo would silently divert a body call like
- *      `Stack(...)` from the primitive to the helper).
- *   2. No duplicate helper names within the same UI. */
-export function checkUiHelperImports(model: Model, accept: ValidationAcceptor): void {
-  for (const member of model.members) {
-    if (member.$type !== "System") continue;
-    const sys = member as System;
-    const uis = sys.members.filter((sm) => sm.$type === "Ui") as Ui[];
-    for (const ui of uis) {
-      const seen = new Map<string, UiHelperImport>();
-      for (const um of ui.members) {
-        if (um.$type !== "UiHelperImport") continue;
-        const h = um as UiHelperImport;
-        if (STDLIB_PRIMITIVES.has(h.name)) {
-          accept(
-            "error",
-            `Helper '${h.name}' shadows the walker stdlib primitive '${h.name}'. Rename the helper.`,
-            { node: h, property: "name" },
-          );
-        }
-        const prior = seen.get(h.name);
-        if (prior) {
-          accept("error", `Duplicate helper import '${h.name}' in ui '${ui.name}'.`, {
-            node: h,
-            property: "name",
-          });
-        } else {
-          seen.set(h.name, h);
-        }
-      }
-    }
-  }
-}
 
 /** `component` declarations — enforce the `extern` ↔ `body`
  *  exclusivity that the grammar admits but cannot constrain:
