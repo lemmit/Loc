@@ -37,7 +37,10 @@ function collectBodies(ast: unknown): BodyEntry[] {
       const body = (node as Page).props.find((p): p is BodyProp => p.$type === "BodyProp");
       if (body) out.push({ name: (node as Page).name, expr: body.expr, page: node as Page });
     } else if (node.$type === "Component") {
-      out.push({ name: (node as Component).name, expr: (node as Component).body });
+      // Extern components have no `body:` (their rendering lives in a
+      // hand-written module), so there's nothing to project onto the canvas.
+      const comp = node as Component;
+      if (comp.body) out.push({ name: comp.name, expr: comp.body });
     }
   }
   return out;
