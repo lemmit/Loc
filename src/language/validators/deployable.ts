@@ -74,7 +74,7 @@ export function checkDeployable(
   if (hasUiBinding && !platformMountsUi(d.platform)) {
     accept(
       "error",
-      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenixLiveView', 'dotnet'); got '${d.platform}'.`,
+      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenix', 'dotnet'); got '${d.platform}'.`,
       {
         node: d,
         property: d.uiSugar
@@ -238,7 +238,7 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
     if (!FRONTEND_KEYWORDS.has(raw)) {
       accept(
         "error",
-        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'hono', 'react', 'static', 'phoenixLiveView' (backends also accept a pinned form, e.g. 'hono@v4').`,
+        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'hono', 'react', 'static', 'phoenix' (backends also accept a pinned form, e.g. 'hono@v4').`,
         { node: d, property: "platform" },
       );
     }

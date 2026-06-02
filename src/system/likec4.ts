@@ -20,11 +20,7 @@ import { lines } from "../util/code-builder.js";
 // ---------------------------------------------------------------------------
 
 // Backends that own persistence — used to wire database relationships.
-const PERSISTENT: ReadonlySet<DeployableIR["platform"]> = new Set([
-  "hono",
-  "dotnet",
-  "phoenixLiveView",
-]);
+const PERSISTENT: ReadonlySet<DeployableIR["platform"]> = new Set(["hono", "dotnet", "phoenix"]);
 
 // LikeC4 identifiers: word chars, not starting with a digit.
 function cid(name: string): string {

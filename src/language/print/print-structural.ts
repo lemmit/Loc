@@ -103,7 +103,14 @@ function quote(s: string): string {
   return JSON.stringify(s);
 }
 
-const PLATFORM_KEYWORDS = new Set(["dotnet", "hono", "react", "static", "phoenixLiveView"]);
+const PLATFORM_KEYWORDS = new Set([
+  "dotnet",
+  "hono",
+  "react",
+  "static",
+  "phoenix",
+  "phoenixLiveView",
+]);
 const DESIGN_KEYWORDS = new Set(["mantine", "shadcn", "mui", "chakra", "ashPhoenix"]);
 
 /** Platform / DesignPack are `keyword | STRING` rules: print a known keyword

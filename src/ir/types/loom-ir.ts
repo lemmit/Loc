@@ -1510,7 +1510,7 @@ export interface NeedIR {
 // `ashPhoenix` HEEx pack.  Unlike `react`/`static` it owns its own
 // database (`needsDb: true`) and never declares `targets:` —
 // validator enforces both.
-export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView";
+export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenix";
 
 // D-REALIZATION-AXES — the `application:` axis is the one axis whose DSL
 // spelling differs from its backing D-ADAPTER-HOME adapter key: the
@@ -1545,7 +1545,7 @@ export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingSha
   // Phoenix/Ash emits relational + embedded (Ash embedded resources);
   // `document` (a single opaque `:map` — non-idiomatic for Ash) is a
   // future allowed-but-warned addition.
-  phoenixLiveView: ["relational", "embedded"],
+  phoenix: ["relational", "embedded"],
 };
 
 export interface DeployableIR {
@@ -1581,7 +1581,7 @@ export interface DeployableIR {
    *  "ashPhoenix".  A string starting with "./" or "/" is a custom
    *  pack path resolved relative to the .ddd file (a directory
    *  containing pack.json).  Only meaningful when platform === "react"
-   *  (or "static"/"dotnet" with a UI mount, or "phoenixLiveView");
+   *  (or "static"/"dotnet" with a UI mount, or "phoenix");
    *  ignored otherwise.
    *
    *  After lowering this field is always fully qualified

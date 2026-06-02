@@ -42,7 +42,7 @@ describe("in-tree discovery (default source)", () => {
       discoverBackends()
         .map((b) => `${b.manifest.family}@${b.manifest.loomVersion}`)
         .sort(),
-    ).toEqual(["dotnet@v8", "hono@v4", "phoenixLiveView@v1"]);
+    ).toEqual(["dotnet@v8", "hono@v4", "phoenix@v1"]);
   });
 
   it("resolution is byte-identical: bareword/pin yield the SAME surface", () => {

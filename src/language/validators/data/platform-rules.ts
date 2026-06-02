@@ -120,7 +120,7 @@ export function expectedFrameworkFor(
   // framework as its bareword.
   const fam = platformFamily(platform);
   if (fam === "react" || fam === "static") return "react";
-  if (fam === "phoenixLiveView") return "phoenixLiveView";
+  if (fam === "phoenix") return "phoenixLiveView";
   if (fam === "dotnet" && hasUi) return "react";
   return undefined;
 }
@@ -185,11 +185,9 @@ function adapterKindForAxis(axis: RealizationAxis): "persistence" | "style" | "l
 /** Single current value for a greenfield axis on a backend family. */
 function greenfieldMenu(family: Platform, axis: "foundation" | "transport" | "runtime"): string[] {
   if (axis === "runtime") return ["transactional"];
-  if (axis === "foundation") return [family === "phoenixLiveView" ? "ash" : "vanilla"];
+  if (axis === "foundation") return [family === "phoenix" ? "ash" : "vanilla"];
   // transport — the platform's only current HTTP surface.
-  return [
-    family === "dotnet" ? "minimalApi" : family === "phoenixLiveView" ? "phoenixRouter" : "hono",
-  ];
+  return [family === "dotnet" ? "minimalApi" : family === "phoenix" ? "phoenixRouter" : "hono"];
 }
 
 /** The DSL-legal values for one realization axis on a platform family.

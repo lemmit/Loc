@@ -26,8 +26,8 @@ import {
 // `PlatformSurface` wiring that delegates to the orchestrator.
 // ---------------------------------------------------------------------------
 
-const phoenixLiveViewPlatform: PlatformSurface = {
-  name: "phoenixLiveView",
+const phoenixPlatform: PlatformSurface = {
+  name: "phoenix",
   defaultPort: 4000,
   needsDb: true,
   mountsUi: true,
@@ -82,4 +82,4 @@ const phoenixLiveViewPlatform: PlatformSurface = {
   },
 };
 
-export default phoenixLiveViewPlatform;
+export default phoenixPlatform;

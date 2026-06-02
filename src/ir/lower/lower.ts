@@ -221,14 +221,10 @@ function greenfieldAxisDefaults(platform: Platform): {
     // Phoenix's domain framework defaults to Ash (matches today's
     // `phoenixLiveView` behaviour after desugar — D-PHOENIX-SURFACE
     // open-item 2); every other backend is `vanilla` (no framework).
-    foundation: platform === "phoenixLiveView" ? "ash" : "vanilla",
+    foundation: platform === "phoenix" ? "ash" : "vanilla",
     // The platform's only current HTTP surface.
     transport:
-      platform === "dotnet"
-        ? "minimalApi"
-        : platform === "phoenixLiveView"
-          ? "phoenixRouter"
-          : "hono",
+      platform === "dotnet" ? "minimalApi" : platform === "phoenix" ? "phoenixRouter" : "hono",
     // Repository-loaded, DB-transaction consistency — the only runtime
     // shipped today (actor runtimes land per-backend later).
     runtime: "transactional",
@@ -248,11 +244,9 @@ function qualifyPlatform(raw: string | undefined): {
   family: Platform;
   ref: string;
 } {
-  // D-PHOENIX-SURFACE: `phoenix` is the host-platform spelling that
-  // decouples the name from the LiveView framework.  Canonicalise it to
-  // `phoenixLiveView` at this boundary so every downstream consumer (13
-  // call sites keyed on the literal) stays unchanged until the rename
-  // cleanup phase.
+  // D-PHOENIX-SURFACE: `phoenix` is the canonical host-platform name.
+  // The legacy `phoenixLiveView` *platform* spelling is desugared here at
+  // the boundary so every downstream consumer sees only `phoenix`.
   const value = canonicalPlatform(raw ?? "hono");
   const parsed = parseBuiltinPlatformRef(value);
   return parsed
@@ -260,12 +254,13 @@ function qualifyPlatform(raw: string | undefined): {
     : { family: value as Platform, ref: value };
 }
 
-/** Canonicalise a D-PHOENIX-SURFACE platform alias to the IR's stable
- *  family name.  `phoenix` → `phoenixLiveView`; everything else passes
- *  through.  Boundary-only: the alias never reaches the IR or any
- *  generator. */
+/** Canonicalise the legacy `phoenixLiveView` *platform* alias to the
+ *  canonical `phoenix`; everything else passes through.  Boundary-only:
+ *  the alias never reaches the IR or any generator.  (The LiveView
+ *  *framework* keeps the `phoenixLiveView` spelling — see
+ *  `canonicalFramework`.) */
 function canonicalPlatform(value: string): string {
-  return value === "phoenix" ? "phoenixLiveView" : value;
+  return value === "phoenixLiveView" ? "phoenix" : value;
 }
 
 /** Canonicalise a D-PHOENIX-SURFACE framework alias.  `liveview` →
@@ -558,7 +553,7 @@ function lowerSystem(sys: System): SystemIR {
     //     by Playwright page objects) AND an API spec (driven by
     //     fetch against the deployable's HTTP surface).
     const isFrontendOnly = !!targetPlatform && platformFor(targetPlatform).isFrontend;
-    const isFullstack = targetPlatform === "phoenixLiveView";
+    const isFullstack = targetPlatform === "phoenix";
     if (isFrontendOnly) {
       e2eTests.push(lowerE2E(b, e2eEnv, "ui"));
     } else if (isFullstack) {
@@ -916,7 +911,7 @@ function lowerDeployable(d: Deployable): DeployableIR {
     canonicalFramework(d.uiBlock?.framework) ??
     canonicalFramework(firstHostedUi?.framework) ??
     (uiName
-      ? platform === "phoenixLiveView"
+      ? platform === "phoenix"
         ? "phoenixLiveView"
         : platformFor(platform).isFrontend || platform === "dotnet"
           ? "react"
@@ -930,7 +925,7 @@ function lowerDeployable(d: Deployable): DeployableIR {
   //  - backends without a `ui:` mount carry no design.
   const design = platformFor(platform).isFrontend
     ? qualifyDesign(d.design, "mantine")
-    : platform === "phoenixLiveView"
+    : platform === "phoenix"
       ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
       : platform === "dotnet" && uiName
         ? qualifyDesign(d.design, "mantine")
