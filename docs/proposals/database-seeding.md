@@ -460,13 +460,20 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
    parsing / lowering / negative-validator tests. Declarative form
    only; `@handle`/`SeedRef`, create-param shape-checking, and the
    `raw`-unchecked warning are split into a Phase 1b follow-up.
-2. Hono emitter + `db:seed` script + `__loom_seed` marker migration
-   step. `LOOM_TS_BUILD` gate.
+2. ✅ **Done.** Hono emitter (`src/generator/typescript/emit/seed.ts`):
+   `db/seed.ts` going through the domain `create` + repository `save`
+   (D-SEED-PATH), ship-once per dataset via the `__loom_seed` marker
+   (D-SEED-IDEMPOTENCY), `LOOM_SEED` dataset gating, the `db:seed`
+   script, and the `runSeeds(db)` boot call after migrations. Two
+   deviations from the spec, both noted in the emitter: the marker
+   table is created by `seed.ts` (`CREATE TABLE IF NOT EXISTS`) rather
+   than a synthetic migration step, and `raw` blocks still route
+   through the domain `create` (true table-insert `raw` is a follow-up).
 3. .NET seeder + Phoenix `seeds.exs`. Per-backend build gates.
 4. Imperative (workflow-body) form — reuses statement lowering.
-5. `seed-spec.json` artifact + compose seed step + `LOOM_SEED`
-   dataset gating; quick-start `saas` template consumes it (closes the
-   quickstart proposal's §5.4 dependency).
+5. `seed-spec.json` artifact + compose seed step (`LOOM_SEED` dataset
+   gating already landed in phase 2); quick-start `saas` template
+   consumes it (closes the quickstart proposal's §5.4 dependency).
 6. `ddd seed` runner + `--reset`; then (only on demand) the `key:`
    upsert path for evolving reference data (§10).
 
