@@ -173,7 +173,13 @@ export function checkDeployable(
   // packs (any name not in BUILTIN_PACK_FORMATS) get a warning
   // instead — the validator can't read their `pack.json` to know the
   // format, but a typo should still surface loudly.
-  checkDeployableDesignPack(d, hasUiBinding, framework, accept);
+  // The framework the design pack must match: prefer a hosted/referenced
+  // `ui` declaration's own `framework:` (D-PHOENIX-SURFACE — the ui owns
+  // it; e.g. a phoenix host embedding `framework: react` needs a tsx
+  // pack, not ashPhoenix), then the legacy block-binding framework.
+  // Mirrors the lowering precedence in `lower.ts`.
+  const uiDeclaredFramework = canonicalFramework(mountedUis.find((u) => u?.framework)?.framework);
+  checkDeployableDesignPack(d, hasUiBinding, uiDeclaredFramework ?? framework, accept);
 
   // Existing rules — react/static both behave like frontends.
   if (isFrontendPlatform(d.platform)) {

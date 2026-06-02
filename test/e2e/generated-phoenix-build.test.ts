@@ -59,6 +59,13 @@ describe.skipIf(!ENABLED)(
       // First-boot seeding (database-seeding.md): compiles priv/repo/seeds.exs
       // (the Ash create-action seed path) + the ecto.setup alias change.
       { name: "seeding.ddd" },
+      // D-PHOENIX-SURFACE: a phoenix backend that EMBEDS a React SPA
+      // (hosts: a `ui { framework: react }`).  Compiles the
+      // embedded-react Elixir side — the endpoint `/app` Plug.Static,
+      // the router `/app` SpaController fallback, and the SpaController
+      // itself — against real Ash 3.x.  No LiveView pages are emitted;
+      // the React `assets/` half is covered by the react-build matrix.
+      { name: "phoenix-embed-react.ddd" },
     ])("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
