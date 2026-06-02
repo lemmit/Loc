@@ -689,9 +689,14 @@ end
 `;
 }
 
-/** RFC 7807 ProblemDetails schema module — the shared error body.  All
- *  fields optional (matching .NET's framework schema + the Hono zod schema),
- *  so the cross-backend field/required sets compare equal. */
+/** RFC 7807 ProblemDetails schema module — the shared error body.  Base 5
+ *  spec fields + the §3.2 `errors[]` extension (per-field `{ pointer,
+ *  message }` array) that the runtime emits on 422 validation responses.
+ *  All fields optional — base 5 per the spec core; `errors` is only
+ *  present on 422 validation responses (consumed by the frontend ACL's
+ *  `applyServerErrors`).  Phase D of validation-error-extension.md —
+ *  all three backends (Hono / .NET / Phoenix) declare the same shape in
+ *  lockstep so the cross-backend parity gate stays green. */
 function renderProblemDetailsSchema(webModule: string): string {
   return `# Auto-generated.
 defmodule ${webModule}.Api.Schemas.ProblemDetails do
@@ -707,7 +712,18 @@ defmodule ${webModule}.Api.Schemas.ProblemDetails do
       title: %OpenApiSpex.Schema{type: :string},
       status: %OpenApiSpex.Schema{type: :integer},
       detail: %OpenApiSpex.Schema{type: :string},
-      instance: %OpenApiSpex.Schema{type: :string}
+      instance: %OpenApiSpex.Schema{type: :string},
+      errors: %OpenApiSpex.Schema{
+        type: :array,
+        items: %OpenApiSpex.Schema{
+          type: :object,
+          required: [:pointer, :message],
+          properties: %{
+            pointer: %OpenApiSpex.Schema{type: :string},
+            message: %OpenApiSpex.Schema{type: :string}
+          }
+        }
+      }
     }
   })
 end

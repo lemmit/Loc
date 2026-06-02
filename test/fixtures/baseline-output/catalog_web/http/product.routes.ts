@@ -52,6 +52,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
           content: { "application/json": { schema: CreateProductResponse } },
         },
         400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
+        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {
@@ -124,6 +125,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       responses: {
         204: { description: "No content" },
         400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
+        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
         404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),

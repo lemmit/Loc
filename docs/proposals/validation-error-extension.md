@@ -1,9 +1,15 @@
 # Validation error extension — RFC 7807 §3.2 `errors[]` on the wire
 
-> Status: PARTIAL — Hono phase shipping in this PR; .NET + Phoenix follow.
+> Status: SHIPPED. All four phases delivered:
+>   Phase A — Hono runtime (#782)
+>   Phase B — .NET runtime (#829)
+>   Phase C — Phoenix runtime (#836)
+>   Phase D — OpenAPI lockstep across all three backends (this PR)
+>
 > Decoupled from [`exception-less.md`](./exception-less.md): pure wire-format
 > extension; no language-level surface change. The wire format defined here
-> is the format `exception-less.md` would emit anyway when it lands later.
+> is the format `exception-less.md` would emit anyway when it lands later —
+> all that changes is the internal production path.
 
 ## Problem
 
@@ -254,20 +260,41 @@ format is unchanged.
 
 - **Phase A — Hono** (shipped #782): runtime body emits 422 + `errors[]`;
   OpenAPI schema declaration deferred to keep parity with .NET + Phoenix.
-- **Phase B — .NET** (shipping in this PR): runtime body emits 422 +
+- **Phase B — .NET** (shipped #829): runtime body emits 422 +
   `Extensions["errors"]`; `PointerOf` helper on `DomainExceptionFilter`
   converts FluentValidation paths to RFC 6901; same OpenAPI deferral
   as Hono.
-- **Phase C — Phoenix** (shipping in this PR): walks `Ash.Error.Invalid`
+- **Phase C — Phoenix** (shipped #836): walks `Ash.Error.Invalid`
   into the same `errors[]` shape via a shared
   `<App>Web.ProblemDetails` Elixir module that both per-aggregate
   controllers (Plug.ErrorHandler arm) and the workflows controller
   (extended `error_response/2`) call.
-- **Phase D — OpenAPI lockstep** (after C lands): flip the central
-  matrix in `src/ir/util/openapi-errors.ts` to add 422 for
-  `create` / `operation` / `workflow`, add `errors:` to every backend's
-  `ProblemDetails` schema, invert the parity-deferred test assertions.
-  All three backends move together so parity stays green.
+- **Phase D — OpenAPI lockstep** (shipping in this PR): all three
+  backends grow the same OpenAPI surface in one atomic move:
+    1. Central matrix `src/ir/util/openapi-errors.ts` returns
+       `[400, 422]` for `create`, `[400, 404, 422]` (`+403` if guarded)
+       for `operation`, `[400, 422]` (`+403` if guarded) for `workflow`.
+       Adds `"Unprocessable Entity"` to `problemTitle(422)`.
+    2. Hono: `ProblemDetails` Zod schema in `http/problem-details.ts`
+       gains `errors: z.array(...).nullish()`. Route declarations in
+       `routes-builder.ts` (create + operation) and `workflow-builder.ts`
+       grow inline `422: { description: "Unprocessable Entity", ... }`
+       alongside the existing 400.
+    3. .NET: `ProblemDetailsResponsesFilter` extended with
+       `AugmentProblemDetailsSchema` that idempotently adds an `errors`
+       array property to the auto-generated Swashbuckle schema
+       (matching the runtime `Extensions["errors"]` shape).
+       `[ProducesResponseType(typeof(ProblemDetails), 422)]` attributes
+       appear automatically via the central matrix.
+    4. Phoenix: `<App>Web.Api.Schemas.ProblemDetails` OpenApiSpex schema
+       module declares the `errors` array property with `pointer` +
+       `message` required per element. 422 `OpenApiSpex.Response` entries
+       appear automatically via the central matrix.
+    5. Parity-deferred test assertions inverted across the three
+       `validation-error-extension.test.ts` files. New positive
+       assertions added for the .NET Swashbuckle augmentation +
+       Phoenix's OpenApiSpex `errors[]` declaration + per-action 422
+       OpenAPI response entries.
 - **Phase E — exception-less interop** (much later): when
   `exception-less.md` lands, refactor the internal production path
   (from `defaultHook` / filter arm to per-variant typed returns).

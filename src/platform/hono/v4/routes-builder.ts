@@ -305,9 +305,14 @@ export function buildRoutesFile(
     lines.push(`          description: "Created",`);
     lines.push(`          content: { "application/json": { schema: Create${agg.name}Response } },`);
     lines.push(`        },`);
-    // create → 400 (domain / validation), per the shared error matrix.
+    // create → 400 (DomainError) + 422 (validation, ProblemDetails with
+    // §3.2 `errors[]` extension emitted by the shared defaultHook), per
+    // the openapi-errors matrix.  See docs/proposals/validation-error-extension.md.
     lines.push(
       `        400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+    lines.push(
+      `        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
     lines.push(`      },`);
     lines.push(`    }),`);
@@ -573,12 +578,15 @@ function emitOperationRoute(
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
-  // operation → 400 (domain) + 404 (aggregate not found), per the
-  // openapi-errors matrix.  422 emitted at runtime via the shared
-  // defaultHook; OpenAPI declaration deferred until .NET + Phoenix catch
-  // up (Phase B + C of validation-error-extension.md).
+  // operation → 400 (domain) + 404 (aggregate not found) + 422
+  // (validation, ProblemDetails with §3.2 `errors[]` extension emitted by
+  // the shared defaultHook), per the openapi-errors matrix.  Phase D of
+  // docs/proposals/validation-error-extension.md.
   out.push(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  out.push(
+    `      422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   // A `requires` guard denies with 403 (ForbiddenError → onError) — declare
   // it so the published contract documents the authorization outcome.
