@@ -28,7 +28,7 @@ system Demo {
   }
   api ProjectsApi from Projects
   deployable phoenixApp {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Projects]
     serves: ProjectsApi
     port: 4000

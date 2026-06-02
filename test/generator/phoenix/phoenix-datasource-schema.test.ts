@@ -35,7 +35,7 @@ system Sys {
   ${dataSourceClause}
   ui WebApp {}
   deployable api {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Orders]
     dataSources: [ordersState]
     ui: WebApp

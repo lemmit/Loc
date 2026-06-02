@@ -9,7 +9,7 @@ import { parseString } from "../../_helpers/parse.js";
 // name); `liveview` is the framework spelling.  Both canonicalise to the
 // still-stable `phoenixLiveView` at the lowering/registry boundary, so
 // the new spelling validates, lowers, and generates identically to the
-// legacy `platform: phoenixLiveView` + `framework: phoenixLiveView`.
+// legacy `platform: phoenix` + `framework: phoenixLiveView`.
 // ---------------------------------------------------------------------------
 
 const UNHOSTABLE = /cannot host ui .* framework/;

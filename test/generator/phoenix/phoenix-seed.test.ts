@@ -27,7 +27,7 @@ const FIXTURE = `system AcmeSeed {
   }
   api ShopApi from Shop
   deployable web {
-    platform: phoenixLiveView
+    platform: phoenix
     contexts: [Catalog]
     serves: ShopApi
     port: 4000

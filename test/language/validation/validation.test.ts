@@ -706,13 +706,13 @@ describe("validation", () => {
       ).toBe(true);
     });
 
-    it("rejects a tsx pack on a phoenixLiveView fullstack deployable", async () => {
+    it("rejects a tsx pack on a phoenix fullstack deployable", async () => {
       const { errors } = await parse(`
         system S {
           subdomain M { context T { } }
           ui WebApp { }
           deployable fullstack {
-            platform: phoenixLiveView
+            platform: phoenix
             contexts: [T]
             ui: WebApp
             port: 4000
