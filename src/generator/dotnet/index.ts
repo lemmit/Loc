@@ -19,7 +19,11 @@ import type { Model } from "../../language/generated/ast.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { generateReactForContexts } from "../react/index.js";
-import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
+import {
+  byLayerLayoutAdapter,
+  type DotnetArtifact,
+  type DotnetArtifactCategory,
+} from "./adapters/by-layer-layout.js";
 import { cqrsStyleAdapter } from "./adapters/cqrs-style.js";
 import { emitDotnetResourceFiles } from "./adapters/resource-clients.js";
 import { emitAuthFiles } from "./auth-emit.js";
@@ -530,13 +534,30 @@ function emitAggregate(
   emitCtx?: EmitCtx,
 ): void {
   const aggFolder = plural(agg.name);
+  // Per-aggregate placement (D-REALIZATION-AXES `directoryLayout:`): route the
+  // aggregate's domain + persistence files through the deployable's RESOLVED
+  // layout adapter (threaded via emitCtx), falling back to byLayer in the
+  // legacy single-context path.  byLayer reproduces the historical inline
+  // paths byte-for-byte; byFeature rehomes them under `Features/<Agg>/`.  The
+  // adapters ignore the EmitCtx arg for path routing, so an empty stand-in is
+  // fine when there's no system context.
+  const layout = emitCtx?.layoutAdapter ?? byLayerLayoutAdapter;
+  const place = (name: string, category: DotnetArtifactCategory, content: string): void => {
+    out.set(
+      layout.pathFor(
+        { name, content, category, aggregateName: agg.name } as DotnetArtifact,
+        emitCtx ?? ({} as EmitCtx),
+      ),
+      content,
+    );
+  };
   // An abstract TPC (`ownTable`) base owns no table, no repository, no routes
   // — it is kept in the generation view only to anchor the polymorphic reader
   // (emitBaseReaders) and to give the concretes a C# base class to inherit.
   // Emit just the abstract class and stop; everything else below is per
   // instantiable aggregate.
   if (agg.isAbstract) {
-    out.set(`Domain/${aggFolder}/${agg.name}.cs`, renderAbstractBaseEntity(agg, ns));
+    place(`${agg.name}.cs`, "entity", renderAbstractBaseEntity(agg, ns));
     return;
   }
   // A concrete TPC subtype inherits the abstract base's fields from the base
@@ -562,13 +583,11 @@ function emitAggregate(
   const isEmbedded = shape === "embedded";
 
   for (const part of agg.parts) {
-    out.set(
-      `Domain/${aggFolder}/${part.name}.cs`,
-      renderEntity(part, false, ns, agg.name, emitTrace, isDoc),
-    );
+    place(`${part.name}.cs`, "entity", renderEntity(part, false, ns, agg.name, emitTrace, isDoc));
   }
-  out.set(
-    `Domain/${aggFolder}/${agg.name}.cs`,
+  place(
+    `${agg.name}.cs`,
+    "entity",
     renderEntity(agg, true, ns, agg.name, emitTrace, isDoc, superType),
   );
   // Views whose source is this aggregate become parameterless,
@@ -585,8 +604,9 @@ function emitAggregate(
     : (ctx.retrievals ?? []).filter(
         (r) => r.targetType.kind === "entity" && r.targetType.name === agg.name,
       );
-  out.set(
-    `Domain/${aggFolder}/I${agg.name}Repository.cs`,
+  place(
+    `I${agg.name}Repository.cs`,
+    "repository-interface",
     renderRepositoryInterface(agg, repoWithViews, ns, aggRetrievals),
   );
   // A find with a `where` expression that lowers to `Regex.IsMatch`
@@ -597,8 +617,9 @@ function emitAggregate(
   collectRetrievalBodyUsings(aggRetrievals, repoImplUsings);
   const findBodies = buildFindBodies(agg, repoWithViews);
   const retrievalBodies = buildRetrievalBodies(agg, aggRetrievals);
-  out.set(
-    `Infrastructure/Repositories/${agg.name}Repository.cs`,
+  place(
+    `${agg.name}Repository.cs`,
+    "repository-impl",
     isDoc
       ? renderDocumentRepositoryImpl(agg, repoWithViews, ns, findBodies, {
           extraUsings: [...repoImplUsings].sort(),
@@ -615,15 +636,13 @@ function emitAggregate(
     // column) + its EF configuration + the snapshot DTOs the repository
     // (de)serialises.  No normalised entity configuration, no join
     // tables — contained parts + references fold into the document.
-    out.set(
-      `Infrastructure/Persistence/Documents/${agg.name}Document.cs`,
-      renderDocumentPoco(agg, ns),
-    );
-    out.set(
-      `Infrastructure/Persistence/Configurations/${agg.name}DocumentConfiguration.cs`,
+    place(`${agg.name}Document.cs`, "document-poco", renderDocumentPoco(agg, ns));
+    place(
+      `${agg.name}DocumentConfiguration.cs`,
+      "ef-configuration",
       renderDocumentConfiguration(agg, ns, { schema: ds?.schema, tablePrefix: ds?.tablePrefix }),
     );
-    out.set(`Domain/${aggFolder}/${agg.name}Snapshots.cs`, renderSnapshots(agg, ns));
+    place(`${agg.name}Snapshots.cs`, "entity", renderSnapshots(agg, ns));
   } else {
     // Relational (default) AND embedded both use the normal entity +
     // repository + DbSet<Agg>; they differ only in the EF configuration:
@@ -631,8 +650,9 @@ function emitAggregate(
     // types `.ToJson(...)` (no child table), so its `OwnsMany/OwnsOne`
     // calls carry `.ToJson()` and the join tables are skipped.
     // dataSource-driven schema / tablePrefix knobs flow through both.
-    out.set(
-      `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
+    place(
+      `${agg.name}Configuration.cs`,
+      "ef-configuration",
       renderConfiguration(agg, ns, ctx, {
         schema: ds?.schema,
         tablePrefix: ds?.tablePrefix,
@@ -646,9 +666,10 @@ function emitAggregate(
     if (!isEmbedded) {
       for (const assoc of agg.associations) {
         const cls = joinEntityName(assoc);
-        out.set(`Infrastructure/Persistence/JoinTables/${cls}.cs`, renderJoinEntity(assoc, ns));
-        out.set(
-          `Infrastructure/Persistence/Configurations/${cls}Configuration.cs`,
+        place(`${cls}.cs`, "join-entity", renderJoinEntity(assoc, ns));
+        place(
+          `${cls}Configuration.cs`,
+          "join-entity-configuration",
           renderJoinEntityConfiguration(assoc, ns),
         );
       }

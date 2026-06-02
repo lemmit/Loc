@@ -95,16 +95,24 @@ the menus go size-1 → size-N:
 - **5a — dotnet `byFeature` layout — DONE.** First real dotnet layout: the
   `directoryLayout: byFeature` selection relocates each aggregate's application +
   API artifacts (commands / queries / handlers / DTOs / controller) under
-  `Features/<Aggregate>/` (vertical-slice), delegating Domain / Infrastructure /
-  Tests / root to `byLayer`. Pure relocation — identical file CONTENTS, only the
-  app/API paths differ (namespaces stay layered; namespace-by-feature is a later
-  slice once the style emitter varies content by layout). `byLayer` default stays
-  byte-identical. `availableAdapterNames("dotnet","layout")` now
-  `["byFeature","byLayer"]`; the R1 "reserved stub" rejection for `byFeature`
-  flips to accepted. Covered by `test/adapters/dotnet-by-feature.test.ts`
-  (routing + delegation + end-to-end pure-relocation). **R2 stays unreachable**:
-  every real style (`cqrs`) declares `supportedLayouts: ["byLayer","byFeature"]`,
-  so no invalid (style × layout) combo exists yet.
+  `Features/<Aggregate>/` (vertical-slice), delegating the rest to `byLayer`.
+  `availableAdapterNames("dotnet","layout")` now `["byFeature","byLayer"]`; the
+  R1 "reserved stub" rejection for `byFeature` flips to accepted. **R2 stays
+  unreachable** (every real style supports both layouts).
+- **5b — `byFeature` becomes a COMPLETE feature layout — DONE.** Routed the
+  remaining per-aggregate emissions in `emitAggregate` — entity (root / parts /
+  abstract base / snapshots), repository interface + impl, EF config (relational +
+  document), join tables, document POCO — through the threaded layout adapter, so
+  `byFeature` now colocates the WHOLE vertical slice (domain + persistence +
+  application + API) under `Features/<Aggregate>/`. Cross-cutting / shared
+  artifacts (context-level Domain primitives, shared Infrastructure like the
+  DbContext / dispatcher / migrations, per-context views / workflows, the Tests
+  project, the root) stay layered. Added one byLayer category (`document-poco`);
+  snapshots reuse `entity`, the document config reuses `ef-configuration`. Pure
+  relocation — identical file CONTENTS, only paths differ (namespaces stay
+  layered; namespace-by-feature is a later slice). `byLayer` default stays
+  byte-identical (baseline fixture unchanged); compiles by construction (C#
+  namespaces are path-independent, `.csproj` globs `**/*.cs`).
 - dotnet: `dapper`, `marten` (persistence); `serviceLayer` (style/`application`).
 - node: `express` / `fastify` (transport); `prisma` (persistence).
 - Activate gating **R2** (`directoryLayout × application`) once a real style does

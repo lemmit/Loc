@@ -7,15 +7,16 @@
 // single `Features/<Aggregate>/` folder — the "vertical slice" / feature-folders
 // arrangement many .NET teams prefer.
 //
-// SCOPE (this slice): only the per-aggregate CQRS + controller artifacts flow
-// through the threaded layout dispatch today (`cqrsStyleAdapter.emitForAggregate`
-// → `layout.pathFor`, see `generator/dotnet/index.ts`).  Those are the artifacts
-// `byFeature` rehomes.  The Domain / Infrastructure / Tests / root files are
-// still emitted with inline paths in the orchestrator (not yet threaded), so
-// for every NON-application category `byFeature` DELEGATES to `byLayer` —
-// keeping the tree coherent (feature folders for the app/API layer; shared
-// Domain + Infrastructure stay layered).  When the F5d rewire threads the
-// remaining emissions through the layout adapter, those categories move here too.
+// SCOPE: every PER-AGGREGATE artifact flows through the threaded layout
+// dispatch and rehomes under `Features/<Aggregate>/` — the CQRS + controller
+// surface (via `cqrsStyleAdapter.emitForAggregate`) PLUS the aggregate's domain
+// model + persistence (entity / repository / EF config / join tables / document
+// POCO, routed from `emitAggregate`).  CROSS-CUTTING artifacts stay layered
+// (delegated to `byLayer`): context-level Domain primitives (ids, enums, value
+// objects, events, common), shared Infrastructure (dbcontext, dispatcher,
+// interceptor, migrations), per-context views / workflows, the separate Tests
+// project, and the project root.  That is the intended vertical-slice shape:
+// one folder per feature for its own code; shared scaffolding stays central.
 //
 // NAMESPACE NOTE: this adapter relocates FILES only; the C# `namespace`
 // declarations baked into each artifact's content by the style emitter are
@@ -65,9 +66,26 @@ function featurePathFor(artifact: DotnetArtifact): string | null {
     case "controller":
       // The feature's API surface, colocated at the feature root.
       return `Features/${need()}/${name}`;
+    // Domain model + persistence for the aggregate — the rest of the
+    // vertical slice.  All flatten to the feature root (the CQRS bits keep
+    // their Commands/Queries/… subfolders above).  `entity` also covers
+    // the abstract-base + `<Agg>Snapshots.cs` files (same Domain folder
+    // under byLayer); `ef-configuration` covers both the relational and
+    // the `<Agg>DocumentConfiguration.cs` document configs.
+    case "entity":
+    case "repository-interface":
+    case "repository-impl":
+    case "ef-configuration":
+    case "join-entity":
+    case "join-entity-configuration":
+    case "document-poco":
+      return `Features/${need()}/${name}`;
     default:
-      // Not an application/API artifact (Domain, Infrastructure, Tests,
-      // root, views, workflows) — keep the layered placement.
+      // Cross-cutting / shared artifacts stay layered: context-level
+      // Domain primitives (ids, enums, value objects, events,
+      // domain-common), shared Infrastructure (dbcontext, dispatcher,
+      // interceptor, migrations), per-context views / workflows, the
+      // separate Tests project, and the project root.
       return null;
   }
 }

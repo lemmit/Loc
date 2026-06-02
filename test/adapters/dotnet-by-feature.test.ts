@@ -1,10 +1,10 @@
-// byFeature — real LayoutAdapter for dotnet (D-REALIZATION-AXES Phase 5a).
-// The first dotnet layout where a `directoryLayout:` selection has an
-// observable effect: it colocates each aggregate's application + API
-// artifacts under `Features/<Aggregate>/` (vertical-slice arrangement)
-// instead of byLayer's `Application/<Plural>/…` + `Api/…`.  Non-application
-// categories (Domain / Infrastructure / Tests / root / views / workflows)
-// delegate to byLayer, so the tree stays coherent.
+// byFeature — real LayoutAdapter for dotnet (D-REALIZATION-AXES Phase 5a/5b).
+// The dotnet layout where a `directoryLayout:` selection has an observable
+// effect: it colocates EVERY per-aggregate artifact — domain model +
+// persistence + application + API — under `Features/<Aggregate>/` (vertical
+// slice) instead of byLayer's layer folders.  Cross-cutting / shared artifacts
+// (context-level Domain primitives, shared Infrastructure, views, workflows,
+// the Tests project, the root) delegate to byLayer, so the tree stays coherent.
 
 import { describe, expect, it } from "vitest";
 import type { EmitCtx } from "../../src/generator/_adapters/index.js";
@@ -89,14 +89,39 @@ describe("byFeature LayoutAdapter — dotnet (real, Phase 5a)", () => {
     );
   });
 
-  it("delegates non-application categories to byLayer (Domain/Infra/Tests/root/views)", () => {
-    // Each of these returns the IDENTICAL path byLayer would — proving the
-    // partial-byFeature tree stays layered outside the app/API surface.
+  it("colocates the aggregate's domain model + persistence under Features/<Aggregate>/", () => {
+    // The rest of the vertical slice: entity (root/parts/abstract/snapshots),
+    // repository interface + impl, EF config (relational + document), join
+    // tables, and the document POCO — all flatten to the feature root.
+    expect(p({ name: "Order.cs", category: "entity", aggregateName: "Order" })).toBe(
+      "Features/Order/Order.cs",
+    );
+    expect(
+      p({ name: "IOrderRepository.cs", category: "repository-interface", aggregateName: "Order" }),
+    ).toBe("Features/Order/IOrderRepository.cs");
+    expect(
+      p({ name: "OrderRepository.cs", category: "repository-impl", aggregateName: "Order" }),
+    ).toBe("Features/Order/OrderRepository.cs");
+    expect(
+      p({ name: "OrderConfiguration.cs", category: "ef-configuration", aggregateName: "Order" }),
+    ).toBe("Features/Order/OrderConfiguration.cs");
+    expect(p({ name: "OrderTags.cs", category: "join-entity", aggregateName: "Order" })).toBe(
+      "Features/Order/OrderTags.cs",
+    );
+    expect(p({ name: "OrderDocument.cs", category: "document-poco", aggregateName: "Order" })).toBe(
+      "Features/Order/OrderDocument.cs",
+    );
+  });
+
+  it("still delegates CROSS-CUTTING categories to byLayer (shared Infra / root / views / tests)", () => {
+    // Context-level + shared artifacts return the IDENTICAL path byLayer would.
     for (const a of [
-      { name: "Order.cs", category: "entity", aggregateName: "Order" },
-      { name: "OrderRepository.cs", category: "repository-impl" },
+      { name: "OrderId.cs", category: "id" },
+      { name: "Status.cs", category: "enum" },
+      { name: "Money.cs", category: "valueobject" },
+      { name: "OrderPlaced.cs", category: "event" },
       { name: "AppDbContext.cs", category: "dbcontext" },
-      { name: "OrderConfiguration.cs", category: "ef-configuration" },
+      { name: "NoopDomainEventDispatcher.cs", category: "event-dispatcher" },
       { name: "ActiveOrdersQuery.cs", category: "view-query" },
       { name: "PlaceOrderHandler.cs", category: "workflow-handler" },
       { name: "ValidationBehavior.cs", category: "validation-behavior" },
@@ -173,18 +198,24 @@ async function emit(layout: string): Promise<Map<string, string>> {
 }
 
 describe("byFeature end-to-end emit — dotnet", () => {
-  it("relocates the application + controller files under Features/Order/", async () => {
+  it("colocates the whole feature (domain + persistence + app + API) under Features/Order/", async () => {
     const files = await emit(" { directoryLayout: byFeature }");
     const paths = [...files.keys()];
-    // CQRS + controller live under the feature folder…
+    // CQRS + controller…
     expect(paths.some((p) => p.startsWith("Features/Order/Commands/"))).toBe(true);
     expect(paths).toContain("Features/Order/OrdersController.cs");
-    // …and NOT under the byLayer layer folders.
+    // …domain model + persistence join the feature folder…
+    expect(paths).toContain("Features/Order/Order.cs");
+    expect(paths).toContain("Features/Order/IOrderRepository.cs");
+    expect(paths).toContain("Features/Order/OrderRepository.cs");
+    expect(paths).toContain("Features/Order/OrderConfiguration.cs");
+    // …and the per-aggregate byLayer folders are now empty of Order's files.
     expect(paths.some((p) => p.startsWith("Application/Orders/"))).toBe(false);
     expect(paths.some((p) => p === "Api/OrdersController.cs")).toBe(false);
-    // Domain / Infrastructure stay layered (delegated to byLayer).
-    expect(paths.some((p) => p.startsWith("Domain/Orders/"))).toBe(true);
-    expect(paths.some((p) => p.startsWith("Infrastructure/"))).toBe(true);
+    expect(paths.some((p) => p.startsWith("Domain/Orders/"))).toBe(false);
+    expect(paths.some((p) => p.startsWith("Infrastructure/Repositories/"))).toBe(false);
+    // Shared, cross-cutting infrastructure STAYS layered.
+    expect(paths).toContain("Infrastructure/Persistence/AppDbContext.cs");
   });
 
   it("the default (byLayer) emit produces NO Features/ folder", async () => {
