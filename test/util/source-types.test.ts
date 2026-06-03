@@ -5,6 +5,7 @@
 // Step 1.5 replaces), so the swap-in is provably behaviour-preserving.
 
 import { describe, expect, it } from "vitest";
+import type { DataSourceKind } from "../../src/ir/types/loom-ir.js";
 import {
   configSchemaFor,
   interfacesFor,
@@ -15,8 +16,7 @@ import {
   sourceTypeFor,
   sourceTypesForSurfaceKind,
   supportsSurfaceKind,
-} from "../../src/ir/source-types.js";
-import type { DataSourceKind } from "../../src/ir/types/loom-ir.js";
+} from "../../src/util/source-types.js";
 
 // The legacy matrix, transcribed verbatim from the pre-registry
 // `validators/datasource.ts` for the equivalence assertions below.

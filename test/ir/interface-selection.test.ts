@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
-import { defaultInterfaceFor } from "../../src/ir/source-types.js";
+import { defaultInterfaceFor } from "../../src/util/source-types.js";
 import { parseValid } from "../_helpers/parse.js";
 
 describe("defaultInterfaceFor", () => {

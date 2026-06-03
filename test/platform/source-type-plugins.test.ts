@@ -4,13 +4,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { discoverSourceTypePlugins } from "../../src/platform/source-type-plugins.js";
 import {
   capabilitiesFor,
   configSchemaFor,
   sourceTypeFor,
   supportsSurfaceKind,
-} from "../../src/ir/source-types.js";
-import { discoverSourceTypePlugins } from "../../src/platform/source-type-plugins.js";
+} from "../../src/util/source-types.js";
 
 let dir: string;
 
