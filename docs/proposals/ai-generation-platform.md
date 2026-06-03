@@ -220,25 +220,41 @@ artifacts, the platform-neutral IR, the in-browser compiler — is *exactly*
 what you would build if your real goal were a trustworthy AI generation
 platform. The missing piece is not the hard part. It is the cockpit.
 
-### 4.4 Two strategies, one engine — sequence them
+### 4.4 Emphasis — platform-first, both motions (pinned: D-AI-EMPHASIS)
 
-This thesis has a lower-risk and a higher-prize expression. They share the
-same core machinery (a validate/repair/verify loop over model patches), so
-they do not fork engineering effort.
+Three coherent paths were on the table: **A — IR-first** (`@loom/core` as the
+engine other AI builders embed), **B — mass-market platform**, **C — vertical
+platform** (the regulated/domain-heavy niche). The pinned decision
+([D-AI-EMPHASIS](../decisions.md#d-ai-emphasis--loom-leads-as-a-platform-mass-market-land--regulated-expand-ir-embedding-deferred))
+is **B + C**: Loom leads as a first-party platform across both motions, with A
+deferred to a later channel.
 
-1. **IR-first (wedge, lower risk, plays to strength).** Ship `@loom/core` as
-   the deterministic, multi-stack, auditable *engine* that other AI builders
-   embed. "Powered by Loom" determinism as a feature they sell. Their
-   hypergrowth becomes Loom's distribution; Loom never fights on consumer AI
-   UX, the axis it is worst at.
-2. **Platform-second (flagship, higher prize, bets on the weakest axis).**
-   Loom's own end-to-end AI generation platform (chat + visual + code → four
-   owned stacks + audit bundle). Bigger TAM, but competes head-on with funded
-   incumbents on on-ramp and polish.
+1. **B is the funnel.** A free/low tier for the broad "describe an app" market
+   is the distribution and brand engine. It is winnable *not* on UX polish
+   alone but on the genuine differentiators — model-as-memory (no context rot
+   as the app grows), determinism (maintainable/upgradable output),
+   multi-stack, and code ownership. The pitch is "AI apps that don't collapse
+   at scale and that you own," not "a prettier Bolt."
+2. **C is the revenue.** The regulated/engineering niche is where pricing power
+   lives — governance/conformance/provenance reporting, private backends,
+   hosted `verify`, SLA'd determinism. B lands these users; C expands them.
+3. **A is deferred, not dropped.** IR-embedding is a later channel/partnership
+   play, reachable *from* a proven platform; the reverse climb (embedded engine
+   → owns the customer) is much harder.
 
-**Recommended sequencing:** IR-first to prove the engine and earn
-distribution; platform-second once the authoring loop and UX are de-risked.
-Because both run the *same* loop, the wedge demo (§6) advances both at once.
+This is a GTM/narrative choice, not an architecture fork: B, C, and A all run
+the *same* validate/repair/verify loop over model patches, so the wedge demo
+(§6) advances all of them and committing to B+C keeps A open at zero technical
+cost.
+
+**Honest caveat (carried from the decision).** B+C is the highest-prize *and*
+highest-cost path, and leans hardest on Loom's weakest muscle — consumer AI UX
+and the capital/team to compete on it. It is justified only if (a) the on-ramp
+is made cheap so the engine carries the UX (grammar-constrained `.ddd` +
+context-pack, [`ai-authoring-loop.md`](./ai-authoring-loop.md) §5) and (b) the
+wedge demo (§6) is proven first. If funding/team for B does not materialise,
+fall back to **C-only** (vertical-first) rather than A — keep the direct
+customer.
 
 ### 4.5 Business model
 
@@ -305,9 +321,13 @@ contract the agent consumes is specified in
 
 ## 7. Open questions
 
-- **Platform vs. IR emphasis at launch.** §4.4 recommends IR-first; a strong
-  consumer-AI hire could justify leading with the platform. Pin with a
-  D-tag once decided.
+- ~~**Platform vs. IR emphasis at launch.**~~ **Resolved — pinned as B+C**
+  (platform-first across mass-market land + regulated expand, IR-embedding
+  deferred) in
+  [D-AI-EMPHASIS](../decisions.md#d-ai-emphasis--loom-leads-as-a-platform-mass-market-land--regulated-expand-ir-embedding-deferred);
+  see §4.4. Open sub-question: the B/C balance of *initial* spend (how much
+  mass-market growth before niche monetisation) stays a judgement call pending
+  the wedge demo.
 - **How much DDD altitude to expose to the AI.** Full DDD (aggregates,
   invariants, workflows) is the depth moat but raises authoring difficulty;
   a "scaffold-first, deepen-on-request" gradient may be the right default.
