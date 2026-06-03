@@ -9,7 +9,7 @@
 // plain, one with a `where`.
 context Orders {
   aggregate Order ids guid {
-    ref: string
+    code: string
     region: string
   }
   repository Orders for Order {
