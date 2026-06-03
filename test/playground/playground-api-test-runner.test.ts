@@ -58,6 +58,7 @@ function fakeBackend(): (req: SerializedRequest) => Promise<DispatchResult> {
 describe("harness", () => {
   it("expect(x).toBe(true) passes for true, fails otherwise", async () => {
     const h = createHarness();
+    // biome-ignore lint/suspicious/noSelfCompare: deliberately testing the harness's pass/fail outcomes
     h.it("ok", () => h.expect(1 === 1).toBe(true));
     h.it("bad", () => h.expect(1 === 2).toBe(true));
     const results = await runTests(h.tests);

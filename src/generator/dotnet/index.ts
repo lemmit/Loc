@@ -9,7 +9,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
-import { isTpcBase, isTpcConcrete } from "../../ir/util/inheritance.js";
+import { isTpcBase } from "../../ir/util/inheritance.js";
 import {
   effectiveSavingShape,
   isDocumentShaped,

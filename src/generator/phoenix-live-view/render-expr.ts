@@ -478,6 +478,7 @@ function renderMatch(
 
 export function renderAshType(t: TypeIR, contextModule: string): string {
   switch (t.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
       switch (t.name) {
         case "int":
@@ -503,7 +504,6 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
         case "json":
           return ":map";
       }
-    /* eslint-disable-next-line no-fallthrough */
     case "id":
       return ":uuid";
     case "enum":

@@ -1,7 +1,6 @@
 import { createInputFields, createOmissionValue } from "../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
-  type BoundedContextIR,
   type EnrichedBoundedContextIR,
   operationUsesCurrentUser,
   type SystemIR,
@@ -579,6 +578,7 @@ function renderExprWithCmdParams(
       return {
         ...e,
         cond: rewrite(e.cond),
+        // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then` across the IR
         then: rewrite(e.then),
         otherwise: rewrite(e.otherwise),
       };

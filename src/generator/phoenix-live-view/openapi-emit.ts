@@ -6,7 +6,6 @@ import {
 } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
-  BoundedContextIR,
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,

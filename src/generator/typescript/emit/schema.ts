@@ -554,6 +554,7 @@ function drizzleColumnLinesForName(
   const opt = optional || t.kind === "optional";
   const not = opt ? "" : ".notNull()";
   switch (inner.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
       switch (inner.name) {
         case "int":
@@ -580,7 +581,6 @@ function drizzleColumnLinesForName(
         case "json":
           return [`${fieldName}: jsonb("${colName}")${not},`];
       }
-    /* eslint-disable-next-line no-fallthrough */
     case "id":
       return [`${fieldName}: text("${colName}")${not},`];
     case "enum":

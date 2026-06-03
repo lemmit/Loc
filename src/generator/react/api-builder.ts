@@ -6,7 +6,6 @@ import {
   type BoundedContextIR,
   type EnrichedAggregateIR,
   type EnrichedEntityPartIR,
-  type EntityPartIR,
   type EnumIR,
   type InvariantIR,
   type OperationIR,
