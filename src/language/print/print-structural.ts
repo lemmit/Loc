@@ -347,18 +347,18 @@ function printApi(node: Api): string {
 }
 
 function printDeployable(node: Deployable): string {
-  // The `platform: X { … }` realization-axes block (foundation / application /
-  // persistence / directoryLayout / transport / runtime).  Emit the brace block
-  // only when at least one knob is set, else the bare `platform: X`.
-  const platformHead = `platform: ${enumOrString(node.platform, PLATFORM_KEYWORDS)}`;
-  const knobs: string[] = [];
-  if (node.foundation) knobs.push(`foundation: ${node.foundation}`);
-  if (node.application) knobs.push(`application: ${node.application}`);
-  if (node.persistence) knobs.push(`persistence: ${node.persistence}`);
-  if (node.directoryLayout) knobs.push(`directoryLayout: ${node.directoryLayout}`);
-  if (node.transport) knobs.push(`transport: ${node.transport}`);
-  if (node.runtime) knobs.push(`runtime: ${node.runtime}`);
-  const items: string[] = [knobs.length > 0 ? commaBlock(platformHead, knobs) : platformHead];
+  // D-REALIZATION-AXES: `platform: <p>` may carry an optional `{ … }` block
+  // decomposing the platform bundle into orthogonal axes.  Print the block
+  // only when at least one axis is set (bare `platform: dotnet` otherwise).
+  const platformLine = `platform: ${enumOrString(node.platform, PLATFORM_KEYWORDS)}`;
+  const axes: string[] = [];
+  if (node.foundation) axes.push(`foundation: ${node.foundation}`);
+  if (node.application) axes.push(`application: ${node.application}`);
+  if (node.persistence) axes.push(`persistence: ${node.persistence}`);
+  if (node.directoryLayout) axes.push(`directoryLayout: ${node.directoryLayout}`);
+  if (node.transport) axes.push(`transport: ${node.transport}`);
+  if (node.runtime) axes.push(`runtime: ${node.runtime}`);
+  const items: string[] = [axes.length > 0 ? block(platformLine, axes) : platformLine];
   if (node.contextRefs.length > 0) {
     items.push(`contexts: [${node.contextRefs.map((r) => r.$refText).join(", ")}]`);
   }
@@ -546,19 +546,21 @@ function printValueObject(node: ValueObject): string {
 }
 
 function printAggregate(node: Aggregate): string {
-  // Header order mirrors the grammar:
-  //   `abstract`? aggregate Name (`extends` Super)? `ids`? `persistedAs`?
-  //   `shape`? `inheritanceUsing`? `with`?
-  const abstractKw = node.isAbstract ? "abstract " : "";
+  // Header modifiers in grammar order (ddd.langium `Aggregate`):
+  //   [abstract] aggregate <name> [extends <Base>] [ids <kind>]
+  //   [persistedAs(…)] [shape(…)] [inheritanceUsing(…)] [with …]
+  const abstract = node.isAbstract ? "abstract " : "";
   const ext = node.superType ? ` extends ${node.superType.$refText}` : "";
   const ids = node.idKind ? ` ids ${node.idKind}` : "";
   // `persistedAs(…)` is a header modifier (between `ids` and `with`),
   // not a body member — matches the grammar order.
   const persistedAs = node.persistedAs ? ` persistedAs(${node.persistedAs})` : "";
   const shape = node.shape ? ` shape(${node.shape})` : "";
-  const inh = node.inheritanceUsing ? ` inheritanceUsing(${node.inheritanceUsing})` : "";
+  const inheritanceUsing = node.inheritanceUsing
+    ? ` inheritanceUsing(${node.inheritanceUsing})`
+    : "";
   return block(
-    `${abstractKw}aggregate ${node.name}${ext}${ids}${persistedAs}${shape}${inh}${printWithClause(node.withClause)}`,
+    `${abstract}aggregate ${node.name}${ext}${ids}${persistedAs}${shape}${inheritanceUsing}${printWithClause(node.withClause)}`,
     node.members.map(printStructural),
   );
 }
@@ -604,21 +606,24 @@ function printEventDecl(node: EventDecl): string {
   return commaBlock(`event ${node.name}`, node.fields.map(printProperty));
 }
 
-// Payload-family member (`command`/`query`/`response`/`error`/`payload` Name { … }).
+/** Payload family (`command`/`query`/`response`/`error` <Name> { … }) —
+ *  same record shape as an event; the `kind` keyword carries the intent. */
 function printPayloadDecl(node: import("../generated/ast.js").PayloadDecl): string {
   return commaBlock(`${node.kind} ${node.name}`, node.fields.map(printProperty));
 }
 
-// `channel Name { carries: …, delivery: …, retention: …, key: … }` (channels.md).
+/** `channel <Name> { carries: … delivery: … retention: … key: … }`
+ *  (channels.md, Slice 1). */
 function printChannel(node: import("../generated/ast.js").Channel): string {
-  const items: string[] = [`carries: ${node.carries.map((r) => r.$refText).join(", ")}`];
+  const items: string[] = [`carries: ${node.carries.map((c) => c.$refText).join(", ")}`];
   if (node.delivery) items.push(`delivery: ${node.delivery}`);
   if (node.retention) items.push(`retention: ${node.retention}`);
   if (node.key) items.push(`key: ${node.key}`);
   return block(`channel ${node.name}`, items);
 }
 
-// `channelSource Name { for: <channel>, use: <Storage> }` (channels.md).
+/** `channelSource <Name> { for: <channel> use: <storage> }` — binds a
+ *  channel contract to a physical transport storage. */
 function printChannelSource(node: import("../generated/ast.js").ChannelSource): string {
   const items: string[] = [`for: ${node.channel}`];
   if (node.use) items.push(`use: ${node.use.$refText}`);

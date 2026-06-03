@@ -97,7 +97,7 @@ been sequenced.
 | `extern-component-escape-hatch.md` | PARTIAL (Tier 1, React, #802) | Open-library seam; Tier 2 / LiveView deferred |
 | `extern-function-hook-escape-hatch.md` | PROPOSED | Logic twin of the component hatch; staged after it |
 | `reified-criteria.md` / `criterion-everywhere.md` | PROPOSED / SUPERSEDED-mechanism | The Specification-object reframe of criterion selectability |
-| `render-expr-target-unification.md` | PROPOSED (one slice #793) | Pinned to ride the exception-less A4 PR |
+| `render-expr-target-unification.md` | SHIPPED — `ExprTarget` contract + shared `renderExprWith` dispatcher; all three backends are leaf-only target tables (byte-identical gated) | Brought forward of A4 so A4 authors its new arms once behind the contract |
 | `resource-model-and-source-types.md` + `workflow-resource-consumption.md` | PROPOSED | Generalises the data layer (object stores / queues / external APIs) |
 | `bounded-context-model.md`, `embedded-frontend-composition.md`, `elixir-ecto-and-api-only-backends.md`, `document-and-json-hierarchies.md` | PROPOSED / PARTIAL | Structural / backend-matrix reframes; coordinate with storage + realization axes |
 | `multi-target-proxy.md`, `deployable-networking.md`, `kubernetes-helm.md`, `terraform-iac-target.md`, `java-backend.md` | PROPOSED / DEFERRED | Deployment, networking, and backend-matrix follow-ons |
