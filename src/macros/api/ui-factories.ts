@@ -90,7 +90,9 @@ export function callExpr(
     return a;
   });
   const suffix: CallSuffix = _tag(mkCallSuffix({ $type: "CallSuffix", args: callArgs }), origin);
-  callArgs.forEach((a, i) => _setContainer(a, suffix, "args", i));
+  callArgs.forEach((a, i) => {
+    _setContainer(a, suffix, "args", i);
+  });
   const chain: PostfixChain = _tag(
     mkPostfixChain({ $type: "PostfixChain", head: callee, suffixes: [suffix] }),
     origin,
@@ -137,7 +139,9 @@ export function pageMenuMeta(entries: Record<string, Expression>): PageMenuMeta 
     mkPageMenuMeta({ $type: "PageMenuMeta", entries: entryNodes }),
     origin,
   );
-  entryNodes.forEach((e, i) => _setContainer(e, meta, "entries", i));
+  entryNodes.forEach((e, i) => {
+    _setContainer(e, meta, "entries", i);
+  });
   return meta;
 }
 
@@ -167,6 +171,8 @@ export function page(opts: {
     }),
     origin,
   );
-  props.forEach((prop, i) => _setContainer(prop, p, "props", i));
+  props.forEach((prop, i) => {
+    _setContainer(prop, p, "props", i);
+  });
   return p as Page & UiMember;
 }

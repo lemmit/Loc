@@ -51,5 +51,17 @@
         "noAccumulatingSpread": "warn"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["test/macro/**/*.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    }
+  ]
 }
