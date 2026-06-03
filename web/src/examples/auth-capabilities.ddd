@@ -1,0 +1,109 @@
+// Auth + capabilities — the authorization and cross-aggregate-behaviour
+// surface that no other playground example exercises.  Targets a single
+// .NET deployable, because audit/softDelete capability emission and the
+// `auth: required` middleware are wired through to runtime on .NET today
+// (Hono/Phoenix carry the IR but don't yet compile the query filters —
+// see docs/capabilities.md).  Files-only in the playground (.NET doesn't
+// boot in-browser); open the generated tree to read Auth/*.cs, the
+// EF query filters, and the AuditableInterceptor.
+//
+// Demonstrates, end to end:
+//   • system `user { ... }` JWT claim shape + `currentUser` magic id.
+//   • `auth: required` on the deployable → JWT-decode middleware.
+//   • subdomain `permissions { ... }` → typed `permissions.<name>`.
+//   • `requires <expr>` authorization gate (HTTP 403) vs `precondition`
+//     domain gate (HTTP 400).
+//   • row-level visibility: a repository find and a view filtered by
+//     `currentUser`.
+//   • the `audit` + `softDelete` capability macros (context) paired with
+//     `auditable` + `softDeletable` (aggregate) — the canonical
+//     audit-columns + soft-delete-filter pattern.
+//   • a hand-written capability group (`filter for "tenantScoped"`) to
+//     show the surface the macros desugar into.
+
+system Helpdesk {
+
+  // The JWT claim shape the verifier hook decodes per request.  Every
+  // `currentUser.<field>` below type-checks against this block.
+  user {
+    id: string
+    role: string
+    permissions: string[]
+    tenantId: string
+  }
+
+  subdomain Support {
+
+    // Typed permission catalogue.  `permissions.ticketsClose` lowers to
+    // the stable string "support.ticketsClose" on both sides of the wire.
+    permissions {
+      ticketsClose,
+      ticketsReassign
+    }
+
+    // `with audit, softDelete` add the context-level stamping rules and
+    // the soft-delete query filter.  `with tenantScoped` (below, on the
+    // context) is the hand-written equivalent for multi-tenant scoping.
+    context Support with audit, softDelete {
+
+      enum TicketStatus { Open, Pending, Closed }
+
+      // Hand-written capability group: every aggregate that
+      // `implements "tenantScoped"` gets this read filter.  This is
+      // exactly what the audit/softDelete macros expand into, but for a
+      // tenant rule the macros don't ship.
+      filter for "tenantScoped" this.tenantId == currentUser.tenantId
+
+      // `auditable` adds createdAt/updatedAt/createdBy/updatedBy + the
+      // "auditable" marker; `softDeletable` adds isDeleted/deletedAt +
+      // softDelete()/restore() + the "softDeletable" marker.  The
+      // context's `audit`/`softDelete` rules then attach to those markers.
+      aggregate Ticket with auditable, softDeletable {
+        tenantId: string
+        subject: string
+        status: TicketStatus
+        assignee: string
+        implements "tenantScoped"
+
+        invariant subject.length > 0
+
+        // `requires` (403) gates the caller; `precondition` (400) gates
+        // the state.  currentUser + permissions.<name> resolve here.
+        operation close() {
+          requires currentUser.role == "agent"
+                || currentUser.permissions.contains(permissions.ticketsClose)
+          precondition status != Closed
+          status := Closed
+        }
+
+        operation reassign(to: string) {
+          requires currentUser.role == "agent"
+                || currentUser.permissions.contains(permissions.ticketsReassign)
+          precondition status != Closed
+          assignee := to
+        }
+      }
+
+      // Row-level visibility: both the find and the view scope their
+      // result to the requesting user via `currentUser` (slice 1C).
+      repository Tickets for Ticket {
+        find mine(): Ticket[] where assignee == currentUser.id
+        find openInTenant(): Ticket[]
+          where tenantId == currentUser.tenantId && status == Open
+      }
+
+      view MyOpenTickets = Ticket where assignee == currentUser.id && status == Open
+    }
+  }
+
+  storage primary { type: postgres }
+  resource ticketsState { for: Support, kind: state, use: primary }
+
+  deployable api {
+    platform: dotnet
+    contexts: [Support]
+    dataSources: [ticketsState]
+    port: 8080
+    auth: required
+  }
+}

@@ -27,6 +27,10 @@ import multifileSharedMoneySource from "./shared/money.ddd?raw";
 import multifileSharedCurrencySource from "./shared/currency.ddd?raw";
 import multifileLandingSource from "./multifile-landing.ddd?raw";
 import multifileMarketingLibSource from "./multifile-marketing-lib.ddd?raw";
+import inheritanceSystemSource from "./inheritance-system.ddd?raw";
+import authCapabilitiesSource from "./auth-capabilities.ddd?raw";
+import fulfillmentNewestSource from "./fulfillment-newest.ddd?raw";
+import fulfillmentKernelSource from "./shared/kernel.ddd?raw";
 
 export interface LoomExample {
   id: string;
@@ -41,7 +45,7 @@ export interface LoomExample {
    *  e.g. `shared/money.ddd`) so the example author doesn't have to
    *  type the prefix at every entry.  The picker writes these to
    *  the workspace VFS when the example is chosen.  See
-   *  `docs/multi-file-source.md`. */
+   *  `docs/plans/multi-file-source.md`. */
   files?: Record<string, string>;
   /** Optional one-liner shown under the dropdown — what the
    *  example demonstrates and whether it supports the Preview
@@ -79,6 +83,16 @@ export const examples: LoomExample[] = [
     },
     blurb:
       "Landing page that imports a marketing component library (Hero / FeatureCard / CtaSection / Footer) declared as top-level `component`s in a sibling .ddd — same scope as root-level value objects and enums.",
+  },
+  {
+    id: "fulfillment-newest",
+    label: "Newest features tour (multi-file)",
+    source: fulfillmentNewestSource,
+    files: {
+      "shared/kernel.ddd": fulfillmentKernelSource,
+    },
+    blurb:
+      "Imports a shared kernel (root-level Money VO + Priority enum) and exercises the most recently-added surface: channel + channelSource, the payload family (command/query/response/error), criterion, retrieval + Repo.run, the workflow `for … in` loop, and declarative seed datasets. Hono + React, previews live.",
   },
   // Storybook entries lead with the discriminator (pack name or
   // "components") so the eye lands on what makes each one different,
@@ -209,6 +223,20 @@ export const examples: LoomExample[] = [
     source: provenanceSystemSource,
     blurb:
       "`provenanced` field: each write to `order.total` is captured as a rule snapshot; the Hono backend records a runtime trace per write.",
+  },
+  {
+    id: "inheritance-system",
+    label: "Inheritance & event sourcing (Hono + React)",
+    source: inheritanceSystemSource,
+    blurb:
+      "Abstract aggregate + two `extends` subtypes mapped Table-Per-Hierarchy (`inheritanceUsing(sharedTable)`) with an auto-emitted polymorphic reader, plus an event-sourced aggregate (`persistedAs(eventLog)` + `apply`) whose truth is its event stream.",
+  },
+  {
+    id: "auth-capabilities",
+    label: "Auth & capabilities (.NET)",
+    source: authCapabilitiesSource,
+    blurb:
+      "JWT `user{}` claims + `currentUser`, `auth: required` middleware, subdomain `permissions{}`, `requires` (403) vs `precondition` (400), row-level visibility, and the audit/softDelete capability macros + a hand-written tenant filter. Files-only — capabilities + auth emit to runtime on .NET.",
   },
   {
     id: "acme",
