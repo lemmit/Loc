@@ -1,9 +1,18 @@
 # Agent tools & MCP — one catalog, many transports
 
-> **Status:** PARTIAL — the **generative catalog shipped** (`src/tools/`:
-> `loom_validate` / `loom_outline` / `loom_generate` / `loom_apply_patch` +
-> `callTool`, gated by `test/tools/catalog.test.ts`). MCP server, LSP-provider
-> correctness, and the navigational family remain (§8).
+> **Status:** PARTIAL — the **generative catalog**, the **MCP stdio server**,
+> the **full navigational family** (read + rewrite trios), and the
+> **transport-neutral agent loop** have shipped (§8 items 1, 2, 4, 5-engine).
+> The `src/tools/` catalog now carries ten tools — generative (`loom_validate` /
+> `loom_outline` / `loom_generate` / `loom_apply_patch`), read-nav
+> (`loom_find_symbol` / `loom_references` / `loom_hover`, #937), and rewrite-nav
+> (`loom_rename` / `loom_quickfix` / `loom_unfold_macro`, returning
+> `EditResult`s, #940) — over one shared resolver (`src/api/symbol-resolver.ts`);
+> `src/mcp/` + the `packages/ddd-mcp` publish wrapper register it over the
+> `@modelcontextprotocol/sdk` stdio transport (#934); the provider-neutral agent
+> loop (`src/tools/agent-loop.ts`) drives the validate→repair conversation over
+> `callTool` (#946). **Remaining:** LSP-provider correctness (§4c) and the
+> **playground agentic chat UI** (§8 item 5-UI).
 > **Role:** Pins how Loom exposes its operations as **agent-callable tools**:
 > a single transport-neutral **tool catalog** over the `src/api/` toolkit, and
 > the transports that surface it (an MCP stdio server for external hosts; direct

@@ -17,6 +17,11 @@ scope), the refreshed [`README.md`](./README.md) status table is the
 companion source of truth; this plan's audit tables below are kept in
 sync with it.
 
+For a short, dated digest of **only the carry-over work** (what's left,
+grouped by family, with a suggested near-term order), see
+[`remaining-work-plan.md`](./remaining-work-plan.md) — refreshed alongside this
+plan's audit tables.
+
 The goal is a single topological order across the in-scope proposals
 that:
 
@@ -49,6 +54,13 @@ Major landings since the original plan was drafted:
 | **extern-component Tier 1 (React)** (#802) — `component … extern` typed leaf | `extern-component-escape-hatch.md` Tier 1 shipped; Tier 2 (`action`) + LiveView carry over |
 | **channels Slice 1** (#797) — `channel`/`channelSource` surface → `ChannelIR`/`ChannelSourceIR` | `channels.md` realtime wire + caching carry over |
 | **retrieval** (#794 surface+IR+lowering; #810 .NET `Run<Name>Async` + workflow `foreach`) | `retrieval.md` Hono/Phoenix emission + `loads` plan carry over |
+| **Pagination / payload P3b** — `Paged<T>` carrier + functional paged finds on **all four backends** (#898 React, #916 .NET CQRS+EF, #925 Phoenix/Ash offset, #927 Hono nullish, #933 cross-backend wire-parity closeout) | `pagination-design-note.md` now SHIPPED (offset); `payload-transport-layer.md` P3b done — the rest of P1–P4 carry over |
+| **Reified criteria (.NET)** — Specification reframe on .NET/EF: `Criterion<T>`+`IsSatisfiedBy` (#890), `ToExpression` query face (#901), retrieval/find consume it (#910/#926), Ardalis `Specification<T>` bundle EF-only (#936) | `reified-criteria.md` now PARTIAL (.NET); Hono/Phoenix reification + the cross-backend reframe carry over. Graduates `criterion.md`'s deferred selectability tail on one backend |
+| **Event-sourcing appliers** — Hono create-from-event (A2.2a, #895) + **.NET/EF appliers + event store** (A2.2b, #914); members-only workflow body with `create()` starter (#889); event/payload names as workflow command param types (#932) | `workflow-and-applier.md` now PARTIAL (Hono + .NET); Phoenix backend + projections/snapshots carry over |
+| **Agent tooling** — `ddd-mcp` stdio server over the tool catalog (#934) + navigational read trio (#937) + **rewrite trio** `loom_rename`/`loom_quickfix`/`loom_unfold_macro` (#940) + a **transport-neutral agent loop** (#946), riding a wave of LSP rename/references/hover correctness fixes (#913–#929) | `agent-tools-and-mcp.md` now PARTIAL (generative + MCP + full nav family + agent loop); LSP-provider correctness + playground chat UI carry over |
+| **Cross-stack static analysis (Phoenix arm)** — Elixir `@spec` emission on event/VO/view/workflow modules + shared `<App>.Types` (#902/#904/#906/#911), Dialyzer CI behind `LOOM_PHOENIX_DIALYZER` (#907/#918), `LOOM_DOTNET_FORMAT`/`LOOM_PHOENIX_FORMAT` gates (#903) | `cross-stack-static-analysis.md` now PARTIAL; C# nullable + .NET analyzer + repo-content lint carry over |
+| **Value-object array persistence** — `Money[]` etc. flatten to child tables across all backends (#908); migrations flatten value objects into columns (#891) | Folded into `document-and-json-hierarchies.md`'s shape axis |
+| **ir/lower + ir/validate decomposition** — `lower.ts` split into per-declaration-kind leaves (#921/#923/#930/#935) + `lower-expr`/`-stmt`/`-types`; `validate.ts` split into `checks/*` (#900); .NET `cqrs-emit`→`cqrs/*` (#869), Phoenix `domain-emit`→`domain/*` (#912) | Phase 0.3 seam extractions DONE — supersedes the 0.3 split-list below |
 
 Per-proposal state on `origin/main`:
 
@@ -59,7 +71,13 @@ Per-proposal state on `origin/main`:
 | `audit-and-logging.md` | PARTIAL — `audited` boolean lands; Hono emits load→mutate→save→audit | Promote to `audited(actions \| access \| events \| off)`; `AuditRecord` shape; before/after snapshots; .NET Mediator behaviour; access-audit query pipeline |
 | `sensitivity-and-compliance.md` | PARTIAL — phases 1 + 2-lite shipped | Phase 2 full (`authorized(<tag>,…)`); Phase 3 (`mask:` DTOs + React); Phase 4 (sink-call classification) |
 | `storage-and-platform-config.md` | PARTIAL — top-level `storage` + `dataSource` + role-keyed slots + the persistence/style/layout **adapter taxonomy** (F3–F7) exist; adapters live on the `PlatformSurface` (D-ADAPTER-HOME) | **Next gated step: per-deployable `persistence:` / `style:` / `layout:` selection** — grammar + `DeployableIR` fields → system orchestrator resolves via `resolve-adapters.ts` + validator capability-checks (`supports`, `supportedLayouts`). This is what *consumes* `resolve*`; build when there's a pull for a non-default adapter. Plus `STORAGE_CAPABILITIES` matrix; per-aggregate `for:` deferred to v2 (D-GRANULARITY) |
-| `criterion.md` | PARTIAL — core (declaration + validation + compile-time inline) + filter-capability targeting on all SQL backends | reified/retrieval/`from`/`when`/auto-`can-<op>`/`private workflow` deferred tail |
+| `criterion.md` | PARTIAL — core (declaration + validation + compile-time inline) + filter-capability targeting on all SQL backends | reified (now PARTIAL on .NET, below)/retrieval/`from`/`when`/auto-`can-<op>`/`private workflow` deferred tail |
+| `reified-criteria.md` | PARTIAL (.NET/EF) — `Criterion<T>`+`IsSatisfiedBy` (#890), `ToExpression` (#901), find/retrieval consume it (#910/#926), Ardalis `Specification<T>` bundle (#936) | Hono/Drizzle + Phoenix/Ash reification; the cross-backend Specification reframe |
+| `payload-transport-layer.md` / `pagination-design-note.md` | PARTIAL — `Paged<T>` carrier + paged finds on all 4 backends (P3b #898/#916/#925, #933 closeout); pagination SHIPPED for offset | P1–P4 carrier-generic surface, tagged unions, `<Agg>Wire`; `unpaged` opt-out + page-aware hooks |
+| `workflow-and-applier.md` | PARTIAL — appliers (A1) + event-sourced emission on Hono (A2.1/A2.2a) and **.NET/EF (A2.2b #914)**; members-only body + `create()` (#889) | Phoenix event-sourced backend, snapshots, projections, workflow-as-aggregate `on(...)` |
+| `cross-stack-static-analysis.md` | PARTIAL — Phoenix `@spec` (#902/#904/#906/#911) + Dialyzer CI (#907/#918) + format gates (#903) | C# nullable enable, .NET analyzer gate, repo-content lint |
+| `agent-tools-and-mcp.md` | PARTIAL — catalog (10 tools) + MCP stdio server (#934) + read trio (#937) + rewrite trio (#940) + agent loop (#946) | LSP-provider correctness + playground agentic chat UI |
+| `implicit-system-composition.md` | PARTIAL — Tiers 1 & 2 (top-level domain + deployment members compose via `lowerProject`) | per `multi-file-source.md` tail |
 | `lifecycle-operations.md` | PARTIAL — Phase 1 (kind-tagged `create`/`destroy` IR, #722) + D-URLSTYLE | Phase 2+ action surface + `urlStyle:`/`routeSlug` slice |
 | `aggregate-inheritance.md` | PARTIAL — I1 (surface + IR + validators, no emission) | I2 (TPH emit), I3 (TPC emit), I4 (override + TPT docs) |
 | `database-seeding.md` | PARTIAL — Phase 1 + all three backend emitters + CI gates | ship-once `__loom_seed` marker + compose wiring, imperative body, per-row upsert |
@@ -96,7 +114,7 @@ been sequenced.
 | `database-seeding.md` | PARTIAL (Phase 1 + 3 emitters) | Mirrors the migrations pipeline; near-complete |
 | `extern-component-escape-hatch.md` | PARTIAL (Tier 1, React, #802) | Open-library seam; Tier 2 / LiveView deferred |
 | `extern-function-hook-escape-hatch.md` | PROPOSED | Logic twin of the component hatch; staged after it |
-| `reified-criteria.md` / `criterion-everywhere.md` | PROPOSED / SUPERSEDED-mechanism | The Specification-object reframe of criterion selectability |
+| `reified-criteria.md` / `criterion-everywhere.md` | PARTIAL (.NET/EF) / SUPERSEDED-mechanism | The Specification-object reframe of criterion selectability — shipped on .NET (4 slices); Hono/Phoenix still inline |
 | `render-expr-target-unification.md` | SHIPPED — `ExprTarget` contract + shared `renderExprWith` dispatcher; all three backends are leaf-only target tables (byte-identical gated) | Brought forward of A4 so A4 authors its new arms once behind the contract |
 | `resource-model-and-source-types.md` + `workflow-resource-consumption.md` | PROPOSED | Generalises the data layer (object stores / queues / external APIs) |
 | `bounded-context-model.md`, `embedded-frontend-composition.md`, `elixir-ecto-and-api-only-backends.md`, `document-and-json-hierarchies.md` | PROPOSED / PARTIAL | Structural / backend-matrix reframes; coordinate with storage + realization axes |
@@ -180,25 +198,31 @@ No new language features.
 - D-ENVELOPE — Pin the wire envelope rule (entity | `Paged<T>` |
   ProblemDetails | event-frame).
 
-### 0.2 Mechanical file-tree reorgs (still NOT STARTED on main)
+### 0.2 Mechanical file-tree reorgs — DONE on main
 
-- `src-ir-phase-reveal.md` — restructure `src/ir/` into `types/` /
-  `lower/` / `enrich/` / `validate/` / `util/`; move
-  `migrations-builder.ts` to `src/system/`.
-- `test-layout-and-macro-consolidation.md` — mirror `test/` to `src/`
-  phases; consolidate macros under `src/macros/`.
+- ~~`src-ir-phase-reveal.md`~~ — SHIPPED. `src/ir/` is `types/` / `lower/` /
+  `enrich/` / `validate/` / `util/`; `migrations-builder.ts` moved to
+  `src/system/`. `lower/` and `validate/` were further decomposed into
+  per-declaration-kind / per-theme leaves (#921/#923/#930/#935, #900).
+- ~~`test-layout-and-macro-consolidation.md`~~ — SHIPPED. `test/` mirrors
+  `src/` phases; macros consolidated under `src/macros/`.
 
 ### 0.3 Seam extractions
 
 - ~~Walker-target extraction~~ — DONE on main; cite for reuse.
-- Split `src/ir/lower-expr.ts` (1,606 LOC) into `lower-expr.ts` /
-  `lower-stmt.ts` / `lower-types.ts`.
-- Split `src/generator/ts/repository-builder.ts` (~1,125 LOC) into
+- ~~Split `src/ir/lower-expr.ts`~~ — DONE. Now `lower-expr.ts` /
+  `lower-stmt.ts` / `lower-types.ts` under `src/ir/lower/`, alongside the
+  per-declaration-kind leaves.
+- ~~`render-expr.ts` unification~~ — DONE (`render-expr-target-unification.md`;
+  `ExprTarget` + `renderExprWith`). Backend emit monoliths also split:
+  .NET `cqrs-emit`→`cqrs/{dtos,commands,queries,controller}` (#869),
+  Phoenix `domain-emit`→`domain/{predicates,actions}` (#912).
+- Split `src/generator/typescript/repository-builder.ts` (~1,125 LOC) into
   `eager-load-builder.ts`, `transaction-boundary-builder.ts`,
-  `change-events-builder.ts`, `repository-imports-builder.ts`.
+  `change-events-builder.ts`, `repository-imports-builder.ts`. *(still open)*
 - PlatformSurface lifecycle hooks — extend `src/platform/surface.ts`
   with optional `emitAuthGate`, `emitAuditInit`,
-  `emitCompliancePolicy`, `emitTenancyFilter`, `emitI18nAdapter`.
+  `emitCompliancePolicy`, `emitTenancyFilter`, `emitI18nAdapter`. *(still open)*
 
 ### 0.4 Cross-cutting design specs (`docs/architecture/*.md`)
 
