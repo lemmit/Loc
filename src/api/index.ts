@@ -30,6 +30,8 @@ import {
 } from "./report.js";
 
 export type {
+  EditError,
+  EditResult,
   FindSymbolResult,
   GenerateReport,
   HoverResult,
@@ -37,8 +39,12 @@ export type {
   NavError,
   NavLocation,
   NavSymbol,
+  NavTextEdit,
   Outline,
+  QuickfixResult,
   ReferencesResult,
+  RenameResult,
+  UnfoldMacroResult,
   ValidateReport,
 } from "../diagnostics/contract.js";
 export type {
@@ -51,6 +57,7 @@ export type {
 export { applyPatches, resolvePatchEdits } from "../language/model-patch.js";
 export { fixHintCodeActions, toLspDiagnostic, toLspDiagnostics } from "./lsp.js";
 export { findSymbol, hover, references } from "./navigate.js";
+export { quickfix, rename, unfoldMacro } from "./refactor.js";
 export { LOOM_VERSION } from "./report.js";
 
 interface ParsedSource {

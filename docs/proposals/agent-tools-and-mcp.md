@@ -112,17 +112,22 @@ Patches *mutate*; these *query and locally rewrite*.
 | `loom_find_symbol` | `{ source, symbol, kind? }` | `{ address, range, kind, parent? }` \| `NavError` | read | ✅ |
 | `loom_references` | `{ source, symbol }` | `{ locations: NavLocation[] }` \| `NavError` | read | ✅ |
 | `loom_hover` | `{ source, symbol }` | `{ markdown }` \| `NavError` | read | ✅ |
-| `loom_rename` | `{ source, symbol, newName }` | `WorkspaceEdit` (edits, **not applied**) | pure | ⬜ |
-| `loom_quickfix` | `{ source, code, at? }` | `WorkspaceEdit` for that diagnostic code | pure | ⬜ |
-| `loom_unfold_macro` | `{ source, macro, on }` | `WorkspaceEdit` | pure | ⬜ |
+| `loom_rename` | `{ source, symbol, newName }` | `EditResult` (edits, **not applied**) \| `EditError` | pure | ✅ |
+| `loom_quickfix` | `{ source, code, at? }` | `EditResult` for that diagnostic code \| `EditError` | pure | ✅ |
+| `loom_unfold_macro` | `{ source, macro, on }` | `EditResult` \| `EditError` | pure | ✅ |
 
-The **read trio** ships in `src/api/navigate.ts` (pure, browser-safe — same
-EmptyFileSystem parse as the rest of `src/api/`) and is registered in the
-catalog. `kind` returns the node's OWN kind (`property` / `operation` / …), not
-the address keyword `addressOf` qualifies plain members under, and the same
-`kind` value is the disambiguating filter. The **rewrite trio** (returning
-`WorkspaceEdit`s, not applying them) is the follow-up slice over the same
-resolver.
+The whole family ships over one **shared resolver** (`src/api/symbol-resolver.ts`,
+pure + browser-safe): the read trio in `src/api/navigate.ts`, the rewrite trio
+in `src/api/refactor.ts`, all registered in the catalog. `kind` returns the
+node's OWN kind (`property` / `operation` / …), not the address keyword
+`addressOf` qualifies plain members under, and the same `kind` value is the
+disambiguating filter. Only nodes with their own name are addressable — an
+unnamed `create`/`destroy`/`invariant` borrows its entity's name as its address
+tail, which would otherwise collide with the entity when resolving `Order`. The
+rewrite trio RETURNS an `EditResult` (`{ edits, title? }`); the host applies it
+(contract §3: tools never touch the buffer). `EditError` covers the non-symbol
+failure modes (`no-fix` for a code without a fix-hint, `cannot-unfold`, plus the
+macros a host does carry when the requested one is absent).
 
 **Addressing.** `symbol` is a dotted path — short form (`Order.customerId`) when
 unambiguous, fully-qualified (`Sales.Orders.Order.customerId`) otherwise. This
@@ -365,11 +370,12 @@ playground settings matter, independent of the tools.
 3. **LSP-provider correctness** (§4c) — fix the operation-rename bug + coverage,
    add quick-fix `fixHintFor` providers. Standalone editor value; gates the
    navigational verbs.
-4. **Navigational family** (§4b) — by-name addressing over the providers.
-   - ✅ read trio: `loom_find_symbol` / `loom_references` / `loom_hover`
-     (`src/api/navigate.ts` + catalog), inheriting the MCP + playground
-     transports.
-   - ⬜ rewrite trio: `loom_rename` / `loom_quickfix` / `loom_unfold_macro`
-     (return `WorkspaceEdit`s, not applied) over the same resolver.
+4. ✅ **Navigational family** (§4b) — by-name addressing over the providers,
+   on one shared resolver (`src/api/symbol-resolver.ts`).
+   - read trio: `loom_find_symbol` / `loom_references` / `loom_hover`
+     (`src/api/navigate.ts`).
+   - rewrite trio: `loom_rename` / `loom_quickfix` / `loom_unfold_macro`
+     (`src/api/refactor.ts`) — return `EditResult`s, not applied.
+   Both inherit the MCP + (future) playground transports through the catalog.
 5. *(separate slice)* playground agentic chat: catalog dispatch + LLM wiring +
    key handling + apply-to-editor.

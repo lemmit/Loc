@@ -9,11 +9,11 @@
 // (model `source` in → report / new-source out) — no server-side state, no
 // filesystem side effect.  No MCP dependency, no Node-only imports → browser-safe.
 //
-// This module hosts the GENERATIVE family (the authoring loop) AND the read
-// half of the NAVIGATIONAL family (find_symbol / references / hover over the
-// LSP providers, by-name addressing — §4b).  The rewrite half (rename /
-// quickfix / unfold_macro, returning WorkspaceEdits) joins in a follow-up
-// slice — see docs/proposals/agent-tools-and-mcp.md §4b.
+// This module hosts the GENERATIVE family (the authoring loop) AND the full
+// NAVIGATIONAL family (§4b) over the LSP providers, addressed by symbol name:
+// the read verbs (find_symbol / references / hover) and the rewrite verbs
+// (rename / quickfix / unfold_macro) — the latter RETURN edits, never applying
+// them (contract §3).  See docs/proposals/agent-tools-and-mcp.md §4b.
 // ---------------------------------------------------------------------------
 
 import {
@@ -22,7 +22,10 @@ import {
   generate,
   hover,
   outline,
+  quickfix,
   references,
+  rename,
+  unfoldMacro,
   validate,
 } from "../api/index.js";
 import type { ModelPatch } from "../diagnostics/contract.js";
@@ -178,6 +181,70 @@ export const TOOLS: ToolDef[] = [
       "The hover bubble (markdown) for a symbol — its signature / type summary, exactly as the editor shows. Ambiguous/unknown symbol returns { error, candidates }.",
     inputSchema: SYMBOL_SCHEMA,
     handler: (args) => hover(reqString(args, "source"), reqString(args, "symbol")),
+  },
+  {
+    name: "loom_rename",
+    description:
+      "Rename a symbol everywhere — returns the text edits (declaration + every use site, including member accesses the cross-reference index can't see), WITHOUT applying them. Apply the edits to your buffer. Ambiguous/unknown symbol returns { error, candidates }.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: { type: "string", description: "The .ddd model source." },
+        symbol: {
+          type: "string",
+          description: "Dotted symbol path of the declaration to rename.",
+        },
+        newName: { type: "string", description: "The new name." },
+      },
+      required: ["source", "symbol", "newName"],
+      additionalProperties: false,
+    },
+    handler: (args) =>
+      rename(reqString(args, "source"), reqString(args, "symbol"), reqString(args, "newName")),
+  },
+  {
+    name: "loom_quickfix",
+    description:
+      "Return the fix-hint edits for a diagnostic code (from loom_validate), WITHOUT applying them. 'at' is the diagnostic's node address — required when several diagnostics share the code. Returns { edits, title } or { error } (not-found / ambiguous / no-fix).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: { type: "string", description: "The .ddd model source." },
+        code: {
+          type: "string",
+          description: "The diagnostic code to fix, e.g. 'loom.bare-aggregate-in-type'.",
+        },
+        at: {
+          type: "string",
+          description:
+            "Optional node address (the diagnostic's 'node' field) — disambiguates when several diagnostics share the code.",
+        },
+      },
+      required: ["source", "code"],
+      additionalProperties: false,
+    },
+    handler: (args) =>
+      quickfix(reqString(args, "source"), reqString(args, "code"), optString(args, "at")),
+  },
+  {
+    name: "loom_unfold_macro",
+    description:
+      "Unfold a 'with <macro>(...)' clause on a host into its expanded source — returns the refactor edits, WITHOUT applying them. 'on' is the host symbol (e.g. an aggregate). Returns { edits, title } or { error } (not-found with the macros it does carry / cannot-unfold).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: { type: "string", description: "The .ddd model source." },
+        macro: { type: "string", description: "The macro name to unfold, e.g. 'crudish'." },
+        on: {
+          type: "string",
+          description: "The host symbol the macro is applied to (e.g. 'Order').",
+        },
+      },
+      required: ["source", "macro", "on"],
+      additionalProperties: false,
+    },
+    handler: (args) =>
+      unfoldMacro(reqString(args, "source"), reqString(args, "macro"), reqString(args, "on")),
   },
 ];
 
