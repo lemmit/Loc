@@ -60,6 +60,61 @@ export function validateWorkflows(ctx: BoundedContextIR, diags: LoomDiagnostic[]
     }
     validateWorkflowBody(ctx, wf, diags);
     validateWorkflowCorrelation(ctx, wf, diags);
+    validateWorkflowCreates(wf, diags, ctx.name);
+  }
+}
+
+// Workflow create-declaration well-formedness (workflow-and-applier.md A2-S5f,
+// validation rules 21–22).  A workflow may declare several `create` starters —
+// one per entry point.  These checks keep that set unambiguous so the runtime
+// can route a command to exactly one starter, and so the deprecated
+// `params`/`statements` facade has a single, well-defined primary create to
+// project from (it picks the unnamed command-triggered create).
+//
+//   - rule 21 (`loom.canonical-create-duplicate-workflow`) — at most one
+//     unnamed (canonical) create; extra entry points must be named.
+//   - rule 22 (`loom.create-name-conflict-workflow`)       — no two creates
+//     share a name.
+//
+// Rules 23–24 (event-triggered overlap / create-vs-on correlation agreement)
+// are deferred: they key on `CreateIR.eventRef`, which lowering does not yet
+// derive for event-triggered creates, and the canonical `create(event: E)`
+// binding name collides with the `event` keyword.  Validating them before that
+// surface lands would test a form the compiler can't yet express.
+function validateWorkflowCreates(wf: WorkflowIR, diags: LoomDiagnostic[], ctxName: string): void {
+  const src = `${ctxName}/${wf.name}`;
+  const creates = wf.creates ?? [];
+
+  // rule 21 — at most one canonical (unnamed) create.
+  const canonical = creates.filter((c) => c.name === null);
+  if (canonical.length > 1) {
+    diags.push({
+      severity: "error",
+      code: "loom.canonical-create-duplicate-workflow",
+      message:
+        `workflow '${wf.name}' declares ${canonical.length} unnamed 'create' starters; ` +
+        `at most one canonical create is allowed. Name the additional entry points (e.g. 'create byImport(...)').`,
+      source: src,
+    });
+  }
+
+  // rule 22 — no two creates share a name.
+  const nameCounts = new Map<string, number>();
+  for (const c of creates) {
+    if (c.name === null) continue;
+    nameCounts.set(c.name, (nameCounts.get(c.name) ?? 0) + 1);
+  }
+  for (const [name, count] of nameCounts) {
+    if (count > 1) {
+      diags.push({
+        severity: "error",
+        code: "loom.create-name-conflict-workflow",
+        message:
+          `workflow '${wf.name}' declares ${count} 'create' starters named '${name}'; ` +
+          `create names must be unique within a workflow.`,
+        source: src,
+      });
+    }
   }
 }
 
