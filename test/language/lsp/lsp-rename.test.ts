@@ -338,3 +338,49 @@ describe("RenameProvider — shadowing, prepareRename, multi-file", () => {
     expect(bEdits[0]?.newText).toBe("Purchase");
   });
 });
+
+describe("RenameProvider — system-scoped declarations", () => {
+  // Deployables and subdomains (modules) are referenced through Langium
+  // cross-references (`targets:` / `against` for deployables; `api … from` for
+  // subdomains), so the index-driven default rename already rewrites every use
+  // site.  These pin that contract across a full `system` fixture — the one
+  // scope the member-access tests above don't reach.
+  it("renames a deployable and its `targets:` + `against` references", async () => {
+    const result = await renameAt(
+      `system Acme {
+  subdomain Sales { context Orders { aggregate Order { total: int } } }
+  deployable <|>backend {
+    platform: hono
+    contexts: [Orders]
+    port: 8080
+  }
+  deployable web {
+    platform: static
+    targets: backend
+    ui: WebUi
+    port: 3000
+  }
+  ui WebUi { }
+  test e2e "smoke" against backend { }
+}`,
+      "core",
+    );
+    expect(result).toContain("deployable core {");
+    expect(result).toContain("targets: core"); // cross-ref in the static deployable
+    expect(result).toContain("against core"); // cross-ref in the e2e test
+    expect(result).not.toMatch(/\bbackend\b/);
+  });
+
+  it("renames a subdomain (module) and its `api … from` reference", async () => {
+    const result = await renameAt(
+      `system Acme {
+  subdomain <|>Sales { context Orders { aggregate Order { total: int } } }
+  api SalesApi from Sales
+}`,
+      "Selling",
+    );
+    expect(result).toContain("subdomain Selling {");
+    expect(result).toContain("from Selling");
+    expect(result).not.toMatch(/\bfrom Sales\b/);
+  });
+});
