@@ -354,6 +354,13 @@ export function renderTsType(t: TypeIR): string {
       // on an aggregate / VO / entity field.  Validator rejects
       // misuse — throwing here keeps the assumption explicit.
       throw new Error("renderTsType: 'slot' type is UI-only and should not reach the backend.");
+    case "genericInstance":
+      // Generic carriers (`paged` / `envelope`) are not emittable yet
+      // (payload-transport-layer.md, P3b); the IR-validate gate rejects
+      // them before codegen, so reaching here is a bug.
+      throw new Error(
+        `renderTsType: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
   }
 }
 

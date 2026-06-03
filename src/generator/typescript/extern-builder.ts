@@ -166,6 +166,10 @@ function wireTsType(t: TypeIR): string {
       throw new Error(
         "wireTsType: 'slot' type is UI-only and should not appear on an extern operation parameter.",
       );
+    case "genericInstance":
+      throw new Error(
+        `wireTsType: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
   }
 }
 

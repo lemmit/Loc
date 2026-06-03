@@ -184,6 +184,14 @@ export function inScopeNames(env: Env): ScopeCandidate[] {
 export function lowerType(t: TypeRef | undefined, env?: Env): TypeIR {
   if (!t) return { kind: "primitive", name: "string" };
   let inner = lowerBase(t, env);
+  // Fold the postfix generic constructors left-to-right (P3):
+  // `string envelope paged` → ctors `["envelope", "paged"]` →
+  // `paged(envelope(string))`.  Array/optional stay outermost so
+  // `customer paged[]` is array-of-(paged customer).  Programmatically
+  // built TypeRef nodes (web builder, macros) may omit the list.
+  for (const ctor of t.ctors ?? []) {
+    inner = { kind: "genericInstance", ctor, arg: inner };
+  }
   if (t.array) inner = { kind: "array", element: inner };
   if (t.optional) inner = { kind: "optional", inner };
   return inner;

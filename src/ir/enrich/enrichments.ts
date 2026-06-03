@@ -1,6 +1,7 @@
 import { platformFor } from "../../platform/registry.js";
 import { plural, snake } from "../../util/naming.js";
 import { defaultInterfaceFor } from "../../util/source-types.js";
+import { forEachGenericInstance, genericInstanceName, genericShape } from "../stdlib/generics.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -21,6 +22,7 @@ import type {
   ExprIR,
   FieldIR,
   FindIR,
+  GenericCtorName,
   LoomInterface,
   LoomModel,
   NeedIR,
@@ -324,8 +326,73 @@ export function enrichContext(
   // `?? []` tolerates IR hand-constructed outside the standard lowering
   // pipeline (test fixtures, the IR-level expander shim) that predate the
   // `payloads` field — lowering always populates it for real sources.
-  const payloads = [...(ctx.payloads ?? []).filter((p) => !p.synthesized), ...wirePayloads];
+  const basePayloads = [...(ctx.payloads ?? []).filter((p) => !p.synthesized), ...wirePayloads];
+  // P3b (payload-transport-layer.md): monomorphize every distinct generic
+  // carrier instantiation (`string paged`, `Customer envelope`) reachable from
+  // a type position into a concrete, named `PayloadIR` — sibling to the
+  // `<Agg>Wire` synthesis above.  Backends map a `genericInstance` reference to
+  // this payload's name and emit its DTO.  Deduped per context by name.
+  const mono = monomorphizeGenericInstances(aggregates, valueObjects, repositories, basePayloads);
+  const payloads = [...basePayloads, ...mono];
   return { ...ctx, valueObjects, enums, aggregates, repositories, payloads };
+}
+
+/** Collect every distinct generic-carrier instantiation reachable from the
+ *  context's type positions and synthesize a concrete `PayloadIR` for each
+ *  (deduped by monomorphized name).  Purely additive: the returned payloads
+ *  name the instantiated shapes so backends can emit them as DTOs and resolve
+ *  a `genericInstance` reference to the concrete name. */
+function monomorphizeGenericInstances(
+  aggregates: EnrichedAggregateIR[],
+  valueObjects: EnrichedValueObjectIR[],
+  repositories: RepositoryIR[],
+  existing: PayloadIR[],
+): PayloadIR[] {
+  const found = new Map<string, { ctor: GenericCtorName; arg: TypeIR }>();
+  const scan = (type: TypeIR): void =>
+    forEachGenericInstance(type, (inst) => {
+      found.set(genericInstanceName(inst.ctor, inst.arg), inst);
+    });
+  const scanAggregateLike = (node: {
+    fields: FieldIR[];
+    derived: DerivedIR[];
+    functions: { params: { type: TypeIR }[]; returnType: TypeIR }[];
+  }): void => {
+    for (const f of node.fields) scan(f.type);
+    for (const d of node.derived) scan(d.type);
+    for (const fn of node.functions) {
+      scan(fn.returnType);
+      for (const p of fn.params) scan(p.type);
+    }
+  };
+  for (const agg of aggregates) {
+    scanAggregateLike(agg);
+    for (const op of agg.operations) for (const p of op.params) scan(p.type);
+    for (const part of agg.parts) scanAggregateLike(part);
+  }
+  for (const vo of valueObjects) scanAggregateLike(vo);
+  for (const repo of repositories) {
+    for (const find of repo.finds) {
+      scan(find.returnType);
+      for (const p of find.params) scan(p.type);
+    }
+  }
+  for (const p of existing) for (const f of p.fields) scan(f.type);
+
+  const taken = new Set(existing.map((p) => p.name));
+  const out: PayloadIR[] = [];
+  for (const [name, inst] of found) {
+    if (taken.has(name)) continue;
+    taken.add(name);
+    out.push({
+      name,
+      kind: "payload",
+      fields: genericShape(inst.ctor).fields(inst.arg),
+      synthesized: true,
+      generic: { ctor: inst.ctor, arg: inst.arg },
+    });
+  }
+  return out;
 }
 
 /** Derive the named `<Agg>Wire` payload (P2) from an enriched aggregate's
@@ -577,6 +644,11 @@ function typeShorthand(t: TypeIR): string {
       return `${typeShorthand(t.inner)}?`;
     case "slot":
       return "slot";
+    case "genericInstance":
+      // Enrichment runs before the IR-validate gate, so a `paged` /
+      // `envelope` instance can legitimately reach here; render readable
+      // postfix text rather than throwing.
+      return `${typeShorthand(t.arg)} ${t.ctor}`;
   }
 }
 

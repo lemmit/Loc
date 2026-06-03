@@ -232,5 +232,9 @@ export function wireTypeInfo(t: TypeIR, dir: WireDirection): WireTypeInfo {
       };
     case "slot":
       throw new Error("wireTypeInfo: 'slot' type is UI-only and has no wire representation.");
+    case "genericInstance":
+      throw new Error(
+        `wireTypeInfo: generic carrier '${cur.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
   }
 }

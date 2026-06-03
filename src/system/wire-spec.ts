@@ -161,6 +161,10 @@ export function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
       throw new Error(
         "jsonPropertyForType: 'slot' type is UI-only and has no wire-spec representation.",
       );
+    case "genericInstance":
+      throw new Error(
+        `jsonPropertyForType: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
   }
 }
 

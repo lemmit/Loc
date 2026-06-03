@@ -28,6 +28,7 @@ import {
   checkCriteria,
   checkDataSource,
   checkDeployable,
+  checkGenericCarriers,
   checkInheritance,
   checkLayout,
   checkLegacyConstructorCalls,
@@ -114,6 +115,11 @@ export class DddValidator {
     // uniqueness within a context (and vs. value objects / events) and
     // distinct non-empty field names.
     checkPayloads(model, accept);
+    // Generic-carrier instantiation (payload-transport-layer.md, P3):
+    // the single type argument of `paged` / `envelope` must be a carrier,
+    // v1 admits only single-level (non-nested) instantiation, and a carrier
+    // may appear only in a transport position (find return / payload field).
+    checkGenericCarriers(model, accept);
     // Seed datasets (database-seeding.md): a seed may only populate
     // aggregates of its own context, and a record may not repeat a field.
     checkSeeds(model, accept);

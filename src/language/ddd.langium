@@ -1117,6 +1117,11 @@ Property:
         // They act as hard keywords only at `ContextMember` position, where
         // `PayloadDecl` (`kind=PayloadKind name=ID '{'`) begins.
         | 'payload' | 'command' | 'query' | 'response' | 'error'
+        // Generic-carrier keywords (payload-transport-layer.md, P3) — soft in
+        // property position so a pre-existing field named `paged` / `envelope`
+        // (e.g. `event Foo { envelope: string }`) keeps parsing.  Hard only in
+        // the `GenericCtor` postfix-type slot.
+        | 'paged' | 'envelope'
         // Retrieval keywords (retrieval.md) — soft in property position so
         // user-declared fields named `sort` / `loads` / `asc` / `desc` /
         // `retrieval` keep parsing.  Hard only inside the `Retrieval` slots.
@@ -1284,6 +1289,10 @@ LooseName returns string:
     // soft in loose-name positions; hard only at `ContextMember`
     // (`PayloadDecl`).
     | 'payload' | 'command' | 'query' | 'response' | 'error'
+    // Generic-carrier keywords (payload-transport-layer.md, P3) admitted as
+    // soft in loose-name positions; hard only in the `GenericCtor`
+    // postfix-type slot.
+    | 'paged' | 'envelope'
     // D-REALIZATION-AXES — the six platform-block axis keywords admitted
     // as soft so user code can still name a field `application`,
     // `transport`, `runtime`, etc.  `transactional` is the `runtime`
@@ -1301,8 +1310,21 @@ LooseName returns string:
 // Type references
 // ---------------------------------------------------------------------------
 
+// ML-postfix generic instantiation (payload-transport-layer.md, P3):
+// `customer paged`, `event envelope`, `string envelope paged`.  The
+// `(ctors+=GenericCtor)*` list accumulates left-associatively, so
+// `string envelope paged` folds to `paged(envelope(string))` in lowering.
+// Array/optional stay outermost — `customer paged[]` is array-of-(paged
+// customer).  The constructors are a blessed closed keyword set (v1, A7a);
+// keyword tokens can't be confused with an adjacent ID field name, which is
+// what makes the otherwise-ambiguous postfix form (`a: string b: int`)
+// safe.  User-declared generics + identifier-postfix instantiation are
+// deferred (A7b).
 TypeRef:
-    base=BaseType (array?='[]')? (optional?='?')?;
+    base=BaseType (ctors+=GenericCtor)* (array?='[]')? (optional?='?')?;
+
+GenericCtor returns string:
+    'paged' | 'envelope';
 
 BaseType:
     PrimitiveType | SlotType | IdType | NamedType;
@@ -1413,6 +1435,9 @@ LValueIdent returns string:
        // l-value position so an assignment target naming a field `error`,
        // `query`, etc. parses; hard only at `ContextMember` (`PayloadDecl`).
        | 'payload' | 'command' | 'query' | 'response' | 'error'
+       // Generic-carrier keywords (payload-transport-layer.md, P3) — soft in
+       // l-value position; hard only in the `GenericCtor` postfix-type slot.
+       | 'paged' | 'envelope'
        // `by` / `handle` soft in l-value position so an assignment target
        // naming a field `by` / `handle` (`handle := handle`) parses — hard only
        // in the reactor clause / workflow handle member (A2-S3/S5c).
@@ -1521,7 +1546,11 @@ MemberName returns string:
        // Payload-family keywords (payload-transport-layer.md, P1) admitted
        // after `.` so member access like `Sales.Customer.all.error` (a
        // generated-hook field) keeps parsing; hard only at `ContextMember`.
-       | 'payload' | 'command' | 'query' | 'response' | 'error';
+       | 'payload' | 'command' | 'query' | 'response' | 'error'
+       // Generic-carrier keywords (payload-transport-layer.md, P3) admitted
+       // after `.` so member access on a field named `paged` / `envelope`
+       // keeps parsing; hard only in the `GenericCtor` postfix-type slot.
+       | 'paged' | 'envelope';
 
 // Lambdas accept either a single expression body (the only form
 // in v22) or a brace-wrapped block of statements.  Block bodies
@@ -1718,6 +1747,10 @@ NameRefIdent returns string:
        // bare NameRefs so expressions can read a field named `payload`,
        // `error`, `query`, etc.  Hard only at `ContextMember` (`PayloadDecl`).
        | 'payload' | 'command' | 'query' | 'response' | 'error'
+       // Generic-carrier keywords (payload-transport-layer.md, P3) admitted as
+       // bare NameRefs so expressions can read a field named `paged` /
+       // `envelope`.  Hard only in the `GenericCtor` postfix-type slot.
+       | 'paged' | 'envelope'
        // Retrieval keywords (retrieval.md) admitted as bare NameRefs so an
        // expression can read a field named `retrieval` / `sort` / `loads` /
        // `asc` / `desc`.  Hard only inside the `Retrieval` rule's slots.

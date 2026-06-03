@@ -604,6 +604,10 @@ function mapTypeToColumn(t: TypeIR): {
       throw new Error(
         "mapTypeToColumn: 'slot' type is UI-only and should not reach the migrations builder.",
       );
+    case "genericInstance":
+      throw new Error(
+        `mapTypeToColumn: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
   }
 }
 

@@ -258,5 +258,9 @@ function zodForRequest(t: TypeIR): string {
       throw new Error(
         "zodForRequest: 'slot' type is UI-only and should not reach a workflow request schema.",
       );
+    case "genericInstance":
+      throw new Error(
+        `zodForRequest: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
   }
 }

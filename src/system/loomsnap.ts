@@ -107,6 +107,8 @@ function typeName(t: TypeIR): string {
       return `${typeName(t.inner)}?`;
     case "slot":
       return "slot";
+    case "genericInstance":
+      return `${typeName(t.arg)} ${t.ctor}`;
   }
 }
 

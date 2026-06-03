@@ -228,6 +228,8 @@ export function typeLabel(t: TypeIR): string {
       return `${typeLabel(t.inner)}?`;
     case "slot":
       return "slot";
+    case "genericInstance":
+      return `${typeLabel(t.arg)} ${t.ctor}`;
   }
 }
 

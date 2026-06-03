@@ -18,6 +18,7 @@ import type {
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
+  FunctionIR,
   StmtIR,
   SubdomainIR,
   SystemIR,
@@ -110,6 +111,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateViews(c, diags);
     validateCurrentUserScope(c, diags);
     validatePermissionRefs(c, diags);
+    validateGenericInstancesUnimplemented(c, diags);
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateEventSourcedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
@@ -267,6 +269,97 @@ function validateFindNameCollisions(ctx: BoundedContextIR, diags: LoomDiagnostic
       }
       seen.add(find.name);
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Generic-payload instantiation gate (payload-transport-layer.md, P3a).
+//
+// The `paged` / `envelope` carriers parse, lower to a `genericInstance`
+// TypeIR, and pass the AST-level carrier-bound check — but emission
+// (monomorphization → per-instance DTOs across the four backends) is P3b.
+// Until then, any `genericInstance` reachable from a type position is a
+// hard error: a generic in a field / find-return / op-signature must be
+// emittable, so this blocks the pipeline before a backend renderer sees it
+// (the renderers also carry a defensive `throw` for the same kind).  Mirrors
+// the "parses + represents in IR, then a not-implemented IR error" staging
+// the inheritance track used for TPH.
+// ---------------------------------------------------------------------------
+
+/** First generic-constructor name reachable inside a type, or undefined.
+ *  Descends array / optional / generic-instance wrappers. */
+function firstGenericCtor(type: TypeIR): string | undefined {
+  switch (type.kind) {
+    case "genericInstance":
+      return type.ctor;
+    case "array":
+      return firstGenericCtor(type.element);
+    case "optional":
+      return firstGenericCtor(type.inner);
+    default:
+      return undefined;
+  }
+}
+
+function validateGenericInstancesUnimplemented(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  const flag = (type: TypeIR, where: string): void => {
+    const ctor = firstGenericCtor(type);
+    if (!ctor) return;
+    diags.push({
+      severity: "error",
+      message:
+        `${where} uses the generic carrier '${ctor}', which parses and is represented in ` +
+        `the IR but is not emittable yet (payload-transport-layer.md, P3b: monomorphization ` +
+        `+ DTO emission). Remove the '${ctor}' instantiation for now.`,
+      source: `${ctx.name}/${where}`,
+    });
+  };
+
+  // Payload fields.
+  for (const p of ctx.payloads) {
+    for (const f of p.fields) flag(f.type, `payload ${p.name}.${f.name}`);
+  }
+  // Repository find returns + params.
+  for (const repo of ctx.repositories) {
+    for (const find of repo.finds) {
+      flag(find.returnType, `repository ${repo.name}.${find.name} return`);
+      for (const param of find.params)
+        flag(param.type, `repository ${repo.name}.${find.name}(${param.name})`);
+    }
+  }
+  // Aggregates — and their parts — fields, derived, function signatures,
+  // operation params.
+  for (const agg of ctx.aggregates) {
+    flagAggregateLike(agg, `aggregate ${agg.name}`, flag);
+    for (const op of agg.operations) {
+      for (const param of op.params)
+        flag(param.type, `aggregate ${agg.name}.${op.name}(${param.name})`);
+    }
+    for (const part of agg.parts) flagAggregateLike(part, `part ${part.name}`, flag);
+  }
+  // Value objects.
+  for (const vo of ctx.valueObjects) flagAggregateLike(vo, `valueobject ${vo.name}`, flag);
+}
+
+/** Shared field / derived / function-signature walk for the structural
+ *  shapes (aggregate, entity part, value object) that carry all three. */
+function flagAggregateLike(
+  node: {
+    fields: { name: string; type: TypeIR }[];
+    derived: { name: string; type: TypeIR }[];
+    functions: FunctionIR[];
+  },
+  where: string,
+  flag: (type: TypeIR, where: string) => void,
+): void {
+  for (const f of node.fields) flag(f.type, `${where}.${f.name}`);
+  for (const d of node.derived) flag(d.type, `${where}.${d.name}`);
+  for (const fn of node.functions) {
+    flag(fn.returnType, `${where}.${fn.name} return`);
+    for (const param of fn.params) flag(param.type, `${where}.${fn.name}(${param.name})`);
   }
 }
 

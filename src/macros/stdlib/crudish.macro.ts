@@ -101,7 +101,8 @@ export default defineMacro({
  * bug this replaces (only ever exercised by primitive fields before).
  *
  * Array / optional flags carry across; the factories own `$container`
- * wiring + origin tagging. */
+ * wiring + origin tagging.  (Generic carriers never reach here — the
+ * position rule keeps them off stored aggregate fields.) */
 function cloneType(t: TypeRef): TypeRef {
   const opts = { array: !!t.array, optional: !!t.optional };
   const b = t.base;
