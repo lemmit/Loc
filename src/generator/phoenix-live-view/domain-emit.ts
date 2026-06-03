@@ -8,18 +8,23 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EntityPartIR,
-  ExprIR,
   FieldIR,
   FunctionIR,
   InvariantIR,
-  OperationIR,
-  StmtIR,
-  TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { effectiveSavingShape } from "../../ir/util/resolve-datasource.js";
-import { classifyForWire, singleFieldShape } from "../../ir/validate/invariant-classify.js";
+import { singleFieldShape } from "../../ir/validate/invariant-classify.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { renderActions, renderPolicies, renderPolicyChecks } from "./domain/actions.js";
+import {
+  ashBuiltinValidate,
+  exprUsesThis,
+  isGuardedOperation,
+  isRefCollection,
+  isRelationshipCountDerive,
+  plural,
+} from "./domain/predicates.js";
 import { renderJasonEncoderImpl } from "./jason-camel-emit.js";
 import { joinEntityName } from "./join-resource-emit.js";
 import {
@@ -29,20 +34,6 @@ import {
   renderExpr,
   renderTypespec,
 } from "./render-expr.js";
-import { renderElixirStatements } from "./render-stmt.js";
-
-/** True for a field type that is a collection of references
- * (`Id<T>[]`) — persisted via a join table, not a column. */
-function isRefCollection(t: TypeIR): boolean {
-  return t.kind === "array" && t.element.kind === "id";
-}
-
-// ---------------------------------------------------------------------------
-// Ash domain emitter — per `AggregateIR` produce one `Ash.Resource` module.
-//
-// Output path:  lib/<app>/<ctx_snake>/<agg_snake>.ex
-// Module name:  <AppModule>.<CtxModule>.<AggModule>
-// ---------------------------------------------------------------------------
 
 /** Per-aggregate dataSource lookup the orchestrator passes in.  When
  *  present, the resource's `postgres do … end` block picks up the
@@ -429,24 +420,6 @@ function renderRelationships(
   return `\n  relationships do\n${lines.join("\n")}\n  end\n`;
 }
 
-// ---------------------------------------------------------------------------
-// Calculations (derived properties)
-//
-// Derives whose body is a bare `<relationship>.count` are lifted out of
-// the `calculations` block into an Ash `aggregates` block — `Enum.count`
-// isn't a primitive in Ash's expression DSL, but `count :<rel>` is.
-// ---------------------------------------------------------------------------
-
-function isRelationshipCountDerive(d: DerivedIR, contains: ContainmentIR[]): string | null {
-  const e = d.expr;
-  if (e.kind !== "member" || e.member !== "count") return null;
-  if (e.receiver.kind !== "ref") return null;
-  if (e.receiver.refKind !== "this-prop") return null;
-  const name = e.receiver.name;
-  if (!contains.some((c) => c.name === name && c.collection)) return null;
-  return name;
-}
-
 function renderAggregates(derived: DerivedIR[], contains: ContainmentIR[]): string {
   const lines: string[] = [];
   for (const d of derived) {
@@ -560,118 +533,6 @@ function renderValidations(
 // Authorization policies (`requires` guards → Ash.Policy.Authorizer)
 // ---------------------------------------------------------------------------
 
-/** The `requires` guard expressions on an operation (authorization gates,
- *  distinct from `precondition` domain checks). */
-function operationGuards(op: OperationIR): ExprIR[] {
-  return op.statements.filter((s) => s.kind === "requires").map((s) => s.expr);
-}
-
-/** True when the operation carries ≥1 `requires` authorization guard. */
-function isGuardedOperation(op: OperationIR): boolean {
-  return op.statements.some((s) => s.kind === "requires");
-}
-
-/** Per-guarded-op SimpleCheck module name (e.g. `…Project.Checks.Rename`). */
-function policyCheckModule(resourceModule: string, op: OperationIR): string {
-  return `${resourceModule}.Checks.${upperFirst(op.name)}`;
-}
-
-/** `policies do … end` block — one `policy action(:op)` per guarded
- *  operation, authorizing via the op's generated SimpleCheck.  Idiomatic
- *  Ash authorization: a failed check yields `Ash.Error.Forbidden`, which
- *  the bang code-interface raises and Phoenix maps to HTTP 403 (matching
- *  Hono/.NET).  Returns "" when the aggregate has no guarded operations. */
-function renderPolicies(agg: AggregateIR, resourceModule: string): string {
-  const guarded = agg.operations.filter(isGuardedOperation);
-  if (guarded.length === 0) return "";
-  const blocks = guarded.map(
-    (op) =>
-      `    policy action(:${snake(op.name)}) do\n      authorize_if ${policyCheckModule(
-        resourceModule,
-        op,
-      )}\n    end`,
-  );
-  return `\n  policies do\n${blocks.join("\n")}\n  end\n`;
-}
-
-/** One `Ash.Policy.SimpleCheck` module per guarded operation.  Reuses the
- *  domain expression renderer by binding `current_user = actor`; multiple
- *  `requires` clauses AND together.  A nil actor is forbidden outright.
- *  Emitted as sibling modules after the resource (like the Jason impl). */
-function renderPolicyChecks(agg: AggregateIR, ctx: RenderCtx, resourceModule: string): string {
-  const guarded = agg.operations.filter(isGuardedOperation);
-  if (guarded.length === 0) return "";
-  const modules = guarded.map((op) => {
-    const cond = operationGuards(op)
-      .map((e) => renderExpr(e, ctx))
-      .join(" and ");
-    const describe = op.statements
-      .filter((s) => s.kind === "requires")
-      .map((s) => s.source)
-      .join("; ");
-    return `defmodule ${policyCheckModule(resourceModule, op)} do
-  @moduledoc false
-  use Ash.Policy.SimpleCheck
-
-  @impl true
-  def describe(_opts), do: ${JSON.stringify(`requires: ${describe}`)}
-
-  @impl true
-  def match?(nil, _context, _opts), do: false
-
-  def match?(actor, _context, _opts) do
-    current_user = actor
-    ${cond}
-  end
-end`;
-  });
-  return `${modules.join("\n\n")}`;
-}
-
-// ---------------------------------------------------------------------------
-// Actions (operations)
-// ---------------------------------------------------------------------------
-
-function renderActions(
-  agg: AggregateIR,
-  _ctx: BoundedContextIR,
-  renderCtx: RenderCtx,
-  ctxModule: string,
-): string {
-  const ops = agg.operations;
-  // Ref-collection fields (`Id<T>[]`) aren't attributes on the
-  // resource (they live in a join table); the create action can't
-  // `accept` them without a `change manage_relationship` block, which
-  // we defer.  Callers seed reference collections via the operations
-  // that mutate them (`addToParty`, etc.).
-  const fieldNames = agg.fields
-    .filter((f) => !isRefCollection(f.type))
-    .map((f) => `:${snake(f.name)}`);
-
-  const defaultCreate = `    create :create do
-      primary? true
-      accept [${fieldNames.join(", ")}]
-    end`;
-
-  const opActions = ops.map((op) => renderOperationAction(op, renderCtx, ctxModule));
-
-  // Ash forbids two actions of the same name.  A mutate operation whose
-  // name collides with a default action (notably `crudish`'s `update`,
-  // which emits an explicit `update :update do`) shadows that default —
-  // drop it from the `defaults [...]` list so the explicit action stands
-  // alone.  The action name is unchanged, so the unconditional PATCH
-  // /<aggs>/{id} (action: :update) route still resolves.
-  const opActionNames = new Set(ops.map((op) => snake(op.name)));
-  const defaultActions = ["read", "update", "destroy"].filter((a) => !opActionNames.has(a));
-
-  return `\n  actions do
-    defaults [${defaultActions.map((a) => `:${a}`).join(", ")}]
-
-${defaultCreate}
-${opActions.join("\n")}
-  end\n`;
-}
-
 // ---------------------------------------------------------------------------
 // Helper functions (`function` decls) — emitted as `defp` on the resource
 // module so validate / change bodies can call them as `<name>(record, ...)`.
@@ -697,257 +558,4 @@ ${recordPrefix}    ${body}
   end`;
   });
   return `\n${blocks.join("\n\n")}\n`;
-}
-
-function renderOperationAction(op: OperationIR, ctx: RenderCtx, _ctxModule: string): string {
-  const args = op.params
-    .map((p) => `      argument :${snake(p.name)}, ${renderAshType(p.type, ctx.contextModule)}`)
-    .join("\n");
-
-  // Collect precondition statements and lower them to Ash validate clauses.
-  const available = new Set(op.params.map((p) => p.name));
-  const validateLines = renderOperationValidates(op, ctx, available);
-
-  // Filter out precondition AND requires statements before rendering the
-  // change block — preconditions become validate clauses (above), and
-  // requires guards become Ash policies (see renderPolicies); neither
-  // belongs in the change fn.  (A `requires` left here would raise an
-  // ArgumentError → HTTP 500 instead of the policy's 403.)
-  const nonPrecondStmts = op.statements.filter(
-    (s) => s.kind !== "precondition" && s.kind !== "requires",
-  );
-  const stmts = renderElixirStatements(nonPrecondStmts, ctx, "changeset");
-
-  // Bind the domain-style identifiers (`record`, `current_user`, each param)
-  // that the rendered body refers to but Ash's `change fn changeset, ctx ->`
-  // callback doesn't supply natively.  Detect which are actually used so the
-  // block stays free of dead bindings.
-  const usesRecord = nonPrecondStmts.some(stmtUsesThis);
-  const usesCurrentUser = nonPrecondStmts.some((s) => stmtUsesCurrentUser(s));
-  const usedParams = op.params.filter((p) => nonPrecondStmts.some((s) => stmtUsesParam(s, p.name)));
-  const contextBinding = usesCurrentUser ? "context" : "_context";
-  const bindings: string[] = [];
-  if (usesRecord) bindings.push("        record = changeset.data");
-  if (usesCurrentUser) bindings.push("        current_user = context.actor");
-  for (const p of usedParams) {
-    bindings.push(
-      `        ${snake(p.name)} = Ash.Changeset.get_argument(changeset, :${snake(p.name)})`,
-    );
-  }
-  const bindingBlock = bindings.length > 0 ? `${bindings.join("\n")}\n` : "";
-
-  const argsBlock = op.params.length > 0 ? `\n${args}` : "";
-  const validateBlock = validateLines.length > 0 ? `\n${validateLines.join("\n")}` : "";
-  const changeBlock =
-    nonPrecondStmts.length > 0
-      ? `\n      change fn changeset, ${contextBinding} ->\n${bindingBlock}${stmts}\n        changeset\n      end`
-      : "";
-
-  // Ash 3.x rejects function-based changes as non-atomic and refuses to
-  // register the action without an explicit opt-out.  Only flag actions
-  // that actually emit a `change fn` body — when the operation is
-  // validate-only (no non-precondition statements) the action is already
-  // atomic-safe, and an unnecessary `require_atomic? false` is noise.
-  const atomicLine = nonPrecondStmts.length > 0 ? "\n      require_atomic? false" : "";
-
-  return `    update :${snake(op.name)} do${atomicLine}${argsBlock}${validateBlock}${changeBlock}
-    end`;
-}
-
-/** True when `e` references `this` (or the bare `id` keyword, which renders
- *  as `<thisName>.id`) or any `this-prop`-family field. */
-function exprUsesThis(e: ExprIR | undefined): boolean {
-  if (!e) return false;
-  if (e.kind === "this" || e.kind === "id") return true;
-  if (
-    e.kind === "ref" &&
-    (e.refKind === "this-prop" || e.refKind === "this-vo-prop" || e.refKind === "this-derived")
-  ) {
-    return true;
-  }
-  if (e.kind === "call" && (e.callKind === "function" || e.callKind === "private-operation")) {
-    // Receiver-prefixed function call passes `this` as first arg.
-    return true;
-  }
-  return walkExpr(e, exprUsesThis);
-}
-
-function stmtUsesThis(s: StmtIR): boolean {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-    case "let":
-    case "expression":
-      return exprUsesThis(s.expr);
-    case "assign":
-    case "add":
-    case "remove":
-      return exprUsesThis(s.value);
-    case "emit":
-      return s.fields.some((f) => exprUsesThis(f.value));
-    case "call":
-      // Receiver-prefixed call passes `this` as first arg.
-      return true;
-  }
-}
-
-function stmtUsesCurrentUser(s: StmtIR): boolean {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-    case "let":
-    case "expression":
-      return exprUsesCurrentUser(s.expr);
-    case "assign":
-    case "add":
-    case "remove":
-      return exprUsesCurrentUser(s.value);
-    case "emit":
-      return s.fields.some((f) => exprUsesCurrentUser(f.value));
-    case "call":
-      return s.args.some(exprUsesCurrentUser);
-  }
-}
-
-function exprUsesParam(e: ExprIR | undefined, name: string): boolean {
-  if (!e) return false;
-  if (e.kind === "ref" && e.refKind === "param" && e.name === name) return true;
-  return walkExpr(e, (sub) => exprUsesParam(sub, name));
-}
-
-function stmtUsesParam(s: StmtIR, name: string): boolean {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-    case "let":
-    case "expression":
-      return exprUsesParam(s.expr, name);
-    case "assign":
-    case "add":
-    case "remove":
-      return exprUsesParam(s.value, name);
-    case "emit":
-      return s.fields.some((f) => exprUsesParam(f.value, name));
-    case "call":
-      return s.args.some((a) => exprUsesParam(a, name));
-  }
-}
-
-/** Walk one level into `e` and return true if `pred` matches any child. */
-function walkExpr(e: ExprIR, pred: (sub: ExprIR | undefined) => boolean): boolean {
-  switch (e.kind) {
-    case "method-call":
-      return pred(e.receiver) || e.args.some((a) => pred(a));
-    case "member":
-      return pred(e.receiver);
-    case "binary":
-      return pred(e.left) || pred(e.right);
-    case "ternary":
-      return pred(e.cond) || pred(e.then) || pred(e.otherwise);
-    case "unary":
-      return pred(e.operand);
-    case "paren":
-      return pred(e.inner);
-    case "call":
-      return e.args.some((a) => pred(a));
-    case "lambda":
-      return pred(e.body);
-    case "new":
-    case "object":
-      return e.fields.some((f) => pred(f.value));
-  }
-  return false;
-}
-
-// ---------------------------------------------------------------------------
-// Operation argument validation — lower precondition StmtIRs to
-// Ash `validate` clauses inside the action block.
-//
-// Recognised single-field shapes (min/max/between/regex/len-*) emit the
-// idiomatic Ash built-in validator; everything else emits a function form:
-//
-//   validate fn changeset, _opts ->
-//     if <expr>, do: :ok, else: {:error, "<message>"}
-//   end
-// ---------------------------------------------------------------------------
-
-function renderOperationValidates(
-  op: OperationIR,
-  ctx: RenderCtx,
-  available: ReadonlySet<string>,
-): string[] {
-  const lines: string[] = [];
-
-  for (const stmt of op.statements) {
-    if (stmt.kind !== "precondition") continue;
-
-    const inv = { expr: stmt.expr, source: stmt.source };
-
-    // Check if this is a single-field shape we can lower idiomatically.
-    if (classifyForWire(inv, { available })) {
-      const single = singleFieldShape(inv);
-      if (single) {
-        const ashValidate = ashBuiltinValidate(single.field, single.pattern);
-        if (ashValidate) {
-          lines.push(
-            `      ${ashValidate}, message: ${JSON.stringify(`Precondition failed: ${stmt.source}`)}`,
-          );
-          continue;
-        }
-      }
-    }
-
-    // Fall back to the function form.  Render against `record` (= changeset.data)
-    // when the predicate touches `this` so the rendered output's `record.X`
-    // resolves; emit the local binding only when actually used.
-    const exprStr = renderExpr(stmt.expr, ctx);
-    const recordLine = exprUsesThis(stmt.expr) ? "        record = changeset.data\n" : "";
-    lines.push(
-      `      validate fn changeset, _opts ->\n${recordLine}        if ${exprStr}, do: :ok, else: {:error, ${JSON.stringify(`Precondition failed: ${stmt.source}`)}}\n      end`,
-    );
-  }
-
-  return lines;
-}
-
-/** Map a recognised single-field pattern to an idiomatic Ash built-in
- *  validate call string (without trailing message), or null when no
- *  built-in covers the shape. */
-function ashBuiltinValidate(
-  field: string,
-  pattern: import("../../ir/validate/invariant-classify.js").SingleFieldPattern,
-): string | null {
-  const attr = `:${snake(field)}`;
-  switch (pattern.kind) {
-    case "min":
-      return `validate compare(${attr}, greater_than_or_equal_to: ${pattern.n})`;
-    case "max":
-      return `validate compare(${attr}, less_than_or_equal_to: ${pattern.n})`;
-    case "between":
-      return `validate compare(${attr}, greater_than_or_equal_to: ${pattern.lo}, less_than_or_equal_to: ${pattern.hi})`;
-    case "len-min":
-      return `validate string_length(${attr}, min: ${pattern.n})`;
-    case "len-max":
-      return `validate string_length(${attr}, max: ${pattern.n})`;
-    case "len-eq":
-      return `validate string_length(${attr}, min: ${pattern.n}, max: ${pattern.n})`;
-    case "len-range":
-      return `validate string_length(${attr}, min: ${pattern.lo}, max: ${pattern.hi})`;
-    case "regex":
-      return `validate match(${attr}, ~r/${pattern.pattern}/)`;
-    default:
-      return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function plural(name: string): string {
-  if (name.endsWith("y") && !/[aeiou]y$/i.test(name)) {
-    return name.slice(0, -1) + "ies";
-  }
-  if (/(s|x|z|ch|sh)$/i.test(name)) return name + "es";
-  return name + "s";
 }
