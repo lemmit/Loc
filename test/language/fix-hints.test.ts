@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildValidateReport } from "../../src/cli/json-report.js";
+import { buildValidateReport } from "../../src/api/report.js";
 import type { ModelPatch } from "../../src/diagnostics/contract.js";
 import { applyPatches } from "../../src/language/model-patch.js";
 import { parseString } from "../_helpers/parse.js";

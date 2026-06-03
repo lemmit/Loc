@@ -17,8 +17,7 @@
 // Pure language-layer: parses in-memory and walks the AST; no `ir/` edge.
 // ---------------------------------------------------------------------------
 
-import { type AstNode, URI } from "langium";
-import { NodeFileSystem } from "langium/node";
+import { type AstNode, EmptyFileSystem, URI } from "langium";
 import type { ModelPatch } from "../diagnostics/contract.js";
 import { createDddServices } from "./ddd-module.js";
 import {
@@ -175,7 +174,7 @@ function editFor(patch: ModelPatch, node: AstNode, text: string): Edit {
  * overlapping edits are rejected.
  */
 export async function applyPatches(source: string, patches: ModelPatch[]): Promise<PatchResult> {
-  const services = createDddServices(NodeFileSystem);
+  const services = createDddServices(EmptyFileSystem);
   const factory = services.shared.workspace.LangiumDocumentFactory;
   const doc = factory.fromString<Model>(source, URI.parse("memory://patch.ddd"));
   await services.shared.workspace.DocumentBuilder.build([doc]);

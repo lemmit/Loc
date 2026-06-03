@@ -3,14 +3,14 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Command } from "commander";
 import ignore from "ignore";
-import { type LangiumDocument, URI } from "langium";
+import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
-import type { Diagnostic } from "vscode-languageserver-types";
+import { generate as generateModel, LOOM_VERSION, validate } from "../api/index.js";
 import { generateDotnet } from "../generator/dotnet/index.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
 import { lowerModel, lowerProject, mergeLoomModels } from "../ir/lower/lower.js";
 import type { EnrichedLoomModel, TestOutcome } from "../ir/types/loom-ir.js";
-import { type LoomDiagnostic, validateLoomModel } from "../ir/validate/validate.js";
+import { validateLoomModel } from "../ir/validate/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
 import { applyPatches, type ModelPatch } from "../language/model-patch.js";
@@ -31,7 +31,6 @@ import {
   renderVerificationMd,
 } from "../verify/render.js";
 import { computeVerification } from "../verify/verification.js";
-import { buildValidateReport, LOOM_VERSION } from "./json-report.js";
 
 interface ParseResult {
   model: Model;
@@ -167,71 +166,39 @@ async function runPatch(file: string, patchesFile: string, options: { json?: boo
   if (!result.ok) process.exit(1);
 }
 
-/** Build the document and return the raw structured Langium diagnostics
- *  (not the pre-stringified human form `parseFile` produces) for `--json`. */
-async function parseFileForJson(
-  file: string,
-): Promise<{ doc: LangiumDocument; model: Model | undefined; diagnostics: Diagnostic[] }> {
-  const services = createDddServices(NodeFileSystem);
+/** Read a `.ddd` file, or throw a clear error.  The structured-JSON verbs
+ *  operate on a single in-memory source (the toolkit parses it browser-safe);
+ *  multi-file `import` resolution stays on the fs-based `generate`/`parse`
+ *  paths. */
+function readSource(file: string): { absolute: string; source: string } {
   const absolute = path.resolve(file);
   if (!fs.existsSync(absolute)) {
     throw new Error(`File not found: ${absolute}`);
   }
-  const docs = services.shared.workspace.LangiumDocuments;
-  const doc = await docs.getOrCreateDocument(URI.file(absolute));
-  await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
-  return {
-    doc,
-    model: doc.parseResult?.value as Model | undefined,
-    diagnostics: [...(doc.diagnostics ?? [])],
-  };
+  return { absolute, source: fs.readFileSync(absolute, "utf8") };
 }
 
 /**
  * `ddd parse --json` — the structured-diagnostics contract
- * (docs/proposals/ai-diagnostics-contract.md).  Runs the Langium phases AND
- * the IR validator (so `parse --json` is the `validate --json` the contract
- * names), prints one JSON envelope to stdout, exits 1 when not `ok`.
+ * (docs/proposals/ai-diagnostics-contract.md).  Thin wrapper over the toolkit
+ * `validate()`: prints the `ValidateReport` to stdout, exits 1 when not `ok`.
  */
 async function runParseJson(file: string): Promise<void> {
-  const absolute = path.resolve(file);
-  const { doc, model, diagnostics } = await parseFileForJson(file);
+  const { absolute, source } = readSource(file);
+  const report = await validate(source, { path: absolute });
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  if (!report.ok) process.exit(1);
+}
 
-  // Only descend into the IR phases when the AST parsed cleanly — lowering a
-  // syntactically broken AST can throw, and the envelope must stay valid
-  // (contract §6).
-  const isParseLevel = (d: Diagnostic): boolean => {
-    const code = (d.data as { code?: string } | undefined)?.code;
-    return d.severity === 1 && (code === "parsing-error" || code === "lexing-error");
-  };
-  const hasParseError = diagnostics.some(isParseLevel);
-
-  let irDiagnostics: LoomDiagnostic[] = [];
-  if (model && !hasParseError) {
-    try {
-      const enriched = enrichLoomModel(mergeLoomModels([lowerModel(model)]));
-      irDiagnostics = validateLoomModel(enriched);
-    } catch (err) {
-      irDiagnostics = [
-        {
-          severity: "error",
-          message: `IR phase failed before generation: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-          source: absolute,
-          code: "loom.ir-internal",
-        },
-      ];
-    }
-  }
-
-  const report = buildValidateReport({
-    modelPath: absolute,
-    langiumDiagnostics: diagnostics,
-    doc,
-    irDiagnostics,
-    model,
-  });
+/**
+ * `ddd generate system --json` — the GenerateReport contract (§4).  Thin
+ * wrapper over the toolkit `generate()`: validates and reports the deployable
+ * manifest as JSON.  It does not write a project tree — run `generate system
+ * -o <dir>` (without `--json`) to emit files.
+ */
+async function runGenerateJson(file: string): Promise<void> {
+  const { absolute, source } = readSource(file);
+  const report = await generateModel(source, { path: absolute });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   if (!report.ok) process.exit(1);
 }
@@ -705,9 +672,13 @@ generate
   .description(
     "Generate every deployable in the file's `system` blocks plus a docker-compose.yml at the output root.",
   )
-  .requiredOption("-o, --out <dir>", "output directory")
+  .option("-o, --out <dir>", "output directory (required unless --json)")
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
+  .option(
+    "--json",
+    "validate and print the deployable manifest as JSON (GenerateReport); writes no files. See docs/proposals/ai-diagnostics-contract.md.",
+  )
   .option(
     "--trace",
     "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/proposals/observability.md",
@@ -716,12 +687,21 @@ generate
     async (
       file: string,
       options: {
-        out: string;
+        out?: string;
         watch?: boolean;
         dryRun?: boolean;
+        json?: boolean;
         trace?: boolean;
       },
     ) => {
+      if (options.json) {
+        await runGenerateJson(file);
+        return;
+      }
+      if (!options.out) {
+        console.error("error: required option '-o, --out <dir>' not specified");
+        process.exit(1);
+      }
       const runOpts = {
         dryRun: options.dryRun,
         emitTrace: !!options.trace,

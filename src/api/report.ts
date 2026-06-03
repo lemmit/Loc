@@ -1,19 +1,19 @@
 // ---------------------------------------------------------------------------
-// Structured-diagnostics serializer for the CLI `--json` mode
-// (docs/proposals/ai-diagnostics-contract.md).  Normalizes Langium
-// (phases ①③④) and IR (phase ⑦) diagnostics into the one wire shape the AI
-// authoring loop consumes, with a deterministic sort and an always-valid
-// envelope.
-//
-// Lives in `src/cli/` (an entrypoint, above every pipeline layer), so it may
-// freely import from language/ and ir/.
+// Structured-diagnostics serializers — the pure core that turns Langium
+// (phases ①③④) and IR (phase ⑦) diagnostics into the contract wire shape
+// (docs/proposals/ai-diagnostics-contract.md).  Transport-neutral: consumed by
+// the CLI, the (future) MCP server, the LSP adapters, and the in-browser
+// playground alike.  No Node-only imports — safe in the browser.
 // ---------------------------------------------------------------------------
 
 import { type AstNode, CstUtils, type LangiumDocument } from "langium";
 import type { Diagnostic } from "vscode-languageserver-types";
 import type {
+  GenerateDeployable,
+  GenerateReport,
   JsonDiagnostic,
   JsonPhase,
+  JsonReportSummary,
   JsonSeverity,
   ValidateReport,
 } from "../diagnostics/contract.js";
@@ -140,6 +140,18 @@ export function sortDiagnostics(diags: JsonDiagnostic[]): JsonDiagnostic[] {
   });
 }
 
+function summarise(diagnostics: JsonDiagnostic[]): JsonReportSummary {
+  let errors = 0;
+  let warnings = 0;
+  let infos = 0;
+  for (const d of diagnostics) {
+    if (d.severity === "error") errors++;
+    else if (d.severity === "warning") warnings++;
+    else infos++;
+  }
+  return { errors, warnings, infos };
+}
+
 export function buildValidateReport(args: {
   modelPath: string;
   langiumDiagnostics: Diagnostic[];
@@ -151,15 +163,7 @@ export function buildValidateReport(args: {
     ...args.langiumDiagnostics.map((d) => langiumDiagnosticToJson(d, args.doc)),
     ...args.irDiagnostics.map(irDiagnosticToJson),
   ]);
-
-  let errors = 0;
-  let warnings = 0;
-  let infos = 0;
-  for (const d of diagnostics) {
-    if (d.severity === "error") errors++;
-    else if (d.severity === "warning") warnings++;
-    else infos++;
-  }
+  const summary = summarise(diagnostics);
 
   // Outline is always a valid object, even on a broken AST (contract §6).
   let outline: ValidateReport["outline"] = { systems: [], contexts: [] };
@@ -174,9 +178,26 @@ export function buildValidateReport(args: {
   return {
     loomVersion: LOOM_VERSION,
     model: args.modelPath,
-    ok: errors === 0,
-    summary: { errors, warnings, infos },
+    ok: summary.errors === 0,
+    summary,
     diagnostics,
     outline,
+  };
+}
+
+export function buildGenerateReport(args: {
+  modelPath: string;
+  diagnostics: JsonDiagnostic[];
+  deployables: GenerateDeployable[];
+}): GenerateReport {
+  const diagnostics = sortDiagnostics(args.diagnostics);
+  const summary = summarise(diagnostics);
+  return {
+    loomVersion: LOOM_VERSION,
+    model: args.modelPath,
+    ok: summary.errors === 0,
+    summary,
+    diagnostics,
+    deployables: args.deployables,
   };
 }
