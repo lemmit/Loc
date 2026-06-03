@@ -1,0 +1,94 @@
+// Extern escape hatches — the two seams where Loom hands control to
+// hand-written code, neither of which the other examples show.  Files-only
+// in the playground: an extern op's backend and an extern component's
+// frontend both need a user-supplied module to boot/build, so this example
+// is for reading the generated CONTRACT (the typed registry + props
+// interface), not for the live preview.  See docs/extern.md.
+//
+//   • extern OPERATION — `operation confirm() extern` declares only its
+//     preconditions; the framework runs load → preconditions → YOUR
+//     handler → invariants → save → drain.  Hono emits
+//     `domain/order-extern.ts` (a typed registry + register helper +
+//     startup verify gate); you register the handler before listen().
+//     A workflow can call a parameterless extern like any other op.
+//
+//   • extern COMPONENT — `component RiskBadge(...) extern from "<path>"`
+//     declares the typed param contract but no body; the React generator
+//     imports your module at every call site and emits `RiskBadge.props.ts`
+//     so your hand-written component is type-checked against the contract.
+
+system ExternShowcase {
+
+  subdomain Sales {
+    context Sales {
+
+      enum OrderStatus { Draft, Confirmed, Cancelled }
+
+      event OrderConfirmed { order: Order id, at: datetime }
+
+      aggregate Order with crudish {
+        reference: string
+        status: OrderStatus
+        riskScore: int
+
+        invariant reference.length > 0
+        derived display: string = reference
+
+        function isMutable(): bool = status == Draft
+
+        // Extern: the framework runs these preconditions, then dispatches
+        // to the registered handler (which talks to a fraud/billing engine
+        // and decides what `confirm` actually does), then re-checks
+        // invariants.  An extern body is preconditions ONLY — no
+        // assignment / emit / mutation in the DSL.
+        operation confirm() extern {
+          precondition isMutable()
+          precondition riskScore < 80
+        }
+
+        // A plain operation, for contrast: pure in-model state change.
+        operation cancel() {
+          precondition isMutable()
+          status := Cancelled
+        }
+      }
+
+      repository Orders for Order {
+        find draft(): Order[] where this.status == Draft
+      }
+
+      // Workflows can drive a parameterless extern op — the generator
+      // emits the same load → preconditions → handler → invariants → save
+      // dance the auto HTTP route does.
+      workflow confirmOrder(orderId: Order id) {
+        let order = Orders.getById(orderId)
+        order.confirm()
+      }
+    }
+  }
+
+  ui Console {
+    // Extern component: no body — the typed contract only.  The generator
+    // emits Console/RiskBadge.props.ts and imports "./components/RiskBadge"
+    // at every call site below.
+    component RiskBadge(score: int, label: string) extern from "./components/RiskBadge"
+
+    page Orders {
+      route: "/"
+      body: Stack {
+        Heading { "Orders", level: 1 },
+        RiskBadge { score: 42, label: "Sample" },
+        List { of: Order }
+      }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+
+  deployable api {
+    platform: hono, contexts: [Sales],
+    dataSources: [salesState], port: 3000
+  }
+  deployable webApp { platform: react, targets: api, ui: Console, port: 3001 }
+}

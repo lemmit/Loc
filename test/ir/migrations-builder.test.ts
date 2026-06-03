@@ -61,6 +61,29 @@ describe("schemaFromModule", () => {
     expect(orders.primaryKey).toEqual(["id"]);
   });
 
+  it("maps the `money` primitive to a decimal column (precise-decimal family)", async () => {
+    // Regression: a system whose aggregate carries a `money` field used to
+    // throw "unknown primitive type 'money'" out of the migrations builder
+    // (the money-primitive fixture only exercised the legacy single-context
+    // path, never system migration derivation).  money is a precise decimal,
+    // so it rides the same column kind as `decimal`.
+    const loom = await buildLoomModel(`
+      system Billing {
+        subdomain Money {
+          context Money {
+            aggregate Invoice ids guid { subtotal: money }
+            repository Invoices for Invoice { }
+          }
+        }
+        deployable api { platform: hono, contexts: [Money], port: 3000 }
+      }
+    `);
+    const snap = schemaFromModule(loom.systems[0]!.subdomains[0]!);
+    const invoice = snap.tables.find((t) => t.name === "invoices")!;
+    const subtotal = invoice.columns.find((c) => c.name === "subtotal")!;
+    expect(subtotal.type).toEqual({ kind: "decimal" });
+  });
+
   it("emits a uuid FK column + per-column index for `Target id` references", async () => {
     const { module } = await loadShop();
     const orders = schemaFromModule(module).tables.find((t) => t.name === "orders")!;

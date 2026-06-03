@@ -29,6 +29,8 @@ import multifileLandingSource from "./multifile-landing.ddd?raw";
 import multifileMarketingLibSource from "./multifile-marketing-lib.ddd?raw";
 import inheritanceSystemSource from "./inheritance-system.ddd?raw";
 import authCapabilitiesSource from "./auth-capabilities.ddd?raw";
+import persistenceShapesSource from "./persistence-shapes.ddd?raw";
+import externShowcaseSource from "./extern-showcase.ddd?raw";
 import fulfillmentNewestSource from "./fulfillment-newest.ddd?raw";
 import fulfillmentKernelSource from "./shared/kernel.ddd?raw";
 
@@ -237,6 +239,20 @@ export const examples: LoomExample[] = [
     source: authCapabilitiesSource,
     blurb:
       "JWT `user{}` claims + `currentUser`, `auth: required` middleware, subdomain `permissions{}`, `requires` (403) vs `precondition` (400), row-level visibility, and the audit/softDelete capability macros + a hand-written tenant filter. Files-only — capabilities + auth emit to runtime on .NET.",
+  },
+  {
+    id: "persistence-shapes",
+    label: "Persistence shapes & primitives (.NET)",
+    source: persistenceShapesSource,
+    blurb:
+      "Table-Per-Concrete inheritance (`inheritanceUsing(ownTable)`) with an auto-emitted polymorphic reader, `shape(document)` + `shape(embedded)` storage, the `money` and `json` primitive types, and the realization-axes `directoryLayout: byFeature` knob. Files-only.",
+  },
+  {
+    id: "extern-showcase",
+    label: "Extern escape hatches (Hono + React)",
+    source: externShowcaseSource,
+    blurb:
+      "The two hand-written-code seams: an `extern` operation (framework emits a typed handler registry + startup gate) and an `extern` component (typed `.props.ts` contract for a hand-authored React component). Files-only — both need a user module to boot/build.",
   },
   {
     id: "acme",

@@ -30,6 +30,8 @@ const featureExamples = [
   "web/src/examples/inheritance-system.ddd",
   "web/src/examples/auth-capabilities.ddd",
   "web/src/examples/fulfillment-newest.ddd",
+  "web/src/examples/persistence-shapes.ddd",
+  "web/src/examples/extern-showcase.ddd",
 ];
 
 /** Load an example through the multi-file project loader (single-file
