@@ -1,4 +1,5 @@
 import { hasCreate } from "../../../ir/enrich/wire-projection.js";
+import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   EnrichedBoundedContextIR,
@@ -44,6 +45,8 @@ export function emitController(
   for (const op of publicOps) for (const p of op.params) collectWireUsings(p.type, ctx, usings);
   for (const find of repo?.finds ?? [])
     for (const p of find.params) collectWireUsings(p.type, ctx, usings);
+  // A paged find's action returns `Paged<…Response>` from the shared runtime.
+  if ((repo?.finds ?? []).some((f) => pagedReturn(f.returnType))) usings.add(`${ns}.Domain.Common`);
   out.set(
     `Api/${upperFirst(plural(agg.name))}Controller.cs`,
     renderController(agg, repo, ns, {
@@ -69,32 +72,41 @@ export function emitController(
           paramNames: op.params.map((p) => p.name),
           guarded: operationIsGuarded(op),
         })),
-      finds: (repo?.finds ?? []).map((find) => ({
-        name: find.name,
-        isRoot: find.name === "all",
-        queryRouteParams: find.params
-          .map((p) => {
-            // A required find param must bind required so Swashbuckle emits
-            // `required: true` — a non-nullable reference type alone reads as
-            // optional, diverging from Hono/Phoenix (which mark it required).
-            // Optional params (`kind === "optional"`) stay optional.  Attribute
-            // fully-qualified to avoid an unused `using` under /warnaserror.
-            const bind =
-              p.type.kind === "optional"
-                ? ""
-                : "[Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] ";
-            return `[FromQuery] ${bind}${wireType(p.type, ctx, "request")} ${p.name}`;
-          })
-          .join(", "),
-        queryConstructorArgs: find.params
-          .map((p) => wireToCommandArgument(p.name, p.type, ctx))
-          .join(", "),
-        returnShape: (find.returnType.kind === "array"
-          ? "list"
-          : find.returnType.kind === "optional"
-            ? "optional"
-            : "single") as "list" | "optional" | "single",
-      })),
+      finds: (repo?.finds ?? []).map((find) => {
+        const paged = pagedReturn(find.returnType);
+        return {
+          name: find.name,
+          isRoot: find.name === "all",
+          queryRouteParams: [
+            ...find.params.map((p) => {
+              // A required find param must bind required so Swashbuckle emits
+              // `required: true` — a non-nullable reference type alone reads as
+              // optional, diverging from Hono/Phoenix (which mark it required).
+              // Optional params (`kind === "optional"`) stay optional.  Attribute
+              // fully-qualified to avoid an unused `using` under /warnaserror.
+              const bind =
+                p.type.kind === "optional"
+                  ? ""
+                  : "[Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] ";
+              return `[FromQuery] ${bind}${wireType(p.type, ctx, "request")} ${p.name}`;
+            }),
+            // Paged finds auto-gain 1-based page/pageSize query params with
+            // defaults (P3b), mirroring the Hono/React contract.
+            ...(paged ? ["[FromQuery] int page = 1", "[FromQuery] int pageSize = 20"] : []),
+          ].join(", "),
+          queryConstructorArgs: [
+            ...find.params.map((p) => wireToCommandArgument(p.name, p.type, ctx)),
+            ...(paged ? ["page", "pageSize"] : []),
+          ].join(", "),
+          returnShape: (paged
+            ? "paged"
+            : find.returnType.kind === "array"
+              ? "list"
+              : find.returnType.kind === "optional"
+                ? "optional"
+                : "single") as "list" | "optional" | "single" | "paged",
+        };
+      }),
       extraUsings: [...usings].sort(),
       routePrefix,
       emitTrace,

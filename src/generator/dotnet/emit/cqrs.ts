@@ -84,12 +84,15 @@ export function renderQuery(args: {
   queryName: string;
   queryParams: string;
   returnType: string;
+  /** Extra `using` namespaces (e.g. Domain.Common for a `Paged<T>` return). */
+  extraUsings?: string[];
 }): string {
+  const extra = (args.extraUsings ?? []).map((u) => `using ${u};`).join("\n");
   return `// Auto-generated.
 using Mediator;
 using ${args.ns}.Domain.Ids;
 using ${args.ns}.Application.${plural(args.aggName)}.Responses;
-
+${extra ? extra + "\n" : ""}
 namespace ${args.ns}.Application.${plural(args.aggName)}.Queries;
 
 public sealed record ${args.queryName}(${args.queryParams}) : IQuery<${args.returnType}>;
