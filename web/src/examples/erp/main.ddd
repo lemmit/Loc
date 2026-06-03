@@ -1,0 +1,1095 @@
+// ═══════════════════════════════════════════════════════════════════════
+//  Acme ERP — a full, multi-file enterprise resource-planning system.
+// ═══════════════════════════════════════════════════════════════════════
+//
+//  This is the deliberately-maximal Loom showcase: one `system` that fuses
+//  six subdomains the way a real ERP does, wired onto a heterogeneous
+//  deployment (a Hono operations backend + React back-office, plus two
+//  .NET services for Finance and HR where capabilities/auth/event-sourcing
+//  matter most).  It exercises essentially the whole language surface.
+//
+//  ── File layout (open the tabs above the editor) ──────────────────────
+//    main.ddd ................ this file — the system, all contexts, the
+//                              deployment topology, the UI and the e2e tests
+//    shared/money.ddd ........ Currency + Money + Percentage (ambient kernel)
+//    shared/geo.ddd .......... Country + Address + GeoPoint
+//    shared/common.ddd ....... Priority/ApprovalStatus/UnitOfMeasure + names
+//    ui/components.ddd ....... reusable top-level UI components
+//    governance/requirements.ddd  requirements → solutions → testCases
+//
+//  ── Feature map (where to look) ───────────────────────────────────────
+//    Sales ......... aggregate tree, Money VO, criterion, retrieval,
+//                    payload family, channel/channelSource, seed, views,
+//                    transactional workflow, aggregate tests
+//    Inventory ..... cross-context `X id`, Quantity VO, nested parts,
+//                    managed fields, guid ids, non-transactional `for…in`
+//    Procurement ... extern operation, provenanced field, approval flow,
+//                    transactional goods-receipt workflow
+//    Crm ........... abstract aggregate + `extends` (TPH/sharedTable),
+//                    polymorphic reader, pipeline stages, derived match
+//    Finance ....... `money`/`json` primitives, shape(document)+shape(embedded),
+//                    TPC inheritance (ownTable), event-sourced ledger
+//                    (persistedAs(eventLog) + apply), .NET deployable
+//    People (HR) ... auth `user{}` + `currentUser`, subdomain permissions,
+//                    capabilities (audit/softDelete + a hand-written tenant
+//                    filter), `requires` vs `precondition`, sensitive(pii),
+//                    row-level visibility, .NET deployable with auth
+// ═══════════════════════════════════════════════════════════════════════
+
+import "./shared/money.ddd"
+import "./shared/geo.ddd"
+import "./shared/common.ddd"
+import "./ui/components.ddd"
+import "./governance/requirements.ddd"
+
+system AcmeErp {
+
+  // The JWT claim shape the Finance/HR verifier middleware decodes per
+  // request; every `currentUser.<field>` below type-checks against it.
+  user {
+    id: string
+    role: string
+    permissions: string[]
+    tenantId: string
+    employeeId: string
+  }
+
+  // Corporate identity — projected by each React pack to its own idiom.
+  theme {
+    primary: "#2563eb"
+    neutral: "#475569"
+    accent: "#f59e0b"
+    radius: "md"
+    fontFamily: "Inter, system-ui, sans-serif"
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  SALES — quote-to-order, the revenue front door.
+  // ════════════════════════════════════════════════════════════════════
+  subdomain Sales {
+    context Sales {
+
+      enum SalesOrderStatus { Draft, Confirmed, Fulfilled, Cancelled }
+      enum QuoteStatus      { Draft, Sent, Accepted, Expired }
+
+      // ── Payload family — the structured carriers crossing the API
+      // boundary.  Four sugar keywords (command/query/response/error)
+      // over the same flat-record shape, each carrying its intent.
+      command  PlaceOrderCmd     { customerRef: string, priority: Priority }
+      query    FindOrdersByStatus { status: SalesOrderStatus }
+      response OrderSummary       { reference: string, status: SalesOrderStatus, total: decimal }
+      error    OrderRejected      { reference: string, reason: string }
+
+      // ── Events carried by the SalesEvents channel below.
+      event SalesOrderConfirmed { order: SalesOrder id, total: decimal, at: datetime }
+      event SalesOrderFulfilled { order: SalesOrder id, at: datetime }
+
+      aggregate Customer with crudish {
+        name: string
+        contact: ContactInfo
+        billingAddress: Address
+        creditLimit: Money
+        active: bool = true
+        invariant name.length > 0
+        derived display: string = name
+      }
+
+      // The aggregate tree: a SalesOrder owns its SalesOrderLine parts.
+      aggregate SalesOrder with crudish {
+        reference: string
+        customerId: Customer id
+        status: SalesOrderStatus = Draft
+        priority: Priority = Normal
+        placedAt: datetime managed
+        shipTo: Address
+        contains lines: SalesOrderLine[]
+
+        derived lineCount: int = lines.count
+        derived subtotal: decimal = lines.sum(l => l.lineTotal)
+        derived display: string = reference
+
+        invariant reference.length > 0
+        invariant lines.count > 0 when status == Confirmed
+
+        function isMutable(): bool = status == Draft
+
+        operation addLine(productRef: string, description: string, unitPrice: Money, qty: int) {
+          precondition isMutable()
+          precondition qty > 0
+          lines += SalesOrderLine {
+            productRef: productRef,
+            description: description,
+            unitPrice: unitPrice,
+            qty: qty
+          }
+        }
+
+        operation confirm() {
+          precondition isMutable()
+          precondition lines.count > 0
+          status := Confirmed
+          emit SalesOrderConfirmed { order: id, total: subtotal, at: now() }
+        }
+
+        operation fulfill() {
+          precondition status == Confirmed
+          status := Fulfilled
+          emit SalesOrderFulfilled { order: id, at: now() }
+        }
+
+        operation cancel(reason: string) {
+          precondition status != Fulfilled
+          precondition status != Cancelled
+          status := Cancelled
+        }
+
+        entity SalesOrderLine {
+          productRef: string
+          description: string
+          unitPrice: Money
+          qty: int
+          derived lineTotal: decimal = unitPrice.amount * qty
+          invariant qty > 0
+        }
+
+        test "adding a line then confirming yields a confirmed order" verifies TC-SALES-1 {
+          let order = SalesOrder.create({
+            reference: "SO-TEST-1",
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            priority: Normal,
+            shipTo: { line1: "1 Test St", city: "Testville", region: "TS", postalCode: "00001", country: US }
+          })
+          order.addLine("PRD-1", "Widget", Money { amount: 5.00, currency: "USD" }, 2)
+          order.confirm()
+          expect(order.status).toBe(Confirmed)
+          expect(order.lineCount).toBe(1)
+        }
+
+        test "lines cannot be added once confirmed" verifies TC-SALES-1 {
+          let order = SalesOrder.create({
+            reference: "SO-TEST-2",
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            priority: Normal,
+            shipTo: { line1: "1 Test St", city: "Testville", region: "TS", postalCode: "00001", country: US }
+          })
+          order.addLine("PRD-1", "Widget", Money { amount: 5.00, currency: "USD" }, 2)
+          order.confirm()
+          expectThrows order.addLine("PRD-2", "Gadget", Money { amount: 9.00, currency: "USD" }, 1)
+        }
+      }
+
+      aggregate Quote with crudish {
+        reference: string
+        customerId: Customer id
+        status: QuoteStatus = Draft
+        amount: Money
+        probability: Percentage
+        validUntil: datetime
+        invariant reference.length > 0
+        derived display: string = reference
+
+        operation send() {
+          precondition status == Draft
+          status := Sent
+        }
+        operation accept() {
+          precondition status == Sent
+          status := Accepted
+        }
+      }
+
+      // ── Criterion — named, reusable predicates (Specification Pattern).
+      criterion OpenOrder of SalesOrder = status == Draft || status == Confirmed
+      criterion ForCustomer(c: Customer id) of SalesOrder = customerId == c
+
+      // ── Retrieval — a named query bundle (predicate + sort); pagination
+      // is supplied at the call site, not here.
+      retrieval OpenOrdersFor(c: Customer id) of SalesOrder {
+        where: OpenOrder && ForCustomer(c)
+        sort:  [placedAt desc]
+      }
+
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.contact.email == email
+        find active(): Customer[] where this.active == true
+      }
+      repository SalesOrders for SalesOrder {
+        find byCustomer(customerId: Customer id): SalesOrder[] where this.customerId == customerId
+        find open(): SalesOrder[] where OpenOrder
+      }
+      repository Quotes for Quote {
+        find byCustomer(customerId: Customer id): Quote[] where this.customerId == customerId
+      }
+
+      // ── View — a saved typed query (shorthand form: result shape is the
+      // source aggregate's wire shape).
+      view ConfirmedOrders = SalesOrder where status == Confirmed
+
+      // ── Transactional workflow: create + confirm an order atomically.
+      // If `confirm`'s precondition throws, the whole creation rolls back.
+      workflow placeOrder(
+        customerId: Customer id,
+        reference: string,
+        productRef: string,
+        unitPrice: Money,
+        qty: int,
+        shipTo: Address
+      ) transactional {
+        precondition qty > 0
+        let order = SalesOrder.create({
+          reference: reference,
+          customerId: customerId,
+          status: Draft,
+          priority: Normal,
+          placedAt: now(),
+          shipTo: shipTo
+        })
+        order.addLine(productRef, "Ordered item", unitPrice, qty)
+        order.confirm()
+      }
+
+      // ── Channel — the publisher-side transport contract for this
+      // context's events; bound to the Kafka bus by `salesBus` (system scope).
+      channel SalesEvents {
+        carries: SalesOrderConfirmed, SalesOrderFulfilled
+        delivery: broadcast
+        retention: log
+        key: order
+      }
+
+      // ── Declarative seed — each row lowered through the canonical create,
+      // so invariants hold on first boot.
+      seed default {
+        Customer { name: "Globex Corporation",
+                   contact: { email: "ap@globex.example", phone: "+1-555-0100" },
+                   billingAddress: { line1: "500 Industrial Way", city: "Springfield", region: "IL", postalCode: "62701", country: US },
+                   creditLimit: { amount: 50000.00, currency: "USD" },
+                   active: true }
+        Customer { name: "Initech Ltd",
+                   contact: { email: "purchasing@initech.example" },
+                   billingAddress: { line1: "1 Office Park", city: "London", region: "LDN", postalCode: "EC1A1BB", country: GB },
+                   creditLimit: { amount: 25000.00, currency: "GBP" },
+                   active: true }
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  INVENTORY — products, warehouses and stock on hand.
+  // ════════════════════════════════════════════════════════════════════
+  subdomain Inventory {
+    context Inventory {
+
+      enum MovementKind { Receipt, Issue, Transfer, Adjustment }
+
+      event StockReceived { item: StockItem id, quantity: decimal, at: datetime }
+      event StockIssued   { item: StockItem id, quantity: decimal, at: datetime }
+
+      // A measured amount with its unit.  Declared context-local (rather
+      // than in the shared kernel) because it is constructed by name in
+      // operation bodies (`Quantity { … }`), which the builder-call
+      // checker resolves against the enclosing context's value objects.
+      valueobject Quantity {
+        value: decimal
+        unit: UnitOfMeasure
+        invariant value >= 0
+        derived label: string = value + " " + unit
+      }
+
+      aggregate Product with crudish {
+        sku: string
+        name: string
+        uom: UnitOfMeasure = Each
+        unitCost: Money
+        active: bool = true
+        invariant sku.length > 0
+        derived display: string = sku
+      }
+
+      aggregate Warehouse with crudish {
+        code: string
+        name: string
+        location: Address
+        invariant code.length > 0
+        derived display: string = code
+      }
+
+      // Stock on hand for a (product, warehouse) pair.  guid identity is
+      // explicit; `lastCountedAt` is server-stamped (`managed`).
+      aggregate StockItem ids guid with crudish {
+        productId: Product id
+        warehouseId: Warehouse id
+        onHand: Quantity
+        reorderPoint: decimal = 0
+        lastCountedAt: datetime managed
+
+        derived belowReorder: bool = onHand.value <= reorderPoint
+        derived display: string = onHand.label
+
+        invariant reorderPoint >= 0
+
+        operation receive(qty: Quantity) {
+          precondition qty.value > 0
+          onHand := Quantity { value: onHand.value + qty.value, unit: onHand.unit }
+          emit StockReceived { item: id, quantity: qty.value, at: now() }
+        }
+
+        operation issue(qty: Quantity) {
+          precondition qty.value > 0
+          precondition onHand.value >= qty.value
+          onHand := Quantity { value: onHand.value - qty.value, unit: onHand.unit }
+          emit StockIssued { item: id, quantity: qty.value, at: now() }
+        }
+
+        operation markCounted() {
+          lastCountedAt := now()
+        }
+
+        test "stock cannot be issued below the quantity on hand" verifies TC-INV-1 {
+          let s = StockItem.create({
+            productId: "00000000-0000-0000-0000-000000000001",
+            warehouseId: "00000000-0000-0000-0000-000000000002",
+            onHand: { value: 5, unit: Each },
+            reorderPoint: 1
+          })
+          s.receive(Quantity { value: 10, unit: Each })
+          expectThrows s.issue(Quantity { value: 100, unit: Each })
+        }
+      }
+
+      // An append-only movement record (its own guid identity).
+      aggregate StockMovement ids guid with crudish {
+        productId: Product id
+        fromWarehouse: Warehouse id?
+        toWarehouse: Warehouse id?
+        kind: MovementKind
+        quantity: Quantity
+        occurredAt: datetime managed
+        derived display: string = "Movement " + kind
+      }
+
+      // Criterion over a plain column == parameter — SQL-lowerable, unlike
+      // a value-object-member comparison (`onHand.value <= reorderPoint`
+      // lives only in the in-memory `belowReorder` derived above).
+      criterion InWarehouse(w: Warehouse id) of StockItem = warehouseId == w
+
+      retrieval ItemsToRecount(w: Warehouse id) of StockItem {
+        where: InWarehouse(w)
+        sort:  [reorderPoint desc]
+      }
+
+      repository Products for Product {
+        find bySku(sku: string): Product? where this.sku == sku
+        find active(): Product[] where this.active == true
+      }
+      repository Warehouses for Warehouse {
+        find byCode(code: string): Warehouse? where this.code == code
+      }
+      repository StockItems for StockItem {
+        find byProduct(productId: Product id): StockItem[] where this.productId == productId
+        find byWarehouse(warehouseId: Warehouse id): StockItem[] where InWarehouse(warehouseId)
+      }
+      repository StockMovements for StockMovement {
+        find byProduct(productId: Product id): StockMovement[] where this.productId == productId
+      }
+
+      view ActiveProducts = Product where active == true
+
+      // Non-transactional cycle-count sweep: page a warehouse's stock and
+      // stamp each row's count time (per-iteration save commits as it goes).
+      workflow recountWarehouse(w: Warehouse id) {
+        let items = StockItems.run(ItemsToRecount(w), page: { offset: 0, limit: 100 })
+        for s in items {
+          s.markCounted()
+        }
+      }
+
+      seed default {
+        Product { sku: "WIDGET-1", name: "Standard Widget", uom: Each,
+                  unitCost: { amount: 3.50, currency: "USD" }, active: true }
+        Product { sku: "GADGET-2", name: "Deluxe Gadget", uom: Each,
+                  unitCost: { amount: 8.00, currency: "USD" }, active: true }
+        Warehouse { code: "WH-MAIN", name: "Main Distribution Centre",
+                    location: { line1: "10 Logistics Rd", city: "Springfield", region: "IL", postalCode: "62702", country: US } }
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  PROCUREMENT — suppliers, purchase orders and goods receipts.
+  // ════════════════════════════════════════════════════════════════════
+  subdomain Procurement {
+    context Procurement {
+
+      enum PurchaseOrderStatus { Draft, Approved, Received, Closed, Cancelled }
+
+      event PurchaseOrderApproved { po: PurchaseOrder id, total: decimal, at: datetime }
+      event GoodsReceiptPosted    { receipt: GoodsReceipt id, po: PurchaseOrder id, at: datetime }
+
+      aggregate Supplier with crudish {
+        name: string
+        contact: ContactInfo
+        address: Address
+        rating: int = 3
+        active: bool = true
+        invariant name.length > 0
+        invariant rating >= 1
+        invariant rating <= 5
+        derived display: string = name
+      }
+
+      aggregate PurchaseOrder with crudish {
+        reference: string
+        supplierId: Supplier id
+        status: PurchaseOrderStatus = Draft
+        priority: Priority = Normal
+        expectedAt: datetime
+        // `provenanced`: every write to `total` is captured as a rule
+        // snapshot, and the Hono backend records a runtime trace per write
+        // (two write-sites below: addLine and applyDiscount).
+        total: decimal provenanced
+        contains lines: PurchaseOrderLine[]
+
+        derived lineCount: int = lines.count
+        derived display: string = reference
+        invariant reference.length > 0
+
+        function isMutable(): bool = status == Draft
+
+        operation addLine(productRef: string, qty: int, unitCost: Money) {
+          precondition isMutable()
+          precondition qty > 0
+          lines += PurchaseOrderLine { productRef: productRef, qty: qty, unitCost: unitCost }
+          total := total + unitCost.amount * qty
+        }
+
+        operation applyDiscount(amount: decimal) {
+          precondition isMutable()
+          precondition amount >= 0
+          precondition amount <= total
+          total := total - amount
+        }
+
+        // Extern operation: the framework runs the preconditions, then
+        // dispatches to the registered handler (budget / credit check
+        // against a finance service), then re-checks invariants.  An
+        // extern body is preconditions ONLY — the handler performs the
+        // approval side effects in hand-written code.
+        operation approve() extern {
+          precondition isMutable()
+          precondition lines.count > 0
+        }
+
+        operation markReceived() {
+          precondition status != Cancelled
+          status := Received
+        }
+
+        operation cancel(reason: string) {
+          precondition status != Received
+          precondition status != Closed
+          status := Cancelled
+        }
+
+        entity PurchaseOrderLine {
+          productRef: string
+          qty: int
+          unitCost: Money
+          derived lineTotal: decimal = unitCost.amount * qty
+          invariant qty > 0
+        }
+
+        test "adding a line accrues the provenanced total" verifies TC-PROC-1 {
+          let po = PurchaseOrder.create({
+            reference: "PO-TEST-1",
+            supplierId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            priority: Normal,
+            expectedAt: "2026-01-15T00:00:00Z",
+            total: 0
+          })
+          po.addLine("PRD-1", 3, Money { amount: 4.00, currency: "USD" })
+          expect(po.lineCount).toBe(1)
+          expect(po.total).toBe(12)
+        }
+      }
+
+      aggregate GoodsReceipt ids guid with crudish {
+        poId: PurchaseOrder id
+        warehouseRef: string
+        receivedAt: datetime managed
+        notes: string?
+        derived display: string = warehouseRef
+      }
+
+      criterion PendingApproval of PurchaseOrder = status == Draft
+
+      repository Suppliers for Supplier {
+        find active(): Supplier[] where this.active == true
+      }
+      repository PurchaseOrders for PurchaseOrder {
+        find bySupplier(supplierId: Supplier id): PurchaseOrder[] where this.supplierId == supplierId
+        find pending(): PurchaseOrder[] where PendingApproval
+      }
+      repository GoodsReceipts for GoodsReceipt {
+        find byPurchaseOrder(poId: PurchaseOrder id): GoodsReceipt[] where this.poId == poId
+      }
+
+      view PendingPurchaseOrders = PurchaseOrder where status == Draft
+
+      // Transactional receipt: create the receipt row AND flip the PO to
+      // Received atomically — if `markReceived` throws, the receipt rolls
+      // back too.
+      workflow receiveGoods(poId: PurchaseOrder id, warehouseRef: string) transactional {
+        let po = PurchaseOrders.getById(poId)
+        let receipt = GoodsReceipt.create({
+          poId: poId,
+          warehouseRef: warehouseRef,
+          receivedAt: now()
+        })
+        po.markReceived()
+      }
+
+      seed default {
+        Supplier { name: "Acme Components Inc",
+                   contact: { email: "sales@acmecomponents.example", phone: "+1-555-0199" },
+                   address: { line1: "42 Supply St", city: "Detroit", region: "MI", postalCode: "48201", country: US },
+                   rating: 4, active: true }
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  CRM — contacts (polymorphic), leads and the opportunity pipeline.
+  // ════════════════════════════════════════════════════════════════════
+  subdomain Crm {
+    context Crm {
+
+      enum LeadStatus       { New, Qualified, Converted, Lost }
+      enum OpportunityStage { Prospecting, Proposal, Negotiation, Won, Lost }
+
+      // ── Inheritance (Table-Per-Hierarchy / sharedTable) ──────────────
+      // The abstract base owns the shared columns + a single `contacts`
+      // table with a `kind` discriminator; it has no repository of its own.
+      // Each backend auto-emits a polymorphic reader that unions the
+      // concrete loaders, and `Contact id` refs resolve against the one
+      // shared identity.
+      abstract aggregate Contact inheritanceUsing(sharedTable) {
+        displayName: string
+        email: string
+        invariant displayName.length > 0
+        derived display: string = displayName
+      }
+
+      aggregate PersonContact extends Contact with crudish {
+        firstName: string
+        lastName: string
+        jobTitle: string?
+      }
+
+      aggregate CompanyContact extends Contact with crudish {
+        legalName: string
+        taxId: string?
+      }
+
+      aggregate Lead with crudish {
+        name: string
+        company: string
+        status: LeadStatus = New
+        source: string
+        score: int = 0
+        invariant name.length > 0
+        invariant score >= 0
+        // derived match — the classic banding expression.
+        derived band: string = match {
+          (score >= 80) => "hot",
+          (score >= 50) => "warm",
+          else => "cold"
+        }
+        derived display: string = name
+
+        operation qualify() {
+          precondition status == New
+          status := Qualified
+        }
+        operation convert() {
+          precondition status == Qualified
+          status := Converted
+        }
+        operation lose(reason: string) {
+          precondition status != Converted
+          status := Lost
+        }
+
+        test "a lead must be qualified before it can convert" verifies TC-CRM-1 {
+          let l = Lead.create({
+            name: "Acme Co", company: "Acme", status: New, source: "Web", score: 10
+          })
+          expectThrows l.convert()
+          l.qualify()
+          l.convert()
+          expect(l.status).toBe(Converted)
+        }
+      }
+
+      aggregate Opportunity with crudish {
+        name: string
+        customerRef: string
+        stage: OpportunityStage = Prospecting
+        amount: Money
+        probability: Percentage
+        expectedClose: datetime
+        invariant name.length > 0
+        derived weightedAmount: decimal = amount.amount * probability.asFraction()
+        derived stageLabel: string = match {
+          (stage == Won)  => "Closed won",
+          (stage == Lost) => "Closed lost",
+          else => "In flight"
+        }
+        derived display: string = name
+
+        operation advance(to: OpportunityStage) {
+          precondition stage != Won
+          precondition stage != Lost
+          stage := to
+        }
+        operation win() {
+          precondition stage != Lost
+          stage := Won
+        }
+        operation lose(reason: string) {
+          precondition stage != Won
+          stage := Lost
+        }
+      }
+
+      criterion OpenOpportunity of Opportunity = stage != Won && stage != Lost
+
+      // Concrete subtypes get ordinary repositories; the abstract base
+      // does not (the polymorphic union reader is emitted as infrastructure).
+      repository PersonContacts for PersonContact {
+        find byEmail(email: string): PersonContact? where this.email == email
+      }
+      repository CompanyContacts for CompanyContact { }
+      repository Leads for Lead {
+        find byStatus(status: LeadStatus): Lead[] where this.status == status
+      }
+      repository Opportunities for Opportunity {
+        find byStage(stage: OpportunityStage): Opportunity[] where this.stage == stage
+        find open(): Opportunity[] where OpenOpportunity
+      }
+
+      view OpenPipeline = Opportunity where stage != Won && stage != Lost
+
+      seed default {
+        Lead { name: "Jane Prospect", company: "Hooli", status: New, source: "Website", score: 65 }
+        PersonContact { displayName: "John Buyer", email: "john@hooli.example",
+                        firstName: "John", lastName: "Buyer", jobTitle: "Head of Ops" }
+        CompanyContact { displayName: "Hooli Inc", email: "info@hooli.example",
+                         legalName: "Hooli Incorporated", taxId: "US-99-1234567" }
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  FINANCE — billing (persistence shapes) + ledger (TPC + event source).
+  //  Hosted on a dedicated .NET service: EF Core implements every storage
+  //  shape and the `money`/`json` primitives end-to-end.
+  // ════════════════════════════════════════════════════════════════════
+  subdomain Finance {
+
+    context Billing {
+
+      enum InvoiceStatus { Draft, Issued, Paid, Void }
+      enum PaymentMethod { Card, BankTransfer, Cash, Cheque }
+
+      // `money` primitive — a precise decimal with closed arithmetic
+      // (money ± money, money × decimal), distinct from the Money VO.
+      // `json` primitive — an opaque blob Loom never looks inside.
+      aggregate Invoice with crudish {
+        number: string
+        customerRef: string
+        subtotal: money
+        taxRate: decimal = 0
+        status: InvoiceStatus = Draft
+        metadata: json
+
+        derived tax:   money = subtotal * taxRate
+        derived total: money = subtotal + tax
+        derived display: string = number
+
+        invariant number.length > 0
+        invariant subtotal >= 0
+
+        operation issue() {
+          precondition status == Draft
+          status := Issued
+        }
+        operation pay() {
+          precondition status == Issued
+          status := Paid
+        }
+        operation applyCredit(amount: money) {
+          precondition status == Draft
+          precondition amount > 0
+          precondition amount <= subtotal
+          subtotal := subtotal - amount
+        }
+      }
+
+      aggregate Payment with crudish {
+        invoiceRef: string
+        amount: money
+        method: PaymentMethod
+        receivedAt: datetime managed
+        derived display: string = invoiceRef
+      }
+
+      // shape(document) — the whole aggregate (root + contained lines)
+      // serialises to one JSONB blob.  Document/embedded aggregates use an
+      // explicit canonical `create` (no crudish hard-delete on a blob).
+      aggregate Receipt shape(document) {
+        store: string
+        contains lines: ReceiptLine[]
+
+        create(store: string) { store := store }
+
+        derived total: money = lines.sum(l => l.amount)
+        derived display: string = store
+        invariant lines.count >= 0
+
+        operation addLine(label: string, amount: money) {
+          precondition amount > 0
+          lines += ReceiptLine { label: label, amount: amount }
+        }
+
+        entity ReceiptLine {
+          label: string
+          amount: money
+          invariant amount > 0
+        }
+      }
+
+      // shape(embedded) — the root (owner, label) stays queryable columns;
+      // the contained TagItem parts fold into a JSONB column.
+      aggregate TagList shape(embedded) {
+        owner: string
+        label: string
+        contains tags: TagItem[]
+
+        create(owner: string, label: string) {
+          owner := owner
+          label := label
+        }
+
+        invariant label.length > 0
+        derived display: string = label
+
+        operation addTag(name: string) {
+          tags += TagItem { name: name }
+        }
+
+        entity TagItem {
+          name: string
+          invariant name.length > 0
+        }
+      }
+
+      repository Invoices for Invoice {
+        find byStatus(status: InvoiceStatus): Invoice[] where this.status == status
+      }
+      repository Payments for Payment {
+        find byInvoice(invoiceRef: string): Payment[] where this.invoiceRef == invoiceRef
+      }
+      repository Receipts for Receipt { }
+      repository TagLists for TagList { }
+
+      view UnpaidInvoices = Invoice where status == Issued
+    }
+
+    context Ledger {
+
+      enum AccountKind { Asset, Liability, Equity, Revenue, Expense }
+
+      event LedgerDebited  { account: GeneralLedgerAccount id, amount: money, at: datetime }
+      event LedgerCredited { account: GeneralLedgerAccount id, amount: money, at: datetime }
+
+      // ── TPC inheritance (ownTable) ───────────────────────────────────
+      // Abstract base, no table of its own; each concrete gets its OWN
+      // table (no discriminator).  The polymorphic reader is auto-emitted
+      // as the union of the concrete loaders.
+      abstract aggregate Account inheritanceUsing(ownTable) {
+        name: string
+        kind: AccountKind
+        invariant name.length > 0
+        derived display: string = name
+      }
+
+      aggregate CashAccount extends Account inheritanceUsing(ownTable) with crudish {
+        location: string
+      }
+      aggregate BankAccount extends Account inheritanceUsing(ownTable) with crudish {
+        iban: string
+        bankName: string
+      }
+
+      // ── Event sourcing (persistedAs(eventLog)) ───────────────────────
+      // The account's truth is its event stream; the `apply(...)` bodies
+      // are the only place state mutates — replaying rebuilds the balance.
+      aggregate GeneralLedgerAccount persistedAs(eventLog) {
+        code: string
+        balance: money
+
+        invariant code.length > 0
+
+        operation debit(amount: money) {
+          precondition amount > 0
+          emit LedgerDebited { account: id, amount: amount, at: now() }
+        }
+        operation credit(amount: money) {
+          precondition amount > 0
+          emit LedgerCredited { account: id, amount: amount, at: now() }
+        }
+
+        apply(e: LedgerDebited)  { balance := balance - e.amount }
+        apply(e: LedgerCredited) { balance := balance + e.amount }
+      }
+
+      repository CashAccounts for CashAccount { }
+      repository BankAccounts for BankAccount { }
+      repository GeneralLedgerAccounts for GeneralLedgerAccount {
+        find byCode(code: string): GeneralLedgerAccount? where this.code == code
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  PEOPLE (HR) — auth + capabilities, on a .NET service with `auth:
+  //  required`.  Capability filters/stamps and the JWT middleware compile
+  //  to runtime here; the audit/softDelete macros + a hand-written tenant
+  //  filter show the whole authorization surface.
+  // ════════════════════════════════════════════════════════════════════
+  subdomain People {
+
+    // Typed permission catalogue.  `permissions.employeesManage` lowers to
+    // the stable string "people.employeesManage" on both sides of the wire.
+    permissions {
+      employeesManage,
+      departmentsManage
+    }
+
+    // `with audit, softDelete` add the context-level stamping rules and the
+    // soft-delete query filter; `auditable`/`softDeletable` (per aggregate)
+    // add the columns + markers those rules attach to.
+    context People with audit, softDelete {
+
+      enum EmployeeStatus { Active, OnLeave, Terminated }
+
+      // Hand-written capability group: every aggregate that
+      // `implements "tenantScoped"` gets this read filter — exactly what
+      // the audit/softDelete macros expand into, but for a tenant rule the
+      // macros don't ship.
+      filter for "tenantScoped" this.tenantId == currentUser.tenantId
+
+      aggregate Department with auditable, softDeletable {
+        tenantId: string
+        code: string
+        name: string
+        implements "tenantScoped"
+        invariant code.length > 0
+        derived display: string = name
+      }
+
+      aggregate Employee with auditable, softDeletable {
+        tenantId: string
+        name: PersonName
+        email: string sensitive(pii)
+        phone: string? sensitive(pii)
+        departmentRef: Department id
+        status: EmployeeStatus = Active
+        salary: money sensitive(pii)
+        implements "tenantScoped"
+
+        invariant tenantId.length > 0
+        derived display: string = name.display
+
+        // `requires` (403, gates the caller) vs `precondition` (400, gates
+        // the state).  currentUser + permissions.<name> resolve here.
+        operation promote(newSalary: money) {
+          requires currentUser.role == "hr"
+                || currentUser.permissions.contains(permissions.employeesManage)
+          precondition status == Active
+          precondition newSalary > salary
+          salary := newSalary
+        }
+        operation terminate() {
+          requires currentUser.role == "hr"
+          precondition status != Terminated
+          status := Terminated
+        }
+        operation startLeave() {
+          precondition status == Active
+          status := OnLeave
+        }
+      }
+
+      // Row-level visibility: both scope the result to the requesting
+      // user's tenant via `currentUser`.
+      repository Employees for Employee {
+        find inMyTenant(): Employee[] where tenantId == currentUser.tenantId
+        find byDepartment(departmentRef: Department id): Employee[]
+          where this.departmentRef == departmentRef
+      }
+      repository Departments for Department {
+        find inMyTenant(): Department[] where tenantId == currentUser.tenantId
+      }
+
+      view MyActiveEmployees =
+        Employee where status == Active && tenantId == currentUser.tenantId
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  Deployment topology (grows as contexts are added).
+  // ════════════════════════════════════════════════════════════════════
+  storage primary { type: postgres }
+  storage bus     { type: kafka }
+
+  resource salesState       { for: Sales,       kind: state, use: primary }
+  resource inventoryState   { for: Inventory,   kind: state, use: primary }
+  resource procurementState { for: Procurement, kind: state, use: primary }
+  resource crmState         { for: Crm,         kind: state, use: primary }
+  resource billingState     { for: Billing,     kind: state,    use: primary }
+  resource ledgerState      { for: Ledger,      kind: state,    use: primary }
+  resource ledgerEvents     { for: Ledger,      kind: eventLog, use: primary }
+  resource peopleState      { for: People,      kind: state,    use: primary }
+  channelSource salesBus { for: SalesEvents, use: bus }
+
+  // The React back-office: `with scaffold(...)` generates the full
+  // list/detail/new/operation/workflow/view page set for every aggregate
+  // in the listed subdomains, and the hand-written Dashboard page below is
+  // layered on top — custom pages coexist with the scaffolded ones, and
+  // both draw on the shared top-level components from ui/components.ddd.
+  ui BackOffice with scaffold(subdomains: [Sales, Inventory, Procurement, Crm]) {
+
+    page Dashboard {
+      route: "/"
+      title: "Acme ERP"
+      body: Stack {
+        SectionHeading {
+          title: "Operations dashboard",
+          subtitle: "Sales, inventory, procurement and CRM at a glance."
+        },
+        Grid {
+          StatTile { label: "Customers", value: "Live" },
+          StatTile { label: "Stock items", value: "Live" },
+          StatTile { label: "Open pipeline", value: "Live" }
+        },
+        Divider {},
+        SectionHeading {
+          title: "Jump to a workspace",
+          subtitle: "The scaffolded list/detail pages for each subdomain."
+        },
+        Grid {
+          CtaRow {
+            title: "Sales",
+            body: "Customers, quotes and the order book.",
+            ctaLabel: "Open sales",
+            to: "/sales-orders"
+          },
+          CtaRow {
+            title: "Inventory",
+            body: "Products, warehouses and stock on hand.",
+            ctaLabel: "Open inventory",
+            to: "/stock-items"
+          },
+          CtaRow {
+            title: "Procurement",
+            body: "Suppliers and purchase orders.",
+            ctaLabel: "Open procurement",
+            to: "/purchase-orders"
+          },
+          CtaRow {
+            title: "CRM",
+            body: "Leads and the opportunity pipeline.",
+            ctaLabel: "Open CRM",
+            to: "/opportunities"
+          }
+        }
+      }
+    }
+  }
+
+  deployable coreApi {
+    platform: hono
+    contexts: [Sales, Inventory, Procurement, Crm]
+    dataSources: [salesState, inventoryState, procurementState, crmState]
+    port: 3000
+  }
+  deployable webApp {
+    platform: react
+    targets: coreApi
+    ui: BackOffice
+    port: 3001
+    design: mantine
+  }
+
+  // Dedicated .NET service for Finance: EF Core + Mediator, every storage
+  // shape and the money/json primitives compiled through to runtime.  No
+  // React UI is mounted (files-only in the playground — .NET doesn't boot
+  // in-browser); open the generated tree to read the EF configurations.
+  deployable financeApi {
+    platform: dotnet
+    contexts: [Billing, Ledger]
+    dataSources: [billingState, ledgerState, ledgerEvents]
+    port: 8080
+  }
+
+  // HR on its own .NET service with `auth: required` → JWT-decode
+  // middleware.  Capability filters/stamps + the tenant filter compile to
+  // EF query filters and an auditable interceptor.  Files-only.
+  deployable peopleApi {
+    platform: dotnet
+    contexts: [People]
+    dataSources: [peopleState]
+    port: 8081
+    auth: required
+  }
+
+  test e2e "create a customer and read it back" against coreApi {
+    let c = api.customers.create({
+      name: "Acme Test Co",
+      contact: { email: "test@acme.example" },
+      billingAddress: { line1: "1 Way", city: "Town", region: "TS", postalCode: "00001", country: "US" },
+      creditLimit: { amount: 1000.0, currency: "USD" }
+    })
+    let read = api.customers.getById(c)
+    expect(read.name).toBe("Acme Test Co")
+  }
+
+  test e2e "create a product and read its sku back" against coreApi {
+    let p = api.products.create({
+      sku: "E2E-WIDGET",
+      name: "E2E Widget",
+      uom: "Each",
+      unitCost: { amount: 2.50, currency: "USD" },
+      active: true
+    })
+    let read = api.products.getById(p)
+    expect(read.sku).toBe("E2E-WIDGET")
+  }
+
+  test e2e "register a supplier" against coreApi {
+    let s = api.suppliers.create({
+      name: "E2E Supplies Ltd",
+      contact: { email: "hello@e2e-supplies.example" },
+      address: { line1: "9 Vendor Rd", city: "Cleveland", region: "OH", postalCode: "44101", country: "US" },
+      rating: 4,
+      active: true
+    })
+    let read = api.suppliers.getById(s)
+    expect(read.name).toBe("E2E Supplies Ltd")
+  }
+}

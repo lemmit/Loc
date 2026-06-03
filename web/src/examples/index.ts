@@ -33,6 +33,13 @@ import persistenceShapesSource from "./persistence-shapes.ddd?raw";
 import externShowcaseSource from "./extern-showcase.ddd?raw";
 import fulfillmentNewestSource from "./fulfillment-newest.ddd?raw";
 import fulfillmentKernelSource from "./shared/kernel.ddd?raw";
+// Acme ERP — the big multi-file showcase (six subdomains, four deployables).
+import erpMainSource from "./erp/main.ddd?raw";
+import erpMoneySource from "./erp/shared/money.ddd?raw";
+import erpGeoSource from "./erp/shared/geo.ddd?raw";
+import erpCommonSource from "./erp/shared/common.ddd?raw";
+import erpComponentsSource from "./erp/ui/components.ddd?raw";
+import erpRequirementsSource from "./erp/governance/requirements.ddd?raw";
 
 export interface LoomExample {
   id: string;
@@ -61,6 +68,24 @@ export interface LoomExample {
 // generator-level showcase that doesn't preview cleanly (its React
 // frontend targets a .NET deployable we don't run in the browser).
 export const examples: LoomExample[] = [
+  // The flagship: a full, six-subdomain ERP split across six files.  Leads
+  // the list because it is the most complete demonstration of the language
+  // — every major feature is exercised somewhere in its tree (see the
+  // feature map at the top of erp/main.ddd).
+  {
+    id: "acme-erp",
+    label: "Acme ERP — full multi-file system",
+    source: erpMainSource,
+    files: {
+      "shared/money.ddd": erpMoneySource,
+      "shared/geo.ddd": erpGeoSource,
+      "shared/common.ddd": erpCommonSource,
+      "ui/components.ddd": erpComponentsSource,
+      "governance/requirements.ddd": erpRequirementsSource,
+    },
+    blurb:
+      "A full ERP across six imported files and six subdomains — Sales, Inventory, Procurement, CRM, Finance and HR — on four deployables (a Hono operations API + React back-office, plus two .NET services). Exercises the whole surface: aggregate trees, criterion/retrieval, the payload family, channels, seeds, TPH + TPC inheritance, event sourcing, money/json primitives, document/embedded storage shapes, capabilities + auth, provenance, externs, traceability and a hand-written dashboard. Hono + React previews live; the .NET services are files-only.",
+  },
   // Multi-file example — picks up the workspace tabs strip and the
   // project loader's `import`-graph walk.  The companion `.ddd`
   // files are placed under `/workspace/shared/` when the user picks

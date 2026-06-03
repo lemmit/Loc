@@ -1,0 +1,32 @@
+// ── Shared UI component library ───────────────────────────────────────
+// Top-level `component`s are ambient across the workspace exactly like
+// root-level value objects: any page in any `ui` block can drop one in by
+// name with no local declaration.  These are the back-office's reusable
+// furniture, used by the hand-written Dashboard page in main.ddd.
+
+// A titled section header — a heading over a muted subtitle.
+component SectionHeading(title: string, subtitle: string) {
+  body: Stack {
+    Heading { title, level: 2 },
+    Text { subtitle }
+  }
+}
+
+// A single labelled metric in a card — the dashboard's KPI tile.
+component StatTile(label: string, value: string) {
+  body: Card {
+    Stat { label, value }
+  }
+}
+
+// A simple call-to-action row: a heading, a line of copy and a button
+// that navigates to `to`.
+component CtaRow(title: string, body: string, ctaLabel: string, to: string) {
+  body: Card {
+    Stack {
+      Heading { title, level: 3 },
+      Text { body },
+      Button { ctaLabel, to: to }
+    }
+  }
+}
