@@ -10,16 +10,16 @@ namespace CatalogApi.Infrastructure.Persistence.Configurations;
 
 public sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
 {
-    public void Configure(EntityTypeBuilder<Product> b)
+    public void Configure(EntityTypeBuilder<Product> builder)
     {
-        b.ToTable("products", "products");
-        b.HasKey(x => x.Id);
-        b.Property(x => x.Id).HasConversion(v => v.Value, v => new ProductId(v));
-        b.OwnsOne<Money>(x => x.Price, o => {
+        builder.ToTable("products", "products");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new ProductId(v));
+        builder.OwnsOne<Money>(x => x.Price, o => {
             o.Property(x => x.Amount).HasColumnName("price_amount");
             o.Property(x => x.Currency).HasColumnName("price_currency");
         });
-        b.HasIndex(x => x.Sku);
-        b.Ignore(x => x.DomainEvents);
+        builder.HasIndex(x => x.Sku);
+        builder.Ignore(x => x.DomainEvents);
     }
 }

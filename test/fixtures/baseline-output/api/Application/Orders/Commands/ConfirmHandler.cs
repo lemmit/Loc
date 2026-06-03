@@ -18,12 +18,12 @@ public sealed class ConfirmHandler : ICommandHandler<ConfirmCommand, Unit>
         _repo = repo;
     }
 
-    public async ValueTask<Unit> Handle(ConfirmCommand cmd, CancellationToken ct)
+    public async ValueTask<Unit> Handle(ConfirmCommand command, CancellationToken cancellationToken)
     {
-        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)
-            ?? throw new AggregateNotFoundException($"Order {cmd.Id} not found");
+        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)
+            ?? throw new AggregateNotFoundException($"Order {command.Id} not found");
         aggregate.Confirm();
-        await _repo.SaveAsync(aggregate, ct);
+        await _repo.SaveAsync(aggregate, cancellationToken);
         return Unit.Value;
     }
 }

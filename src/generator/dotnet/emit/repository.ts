@@ -35,7 +35,7 @@ export function renderRepositoryInterface(
     const pageExtra = pagedReturn(f.returnType) ? ["int page", "int pageSize"] : [];
     return `    Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser, pageExtra)});`;
   });
-  // `Run<Name>Async(args, page?, ct)` per context retrieval (retrieval.md).
+  // `Run<Name>Async(args, page?, cancellationToken)` per context retrieval (retrieval.md).
   const retrievalLines = retrievals.map(
     (r) =>
       `    Task<IReadOnlyList<${agg.name}>> Run${upperFirst(r.name)}Async(${renderRetrievalParamsWithCt(r.params)});`,
@@ -51,13 +51,15 @@ export function renderRepositoryInterface(
       "",
       `public interface I${agg.name}Repository`,
       "{",
-      `    Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken ct = default);`,
-      `    Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default);`,
-      `    Task SaveAsync(${agg.name} aggregate, CancellationToken ct = default);`,
+      `    Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default);`,
+      `    Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default);`,
+      `    Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default);`,
       // Hard delete — only when the aggregate has a canonical `destroy`
       // (declared or via `crudish`); keeps plain repos unchanged.
       ...(agg.canonicalDestroy
-        ? [`    Task DeleteAsync(${agg.name} aggregate, CancellationToken ct = default);`]
+        ? [
+            `    Task DeleteAsync(${agg.name} aggregate, CancellationToken cancellationToken = default);`,
+          ]
         : []),
       ...findLines,
       ...retrievalLines,
@@ -111,7 +113,7 @@ export function renderRepositoryImpl(
   const findMethodLines = finds.flatMap((f) => {
     const body = findBodies.find((b) => b.name === f.name);
     const filter = body?.filterClause ?? "";
-    const projection = body?.projectionClause ?? ".ToListAsync(ct)";
+    const projection = body?.projectionClause ?? ".ToListAsync(cancellationToken)";
     const usesUser = findUsesCurrentUser(f);
     // Paged (P3b): a count query + a `Skip`/`Take` page query (the find's
     // `where` threaded into both), returning the domain `Paged<Agg>`
@@ -121,9 +123,9 @@ export function renderRepositoryImpl(
         `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser, ["int page", "int pageSize"])})`,
         "    {",
         "        var offset = (page - 1) * pageSize;",
-        `        var total = await _db.${setName}${filter}.CountAsync(ct);`,
+        `        var total = await _db.${setName}${filter}.CountAsync(cancellationToken);`,
         "        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;",
-        `        var items = await _db.${setName}${filter}.Skip(offset).Take(pageSize).ToListAsync(ct);`,
+        `        var items = await _db.${setName}${filter}.Skip(offset).Take(pageSize).ToListAsync(cancellationToken);`,
         `        ${renderDotnetLogCall("findExecuted", [
           { name: "aggregate", valueExpr: `"${agg.name}"` },
           { name: "find", valueExpr: `"${f.name}"` },
@@ -172,7 +174,7 @@ export function renderRepositoryImpl(
     return [
       `    public async Task<IReadOnlyList<${agg.name}>> Run${upperFirst(r.name)}Async(${renderRetrievalParamsWithCt(r.params)})`,
       "    {",
-      `        var result = await _db.${setName}.WithSpecification(new ${upperFirst(r.name)}Spec(${specArgs})).ApplyPaging(page).ToListAsync(ct);`,
+      `        var result = await _db.${setName}.WithSpecification(new ${upperFirst(r.name)}Spec(${specArgs})).ApplyPaging(page).ToListAsync(cancellationToken);`,
       `        ${renderDotnetLogCall("findExecuted", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "find", valueExpr: `"Run${upperFirst(r.name)}"` },
@@ -221,9 +223,9 @@ export function renderRepositoryImpl(
       "        _log = log;",
       "    }",
       "",
-      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken ct = default)`,
+      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
       "    {",
-      `        var found = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == id, ct);`,
+      `        var found = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);`,
       // aggregate_loaded (debug) — mirrors the Hono repo emission;
       // `found` is a bool so a downstream filter can grep failed loads
       // by (event="aggregate_loaded", Found=false).
@@ -236,13 +238,13 @@ export function renderRepositoryImpl(
       "        return found;",
       "    }",
       "",
-      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default)`,
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
       "    {",
       "        if (ids.Count == 0) return Array.Empty<" + agg.name + ">();",
       ...loadManyByIdsLines,
       "    }",
       "",
-      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken ct = default)`,
+      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
       "    {",
       "        var entry = _db.Entry(aggregate);",
       "        if (entry.State == EntityState.Detached)",
@@ -263,7 +265,7 @@ export function renderRepositoryImpl(
             ])}`,
             "        try",
             "        {",
-            "            await _db.SaveChangesAsync(ct);",
+            "            await _db.SaveChangesAsync(cancellationToken);",
             `            ${renderDotnetLogCall("txCommit", [
               { name: "aggregate", valueExpr: `"${agg.name}"` },
               { name: "id", valueExpr: "aggregate.Id.Value" },
@@ -286,7 +288,7 @@ export function renderRepositoryImpl(
             "        }",
           ]
         : [
-            "        await _db.SaveChangesAsync(ct);",
+            "        await _db.SaveChangesAsync(cancellationToken);",
             // repository_save (debug) after SaveChangesAsync — the EF
             // transaction has committed at this point.  Field set mirrors
             // the Hono emission's (aggregate, id) prefix.
@@ -305,7 +307,7 @@ export function renderRepositoryImpl(
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "id", valueExpr: "aggregate.Id.Value" },
       ])}`,
-      "            await _events.DispatchAsync(ev, ct);",
+      "            await _events.DispatchAsync(ev, cancellationToken);",
       "        }",
       "    }",
       // Hard delete — gated on a canonical `destroy`.  `Remove` + Save;
@@ -314,10 +316,10 @@ export function renderRepositoryImpl(
       ...(agg.canonicalDestroy
         ? [
             "",
-            `    public async Task DeleteAsync(${agg.name} aggregate, CancellationToken ct = default)`,
+            `    public async Task DeleteAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
             "    {",
             `        _db.${setName}.Remove(aggregate);`,
-            "        await _db.SaveChangesAsync(ct);",
+            "        await _db.SaveChangesAsync(cancellationToken);",
             "    }",
           ]
         : []),
@@ -346,7 +348,7 @@ function buildLoadByIdLines(associations: AssociationIR[]): string[] {
     out.push(`                .Where(j => j.${owner} == id)`);
     out.push(`                .OrderBy(j => j.Ordinal)`);
     out.push(`                .Select(j => j.${target})`);
-    out.push(`                .ToListAsync(ct);`);
+    out.push(`                .ToListAsync(cancellationToken);`);
   }
   out.push("        }");
   return out;
@@ -362,11 +364,13 @@ function buildLoadManyByIdsLines(
   associations: AssociationIR[],
 ): string[] {
   if (associations.length === 0) {
-    return [`        return await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`];
+    return [
+      `        return await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(cancellationToken);`,
+    ];
   }
   const out: string[] = [];
   out.push(
-    `        var roots = await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`,
+    `        var roots = await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(cancellationToken);`,
   );
   out.push("        if (roots.Count == 0) return roots;");
   for (const a of associations) {
@@ -380,7 +384,7 @@ function buildLoadManyByIdsLines(
     out.push(`            .Where(j => ids.Contains(j.${owner}))`);
     out.push(`            .OrderBy(j => j.${owner}).ThenBy(j => j.Ordinal)`);
     out.push(`            .Select(j => new { Owner = j.${owner}, Target = j.${target} })`);
-    out.push(`            .ToListAsync(ct);`);
+    out.push(`            .ToListAsync(cancellationToken);`);
     out.push(`        var __${a.fieldName}ByOwner = __${a.fieldName}Rows`);
     out.push(`            .GroupBy(r => r.Owner)`);
     out.push(`            .ToDictionary(g => g.Key, g => g.Select(r => r.Target).ToList());`);
@@ -418,7 +422,7 @@ function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
     const targetType = `${a.targetAgg}Id`;
     out.push("");
     out.push(`        var __existing${cap} = await _db.${dbSet}`);
-    out.push(`            .Where(x => x.${owner} == aggregate.Id).ToListAsync(ct);`);
+    out.push(`            .Where(x => x.${owner} == aggregate.Id).ToListAsync(cancellationToken);`);
     out.push(`        var __current${cap} = aggregate.${cap}.ToList();`);
     out.push(`        var __currentIds${cap} = new HashSet<${targetType}>(__current${cap});`);
     out.push(
@@ -470,17 +474,17 @@ export function renderDocumentRepositoryImpl(
     // De-async the EF terminal — finds run in-memory over the rehydrated
     // documents, so the async EF operators become their LINQ-to-objects
     // equivalents.
-    const projection = (body?.projectionClause ?? ".ToListAsync(ct)")
-      .replace(".ToListAsync(ct)", ".ToList()")
-      .replace(".FirstOrDefaultAsync(ct)", ".FirstOrDefault()")
-      .replace(".FirstAsync(ct)", ".First()");
+    const projection = (body?.projectionClause ?? ".ToListAsync(cancellationToken)")
+      .replace(".ToListAsync(cancellationToken)", ".ToList()")
+      .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()")
+      .replace(".FirstAsync(cancellationToken)", ".First()");
     const usesUser = findUsesCurrentUser(f);
     const isArray = f.returnType.kind === "array";
     const rowsExpr = isArray ? "result.Count" : "result == null ? 0 : 1";
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",
-      `        var __all = (await _db.${setName}.ToListAsync(ct)).Select(__d => ${deser});`,
+      `        var __all = (await _db.${setName}.ToListAsync(cancellationToken)).Select(__d => ${deser});`,
       `        var result = __all${filter}${projection};`,
       `        ${renderDotnetLogCall("findExecuted", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
@@ -529,9 +533,9 @@ export function renderDocumentRepositoryImpl(
       "        _log = log;",
       "    }",
       "",
-      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken ct = default)`,
+      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
       "    {",
-      `        var __doc = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == id.Value, ct);`,
+      `        var __doc = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == id.Value, cancellationToken);`,
       `        ${renderDotnetLogCall("aggregateLoaded", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "id", valueExpr: "id.Value" },
@@ -541,18 +545,18 @@ export function renderDocumentRepositoryImpl(
       `        return ${agg.name}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snap}>(__doc.Data, __json)!);`,
       "    }",
       "",
-      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default)`,
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
       "    {",
       `        if (ids.Count == 0) return Array.Empty<${agg.name}>();`,
       "        var __raw = ids.Select(i => i.Value).ToList();",
-      `        var __docs = await _db.${setName}.Where(x => __raw.Contains(x.Id)).ToListAsync(ct);`,
+      `        var __docs = await _db.${setName}.Where(x => __raw.Contains(x.Id)).ToListAsync(cancellationToken);`,
       `        return __docs.Select(__d => ${deser}).ToList();`,
       "    }",
       "",
-      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken ct = default)`,
+      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
       "    {",
       "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
-      `        var __existing = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == aggregate.Id.Value, ct);`,
+      `        var __existing = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == aggregate.Id.Value, cancellationToken);`,
       "        if (__existing == null)",
       "        {",
       `            _db.${setName}.Add(new ${agg.name}Document { Id = aggregate.Id.Value, Data = __data, Version = 1 });`,
@@ -562,7 +566,7 @@ export function renderDocumentRepositoryImpl(
       "            __existing.Data = __data;",
       "            __existing.Version += 1;",
       "        }",
-      "        await _db.SaveChangesAsync(ct);",
+      "        await _db.SaveChangesAsync(cancellationToken);",
       `        ${renderDotnetLogCall("repositorySave", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "id", valueExpr: "aggregate.Id.Value" },
@@ -574,7 +578,7 @@ export function renderDocumentRepositoryImpl(
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "id", valueExpr: "aggregate.Id.Value" },
       ])}`,
-      "            await _events.DispatchAsync(ev, ct);",
+      "            await _events.DispatchAsync(ev, cancellationToken);",
       "        }",
       "    }",
       ...findMethodLines,
@@ -627,17 +631,17 @@ export function renderEventSourcedRepositoryImpl(
   const findMethodLines = finds.flatMap((f) => {
     const body = findBodies.find((b) => b.name === f.name);
     const filter = body?.filterClause ?? "";
-    const projection = (body?.projectionClause ?? ".ToListAsync(ct)")
-      .replace(".ToListAsync(ct)", ".ToList()")
-      .replace(".FirstOrDefaultAsync(ct)", ".FirstOrDefault()")
-      .replace(".FirstAsync(ct)", ".First()");
+    const projection = (body?.projectionClause ?? ".ToListAsync(cancellationToken)")
+      .replace(".ToListAsync(cancellationToken)", ".ToList()")
+      .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()")
+      .replace(".FirstAsync(cancellationToken)", ".First()");
     const usesUser = findUsesCurrentUser(f);
     const isArray = f.returnType.kind === "array";
     const rowsExpr = isArray ? "result.Count" : "result == null ? 0 : 1";
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",
-      "        var __all = await _LoadAllAsync(ct);",
+      "        var __all = await _LoadAllAsync(cancellationToken);",
       `        var result = __all${filter}${projection};`,
       `        ${renderDotnetLogCall("findExecuted", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
@@ -688,10 +692,10 @@ export function renderEventSourcedRepositoryImpl(
       "        _log = log;",
       "    }",
       "",
-      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken ct = default)`,
+      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
       "    {",
       "        var __sid = id.Value.ToString();",
-      `        var __rows = await _db.${dbSet}.Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync(ct);`,
+      `        var __rows = await _db.${dbSet}.Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync(cancellationToken);`,
       `        ${renderDotnetLogCall("aggregateLoaded", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "id", valueExpr: "id.Value" },
@@ -701,25 +705,25 @@ export function renderEventSourcedRepositoryImpl(
       `        return ${agg.name}._FromEvents(id, __rows.Select(RowToEvent).ToList());`,
       "    }",
       "",
-      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default)`,
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
       "    {",
       `        if (ids.Count == 0) return Array.Empty<${agg.name}>();`,
       `        var __out = new List<${agg.name}>();`,
       "        foreach (var __id in ids)",
       "        {",
-      "            var __a = await GetByIdAsync(__id, ct);",
+      "            var __a = await GetByIdAsync(__id, cancellationToken);",
       "            if (__a != null) __out.Add(__a);",
       "        }",
       "        return __out;",
       "    }",
       "",
-      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken ct = default)`,
+      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
       "    {",
       "        var __pending = aggregate.PullEvents();",
       "        if (__pending.Count > 0)",
       "        {",
       "            var __sid = aggregate.Id.Value.ToString();",
-      `            var __version = await _db.${dbSet}.Where(e => e.StreamId == __sid).Select(e => (int?)e.Version).MaxAsync(ct) ?? 0;`,
+      `            var __version = await _db.${dbSet}.Where(e => e.StreamId == __sid).Select(e => (int?)e.Version).MaxAsync(cancellationToken) ?? 0;`,
       "            foreach (var __ev in __pending)",
       "            {",
       "                __version++;",
@@ -732,7 +736,7 @@ export function renderEventSourcedRepositoryImpl(
       "                    OccurredAt = DateTime.UtcNow,",
       "                });",
       "            }",
-      "            await _db.SaveChangesAsync(ct);",
+      "            await _db.SaveChangesAsync(cancellationToken);",
       "        }",
       `        ${renderDotnetLogCall("repositorySave", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
@@ -745,14 +749,14 @@ export function renderEventSourcedRepositoryImpl(
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "id", valueExpr: "aggregate.Id.Value" },
       ])}`,
-      "            await _events.DispatchAsync(ev, ct);",
+      "            await _events.DispatchAsync(ev, cancellationToken);",
       "        }",
       "    }",
       "",
       // Load every stream, fold each — the in-memory source for finds.
-      `    private async Task<List<${agg.name}>> _LoadAllAsync(CancellationToken ct)`,
+      `    private async Task<List<${agg.name}>> _LoadAllAsync(CancellationToken cancellationToken)`,
       "    {",
-      `        var __rows = await _db.${dbSet}.OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(ct);`,
+      `        var __rows = await _db.${dbSet}.OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(cancellationToken);`,
       "        var __byStream = new Dictionary<string, List<IDomainEvent>>();",
       "        foreach (var __r in __rows)",
       "        {",
@@ -793,8 +797,8 @@ function renderParamsWithCt(
     .filter(Boolean)
     .join(", ");
   return head.length > 0
-    ? `${head}, CancellationToken ct = default`
-    : "CancellationToken ct = default";
+    ? `${head}, CancellationToken cancellationToken = default`
+    : "CancellationToken cancellationToken = default";
 }
 
 /** Retrieval params + an optional call-site `page` argument
@@ -806,5 +810,5 @@ export function renderRetrievalParamsWithCt(params: ParamIR[]): string {
     ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
     "(int? offset, int? limit)? page = null",
   ].join(", ");
-  return `${head}, CancellationToken ct = default`;
+  return `${head}, CancellationToken cancellationToken = default`;
 }

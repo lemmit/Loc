@@ -162,19 +162,33 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
  * Render an explicit conversion expression (`string(age)`,
  * `money(decimalField)`, etc.) for the .NET backend.  Per-(from,
  * target) pair so each emit matches C# idiom:
- *   string(x: numeric|bool) → `x.ToString()`
- *   string(x: decimal|money) → `x.ToString(CultureInfo.InvariantCulture)`
- *                              (locale-independent decimal separator)
- *   long(x: int)             → `(long)x`
- *   decimal(x: int|long)     → `(decimal)x`
- *   decimal(x: money)        → `x`               (money IS decimal in C#)
- *   money(x: int|long)       → `(decimal)x`
- *   money(x: decimal)        → `x`               (no-op)
+ *   string(x: numeric)        → `x.ToString(CultureInfo.InvariantCulture)`
+ *   string(x: bool)           → `x.ToString()` (bool is culture-stable)
+ *   string(x: datetime)       → `x.ToString("O", CultureInfo.InvariantCulture)`
+ *                               (ISO 8601 round-trip; CA1305-clean)
+ *   long(x: int)              → `(long)x`
+ *   decimal(x: int|long)      → `(decimal)x`
+ *   decimal(x: money)         → `x`               (money IS decimal in C#)
+ *   money(x: int|long)        → `(decimal)x`
+ *   money(x: decimal)         → `x`               (no-op)
  */
 function renderCsConvert(target: string, from: string | undefined, v: string): string {
   if (target === "string") {
+    // CA1305: numeric / decimal / datetime ToString needs an IFormatProvider
+    // so generated code doesn't drift on a non-en-US machine.  Other types
+    // (id records, enums, custom value-objects) either lack the IFormatProvider
+    // overload (records' default ToString) or render it obsolete (Enum.ToString
+    // since .NET 8) — keep their bare ToString.
     if (from === "decimal" || from === "money") {
       return `${v}.ToString(System.Globalization.CultureInfo.InvariantCulture)`;
+    }
+    if (from === "int" || from === "long") {
+      return `${v}.ToString(System.Globalization.CultureInfo.InvariantCulture)`;
+    }
+    if (from === "datetime") {
+      // ISO 8601 round-trip — "O" is the only format that preserves DateTime
+      // precision losslessly, and IFormatProvider keeps the literal stable.
+      return `${v}.ToString("O", System.Globalization.CultureInfo.InvariantCulture)`;
     }
     return `${v}.ToString()`;
   }

@@ -15,9 +15,9 @@ public sealed class OrderSummaryHandler : IQueryHandler<OrderSummaryQuery, IRead
     private readonly IOrderRepository _repo;
     public OrderSummaryHandler(IOrderRepository repo) => _repo = repo;
 
-    public async ValueTask<IReadOnlyList<OrderSummaryRow>> Handle(OrderSummaryQuery q, CancellationToken ct)
+    public async ValueTask<IReadOnlyList<OrderSummaryRow>> Handle(OrderSummaryQuery query, CancellationToken cancellationToken)
     {
-        var domain = await _repo.OrderSummary(ct);
+        var domain = await _repo.OrderSummary(cancellationToken);
         return domain.Select(d => new OrderSummaryRow(d.Id.Value, d.Status, d.Lines.Count)).ToList();
     }
 }

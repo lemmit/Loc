@@ -286,25 +286,25 @@ function renderHandler(
   // Saves.
   for (const save of wf.savesAtExit) {
     const fieldName = `_${save.repoName.charAt(0).toLowerCase() + save.repoName.slice(1)}`;
-    stmtLines.push(`        await ${fieldName}.SaveAsync(${save.name}, ct);`);
+    stmtLines.push(`        await ${fieldName}.SaveAsync(${save.name}, cancellationToken);`);
   }
 
   let body: string;
   if (wf.transactional) {
     const beginCall = effectiveIsolation
-      ? `_db.Database.BeginTransactionAsync(IsolationLevel.${csIsolationLevel(effectiveIsolation)}, ct)`
-      : `_db.Database.BeginTransactionAsync(ct)`;
+      ? `_db.Database.BeginTransactionAsync(IsolationLevel.${csIsolationLevel(effectiveIsolation)}, cancellationToken)`
+      : `_db.Database.BeginTransactionAsync(cancellationToken)`;
     body =
       `        await using var tx = await ${beginCall};\n` +
       `        try\n` +
       `        {\n` +
       stmtLines.map((l) => "    " + l).join("\n") +
       "\n" +
-      `            await tx.CommitAsync(ct);\n` +
+      `            await tx.CommitAsync(cancellationToken);\n` +
       `        }\n` +
       `        catch\n` +
       `        {\n` +
-      `            await tx.RollbackAsync(ct);\n` +
+      `            await tx.RollbackAsync(cancellationToken);\n` +
       `            throw;\n` +
       `        }\n`;
   } else {
@@ -313,7 +313,7 @@ function renderHandler(
   if (usage.hasEmit) {
     body +=
       `        foreach (var ev in _workflowEvents)\n` +
-      `            await _events.DispatchAsync(ev, ct);\n`;
+      `            await _events.DispatchAsync(ev, cancellationToken);\n`;
   }
   body += "        return Unit.Value;\n";
 
@@ -359,7 +359,7 @@ public sealed class ${handlerName} : ICommandHandler<${cmdName}, Unit>
 ${fields.join("\n")}
 ${ctor}
 
-    public async ValueTask<Unit> Handle(${cmdName} cmd, CancellationToken ct)
+    public async ValueTask<Unit> Handle(${cmdName} command, CancellationToken cancellationToken)
     {
 ${body}    }
 }
@@ -449,7 +449,7 @@ function renderStatement(
     case "repo-let": {
       const fieldName = `_${st.repoName.charAt(0).toLowerCase() + st.repoName.slice(1)}`;
       const argList = st.args.map(renderArg).join(", ");
-      const callArgs = argList.length > 0 ? `${argList}, ct` : `ct`;
+      const callArgs = argList.length > 0 ? `${argList}, cancellationToken` : `cancellationToken`;
       return [
         `${INDENT}var ${st.name} = await ${fieldName}.${upperFirst(st.method)}Async(${callArgs});`,
       ];
@@ -473,7 +473,7 @@ function renderStatement(
         return [
           `${INDENT}${st.target}.Check${upperFirst(st.op)}(${argList});`,
           `${INDENT}var __${st.op}Request = new ${reqName}(${requestArgs});`,
-          `${INDENT}await ${handlerField}.HandleAsync(${st.target}, __${st.op}Request, ct);`,
+          `${INDENT}await ${handlerField}.HandleAsync(${st.target}, __${st.op}Request, cancellationToken);`,
           `${INDENT}${st.target}.AssertInvariants();`,
         ];
       }
@@ -497,7 +497,7 @@ function renderStatement(
     }
     case "repo-run": {
       // `Repo.run(<Retrieval>(args), page?)` → the generated
-      // `Run<Name>Async(args, page?, ct)` repository method.
+      // `Run<Name>Async(args, page?, cancellationToken)` repository method.
       const fieldName = `_${st.repoName.charAt(0).toLowerCase() + st.repoName.slice(1)}`;
       const args = st.retrievalArgs.map(renderArg);
       if (st.page) {
@@ -505,7 +505,7 @@ function renderStatement(
         const lim = st.page.limit ? renderArg(st.page.limit) : "null";
         args.push(`(${off}, ${lim})`);
       }
-      const callArgs = [...args, "ct"].join(", ");
+      const callArgs = [...args, "cancellationToken"].join(", ");
       return [
         `${INDENT}var ${st.name} = await ${fieldName}.Run${upperFirst(st.retrievalName)}Async(${callArgs});`,
       ];
@@ -519,7 +519,7 @@ function renderStatement(
         .map((l) => `    ${l}`);
       const saveLines = st.savesPerIteration.map((sv) => {
         const fieldName = `_${sv.repoName.charAt(0).toLowerCase() + sv.repoName.slice(1)}`;
-        return `${INDENT}    await ${fieldName}.SaveAsync(${sv.name}, ct);`;
+        return `${INDENT}    await ${fieldName}.SaveAsync(${sv.name}, cancellationToken);`;
       });
       return [
         `${INDENT}foreach (var ${st.var} in ${renderArg(st.iterable)})`,
@@ -547,7 +547,7 @@ function renderExprWithCmdParams(
     e: import("../../ir/types/loom-ir.js").ExprIR,
   ): import("../../ir/types/loom-ir.js").ExprIR => {
     if (e.kind === "ref" && e.refKind === "param" && paramNames.has(e.name)) {
-      return { ...e, name: `cmd.${upperFirst(e.name)}`, refKind: "let" };
+      return { ...e, name: `command.${upperFirst(e.name)}`, refKind: "let" };
     }
     if (e.kind === "member") {
       return { ...e, receiver: rewrite(e.receiver) };

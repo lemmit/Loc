@@ -108,7 +108,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
     // RFC 7807 problem responder — application/problem+json body +
     // x-request-id header (trace correlation moves off the body so it's
     // byte-identical to Hono / Phoenix).  Shared by every non-validation arm.
-    private static IActionResult Problem(ExceptionContext context, int status, string title, string detail, string traceId)
+    private static ObjectResult Problem(ExceptionContext context, int status, string title, string detail, string traceId)
     {
         context.HttpContext.Response.Headers["x-request-id"] = traceId;
         return new ObjectResult(new ProblemDetails

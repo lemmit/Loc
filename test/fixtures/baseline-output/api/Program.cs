@@ -183,11 +183,11 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 // decide "should I send traffic to this pod?".  Returns 503 with a
 // one-line cause when the DB is unreachable so operators see the
 // reason in the probe log instead of having to exec into the pod.
-app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
+app.MapGet("/ready", async (AppDbContext db, CancellationToken cancellationToken) =>
 {
     try
     {
-        var ok = await db.Database.CanConnectAsync(ct);
+        var ok = await db.Database.CanConnectAsync(cancellationToken);
         return ok
             ? Results.Ok(new { status = "ready" })
             : Results.Json(

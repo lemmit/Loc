@@ -50,7 +50,7 @@ namespace ${ns}.Auth;
 /// builder.Services.AddScoped&lt;IUserVerifier, MyJwtVerifier&gt;()).</summary>
 public sealed class DevStubUserVerifier : IUserVerifier
 {
-    public Task<User?> VerifyAsync(HttpContext httpContext, CancellationToken ct)
+    public Task<User?> VerifyAsync(HttpContext httpContext, CancellationToken cancellationToken)
     {
         return Task.FromResult<User?>(new User(
             ${args}));
@@ -133,7 +133,7 @@ namespace ${ns}.Auth;
 /// with a 401.</summary>
 public interface IUserVerifier
 {
-    Task<User?> VerifyAsync(HttpContext httpContext, CancellationToken ct);
+    Task<User?> VerifyAsync(HttpContext httpContext, CancellationToken cancellationToken);
 }
 `;
 }

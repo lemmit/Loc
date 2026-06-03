@@ -150,7 +150,7 @@ function renderHandler(
       : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join(";\n        ")};\n    }`;
   // Repository call args — drop the `, ct` separator when there are
   // no domain params, mirroring the find handler convention.
-  const repoCallArgs = usesUser ? "_currentUser.User, ct" : "ct";
+  const repoCallArgs = usesUser ? "_currentUser.User, cancellationToken" : "cancellationToken";
   // Bulk-load lines — one per auxiliary path, in dependency order.
   const auxLines: string[] = [];
   for (const aux of auxiliaries) {
@@ -158,7 +158,7 @@ function renderHandler(
     const mapVar = aux.mapVar;
     const idsExpr = csIdsSourceForAux(aux, pathToMap);
     auxLines.push(
-      `        var ${mapVar} = (await ${repoField}.FindManyByIdsAsync(${idsExpr}, ct)).ToDictionary(__a => __a.Id);`,
+      `        var ${mapVar} = (await ${repoField}.FindManyByIdsAsync(${idsExpr}, cancellationToken)).ToDictionary(__a => __a.Id);`,
     );
     pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
   }
@@ -197,7 +197,7 @@ public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<$
 ${fields.join("\n")}
 ${ctor}
 
-    public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} q, CancellationToken ct)
+    public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} query, CancellationToken cancellationToken)
     {
         var domain = await _repo.${upperFirst(view.name)}(${repoCallArgs});
 ${auxLines.join("\n")}${auxLines.length > 0 ? "\n" : ""}        return domain.Select(d => ${projection}).ToList();

@@ -18,12 +18,12 @@ public sealed class UpdateHandler : ICommandHandler<UpdateCommand, Unit>
         _repo = repo;
     }
 
-    public async ValueTask<Unit> Handle(UpdateCommand cmd, CancellationToken ct)
+    public async ValueTask<Unit> Handle(UpdateCommand command, CancellationToken cancellationToken)
     {
-        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)
-            ?? throw new AggregateNotFoundException($"Product {cmd.Id} not found");
-        aggregate.Update(cmd.Sku, cmd.Price);
-        await _repo.SaveAsync(aggregate, ct);
+        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)
+            ?? throw new AggregateNotFoundException($"Product {command.Id} not found");
+        aggregate.Update(command.Sku, command.Price);
+        await _repo.SaveAsync(aggregate, cancellationToken);
         return Unit.Value;
     }
 }

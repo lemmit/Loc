@@ -46,7 +46,7 @@ describe(".NET generator — reified criteria (Slice 1: evaluate face)", () => {
     // No constructor for a parameterless criterion; body renders `this` as the candidate.
     expect(c).not.toMatch(/public ActiveCustomerCriterion\(/);
     expect(c).toMatch(
-      /public override bool IsSatisfiedBy\(Customer __candidate\) => __candidate\.Active;/,
+      /public override bool IsSatisfiedBy\(Customer candidate\) => candidate\.Active;/,
     );
   });
 
@@ -56,9 +56,9 @@ describe(".NET generator — reified criteria (Slice 1: evaluate face)", () => {
     expect(c).toMatch(/private readonly string rgn;/);
     expect(c).toMatch(/public InRegionCriterion\(string rgn\)/);
     expect(c).toMatch(/this\.rgn = rgn;/);
-    // candidate field → `__candidate.Region`; parameter → bare `rgn` (the field).
+    // candidate field → `candidate.Region`; parameter → bare `rgn` (the field).
     expect(c).toMatch(
-      /public override bool IsSatisfiedBy\(Customer __candidate\) => __candidate\.Region == rgn;/,
+      /public override bool IsSatisfiedBy\(Customer candidate\) => candidate\.Region == rgn;/,
     );
   });
 
@@ -74,7 +74,7 @@ describe(".NET generator — reified criteria (Slice 1: evaluate face)", () => {
     const c = (await files()).get("Domain/Criteria/InRegionCriterion.cs")!;
     expect(c).toMatch(/using System\.Linq\.Expressions;/);
     expect(c).toMatch(
-      /public Expression<Func<Customer, bool>> ToExpression\(\) => __candidate => __candidate\.Region == rgn;/,
+      /public Expression<Func<Customer, bool>> ToExpression\(\) => candidate => candidate\.Region == rgn;/,
     );
   });
 
@@ -85,7 +85,7 @@ describe(".NET generator — reified criteria (Slice 1: evaluate face)", () => {
     // (the gap Slice 1a's hardcoded using-set would have missed).
     expect(c).toMatch(/using System\.Text\.RegularExpressions;/);
     expect(c).toMatch(
-      /IsSatisfiedBy\(Customer __candidate\) => Regex\.IsMatch\(__candidate\.Name, "x"\);/,
+      /IsSatisfiedBy\(Customer candidate\) => Regex\.IsMatch\(candidate\.Name, "x"\);/,
     );
     // Not in the queryable subset → no query face, no Expressions using.
     expect(c).not.toMatch(/ToExpression/);

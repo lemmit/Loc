@@ -43,7 +43,7 @@ export function emitGetByIdQueryAndHandler(
       queryName: `Get${agg.name}ByIdQuery`,
       returnType: `${agg.name}Response?`,
       body:
-        `        var found = await _repo.GetByIdAsync(q.Id, ct);\n` +
+        `        var found = await _repo.GetByIdAsync(query.Id, cancellationToken);\n` +
         `        return found is null ? null : ${projectEntityExpr("found", agg, ctx)};\n`,
     }),
   );
@@ -104,23 +104,23 @@ function buildFindHandlerBody(
   ctx: EnrichedBoundedContextIR,
   usesUser: boolean = false,
 ): string {
-  const baseArgs = find.params.map((p) => `q.${upperFirst(p.name)}`);
+  const baseArgs = find.params.map((p) => `query.${upperFirst(p.name)}`);
   const allArgs = usesUser ? [...baseArgs, "_currentUser.User"] : baseArgs;
-  // The repository signature ends with `CancellationToken ct`; drop the
+  // The repository signature ends with `CancellationToken cancellationToken`; drop the
   // separator when there are no domain params, so the auto-included
   // zero-arg `all` find compiles cleanly.
   const argList = allArgs.join(", ");
-  const callArgs = argList.length > 0 ? `${argList}, ct` : `ct`;
+  const callArgs = argList.length > 0 ? `${argList}, cancellationToken` : `cancellationToken`;
   if (pagedReturn(find.returnType)) {
     // Repo returns `Paged<Agg>` (domain); map each item to its response DTO
     // and re-wrap, preserving the page metadata (P3b).
     const pagedArgs = [
       ...baseArgs,
-      "q.Page",
-      "q.PageSize",
+      "query.Page",
+      "query.PageSize",
       ...(usesUser ? ["_currentUser.User"] : []),
     ];
-    const pagedCall = `${pagedArgs.join(", ")}, ct`;
+    const pagedCall = `${pagedArgs.join(", ")}, cancellationToken`;
     return (
       `        var domain = await _repo.${upperFirst(find.name)}(${pagedCall});\n` +
       `        return new Paged<${agg.name}Response>(domain.Items.Select(d => ${projectEntityExpr("d", agg, ctx)}).ToList(), domain.Page, domain.PageSize, domain.Total, domain.TotalPages);\n`

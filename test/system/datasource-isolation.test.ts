@@ -54,7 +54,9 @@ describe("resource isolationLevel — end-to-end emit", () => {
     const handler = [...files.keys()].find((k) => k.endsWith("BumpCreditHandler.cs"));
     expect(handler, "BumpCreditHandler.cs emitted").toBeDefined();
     const body = files.get(handler!)!;
-    expect(body).toMatch(/BeginTransactionAsync\(IsolationLevel\.Serializable, ct\)/);
+    expect(body).toMatch(
+      /BeginTransactionAsync\(IsolationLevel\.Serializable, cancellationToken\)/,
+    );
     expect(body).toMatch(/using System\.Data;/);
   });
 
@@ -93,7 +95,9 @@ describe("resource isolationLevel — end-to-end emit", () => {
     const handler = [...files.keys()].find((k) => k.endsWith("BumpCreditHandler.cs"));
     const body = files.get(handler!)!;
     // Workflow-level readCommitted wins over resource serializable.
-    expect(body).toMatch(/BeginTransactionAsync\(IsolationLevel\.ReadCommitted, ct\)/);
+    expect(body).toMatch(
+      /BeginTransactionAsync\(IsolationLevel\.ReadCommitted, cancellationToken\)/,
+    );
     expect(body).not.toMatch(/Serializable/);
   });
 

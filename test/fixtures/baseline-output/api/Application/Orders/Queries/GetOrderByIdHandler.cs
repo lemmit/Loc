@@ -19,9 +19,9 @@ public sealed class GetOrderByIdHandler : IQueryHandler<GetOrderByIdQuery, Order
         _repo = repo;
     }
 
-    public async ValueTask<OrderResponse?> Handle(GetOrderByIdQuery q, CancellationToken ct)
+    public async ValueTask<OrderResponse?> Handle(GetOrderByIdQuery query, CancellationToken cancellationToken)
     {
-        var found = await _repo.GetByIdAsync(q.Id, ct);
+        var found = await _repo.GetByIdAsync(query.Id, cancellationToken);
         return found is null ? null : new OrderResponse(found.Id.Value, found.CustomerId, found.Status, found.PlacedAt.ToUniversalTime().ToString("o"), found.Lines.Select(__e => new OrderLineResponse(__e.Id.Value, __e.ProductId.Value, __e.Quantity)).ToList());
     }
 }

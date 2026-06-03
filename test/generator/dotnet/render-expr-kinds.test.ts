@@ -297,10 +297,10 @@ describe("dotnet renderCsExpr — convert", () => {
     ).toBe("this.Price.ToString(System.Globalization.CultureInfo.InvariantCulture)");
   });
 
-  it("string(int) → `<expr>.ToString()`", () => {
+  it("string(int) → `<expr>.ToString(InvariantCulture)` (CA1305-clean)", () => {
     expect(
       renderCsExpr({ kind: "convert", target: "string", from: "int", value: litInt("3") }),
-    ).toBe("3.ToString()");
+    ).toBe("3.ToString(System.Globalization.CultureInfo.InvariantCulture)");
   });
 
   it("money(int) → `(decimal)<expr>`", () => {

@@ -3,7 +3,7 @@
 // from the context's `SeedIR` list.
 //
 // Per D-SEED-PATH the default path is **through the domain `Create`**: each
-// row becomes `await <agg>Repo.SaveAsync(<Agg>.Create(…), ct)`, so the
+// row becomes `await <agg>Repo.SaveAsync(<Agg>.Create(…), cancellationToken)`, so the
 // aggregate's invariants run.  Unlike the Hono `create({ … })` named object,
 // the C# `Create(…)` factory is **positional** in the aggregate's
 // required-field order, so a row's fields are ordered to match before being
@@ -57,7 +57,9 @@ export function emitDotnetSeeds(
     const entries = ds.entries.filter((e) => aggByName.has(e.row.aggregate));
     if (entries.length === 0) continue;
     fnBlocks.push(renderDatasetFn(ds.name, entries, aggByName));
-    callLines.push(`        await Seed${upperFirst(ds.name)}(db, sp, requested, ct);`);
+    callLines.push(
+      `        await Seed${upperFirst(ds.name)}(db, sp, requested, cancellationToken);`,
+    );
     // raw rows emit SQL only — they import no aggregate class/repository.
     for (const e of entries) if (!e.raw) usedAggs.add(e.row.aggregate);
   }
@@ -96,23 +98,23 @@ function renderDatasetFn(
   const saveLines = entries.map((e) => {
     if (e.raw) {
       // raw path (D-SEED-XREF): direct INSERT with explicit id + FK columns.
-      return `        await db.Database.ExecuteSqlRawAsync(${csVerbatim(renderSeedRowInsert(e.row.aggregate, e.row.fields))}, ct);`;
+      return `        await db.Database.ExecuteSqlRawAsync(${csVerbatim(renderSeedRowInsert(e.row.aggregate, e.row.fields))}, cancellationToken);`;
     }
     const agg = aggByName.get(e.row.aggregate)!;
-    return `        await ${repoVar(e.row.aggregate)}.SaveAsync(${e.row.aggregate}.Create(${renderArgs(e.row, agg)}), ct);`;
+    return `        await ${repoVar(e.row.aggregate)}.SaveAsync(${e.row.aggregate}.Create(${renderArgs(e.row, agg)}), cancellationToken);`;
   });
   return lines(
     `    private static async Task Seed${upperFirst(dataset)}(`,
     "        AppDbContext db,",
     "        IServiceProvider sp,",
     "        HashSet<string> requested,",
-    "        CancellationToken ct)",
+    "        CancellationToken cancellationToken)",
     "    {",
     `        if (!DatasetEnabled(${csStr(dataset)}, requested)) return;`,
-    `        if (await AlreadySeeded(db, ${csStr(dataset)}, ct)) return;`,
+    `        if (await AlreadySeeded(db, ${csStr(dataset)}, cancellationToken)) return;`,
     ...repoDecls,
     ...saveLines,
-    `        await MarkSeeded(db, ${csStr(dataset)}, ct);`,
+    `        await MarkSeeded(db, ${csStr(dataset)}, cancellationToken);`,
     "    }",
     "",
   );
@@ -179,11 +181,11 @@ function renderSeedFile(
       "/// no-ops.</summary>",
       "public static class Seed",
       "{",
-      "    public static async Task RunSeeds(AppDbContext db, IServiceProvider sp, CancellationToken ct = default)",
+      "    public static async Task RunSeeds(AppDbContext db, IServiceProvider sp, CancellationToken cancellationToken = default)",
       "    {",
       "        await db.Database.ExecuteSqlRawAsync(",
       '            "CREATE TABLE IF NOT EXISTS \\"__loom_seed\\" (\\"dataset\\" text PRIMARY KEY, \\"applied_at\\" timestamptz NOT NULL DEFAULT now())",',
-      "            ct);",
+      "            cancellationToken);",
       '        var requested = (Environment.GetEnvironmentVariable("LOOM_SEED") ?? "")',
       "            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)",
       "            .ToHashSet();",
@@ -194,11 +196,11 @@ function renderSeedFile(
       "    private static bool DatasetEnabled(string dataset, HashSet<string> requested) =>",
       '        dataset == "default" || requested.Contains(dataset);',
       "",
-      "    private static async Task<bool> AlreadySeeded(AppDbContext db, string dataset, CancellationToken ct)",
+      "    private static async Task<bool> AlreadySeeded(AppDbContext db, string dataset, CancellationToken cancellationToken)",
       "    {",
       "        var conn = db.Database.GetDbConnection();",
       "        var opened = conn.State != System.Data.ConnectionState.Open;",
-      "        if (opened) await conn.OpenAsync(ct);",
+      "        if (opened) await conn.OpenAsync(cancellationToken);",
       "        try",
       "        {",
       "            await using var cmd = conn.CreateCommand();",
@@ -207,7 +209,7 @@ function renderSeedFile(
       '            p.ParameterName = "@dataset";',
       "            p.Value = dataset;",
       "            cmd.Parameters.Add(p);",
-      "            return await cmd.ExecuteScalarAsync(ct) is not null;",
+      "            return await cmd.ExecuteScalarAsync(cancellationToken) is not null;",
       "        }",
       "        finally",
       "        {",
@@ -215,10 +217,10 @@ function renderSeedFile(
       "        }",
       "    }",
       "",
-      "    private static async Task MarkSeeded(AppDbContext db, string dataset, CancellationToken ct) =>",
+      "    private static async Task MarkSeeded(AppDbContext db, string dataset, CancellationToken cancellationToken) =>",
       "        await db.Database.ExecuteSqlRawAsync(",
       '            "INSERT INTO \\"__loom_seed\\" (\\"dataset\\") VALUES ({0})",',
-      "            new object[] { dataset }, ct);",
+      "            new object[] { dataset }, cancellationToken);",
       "",
       body,
       "}",

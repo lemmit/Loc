@@ -18,11 +18,11 @@ public sealed class DestroyProductHandler : ICommandHandler<DestroyProductComman
         _repo = repo;
     }
 
-    public async ValueTask<Unit> Handle(DestroyProductCommand cmd, CancellationToken ct)
+    public async ValueTask<Unit> Handle(DestroyProductCommand command, CancellationToken cancellationToken)
     {
-        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)
-            ?? throw new AggregateNotFoundException($"Product {cmd.Id} not found");
-        await _repo.DeleteAsync(aggregate, ct);
+        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)
+            ?? throw new AggregateNotFoundException($"Product {command.Id} not found");
+        await _repo.DeleteAsync(aggregate, cancellationToken);
         return Unit.Value;
     }
 }

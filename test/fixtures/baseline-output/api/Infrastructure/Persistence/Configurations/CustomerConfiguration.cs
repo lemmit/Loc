@@ -10,12 +10,12 @@ namespace Api.Infrastructure.Persistence.Configurations;
 
 public sealed class CustomerConfiguration : IEntityTypeConfiguration<Customer>
 {
-    public void Configure(EntityTypeBuilder<Customer> b)
+    public void Configure(EntityTypeBuilder<Customer> builder)
     {
-        b.ToTable("customers", "customers");
-        b.HasKey(x => x.Id);
-        b.Property(x => x.Id).HasConversion(v => v.Value, v => new CustomerId(v));
-        b.HasIndex(x => x.Email);
-        b.Ignore(x => x.DomainEvents);
+        builder.ToTable("customers", "customers");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new CustomerId(v));
+        builder.HasIndex(x => x.Email);
+        builder.Ignore(x => x.DomainEvents);
     }
 }

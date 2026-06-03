@@ -122,7 +122,11 @@ export function renderEntity(
     // them — the State/ctor/_Create/factory below still set them via the
     // inherited (internal-set) accessors.
     if (superType?.fieldNames.has(f.name)) continue;
-    const def = f.optional ? " = default;" : " = default!;";
+    // Optional fields default to null on their own — emitting `= default`
+    // explicitly trips CA1805 ("redundant initialization to default").
+    // Non-optional reference types still need the null-forgiving `= default!`
+    // so the non-null analyzer accepts the auto-property declaration.
+    const def = f.optional ? "" : " = default!;";
     // Reference-collection (`Id<T>[]`) fields are persisted via a
     // separate join table; the repository (in the Infrastructure
     // assembly) needs to write the `List<TargetId>` after loading
@@ -517,7 +521,14 @@ export function renderEntity(
       ...pullEventsLines,
       `    ${hasExtern ? "internal" : "private"} void AssertInvariants(${emitTrace ? 'string __op = "<init>"' : ""})`,
       "    {",
-      ...invariantLines,
+      // When no invariants are declared the body is empty, which trips CA1822
+      // ("can be marked as static").  AssertInvariants is intentionally kept
+      // on the instance for two reasons: (a) it is called via `e.AssertInvariants()`
+      // from the event-sourcing applier (line ~295) where `e` is an instance,
+      // and (b) user extensions via the `internal` hatch (when `hasExtern`) may
+      // add instance-touching invariants over time.  Emit a `this` discard so
+      // the analyzer sees the method as instance-bound.
+      ...(invariantLines.length === 0 ? ["        _ = this;"] : invariantLines),
       "    }",
       "",
       ...stateLines,
@@ -551,7 +562,11 @@ export function renderAbstractBaseEntity(base: EnrichedAggregateIR, ns: string):
   const usings = new Set<string>();
   for (const d of base.derived) collectCsExprUsings(d.expr, usings);
   const propLines = base.fields.map((f) => {
-    const def = f.optional ? " = default;" : " = default!;";
+    // Optional fields default to null on their own — emitting `= default`
+    // explicitly trips CA1805 ("redundant initialization to default").
+    // Non-optional reference types still need the null-forgiving `= default!`
+    // so the non-null analyzer accepts the auto-property declaration.
+    const def = f.optional ? "" : " = default!;";
     return `    public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; internal set; }${def}`;
   });
   const derivedLines = base.derived.map(

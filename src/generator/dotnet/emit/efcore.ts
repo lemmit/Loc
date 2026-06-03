@@ -20,7 +20,7 @@ import { joinDbSetName, joinEntityName } from "./join-entities.js";
 // collections (`Id<T>[]` aggregate fields, populated by enrichment as
 // `agg.associations`) get their own per-join-table entity + DbSet +
 // IEntityTypeConfiguration; the aggregate config additionally calls
-// `b.Ignore(...)` on each reference-collection property so EF doesn't
+// `builder.Ignore(...)` on each reference-collection property so EF doesn't
 // try to map the `List<TargetId>` to a column on the root.
 
 /** Every association declared across an entire context's aggregates,
@@ -96,7 +96,7 @@ export function renderDbContext(
   );
   // Capability filter installation is per-EntityConfiguration —
   // see `renderConfiguration` below, which emits one
-  // `b.HasQueryFilter(...)` per `agg.contextFilters` entry.  No
+  // `builder.HasQueryFilter(...)` per `agg.contextFilters` entry.  No
   // DbContext-level loop, no marker interfaces, no per-capability
   // helper class.  Pre-Phase-3-refactor shape; the grouping
   // infrastructure was removed when stdlib macros were split into
@@ -132,7 +132,7 @@ export function renderConfiguration(
   ns: string,
   ctx: BoundedContextIR,
   /** Per-aggregate dataSource config — `schema` flows into a two-arg
-   *  `b.ToTable("orders", "tenant_a")`; `tablePrefix` prepends the
+   *  `builder.ToTable("orders", "tenant_a")`; `tablePrefix` prepends the
    *  snake-case plural ("tenant_a_orders").  Absent today on systems
    *  that don't declare any dataSource bindings — output stays
    *  byte-identical when both fields are undefined. */
@@ -140,16 +140,16 @@ export function renderConfiguration(
 ): string {
   const voLookup: VoLookup = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
   const fieldConfigs = agg.fields.flatMap((f) =>
-    fieldConfigLines(f, "        ", "b", voLookup, false, agg.name),
+    fieldConfigLines(f, "        ", "builder", voLookup, false, agg.name),
   );
   const containmentLines = agg.contains.flatMap((c) => containmentConfigLines(c, agg, options));
   // Reference-collection (`Id<T>[]`) fields are persisted via a
   // separate join entity (see `join-entities.ts`), so the public
   // `List<TargetId>` accessor on the root must be unmapped — without
-  // `b.Ignore(...)` EF Core 8's primitive-collection support pins it
+  // `builder.Ignore(...)` EF Core 8's primitive-collection support pins it
   // as a JSON column on the root row, defeating the relational join.
   const refCollectionIgnores = agg.associations.map(
-    (a) => `        b.Ignore(x => x.${upperFirst(a.fieldName)});`,
+    (a) => `        builder.Ignore(x => x.${upperFirst(a.fieldName)});`,
   );
   // Emit HasIndex for every aggregate-root column referenced by a
   // repository find — same set the Drizzle schema indexes.  Without
@@ -157,10 +157,10 @@ export function renderConfiguration(
   // once the table grows past a few hundred rows.
   const indexed = indexedColumnsFor(agg, ctx);
   const indexLines = [...indexed].map(
-    (col) => `        b.HasIndex(x => x.${pascalCol(col, agg)});`,
+    (col) => `        builder.HasIndex(x => x.${pascalCol(col, agg)});`,
   );
   // Context filters install per-EntityConfiguration: one
-  // `b.HasQueryFilter(...)` per propagated predicate.  EF Core's
+  // `builder.HasQueryFilter(...)` per propagated predicate.  EF Core's
   // HasQueryFilter is per-entity-type by design — the
   // DbContext-level grouping mechanism Phase 3 introduced was a
   // workaround for a misplaced abstraction.  After splitting stdlib
@@ -168,7 +168,8 @@ export function renderConfiguration(
   // at aggregate), every filter just lands here regardless of
   // whether the aggregate names a capability via `implements`.
   const filterLines = (agg.contextFilters ?? []).map(
-    (predicate) => `        b.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
+    (predicate) =>
+      `        builder.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
   );
   return (
     lines(
@@ -184,7 +185,7 @@ export function renderConfiguration(
       "",
       `public sealed class ${agg.name}Configuration : IEntityTypeConfiguration<${agg.name}>`,
       "{",
-      `    public void Configure(EntityTypeBuilder<${agg.name}> b)`,
+      `    public void Configure(EntityTypeBuilder<${agg.name}> builder)`,
       "    {",
       // dataSource-driven table mapping.  `tablePrefix` lands first
       // (it shifts the local table name); `schema` is the second arg
@@ -192,15 +193,15 @@ export function renderConfiguration(
       // schema.  Both default to undefined → byte-identical with the
       // existing single-arg ToTable on systems without dataSource
       // declarations.
-      `        b.ToTable(${renderTableArgs(plural(agg.name), options)});`,
-      "        b.HasKey(x => x.Id);",
-      `        b.Property(x => x.Id).HasConversion(v => v.Value, v => new ${agg.name}Id(v));`,
+      `        builder.ToTable(${renderTableArgs(plural(agg.name), options)});`,
+      "        builder.HasKey(x => x.Id);",
+      `        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new ${agg.name}Id(v));`,
       ...fieldConfigs,
       ...containmentLines,
       ...refCollectionIgnores,
       ...indexLines,
       ...filterLines,
-      "        b.Ignore(x => x.DomainEvents);",
+      "        builder.Ignore(x => x.DomainEvents);",
       "    }",
       "}",
     ) + "\n"
@@ -399,29 +400,29 @@ function containmentConfigLines(
     const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, "            ", "o"));
     if (!c.collection) {
       return [
-        `        b.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)}, o => {`,
+        `        builder.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)}, o => {`,
         `            o.ToJson("${jsonCol}");`,
         ...partFieldLines,
         "        });",
       ];
     }
     return [
-      `        b.Ignore(x => x.${upperFirst(c.name)});`,
-      `        b.OwnsMany<${c.partName}>("_${c.name}", o => {`,
+      `        builder.Ignore(x => x.${upperFirst(c.name)});`,
+      `        builder.OwnsMany<${c.partName}>("_${c.name}", o => {`,
       `            o.ToJson("${jsonCol}");`,
       ...partFieldLines,
       "        });",
     ];
   }
   if (!c.collection) {
-    return [`        b.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)});`];
+    return [`        builder.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)});`];
   }
   const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, "            ", "o"));
   return [
     "        // Ignore the public read-accessor and tell EF to map the",
     "        // private backing field instead.",
-    `        b.Ignore(x => x.${upperFirst(c.name)});`,
-    `        b.OwnsMany<${c.partName}>("_${c.name}", o => {`,
+    `        builder.Ignore(x => x.${upperFirst(c.name)});`,
+    `        builder.OwnsMany<${c.partName}>("_${c.name}", o => {`,
     // Containment part tables inherit the aggregate's dataSource
     // schema + prefix — both halves of the parent / part live in
     // the same physical store.

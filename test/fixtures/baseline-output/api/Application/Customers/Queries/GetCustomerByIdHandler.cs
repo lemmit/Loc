@@ -19,9 +19,9 @@ public sealed class GetCustomerByIdHandler : IQueryHandler<GetCustomerByIdQuery,
         _repo = repo;
     }
 
-    public async ValueTask<CustomerResponse?> Handle(GetCustomerByIdQuery q, CancellationToken ct)
+    public async ValueTask<CustomerResponse?> Handle(GetCustomerByIdQuery query, CancellationToken cancellationToken)
     {
-        var found = await _repo.GetByIdAsync(q.Id, ct);
+        var found = await _repo.GetByIdAsync(query.Id, cancellationToken);
         return found is null ? null : new CustomerResponse(found.Id.Value, found.Username, found.Email, found.Age, found.Display);
     }
 }

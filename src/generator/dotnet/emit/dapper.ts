@@ -249,7 +249,7 @@ function whereToSql(e: ExprIR): string {
 
 function renderParams(params: ParamIR[]): string {
   const ps = params.map((p) => `${renderCsType(p.type)} ${p.name}`);
-  return [...ps, "CancellationToken ct = default"].join(", ");
+  return [...ps, "CancellationToken cancellationToken = default"].join(", ");
 }
 
 // ---------------------------------------------------------------------------
@@ -300,8 +300,8 @@ export function renderDapperRepository(
       return lines(
         `    public async Task<${ret}> ${name}(${renderParams(f.params)})`,
         `    {`,
-        `        await using var conn = await _db.OpenConnectionAsync(ct);`,
-        `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: ct));`,
+        `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
+        `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
         `        return rows.Select(Map).ToList();`,
         `    }`,
       );
@@ -309,8 +309,8 @@ export function renderDapperRepository(
     return lines(
       `    public async Task<${ret}> ${name}(${renderParams(f.params)})`,
       `    {`,
-      `        await using var conn = await _db.OpenConnectionAsync(ct);`,
-      `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: ct));`,
+      `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
+      `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
       `        return r is null ? null : Map(r);`,
       `    }`,
     );
@@ -346,7 +346,7 @@ export function renderDapperRepository(
     return lines(
       `    public async Task<IReadOnlyList<${agg.name}>> Run${name}Async(${renderRetrievalParamsWithCt(r.params)})`,
       `    {`,
-      `        await using var conn = await _db.OpenConnectionAsync(ct);`,
+      `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
       `        var sql = "${baseSql}";`,
       `        var p = new DynamicParameters();`,
       ...paramAdds,
@@ -355,7 +355,7 @@ export function renderDapperRepository(
       `            if (pg.limit is { } lim) { sql += " LIMIT @__lim"; p.Add("__lim", lim); }`,
       `            if (pg.offset is { } off) { sql += " OFFSET @__off"; p.Add("__off", off); }`,
       `        }`,
-      `        var rows = await conn.QueryAsync<Row>(new CommandDefinition(sql, p, cancellationToken: ct));`,
+      `        var rows = await conn.QueryAsync<Row>(new CommandDefinition(sql, p, cancellationToken: cancellationToken));`,
       `        return rows.Select(Map).ToList();`,
       `    }`,
     );
@@ -363,10 +363,10 @@ export function renderDapperRepository(
 
   const deleteMethod = agg.canonicalDestroy
     ? lines(
-        `    public async Task DeleteAsync(${agg.name} aggregate, CancellationToken ct = default)`,
+        `    public async Task DeleteAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
         `    {`,
-        `        await using var conn = await _db.OpenConnectionAsync(ct);`,
-        `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${table} WHERE id = @id", new { id = aggregate.Id.Value }, cancellationToken: ct));`,
+        `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
+        `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${table} WHERE id = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
         `    }`,
       )
     : "";
@@ -419,28 +419,28 @@ export function renderDapperRepository(
       ...mapBody,
       "        });",
       "",
-      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken ct = default)`,
+      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
       "    {",
-      "        await using var conn = await _db.OpenConnectionAsync(ct);",
-      `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = @id", new { id = id.Value }, cancellationToken: ct));`,
+      "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
+      `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = @id", new { id = id.Value }, cancellationToken: cancellationToken));`,
       "        return r is null ? null : Map(r);",
       "    }",
       "",
-      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default)`,
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
       "    {",
       "        if (ids.Count == 0) return Array.Empty<" + agg.name + ">();",
-      `        await using var conn = await _db.OpenConnectionAsync(ct);`,
-      `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = ANY(@ids)", new { ids = ids.Select(x => x.Value).ToArray() }, cancellationToken: ct));`,
+      `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
+      `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = ANY(@ids)", new { ids = ids.Select(x => x.Value).ToArray() }, cancellationToken: cancellationToken));`,
       "        return rows.Select(Map).ToList();",
       "    }",
       "",
-      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken ct = default)`,
+      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
       "    {",
-      "        await using var conn = await _db.OpenConnectionAsync(ct);",
-      `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${colList}) VALUES (${insertVals}) ON CONFLICT (id) DO UPDATE SET ${upsertSet}", new { ${saveParams} }, cancellationToken: ct));`,
+      "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
+      `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${colList}) VALUES (${insertVals}) ON CONFLICT (id) DO UPDATE SET ${upsertSet}", new { ${saveParams} }, cancellationToken: cancellationToken));`,
       "        foreach (var ev in aggregate.PullEvents())",
       "        {",
-      "            await _events.DispatchAsync(ev, ct);",
+      "            await _events.DispatchAsync(ev, cancellationToken);",
       "        }",
       "    }",
       deleteMethod ? "" : null,
@@ -644,10 +644,10 @@ export function renderDapperSchema(aggs: readonly EnrichedAggregateIR[], ns: str
       ddl.replace(/"/g, '""'),
       '";',
       "",
-      "    public static async Task EnsureAsync(NpgsqlDataSource db, CancellationToken ct = default)",
+      "    public static async Task EnsureAsync(NpgsqlDataSource db, CancellationToken cancellationToken = default)",
       "    {",
-      "        await using var conn = await db.OpenConnectionAsync(ct);",
-      "        await conn.ExecuteAsync(new CommandDefinition(Sql, cancellationToken: ct));",
+      "        await using var conn = await db.OpenConnectionAsync(cancellationToken);",
+      "        await conn.ExecuteAsync(new CommandDefinition(Sql, cancellationToken: cancellationToken));",
       "    }",
       "}",
     ) + "\n"

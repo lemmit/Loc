@@ -21,9 +21,12 @@ import { lines } from "../../util/code-builder.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
 
-/** The `IsSatisfiedBy` parameter name — a reserved-ish identifier so it
- *  can't collide with a user-declared criterion parameter. */
-const CANDIDATE = "__candidate";
+/** The `IsSatisfiedBy` parameter name — matches the abstract base
+ *  declaration verbatim so the analyzer (CA1725) is happy.  Criterion
+ *  parameters are stored as constructor-injected fields on the subclass
+ *  (not as method parameters), so no collision with this identifier
+ *  is possible from the user's DSL surface. */
+const CANDIDATE = "candidate";
 
 export function emitCriteria(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
   const eligible = ctx.criteria.filter((c) => candidateName(c, ctx) !== undefined);

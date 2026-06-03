@@ -138,7 +138,7 @@ describe(".NET generator", () => {
       const program = files.get("Program.cs")!;
       expect(program).toMatch(/app\.MapGet\("\/ready"/);
       // Ping uses CanConnectAsync (cheap, no schema lookup).
-      expect(program).toMatch(/db\.Database\.CanConnectAsync\(ct\)/);
+      expect(program).toMatch(/db\.Database\.CanConnectAsync\(cancellationToken\)/);
       // 503 with a structured body on failure.
       expect(program).toMatch(/status = "not_ready"/);
       expect(program).toMatch(/statusCode: 503/);
@@ -301,8 +301,8 @@ describe(".NET generator", () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
     const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
-    expect(cfg).toMatch(/b\.HasIndex\(x => x\.CustomerId\)/);
-    expect(cfg).toMatch(/b\.HasIndex\(x => x\.Status\)/);
+    expect(cfg).toMatch(/builder\.HasIndex\(x => x\.CustomerId\)/);
+    expect(cfg).toMatch(/builder\.HasIndex\(x => x\.Status\)/);
   });
 
   it("emits an IXAggHandler interface + Scrutor scan for extern operations", async () => {
@@ -332,7 +332,7 @@ describe(".NET generator", () => {
     //    Application/<Aggregate>/Handlers/.
     const iface = files.get("Application/Orders/Handlers/IConfirmOrderHandler.cs")!;
     expect(iface).toMatch(
-      /Task HandleAsync\(Order aggregate, ConfirmOrderRequest request, CancellationToken ct\)/,
+      /Task HandleAsync\(Order aggregate, ConfirmOrderRequest request, CancellationToken cancellationToken\)/,
     );
 
     // 2. The auto Mediator handler injects the user interface and
@@ -340,7 +340,7 @@ describe(".NET generator", () => {
     const handler = files.get("Application/Orders/Commands/ConfirmHandler.cs")!;
     expect(handler).toMatch(/private readonly IConfirmOrderHandler _user;/);
     expect(handler).toMatch(/aggregate\.CheckConfirm\(\);/);
-    expect(handler).toMatch(/await _user\.HandleAsync\(aggregate, request, ct\);/);
+    expect(handler).toMatch(/await _user\.HandleAsync\(aggregate, request, cancellationToken\);/);
     expect(handler).toMatch(/aggregate\.AssertInvariants\(\);/);
     // No direct call to a non-existent `aggregate.Confirm()` method.
     expect(handler).not.toMatch(/aggregate\.Confirm\(/);
@@ -601,7 +601,7 @@ describe(".NET generator", () => {
       expect(repo).not.toMatch(/__txErr/);
       // The bare SaveChangesAsync + LogDebug stays exactly as before.
       expect(repo).toMatch(
-        /await _db\.SaveChangesAsync\(ct\);\n\s+_log\.LogDebug\("\{Event\} aggregate=\{Aggregate\} id=\{Id\}", "repository_save", "Order", aggregate\.Id\.Value\);/,
+        /await _db\.SaveChangesAsync\(cancellationToken\);\n\s+_log\.LogDebug\("\{Event\} aggregate=\{Aggregate\} id=\{Id\}", "repository_save", "Order", aggregate\.Id\.Value\);/,
       );
     });
 
@@ -790,18 +790,18 @@ describe(".NET generator", () => {
     expect(handler).toMatch(/private readonly ICustomerRepository _customers;/);
     expect(handler).toMatch(/private readonly IOrderRepository _orders;/);
     expect(handler).toMatch(/private readonly IDomainEventDispatcher _events;/);
-    // Literal `0` opposite a decimal-typed `cmd.Amount` is elaborated
+    // Literal `0` opposite a decimal-typed `command.Amount` is elaborated
     // to a decimal IR literal (`lit("decimal", "0")`) by the general
     // literal-promotion seam, so the .NET emitter writes `0m`
     // (canonical C# decimal literal) — still valid C#, just more
     // type-honest than the old implicit-conversion form.
-    expect(handler).toMatch(/if \(!\(cmd\.Amount > 0m\)\) throw new DomainException/);
+    expect(handler).toMatch(/if \(!\(command\.Amount > 0m\)\) throw new DomainException/);
     expect(handler).toMatch(
-      /var customer = await _customers\.GetByIdAsync\(cmd\.CustomerId, ct\);/,
+      /var customer = await _customers\.GetByIdAsync\(command\.CustomerId, cancellationToken\);/,
     );
-    expect(handler).toMatch(/customer\.DeductCredit\(cmd\.Amount\);/);
+    expect(handler).toMatch(/customer\.DeductCredit\(command\.Amount\);/);
     expect(handler).toMatch(
-      /var order = Order\.Create\(customerId: cmd\.CustomerId, status: OrderStatus\.Draft/,
+      /var order = Order\.Create\(customerId: command\.CustomerId, status: OrderStatus\.Draft/,
     );
     expect(handler).toMatch(/_workflowEvents\.Add\(new OrderPlaced\(/);
     // Saves ordered: customer first (declared first), then order.
@@ -858,7 +858,7 @@ describe(".NET generator", () => {
     const handler = files.get("Application/Workflows/OpenTicketHandler.cs")!;
     // Provided field first, then the omitted optional (null) and the
     // omitted defaulted field (its literal) — all named, so order-free.
-    expect(handler).toMatch(/Ticket\.Create\(subject: cmd\.Subject/);
+    expect(handler).toMatch(/Ticket\.Create\(subject: command\.Subject/);
     expect(handler).toMatch(/memo: null/);
     expect(handler).toMatch(/rank: 3/);
   });
@@ -895,13 +895,13 @@ describe(".NET generator", () => {
     const handler = files.get("Application/Workflows/TopUpHandler.cs")!;
     expect(handler).toMatch(/private readonly T\.Infrastructure\.Persistence\.AppDbContext _db;/);
     expect(handler).toMatch(
-      /await using var tx = await _db\.Database\.BeginTransactionAsync\(ct\);/,
+      /await using var tx = await _db\.Database\.BeginTransactionAsync\(cancellationToken\);/,
     );
-    expect(handler).toMatch(/await tx\.CommitAsync\(ct\);/);
-    expect(handler).toMatch(/await tx\.RollbackAsync\(ct\);/);
+    expect(handler).toMatch(/await tx\.CommitAsync\(cancellationToken\);/);
+    expect(handler).toMatch(/await tx\.RollbackAsync\(cancellationToken\);/);
     // Save inside the try block, before commit.
-    const trySaveIdx = handler.indexOf("await _customers.SaveAsync(c, ct);");
-    const commitIdx = handler.indexOf("await tx.CommitAsync(ct);");
+    const trySaveIdx = handler.indexOf("await _customers.SaveAsync(c, cancellationToken);");
+    const commitIdx = handler.indexOf("await tx.CommitAsync(cancellationToken);");
     expect(trySaveIdx).toBeGreaterThan(0);
     expect(commitIdx).toBeGreaterThan(trySaveIdx);
   });
@@ -932,12 +932,12 @@ describe(".NET generator", () => {
       /public sealed record ActiveOrdersQuery\(\) : IQuery<IReadOnlyList<OrderResponse>>/,
     );
 
-    // 2. Handler injects IOrderRepository, calls _repo.ActiveOrders(ct),
+    // 2. Handler injects IOrderRepository, calls _repo.ActiveOrders(cancellationToken),
     //    projects each domain row to OrderResponse via the canonical
     //    projection helper.
     const handler = files.get("Application/Views/ActiveOrdersHandler.cs")!;
     expect(handler).toMatch(/private readonly IOrderRepository _repo;/);
-    expect(handler).toMatch(/await _repo\.ActiveOrders\(ct\);/);
+    expect(handler).toMatch(/await _repo\.ActiveOrders\(cancellationToken\);/);
     expect(handler).toMatch(/domain\.Select\(d => new OrderResponse\(/);
 
     // 3. The .NET repository interface + impl gained the view method
@@ -947,7 +947,7 @@ describe(".NET generator", () => {
     const impl = files.get("Infrastructure/Repositories/OrderRepository.cs")!;
     expect(impl).toMatch(/public async Task<List<Order>> ActiveOrders\(/);
     expect(impl).toMatch(
-      /_db\.Orders\.Where\(x => x\.Status == OrderStatus\.Confirmed\)\.ToListAsync\(ct\)/,
+      /_db\.Orders\.Where\(x => x\.Status == OrderStatus\.Confirmed\)\.ToListAsync\(cancellationToken\)/,
     );
 
     // 4. Controller exposes GET /views/active_orders.
@@ -1040,7 +1040,7 @@ describe(".NET generator", () => {
     expect(handler).toMatch(/private readonly ICustomerRepository _customerRepo;/);
     // Bulk load + ToDictionary keyed by Id.
     expect(handler).toMatch(
-      /var customerById = \(await _customerRepo\.FindManyByIdsAsync\(domain\.Select\(d => d\.CustomerId\)\.ToList\(\), ct\)\)\.ToDictionary\(__a => __a\.Id\)/,
+      /var customerById = \(await _customerRepo\.FindManyByIdsAsync\(domain\.Select\(d => d\.CustomerId\)\.ToList\(\), cancellationToken\)\)\.ToDictionary\(__a => __a\.Id\)/,
     );
     // Projection rewrites the Id-follow refs to dictionary lookups.
     expect(handler).toMatch(
@@ -1051,7 +1051,9 @@ describe(".NET generator", () => {
     const iface = files.get("Domain/Customers/ICustomerRepository.cs")!;
     expect(iface).toMatch(/Task<IReadOnlyList<Customer>> FindManyByIdsAsync/);
     const impl = files.get("Infrastructure/Repositories/CustomerRepository.cs")!;
-    expect(impl).toMatch(/_db\.Customers\.Where\(x => ids\.Contains\(x\.Id\)\)\.ToListAsync\(ct\)/);
+    expect(impl).toMatch(
+      /_db\.Customers\.Where\(x => ids\.Contains\(x\.Id\)\)\.ToListAsync\(cancellationToken\)/,
+    );
   });
 
   it("workflow op-call to a parameterless extern emits the dispatch dance", async () => {
@@ -1091,11 +1093,11 @@ describe(".NET generator", () => {
     expect(handler).toMatch(/order\.CheckConfirm\(\);/);
     expect(handler).toMatch(/var __confirmRequest = new ConfirmOrderRequest\(\);/);
     expect(handler).toMatch(
-      /await _confirmOrderHandler\.HandleAsync\(order, __confirmRequest, ct\);/,
+      /await _confirmOrderHandler\.HandleAsync\(order, __confirmRequest, cancellationToken\);/,
     );
     expect(handler).toMatch(/order\.AssertInvariants\(\);/);
     // Save still happens at workflow exit.
-    expect(handler).toMatch(/await _orders\.SaveAsync\(order, ct\);/);
+    expect(handler).toMatch(/await _orders\.SaveAsync\(order, cancellationToken\);/);
   });
 
   it("auto Mediator handler for parameterized extern wraps domain args via domainToRequestExpr", async () => {
@@ -1127,7 +1129,7 @@ describe(".NET generator", () => {
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Orders/Commands/AddLineHandler.cs")!;
     expect(handler).toMatch(
-      /var request = new AddLineOrderRequest\(cmd\.ProductId\.Value, cmd\.Qty, new MoneyRequest\(cmd\.Price\.Amount, cmd\.Price\.Currency\)\);/,
+      /var request = new AddLineOrderRequest\(command\.ProductId\.Value, command\.Qty, new MoneyRequest\(command\.Price\.Amount, command\.Price\.Currency\)\);/,
     );
   });
 
@@ -1160,10 +1162,10 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Workflows/ChargeOrderHandler.cs")!;
-    expect(handler).toMatch(/order\.CheckDeduct\(cmd\.Amount\);/);
-    expect(handler).toMatch(/var __deductRequest = new DeductOrderRequest\(cmd\.Amount\);/);
+    expect(handler).toMatch(/order\.CheckDeduct\(command\.Amount\);/);
+    expect(handler).toMatch(/var __deductRequest = new DeductOrderRequest\(command\.Amount\);/);
     expect(handler).toMatch(
-      /await _deductOrderHandler\.HandleAsync\(order, __deductRequest, ct\);/,
+      /await _deductOrderHandler\.HandleAsync\(order, __deductRequest, cancellationToken\);/,
     );
   });
 
@@ -1202,10 +1204,10 @@ describe(".NET generator", () => {
     // Customer loaded first (depends on rows); Region loaded after,
     // sourced from Customer values.
     expect(handler).toMatch(
-      /var customerById = \(await _customerRepo\.FindManyByIdsAsync\(domain\.Select\(d => d\.CustomerId\)\.ToList\(\), ct\)\)\.ToDictionary\(__a => __a\.Id\);/,
+      /var customerById = \(await _customerRepo\.FindManyByIdsAsync\(domain\.Select\(d => d\.CustomerId\)\.ToList\(\), cancellationToken\)\)\.ToDictionary\(__a => __a\.Id\);/,
     );
     expect(handler).toMatch(
-      /var regionByCustomerId = \(await _regionRepo\.FindManyByIdsAsync\(customerById\.Values\.Select\(__a => __a\.RegionId\)\.ToList\(\), ct\)\)\.ToDictionary\(__a => __a\.Id\);/,
+      /var regionByCustomerId = \(await _regionRepo\.FindManyByIdsAsync\(customerById\.Values\.Select\(__a => __a\.RegionId\)\.ToList\(\), cancellationToken\)\)\.ToDictionary\(__a => __a\.Id\);/,
     );
     // Projection walks the chain.
     expect(handler).toMatch(/regionByCustomerId\[customerById\[d\.CustomerId\]\.RegionId\]\.Name/);
@@ -1264,20 +1266,20 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
     expect(files.get("Application/Workflows/SerHandler.cs")!).toMatch(
-      /BeginTransactionAsync\(IsolationLevel\.Serializable, ct\)/,
+      /BeginTransactionAsync\(IsolationLevel\.Serializable, cancellationToken\)/,
     );
     expect(files.get("Application/Workflows/RrHandler.cs")!).toMatch(
-      /BeginTransactionAsync\(IsolationLevel\.RepeatableRead, ct\)/,
+      /BeginTransactionAsync\(IsolationLevel\.RepeatableRead, cancellationToken\)/,
     );
     expect(files.get("Application/Workflows/RuHandler.cs")!).toMatch(
-      /BeginTransactionAsync\(IsolationLevel\.ReadUncommitted, ct\)/,
+      /BeginTransactionAsync\(IsolationLevel\.ReadUncommitted, cancellationToken\)/,
     );
     expect(files.get("Application/Workflows/RcHandler.cs")!).toMatch(
-      /BeginTransactionAsync\(IsolationLevel\.ReadCommitted, ct\)/,
+      /BeginTransactionAsync\(IsolationLevel\.ReadCommitted, cancellationToken\)/,
     );
     // Bare `transactional` doesn't pass an explicit level.
     const plain = files.get("Application/Workflows/PlainHandler.cs")!;
-    expect(plain).toMatch(/BeginTransactionAsync\(ct\)/);
+    expect(plain).toMatch(/BeginTransactionAsync\(cancellationToken\)/);
     expect(plain).not.toMatch(/IsolationLevel/);
   });
 
@@ -1544,14 +1546,14 @@ describe(".NET generator", () => {
       const files = await emitForAuthSystem(SRC_FILTER_AUTH);
       const handler = files.get("Application/Orders/Queries/MineHandler.cs")!;
       expect(handler).toMatch(/ICurrentUserAccessor _currentUser/);
-      expect(handler).toMatch(/_repo\.Mine\(_currentUser\.User, ct\)/);
+      expect(handler).toMatch(/_repo\.Mine\(_currentUser\.User, cancellationToken\)/);
     });
 
     it("view handler injects ICurrentUserAccessor when the view filter uses currentUser", async () => {
       const files = await emitForAuthSystem(SRC_FILTER_AUTH);
       const handler = files.get("Application/Views/MyOrdersHandler.cs")!;
       expect(handler).toMatch(/ICurrentUserAccessor _currentUser/);
-      expect(handler).toMatch(/_repo\.MyOrders\(_currentUser\.User, ct\)/);
+      expect(handler).toMatch(/_repo\.MyOrders\(_currentUser\.User, cancellationToken\)/);
     });
 
     // -----------------------------------------------------------------------
@@ -1851,7 +1853,7 @@ describe(".NET generator", () => {
   describe("reference-collection join tables (.NET)", () => {
     // Mirrors `test/generator/join-table.test.ts` (TS/Hono).  Pins the
     // .NET emission seams: join entity + configuration, DbContext
-    // wiring, `b.Ignore` on the aggregate, internal setter, repository
+    // wiring, `builder.Ignore` on the aggregate, internal setter, repository
     // load + save diff-sync, and the `this.<refColl>.contains(...)`
     // → subquery lowering.
 
@@ -1869,9 +1871,9 @@ describe(".NET generator", () => {
       const cfg = files.get(
         "Infrastructure/Persistence/Configurations/TrainerPartyConfiguration.cs",
       )!;
-      expect(cfg).toMatch(/b\.ToTable\("trainer_party"\)/);
-      expect(cfg).toMatch(/b\.HasKey\(x => new \{ x\.TrainerId, x\.PokemonId \}\)/);
-      expect(cfg).toMatch(/b\.HasIndex\(x => x\.PokemonId\)/);
+      expect(cfg).toMatch(/builder\.ToTable\("trainer_party"\)/);
+      expect(cfg).toMatch(/builder\.HasKey\(x => new \{ x\.TrainerId, x\.PokemonId \}\)/);
+      expect(cfg).toMatch(/builder\.HasIndex\(x => x\.PokemonId\)/);
       expect(cfg).toMatch(/HasConversion\(v => v\.Value, v => new TrainerId\(v\)\)/);
       expect(cfg).toMatch(/HasConversion\(v => v\.Value, v => new PokemonId\(v\)\)/);
     });
@@ -1895,8 +1897,8 @@ describe(".NET generator", () => {
       )!;
       // EF auto-mapping of List<PokemonId> as a JSON column would defeat
       // the relational join — explicit Ignore is the load-bearing line.
-      expect(trainerCfg).toMatch(/b\.Ignore\(x => x\.Party\)/);
-      expect(trainerCfg).toMatch(/b\.Ignore\(x => x\.Caught\)/);
+      expect(trainerCfg).toMatch(/builder\.Ignore\(x => x\.Party\)/);
+      expect(trainerCfg).toMatch(/builder\.Ignore\(x => x\.Caught\)/);
     });
 
     it("widens the entity's ref-collection setters to internal for repo hydration", async () => {
@@ -1912,7 +1914,7 @@ describe(".NET generator", () => {
       const files = generateDotnet(model);
       const repo = files.get("Infrastructure/Repositories/TrainerRepository.cs")!;
       expect(repo).toMatch(
-        /found\.Party = await _db\.TrainerParties\s+\.Where\(j => j\.TrainerId == id\)\s+\.OrderBy\(j => j\.Ordinal\)\s+\.Select\(j => j\.PokemonId\)\s+\.ToListAsync\(ct\);/,
+        /found\.Party = await _db\.TrainerParties\s+\.Where\(j => j\.TrainerId == id\)\s+\.OrderBy\(j => j\.Ordinal\)\s+\.Select\(j => j\.PokemonId\)\s+\.ToListAsync\(cancellationToken\);/,
       );
       expect(repo).toMatch(/found\.Caught = await _db\.TrainerCaughts/);
     });

@@ -26,49 +26,49 @@ public sealed class CustomerRepository : ICustomerRepository
         _log = log;
     }
 
-    public async Task<Customer?> GetByIdAsync(CustomerId id, CancellationToken ct = default)
+    public async Task<Customer?> GetByIdAsync(CustomerId id, CancellationToken cancellationToken = default)
     {
-        var found = await _db.Customers.FirstOrDefaultAsync(x => x.Id == id, ct);
+        var found = await _db.Customers.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} id={Id} found={Found}", "aggregate_loaded", "Customer", id.Value, found != null);
         return found;
     }
 
-    public async Task<IReadOnlyList<Customer>> FindManyByIdsAsync(IReadOnlyList<CustomerId> ids, CancellationToken ct = default)
+    public async Task<IReadOnlyList<Customer>> FindManyByIdsAsync(IReadOnlyList<CustomerId> ids, CancellationToken cancellationToken = default)
     {
         if (ids.Count == 0) return Array.Empty<Customer>();
-        return await _db.Customers.Where(x => ids.Contains(x.Id)).ToListAsync(ct);
+        return await _db.Customers.Where(x => ids.Contains(x.Id)).ToListAsync(cancellationToken);
     }
 
-    public async Task SaveAsync(Customer aggregate, CancellationToken ct = default)
+    public async Task SaveAsync(Customer aggregate, CancellationToken cancellationToken = default)
     {
         var entry = _db.Entry(aggregate);
         if (entry.State == EntityState.Detached)
         {
             _db.Customers.Add(aggregate);
         }
-        await _db.SaveChangesAsync(ct);
+        await _db.SaveChangesAsync(cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} id={Id}", "repository_save", "Customer", aggregate.Id.Value);
         foreach (var ev in aggregate.PullEvents())
         {
             _log.LogInformation("{Event} event_type={EventType} aggregate={Aggregate} id={Id}", "event_dispatched", ev.GetType().Name, "Customer", aggregate.Id.Value);
-            await _events.DispatchAsync(ev, ct);
+            await _events.DispatchAsync(ev, cancellationToken);
         }
     }
 
-    public async Task DeleteAsync(Customer aggregate, CancellationToken ct = default)
+    public async Task DeleteAsync(Customer aggregate, CancellationToken cancellationToken = default)
     {
         _db.Customers.Remove(aggregate);
-        await _db.SaveChangesAsync(ct);
+        await _db.SaveChangesAsync(cancellationToken);
     }
-    public async Task<List<Customer>> All(CancellationToken ct = default)
+    public async Task<List<Customer>> All(CancellationToken cancellationToken = default)
     {
-        var result = await _db.Customers.ToListAsync(ct);
+        var result = await _db.Customers.ToListAsync(cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Customer", "all", result.Count);
         return result;
     }
-    public async Task<Customer?> ByEmail(string email, CancellationToken ct = default)
+    public async Task<Customer?> ByEmail(string email, CancellationToken cancellationToken = default)
     {
-        var result = await _db.Customers.Where(x => x.Email == email).FirstOrDefaultAsync(ct);
+        var result = await _db.Customers.Where(x => x.Email == email).FirstOrDefaultAsync(cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Customer", "byEmail", result == null ? 0 : 1);
         return result;
     }

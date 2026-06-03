@@ -79,7 +79,7 @@ public sealed class ExternHandlerAttribute : Attribute
 /// </summary>
 public interface IDomainEventDispatcher
 {
-    Task DispatchAsync(IDomainEvent ev, CancellationToken ct = default);
+    Task DispatchAsync(IDomainEvent ev, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -108,7 +108,7 @@ namespace ${ns}.Infrastructure.Events;
 /// <summary>Default implementation that drops domain events.</summary>
 public sealed class NoopDomainEventDispatcher : IDomainEventDispatcher
 {
-    public Task DispatchAsync(IDomainEvent ev, CancellationToken ct = default)
+    public Task DispatchAsync(IDomainEvent ev, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 }
 `;

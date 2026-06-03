@@ -18,12 +18,12 @@ public sealed class AddLineHandler : ICommandHandler<AddLineCommand, Unit>
         _repo = repo;
     }
 
-    public async ValueTask<Unit> Handle(AddLineCommand cmd, CancellationToken ct)
+    public async ValueTask<Unit> Handle(AddLineCommand command, CancellationToken cancellationToken)
     {
-        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)
-            ?? throw new AggregateNotFoundException($"Order {cmd.Id} not found");
-        aggregate.AddLine(cmd.ProductId, cmd.Qty);
-        await _repo.SaveAsync(aggregate, ct);
+        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)
+            ?? throw new AggregateNotFoundException($"Order {command.Id} not found");
+        aggregate.AddLine(command.ProductId, command.Qty);
+        await _repo.SaveAsync(aggregate, cancellationToken);
         return Unit.Value;
     }
 }

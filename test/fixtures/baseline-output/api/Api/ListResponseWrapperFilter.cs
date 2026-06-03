@@ -15,14 +15,14 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
         ("CustomerResponse", "CustomerListResponse"),
     };
 
-    public void Apply(OpenApiDocument doc, DocumentFilterContext context)
+    public void Apply(OpenApiDocument swaggerDoc, DocumentFilterContext context)
     {
         // Add the named wrapper component for each element schema present.
         foreach (var (element, wrapper) in Wrappers)
         {
-            if (doc.Components.Schemas.ContainsKey(element) && !doc.Components.Schemas.ContainsKey(wrapper))
+            if (swaggerDoc.Components.Schemas.ContainsKey(element) && !swaggerDoc.Components.Schemas.ContainsKey(wrapper))
             {
-                doc.Components.Schemas[wrapper] = new OpenApiSchema
+                swaggerDoc.Components.Schemas[wrapper] = new OpenApiSchema
                 {
                     Type = "array",
                     Items = new OpenApiSchema
@@ -34,7 +34,7 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
         }
 
         // Retarget inline array responses to the named wrapper $ref.
-        foreach (var path in doc.Paths.Values)
+        foreach (var path in swaggerDoc.Paths.Values)
         foreach (var operation in path.Operations.Values)
         foreach (var response in operation.Responses.Values)
         foreach (var media in response.Content.Values)

@@ -2,7 +2,7 @@
 //
 // Proves the storage-and-platform-config promise on the .NET backend:
 // `resource X { for: <ctx>, kind: state, use: <pg>, schema: "sales" }`
-// produces `b.ToTable("orders", "sales")` in the per-aggregate
+// produces `builder.ToTable("orders", "sales")` in the per-aggregate
 // Configuration.cs (with `tablePrefix` prepending the local table
 // name).  Verifies byte-identical default behavior when no schema /
 // prefix is set.
@@ -61,7 +61,7 @@ describe("resource → EF Core ToTable (.NET)", () => {
     );
     const cfg = configFor(files);
     // Implicit default — context Orders → schema "orders".
-    expect(cfg).toContain(`b.ToTable("orders", "orders");`);
+    expect(cfg).toContain(`builder.ToTable("orders", "orders");`);
     expect(cfg).toContain(`o.ToTable("lines", "orders");`);
   });
 
@@ -72,7 +72,7 @@ describe("resource → EF Core ToTable (.NET)", () => {
       ),
     );
     const cfg = configFor(files);
-    expect(cfg).toContain(`b.ToTable("orders", "sales");`);
+    expect(cfg).toContain(`builder.ToTable("orders", "sales");`);
     // Containment parts live in the same schema as their owner.
     expect(cfg).toContain(`o.ToTable("lines", "sales");`);
   });
@@ -85,7 +85,7 @@ describe("resource → EF Core ToTable (.NET)", () => {
     );
     const cfg = configFor(files);
     // tablePrefix prepends; schema stays defaulted to ctx name.
-    expect(cfg).toContain(`b.ToTable("sales_orders", "orders");`);
+    expect(cfg).toContain(`builder.ToTable("sales_orders", "orders");`);
     expect(cfg).toContain(`o.ToTable("sales_lines", "orders");`);
   });
 
@@ -96,7 +96,7 @@ describe("resource → EF Core ToTable (.NET)", () => {
       ),
     );
     const cfg = configFor(files);
-    expect(cfg).toContain(`b.ToTable("sales_orders", "legacy");`);
+    expect(cfg).toContain(`builder.ToTable("sales_orders", "legacy");`);
     expect(cfg).toContain(`o.ToTable("sales_lines", "legacy");`);
   });
 });
