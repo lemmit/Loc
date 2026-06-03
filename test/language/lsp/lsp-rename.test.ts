@@ -204,23 +204,44 @@ describe("RenameProvider — cross-reference categories", () => {
     expect(result).not.toMatch(/\bOpen\b/);
   });
 
-  // ---- KNOWN GAP (residual) ------------------------------------------------
-  // The *qualified* enum-value form `Status.Open` is not yet rewritten: the
-  // head `Status` is an enum NAME (types as `unknown` as a value expression),
-  // so the MemberSuffix path's `stepIntoNode` can't reach the value — it needs
-  // a dedicated enum-qualified-access case.  Bare `Open` works (above).
-  it.skip("KNOWN GAP: renames an enum value used in qualified form (Status.Open)", async () => {
+  // The *qualified* enum-value form `Status.Open` now follows too: the head
+  // `Status` is an enum NAME (types as `unknown` as a value expression), so the
+  // MemberSuffix path's `stepIntoNode` can't reach the value — a dedicated
+  // `qualifiedEnumValueDecl` case resolves the head enum by name, then its
+  // value.  Covers rename from the declaration with a mixed bare + qualified
+  // body, and rename driven from a qualified use site.
+  it("renames an enum value used in qualified form (Status.Open)", async () => {
     const result = await renameAt(
       `context Sales {
   enum Status { <|>Open, Closed }
   aggregate Order {
     st: Status
-    operation close() { st := Status.Open }
+    operation a() { st := Open }
+    operation b() { st := Status.Open }
   }
 }`,
       "Active",
     );
+    expect(result).toContain("{ Active, Closed }");
+    expect(result).toContain("st := Active"); // bare form
+    expect(result).toContain("st := Status.Active"); // qualified form
+    expect(result).not.toMatch(/\bOpen\b/);
+  });
+
+  it("renames an enum value from its qualified use site (Status.Open)", async () => {
+    const result = await renameAt(
+      `context Sales {
+  enum Status { Open, Closed }
+  aggregate Order {
+    st: Status
+    operation b() { st := Status.<|>Open }
+  }
+}`,
+      "Active",
+    );
+    expect(result).toContain("{ Active, Closed }"); // declaration follows
     expect(result).toContain("st := Status.Active");
+    expect(result).not.toMatch(/\bOpen\b/);
   });
 
   it("renames a function and its bare call site", async () => {
