@@ -1,31 +1,19 @@
 // Paged finds on the .NET backend — exercises P3b generic-carrier emission
-// (Paged<T> DTO + CountAsync/Skip/Take repository + CQRS query/handler +
-// controller) under `dotnet build /warnaserror` in the generated-dotnet CI
-// matrix.  Kept minimal: one aggregate, two paged finds (one with a where).
-system PagedShop {
-  subdomain Sales {
-    context Orders {
-      aggregate Order ids guid {
-        ref: string
-        region: string
-      }
-      repository Orders for Order {
-        find recent(): Order paged
-        find inRegion(region: string): Order paged where this.region == region
-      }
-    }
+// (Paged<T> record + CountAsync/Skip/Take repository + paged CQRS
+// query/handler + controller page/pageSize action) under
+// `ddd generate dotnet` + `dotnet build /warnaserror` in the
+// generated-dotnet CI matrix.
+//
+// A loose context (like inventory.ddd) so the single-context
+// `generate dotnet` path emits a complete project.  Two paged finds: one
+// plain, one with a `where`.
+context Orders {
+  aggregate Order ids guid {
+    ref: string
+    region: string
   }
-
-  api OrdersApi from Sales
-
-  storage pg { type: postgres }
-  resource ordersState { for: Orders, kind: state, use: pg }
-
-  deployable api {
-    platform: dotnet
-    contexts: [Orders]
-    dataSources: [ordersState]
-    serves: OrdersApi
-    port: 8080
+  repository Orders for Order {
+    find recent(): Order paged
+    find inRegion(region: string): Order paged where this.region == region
   }
 }
