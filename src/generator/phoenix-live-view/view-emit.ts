@@ -1,6 +1,12 @@
-import type { AggregateIR, BoundedContextIR, ExprIR, ViewIR } from "../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ExprIR,
+  FieldIR,
+  ViewIR,
+} from "../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
-import { type RenderCtx, renderExpr } from "./render-expr.js";
+import { type RenderCtx, renderExpr, renderTypespec } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // View emission for Phoenix LiveView / Ash.
@@ -30,13 +36,14 @@ export function emitViews(
   const ctxSnake = snake(ctx.name);
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+  const typesModule = `${appModule}.Types`;
 
   for (const view of ctx.views) {
     const agg = aggsByName.get(view.aggregateName);
     if (!agg) continue; // validator already errored
 
     const path = `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`;
-    const content = renderView(view, agg, ctx, contextModule, appModule);
+    const content = renderView(view, agg, ctx, contextModule, appModule, typesModule);
     out.set(path, content);
   }
 }
@@ -47,11 +54,12 @@ function renderView(
   ctx: BoundedContextIR,
   contextModule: string,
   appModule: string,
+  typesModule: string,
 ): string {
   void ctx;
   void appModule;
   const moduleName = `${contextModule}.Views.${upperFirst(view.name)}`;
-  const renderCtx: RenderCtx = { thisName: "record", contextModule };
+  const renderCtx: RenderCtx = { thisName: "record", contextModule, typesModule };
 
   const isShorthand = !view.output;
 
@@ -63,6 +71,16 @@ function renderView(
   const queryBody = isShorthand
     ? buildShorthandBody(view, agg, renderCtx, contextModule)
     : buildFullFormBody(view, agg, renderCtx, contextModule);
+
+  // @spec on `def run/1`.  Shorthand views return the source aggregate's
+  // struct type (Ash-auto-emitted `t()`); full-form views return a list of
+  // maps with the declared output field shape.  `current_user` is `any()` —
+  // Ash actors are pluggable and we don't pin a concrete user-module type
+  // from this seam.
+  const aggModule = `${contextModule}.${upperFirst(agg.name)}`;
+  const runSpec = isShorthand
+    ? `@spec run(any()) :: [${aggModule}.t()]`
+    : `@spec run(any()) :: [${renderViewOutputMapShape(view.output!.fields, contextModule, typesModule)}]`;
 
   return `# Auto-generated.
 defmodule ${moduleName} do
@@ -81,12 +99,30 @@ defmodule ${moduleName} do
   # currentUser threading.  Controllers pass
   # \`conn.assigns.current_user\` here; views that don't reference
   # currentUser ignore it (default = nil).
+  ${runSpec}
   def run(current_user \\\\ nil) do
     _ = current_user
 ${queryBody}
   end
 end
 `;
+}
+
+/** Build the inline map typespec for a full-form view's projected
+ *  output.  Each declared field becomes a `key: <typespec>` entry,
+ *  honouring `FieldIR.optional` → `T | nil`.  Routes id / datetime
+ *  through the shared `<App>.Types` vocabulary. */
+function renderViewOutputMapShape(
+  fields: FieldIR[],
+  contextModule: string,
+  typesModule: string,
+): string {
+  const entries = fields.map((f) => {
+    const base = renderTypespec(f.type, contextModule, typesModule);
+    const ty = f.optional && !base.endsWith("| nil") ? `${base} | nil` : base;
+    return `${snake(f.name)}: ${ty}`;
+  });
+  return `%{${entries.join(", ")}}`;
 }
 
 // ---------------------------------------------------------------------------
