@@ -44,12 +44,23 @@ function applyEdits(
 }
 
 describe("CodeActionProvider", () => {
-  it.skip("placeholder — no code actions registered after display-on-Property removal", () => {
-    // The `Change type to 'string'` quick-fix went away with the `display`
-    // property annotation.  Display is now a `derived display: string = ...`
-    // clause on the aggregate; the validator doesn't surface a code-action
-    // for it (the message is enough).
+  it("quick-fixes a bare aggregate reference to `X id`", async () => {
+    const before = `context Sales {
+  aggregate Order { customer: Customer }
+  aggregate Customer { name: string }
+}
+`;
+    const after = await fix(before, "Reference the aggregate by id");
+    expect(after).toContain("customer: Customer id");
+  });
+
+  it("quick-fixes a bare collection reference to `X id[]`", async () => {
+    const before = `context Sales {
+  aggregate Order { lines: OrderLine[] }
+  aggregate OrderLine { qty: int }
+}
+`;
+    const after = await fix(before, "Reference the aggregate by id");
+    expect(after).toContain("lines: OrderLine id[]");
   });
 });
-
-void fix; // keep the helper around for future code-action tests

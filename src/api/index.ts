@@ -28,8 +28,15 @@ import {
   langiumDiagnosticToJson,
 } from "./report.js";
 
-export type { ModelPatch, PatchApplied, PatchError, PatchResult } from "../language/model-patch.js";
-export { applyPatches } from "../language/model-patch.js";
+export type {
+  ModelPatch,
+  PatchApplied,
+  PatchError,
+  PatchResult,
+  PatchTextEdit,
+} from "../language/model-patch.js";
+export { applyPatches, resolvePatchEdits } from "../language/model-patch.js";
+export { fixHintCodeActions, toLspDiagnostic, toLspDiagnostics } from "./lsp.js";
 export { LOOM_VERSION } from "./report.js";
 
 interface ParsedSource {
