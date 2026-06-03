@@ -38,6 +38,7 @@ import {
   emitValueObjects,
 } from "./context-scaffolding-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
+import { emitCriteria } from "./criteria-emit.js";
 import { renderDapperRepository, renderDapperSchema } from "./emit/dapper.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
 import { emitDotnetMigrations } from "./emit/migrations.js";
@@ -260,6 +261,9 @@ function emitProjectFromContexts(
   // `contextStamps` IR (no marker interface, no per-aggregate
   // hand-written stamping logic).
   emitStampingInterceptor(merged, ns, out);
+  // Reified `criterion` specifications (evaluate face) — additive, not yet
+  // wired into invariants/preconditions (see criteria-emit.ts).
+  emitCriteria(merged, ns, out);
   const usesStamping = merged.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
   // Persistence selection (D-REALIZATION-AXES `persistence:`): `dapper` replaces
   // the EF Core DbContext + model-derived migrations with an Npgsql/Dapper
@@ -407,6 +411,9 @@ function emitContext(
   emitBaseReaders(ctx, ns, out);
   emitWorkflows(ctx, ns, out);
   emitViews(ctx, ns, out);
+  // Reified `criterion` specifications (evaluate face) — additive, not yet
+  // wired into invariants/preconditions (see criteria-emit.ts).
+  emitCriteria(ctx, ns, out);
   // Stamping interceptor — same gating as the system path.
   emitStampingInterceptor(ctx, ns, out);
   // Same FluentValidation gate as the system path — drives the
