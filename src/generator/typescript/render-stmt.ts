@@ -173,10 +173,10 @@ function collectLeaves(
       break;
     case "method-call":
       collectLeaves(e.receiver, out);
-      e.args.forEach((a) => collectLeaves(a, out));
+      for (const a of e.args) collectLeaves(a, out);
       break;
     case "call":
-      e.args.forEach((a) => collectLeaves(a, out));
+      for (const a of e.args) collectLeaves(a, out);
       break;
     case "paren":
       collectLeaves(e.inner, out);
@@ -202,7 +202,7 @@ function collectLeaves(
       break;
     case "new":
     case "object":
-      e.fields.forEach((f) => collectLeaves(f.value, out));
+      for (const f of e.fields) collectLeaves(f.value, out);
       break;
   }
   return out;

@@ -105,7 +105,6 @@ describe("money emission — Hono lib/schemas.ts helper", () => {
   // routes import `moneySchema` rather than redeclaring the chain.
 
   async function generateHonoFiles(): Promise<Map<string, string>> {
-    const { generateSystems } = await import("../../../src/system/index.js");
     const { parseValid } = await import("../../_helpers/parse.js");
     const fs = await import("node:fs");
     const path = await import("node:path");

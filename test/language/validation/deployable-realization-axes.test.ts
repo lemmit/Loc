@@ -59,9 +59,16 @@ describe("realization axes — grammar admits the block", () => {
 });
 
 describe("realization axes — R1 out-of-menu", () => {
-  it("rejects a reserved-but-unimplemented persistence (`dapper` on dotnet)", async () => {
+  it("accepts `persistence: dapper` on dotnet (real since Phase 5c)", async () => {
+    // The R1 menu now lists dapper as a real adapter; feature-level gating
+    // (loom.dapper-unsupported) lives in the IR validator, not here.
     const { errors } = await parse(sys("dotnet { persistence: dapper }"));
-    expect(errors.some((e) => /persistence: dapper.*reserved.*not yet implemented/.test(e))).toBe(
+    expect(errors.some((e) => /persistence: dapper/.test(e))).toBe(false);
+  });
+
+  it("rejects a reserved-but-unimplemented persistence (`marten` on dotnet)", async () => {
+    const { errors } = await parse(sys("dotnet { persistence: marten }"));
+    expect(errors.some((e) => /persistence: marten.*reserved.*not yet implemented/.test(e))).toBe(
       true,
     );
     expect(errors.some((e) => /'efcore'/.test(e))).toBe(true);

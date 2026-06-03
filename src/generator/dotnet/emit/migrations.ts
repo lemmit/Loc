@@ -1,6 +1,6 @@
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
-import { renderPgStep } from "../../../system/sql-pg.js";
 import { upperFirst } from "../../../util/naming.js";
+import { renderPgStep } from "../../sql-pg.js";
 
 // ---------------------------------------------------------------------------
 // .NET EF Core migration emitter.

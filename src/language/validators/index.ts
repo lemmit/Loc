@@ -4,6 +4,7 @@
 
 export { checkBuilderCallType, checkLegacyConstructorCalls } from "./builder-call.js";
 export { checkChannels } from "./channel.js";
+export { checkProjectSingletons, checkTopLevelDomainComposition } from "./composition.js";
 export { checkCriteria } from "./criterion.js";
 export { checkDataSource } from "./datasource.js";
 export {

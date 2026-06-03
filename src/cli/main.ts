@@ -5,13 +5,15 @@ import { Command } from "commander";
 import ignore from "ignore";
 import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
+import { generate as generateModel, LOOM_VERSION, validate } from "../api/index.js";
 import { generateDotnet } from "../generator/dotnet/index.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
-import { lowerModel, mergeLoomModels } from "../ir/lower/lower.js";
+import { lowerModel, lowerProject } from "../ir/lower/lower.js";
 import type { EnrichedLoomModel, TestOutcome } from "../ir/types/loom-ir.js";
 import { validateLoomModel } from "../ir/validate/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
+import { applyPatches, type ModelPatch } from "../language/model-patch.js";
 import { loadProject } from "../language/project-loader.js";
 import { installFsBackendSource } from "../platform/fs-discovery.js";
 import { generateTypeScript } from "../platform/hono/v4/emit.js";
@@ -19,7 +21,6 @@ import { generateTypeScript } from "../platform/hono/v4/emit.js";
 // backend; the CLI (an entrypoint) supplies that package's pins to
 // the version-agnostic shared emitter.
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
-import { bootSourceTypePlugins } from "../platform/source-type-plugins.js";
 import { generateSystemsFromLoom } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
 import { fsSnapshotStore } from "../system/snapshot.js";
@@ -111,8 +112,11 @@ async function parseProject(entryFile: string): Promise<ProjectParseResult> {
   // were resolved by the linker during DocumentBuilder.build so each
   // IR node carries fully-resolved cross-doc refs.  The merge is then
   // an in-order concatenation of the top-level slices.
-  const lowered = all.map((doc) => lowerModel(doc.parseResult.value as Model));
-  const merged = mergeLoomModels(lowered);
+  // `lowerProject` composes the whole import graph as one project — the
+  // lone `system { }` block plus top-level `subdomain` / `context`
+  // declarations from any file fold into a single system (see
+  // docs/proposals/implicit-system-composition.md).
+  const merged = lowerProject(all.map((doc) => doc.parseResult.value as Model));
   const loom = enrichLoomModel(merged);
   return { loom, diagnostics, errorCount, warningCount };
 }
@@ -127,6 +131,75 @@ async function runParse(file: string) {
   printDiagnostics(result);
   if (result.errorCount > 0) process.exit(1);
   console.log(`OK: ${file}`);
+}
+
+/**
+ * `ddd patch <file> --patches <json>` — apply node-addressed model patches
+ * (docs/proposals/ai-authoring-loop.md §4).  Default output is the patched
+ * source on stdout (so it composes: `ddd patch m.ddd --patches p.json > m2.ddd`);
+ * `--json` emits the structured PatchResult.  Exits 1 if any patch fails.
+ */
+async function runPatch(file: string, patchesFile: string, options: { json?: boolean }) {
+  const absolute = path.resolve(file);
+  if (!fs.existsSync(absolute)) {
+    throw new Error(`File not found: ${absolute}`);
+  }
+  const source = fs.readFileSync(absolute, "utf8");
+  const raw =
+    patchesFile === "-"
+      ? fs.readFileSync(0, "utf8")
+      : fs.readFileSync(path.resolve(patchesFile), "utf8");
+  const parsed = JSON.parse(raw) as ModelPatch[] | { patches: ModelPatch[] };
+  const patches = Array.isArray(parsed) ? parsed : parsed.patches;
+
+  const result = await applyPatches(source, patches);
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  } else if (result.ok) {
+    process.stdout.write(result.text);
+  } else {
+    for (const e of result.errors) {
+      console.error(`patch error [${e.patch.op} ${e.patch.target}]: ${e.message}`);
+    }
+  }
+  if (!result.ok) process.exit(1);
+}
+
+/** Read a `.ddd` file, or throw a clear error.  The structured-JSON verbs
+ *  operate on a single in-memory source (the toolkit parses it browser-safe);
+ *  multi-file `import` resolution stays on the fs-based `generate`/`parse`
+ *  paths. */
+function readSource(file: string): { absolute: string; source: string } {
+  const absolute = path.resolve(file);
+  if (!fs.existsSync(absolute)) {
+    throw new Error(`File not found: ${absolute}`);
+  }
+  return { absolute, source: fs.readFileSync(absolute, "utf8") };
+}
+
+/**
+ * `ddd parse --json` — the structured-diagnostics contract
+ * (docs/proposals/ai-diagnostics-contract.md).  Thin wrapper over the toolkit
+ * `validate()`: prints the `ValidateReport` to stdout, exits 1 when not `ok`.
+ */
+async function runParseJson(file: string): Promise<void> {
+  const { absolute, source } = readSource(file);
+  const report = await validate(source, { path: absolute });
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  if (!report.ok) process.exit(1);
+}
+
+/**
+ * `ddd generate system --json` — the GenerateReport contract (§4).  Thin
+ * wrapper over the toolkit `generate()`: validates and reports the deployable
+ * manifest as JSON.  It does not write a project tree — run `generate system
+ * -o <dir>` (without `--json`) to emit files.
+ */
+async function runGenerateJson(file: string): Promise<void> {
+  const { absolute, source } = readSource(file);
+  const report = await generateModel(source, { path: absolute });
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  if (!report.ok) process.exit(1);
 }
 
 /**
@@ -518,13 +591,32 @@ async function runVerify(file: string, options: VerifyOptions): Promise<void> {
 }
 
 const program = new Command();
-program.name("ddd").description("DDD DSL CLI").version("0.1.0");
+program.name("ddd").description("DDD DSL CLI").version(LOOM_VERSION);
 
 program
   .command("parse <file>")
   .description("Parse and validate a .ddd file")
-  .action(async (file: string) => {
-    await runParse(file);
+  .option(
+    "--json",
+    "emit structured diagnostics + outline as JSON (also runs IR validation); see docs/proposals/ai-diagnostics-contract.md",
+  )
+  .action(async (file: string, options: { json?: boolean }) => {
+    if (options.json) await runParseJson(file);
+    else await runParse(file);
+  });
+
+program
+  .command("patch <file>")
+  .description(
+    "Apply node-addressed model patches (JSON) to a .ddd file; prints the patched source, or --json for the structured PatchResult. See docs/proposals/ai-authoring-loop.md.",
+  )
+  .requiredOption(
+    "--patches <file>",
+    "JSON file (or '-' for stdin): a ModelPatch[] or { patches: [...] }",
+  )
+  .option("--json", "emit the structured PatchResult instead of the patched source")
+  .action(async (file: string, options: { patches: string; json?: boolean }) => {
+    await runPatch(file, options.patches, options);
   });
 
 const generate = program.command("generate").description("Generate code from a .ddd file");
@@ -579,9 +671,13 @@ generate
   .description(
     "Generate every deployable in the file's `system` blocks plus a docker-compose.yml at the output root.",
   )
-  .requiredOption("-o, --out <dir>", "output directory")
+  .option("-o, --out <dir>", "output directory (required unless --json)")
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
+  .option(
+    "--json",
+    "validate and print the deployable manifest as JSON (GenerateReport); writes no files. See docs/proposals/ai-diagnostics-contract.md.",
+  )
   .option(
     "--trace",
     "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/proposals/observability.md",
@@ -590,12 +686,21 @@ generate
     async (
       file: string,
       options: {
-        out: string;
+        out?: string;
         watch?: boolean;
         dryRun?: boolean;
+        json?: boolean;
         trace?: boolean;
       },
     ) => {
+      if (options.json) {
+        await runGenerateJson(file);
+        return;
+      }
+      if (!options.out) {
+        console.error("error: required option '-o, --out <dir>' not specified");
+        process.exit(1);
+      }
       const runOpts = {
         dryRun: options.dryRun,
         emitTrace: !!options.trace,

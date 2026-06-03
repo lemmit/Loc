@@ -1,6 +1,6 @@
 # Aggregate load specifications — `loads`, default-whole, future inference
 
-> Status: proposal. Not in `ddd.langium`.
+> Status: **partially implemented — see [`docs/plans/retrieval-implementation.md`](../plans/retrieval-implementation.md) ("PR4" + "Next phases") for what actually shipped.** The `loads:` grammar exists and the **whole-aggregate default is live on all three backends**. The explicit-`loads` *narrowing*, the operation-side `loads` clause, and the `loom.loads-incomplete` / `loom.retrieval-loads-insufficient` validators described below were **superseded** by the autoload (auto-inference) direction: explicit `loads:` is currently **gated** at IR validation (`loom.retrieval-loads-unsupported`), and per-operation autoload — which derives the load set from each body, making it sufficient by construction — is the planned replacement (Phase 5). The body below is the original proposal, retained for the v2 auto-inference + cross-aggregate-fetch design.
 
 ## TL;DR
 

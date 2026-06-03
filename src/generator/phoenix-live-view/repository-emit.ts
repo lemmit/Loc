@@ -67,27 +67,22 @@ export function buildRetrievalActions(
 }
 
 /** The owned-containment relationships a retrieval eager-loads, as Ash
- *  load atoms (`:lines`, …).  Only `relational` aggregates expose their
+ *  load atoms (`:lines`, …).  Every retrieval loads the **whole**
+ *  aggregate: explicit `loads:` narrowing is gated at IR validation (not
+ *  supported yet — the planned replacement is per-operation autoload, see
+ *  validate.ts / load-specifications.md), so the load set is purely a
+ *  function of the aggregate.  Only `relational` aggregates expose their
  *  `contains` as Ash relationships; `embedded`/`document` shapes fold the
  *  parts inline (jsonb attributes — always materialised, nothing to
- *  load), so those yield an empty list.  `whole(T)` (no `loads:` clause)
- *  loads every owned containment so a downstream operation can read
- *  `record.<part>` without a `%NotLoaded{}` crash; an explicit `loads:`
- *  plan narrows that to the containments its paths root at.  Cross-
- *  aggregate references (`X id`) stay ids and are never loaded.  Ash
- *  realises `load` as a separate batched query per relationship, so this
- *  composes with the action's offset pagination without the in-memory
- *  collection-paging penalty an ORM join-fetch would hit. */
-function retrievalLoadAtoms(r: RetrievalIR, agg: EnrichedAggregateIR): string[] {
+ *  load), so those yield an empty list.  Loading every owned containment
+ *  lets a downstream operation read `record.<part>` without a
+ *  `%NotLoaded{}` crash.  Cross-aggregate references (`X id`) stay ids and
+ *  are never loaded.  Ash realises `load` as a separate batched query per
+ *  relationship, so this composes with the action's offset pagination
+ *  without the in-memory collection-paging penalty an ORM join-fetch hits. */
+function retrievalLoadAtoms(agg: EnrichedAggregateIR): string[] {
   if (effectiveSavingShape(agg) !== "relational") return [];
-  const containNames = agg.contains.map((c) => c.name);
-  const selected =
-    r.loadPlan.kind === "whole"
-      ? containNames
-      : containNames.filter((n) =>
-          r.loadPlan.kind === "explicit" ? r.loadPlan.paths.some((p) => p[0]?.name === n) : false,
-        );
-  return selected.map((n) => `:${snake(n)}`);
+  return agg.contains.map((c) => `:${snake(c.name)}`);
 }
 
 function renderRetrievalAction(r: RetrievalIR, ctx: RenderCtx, agg: EnrichedAggregateIR): string {
@@ -105,11 +100,12 @@ function renderRetrievalAction(r: RetrievalIR, ctx: RenderCtx, agg: EnrichedAggr
     const terms = r.sort.map((s) => `${snake(s.path[0]!.name)}: :${s.direction}`).join(", ");
     lines.push(`      prepare build(sort: [${terms}])`);
   }
-  // Eager-load shape (load-specifications.md / loadPlan).  `whole(T)`
-  // loads every owned containment relationship; an explicit `loads:`
-  // narrows it.  Embedded/document aggregates carry parts inline and
-  // yield no atoms.
-  const loadAtoms = retrievalLoadAtoms(r, agg);
+  // Eager-load shape (load-specifications.md / loadPlan).  Every
+  // retrieval loads the whole aggregate — every owned containment
+  // relationship — so a downstream for-loop op can read `record.<part>`.
+  // (Explicit narrowing is gated at IR validation until autoload lands.)
+  // Embedded/document aggregates carry parts inline and yield no atoms.
+  const loadAtoms = retrievalLoadAtoms(agg);
   if (loadAtoms.length > 0) {
     lines.push(`      prepare build(load: [${loadAtoms.join(", ")}])`);
   }

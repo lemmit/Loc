@@ -60,7 +60,7 @@ export function prepareFormFieldVM(
     // Text-input fallback only when there's truly no display to read
     // — target unresolved (cross-module ref to an aggregate the
     // context doesn't see) or target has no `derived display` at all.
-    if (!target || !target.displayDerived) {
+    if (!target?.displayDerived) {
       const reason = !target
         ? `${inner.targetName} id: target aggregate not found`
         : `Aggregate '${inner.targetName}' has no 'derived display' — declare 'derived display: string = <expr>' to enable a Select picker for ${inner.targetName} id.`;

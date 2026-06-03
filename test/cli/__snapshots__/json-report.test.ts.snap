@@ -1,0 +1,33 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ddd parse --json > golden: the bad model's diagnostics array is stable 1`] = `
+[
+  {
+    "code": "loom.bare-aggregate-in-type",
+    "fixHint": {
+      "kind": "replace-text",
+      "patch": {
+        "op": "replace",
+        "source": "customer: Customer id",
+        "target": "aggregate Sales.Order.customer",
+      },
+      "summary": "Reference the aggregate by id.",
+    },
+    "message": "References across aggregate boundaries need an id link — write 'Customer id' (or 'Customer id[]' for many-to-many).",
+    "node": "aggregate Sales.Order",
+    "phase": "ast-validate",
+    "range": {
+      "end": {
+        "character": 22,
+        "line": 6,
+      },
+      "start": {
+        "character": 14,
+        "line": 6,
+      },
+    },
+    "severity": "error",
+    "sourceText": "Customer",
+  },
+]
+`;

@@ -466,7 +466,7 @@ export function isMemberName(item: unknown): item is MemberName {
     return item === 'by' || item === 'handle' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'create' || item === 'destroy' || item === 'where' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type ModelMember = BoundedContext | Component | EnumDecl | Requirement | Solution | System | TestCase | ValueObject;
+export type ModelMember = Api | BoundedContext | ChannelSource | Component | Deployable | EnumDecl | Layout | Requirement | Resource | Solution | Storage | Subdomain | System | TestCase | TestE2E | ThemeBlock | Ui | UserBlock | ValueObject;
 
 export const ModelMember = 'ModelMember';
 
@@ -653,7 +653,7 @@ export function isAggregate(item: unknown): item is Aggregate {
 }
 
 export interface Api extends AstNode {
-    readonly $container: System;
+    readonly $container: Model | System;
     readonly $type: 'Api';
     name: string;
     source: Reference<Subdomain>;
@@ -851,7 +851,7 @@ export function isChannel(item: unknown): item is Channel {
 }
 
 export interface ChannelSource extends AstNode {
-    readonly $container: System;
+    readonly $container: Model | System;
     readonly $type: 'ChannelSource';
     channel: string;
     name: LooseName;
@@ -951,7 +951,7 @@ export function isDecLit(item: unknown): item is DecLit {
 }
 
 export interface Deployable extends AstNode {
-    readonly $container: System;
+    readonly $container: Model | System;
     readonly $type: 'Deployable';
     application?: LooseName;
     auth?: AuthMode;
@@ -1305,7 +1305,7 @@ export function isLambda(item: unknown): item is Lambda {
 }
 
 export interface Layout extends AstNode {
-    readonly $container: System;
+    readonly $container: Model | System;
     readonly $type: 'Layout';
     name: string;
     slots: Array<LayoutSlot>;
@@ -1985,7 +1985,7 @@ export function isRequiresStmt(item: unknown): item is RequiresStmt {
 }
 
 export interface Resource extends AstNode {
-    readonly $container: System;
+    readonly $container: Model | System;
     readonly $type: 'Resource';
     config: Array<ConfigEntry>;
     context?: Reference<BoundedContext>;
@@ -2182,7 +2182,7 @@ export function isStateField(item: unknown): item is StateField {
 }
 
 export interface Storage extends AstNode {
-    readonly $container: System;
+    readonly $container: Model | System;
     readonly $type: 'Storage';
     config: Array<ConfigEntry>;
     connection?: ConnectionSource;
@@ -2222,7 +2222,7 @@ export function isStringLit(item: unknown): item is StringLit {
 }
 
 export interface Subdomain extends AstNode {
-    readonly $container: System;
+    readonly $container: Model | System;
     readonly $type: 'Subdomain';
     contexts: Array<BoundedContext>;
     name: string;
@@ -2292,7 +2292,7 @@ export function isTestCase(item: unknown): item is TestCase {
 }
 
 export interface TestE2E extends AstNode {
-    readonly $container: System;
+    readonly $container: Model | System;
     readonly $type: 'TestE2E';
     body: Array<TestStatement>;
     deployable: Reference<Deployable>;
@@ -2307,7 +2307,7 @@ export function isTestE2E(item: unknown): item is TestE2E {
 }
 
 export interface ThemeBlock extends AstNode {
-    readonly $container: System;
+    readonly $container: Model | System;
     readonly $type: 'ThemeBlock';
     props: Array<ThemeProp>;
 }
@@ -2370,7 +2370,7 @@ export function isTypeRef(item: unknown): item is TypeRef {
 }
 
 export interface Ui extends AstNode {
-    readonly $container: System;
+    readonly $container: Model | System;
     readonly $type: 'Ui';
     framework?: Framework;
     members: Array<UiMember>;
@@ -2462,7 +2462,7 @@ export function isUnaryExpr(item: unknown): item is UnaryExpr {
 }
 
 export interface UserBlock extends AstNode {
-    readonly $container: System;
+    readonly $container: Model | System;
     readonly $type: 'UserBlock';
     fields: Array<UserField>;
 }
@@ -2724,9 +2724,10 @@ export class DddAstReflection extends AbstractAstReflection {
                 return this.isSubtype(ContextMember, supertype) || this.isSubtype(NamedDecl, supertype) || this.isSubtype(Targetable, supertype);
             }
             case Api:
+            case BoundedContext:
             case Deployable:
             case Subdomain: {
-                return this.isSubtype(SystemMember, supertype) || this.isSubtype(Targetable, supertype);
+                return this.isSubtype(ModelMember, supertype) || this.isSubtype(SystemMember, supertype) || this.isSubtype(Targetable, supertype);
             }
             case Apply: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(WorkflowMember, supertype);
@@ -2779,9 +2780,6 @@ export class DddAstReflection extends AbstractAstReflection {
             case StringLit: {
                 return this.isSubtype(LiteralExpr, supertype);
             }
-            case BoundedContext: {
-                return this.isSubtype(ModelMember, supertype) || this.isSubtype(SystemMember, supertype) || this.isSubtype(Targetable, supertype);
-            }
             case CallSuffix:
             case MemberSuffix: {
                 return this.isSubtype(PostfixSuffix, supertype);
@@ -2801,7 +2799,7 @@ export class DddAstReflection extends AbstractAstReflection {
             case ThemeBlock:
             case Ui:
             case UserBlock: {
-                return this.isSubtype(SystemMember, supertype);
+                return this.isSubtype(ModelMember, supertype) || this.isSubtype(SystemMember, supertype);
             }
             case Component: {
                 return this.isSubtype(ModelMember, supertype) || this.isSubtype(UiMember, supertype);

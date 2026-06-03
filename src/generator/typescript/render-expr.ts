@@ -1,3 +1,4 @@
+import { genericShape } from "../../ir/stdlib/generics.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst } from "../../util/naming.js";
 import {
@@ -314,6 +315,7 @@ function renderMoneyBinary(op: BinOp, left: string, right: string): string {
 
 export function renderTsType(t: TypeIR): string {
   switch (t.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
       switch (t.name) {
         case "int":
@@ -336,7 +338,6 @@ export function renderTsType(t: TypeIR): string {
         case "json":
           return "unknown";
       }
-    /* eslint-disable-next-line no-fallthrough */
     case "id":
       return `Ids.${t.targetName}Id`;
     case "enum":
@@ -354,13 +355,13 @@ export function renderTsType(t: TypeIR): string {
       // on an aggregate / VO / entity field.  Validator rejects
       // misuse — throwing here keeps the assumption explicit.
       throw new Error("renderTsType: 'slot' type is UI-only and should not reach the backend.");
-    case "genericInstance":
-      // Generic carriers (`paged` / `envelope`) are not emittable yet
-      // (payload-transport-layer.md, P3b); the IR-validate gate rejects
-      // them before codegen, so reaching here is a bug.
-      throw new Error(
-        `renderTsType: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
-      );
+    case "genericInstance": {
+      // Carrier-bounded generic (`order paged`, `event envelope`) renders as
+      // its monomorphized record shape, driven by the stdlib registry so the
+      // domain-side type matches the wire DTO field-for-field (P3b).
+      const fields = genericShape(t.ctor).fields(t.arg);
+      return `{ ${fields.map((f) => `${f.name}: ${renderTsType(f.type)}`).join("; ")} }`;
+    }
   }
 }
 

@@ -8,6 +8,7 @@ import {
 import { byFeatureLayoutAdapter } from "../generator/dotnet/adapters/by-feature-layout.js";
 import { byLayerLayoutAdapter } from "../generator/dotnet/adapters/by-layer-layout.js";
 import { cqrsStyleAdapter } from "../generator/dotnet/adapters/cqrs-style.js";
+import { dapperPersistenceAdapter } from "../generator/dotnet/adapters/dapper-persistence.js";
 import { efcorePersistenceAdapter } from "../generator/dotnet/adapters/efcore-persistence.js";
 import { generateDotnetForContexts } from "../generator/dotnet/index.js";
 import {
@@ -87,28 +88,15 @@ const dotnetPlatform: PlatformSurface = {
     };
   },
   // .NET — EF Core + Dapper + Marten persistence; CQRS + layered style;
-  // byLayer + byFeature layout.  `efcore` / `cqrs` / `byLayer` / `byFeature`
-  // are real (F5a/b/c + Phase 5a); `dapper` / `marten` / `layered` are stubs.
+  // byLayer + byFeature layout.  `efcore` / `dapper` / `cqrs` / `byLayer` /
+  // `byFeature` are real (F5a/b/c + Phase 5a/5c); `marten` / `layered` are stubs.
   // Built lazily (see PlatformSurface.adapters jsdoc) so the adapter
   // bindings are read after init, not during the load-time cycle.
   adapters(): PlatformAdapters {
     const menu: PlatformAdapters = {
       persistence: {
         efcore: efcorePersistenceAdapter,
-        dapper: stubAdapter<PersistenceAdapter>(
-          "persistence",
-          "dapper",
-          "dotnet",
-          () => Object.keys(menu.persistence),
-          {
-            name: "dapper",
-            supportedStrategies: ["state"],
-            supports: (type, kind, strategy) =>
-              strategy === "state" &&
-              ["postgres", "mysql", "sqlite"].includes(type) &&
-              ["state", "snapshot", "replica"].includes(kind),
-          },
-        ),
+        dapper: dapperPersistenceAdapter,
         marten: stubAdapter<PersistenceAdapter>(
           "persistence",
           "marten",

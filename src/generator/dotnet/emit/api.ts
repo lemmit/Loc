@@ -82,6 +82,11 @@ interface ControllerShape {
    *  on the structured stream.  Off keeps the operation handler at its
    *  pre-trace shape exactly. */
   emitTrace?: boolean;
+  /** Persistence selection (D-REALIZATION-AXES): when true (`persistence:
+   *  dapper`), the destroy handler omits the EF `DbUpdateException` catch —
+   *  the dapper schema emits no FK constraints, so the foreign_key_violation →
+   *  409 path can't fire, and `Microsoft.EntityFrameworkCore` isn't referenced. */
+  usingDapper?: boolean;
   /** Extra namespaces accumulated by the upstream
    *  `wireToCommandArgument` calls (e.g. `System.Globalization` when
    *  a datetime field needs `DateTime.Parse(..., CultureInfo, …)`).
@@ -269,18 +274,25 @@ export function renderController(
             ...producesProblem("destroy"),
             `    public async Task<IActionResult> ${actionName(opDestroy(agg.name))}([FromRoute] ${shape.idClrType} id)`,
             "    {",
-            "        try",
-            "        {",
-            `            await _mediator.Send(new Destroy${agg.name}Command(new ${agg.name}Id(id)));`,
-            "        }",
             // EF wraps a Postgres foreign_key_violation in DbUpdateException
             // when the row is still referenced (cross-aggregate `X id` FK is
             // ON DELETE RESTRICT) → 409 Conflict.  Caught locally so the
-            // shared DomainExceptionFilter stays untouched.
-            "        catch (Microsoft.EntityFrameworkCore.DbUpdateException)",
-            "        {",
-            `            return Conflict(new ProblemDetails { Title = "Conflict", Status = 409, Detail = "${agg.name} is still referenced and cannot be deleted." });`,
-            "        }",
+            // shared DomainExceptionFilter stays untouched.  Dapper v1 emits no
+            // FK constraints, so it skips the catch (and the EF reference).
+            ...(shape.usingDapper
+              ? [
+                  `        await _mediator.Send(new Destroy${agg.name}Command(new ${agg.name}Id(id)));`,
+                ]
+              : [
+                  "        try",
+                  "        {",
+                  `            await _mediator.Send(new Destroy${agg.name}Command(new ${agg.name}Id(id)));`,
+                  "        }",
+                  "        catch (Microsoft.EntityFrameworkCore.DbUpdateException)",
+                  "        {",
+                  `            return Conflict(new ProblemDetails { Title = "Conflict", Status = 409, Detail = "${agg.name} is still referenced and cannot be deleted." });`,
+                  "        }",
+                ]),
             "        return NoContent();",
             "    }",
             "",

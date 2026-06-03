@@ -44,7 +44,10 @@ export class DddNodeKindProvider extends DefaultNodeKindProvider {
       case "System":
         return SymbolKind.Package;
       case "Deployable":
-        return SymbolKind.Constructor;
+        // A deployable is a runnable deployment unit grouping contexts +
+        // dataSources — module-like, not a Constructor (which implies
+        // instantiation).
+        return SymbolKind.Module;
       default:
         return SymbolKind.Field;
     }
@@ -74,7 +77,10 @@ export class DddNodeKindProvider extends DefaultNodeKindProvider {
         return CompletionItemKind.Method;
       case "Subdomain":
       case "BoundedContext":
+      case "Deployable":
         return CompletionItemKind.Module;
+      case "Repository":
+        return CompletionItemKind.Interface;
       default:
         return CompletionItemKind.Reference;
     }

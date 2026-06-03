@@ -114,7 +114,7 @@ export function checkTypeReferences(model: Model, accept: ValidationAcceptor): v
       accept(
         "error",
         `References across aggregate boundaries need an id link — write '${aggName} id' (or '${aggName} id[]' for many-to-many).`,
-        { node, property: "target" },
+        { node, property: "target", code: "loom.bare-aggregate-in-type" },
       );
       continue;
     }
@@ -126,7 +126,7 @@ export function checkTypeReferences(model: Model, accept: ValidationAcceptor): v
         accept(
           "error",
           `Entity part '${target.name}' belongs to aggregate '${owner.name}'; cross-aggregate references must go through the root: use '${owner.name} id'.`,
-          { node, property: "target" },
+          { node, property: "target", code: "loom.cross-aggregate-entity-part" },
         );
       }
     }

@@ -270,6 +270,7 @@ function zodForResponse(t: TypeIR, optional: boolean): string {
 
 function zodForResponseInner(t: TypeIR): string {
   switch (t.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
       switch (t.name) {
         case "int":
@@ -289,7 +290,6 @@ function zodForResponseInner(t: TypeIR): string {
         case "json":
           return "z.unknown()";
       }
-    /* eslint-disable-next-line no-fallthrough */
     case "id":
       return "z.string()";
     case "enum":

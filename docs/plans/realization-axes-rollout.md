@@ -113,7 +113,22 @@ the menus go size-1 → size-N:
   layered; namespace-by-feature is a later slice). `byLayer` default stays
   byte-identical (baseline fixture unchanged); compiles by construction (C#
   namespaces are path-independent, `.csproj` globs `**/*.cs`).
-- dotnet: `dapper`, `marten` (persistence); `serviceLayer` (style/`application`).
+- **5c — dotnet `dapper` persistence (minimal-v1) — DONE.** First alternate
+  persistence adapter: `persistence: dapper` emits an Npgsql/Dapper Infrastructure
+  (per-aggregate repository with hand-built SQL — upsert / getById / findManyByIds
+  / finds via an `ExprIR`→SQL renderer — plus a self-applied `DbSchema`
+  CREATE-TABLE bootstrap, an `NpgsqlDataSource` registration, and Dapper/Npgsql
+  deps) reusing the persistence-agnostic Domain layer via the
+  `<Agg>._Create(State)` hydration seam.  The orchestrator branches on the
+  deployable's resolved `persistence` key (efcore path byte-identical).  v1 is
+  validator-gated (`loom.dapper-unsupported` in `ir/validate/validate.ts`):
+  relational + state-based, flat aggregates with scalar / enum / value-object /
+  id-ref fields; rejects document/embedded shape, associations, nested parts,
+  inheritance, event-sourcing, audit/provenance/managed fields, retrievals,
+  seeds.  Compile-gated: `test/e2e/fixtures/dotnet-build/dapper.ddd` is built
+  under `dotnet build /warnaserror` (`build-generated-dotnet`).
+  `availableAdapterNames("dotnet","persistence")` → `["dapper","efcore"]`.
+- dotnet: `marten` (persistence); `serviceLayer` (style/`application`).
 - node: `express` / `fastify` (transport); `prisma` (persistence).
 - **node `byFeature` layout — DONE (proper, with import rewriting).** A first
   naive port (#830, reverted) shipped broken: unlike .NET `using <Namespace>`

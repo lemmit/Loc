@@ -1,0 +1,89 @@
+// ── People subdomain — split out of the Acme ERP project.
+// A top-level `subdomain` composes into the single `system` declared in
+// main.ddd (implicit-system-composition).
+
+// ════════════════════════════════════════════════════════════════════
+//  PEOPLE (HR) — auth + capabilities, on a .NET service with `auth:
+//  required`.  Capability filters/stamps and the JWT middleware compile
+//  to runtime here; the audit/softDelete macros + a hand-written tenant
+//  filter show the whole authorization surface.
+// ════════════════════════════════════════════════════════════════════
+subdomain People {
+
+  // Typed permission catalogue.  `permissions.employeesManage` lowers to
+  // the stable string "people.employeesManage" on both sides of the wire.
+  permissions {
+    employeesManage,
+    departmentsManage
+  }
+
+  // `with audit, softDelete` add the context-level stamping rules and the
+  // soft-delete query filter; `auditable`/`softDeletable` (per aggregate)
+  // add the columns + markers those rules attach to.
+  context People with audit, softDelete {
+
+    enum EmployeeStatus { Active, OnLeave, Terminated }
+
+    // Hand-written capability group: every aggregate that
+    // `implements "tenantScoped"` gets this read filter — exactly what
+    // the audit/softDelete macros expand into, but for a tenant rule the
+    // macros don't ship.
+    filter for "tenantScoped" this.tenantId == currentUser.tenantId
+
+    aggregate Department with auditable, softDeletable {
+      tenantId: string
+      code: string
+      name: string
+      implements "tenantScoped"
+      invariant code.length > 0
+      derived display: string = name
+    }
+
+    aggregate Employee with auditable, softDeletable {
+      tenantId: string
+      name: PersonName
+      email: string sensitive(pii)
+      phone: string? sensitive(pii)
+      departmentRef: Department id
+      status: EmployeeStatus = Active
+      salary: money sensitive(pii)
+      implements "tenantScoped"
+
+      invariant tenantId.length > 0
+      derived display: string = name.display
+
+      // `requires` (403, gates the caller) vs `precondition` (400, gates
+      // the state).  currentUser + permissions.<name> resolve here.
+      operation promote(newSalary: money) {
+        requires currentUser.role == "hr"
+              || currentUser.permissions.contains(permissions.employeesManage)
+        precondition status == Active
+        precondition newSalary > salary
+        salary := newSalary
+      }
+      operation terminate() {
+        requires currentUser.role == "hr"
+        precondition status != Terminated
+        status := Terminated
+      }
+      operation startLeave() {
+        precondition status == Active
+        status := OnLeave
+      }
+    }
+
+    // Row-level visibility: both scope the result to the requesting
+    // user's tenant via `currentUser`.
+    repository Employees for Employee {
+      find inMyTenant(): Employee[] where tenantId == currentUser.tenantId
+      find byDepartment(departmentRef: Department id): Employee[]
+        where this.departmentRef == departmentRef
+    }
+    repository Departments for Department {
+      find inMyTenant(): Department[] where tenantId == currentUser.tenantId
+    }
+
+    view MyActiveEmployees =
+      Employee where status == Active && tenantId == currentUser.tenantId
+  }
+}

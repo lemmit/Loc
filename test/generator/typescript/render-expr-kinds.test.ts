@@ -8,7 +8,7 @@
 // with no IO or class instantiation.
 
 import { describe, expect, it } from "vitest";
-import { renderTsExpr } from "../../../src/generator/typescript/render-expr.js";
+import { renderTsExpr, renderTsType } from "../../../src/generator/typescript/render-expr.js";
 import type { ExprIR, TypeIR } from "../../../src/ir/types/loom-ir.js";
 
 const STRING: TypeIR = { kind: "primitive", name: "string" };
@@ -287,6 +287,7 @@ describe("ts renderTsExpr — binary, unary, paren, ternary", () => {
       renderTsExpr({
         kind: "ternary",
         cond: litBool("true"),
+        // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then`
         then: litInt("1"),
         otherwise: litInt("2"),
       }),
@@ -404,6 +405,24 @@ describe("ts renderTsExpr — lambda, new, list, object", () => {
         ],
       }),
     ).toBe('({ name: "Ada", age: 36 })');
+  });
+});
+
+describe("ts renderTsType — generic carriers (P3b)", () => {
+  it("renders `paged` as its monomorphized inline record shape", () => {
+    const t: TypeIR = {
+      kind: "genericInstance",
+      ctor: "paged",
+      arg: { kind: "entity", name: "Order" },
+    };
+    expect(renderTsType(t)).toBe(
+      "{ items: Order[]; page: number; pageSize: number; total: number; totalPages: number }",
+    );
+  });
+
+  it("renders `envelope` as { id; ts; body }", () => {
+    const t: TypeIR = { kind: "genericInstance", ctor: "envelope", arg: STRING };
+    expect(renderTsType(t)).toBe("{ id: string; ts: Date; body: string }");
   });
 });
 

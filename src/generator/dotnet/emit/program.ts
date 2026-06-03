@@ -1,6 +1,7 @@
 import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
+import { DAPPER_PROJECT_DEPS, renderDapperConnectionSetup } from "./dapper.js";
 
 // Program.cs is top-level statements, not a class — so the renderer's
 // `_log.` prefix becomes `lifecycleLog.`.  When the call sits inside a
@@ -53,6 +54,11 @@ export function renderProgram(
      *  trace calls in aggregate methods.  Off keeps Program.cs
      *  free of the registration entirely. */
     emitTrace?: boolean;
+    /** Persistence selection (D-REALIZATION-AXES `persistence:`): when true,
+     *  the deployable uses Dapper — Program.cs registers an `NpgsqlDataSource`
+     *  (not a `DbContext`) and applies the self-contained `DbSchema` at
+     *  startup instead of EF migrations. */
+    usingDapper?: boolean;
   },
 ): string {
   const authRequired = !!options?.authRequired;
@@ -61,6 +67,7 @@ export function renderProgram(
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   const hasMigrations = !!options?.hasMigrations;
   const hasSeeds = !!options?.hasSeeds;
+  const usingDapper = !!options?.usingDapper;
   const seedBlock = hasSeeds
     ? `
 // Apply first-boot seed data after migrations (database-seeding.md).
@@ -166,8 +173,7 @@ using (var scope = app.Services.CreateScope())
     : "";
   return `// Auto-generated.
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
-${usesValidators ? "using FluentValidation;\n" : ""}using ${ns}.Api;
+${usingDapper ? "using Npgsql;\n" : "using Microsoft.EntityFrameworkCore;\n"}${usesValidators ? "using FluentValidation;\n" : ""}using ${ns}.Api;
 using ${ns}.Domain.Common;
 using ${ns}.Infrastructure.Persistence;
 using ${ns}.Infrastructure.Events;${authUsing}
@@ -216,14 +222,17 @@ builder.Services.AddHttpLogging(opts =>
 });
 
 ${
-  usesStamping
-    ? `builder.Services.AddScoped<${ns}.Infrastructure.Persistence.AuditableInterceptor>();
+  usingDapper
+    ? `// Dapper persistence: a single Npgsql data source, no DbContext.
+${renderDapperConnectionSetup().join("\n")}`
+    : usesStamping
+      ? `builder.Services.AddScoped<${ns}.Infrastructure.Persistence.AuditableInterceptor>();
 builder.Services.AddDbContext<AppDbContext>((sp, opts) =>
 {
     opts.UseNpgsql(builder.Configuration.GetConnectionString("Default"));
     opts.AddInterceptors(sp.GetRequiredService<${ns}.Infrastructure.Persistence.AuditableInterceptor>());
 });`
-    : `builder.Services.AddDbContext<AppDbContext>(opts =>
+      : `builder.Services.AddDbContext<AppDbContext>(opts =>
     opts.UseNpgsql(builder.Configuration.GetConnectionString("Default")));`
 }
 
@@ -334,8 +343,15 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 ${
-  hasMigrations
+  usingDapper
     ? `
+// Dapper persistence: apply the self-contained schema (CREATE TABLE IF NOT
+// EXISTS) before serving traffic.  Idempotent; no migration history table.
+await ${ns}.Infrastructure.Persistence.DbSchema.EnsureAsync(
+    app.Services.GetRequiredService<NpgsqlDataSource>());
+`
+    : hasMigrations
+      ? `
 // Apply pending EF Core migrations before serving traffic.  Idempotent —
 // EF tracks applied versions in the __EFMigrationsHistory table.  Runs
 // synchronously at startup so the schema is current on first request.
@@ -345,7 +361,7 @@ using (var migrationScope = app.Services.CreateScope())
     db.Database.Migrate();
 }
 `
-    : ""
+      : ""
 }${seedBlock}
 // Catalog server-lifecycle events.  Same event names + level Hono and
 // Phoenix emit so a cross-backend dashboard pivots on one identity.
@@ -387,7 +403,23 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 // decide "should I send traffic to this pod?".  Returns 503 with a
 // one-line cause when the DB is unreachable so operators see the
 // reason in the probe log instead of having to exec into the pod.
-app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
+${
+  usingDapper
+    ? `app.MapGet("/ready", async (NpgsqlDataSource db, CancellationToken ct) =>
+{
+    try
+    {
+        await using var conn = await db.OpenConnectionAsync(ct);
+        return Results.Ok(new { status = "ready" });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(
+            new { status = "not_ready", error = ex.Message },
+            statusCode: 503);
+    }
+});`
+    : `app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
 {
     try
     {
@@ -404,7 +436,8 @@ app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
             new { status = "not_ready", error = ex.Message },
             statusCode: 503);
     }
-});
+});`
+}
 // Catalog-identity request log — emits the cross-backend
 // request_start / request_end events (same envelope shape Hono
 // and Phoenix produce).  Mounted FIRST so its Stopwatch covers the
@@ -436,7 +469,12 @@ app.MapFallbackToFile("index.html");
 `
     : ""
 }
-// Dev-friendly schema bootstrap: create the schema from the model on
+${
+  usingDapper
+    ? // Dapper applied its schema via DbSchema.EnsureAsync at startup (above);
+      // no EF EnsureCreated block.
+      ""
+    : `// Dev-friendly schema bootstrap: create the schema from the model on
 // first boot.  System-mode compose isolates each deployable to its own
 // database (see db-init/), so EnsureCreated runs cleanly without
 // racing peers.  For production, replace this with
@@ -446,7 +484,8 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 }
-${authVerify}${externVerify}
+`
+}${authVerify}${externVerify}
 app.Run();
 `;
 }
@@ -456,7 +495,22 @@ export function renderCsproj(
   hasExtern: boolean = false,
   usesValidators: boolean = false,
   resourceNugetDeps: Record<string, string> = {},
+  usingDapper: boolean = false,
 ): string {
+  // Persistence package set — Dapper + raw Npgsql for `persistence: dapper`,
+  // otherwise the EF Core + Npgsql.EntityFrameworkCore stack.
+  const persistenceRefs = usingDapper
+    ? DAPPER_PROJECT_DEPS.join("\n")
+    : `    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.10">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.10" />`;
   // Resource-client NuGet refs (Phase 4c) — AWSSDK.S3 / RabbitMQ.Client
   // etc., one row per package the deployable's consumed resources need.
   const resourceRefs = Object.entries(resourceNugetDeps)
@@ -488,16 +542,7 @@ export function renderCsproj(
     <None Remove="Tests/**" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.10" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.10">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.10" />
+${persistenceRefs}
     <!-- Source-generated Mediator (https://github.com/martinothamar/Mediator) -->
     <PackageReference Include="Mediator.SourceGenerator" Version="2.1.7">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

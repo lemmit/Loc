@@ -78,6 +78,8 @@ The single most important fact: **layers are strictly one-directional and enforc
 - `system/` composes outputs from the platform generators; it never generates domain code itself.
 - **No target-backend IR.** Every backend consumes `LoomModel` directly. The only secondary IR is `MigrationsIR`, derived once in phase ⑨ and shared by every backend with a database.
 
+This is **test-enforced**, not just convention: `test/platform/pipeline-layering.test.ts` fails on any *value* (runtime) backward-edge across the `language → ir → generator → system` chain (type-only imports of the shared IR vocabulary are exempt — `import type` carries no runtime edge), and `test/platform/backend-packages-layering.test.ts` guards the `generator → platform` package edge. A shared helper consumed across layers belongs at the layer its consumers live at (e.g. pack-identity metadata and source-type predicates are in `src/util/`; the Postgres-SQL renderer is in `src/generator/`), never imported "upward" against the pipeline.
+
 **Loom IR (`src/ir/types/loom-ir.ts`) is platform-neutral and fully resolved.** Every name carries a `refKind` (`param`/`let`/`this-prop`/`enum-value`/…), every member access carries `receiverType` and `memberType`, every call carries `callKind`, every find filter is a typed `ExprIR`. Backends never re-resolve. This is the architectural payoff for phase ⑤'s complexity — adding a backend means writing emitters, not redoing name resolution.
 
 The lowering phase has three sub-passes, all driven by `lowerModel`:
@@ -109,9 +111,11 @@ Every backend has the same shape:
 | `index.ts` | Orchestrator — `generate<Platform>ForContexts(...) → Map<path, content>` |
 | `emit/*.ts` (TS/.NET) or `*-emit.ts` (Phoenix) | Procedural emitters (`render<Thing>(...)`) for regular-shaped fragments — id classes, value-object classes, events, DTOs. Plain TS functions building strings via `lines(...)` from `src/util/code-builder.ts`. **The backend emitters use no Handlebars since the v2 refactor — but Handlebars is still a live runtime dependency for the design-pack rendering layer (`src/generator/_packs/loader.ts` compiles the `.hbs` pack/shared templates under `designs/`, `vite/`, `api/`, `docker/`, `stacks/`).** |
 | `*-builder.ts` | Larger procedural builders for per-aggregate-variable content (Hono routes, repositories, React pages, page-objects). |
-| `render-expr.ts` / `render-stmt.ts` | IR-expression-/IR-statement-to-source renderers. Present on platforms that execute domain logic (TS, .NET, Phoenix LiveView). React skips these — the frontend doesn't run domain logic, only consumes the wire shape. |
+| `render-expr.ts` / `render-stmt.ts` | IR-expression-/IR-statement-to-source renderers. Present on platforms that execute domain logic (TS, .NET, Phoenix LiveView). React skips these — the frontend doesn't run domain logic, only consumes the wire shape. **Each `render-expr.ts` is now a leaf-only `ExprTarget` table** — the 17-arm `ExprIR.kind` dispatch + all recursion live once in `src/generator/_expr/target.ts` (see below). `render-stmt.ts` stays per-backend (flat dispatch, shape-divergent arms — deliberately not extracted). |
 
 The four backends and their entry points are registered in `src/platform/registry.ts`; each implements the `PlatformSurface` contract in `src/platform/surface.ts` (`emitProject`, `composeService`, `needsDb`, `defaultPort`, `mountsUi`).
+
+The three expression renderers share one dispatcher: `src/generator/_expr/target.ts` **defines** the `ExprTarget` contract (the eight leaf-divergence axes — operators, naming, money arithmetic, collection ops, `refColl.contains` membership, regex, `ref` role, `callKind` call syntax) and `renderExprWith(e, target, ctx)`, which owns the 17-arm `ExprIR.kind` dispatch + recursion. Each backend's `render-expr.ts` supplies only the leaf table (`TS_TARGET` / `CS_TARGET` / `ELIXIR_TARGET`); a 5th domain-logic backend writes one target, not a 4th dispatcher. Expression-side analogue of the `WalkerTarget` seam below; byte-identical-output gated (PR #843). Per-`ExprIR.kind` arm tests live alongside each backend (`render-expr-kinds.test.ts` for TS/.NET, `phoenix-render-expr.test.ts`).
 
 ### React page rendering — the body walker
 
@@ -129,11 +133,12 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 |---|---|
 | `src/` | The Loom toolchain (compiler, generators, CLI). |
 | `src/language/generated/` | **Gitignored.** `langium generate` output — parser, AST types, reflection. Must exist before `tsc` runs. |
-| `src/language/print/` | AST → `.ddd` source printer (`printExpr` / `printStmt` / `printStructural`).  Drives the LSP "unfold macro" code action (`src/language/lsp/unfold-macro.ts`), which rewrites a `with X(...)` clause into its expanded source in place. |
+| `src/language/print/` | AST → `.ddd` source printer (`printExpr` / `printStmt` / `printStructural`).  Drives the LSP "unfold macro" code action (`src/language/lsp/unfold-macro.ts`), which rewrites a `with X(...)` clause into its expanded source in place. Each printer dispatches on `node.$type` and throws on an unhandled type; `test/language/print/print-completeness.test.ts` pins all three against the grammar's printable unions (via Langium reflection), so a new member/expr/stmt rule without a printer arm fails CI — add the matching `case` when extending the grammar. Round-trip safety is gated by `print-structural-roundtrip.test.ts`. |
 | `src/ir/{types,lower,enrich,validate,util}/` | The phase-revealing IR layout. One subdir per pipeline phase; `lower/` further splits into `lower.ts` (structural) + `lower-expr.ts` / `lower-stmt.ts` / `lower-types.ts` (expression / statement / type-resolution) + `walker-primitive-expander.ts`. |
 | `src/macros/` | Macro pipeline. `expander.ts` is the Langium `DocumentBuilder` listener; `registry.ts` is the global lookup; `api/` is the macro-authoring surface (`defineMacro`, factories); `stdlib/` ships the built-in macros (`audit/`, `softDelete/`, `scaffold/`, `crudish.macro.ts`). `bootMacros()` from `src/language/ddd-module.ts` registers them once at language-module init. |
 | `src/verify/` | `ddd verify` rollup — joins test-execution results onto the traceability graph to produce per-requirement Definition-of-Done verdicts.  Pure, dependency-free; consumed by both the CLI and the browser playground. |
-| `src/system/` | More than just the orchestrator — siblings of `index.ts` emit the `.loom/` artefact bundle: `mermaid.ts`, `likec4.ts`, `traceability.ts`, `wire-spec.ts`, `loomsnap.ts` (provenance snapshot capture for `ddd snapshot`), `sql-pg.ts`, `migrations-builder.ts`.  See [`docs/loom-artifacts.md`](docs/loom-artifacts.md). |
+| `src/api/` | **Transport-neutral toolkit** — `validate()` / `generate()` / `applyPatches()` over an in-memory `.ddd` source, returning the `src/diagnostics/contract.ts` wire shapes. One shared core for every surface (CLI, future MCP server, LSP adapters, web playground); parses on `EmptyFileSystem` so it stays browser-safe. `report.ts` holds the diagnostic/outline serializers. See [D-API-TOOLKIT](docs/decisions.md). |
+| `src/system/` | More than just the orchestrator — siblings of `index.ts` emit the `.loom/` artefact bundle: `mermaid.ts`, `likec4.ts`, `traceability.ts`, `wire-spec.ts`, `loomsnap.ts` (provenance snapshot capture for `ddd snapshot`), `migrations-builder.ts` (derives `MigrationsIR`; the Postgres-SQL renderer it feeds, `sql-pg.ts`, lives under `src/generator/` since only the backends consume it).  See [`docs/loom-artifacts.md`](docs/loom-artifacts.md). |
 | `packages/` | **Publish-shaped workspaces** discovered by the plugin resolver: `@loom/core` (the toolchain library + `PlatformSurface` contract), `@loom/backend-hono-v4` (versioned Hono backend), `@loom/ui-test-driver` (the cross-window page-object/locator runtime).  Each `package.json` carries a `loom` key (`kind: "core"\|"backend"`, `family`, `loomVersion`, `core` semver range) read by `src/platform/fs-discovery.ts` — this is the out-of-tree backend story. |
 | `web/` | Separate package — the browser-side playground. Imports the Loom toolchain straight from `../src` (pure TS, no Node-only APIs except `src/cli/` and `src/language/main.ts`). Has its own `package.json`, `playwright.config.ts`, and Vite shim that swaps `_packs/loader-fs.js` for a VFS-backed loader. |
 | `vscode/` | Separate package — VS Code extension (LSP client). Has its own `package.json`; builds against the compiled toolchain. |
@@ -162,10 +167,11 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 1. Edit `src/language/ddd.langium`; `npm run langium:generate`.
 2. Update `ddd-scope.ts` / `src/language/validators/<themed>.ts` / `type-system.ts` as needed.
 3. Add IR node in `loom-ir.ts`; lower it in `lower.ts` (structure) or `lower-expr.ts` (expr/stmt/type).
-4. Extend `render-expr.ts` / `render-stmt.ts` for every domain-logic backend.
+4. For a new `ExprIR.kind`: add one arm to `renderExprWith` in `src/generator/_expr/target.ts` and one method to the `ExprTarget` interface — the exhaustive switch + interface make every backend's target a compile error until filled. For a new `StmtIR` kind: extend each backend's `render-stmt.ts`.
 5. Extend `emit/*.ts` (or `*-emit.ts` on Phoenix) or a `*-builder.ts` per backend.
-6. Add: one parsing test, one negative validator test, one generator test per backend.
-7. Verify with `npm test` and at least one `LOOM_TS_BUILD=1` / `LOOM_REACT_BUILD=1` run.
+6. If the feature adds a structural member / expression / statement to the grammar, add the matching arm in `src/language/print/print-structural.ts` (or `print-expr.ts` / `print-stmt.ts`) — `print-completeness.test.ts` fails until you do.
+7. Add: one parsing test, one negative validator test, one generator test per backend.
+8. Verify with `npm test` and at least one `LOOM_TS_BUILD=1` / `LOOM_REACT_BUILD=1` run.
 
 **Adding a backend:**
 1. Two homes are possible:
@@ -191,12 +197,13 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 
 ### Local enforcement (checked-in Claude Code hooks)
 
-`.claude/settings.json` wires two project hooks so the CI Biome gate can't be forgotten:
+`.claude/settings.json` wires three project hooks so the CI Biome gate (and a clean-merge invariant) can't be forgotten:
 
 - **SessionStart** (`.claude/hooks/session-start.sh`) — runs `npm install` (the `prepare` lifecycle: `langium:generate` + `build`) on a fresh remote container so Biome, the build, and the tests are ready. Idempotent; skips when `node_modules/.bin/biome` and `src/language/generated/` already exist; remote-only (`$CLAUDE_CODE_REMOTE`).
 - **Stop** (`.claude/hooks/biome-gate.sh`) — when a turn finishes with work in the tree, runs `npm run lint` (`biome ci .`, the exact `test.yml` step). On failure it **blocks** and feeds the Biome output back so it's fixed before finishing; it releases (with a loud warning) after one fix cycle to avoid a stop loop, and never blocks when Biome isn't installed.
+- **PreToolUse(Bash)** (`.claude/hooks/pre-push-merge-check.sh`) — before a `git push`, fetches `origin/main` and runs a `git merge-tree --write-tree` dry-run; **denies** the push (with a rebase hint + the conflicting files) when the branch wouldn't merge cleanly, so upstream drift is caught before it becomes a stale PR. Conservative: only blocks on a *definite* conflict and **fails open** on any uncertainty (not a repo, no `origin/main`, offline, git < 2.38, pushing trunk itself).
 
-`.claude/` stays gitignored except these two paths (see `.gitignore`), so the hooks ship with the repo while worktrees and `settings.local.json` stay local.
+`.claude/` stays gitignored except `settings.json` and `hooks/` (see `.gitignore`), so the hooks ship with the repo while worktrees and `settings.local.json` stay local.
 
 ## Further reading
 

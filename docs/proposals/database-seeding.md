@@ -481,7 +481,7 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
    also fixes the same latent bug for VO construction in Phoenix
    *operation bodies*.
 4. **`raw` explicit-id path ✅ Done** — the home for **cross-references**
-   (D-SEED-XREF). A shared `renderSeedRowInsert` (`src/system/sql-pg.ts`)
+   (D-SEED-XREF). A shared `renderSeedRowInsert` (`src/generator/sql-pg.ts`)
    turns a `raw` row (explicit `id` + literal FK columns) into a direct
    Postgres `INSERT`, emitted **bit-identically** by all three backends
    and executed via their raw-SQL channels (Drizzle `db.execute(sql.raw)`,

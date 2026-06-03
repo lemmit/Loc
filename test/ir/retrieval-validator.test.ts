@@ -28,12 +28,11 @@ async function diagsFor(body: string) {
 }
 
 describe("validator — retrieval", () => {
-  it("accepts a well-formed retrieval (composed where + valid sort + valid loads)", async () => {
+  it("accepts a well-formed retrieval (composed where + valid sort)", async () => {
     const diags = await diagsFor(`
       retrieval ActiveInRegion(region: string) of Customer {
         where: ActiveCustomer && InRegion(region)
         sort:  [name asc]
-        loads: [this.region]
       }
     `);
     expect(diags).toEqual([]);
@@ -67,14 +66,19 @@ describe("validator — retrieval", () => {
     expect(diags.some((d) => /sort references unknown field 'nope'/.test(d.message))).toBe(true);
   });
 
-  it("rejects a loads path whose first segment is not an aggregate member", async () => {
+  it("rejects an explicit `loads:` as not yet supported (whole-only until autoload)", async () => {
+    // Explicit eager-load narrowing is gated: every retrieval loads the
+    // whole aggregate until per-operation autoload lands.  The check fires
+    // on the presence of any `loads:` path, before field resolution — so a
+    // valid-looking path is rejected just the same.
     const diags = await diagsFor(`
-      retrieval BadLoads of Customer {
+      retrieval Narrowed of Customer {
         where: ActiveCustomer
-        loads: [this.ghost]
+        loads: [this.region]
       }
     `);
     expect(diags.length).toBeGreaterThanOrEqual(1);
-    expect(diags.some((d) => /loads references unknown field 'ghost'/.test(d.message))).toBe(true);
+    expect(diags.some((d) => /explicit 'loads:' is not supported yet/.test(d.message))).toBe(true);
+    expect(diags.some((d) => d.source.includes("retrieval Narrowed"))).toBe(true);
   });
 });

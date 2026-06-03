@@ -1,6 +1,35 @@
 # AI diagnostics contract — `ddd validate --json` and friends
 
-> **Status:** PROPOSED / spec — no code yet.
+> **Status:** PARTIAL — slice 1 shipped. `ddd parse --json` emits the
+> `ValidateReport` envelope (§2): located/coded/phase-attributed `diagnostics[]`
+> from phases ①③④⑦, deterministic ordering (§3.4), the always-valid envelope on
+> parse failure (§6), and a name-only `outline` (§5). The flagship
+> `loom.bare-aggregate-in-type` code is now actually emitted (it was previously
+> comment-only). Implementation: `src/cli/json-report.ts`,
+> `src/language/print/outline.ts`, `src/diagnostics/contract.ts`; gate:
+> `test/cli/json-report.test.ts`. **Decision:** the contract names
+> `ddd validate --json`; the shipped surface is **`ddd parse --json`** (the
+> `parse` verb, extended under `--json` to also run the IR phases) — there is no
+> separate `validate` verb. **Slice 2 shipped:** every IR diagnostic in
+> `src/ir/validate/validate.ts` now carries a stable `loom.*` code (the
+> `loom.ir-validate` fallback is now only a defensive net), gated by
+> `test/ir/diagnostic-codes-completeness.test.ts`. **Slice 4 shipped:**
+> `fixHint` (§3.3) — CST-backed diagnostics can carry an applyable `ModelPatch`,
+> via a per-code provider registry (`src/language/fix-hints.ts`); the flagship
+> `loom.bare-aggregate-in-type` ships a `replace-text` fix (robust for scalar
+> and `[]` collection refs), and the validate→repair loop is proven closed
+> end-to-end (diagnostic → fixHint → `applyPatches` → clean re-validate) in
+> `test/language/fix-hints.test.ts`. More per-code providers are additive.
+> **Slice 5 shipped:** `generate --json` (§4) — `ddd generate system --json`
+> emits the `GenerateReport` (validation + the deployable manifest:
+> name/platform/port; writes no files). Landed alongside a **transport-neutral
+> toolkit** (`src/api/`): `validate()` / `generate()` / `applyPatches()` are now
+> one shared core that the CLI, the future MCP server, the LSP adapters, and the
+> in-browser playground all call (browser-safe, EmptyFileSystem) — see
+> [D-API-TOOLKIT](../decisions.md#d-api-toolkit--one-transport-neutral-toolkit-core-thin-adapters-per-surface).
+> **Deferred to follow-up slices:** `related[]`, IR-diagnostic *ranges* and
+> their fixHints (need CST provenance through lowering); per-deployable file
+> counts + `.loom/` artifact paths in the GenerateReport; multi-file generate.
 > **Role:** Defines the machine-readable interface the AI authoring loop
 > consumes. The loop in [`ai-authoring-loop.md`](./ai-authoring-loop.md) and
 > the platform vision in [`ai-generation-platform.md`](./ai-generation-platform.md)
