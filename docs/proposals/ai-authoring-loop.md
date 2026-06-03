@@ -1,6 +1,15 @@
 # AI authoring loop — agent, validate/repair, model patches
 
-> **Status:** PROPOSED / spec — no code yet.
+> **Status:** PARTIAL. Shipped: the diagnostics half of the loop
+> (`ddd parse --json`, build-plan items 1–2; see
+> [`ai-diagnostics-contract.md`](./ai-diagnostics-contract.md)) and the
+> **model-patch applier** (§4, build-plan item 3) — `ddd patch <file>
+> --patches <json>` plus `applyPatches()` in `src/language/model-patch.ts`,
+> with `add`/`replace`/`remove` ops, atomic batches, CST-range splicing that
+> preserves untouched bytes, and a round-trip gate
+> (`test/language/model-patch.test.ts`). `rename` is deferred (it needs
+> reference rewriting). Still to come: `fixHint` patches keyed to diagnostics,
+> the agent driver (build-plan item 4), and the wedge demo (item 5).
 > **Role:** Specifies the mechanics behind
 > [`ai-generation-platform.md`](./ai-generation-platform.md): how an LLM
 > authors and evolves a `.ddd` model through Loom's existing compiler as a set

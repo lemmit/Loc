@@ -13,6 +13,7 @@ import type { EnrichedLoomModel, TestOutcome } from "../ir/types/loom-ir.js";
 import { type LoomDiagnostic, validateLoomModel } from "../ir/validate/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
+import { applyPatches, type ModelPatch } from "../language/model-patch.js";
 import { loadProject } from "../language/project-loader.js";
 import { installFsBackendSource } from "../platform/fs-discovery.js";
 import { generateTypeScript } from "../platform/hono/v4/emit.js";
@@ -129,6 +130,38 @@ async function runParse(file: string) {
   printDiagnostics(result);
   if (result.errorCount > 0) process.exit(1);
   console.log(`OK: ${file}`);
+}
+
+/**
+ * `ddd patch <file> --patches <json>` — apply node-addressed model patches
+ * (docs/proposals/ai-authoring-loop.md §4).  Default output is the patched
+ * source on stdout (so it composes: `ddd patch m.ddd --patches p.json > m2.ddd`);
+ * `--json` emits the structured PatchResult.  Exits 1 if any patch fails.
+ */
+async function runPatch(file: string, patchesFile: string, options: { json?: boolean }) {
+  const absolute = path.resolve(file);
+  if (!fs.existsSync(absolute)) {
+    throw new Error(`File not found: ${absolute}`);
+  }
+  const source = fs.readFileSync(absolute, "utf8");
+  const raw =
+    patchesFile === "-"
+      ? fs.readFileSync(0, "utf8")
+      : fs.readFileSync(path.resolve(patchesFile), "utf8");
+  const parsed = JSON.parse(raw) as ModelPatch[] | { patches: ModelPatch[] };
+  const patches = Array.isArray(parsed) ? parsed : parsed.patches;
+
+  const result = await applyPatches(source, patches);
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  } else if (result.ok) {
+    process.stdout.write(result.text);
+  } else {
+    for (const e of result.errors) {
+      console.error(`patch error [${e.patch.op} ${e.patch.target}]: ${e.message}`);
+    }
+  }
+  if (!result.ok) process.exit(1);
 }
 
 /** Build the document and return the raw structured Langium diagnostics
@@ -601,6 +634,20 @@ program
   .action(async (file: string, options: { json?: boolean }) => {
     if (options.json) await runParseJson(file);
     else await runParse(file);
+  });
+
+program
+  .command("patch <file>")
+  .description(
+    "Apply node-addressed model patches (JSON) to a .ddd file; prints the patched source, or --json for the structured PatchResult. See docs/proposals/ai-authoring-loop.md.",
+  )
+  .requiredOption(
+    "--patches <file>",
+    "JSON file (or '-' for stdin): a ModelPatch[] or { patches: [...] }",
+  )
+  .option("--json", "emit the structured PatchResult instead of the patched source")
+  .action(async (file: string, options: { patches: string; json?: boolean }) => {
+    await runPatch(file, options.patches, options);
   });
 
 const generate = program.command("generate").description("Generate code from a .ddd file");

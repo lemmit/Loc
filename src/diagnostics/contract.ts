@@ -12,6 +12,23 @@
 /** LSP-compatible severities (design goal §7 — feeds VS Code + playground). */
 export type JsonSeverity = "error" | "warning" | "info";
 
+/**
+ * A single node-addressed model edit (ai-authoring-loop.md §4).  The agent
+ * edits *named model nodes*, not byte ranges, so patches survive canonical
+ * re-printing.  `target` uses the same address space as the diagnostic `node`
+ * and the outline (`<keyword> <Context>.<Decl>[.<member>]`).
+ *
+ * - `add`     — `target` is the container to add into; `source` is the new
+ *               member/declaration text.
+ * - `replace` — `target` is the node to replace; `source` is its new text.
+ * - `remove`  — `target` is the node to delete; `source` is ignored.
+ */
+export interface ModelPatch {
+  op: "add" | "replace" | "remove";
+  target: string;
+  source?: string;
+}
+
 /** The pipeline phase that raised a diagnostic (contract §3.2). */
 export type JsonPhase =
   | "parse" // ① lex/parse
@@ -42,10 +59,9 @@ export interface JsonRange {
 export interface JsonFixHint {
   kind: "replace-text" | "insert-decl" | "choose" | "manual";
   summary: string;
-  /** A model patch the agent can hand straight to `apply_patch`.  Shape
-   *  intentionally left `unknown` until the patch envelope is specified. */
-  patch?: unknown;
-  options?: { summary: string; patch?: unknown }[];
+  /** A model patch the agent can hand straight to `apply_patch`. */
+  patch?: ModelPatch;
+  options?: { summary: string; patch?: ModelPatch }[];
 }
 
 /** A secondary location related to a diagnostic (contract §3, optional). */
