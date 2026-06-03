@@ -824,36 +824,37 @@ export function validateInheritanceStorage(
 }
 
 // Event-sourced storage emission (`persistedAs(eventLog)`, appliers A2) is
-// implemented for the Hono backend only (v1): the `<agg>_events` stream
-// table + fold-on-load repository. So an event-sourced aggregate is allowed
-// iff its context is hosted by a Hono backend deployable. On .NET / Phoenix
-// the aggregate would silently fall back to state persistence (those
-// backends don't yet branch on `persistedAs`), losing the event log — an
-// error, not a silent downgrade. Mirrors the TPH-only-on-Hono storage gate.
+// implemented for the Hono (`node`) and .NET (`dotnet`, EF Core) backends:
+// the `<agg>_events` stream table + fold-on-load repository. So an
+// event-sourced aggregate is allowed iff every backend deployable hosting
+// its context implements it. On a backend that doesn't (Phoenix today) the
+// aggregate would silently fall back to state persistence, losing the event
+// log — an error, not a silent downgrade. Mirrors the TPH storage gate.
+const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet"]);
 export function validateEventSourcedStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
 ): void {
-  // The Hono backend's platform identifier is `node` (D-PHOENIX-SURFACE /
-  // D-REALIZATION-AXES rename); `platform: hono` lowers to it.
-  const hostedByHono = backendPlatforms.has("node");
+  // Every hosting backend must implement event sourcing; flag the ones that
+  // don't (e.g. a Phoenix deployable hosting the context alongside a node one).
+  const unsupported = [...backendPlatforms].filter((p) => !EVENT_SOURCING_BACKENDS.has(p));
+  const anyBackend = backendPlatforms.size > 0;
   for (const agg of ctx.aggregates) {
     if (agg.persistedAs !== "eventLog") continue;
-    if (hostedByHono) continue;
-    const others = [...backendPlatforms].filter((p) => p !== "node");
+    if (anyBackend && unsupported.length === 0) continue;
     const hostNote =
-      others.length > 0
-        ? `it is hosted by ${others.join(", ")}, where event-sourced persistence is not implemented`
-        : "no Hono backend deployable hosts this context";
+      unsupported.length > 0
+        ? `it is hosted by ${unsupported.join(", ")}, where event-sourced persistence is not implemented`
+        : "no event-sourcing-capable (node / dotnet) backend deployable hosts this context";
     diags.push({
       severity: "error",
       code: "loom.event-sourcing-backend-unsupported",
       message:
         `aggregate '${agg.name}' is persistedAs(eventLog), but event-sourced storage emission ` +
-        `is implemented for the Hono backend only — ${hostNote}. Host the context on a Hono ` +
-        `deployable, or drop persistedAs(eventLog) to use state persistence (all backends). ` +
-        `Tracked in workflow-and-applier.md (appliers A2).`,
+        `is implemented for the Hono (node) and .NET (dotnet) backends only — ${hostNote}. ` +
+        `Host the context on a node / dotnet deployable, or drop persistedAs(eventLog) to use ` +
+        `state persistence (all backends). Tracked in workflow-and-applier.md (appliers A2).`,
       source: `${ctx.name}/${agg.name}`,
     });
   }
