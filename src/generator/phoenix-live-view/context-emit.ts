@@ -11,7 +11,7 @@ import { crudOpNames } from "./api-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
 import { renderJasonEncoderImpl } from "./jason-camel-emit.js";
 import { joinEntityName, renderJoinResource } from "./join-resource-emit.js";
-import { renderAshType } from "./render-expr.js";
+import { renderAshType, renderTypespec } from "./render-expr.js";
 import {
   buildFindActions,
   buildRetrievalActions,
@@ -153,6 +153,18 @@ function renderValueObjectModule(
     return `    attribute :${snake(f.name)}, ${ashType}, ${opts}`;
   });
 
+  // Explicit @type t — Ash 3.x auto-generates a typespec for resource
+  // modules, but emitting our own gives Dialyzer / hover docs a
+  // field-accurate shape that matches the IR exactly.  The IR's
+  // FieldIR.optional flag corresponds to the same "| nil" the type
+  // would have if it were a TypeIR `{kind: optional}`, so apply it here.
+  const typespecLines = vo.fields.map((f, i) => {
+    const base = renderTypespec(f.type, contextModule);
+    const ty = f.optional && !base.endsWith("| nil") ? `${base} | nil` : base;
+    const sep = i === vo.fields.length - 1 ? "" : ",";
+    return `    ${snake(f.name)}: ${ty}${sep}`;
+  });
+
   // VOs are embedded inside aggregates' wire shape, so they need the
   // camelCase Jason encoder too — same shared helper as aggregates.
   const fieldAtoms = vo.fields.map((f) => `:${snake(f.name)}`);
@@ -165,6 +177,10 @@ defmodule ${moduleName} do
   attributes do
 ${attrLines.join("\n")}
   end
+
+  @type t :: %__MODULE__{
+${typespecLines.join("\n")}
+  }
 end
 
 ${jasonImpl}`;
@@ -180,13 +196,19 @@ function renderEventModule(
 ): string {
   const moduleName = `${contextModule}.Events.${upperFirst(ev.name)}`;
   void renderAshType; // used in sibling fns
+  // FieldIR carries `optional` separately from TypeIR — preserve it in
+  // the spec so a nullable event field is `T | nil`, not `T`.
+  const typeFor = (f: { type: import("../../ir/types/loom-ir.js").TypeIR; optional: boolean }) => {
+    const base = renderTypespec(f.type, contextModule);
+    return f.optional && !base.endsWith("| nil") ? `${base} | nil` : base;
+  };
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc "Domain event: ${upperFirst(ev.name)}"
 
   defstruct [${ev.fields.map((f) => `:${snake(f.name)}`).join(", ")}]
   @type t :: %__MODULE__{
-${ev.fields.map((f) => `    ${snake(f.name)}: term()`).join(",\n")}
+${ev.fields.map((f) => `    ${snake(f.name)}: ${typeFor(f)}`).join(",\n")}
   }
 end
 `;
@@ -298,10 +320,16 @@ function renderDomainModule(
     if (concretes.length === 0) continue;
     const listName = `list_${snake(plural(base.name))}`;
     const union = concretes.map((c) => `list_${snake(plural(c.name))}!()`).join(" ++ ");
+    // Polymorphic return type — union of the concrete struct types.  More
+    // precise than `[base.t()]` since the base owns no resource and has no
+    // auto-generated struct typespec to reference.
+    const elemType = concretes.map((c) => `${contextModule}.${upperFirst(c.name)}.t()`).join(" | ");
     baseBlocks.push(
       [
         `  @doc "Polymorphic read of the abstract base ${upperFirst(base.name)} — the union of its concrete subtypes."`,
+        `  @spec ${listName}!() :: [${elemType}]`,
         `  def ${listName}!, do: ${union}`,
+        `  @spec ${listName}() :: {:ok, [${elemType}]}`,
         `  def ${listName}, do: {:ok, ${listName}!()}`,
       ].join("\n"),
     );
