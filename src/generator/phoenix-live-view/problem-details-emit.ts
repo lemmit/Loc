@@ -47,14 +47,14 @@ defmodule ${appModule}Web.ProblemDetails do
 
   import Plug.Conn
 
-  @doc \"\"\"
+  @doc """
   Send a 422 ProblemDetails response carrying the §3.2 \`errors[]\`
   extension built from an \`Ash.Error.Invalid\` struct's nested errors.
 
   The frontend ACL's \`applyServerErrors\` reads each \`{ pointer, message }\`
   entry, decodes the JSON pointer to a flat RHF field key, and calls
   \`setError\` so the error renders inline next to the right input.
-  \"\"\"
+  """
   def validation_error_response(conn, %Ash.Error.Invalid{errors: errors}) do
     do_validation_response(conn, errors)
   end
@@ -103,11 +103,11 @@ defmodule ${appModule}Web.ProblemDetails do
     |> send_resp(422, body)
   end
 
-  @doc \"\"\"
+  @doc """
   Send a base ProblemDetails response (no \`errors[]\` extension).  Used
   by every non-validation fault arm in the per-controller
   \`error_response/2\` helper.
-  \"\"\"
+  """
   def problem_response(conn, status, title, detail) do
     body =
       Jason.encode!(%{

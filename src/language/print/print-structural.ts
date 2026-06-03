@@ -631,7 +631,8 @@ function printLoadPath(node: import("../generated/ast.js").LoadPath): string {
 
 function printWorkflow(node: Workflow): string {
   const params = node.params.map(printParameter).join(", ");
-  let head = `workflow ${node.name}(${params})`;
+  const es = node.eventSourced ? " eventSourced" : "";
+  let head = `workflow ${node.name}${es}(${params})`;
   if (node.transactional) {
     head += node.isolation ? ` transactional(${node.isolation})` : " transactional";
   }
@@ -642,7 +643,9 @@ function printWorkflow(node: Workflow): string {
         ? printOnDecl(m)
         : m.$type === "Property"
           ? printProperty(m)
-          : printStmt(m),
+          : m.$type === "Apply"
+            ? printApply(m)
+            : printStmt(m),
     ),
   );
 }

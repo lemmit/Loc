@@ -7872,6 +7872,16 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             }
           },
           {
+            "$type": "Assignment",
+            "feature": "eventSourced",
+            "operator": "?=",
+            "terminal": {
+              "$type": "Keyword",
+              "value": "eventSourced"
+            },
+            "cardinality": "?"
+          },
+          {
             "$type": "Keyword",
             "value": "("
           },
@@ -7996,6 +8006,13 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
       "definition": {
         "$type": "Alternatives",
         "elements": [
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@128"
+            },
+            "arguments": []
+          },
           {
             "$type": "RuleCall",
             "rule": {

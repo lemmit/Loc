@@ -112,6 +112,7 @@ export type DddKeywordNames =
     | "error"
     | "event"
     | "eventLog"
+    | "eventSourced"
     | "events"
     | "every"
     | "expect"
@@ -614,7 +615,7 @@ export function isValueObjectMember(item: unknown): item is ValueObjectMember {
     return reflection.isInstance(item, ValueObjectMember);
 }
 
-export type WorkflowMember = OnDecl | Property | Statement;
+export type WorkflowMember = Apply | OnDecl | Property | Statement;
 
 export const WorkflowMember = 'WorkflowMember';
 
@@ -657,7 +658,7 @@ export function isApi(item: unknown): item is Api {
 }
 
 export interface Apply extends AstNode {
-    readonly $container: Aggregate;
+    readonly $container: Aggregate | Workflow;
     readonly $type: 'Apply';
     body: Array<Statement>;
     event: Reference<EventDecl>;
@@ -2505,6 +2506,7 @@ export function isWithClause(item: unknown): item is WithClause {
 export interface Workflow extends AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'Workflow';
+    eventSourced: boolean;
     isolation?: IsolationLevel;
     members: Array<WorkflowMember>;
     name: string;
@@ -2701,11 +2703,8 @@ export class DddAstReflection extends AbstractAstReflection {
             case Subdomain: {
                 return this.isSubtype(SystemMember, supertype) || this.isSubtype(Targetable, supertype);
             }
-            case Apply:
-            case Create:
-            case Destroy:
-            case TestBlock: {
-                return this.isSubtype(AggregateMember, supertype);
+            case Apply: {
+                return this.isSubtype(AggregateMember, supertype) || this.isSubtype(WorkflowMember, supertype);
             }
             case AssignOrCallStmt:
             case EmitStmt:
@@ -2784,6 +2783,11 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case Containment: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype);
+            }
+            case Create:
+            case Destroy:
+            case TestBlock: {
+                return this.isSubtype(AggregateMember, supertype);
             }
             case DerivedProp:
             case FunctionDecl:
@@ -4239,6 +4243,7 @@ export class DddAstReflection extends AbstractAstReflection {
                 return {
                     name: Workflow,
                     properties: [
+                        { name: 'eventSourced', defaultValue: false },
                         { name: 'isolation' },
                         { name: 'members', defaultValue: [] },
                         { name: 'name' },

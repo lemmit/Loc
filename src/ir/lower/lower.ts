@@ -2359,12 +2359,16 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
   // saga state (workflow-and-applier.md A2-S2).  Lowered with the same
   // `lowerField` every aggregate / value-object field uses.
   const stateFields: FieldIR[] = wf.members.filter(isProperty).map((p) => lowerField(p, paramEnv));
+  // Appliers fold emitted events into workflow state (A2-S5b).  Lowered with
+  // `paramEnv` — which binds `this` to the workflow (A2-S5a) — so the same
+  // `lowerApply` aggregates use produces a state-folding body for workflows.
+  const appliers: ApplyIR[] = wf.members.filter(isApply).map((a) => lowerApply(a, paramEnv));
   for (const m of wf.members) {
     if (isOnDecl(m)) {
       subscriptions.push(lowerOn(m, paramEnv, aggsByName, reposByName, repoForAgg));
       continue;
     }
-    if (isProperty(m)) continue; // handled above
+    if (isProperty(m) || isApply(m)) continue; // handled above
     const lowered = lowerWorkflowStatement(m, inner, aggsByName, reposByName, repoForAgg);
     statements.push(lowered.stmt);
     inner = lowered.envAfter;
@@ -2389,9 +2393,11 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
       | undefined,
     statements,
     savesAtExit,
+    eventSourced: !!wf.eventSourced,
     ...(subscriptions.length > 0 ? { subscriptions } : {}),
     ...(stateFields.length > 0 ? { stateFields } : {}),
     ...(correlationField ? { correlationField } : {}),
+    ...(appliers.length > 0 ? { appliers } : {}),
   };
 }
 

@@ -883,7 +883,8 @@ FindDecl:
 // call) but the validator restricts mutation forms (`:=`, `+=`, `-=`)
 // to operation bodies only.  See docs/workflow.md for semantics.
 Workflow:
-    'workflow' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+    'workflow' name=ID (eventSourced?='eventSourced')?
+        '(' (params+=Parameter (',' params+=Parameter)*)? ')'
         (transactional?='transactional' ('(' isolation=IsolationLevel ')')?)?
     '{'
         members+=WorkflowMember*
@@ -896,10 +897,12 @@ Workflow:
 // the additive, non-breaking shape — the full workflow-as-aggregate reshape
 // (Properties + create/handle members, no free statements) is a later slice.
 // `Property` (`name ':' …`) is unambiguous against `AssignOrCallStmt` (whose
-// LValue continues with `:=`/`.`/`(`, never a bare `:`), and `on` is a keyword
-// so it can never start a Statement.
+// LValue continues with `:=`/`.`/`(`, never a bare `:`), and `on`/`apply` are
+// keywords so they can never start a Statement.  `Apply` (A2-S5b) reuses the
+// aggregate applier rule: an `eventSourced` workflow folds its emitted events
+// into state via `apply(e: E) { … }`, exactly like an event-sourced aggregate.
 WorkflowMember:
-    OnDecl | Property | Statement;
+    Apply | OnDecl | Property | Statement;
 
 // Extrinsic event subscription / continuation: `on(paid: PaymentReceived)
 // { … }` reacts to a fact from outside the workflow's own scope.  Mirrors the
