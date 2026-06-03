@@ -1,6 +1,6 @@
 import { platformFor } from "../../platform/registry.js";
 import { plural, snake } from "../../util/naming.js";
-import { defaultInterfaceFor } from "../source-types.js";
+import { defaultInterfaceFor } from "../../util/source-types.js";
 import { forEachGenericInstance, genericInstanceName, genericShape } from "../stdlib/generics.js";
 import type {
   AggregateIR,

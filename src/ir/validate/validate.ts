@@ -5,8 +5,8 @@ import {
 } from "../../language/validators/data/platform-rules.js";
 import { allPlatforms, platformFor } from "../../platform/registry.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
+import { capabilitiesFor, configSchemaFor, supportsSurfaceKind } from "../../util/source-types.js";
 import { verbsForKind } from "../resource-verbs.js";
-import { capabilitiesFor, configSchemaFor, supportsSurfaceKind } from "../source-types.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -113,6 +113,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validatePermissionRefs(c, diags);
     validateGenericInstancesUnimplemented(c, diags);
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateEventSourcedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
   validateExprIntegrity(loom, diags);
   return diags;
@@ -1684,6 +1685,41 @@ function validateInheritanceStorage(
         `${hostNote}. Host the context on a Hono deployable, or declare ` +
         `'inheritanceUsing(ownTable)' to use the per-concrete (TPC) layout (all backends). ` +
         `Tracked in aggregate-inheritance.md I2/I3.`,
+      source: `${ctx.name}/${agg.name}`,
+    });
+  }
+}
+
+// Event-sourced storage emission (`persistedAs(eventLog)`, appliers A2) is
+// implemented for the Hono backend only (v1): the `<agg>_events` stream
+// table + fold-on-load repository. So an event-sourced aggregate is allowed
+// iff its context is hosted by a Hono backend deployable. On .NET / Phoenix
+// the aggregate would silently fall back to state persistence (those
+// backends don't yet branch on `persistedAs`), losing the event log — an
+// error, not a silent downgrade. Mirrors the TPH-only-on-Hono storage gate.
+function validateEventSourcedStorage(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  // The Hono backend's platform identifier is `node` (D-PHOENIX-SURFACE /
+  // D-REALIZATION-AXES rename); `platform: hono` lowers to it.
+  const hostedByHono = backendPlatforms.has("node");
+  for (const agg of ctx.aggregates) {
+    if (agg.persistedAs !== "eventLog") continue;
+    if (hostedByHono) continue;
+    const others = [...backendPlatforms].filter((p) => p !== "node");
+    const hostNote =
+      others.length > 0
+        ? `it is hosted by ${others.join(", ")}, where event-sourced persistence is not implemented`
+        : "no Hono backend deployable hosts this context";
+    diags.push({
+      severity: "error",
+      message:
+        `aggregate '${agg.name}' is persistedAs(eventLog), but event-sourced storage emission ` +
+        `is implemented for the Hono backend only — ${hostNote}. Host the context on a Hono ` +
+        `deployable, or drop persistedAs(eventLog) to use state persistence (all backends). ` +
+        `Tracked in workflow-and-applier.md (appliers A2).`,
       source: `${ctx.name}/${agg.name}`,
     });
   }

@@ -7,17 +7,17 @@
 // scope provider; no IR-level lookup is needed.
 
 import type { ValidationAcceptor } from "langium";
+import type { DataSourceKind } from "../../ir/types/loom-ir.js";
 import {
   isCacheStore,
   isRelational,
   sourceTypesForSurfaceKind,
   supportsSurfaceKind,
-} from "../../ir/source-types.js";
-import type { DataSourceKind } from "../../ir/types/loom-ir.js";
+} from "../../util/source-types.js";
 import type { Resource, Storage } from "../generated/ast.js";
 
 // Kind↔storage-type and knob↔storage-type compatibility is sourced from
-// the platform-internal sourceType registry (`src/ir/source-types.ts`),
+// the platform-internal sourceType registry (`src/util/source-types.ts`),
 // the single source of truth.  This validator keeps the check at the AST
 // layer so mismatches surface as in-editor squiggles on the offending
 // node/property; it merely consults the registry instead of hardcoding

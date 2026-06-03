@@ -13,13 +13,7 @@
 // *grammar-level* platform-family classification — what kind of
 // thing each platform is.
 
-import {
-  applicationAdapterToDsl,
-  applicationDslToAdapter,
-  PLATFORM_SAVING_SHAPES,
-  type Platform,
-  type SavingShape,
-} from "../../../ir/types/loom-ir.js";
+import type { Platform, SavingShape } from "../../../ir/types/loom-ir.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../../platform/registry.js";
 import {
   allAdapterNames,
@@ -27,6 +21,11 @@ import {
   hasAdapters,
 } from "../../../platform/resolve-adapters.js";
 import { BUILTIN_PACK_LATEST, packFormatForBuiltin } from "../../../util/builtin-formats.js";
+import {
+  applicationAdapterToDsl,
+  applicationDslToAdapter,
+  PLATFORM_SAVING_SHAPES,
+} from "../../../util/platform-axes.js";
 
 /** Frontend keyword platforms — those that are valid as bareword
  *  `platform:` values without being registered as a backend family. */
@@ -166,7 +165,7 @@ export type RealizationAxis =
   | "runtime";
 
 // `applicationDslToAdapter` / `applicationAdapterToDsl` live in
-// `loom-ir.ts` (shared with lowering) — imported above.
+// `util/platform-axes.ts` (shared with lowering) — imported above.
 
 /** Adapter kind backing each axis, or undefined for the greenfield axes. */
 const ADAPTER_KIND_BY_AXIS: Partial<Record<RealizationAxis, "persistence" | "style" | "layout">> = {

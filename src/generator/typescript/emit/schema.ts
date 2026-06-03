@@ -115,6 +115,14 @@ export function renderSchema(
       tables.push(emitTphTable(agg, ctx, { schema, prefix }));
       continue;
     }
+    // Event-sourced (`persistedAs(eventLog)`): the aggregate's truth is its
+    // event stream, so it gets an append-only `<agg>_events` table instead
+    // of a state table.  State is rehydrated by folding the stream through
+    // the appliers (fold-from-zero MVP); no part / join / read-model tables.
+    if (agg.persistedAs === "eventLog") {
+      tables.push(emitEventLogTable(agg.name, { schema, prefix }));
+      continue;
+    }
     const shape = effectiveSavingShape(agg, lookup?.(agg));
     // Document (`shape(document)`): the whole aggregate is one opaque
     // jsonb blob (`id, data, version`).  No part/join tables.
@@ -370,6 +378,33 @@ function emitEmbeddedTable(
 /** Document-shaped persistence table: one jsonb `data` column holding
  *  the whole serialised aggregate read model + a `version` concurrency
  *  counter.  Mirrors the .NET `<Agg>Document` record. */
+/** Event-log stream table (D-DOCUMENT-AXIS / appliers A2): one append-only
+ *  table per event-sourced aggregate.  A row is one recorded event keyed by
+ *  `(stream_id, version)` — `stream_id` is the aggregate id, `version` its
+ *  position in the stream (1-based, gap-free).  `type` discriminates the
+ *  event for the fold; `data` is the event payload.  No global sequence in
+ *  the MVP — `(stream_id, version)` ordering is all fold-from-zero needs. */
+function emitEventLogTable(
+  name: string,
+  options: { schema?: string; prefix?: string } = {},
+): string {
+  const baseTable = `${snake(name)}_events`;
+  const tableName = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
+  const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
+  const constName = `${lowerFirst(name)}Events`;
+  return [
+    `export const ${constName} = ${tableFactory}("${tableName}", {`,
+    `  streamId: text("stream_id").notNull(),`,
+    `  version: integer("version").notNull(),`,
+    `  type: text("type").notNull(),`,
+    `  data: jsonb("data").notNull(),`,
+    `  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),`,
+    `}, (table) => ({`,
+    `  ${constName}Pk: primaryKey({ columns: [table.streamId, table.version] }),`,
+    `}));`,
+  ].join("\n");
+}
+
 function emitDocumentTable(
   name: string,
   options: { schema?: string; prefix?: string } = {},

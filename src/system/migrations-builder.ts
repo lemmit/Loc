@@ -93,6 +93,14 @@ export function schemaFromModule(
       tables.push(tphTableForAggregate(agg, pool, module.name));
       continue;
     }
+    // Event-sourced (`persistedAs(eventLog)`): an append-only stream table
+    // keyed by `(stream_id, version)`, not a state table.  State is folded
+    // from the stream at load time (appliers A2).  Mirrors the Drizzle
+    // schema's `emitEventLogTable`.
+    if (agg.persistedAs === "eventLog") {
+      tables.push(eventLogTableForAggregate(agg, module.name));
+      continue;
+    }
     const shape = shapeOf(agg);
     if (shape === "document") {
       tables.push(documentTableForAggregate(agg, module.name));
@@ -180,6 +188,30 @@ function documentTableForAggregate(agg: AggregateIR, ownerModule: string): Table
       { name: "version", type: { kind: "int" }, nullable: false },
     ],
     primaryKey: ["id"],
+    foreignKeys: [],
+    indexes: [],
+  };
+}
+
+/** Event-sourced aggregate (`persistedAs(eventLog)`): one append-only
+ *  `<agg>_events` stream table.  A row is one recorded event keyed by
+ *  `(stream_id, version)` — `stream_id` is the aggregate id, `version` its
+ *  gap-free position in the stream.  `type` discriminates the event for the
+ *  fold; `data` is the JSON payload; `occurred_at` defaults to insert time.
+ *  No state / part / join tables — the read model is folded at load. */
+function eventLogTableForAggregate(agg: AggregateIR, ownerModule: string): TableShape {
+  const tableName = `${snake(agg.name)}_events`;
+  return {
+    name: tableName,
+    ownerModule,
+    columns: [
+      { name: "stream_id", type: { kind: "text" }, nullable: false },
+      { name: "version", type: { kind: "int" }, nullable: false },
+      { name: "type", type: { kind: "text" }, nullable: false },
+      { name: "data", type: { kind: "json" }, nullable: false },
+      { name: "occurred_at", type: { kind: "datetime" }, nullable: false, default: "now()" },
+    ],
+    primaryKey: ["stream_id", "version"],
     foreignKeys: [],
     indexes: [],
   };

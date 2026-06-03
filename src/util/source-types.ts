@@ -10,9 +10,15 @@
 // libraries, migration dialects, connection wiring) stays in the
 // platform adapters keyed by sourceType name.
 //
-// Layering: this module sits at IR altitude — it imports only IR types
-// and is read by IR enrichment, IR validation, and system composition.
-// It must NOT import from `language/`, `generator/`, or `platform/`.
+// Layering: a foundational vocabulary module (`util/` altitude) — it
+// type-imports only the IR vocabulary (`DataSourceKind`/`StorageKind`/
+// `LoomInterface`) and is read across the pipeline: the language
+// validators (`datasource.ts`), IR enrichment + validation, system
+// composition, and the platform/generator resource-client adapters.
+// Because `language/` consumes it, it cannot live under `ir/` without a
+// backward `language → ir` value edge — hence its home here.  It must
+// still NOT import any runtime value from `language/`, `generator/`, or
+// `platform/`.
 //
 // Phase 1 note: the user-facing `kind:` keyword keeps its fine-grained
 // values (`state`/`snapshot`/`replica`/`eventLog`/`cache`); those map to
@@ -23,9 +29,9 @@
 // eventLog), so swapping it in for the old `KIND_STORAGE` tables is a
 // behaviour-preserving change.
 
-import type { DataSourceKind, LoomInterface, StorageKind } from "./types/loom-ir.js";
+import type { DataSourceKind, LoomInterface, StorageKind } from "../ir/types/loom-ir.js";
 
-export type { LoomInterface } from "./types/loom-ir.js";
+export type { LoomInterface } from "../ir/types/loom-ir.js";
 
 /** The coarse, infrastructure-level semantic role a source plays.
  *  This is the registry's primary key axis (RFC §3.5). */

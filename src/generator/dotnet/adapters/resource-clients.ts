@@ -8,9 +8,9 @@
 // 4c is hono-parity: same closed verb vocabulary, vendor-neutral source
 // → C# emission.  `supports()` delegates to the sourceType registry.
 
-import { supportsSurfaceKind } from "../../../ir/source-types.js";
 import type { DataSourceIR, StorageIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
+import { supportsSurfaceKind } from "../../../util/source-types.js";
 
 export interface DotnetResourceAdapter {
   readonly name: string;

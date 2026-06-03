@@ -40,31 +40,20 @@ const srcDir = path.join(repoRoot, "src");
 /** Pre-existing value backward-edges, pinned so the surface can't grow.
  *  Keyed by the importing file (repo-relative); the value is the set of
  *  downstream module specifiers it is permitted to value-import, each
- *  with the reason it exists / how it should eventually be removed. */
-const ALLOWED: Record<string, { spec: string; why: string }[]> = {
-  // Two value edges remain — both language validators reaching into an
-  // `ir/` runtime helper.  Candidates to invert later (move the shared
-  // predicate / maps to a foundational layer, or thread them in); pinned
-  // so the surface is frozen rather than growing.
-  //
-  // (The three former `generator/_packs/builtin-formats` edges are gone:
-  // that pure, zero-import metadata module was relocated to
-  // `src/util/builtin-formats.ts` — a foundational layer language / ir /
-  // generator may all depend on — so those imports are no longer
-  // backward edges.)
-  "src/language/validators/data/platform-rules.ts": [
-    {
-      spec: "ir/types/loom-ir",
-      why: "platform-family DSL/adapter maps + PLATFORM_SAVING_SHAPES live on the IR types module",
-    },
-  ],
-  "src/language/validators/datasource.ts": [
-    {
-      spec: "ir/source-types",
-      why: "validator reuses ir source-type predicates (isCacheStore/isRelational/…)",
-    },
-  ],
-};
+ *  with the reason it exists / how it should eventually be removed.
+ *
+ *  EMPTY — there are no permitted backward value-edges.  The pipeline's
+ *  value-dependency graph is acyclic.  The historical exceptions were
+ *  all resolved by relocating the shared, mislocated vocabulary to the
+ *  foundational `src/util/` layer (which every phase may depend on):
+ *    - `generator/_packs/builtin-formats.ts` → `util/builtin-formats.ts`
+ *    - the `application:`/`shape(…)` platform-axes lookups in
+ *      `ir/types/loom-ir.ts`     → `util/platform-axes.ts`
+ *    - `ir/source-types.ts`      → `util/source-types.ts`
+ *  A new backward value-edge fails the assertions below; only add a pin
+ *  here if inverting the dependency is genuinely impossible (it has not
+ *  been so far). */
+const ALLOWED: Record<string, { spec: string; why: string }[]> = {};
 
 function tsFiles(dir: string): string[] {
   const out: string[] = [];

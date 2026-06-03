@@ -1,6 +1,7 @@
 import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
+  ApplyIR,
   BoundedContextIR,
   ContainmentIR,
   DerivedIR,
@@ -40,6 +41,13 @@ interface EntityShape {
   invariants: InvariantIR[];
   functions: FunctionIR[];
   operations: OperationIR[];
+  /** Event-fold appliers — root-only, present iff the aggregate is
+   *  event-sourced.  Drive the `_apply` fold dispatch + `_fromEvents`
+   *  rehydrator (appliers A2). */
+  appliers?: ApplyIR[];
+  /** True when the aggregate is `persistedAs(eventLog)` — gates the
+   *  fold/rehydrate emission and flips `emit` to push-and-apply. */
+  eventSourced?: boolean;
 }
 
 export function renderAggregate(
@@ -145,6 +153,8 @@ function rootShape(a: AggregateIR): EntityShape {
     invariants: a.invariants,
     functions: a.functions,
     operations: a.operations,
+    appliers: a.appliers,
+    eventSourced: a.persistedAs === "eventLog",
   };
 }
 
@@ -317,6 +327,7 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
         emitTrace,
         aggregate: e.name,
         op: op.name,
+        eventSourced: e.eventSourced,
       });
       if (body.length > 0) ops.push(body);
       ops.push("  }");
@@ -328,6 +339,7 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
       emitTrace,
       aggregate: e.name,
       op: op.name,
+      eventSourced: e.eventSourced,
     });
     if (body.length > 0) ops.push(body);
     ops.push(
@@ -425,6 +437,48 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
       ]
     : [];
 
+  // Event-sourcing fold (appliers A2): one `_apply<Event>` method per
+  // applier (body rendered at the natural method-body depth), a `_apply`
+  // dispatcher that switches on `ev.type`, and a `_fromEvents` rehydrator
+  // that folds a stream from an empty shell.  Emitted root-only and only
+  // for `persistedAs(eventLog)` aggregates; the repository calls
+  // `_fromEvents` on load, and the push-and-apply `emit` calls `_apply`.
+  const appliersBlock =
+    e.isRoot && e.eventSourced && (e.appliers?.length ?? 0) > 0
+      ? [
+          ...(e.appliers ?? []).flatMap((ap) => {
+            const body = renderTsStatements(ap.statements, emitProvenance, {
+              emitTrace,
+              aggregate: e.name,
+              op: `apply(${ap.event})`,
+              eventSourced: true,
+            });
+            return [
+              `  private _apply${ap.event}(${ap.param}: Events.${ap.event}): void {`,
+              ...(body.length > 0 ? [body] : []),
+              "  }",
+              "",
+            ];
+          }),
+          "  private _apply(ev: Events.DomainEvent): void {",
+          "    switch (ev.type) {",
+          ...(e.appliers ?? []).flatMap((ap) => [
+            `      case ${JSON.stringify(ap.event)}:`,
+            `        this._apply${ap.event}(ev as Events.${ap.event});`,
+            "        break;",
+          ]),
+          "    }",
+          "  }",
+          "",
+          `  static _fromEvents(id: Ids.${e.name}Id, events: Events.DomainEvent[]): ${e.name} {`,
+          `    const inst = ${e.name}._create({ id } as unknown as ${stateLiteral});`,
+          "    for (const ev of events) inst._apply(ev);",
+          "    return inst;",
+          "  }",
+          "",
+        ]
+      : [];
+
   return lines(
     `export class ${e.name} {`,
     ...fieldDecls,
@@ -438,6 +492,7 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
     ...ops,
     ...provDrain,
     ...pullEvents,
+    ...appliersBlock,
     // Under --trace, the helper takes an `__op` string param threaded by
     // each call site (ctor → "<init>", per-op → op name, extern public
     // wrapper → "extern") so the invariant_evaluated trace line carries

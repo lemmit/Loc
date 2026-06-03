@@ -34,7 +34,7 @@ import {
   type LoomInterface,
   registerSourceType,
   type SourceTypeDescriptor,
-} from "../ir/source-types.js";
+} from "../util/source-types.js";
 
 const INFRA_KINDS = new Set<string>([
   "database",
