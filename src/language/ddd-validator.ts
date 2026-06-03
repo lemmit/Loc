@@ -48,6 +48,7 @@ import {
   checkTypeReferences,
   checkUi,
   checkUnions,
+  checkUnknownMemberAccess,
 } from "./validators/index.js";
 
 export class DddValidator {
@@ -156,6 +157,11 @@ export class DddValidator {
     // Emits a precise diagnostic at the member position instead of
     // letting the access cascade silently to `T.unknown`.
     checkSlotMemberAccess(model, accept);
+    // Unknown member access: `order.totl` on an aggregate / value object /
+    // event / payload receiver where no such member exists.  Without it the
+    // typo cascades to `T.unknown` and every operand check on it is
+    // suppressed — so the mistake produces no diagnostic at all.
+    checkUnknownMemberAccess(model, accept);
     // Primitive conversion expressions (`string(x)`, `money(d)`):
     // restrict to the infallible (source, target) pairs.  Fallible
     // parses (`int("42")`) and narrowing (`int(longValue)`) are
