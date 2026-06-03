@@ -1907,7 +1907,7 @@ export interface Property extends AstNode {
     access?: FieldAccess;
     check?: Expression;
     default?: Expression;
-    name: 'asc' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'handle' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'money' | 'objectStore' | 'ogImage' | 'paged' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'service' | 'snapshot' | 'sort' | 'tablePrefix' | 'token' | 'ttl' | 'use' | string;
+    name: 'asc' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'handle' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'money' | 'objectStore' | 'ogImage' | 'paged' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'service' | 'snapshot' | 'sort' | 'state' | 'tablePrefix' | 'token' | 'ttl' | 'use' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;

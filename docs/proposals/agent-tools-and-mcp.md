@@ -190,9 +190,14 @@ call-site cursor (`a.b := …` / `this.op(...)`) finds no target because
 >   resolves the head enum by name, then its `.member` value — pinning the enum
 >   explicitly (unlike the bare form's context-order scan). Works from the
 >   declaration and from a qualified use site.
-> - ⚠️ **soft-keyword field names** — a field named with a `LooseName` keyword
->   (`state: Status`) blocks the type-ref `Status` from renaming (works for
->   `kind: Status`). Tangential parser-level edge; tracked.
+> - ✅ **soft-keyword field name `state`** FIXED — `aggregate Order { state:
+>   Status }` failed to *parse* (so the `Status` type-ref couldn't rename),
+>   because `Property.name` admitted a narrower soft-keyword set than
+>   `LooseName` and omitted `state`. `state` is now in `Property.name` (it
+>   begins no aggregate/VO/event member, so it's safe there — unlike `contains`,
+>   which is why `Property.name` can't just reuse `LooseName` wholesale). Other
+>   non-starter `LooseName` keywords (`title`, `body`, `route`, …) can be added
+>   the same one-line way if a real field needs them.
 
 Multi-file rename and `prepareRename`-range are also covered (both pass).
 

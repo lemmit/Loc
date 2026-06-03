@@ -623,6 +623,31 @@ describe("page metamodel — grammar smoke tests", () => {
     expect(errors).toEqual([]);
   });
 
+  it("keeps a field named `state` parseable in property position", async () => {
+    // `state` is a hard keyword only in the page `state { … }` block and the
+    // storage-kind enum — neither begins an aggregate / VO / event member, so
+    // it is admitted as a soft keyword in `Property.name` (it was already in
+    // `LooseName`).  Without this, `aggregate Order { state: Status }` failed
+    // to parse, which also blocked renaming the `Status` type-ref.
+    const { errors } = await parseSnippet(`
+      system Acme {
+        subdomain M {
+          context C {
+            enum Status { Open, Closed }
+            aggregate Order {
+              state: Status
+              total: int
+            }
+            valueobject Snapshot { state: Status }
+            event Changed { state: Status }
+            repository Orders for Order { }
+          }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+  });
+
   it("parses examples/acme.ddd including its `ui WebApp` block", async () => {
     const { errors } = await parseExample("examples/acme.ddd");
     expect(errors).toEqual([]);

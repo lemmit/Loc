@@ -1144,7 +1144,15 @@ Property:
         // `by` / `handle` soft in property position so fields named `by`
         // (`event Bumped { by: int }`) / `handle` (`engineer { handle: string }`)
         // keep parsing — hard only in the reactor clause / workflow handle member.
-        | 'by' | 'handle')
+        | 'by' | 'handle'
+        // `state` soft in property position so a field named `state`
+        // (`aggregate Order { state: Status }`) parses — it is a hard keyword
+        // only in the page `state { … }` block and the storage-kind enum,
+        // neither of which begins an aggregate / VO / event member.  `state`
+        // is already in `LooseName`; this mirrors it for the `Property.name`
+        // dispatch (which can't reuse `LooseName` wholesale because that set
+        // includes member-starter keywords like `contains`).
+        | 'state')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
