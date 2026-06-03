@@ -113,7 +113,11 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateViews(c, diags);
     validateCurrentUserScope(c, diags);
     validatePermissionRefs(c, diags);
-    validateGenericInstancesUnimplemented(c, diags);
+    validateGenericInstancesUnimplemented(
+      c,
+      diags,
+      backendPlatformsByContext.get(c.name) ?? new Set(),
+    );
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateEventSourcedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
@@ -314,7 +318,18 @@ function firstGenericCtor(type: TypeIR): string | undefined {
 function validateGenericInstancesUnimplemented(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
 ): void {
+  // Backends that can emit generic carriers (`paged` / `envelope`) today.
+  // Grows one slice at a time; when a context is served only by these (or by
+  // no backend at all — the legacy single-context path), the carrier is
+  // emittable and the gate stays quiet.  React is a frontend, not a backend,
+  // so it never appears here — its hooks consume whatever the backend serves.
+  // `"node"` is the hono/TS backend's platform identity (realization axes).
+  const SUPPORTED_PAGED_BACKENDS = new Set(["node"]);
+  const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_PAGED_BACKENDS.has(p));
+  if (unsupported.length === 0) return;
+
   const flag = (type: TypeIR, where: string): void => {
     const ctor = firstGenericCtor(type);
     if (!ctor) return;
@@ -322,9 +337,9 @@ function validateGenericInstancesUnimplemented(
       severity: "error",
       code: "loom.generic-carrier-unsupported",
       message:
-        `${where} uses the generic carrier '${ctor}', which parses and is represented in ` +
-        `the IR but is not emittable yet (payload-transport-layer.md, P3b: monomorphization ` +
-        `+ DTO emission). Remove the '${ctor}' instantiation for now.`,
+        `${where} uses the generic carrier '${ctor}', but the backend(s) serving this context ` +
+        `(${unsupported.sort().join(", ")}) don't emit it yet (payload-transport-layer.md, P3b). ` +
+        `It's supported on: ${[...SUPPORTED_PAGED_BACKENDS].sort().join(", ")}.`,
       source: `${ctx.name}/${where}`,
     });
   };

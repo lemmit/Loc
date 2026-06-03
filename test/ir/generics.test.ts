@@ -215,41 +215,61 @@ describe("generics — monomorphization (P3b)", () => {
   });
 });
 
-describe("generics — not-implemented gate (P3a)", () => {
-  it("blocks emission for a generic in a field type (severity error)", async () => {
-    const { model } = await parseString(
-      `system S { subdomain D { context C { valueobject V { items: string paged } } } }`,
-      { validate: false },
-    );
-    const diags = validateLoomModel(enrichLoomModel(lowerModel(model)));
-    const offending = diags.filter(
-      (d) => d.severity === "error" && d.message.includes("not emittable yet"),
-    );
-    expect(offending.length).toBeGreaterThan(0);
-    expect(offending[0]!.message).toContain("paged");
+describe("generics — platform-aware emission gate (P3b)", () => {
+  // A paged find served by the named backend platform.
+  const sysWith = (platform: string): string => `
+    system Shop {
+      subdomain Sales {
+        context Shop {
+          aggregate Order ids guid { ref: string }
+          repository Orders for Order { find recent(): Order paged }
+        }
+      }
+      storage pg { type: postgres }
+      resource shopState { for: Shop, kind: state, use: pg }
+      deployable api { platform: ${platform}, contexts: [Shop], dataSources: [shopState], port: 4000 }
+    }`;
+
+  const gateDiags = async (platform: string): Promise<string[]> => {
+    const { model } = await parseString(sysWith(platform), { validate: false });
+    return validateLoomModel(enrichLoomModel(lowerModel(model)))
+      .filter((d) => d.code === "loom.generic-carrier-unsupported")
+      .map((d) => d.message);
+  };
+
+  it("does NOT gate a paged find served only by hono (emission implemented)", async () => {
+    expect(await gateDiags("hono")).toEqual([]);
   });
 
-  it("blocks emission for a generic in a repository find return", async () => {
-    const { model } = await parseString(
-      `system S { subdomain D { context C {
-         aggregate Order ids guid { ref: string }
-         repository Orders for Order { find recent(): string paged }
-       } } }`,
-      { validate: false },
-    );
-    const diags = validateLoomModel(enrichLoomModel(lowerModel(model)));
-    const offending = diags.filter(
-      (d) => d.severity === "error" && d.message.includes("not emittable yet"),
-    );
-    expect(offending.some((d) => d.message.includes("recent"))).toBe(true);
+  it("gates a paged find served by dotnet (emission not implemented yet)", async () => {
+    const msgs = await gateDiags("dotnet");
+    expect(msgs.length).toBeGreaterThan(0);
+    expect(msgs[0]).toContain("recent");
+    expect(msgs[0]).toContain("dotnet");
   });
 
-  it("does not fire when no generic carrier is used", async () => {
+  it("gates a paged find served by phoenix", async () => {
+    const msgs = await gateDiags("phoenix");
+    expect(msgs.some((m) => m.includes("phoenix"))).toBe(true);
+  });
+
+  it("does not fire when no generic carrier is used (hono)", async () => {
     const { model } = await parseString(
-      `system S { subdomain D { context C { valueobject V { items: string } } } }`,
+      `
+      system Shop {
+        subdomain Sales {
+          context Shop {
+            aggregate Order ids guid { ref: string }
+            repository Orders for Order { find all(): Order[] }
+          }
+        }
+        storage pg { type: postgres }
+        resource shopState { for: Shop, kind: state, use: pg }
+        deployable api { platform: dotnet, contexts: [Shop], dataSources: [shopState], port: 4000 }
+      }`,
       { validate: false },
     );
     const diags = validateLoomModel(enrichLoomModel(lowerModel(model)));
-    expect(diags.filter((d) => d.message.includes("not emittable yet"))).toHaveLength(0);
+    expect(diags.filter((d) => d.code === "loom.generic-carrier-unsupported")).toHaveLength(0);
   });
 });
