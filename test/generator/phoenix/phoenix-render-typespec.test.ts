@@ -99,3 +99,43 @@ describe("renderTypespec — error cases", () => {
     ).toThrow(/not emittable/);
   });
 });
+
+describe("renderTypespec — shared <App>.Types vocabulary", () => {
+  const TYPES = "MyApp.Types";
+
+  it("routes id through <Types>.id() when typesModule is set", () => {
+    expect(renderTypespec({ kind: "id", targetName: "Order" } as TypeIR, CTX, TYPES)).toBe(
+      "MyApp.Types.id()",
+    );
+  });
+  it("routes primitive datetime through <Types>.timestamp()", () => {
+    expect(renderTypespec(prim("datetime"), CTX, TYPES)).toBe("MyApp.Types.timestamp()");
+  });
+  it("falls back to String.t() for id when typesModule is unset", () => {
+    expect(renderTypespec({ kind: "id", targetName: "Order" } as TypeIR, CTX)).toBe("String.t()");
+  });
+  it("falls back to DateTime.t() for datetime when typesModule is unset", () => {
+    expect(renderTypespec(prim("datetime"), CTX)).toBe("DateTime.t()");
+  });
+  it("propagates typesModule through array combinator", () => {
+    expect(
+      renderTypespec(
+        { kind: "array", element: { kind: "id", targetName: "Order" } } as TypeIR,
+        CTX,
+        TYPES,
+      ),
+    ).toBe("[MyApp.Types.id()]");
+  });
+  it("propagates typesModule through optional combinator", () => {
+    expect(
+      renderTypespec(
+        { kind: "optional", inner: { kind: "id", targetName: "Order" } } as TypeIR,
+        CTX,
+        TYPES,
+      ),
+    ).toBe("MyApp.Types.id() | nil");
+  });
+  it("leaves String.t() (the primitive) alone — only `id` routes through Types", () => {
+    expect(renderTypespec(prim("string"), CTX, TYPES)).toBe("String.t()");
+  });
+});
