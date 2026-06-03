@@ -261,6 +261,27 @@ describe("validation", () => {
       `);
       expect(errors.some((e) => /Unknown builder type/.test(e))).toBe(false);
     });
+
+    it("accepts a root-level (model-scope) value object constructed by name", async () => {
+      // A `valueobject` declared at file scope — outside any context — is
+      // an ambient shared-kernel type.  Constructing it by bare name from a
+      // context in the SAME document must resolve: the enclosing context's
+      // VOs were already accepted, this covers the file-level ones (gap
+      // fix — previously rejected as an unknown builder type).
+      const { errors } = await parse(`
+        valueobject Weight { grams: decimal  invariant grams >= 0 }
+        context C {
+          aggregate Parcel {
+            w: Weight
+            derived display: string = "p"
+            operation reweigh(extra: decimal) {
+              w := Weight { grams: w.grams + extra }
+            }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type/.test(e))).toBe(false);
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1830,6 +1851,52 @@ describe("Loom IR validation (post-lowering)", async () => {
     const diags = validateLoomModel(loom);
     expect(
       diags.some((d) => d.severity === "error" && /missing required field 'email'/.test(d.message)),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("does not require a managed field in a workflow create (the server stamps it)", async () => {
+    // `managed` fields are server-populated, so the canonical create the
+    // workflow invokes is parameterized by the *create-input* fields,
+    // which drop managed/token/internal.  Omitting `openedAt` is valid
+    // (gap fix — was wrongly reported as a missing required field).
+    const loom = await loomFrom(`
+      context T {
+        aggregate Ticket {
+          subject: string
+          derived display: string = subject
+          openedAt: datetime managed
+        }
+        repository Tickets for Ticket { }
+        workflow open(subject: string) {
+          let t = Ticket.create({ subject: subject })
+        }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  it("rejects passing a managed field to a workflow create (not a create input)", async () => {
+    // The flip side: a managed field is not a legal create argument either
+    // (the backend create-call has no parameter for it), so providing one
+    // is an unknown-field error rather than being silently accepted.
+    const loom = await loomFrom(`
+      context T {
+        aggregate Ticket {
+          subject: string
+          derived display: string = subject
+          openedAt: datetime managed
+        }
+        repository Tickets for Ticket { }
+        workflow open(subject: string) {
+          let t = Ticket.create({ subject: subject, openedAt: "2026-01-01T00:00:00Z" })
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some((d) => d.severity === "error" && /has unknown field 'openedAt'/.test(d.message)),
       JSON.stringify(diags),
     ).toBe(true);
   });

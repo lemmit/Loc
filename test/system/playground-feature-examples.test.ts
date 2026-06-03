@@ -32,6 +32,8 @@ const featureExamples = [
   "web/src/examples/fulfillment-newest.ddd",
   "web/src/examples/persistence-shapes.ddd",
   "web/src/examples/extern-showcase.ddd",
+  // The big one: a full six-subdomain ERP across six imported files.
+  "web/src/examples/erp/main.ddd",
 ];
 
 /** Load an example through the multi-file project loader (single-file

@@ -6,6 +6,7 @@ import {
 import { allPlatforms, platformFor } from "../../platform/registry.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
 import { capabilitiesFor, configSchemaFor, supportsSurfaceKind } from "../../util/source-types.js";
+import { createInputFields, omittableCreateInputs } from "../enrich/wire-projection.js";
 import { verbsForKind } from "../resource-verbs.js";
 import type {
   AggregateIR,
@@ -2335,7 +2336,18 @@ function validateWorkflowBody(
           });
           break;
         }
-        const required = agg.fields.filter((f) => !f.optional).map((f) => f.name);
+        // A workflow `Agg.create({...})` invokes the canonical create,
+        // which is parameterized by the aggregate's *create-input* fields
+        // — `forCreateInput` drops the server-populated roles
+        // (`managed`/`token`/`internal`) and the required subset further
+        // drops fields the client may omit (optional, `= default`, bare
+        // `bool`).  Validate against that contract, the same set the
+        // backends' create-call emitters consume, rather than the raw
+        // field list: a `managed` timestamp is neither required here nor a
+        // legal argument (passing one would fail the backend create-call).
+        const omittable = omittableCreateInputs(agg);
+        const inputFields = createInputFields(agg).map((f) => f.name);
+        const required = inputFields.filter((n) => !omittable.has(n));
         const provided = new Set(st.fields.map((f) => f.name));
         for (const r of required) {
           if (!provided.has(r)) {
@@ -2346,7 +2358,7 @@ function validateWorkflowBody(
             });
           }
         }
-        const allowed = new Set(agg.fields.map((f) => f.name));
+        const allowed = new Set(inputFields);
         for (const p of provided) {
           if (!allowed.has(p)) {
             diags.push({

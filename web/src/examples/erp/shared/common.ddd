@@ -1,0 +1,27 @@
+// ── Shared kernel: common primitives ──────────────────────────────────
+// Cross-cutting enums and small value objects every subdomain reaches for.
+
+// A workflow/record urgency used by Sales orders, Procurement approvals
+// and CRM activities alike.
+enum Priority { Low, Normal, High, Urgent }
+
+// The canonical lightweight approval lifecycle reused by purchase orders,
+// expense claims and leave requests.
+enum ApprovalStatus { Draft, Submitted, Approved, Rejected }
+
+// Units of measure for inventory quantities.
+enum UnitOfMeasure { Each, Kilogram, Litre, Metre, Box, Pallet }
+
+valueobject PersonName {
+  first: string
+  last: string
+  invariant first.length > 0
+  invariant last.length > 0
+  derived display: string = first + " " + last
+}
+
+valueobject ContactInfo {
+  email: string
+  phone: string?
+  invariant email.length > 0
+}
