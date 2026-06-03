@@ -35,21 +35,40 @@ async function files() {
 }
 
 describe(".NET generator — retrieval", () => {
-  it("emits a Run<Name>Async repository method (where + sort + paging)", async () => {
+  it("emits a Run<Name>Async that applies a reified Specification + paging", async () => {
     const out = await files();
     const repo = out.get("Infrastructure/Repositories/CustomerRepository.cs")!;
     expect(repo).toMatch(
       /public async Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, CancellationToken ct = default\)/,
     );
-    // `where: InRegion(rgn)` is exactly one named criterion → reified
-    // (Slice 2b): the query consumes the criterion's `ToExpression()` rather
-    // than inlining the predicate.
+    // The retrieval is a reified Ardalis Specification, applied via
+    // `.WithSpecification(...)` + the shared `.ApplyPaging(page)` extension.
     expect(repo).toMatch(
-      /var query = _db\.Customers\.Where\(new InRegionCriterion\(rgn\)\.ToExpression\(\)\)\.OrderByDescending\(x => x\.Name\)\.AsQueryable\(\);/,
+      /var result = await _db\.Customers\.WithSpecification\(new ByRegionSpec\(rgn\)\)\.ApplyPaging\(page\)\.ToListAsync\(ct\);/,
     );
-    expect(repo).toMatch(/if \(p\.offset is \{ \} off\) query = query\.Skip\(off\);/);
-    expect(repo).toMatch(/if \(p\.limit is \{ \} lim\) query = query\.Take\(lim\);/);
-    expect(repo).toMatch(/var result = await query\.ToListAsync\(ct\);/);
+    expect(repo).toMatch(/using Ardalis\.Specification\.EntityFrameworkCore;/);
+    // The spec carries the where (reified criterion `where: InRegion(rgn)`) + sort.
+    const spec = out.get("Domain/Customers/ByRegionSpec.cs")!;
+    expect(spec).toBeDefined();
+    expect(spec).toMatch(/public sealed class ByRegionSpec : Specification<Customer>/);
+    expect(spec).toMatch(
+      /Query\.Where\(new InRegionCriterion\(rgn\)\.ToExpression\(\)\)\.OrderByDescending\(x => x\.Name\);/,
+    );
+  });
+
+  it("emits the shared ApplyPaging extension + EF-only Ardalis csproj deps", async () => {
+    const out = await files();
+    const ext = out.get("Infrastructure/Persistence/QueryablePagingExtensions.cs")!;
+    expect(ext).toMatch(
+      /public static IQueryable<T> ApplyPaging<T>\(this IQueryable<T> query, \(int\? offset, int\? limit\)\? page\)/,
+    );
+    const csproj = [...out.entries()].find(([k]) => k.endsWith(".csproj"))![1];
+    expect(csproj).toMatch(
+      /<PackageReference Include="Ardalis\.Specification" Version="8\.0\.0" \/>/,
+    );
+    expect(csproj).toMatch(
+      /<PackageReference Include="Ardalis\.Specification\.EntityFrameworkCore" Version="8\.0\.0" \/>/,
+    );
   });
 
   it("declares the method on the repository interface", async () => {
@@ -97,14 +116,6 @@ const LOADS_SRC = `
   }
 `;
 
-/** The single `var query = _db.… .AsQueryable();` line of a Run<Name>Async. */
-function queryLine(repo: string, method: string): string {
-  const body = repo.slice(repo.indexOf(`Run${method}Async`));
-  const m = body.match(/var query = _db\.[^\n]*\.AsQueryable\(\);/);
-  expect(m, `query line for Run${method}Async not found`).not.toBeNull();
-  return m![0];
-}
-
 describe(".NET generator — retrieval loadPlan (owned-type no-op)", () => {
   it("maps owned containments to OwnsMany (always loaded with the owner)", async () => {
     const out = await generateDotnet(await parseValid(LOADS_SRC));
@@ -113,12 +124,15 @@ describe(".NET generator — retrieval loadPlan (owned-type no-op)", () => {
     expect(cfg).toMatch(/\.OwnsMany<Note>\("_notes"/);
   });
 
-  it("whole and explicit-`loads` retrievals emit the identical query (no Include, no narrowing)", async () => {
+  it("whole and explicit-`loads` specs are identical (no Include, no narrowing)", async () => {
     const out = await generateDotnet(await parseValid(LOADS_SRC));
-    const repo = out.get("Infrastructure/Repositories/OrderRepository.cs")!;
-    // Explicit `loads: [this.lines]` neither narrows nor Includes — the
-    // query body is byte-identical to the default-whole retrieval's.
-    expect(queryLine(repo, "Slim")).toBe(queryLine(repo, "Recent"));
-    expect(repo).not.toMatch(/\.Include\(/);
+    // `Recent` (whole) and `Slim` (explicit `loads: [this.lines]`) both have
+    // `where: Open(s)`; loads narrowing is gated, so the two reified specs are
+    // identical modulo class name — and neither Includes anything.
+    const recent = out.get("Domain/Orders/RecentSpec.cs")!.replaceAll("Recent", "X");
+    const slim = out.get("Domain/Orders/SlimSpec.cs")!.replaceAll("Slim", "X");
+    expect(recent).toBe(slim);
+    expect(out.get("Infrastructure/Repositories/OrderRepository.cs")!).not.toMatch(/\.Include\(/);
+    expect(recent).not.toMatch(/\.Include\(/);
   });
 });

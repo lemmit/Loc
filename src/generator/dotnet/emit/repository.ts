@@ -165,21 +165,14 @@ export function renderRepositoryImpl(
   // regression guard in retrieval-emit.test.ts pins that whole and an
   // explicit-`loads` retrieval emit the identical query body here.
   const retrievals = options?.retrievals ?? [];
-  const retrievalBodies = options?.retrievalBodies ?? [];
   const retrievalMethodLines = retrievals.flatMap((r) => {
-    const body = retrievalBodies.find((b) => b.name === r.name);
-    const where = body?.whereClause ?? "";
-    const orderBy = body?.orderByClause ?? "";
+    // The retrieval is a reified Ardalis Specification (where + sort, emitted
+    // by spec-emit.ts); the method applies it and layers call-site paging.
+    const specArgs = r.params.map((p) => p.name).join(", ");
     return [
       `    public async Task<IReadOnlyList<${agg.name}>> Run${upperFirst(r.name)}Async(${renderRetrievalParamsWithCt(r.params)})`,
       "    {",
-      `        var query = _db.${setName}${where}${orderBy}.AsQueryable();`,
-      "        if (page is { } p)",
-      "        {",
-      "            if (p.offset is { } off) query = query.Skip(off);",
-      "            if (p.limit is { } lim) query = query.Take(lim);",
-      "        }",
-      "        var result = await query.ToListAsync(ct);",
+      `        var result = await _db.${setName}.WithSpecification(new ${upperFirst(r.name)}Spec(${specArgs})).ApplyPaging(page).ToListAsync(ct);`,
       `        ${renderDotnetLogCall("findExecuted", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "find", valueExpr: `"Run${upperFirst(r.name)}"` },
@@ -199,6 +192,8 @@ export function renderRepositoryImpl(
       ...extraUsings,
       "using Microsoft.EntityFrameworkCore;",
       "using Microsoft.Extensions.Logging;",
+      // `.WithSpecification(...)` for `Run<Name>Async` retrieval methods.
+      retrievals.length > 0 ? "using Ardalis.Specification.EntityFrameworkCore;" : null,
       `using ${ns}.Domain.${plural(agg.name)};`,
       `using ${ns}.Domain.Common;`,
       `using ${ns}.Domain.Ids;`,
