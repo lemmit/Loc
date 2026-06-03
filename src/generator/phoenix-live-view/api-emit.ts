@@ -1,3 +1,8 @@
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../ir/stdlib/generics.js";
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
@@ -572,6 +577,27 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
       const argReads = find.params
         .map((p) => `params[${JSON.stringify(snake(p.name))}]`)
         .join(", ");
+      if (pagedReturn(find.returnType)) {
+        // Paged (P3b): read page/pageSize (1-based, defaults), pass Ash
+        // offset pagination with `count: true`, and map the
+        // `%Ash.Page.Offset{}` to the cross-backend envelope.  camelCase
+        // atom keys serialize to the shared wire shape.
+        const pageArgs = [
+          ...find.params.map((p) => `params[${JSON.stringify(snake(p.name))}]`),
+          "page: [limit: page_size, offset: offset, count: true]",
+        ].join(", ");
+        findActions.push(`  @doc "GET /api/${aggPlural}/${findSnake}"
+  def ${findSnake}(conn, params) do
+    page = String.to_integer(params["page"] || "${PAGED_DEFAULT_PAGE}")
+    page_size = String.to_integer(params["pageSize"] || "${PAGED_DEFAULT_PAGE_SIZE}")
+    offset = (page - 1) * page_size
+    result = ${contextModule}.${findSnake}_${aggSnake}!(${pageArgs})
+    total = result.count || 0
+    total_pages = if page_size > 0, do: ceil(total / page_size), else: 0
+    json(conn, %{items: result.results, page: page, pageSize: page_size, total: total, totalPages: total_pages})
+  end`);
+        continue;
+      }
       findActions.push(`  @doc "GET /api/${aggPlural}/${findSnake}"
   def ${findSnake}(conn, params) do
     _ = params
