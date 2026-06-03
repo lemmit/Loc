@@ -212,7 +212,12 @@ system DevPlatform {
             aggregate Build with crudish {
                 commitSha: string
                 buildState: BuildState
-                total: int provenanced
+                // `total` is a plain field here: the Builds context is hosted on
+                // dotnet + phoenix as well as hono for OpenAPI parity, and the
+                // provenance runtime is emitted on hono only (loom.provenanced-
+                // backend-unsupported gates the mismatch).  The `provenanced`
+                // modifier is demonstrated in examples/provenance.ddd (hono-only).
+                total: int
                 startedAt: datetime
 
                 invariant commitSha.length > 0

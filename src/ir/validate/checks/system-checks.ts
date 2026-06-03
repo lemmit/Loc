@@ -860,6 +860,81 @@ export function validateEventSourcedStorage(
   }
 }
 
+// Provenanced-field runtime (trace capture + write-site history) is emitted for
+// the Hono (`node`) backend only — `domain/provenance.ts` + a per-write
+// `recordTrace(...)`.  On a backend that doesn't (dotnet / phoenix today) a
+// `provenanced` field silently behaves like a plain field, dropping the audit
+// trail it promises — an error, not a silent no-op.  Mirrors the event-sourcing
+// storage gate (a parsed-but-unemitted feature is a footgun, so it fails fast).
+const PROVENANCE_BACKENDS = new Set(["node"]);
+export function validateProvenancedStorage(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  const unsupported = [...backendPlatforms].filter((p) => !PROVENANCE_BACKENDS.has(p));
+  const anyBackend = backendPlatforms.size > 0;
+  for (const agg of ctx.aggregates) {
+    const provFields = agg.fields.filter((f) => f.provenanced);
+    if (provFields.length === 0) continue;
+    if (anyBackend && unsupported.length === 0) continue;
+    const hostNote =
+      unsupported.length > 0
+        ? `it is hosted by ${unsupported.join(", ")}, where the provenance runtime is not emitted`
+        : "no provenance-capable (node) backend deployable hosts this context";
+    const names = provFields.map((f) => f.name).join(", ");
+    diags.push({
+      severity: "error",
+      code: "loom.provenanced-backend-unsupported",
+      message:
+        `aggregate '${agg.name}' has provenanced field(s) ${names}, but the provenance runtime ` +
+        `(trace capture + history) is emitted for the Hono (node) backend only — ${hostNote}. ` +
+        `Host the context on a node deployable, or drop the 'provenanced' modifier to use a plain ` +
+        `field (all backends). Tracked in provenance.md / type-system-feature-migration.md (DBT-1).`,
+      source: `${ctx.name}/${agg.name}`,
+    });
+  }
+}
+
+// Per-operation audit-record emission (`operation … audited`) is implemented for
+// the Hono (`node`) backend only — an audited public route appends a who/what/
+// when + before/after snapshot to the audit sink.  On a backend that doesn't
+// (dotnet / phoenix today) the modifier is inert, so an `audited` operation
+// hosted there silently records nothing — an error, not a silent no-op.  (This
+// gates the per-operation `audited` flag only; the `with audit` capability
+// macro emits stamping rules via `contextStamps`, a separate concern.)
+const AUDIT_BACKENDS = new Set(["node"]);
+export function validateAuditedOperationSupport(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  const unsupported = [...backendPlatforms].filter((p) => !AUDIT_BACKENDS.has(p));
+  const anyBackend = backendPlatforms.size > 0;
+  for (const agg of ctx.aggregates) {
+    const auditedOps = [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])].filter(
+      (o) => o.audited,
+    );
+    if (auditedOps.length === 0) continue;
+    if (anyBackend && unsupported.length === 0) continue;
+    const hostNote =
+      unsupported.length > 0
+        ? `it is hosted by ${unsupported.join(", ")}, where audit-record emission is not implemented`
+        : "no audit-capable (node) backend deployable hosts this context";
+    const names = auditedOps.map((o) => o.name || "<create>").join(", ");
+    diags.push({
+      severity: "error",
+      code: "loom.audited-backend-unsupported",
+      message:
+        `aggregate '${agg.name}' has 'audited' operation(s) ${names}, but per-operation audit-record ` +
+        `emission is implemented for the Hono (node) backend only — ${hostNote}. ` +
+        `Host the context on a node deployable, or drop the 'audited' modifier (all backends). ` +
+        `Tracked in audit-and-logging.md.`,
+      source: `${ctx.name}/${agg.name}`,
+    });
+  }
+}
+
 export function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const ds of sys.dataSources) {
     for (const knob of UNWIRED_KNOBS) {

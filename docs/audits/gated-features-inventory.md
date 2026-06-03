@@ -27,10 +27,11 @@ Legend: ✓ implemented · ✗ gated (validator error) · ⚠ partial / stub · 
 | `shape(document)` persistence | ✓ | ✓ | ✗ | N/A |
 | Principal-referencing capability `filter` (`currentUser`) | ✗ | ✓ | ✗ | N/A |
 | Non-principal capability `filter` (relational) | ✓ | ✓ | ✓ | N/A |
-| Provenanced fields (runtime trace) | ✓ | ⚠ parsed no-op | ⚠ parsed no-op | N/A |
+| Provenanced fields (runtime trace) | ✓ | ✗ (gated) | ✗ (gated) | N/A |
 | Generic carriers (`paged<T>` etc.) | ✓ | ✓ | ✓ | ✗ |
 | Ordered `X id[]` reference collections | ✓ | ✓ | ✗ (set semantics) | display-only |
-| Audited operations (runtime) | ✓ | ⚠ parsed, parity deferred | ⚠ parsed, parity deferred | N/A |
+| Per-op `audited` operations (audit record) | ✓ | ✗ (gated) | ✗ (gated) | N/A |
+| Audit stamping (`with audit` / `contextStamps`) | ✓ | ⚠ parsed, parity deferred | ⚠ parsed, parity deferred | N/A |
 | Non-constructible aggregates (omit create surface) | ✓ | ✓ | ⚠ always create | ⚠ always create |
 | `where`-clause finds / queryable predicates | ✓ | ✓ | ✓ | ⚠ hook only |
 | Page `requires <pred>` guard | N/A | N/A | ⚠ v0 stub | N/A |
@@ -110,9 +111,21 @@ the inheritance feature can express today.
   ARE emitted on all backends.
 - **Code:** `loom.context-filter-unsupported`
 
-### 3.2 Audit stamping (`contextStamps`) — runtime parity
+### 3.2 Per-operation `audited` flag (`operation … audited`)
+- **Gate:** `src/ir/validate/checks/system-checks.ts` `validateAuditedOperationSupport`
+  (`AUDIT_BACKENDS = {node}`).
+- **Supported:** **node only** — an audited public route appends a who/what/when +
+  before/after snapshot to the audit sink.
+- **Gated:** **dotnet, phoenix** — the modifier was inert (silently recorded nothing);
+  now a hard error. **Code:** `loom.audited-backend-unsupported`.
+- Scope note: this gates the *per-operation* `audited` flag only. The `with audit`
+  capability macro (§3.3) is a separate mechanism and is **not** gated.
+
+### 3.3 Audit stamping (`with audit` / `contextStamps`) — runtime parity
 - **Supported (runtime):** node.
-- **Partial:** dotnet, phoenix — parsed; runtime parity deferred.
+- **Partial:** dotnet, phoenix — parsed; runtime parity deferred (the `with audit` /
+  `auditable` macros emit `contextStamps`; .NET has a partial auditable interceptor).
+- **Not gated** — co-hosting is allowed; closing this is Tier-1+ work, not Tier-0.
 - **Tracking:** `docs/plans/type-system-feature-migration.md` (DBT register).
 
 ---
@@ -143,11 +156,13 @@ server-managed field access (`managed`/`token`/`internal`/`secret`).
 ---
 
 ## 5. Provenanced fields — `provenanced field: T`
+- **Gate:** `src/ir/validate/checks/system-checks.ts` `validateProvenancedStorage`
+  (`PROVENANCE_BACKENDS = {node}`).
 - **Supported:** node — `domain/provenance.ts` SDK, `recordTrace(...)` after each write,
   `ddd snapshot` capture.
-- **Partial (parsed no-op):** dotnet, phoenix — keyword accepted, no trace code emitted.
-- **Reference:** `docs/generators.md` ("keyword parsed; no trace code emitted"),
-  `docs/plans/type-system-feature-migration.md` DBT-1.
+- **Gated:** **dotnet, phoenix** — the keyword was accepted but emitted no trace code
+  (a silent no-op); now a hard error. **Code:** `loom.provenanced-backend-unsupported`.
+- **Reference:** `docs/provenance.md`, `docs/plans/type-system-feature-migration.md` DBT-1.
 
 ---
 

@@ -138,7 +138,11 @@ export interface FieldIR {
   optional: boolean;
   /** True iff the source declared this property with the `provenanced`
    * modifier.  Every assignment statement (`:=`/`+=`/`-=`) targeting such
-   * a field becomes a per-site rule snapshot; see `ProvSite`. */
+   * a field becomes a per-site rule snapshot; see `ProvSite`.  The provenance
+   * runtime is emitted on the Hono (`node`) backend only — hosting a
+   * provenanced context on another backend is rejected at validate time
+   * (`loom.provenanced-backend-unsupported`, `validateProvenancedStorage`)
+   * rather than silently dropping the trail. */
   provenanced?: boolean;
   /** Information-flow sensitivity tags declared at the property site via
    * `sensitive(<tag>, ...)`.  Sorted + deduped; omitted when the field
@@ -279,8 +283,11 @@ export interface OperationIR {
   /** When true, every HTTP invocation of this operation appends an
    * audit record (who/what/when + before/after wire snapshot) to the
    * generated Hono project's in-memory audit sink.  Inert on private
-   * operations (no route) and on non-TS backends (no audit emission).
-   * See `docs/proposals/audit-and-logging.md`. */
+   * operations (no route).  Emission is implemented on the Hono (`node`)
+   * backend only — hosting an `audited` operation on another backend is
+   * rejected at validate time (`loom.audited-backend-unsupported`,
+   * `validateAuditedOperationSupport`) rather than silently recording
+   * nothing.  See `docs/proposals/audit-and-logging.md`. */
   audited: boolean;
 }
 
