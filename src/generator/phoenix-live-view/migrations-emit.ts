@@ -109,7 +109,7 @@ function writeInitialFile(
 function renderInitialFile(table: TableShape, migrationName: string, appModule: string): string {
   const idCol = table.columns.find((c) => c.name === "id");
   const pkType = idCol ? ectoPrimaryKeyType(idCol.type) : ":uuid";
-  const otherCols = table.columns.filter((c) => c.name !== "id");
+  const otherCols = collapseVoGroups(table.columns.filter((c) => c.name !== "id"));
   const colLines = otherCols.map((c) => "      " + renderEctoColumn(c, table));
   const indexLines = table.indexes.map((i) => {
     const cols = i.columns.map((n) => `:${n}`).join(", ");
@@ -236,7 +236,7 @@ function renderEctoStep(step: MigrationStep): string[] {
 
 function renderCreateTableInline(table: TableShape): string[] {
   const idCol = table.columns.find((c) => c.name === "id");
-  const others = table.columns.filter((c) => c.name !== "id");
+  const others = collapseVoGroups(table.columns.filter((c) => c.name !== "id"));
   const lines: string[] = [`create table(:${table.name}, primary_key: false) do`];
   if (idCol) {
     lines.push(`  add :id, ${ectoPrimaryKeyType(idCol.type)}, primary_key: true, null: false`);
@@ -250,6 +250,30 @@ function renderCreateTableInline(table: TableShape): string[] {
     lines.push(`create index(:${table.name}, [${cols}]${unique})`);
   }
   return lines;
+}
+
+/** Regroup the flattened leaf columns of a value-object field
+ *  (`price_amount`, `price_currency`, both `voGroup: "price"`) back into a
+ *  single `:map` column named for the group.  The canonical migration
+ *  flattens value objects into columns (the relational/DDD shape the
+ *  Drizzle / EF ORMs query); Ash stores an embedded value object as one
+ *  `:map`, so Phoenix collapses each group here.  A group's `:map` is
+ *  nullable iff every leaf is (i.e. the value-object field itself was
+ *  optional).  Columns without a `voGroup` pass through unchanged. */
+function collapseVoGroups(columns: readonly ColumnShape[]): ColumnShape[] {
+  const out: ColumnShape[] = [];
+  const handled = new Set<string>();
+  for (const c of columns) {
+    if (!c.voGroup) {
+      out.push(c);
+      continue;
+    }
+    if (handled.has(c.voGroup)) continue;
+    handled.add(c.voGroup);
+    const group = columns.filter((x) => x.voGroup === c.voGroup);
+    out.push({ name: c.voGroup, type: { kind: "json" }, nullable: group.every((x) => x.nullable) });
+  }
+  return out;
 }
 
 function renderEctoColumn(c: ColumnShape, table: TableShape): string {
