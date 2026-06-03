@@ -6,6 +6,7 @@ import type {
   RepositoryIR,
   RetrievalIR,
 } from "../../ir/types/loom-ir.js";
+import { effectiveSavingShape } from "../../ir/util/resolve-datasource.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
@@ -62,10 +63,34 @@ export function buildRetrievalActions(
   const rctx: RenderCtx = { thisName: "record", contextModule, agg };
   return (ctx.retrievals ?? [])
     .filter((r) => r.targetType.kind === "entity" && r.targetType.name === agg.name)
-    .map((r) => renderRetrievalAction(r, rctx));
+    .map((r) => renderRetrievalAction(r, rctx, agg));
 }
 
-function renderRetrievalAction(r: RetrievalIR, ctx: RenderCtx): string {
+/** The owned-containment relationships a retrieval eager-loads, as Ash
+ *  load atoms (`:lines`, …).  Only `relational` aggregates expose their
+ *  `contains` as Ash relationships; `embedded`/`document` shapes fold the
+ *  parts inline (jsonb attributes — always materialised, nothing to
+ *  load), so those yield an empty list.  `whole(T)` (no `loads:` clause)
+ *  loads every owned containment so a downstream operation can read
+ *  `record.<part>` without a `%NotLoaded{}` crash; an explicit `loads:`
+ *  plan narrows that to the containments its paths root at.  Cross-
+ *  aggregate references (`X id`) stay ids and are never loaded.  Ash
+ *  realises `load` as a separate batched query per relationship, so this
+ *  composes with the action's offset pagination without the in-memory
+ *  collection-paging penalty an ORM join-fetch would hit. */
+function retrievalLoadAtoms(r: RetrievalIR, agg: EnrichedAggregateIR): string[] {
+  if (effectiveSavingShape(agg) !== "relational") return [];
+  const containNames = agg.contains.map((c) => c.name);
+  const selected =
+    r.loadPlan.kind === "whole"
+      ? containNames
+      : containNames.filter((n) =>
+          r.loadPlan.kind === "explicit" ? r.loadPlan.paths.some((p) => p[0]?.name === n) : false,
+        );
+  return selected.map((n) => `:${snake(n)}`);
+}
+
+function renderRetrievalAction(r: RetrievalIR, ctx: RenderCtx, agg: EnrichedAggregateIR): string {
   const lines: string[] = [];
   lines.push(`    read :${snake(r.name)} do`);
   for (const p of r.params) {
@@ -79,6 +104,14 @@ function renderRetrievalAction(r: RetrievalIR, ctx: RenderCtx): string {
   if (r.sort.length > 0) {
     const terms = r.sort.map((s) => `${snake(s.path[0]!.name)}: :${s.direction}`).join(", ");
     lines.push(`      prepare build(sort: [${terms}])`);
+  }
+  // Eager-load shape (load-specifications.md / loadPlan).  `whole(T)`
+  // loads every owned containment relationship; an explicit `loads:`
+  // narrows it.  Embedded/document aggregates carry parts inline and
+  // yield no atoms.
+  const loadAtoms = retrievalLoadAtoms(r, agg);
+  if (loadAtoms.length > 0) {
+    lines.push(`      prepare build(load: [${loadAtoms.join(", ")}])`);
   }
   // `where` → Ash filter.  Render with read-action arg binding (^arg)
   // and strip the `record.` receiver Ash filters don't use (bare

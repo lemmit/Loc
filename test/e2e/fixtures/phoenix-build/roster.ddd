@@ -14,6 +14,13 @@ system Roster {
         party: Pokemon id[]
         caught: Pokemon id[]
         verified: bool
+        // Owned containment (has_many) — exercises the retrieval load plan:
+        // `ByName`'s default-whole load eager-fetches it as
+        // `prepare build(load: [:badges])` under the real `mix compile` gate.
+        contains badges: Badge[]
+        entity Badge {
+          name: string
+        }
         invariant party.count <= 6
         operation verify() { verified := true }
         operation addToParty(pokemon: Pokemon id) {
@@ -32,7 +39,8 @@ system Roster {
       }
       // Named query bundle (retrieval.md) — exercises the Ash read-action
       // emission (filter via ^arg + sort via prepare build + offset
-      // pagination) under the real `mix compile` gate.
+      // pagination + default-whole `prepare build(load: [:badges])`) under
+      // the real `mix compile` gate.
       criterion NamedLike(needle: string) of Trainer = name == needle
       retrieval ByName(needle: string) of Trainer {
         where: NamedLike(needle)

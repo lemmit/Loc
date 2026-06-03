@@ -74,3 +74,87 @@ system Sys {
     expect(resource).toMatch(/argument :top_rank, :integer/);
   });
 });
+
+// PR4 — `loads` / loadPlan fetch realisation on Phoenix/Ash.  A retrieval's
+// load plan maps to `prepare build(load: [...])` on the read action: the
+// owned containment relationships (`has_many`/`has_one`) it eager-loads so
+// a downstream operation can read `record.<part>` without a `%NotLoaded{}`
+// crash.  `whole(T)` (no `loads:`) loads every owned containment; an
+// explicit `loads:` narrows it.  Cross-aggregate refs stay ids; embedded /
+// document aggregates fold parts inline and emit no load.
+const LOAD_SRC = `
+system Sys {
+  subdomain Sales {
+    context Shop {
+      aggregate Order {
+        status: string
+        contains lines: Line[]
+        contains note: Note
+        entity Line { sku: string }
+        entity Note { text: string }
+      }
+      repository Orders for Order {}
+      criterion Open(s: string) of Order = status == s
+      retrieval Recent(s: string) of Order { where: Open(s) sort: [status asc] }
+      retrieval Slim(s: string) of Order { where: Open(s) loads: [this.lines] }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  ui W {}
+  deployable api { platform: phoenix  contexts: [Shop]  dataSources: [st]  ui: W  port: 4000 }
+}
+`;
+
+/** Slice the body of one `read :<name> do … end` action out of a resource
+ *  module so an assertion can't accidentally match a sibling action. */
+function readAction(resource: string, name: string): string {
+  const m = resource.match(new RegExp(`read :${name} do[\\s\\S]*?\\n {4}end`));
+  expect(m, `read :${name} action not found`).not.toBeNull();
+  return m![0];
+}
+
+describe("phoenix generator — retrieval load plan", () => {
+  it("whole(T) eager-loads every owned containment relationship", async () => {
+    const out = (await generateSystems(await parseValid(LOAD_SRC))).files;
+    const recent = readAction(out.get("api/lib/api/shop/order.ex")!, "recent");
+    expect(recent).toMatch(/prepare build\(load: \[:lines, :note\]\)/);
+  });
+
+  it("an explicit `loads:` narrows the eager-load set to its listed paths", async () => {
+    const out = (await generateSystems(await parseValid(LOAD_SRC))).files;
+    const slim = readAction(out.get("api/lib/api/shop/order.ex")!, "slim");
+    expect(slim).toMatch(/prepare build\(load: \[:lines\]\)/);
+    // `note` is a containment but not in `loads:` — must not be loaded.
+    expect(slim).not.toMatch(/:note/);
+  });
+
+  it("emits no load for embedded aggregates (parts fold inline)", async () => {
+    const out = (
+      await generateSystems(
+        await parseValid(`
+system Sys {
+  subdomain Sales {
+    context Shop {
+      aggregate Order shape(embedded) {
+        status: string
+        contains lines: Line[]
+        entity Line { sku: string }
+      }
+      repository Orders for Order {}
+      criterion Open(s: string) of Order = status == s
+      retrieval Recent(s: string) of Order { where: Open(s) }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  ui W {}
+  deployable api { platform: phoenix  contexts: [Shop]  dataSources: [st]  ui: W  port: 4000 }
+}
+`),
+      )
+    ).files;
+    const recent = readAction(out.get("api/lib/api/shop/order.ex")!, "recent");
+    expect(recent).not.toMatch(/prepare build\(load:/);
+  });
+});
