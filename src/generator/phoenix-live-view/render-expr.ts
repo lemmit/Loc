@@ -7,13 +7,24 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import {
+  type BinaryExpr,
+  type CallExpr,
+  type ExprTarget,
+  type MemberExpr,
+  type MethodCallExpr,
+  type NewExpr,
+  type RefExpr,
+  renderExprWith,
+} from "../_expr/target.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the Phoenix LiveView / Elixir backend.
 //
-// Mirrors the shape of dotnet/render-expr.ts: a single exported
-// `renderExpr` function that dispatches on `expr.kind`.  Output is
-// idiomatic Elixir 1.16 / Ash 3.x.
+// Mirrors the shape of the other backends: consumes fully-resolved Loom
+// ExprIR.  Output is idiomatic Elixir 1.16 / Ash 3.x.  The 17-arm dispatch +
+// recursion live in `../_expr/target.ts`; this file is the Elixir leaf table
+// (`ELIXIR_TARGET`) plus the thin `renderExpr` entry point.
 //
 // `RenderCtx.thisName` names the implicit receiver for `this-prop`
 // references.  In aggregate action bodies the receiver is the changeset
@@ -59,52 +70,37 @@ export function relationshipNameFor(_agg: AggregateIR, fieldName: string): strin
   return `${snake(fieldName)}_through`;
 }
 
+const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
+  literal: renderLiteral,
+  id: (ctx) => `${ctx.thisName}.id`,
+  ref: renderRef,
+  member: renderMember,
+  methodCall: renderMethodCall,
+  call: renderCall,
+  lambda(param, body) {
+    // Single-expression lambda: `x => expr` → `fn x -> expr end`
+    // Block-body lambdas are not renderable as an inline expression.
+    if (body !== undefined) return `fn ${param} -> ${body} end`;
+    return `fn ${param} -> # block-body-lambda end`;
+  },
+  newPart: renderNew,
+  // Bare object literals appear in e2e contexts; not expected in domain
+  // expression bodies.
+  object: (fields) => `%{${fields.map((f) => `${snake(f.name)}: ${f.value}`).join(", ")}}`,
+  unary: renderUnary,
+  binary: renderBinary,
+  // Lower to `if … do … else … end`
+  ternary: (cond, then, otherwise) => `if ${cond}, do: ${then}, else: ${otherwise}`,
+  convert: (value, e) => renderElixirConvert(e.target, e.from, value),
+  match: renderMatch,
+  // List literals are walker-config sugar (e.g. responsive Grid cols); no
+  // domain-expression position consumes one today, but keep total with an
+  // Elixir-list emit so unexpected uses still compile.
+  list: (elements) => `[${elements.join(", ")}]`,
+};
+
 export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
-  switch (e.kind) {
-    case "literal":
-      return renderLiteral(e.lit, e.value);
-    case "this":
-      return ctx.thisName;
-    case "id":
-      return `${ctx.thisName}.id`;
-    case "ref":
-      return renderRef(e, ctx);
-    case "member":
-      return renderMember(e, ctx);
-    case "method-call":
-      return renderMethodCall(e, ctx);
-    case "call":
-      return renderCall(e, ctx);
-    case "lambda":
-      // Single-expression lambda: `x => expr` → `fn x -> expr end`
-      // Block-body lambdas are not renderable as an inline expression.
-      if (e.body) return `fn ${e.param} -> ${renderExpr(e.body, ctx)} end`;
-      return `fn ${e.param} -> # block-body-lambda end`;
-    case "new":
-      return renderNew(e, ctx);
-    case "object":
-      // Bare object literals appear in e2e contexts; not expected in
-      // domain expression bodies.
-      return `%{${e.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`).join(", ")}}`;
-    case "paren":
-      return `(${renderExpr(e.inner, ctx)})`;
-    case "unary":
-      return renderUnary(e.op, e.operand, ctx);
-    case "binary":
-      return renderBinary(e.op, e.left, e.right, e.leftType, ctx);
-    case "ternary":
-      // Lower to `if … do … else … end`
-      return `if ${renderExpr(e.cond, ctx)}, do: ${renderExpr(e.then, ctx)}, else: ${renderExpr(e.otherwise, ctx)}`;
-    case "convert":
-      return renderElixirConvert(e.target, e.from, e.value, ctx);
-    case "match":
-      return renderMatch(e.arms, e.otherwise, ctx);
-    case "list":
-      // List literals are walker-config sugar (e.g. responsive Grid cols);
-      // no domain-expression position consumes one today, but keep total
-      // with an Elixir-list emit so unexpected uses still compile.
-      return `[${e.elements.map((el) => renderExpr(el, ctx)).join(", ")}]`;
-  }
+  return renderExprWith(e, ELIXIR_TARGET, ctx);
 }
 
 /**
@@ -122,13 +118,7 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
  *   money(x: int|long|decimal)       → `Decimal.new(x)`
  *   money(x: money)                  → `x`           (no-op)
  */
-function renderElixirConvert(
-  target: string,
-  from: string | undefined,
-  value: ExprIR,
-  ctx: RenderCtx,
-): string {
-  const v = renderExpr(value, ctx);
+function renderElixirConvert(target: string, from: string | undefined, v: string): string {
   if (target === "string") {
     if (from === "money") return `Decimal.to_string(${v})`;
     return `to_string(${v})`;
@@ -163,7 +153,7 @@ function renderLiteral(lit: string, value: string): string {
 // References
 // ---------------------------------------------------------------------------
 
-function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: RenderCtx): string {
+function renderRef(e: RefExpr, ctx: RenderCtx): string {
   switch (e.refKind) {
     case "param":
     case "let":
@@ -196,8 +186,7 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: RenderCtx): string 
 // Member access
 // ---------------------------------------------------------------------------
 
-function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: RenderCtx): string {
-  const recv = renderExpr(e.receiver, ctx);
+function renderMember(recv: string, e: MemberExpr): string {
   // Array/list size shorthand.  The DSL admits both `.count` and
   // `.length` on arrays (see the .NET renderer's matching comment);
   // both map to Elixir `Enum.count/1`.  Without the `.length` arm an
@@ -221,9 +210,7 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: RenderCtx): s
 // Method calls
 // ---------------------------------------------------------------------------
 
-function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>, ctx: RenderCtx): string {
-  const recv = renderExpr(e.receiver, ctx);
-  const args = e.args.map((a) => renderExpr(a, ctx));
+function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: RenderCtx): string {
   // `this.<refColl>.contains(x)` — membership over a reference
   // collection.  Inside an Ash `filter expr(...)` this lowers to a
   // join-table subquery via the auto-emitted many_to_many relationship:
@@ -260,7 +247,7 @@ function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>, ctx: Rend
     }
   }
   if (e.isCollectionOp) {
-    return renderCollectionOp(recv, e.member, args, ctx);
+    return renderCollectionOp(recv, e.member, args);
   }
   // string.matches(pattern) → Regex.match?(~r/pattern/, recv)
   if (
@@ -278,7 +265,7 @@ function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>, ctx: Rend
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
 }
 
-function renderCollectionOp(recv: string, name: string, args: string[], _ctx: RenderCtx): string {
+function renderCollectionOp(recv: string, name: string, args: string[]): string {
   switch (name) {
     case "count":
       return `Enum.count(${recv})`;
@@ -305,8 +292,7 @@ function renderCollectionOp(recv: string, name: string, args: string[], _ctx: Re
 // Calls
 // ---------------------------------------------------------------------------
 
-function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): string {
-  const args = e.args.map((a) => renderExpr(a, ctx)).join(", ");
+function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
   switch (e.callKind) {
     case "value-object-ctor": {
       // Embedded Ash resource / struct constructor.  Elixir structs require
@@ -314,23 +300,21 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): strin
       // than positional args.  Falls back to positional for hand-built IR
       // that carries no names (kept total).
       const names = e.argNames;
-      if (names && names.length === e.args.length && names.every((n) => n)) {
-        const namedFields = e.args
-          .map((a, i) => `${snake(names[i] as string)}: ${renderExpr(a, ctx)}`)
-          .join(", ");
+      if (names && names.length === args.length && names.every((n) => n)) {
+        const namedFields = args.map((a, i) => `${snake(names[i] as string)}: ${a}`).join(", ");
         return `%${ctx.contextModule}.${upperFirst(e.name)}{${namedFields}}`;
       }
-      return `%${ctx.contextModule}.${upperFirst(e.name)}{${args}}`;
+      return `%${ctx.contextModule}.${upperFirst(e.name)}{${args.join(", ")}}`;
     }
     case "function":
     case "private-operation":
       // Receiver-prefixed call.  Skip the trailing comma when the user
       // function has no params — `passed(changeset, )` is invalid Elixir.
       return args.length > 0
-        ? `${snake(e.name)}(${ctx.thisName}, ${args})`
+        ? `${snake(e.name)}(${ctx.thisName}, ${args.join(", ")})`
         : `${snake(e.name)}(${ctx.thisName})`;
     case "free":
-      return `${snake(e.name)}(${args})`;
+      return `${snake(e.name)}(${args.join(", ")})`;
     case "resource-op": {
       // Resource-op (Phase 4c) → `<Module>.<resource>_<verb>(args)`, a
       // helper function the Phoenix ResourceAdapter emits.  Routed by
@@ -342,7 +326,7 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): strin
           `Resource operation '${op.resourceName}.${op.verb}' reached the Phoenix renderer without a module mapping.`,
         );
       }
-      return `${mod}.${snake(op.resourceName)}_${snake(op.verb)}(${args})`;
+      return `${mod}.${snake(op.resourceName)}_${snake(op.verb)}(${args.join(", ")})`;
     }
   }
 }
@@ -351,19 +335,18 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): strin
 // New (entity part constructor)
 // ---------------------------------------------------------------------------
 
-function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: RenderCtx): string {
-  const fields = e.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`).join(", ");
-  return `%${ctx.contextModule}.${upperFirst(e.partName)}{${fields}}`;
+function renderNew(fields: { name: string; value: string }[], e: NewExpr, ctx: RenderCtx): string {
+  const body = fields.map((f) => `${snake(f.name)}: ${f.value}`).join(", ");
+  return `%${ctx.contextModule}.${upperFirst(e.partName)}{${body}}`;
 }
 
 // ---------------------------------------------------------------------------
 // Unary
 // ---------------------------------------------------------------------------
 
-function renderUnary(op: "-" | "!", operand: ExprIR, ctx: RenderCtx): string {
-  const inner = renderExpr(operand, ctx);
-  if (op === "!") return `not ${inner}`;
-  return `-${inner}`;
+function renderUnary(op: "-" | "!", operand: string): string {
+  if (op === "!") return `not ${operand}`;
+  return `-${operand}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -422,31 +405,23 @@ function isStringType(e: ExprIR): boolean {
   return false;
 }
 
-function renderBinary(
-  op: BinOp,
-  left: ExprIR,
-  right: ExprIR,
-  leftType: TypeIR | undefined,
-  ctx: RenderCtx,
-): string {
-  const l = renderExpr(left, ctx);
-  const r = renderExpr(right, ctx);
+function renderBinary(l: string, r: string, e: BinaryExpr): string {
   // Money operands cannot use the native `+`/`*`/`>` operators in
   // Elixir — `Decimal` is a struct.  Arithmetic dispatches through
   // `Decimal.add/2` / `mult/2` / `div/2`; comparisons go through
   // `Decimal.compare/2` (returns `:lt | :eq | :gt` — three tokens,
   // not a single operator, so the result shape isn't `${l} ${op}
   // ${r}` like the primitive path).
-  if (leftType?.kind === "primitive" && leftType.name === "money") {
-    return renderMoneyBinary(op, l, r);
+  if (e.leftType?.kind === "primitive" && e.leftType.name === "money") {
+    return renderMoneyBinary(e.op, l, r);
   }
   // Prefer the IR-level `leftType` over the AST-shape check: chained
   // string concats (`a + b + c`) carry `leftType: string` on the outer
   // binary even when the left operand is itself a binary.
   const leftIsString =
-    (leftType?.kind === "primitive" && leftType.name === "string") || isStringType(left);
-  const elOp = elixirOp(op, leftIsString);
-  if (op === "%") {
+    (e.leftType?.kind === "primitive" && e.leftType.name === "string") || isStringType(e.left);
+  const elOp = elixirOp(e.op, leftIsString);
+  if (e.op === "%") {
     // `rem` is a function in Elixir.
     return `rem(${l}, ${r})`;
   }
@@ -458,14 +433,6 @@ const MONEY_ARITH: Record<string, string | undefined> = {
   "-": "Decimal.sub",
   "*": "Decimal.mult",
   "/": "Decimal.div",
-};
-
-const MONEY_COMPARE: Record<string, string | undefined> = {
-  "==": ":eq",
-  "<": ":lt",
-  "<=": ":lt_or_eq",
-  ">": ":gt",
-  ">=": ":gt_or_eq",
 };
 
 function renderMoneyBinary(op: BinOp, l: string, r: string): string {
@@ -486,14 +453,11 @@ function renderMoneyBinary(op: BinOp, l: string, r: string): string {
 // ---------------------------------------------------------------------------
 
 function renderMatch(
-  arms: { cond: ExprIR; value: ExprIR }[],
-  otherwise: ExprIR | undefined,
-  ctx: RenderCtx,
+  arms: { cond: string; value: string }[],
+  otherwise: string | undefined,
 ): string {
-  const clauses = arms
-    .map((a) => `    ${renderExpr(a.cond, ctx)} -> ${renderExpr(a.value, ctx)}`)
-    .join("\n");
-  const fallthrough = otherwise ? `    true -> ${renderExpr(otherwise, ctx)}` : `    true -> nil`;
+  const clauses = arms.map((a) => `    ${a.cond} -> ${a.value}`).join("\n");
+  const fallthrough = otherwise ? `    true -> ${otherwise}` : `    true -> nil`;
   return `cond do\n${clauses}\n${fallthrough}\n  end`;
 }
 
