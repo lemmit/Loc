@@ -801,7 +801,7 @@ function renderParamsWithCt(
  *  (`(int? offset, int? limit)? page`) + CancellationToken.  `page` is
  *  never part of the retrieval declaration (retrieval.md) — it rides on
  *  the run method. */
-function renderRetrievalParamsWithCt(params: ParamIR[]): string {
+export function renderRetrievalParamsWithCt(params: ParamIR[]): string {
   const head = [
     ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
     "(int? offset, int? limit)? page = null",
