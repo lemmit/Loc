@@ -14,6 +14,7 @@
 // module stays the single import surface the sibling repository builders
 // already reference.
 
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   BoundedContextIR,
   ContainmentIR,
@@ -254,6 +255,39 @@ export function findQueryMethod(
   const baseParams = find.params.map((p) => `${p.name}: ${tsTypeForReturn(p.type)}`);
   const params = (usesUser ? [...baseParams, "currentUser: User"] : baseParams).join(", ");
   const whereClause = buildFindWhereClause(agg, find, tableName, ctx, filterPred);
+
+  // Paged return (`find x(): <Agg> paged`, P3b): the method gains trailing
+  // `page` / `pageSize` controls, runs a count query + a `limit`/`offset`
+  // page query, hydrates the page rows the same way the array branch does,
+  // and returns the wrapped `{ items, page, pageSize, total, totalPages }`
+  // shape.  1-based page; `items` are domain instances (the route maps them
+  // through `toWire`).
+  if (pagedReturn(find.returnType)) {
+    const eagerContains = eagerContainsOf(agg);
+    const needsIdsLocal = eagerContains.length > 0 || associationsOf(agg).length > 0;
+    const pagedParams = [...baseParams, "page: number", "pageSize: number"];
+    const pagedAll = (usesUser ? [...pagedParams, "currentUser: User"] : pagedParams).join(", ");
+    const ret = `{ items: ${agg.name}[]; page: number; pageSize: number; total: number; totalPages: number }`;
+    return lines(
+      `  async ${find.name}(${pagedAll}): Promise<${ret}> {`,
+      `    const offset = (page - 1) * pageSize;`,
+      `    const countRows = await this.db.select({ value: count() }).from(schema.${tableName})${whereClause};`,
+      `    const total = Number(countRows[0]?.value ?? 0);`,
+      `    const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;`,
+      `    const rootRows = await this.db.select().from(schema.${tableName})${whereClause}.limit(pageSize).offset(offset);`,
+      `    if (rootRows.length === 0) {`,
+      `      ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: 0`)}`,
+      `      return { items: [], page, pageSize, total, totalPages };`,
+      `    }`,
+      needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
+      ...bulkLoadContainmentLines(eagerContains, agg, ctx),
+      associationMapLines(agg, "this.db", "    "),
+      `    const items = rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
+      `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: items.length`)}`,
+      `    return { items, page, pageSize, total, totalPages };`,
+      `  }`,
+    );
+  }
 
   if (find.returnType.kind === "array") {
     // Bulk-load every containment (collections + singulars).  Earlier

@@ -11,6 +11,11 @@ import {
   hasCreate,
   wireCreateDefault,
 } from "../../../ir/enrich/wire-projection.js";
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -231,13 +236,20 @@ export function buildRoutesFile(
 
   if (repo) {
     for (const find of repo.finds) {
-      // Only emit a Query schema when the find takes parameters — the route
-      // (route emitter, ~line 475) is gated the same way, so an empty
-      // `<Find>Query = z.object({})` would be dead code.
-      if (find.params.length === 0) continue;
+      // Only emit a Query schema when the find takes parameters or is paged —
+      // a paged find adds `page` / `pageSize` query controls (P3b).  An empty
+      // `<Find>Query = z.object({})` would be dead code otherwise.
+      const paged = pagedReturn(find.returnType);
+      if (find.params.length === 0 && !paged) continue;
       lines.push(`const ${upperFirst(find.name)}Query = z.object({`);
       for (const p of find.params) {
         lines.push(`  ${p.name}: ${zodFor(p.type, "query")},`);
+      }
+      if (paged) {
+        lines.push(
+          `  page: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE}),`,
+          `  pageSize: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
+        );
       }
       lines.push(`}).openapi("${upperFirst(find.name)}Query");`);
     }
@@ -268,6 +280,21 @@ export function buildRoutesFile(
   lines.push(
     `export const ${agg.name}ListResponse = z.array(${agg.name}Response).openapi("${agg.name}ListResponse");`,
   );
+  // Paged response DTOs (P3b) — one per distinct `<carrier> paged` return on
+  // this aggregate's repository finds.  `items` reuses the response-side zod
+  // for the carrier (so an entity carrier maps to its `<Agg>Response`),
+  // wrapped with the 1-based pagination envelope.
+  {
+    const pagedSeen = new Set<string>();
+    for (const find of repo?.finds ?? []) {
+      const paged = pagedReturn(find.returnType);
+      if (!paged || pagedSeen.has(paged.name)) continue;
+      pagedSeen.add(paged.name);
+      lines.push(
+        `export const ${paged.name} = z.object({ items: z.array(${zodForResponse(paged.arg, false)}), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }).openapi("${paged.name}");`,
+      );
+    }
+  }
   // RFC 7807 ProblemDetails body — declared once for the project in
   // `http/problem-details.ts` (with the §3.2 `errors[]` extension for
   // validation failures, consumed by the frontend ACL's
@@ -734,8 +761,16 @@ function emitFindRoute(
 ): string[] {
   const aggSlug = snake(plural(agg.name));
   const findSnake = snake(find.name);
+  const paged = pagedReturn(find.returnType);
   const isList = find.returnType.kind === "array";
-  const responseSchema = isList ? `${agg.name}ListResponse` : `${agg.name}Response`;
+  const responseSchema = paged
+    ? paged.name
+    : isList
+      ? `${agg.name}ListResponse`
+      : `${agg.name}Response`;
+  // A paged find always carries a query (page/pageSize), even with no
+  // declared params.
+  const hasQuery = find.params.length > 0 || !!paged;
   const path = find.name === "all" ? "/" : `/${findSnake}`;
   const out: string[] = [];
   out.push(`app.openapi(`);
@@ -744,7 +779,7 @@ function emitFindRoute(
   out.push(`    path: "${path}",`);
   out.push(`    tags: ["${aggSlug}"],`);
   out.push(`    operationId: "${camelId(opFind(agg.name, find.name))}",`);
-  if (find.params.length > 0) {
+  if (hasQuery) {
     out.push(`    request: { query: ${upperFirst(find.name)}Query },`);
   }
   out.push(`    responses: {`);
@@ -759,7 +794,7 @@ function emitFindRoute(
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (c) => {`);
-  if (find.params.length > 0) {
+  if (hasQuery) {
     out.push(`    const params = c.req.valid("query");`);
   }
   // When the find's where clause references currentUser,
@@ -773,6 +808,20 @@ function emitFindRoute(
     );
   }
   const baseArgs = find.params.map((p) => wireToDomainExpr(`params.${p.name}`, p.type, ctx));
+  if (paged) {
+    // Auto-injected pagination controls follow the domain args; the repo
+    // method returns `{ items: <domain>[], page, pageSize, total, totalPages }`
+    // and the route maps the page items through `toWire`.
+    const pagedArgs = [...baseArgs, "params.page", "params.pageSize"];
+    const argList = (usesUser ? [...pagedArgs, "currentUser"] : pagedArgs).join(", ");
+    out.push(`    const result = await repo.${find.name}(${argList});`);
+    out.push(
+      `    return c.json({ ...result, items: result.items.map((r) => repo.toWire(r)) } as z.infer<typeof ${paged.name}>, 200);`,
+    );
+    out.push(`  },`);
+    out.push(`);`);
+    return out;
+  }
   const argList = (usesUser ? [...baseArgs, "currentUser"] : baseArgs).join(", ");
   out.push(`    const result = await repo.${find.name}(${argList});`);
   if (isList) {

@@ -1,3 +1,4 @@
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -53,6 +54,9 @@ export function buildRepositoryFile(
   // / inArray) are always pulled in; the lowering may add ne / gt /
   // gte / lt / lte / or / not depending on the expression shape.
   const drizzleOps = new Set<string>(["eq", "and", "inArray"]);
+  // A paged find runs a `count()` aggregate for its total (P3b).  Added as a
+  // candidate; the import narrower below keeps it only if `count(` is emitted.
+  if ((repo?.finds ?? []).some((f) => pagedReturn(f.returnType))) drizzleOps.add("count");
   const viewFilters = ctx.views
     .filter((v) => v.aggregateName === agg.name && v.filter)
     .map((v) => v.filter!);
