@@ -167,7 +167,7 @@ call-site cursor (`a.b := …` / `this.op(...)`) finds no target because
 | `ddd-semantic-tokens.ts` | 1 → 2 | operations, repositories, events, type-refs, parameters, member-calls, var refs | **covered** (added type-ref / function / parameter / variable / method-decl / member-method / event / repository cases) |
 | `ddd-node-kind.ts` | 0 → 1 | `Deployable → Constructor` is semantically wrong (a deployable is a module) | **fixed + first tests** (`Deployable → Module`) |
 | `ddd-rename.ts` / `member-refs.ts` | 5 → 11 (+2 skip) | — | **cross-ref matrix + shadowing + prepareRename + multi-file covered**; **shadowing bug FIXED** (`nameRefDecl` now consults `localShadows` — see below); 2 gaps captured as tripwires |
-| `ddd-references.ts` | 3 | derived / function / assignment / shadowing / multi-file unverified | open (likely mirrors the rename gaps — same `collectMemberUsages` machinery) |
+| `ddd-references.ts` | 3 → 6 | — | **shadowing + derived + operation-call covered**; shares `collectMemberUsages`, so the shadowing fix flows through. enum-value / bare-call gaps mirror rename (same machinery) |
 
 > **Rename gaps found writing the cross-ref matrix** (all the operation-rename
 > bug's siblings — the declaration renames but a use-site is left stale; the
@@ -192,10 +192,12 @@ which doesn't model lambda-param shadowing; it now guards with `localShadows`
 first (previously dead-tested). Multi-file rename and `prepareRename`-range are
 also now covered (both pass).
 
-Still to add: references parity (likely mirrors the two skip-gaps — same
-`collectMemberUsages` machinery); a hover failure-path test (render unresolved
-refs as `«unresolved»`, not a silent `?`); deployable / module rename (need a
-system-scoped fixture).
+Still to add: a hover failure-path test (render unresolved refs as
+`«unresolved»`, not a silent `?`); deployable / module rename (need a
+system-scoped fixture). The deep enum-value / bare-function-call resolution
+(the two skip-tripwires, shared by rename + references) remains its own slice —
+those refs are resolved by Loom's custom scope but aren't in the reference
+index nor reachable via `env.resolve`.
 
 > **Note (LValue blind spot, found while testing).** A statement-position
 > member call / assignment target (`this.op(...)`, `a.b := …`) parses as an

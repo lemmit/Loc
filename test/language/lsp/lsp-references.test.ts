@@ -60,3 +60,50 @@ describe("ReferencesProvider — member access", () => {
     });
   });
 });
+
+describe("ReferencesProvider — shadowing & callables", () => {
+  // Guards the shared `nameRefDecl`/`localShadows` fix: the lambda body `total`
+  // is bound to the shadowing lambda param, so it is NOT a reference to the
+  // property.  Only the declaration and `this.total` are marked → the lambda
+  // body must not appear in the result.
+  it("excludes a member reference shadowed by a lambda param", async () => {
+    await expectRefs({
+      text: `
+        context Sales {
+          aggregate Order {
+            <|><|total|>: int
+            nums: int[]
+            function f(): int = nums.sum(total => total) + this.<|total|>
+          }
+        }`,
+      includeDeclaration: true,
+    });
+  });
+
+  it("finds a property used in a derived expression", async () => {
+    await expectRefs({
+      text: `
+        context Sales {
+          aggregate Order {
+            <|><|rate|>: int
+            derived doubled: int = this.<|rate|> * 2
+          }
+        }`,
+      includeDeclaration: true,
+    });
+  });
+
+  it("finds `this.<op>()` call sites of an operation from its declaration", async () => {
+    await expectRefs({
+      text: `
+        context Sales {
+          aggregate Order {
+            total: int
+            operation <|><|close|>() { total := 0 }
+            operation drain() { this.<|close|>() }
+          }
+        }`,
+      includeDeclaration: true,
+    });
+  });
+});
