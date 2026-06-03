@@ -67,6 +67,14 @@ export function schemaFromModule(
 ): SchemaSnapshot {
   const tables: TableShape[] = [];
   const pool = collectAggregates(module);
+  // Value-object field list lookup (by VO name), so a value-object field
+  // can be flattened into the parent table's columns — the standard DDD
+  // destructure, matching the Drizzle / EF ORMs.  The migration builder
+  // otherwise only sees a `TypeIR` and used to collapse a VO to one `json`
+  // column, which the relational ORMs (flattened) then mismatched.
+  const voLookup: VoLookup = new Map(
+    module.contexts.flatMap((c) => c.valueObjects.map((v) => [v.name, v.fields] as const)),
+  );
   for (const agg of pool) {
     // An abstract base that is NOT a TPH base owns no table — a TPC
     // (`ownTable`) base emits nothing here (each concrete is standalone);
@@ -85,12 +93,12 @@ export function schemaFromModule(
       // its base; the part's `parentId` holds the shared-table row id.
       const owner = tableOwnerName(agg, pool);
       for (const part of agg.parts) {
-        tables.push(tableForPart(part, agg, module.name, owner));
+        tables.push(tableForPart(part, agg, module.name, voLookup, owner));
       }
       continue;
     }
     if (isTphBase(agg, pool)) {
-      tables.push(tphTableForAggregate(agg, pool, module.name));
+      tables.push(tphTableForAggregate(agg, pool, module.name, voLookup));
       continue;
     }
     // Event-sourced (`persistedAs(eventLog)`): an append-only stream table
@@ -110,9 +118,9 @@ export function schemaFromModule(
       tables.push(embeddedTableForAggregate(agg, module.name));
       continue;
     }
-    tables.push(tableForAggregate(agg, module.name));
+    tables.push(tableForAggregate(agg, module.name, voLookup));
     for (const part of agg.parts) {
-      tables.push(tableForPart(part, agg, module.name));
+      tables.push(tableForPart(part, agg, module.name, voLookup));
     }
     // Reference-collection fields (`Target id[]`) persist via a join
     // table rather than a column on the owner row — enrichment derives
@@ -379,7 +387,11 @@ function collectAggregates(module: EnrichedSubdomainIR): EnrichedAggregateIR[] {
   return acc;
 }
 
-function tableForAggregate(agg: AggregateIR, ownerModule: string): TableShape {
+function tableForAggregate(
+  agg: AggregateIR,
+  ownerModule: string,
+  voLookup: VoLookup = new Map(),
+): TableShape {
   const tableName = plural(snake(agg.name));
   const columns: ColumnShape[] = [
     { name: "id", type: idColumnType(agg.idValueType), nullable: false },
@@ -391,9 +403,9 @@ function tableForAggregate(agg: AggregateIR, ownerModule: string): TableShape {
     // Reference collections (`Target id[]`) lower to a separate join
     // table (see `tableForAssociation`); no column on the owner row.
     if (isReferenceCollection(f.type)) continue;
-    const mapped = mapField(f);
-    columns.push(mapped.column);
-    if (mapped.fkRefTable) {
+    for (const mapped of columnsForField(f, voLookup)) {
+      columns.push(mapped.column);
+      if (!mapped.fkRefTable) continue;
       foreignKeys.push({
         column: mapped.column.name,
         refTable: mapped.fkRefTable,
@@ -428,6 +440,7 @@ function tphTableForAggregate(
   base: AggregateIR,
   pool: readonly AggregateIR[],
   ownerModule: string,
+  voLookup: VoLookup = new Map(),
 ): TableShape {
   const tableName = plural(snake(base.name));
   const kindField: FieldIR = {
@@ -445,12 +458,12 @@ function tphTableForAggregate(
 
   const pushField = (f: FieldIR, forceNullable: boolean): void => {
     if (isReferenceCollection(f.type)) return;
-    const mapped = mapField(f);
-    if (seen.has(mapped.column.name)) return;
-    seen.add(mapped.column.name);
-    const column = forceNullable ? { ...mapped.column, nullable: true } : mapped.column;
-    columns.push(column);
-    if (mapped.fkRefTable) {
+    for (const mapped of columnsForField(f, voLookup)) {
+      if (seen.has(mapped.column.name)) continue;
+      seen.add(mapped.column.name);
+      const column = forceNullable ? { ...mapped.column, nullable: true } : mapped.column;
+      columns.push(column);
+      if (!mapped.fkRefTable) continue;
       foreignKeys.push({ column: column.name, refTable: mapped.fkRefTable, onDelete: "restrict" });
       indexes.push({
         name: `${tableName}_${column.name}_idx`,
@@ -473,6 +486,7 @@ function tableForPart(
   part: EntityPartIR,
   parent: AggregateIR,
   ownerModule: string,
+  voLookup: VoLookup = new Map(),
   // The aggregate that physically owns the parent table.  For a plain
   // aggregate this is `parent.name`; for a TPH concrete it's the shared base
   // table (the concrete has no table of its own), so the part's FK targets the
@@ -498,9 +512,9 @@ function tableForPart(
 
   for (const f of part.fields) {
     if (isReferenceCollection(f.type)) continue;
-    const mapped = mapField(f);
-    columns.push(mapped.column);
-    if (mapped.fkRefTable) {
+    for (const mapped of columnsForField(f, voLookup)) {
+      columns.push(mapped.column);
+      if (!mapped.fkRefTable) continue;
       foreignKeys.push({
         column: mapped.column.name,
         refTable: mapped.fkRefTable,
@@ -567,6 +581,47 @@ interface MappedColumn {
   column: ColumnShape;
   /** Set iff this column references another aggregate's table. */
   fkRefTable?: string;
+}
+
+/** VO name → its field list, so a value-object field can be flattened into
+ *  the parent table's columns rather than collapsed to one `json` column. */
+type VoLookup = ReadonlyMap<string, readonly FieldIR[]>;
+
+/** The migration column(s) a field contributes.  A value-object field
+ *  destructures into one column per (recursively-flattened) VO field — the
+ *  standard DDD shape the Drizzle / EF ORMs already query — each tagged with
+ *  the originating field's `voGroup` so Phoenix can regroup them into a
+ *  single `:map`.  Every other field is one column (`mapField`). */
+function columnsForField(f: FieldIR, voLookup: VoLookup): MappedColumn[] {
+  const optional = f.optional || f.type.kind === "optional";
+  const base = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (base.kind === "valueobject") {
+    const voFields = voLookup.get(base.name);
+    if (voFields) {
+      return flattenValueObject(snake(f.name), voFields, optional, snake(f.name), voLookup);
+    }
+  }
+  return [mapField(f)];
+}
+
+function flattenValueObject(
+  prefix: string,
+  voFields: readonly FieldIR[],
+  optional: boolean,
+  group: string,
+  voLookup: VoLookup,
+): MappedColumn[] {
+  return voFields.flatMap((vf): MappedColumn[] => {
+    const name = `${prefix}_${snake(vf.name)}`;
+    const vfOptional = optional || vf.optional || vf.type.kind === "optional";
+    const vfBase = vf.type.kind === "optional" ? vf.type.inner : vf.type;
+    if (vfBase.kind === "valueobject") {
+      const inner = voLookup.get(vfBase.name);
+      if (inner) return flattenValueObject(name, inner, vfOptional, group, voLookup);
+    }
+    const { type, fkRefTable } = mapTypeToColumn(vfBase);
+    return [{ column: { name, type, nullable: vfOptional, voGroup: group }, fkRefTable }];
+  });
 }
 
 function mapField(f: FieldIR): MappedColumn {
