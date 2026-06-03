@@ -137,7 +137,14 @@ export function buildTypeRef(spec: TypeSpec): TypeRef {
       base = mkNamedType({ $type: "NamedType", target: { $refText: spec.base.target } });
       break;
   }
-  return mkTypeRef({ $type: "TypeRef", base, ctors: [], array: spec.array, optional: spec.optional });
+  return mkTypeRef({
+    $type: "TypeRef",
+    base,
+    ctors: [],
+    alternatives: [],
+    array: spec.array,
+    optional: spec.optional,
+  });
 }
 
 function buildProperty(name: string, spec: TypeSpec): Property {
