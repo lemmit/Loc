@@ -106,8 +106,9 @@ describe("adapter registry — lookup", () => {
 });
 
 describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 menu)", () => {
-  it("excludes stubs on dotnet (efcore/cqrs/byLayer/byFeature real; dapper/marten/layered stubs)", () => {
-    expect(availableAdapterNames("dotnet", "persistence")).toEqual(["efcore"]);
+  it("excludes stubs on dotnet (efcore/dapper/cqrs/byLayer/byFeature real; marten/layered stubs)", () => {
+    // dapper became real in Phase 5c — both persistence adapters selectable.
+    expect(availableAdapterNames("dotnet", "persistence")).toEqual(["dapper", "efcore"]);
     expect(availableAdapterNames("dotnet", "style")).toEqual(["cqrs"]);
     // byFeature became real in Phase 5a — both layouts are now selectable.
     expect(availableAdapterNames("dotnet", "layout")).toEqual(["byFeature", "byLayer"]);
@@ -131,8 +132,9 @@ describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 me
 
   it("allAdapterNames includes reserved stubs (so 'reserved' can be told from 'unknown')", () => {
     const all = allAdapterNames("dotnet", "persistence");
-    expect(all).toContain("efcore");
-    expect(all).toContain("dapper"); // a registered stub
-    expect(availableAdapterNames("dotnet", "persistence")).not.toContain("dapper");
+    expect(all).toContain("efcore"); // real
+    expect(all).toContain("dapper"); // real since Phase 5c
+    expect(all).toContain("marten"); // a registered stub
+    expect(availableAdapterNames("dotnet", "persistence")).not.toContain("marten");
   });
 });
