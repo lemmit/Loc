@@ -617,16 +617,17 @@ Each platform has the same module shape (in `src/generator/<platform>/`):
 | `index.ts` | Orchestrator — `generate<Platform>ForContexts(contexts, ...) → Map<path, content>`. |
 | `emit/*.ts` (TS/.NET) or `*-emit.ts` (Phoenix) | Procedural emitters (`render<Thing>(...)`) for regular-shaped fragments — id classes, value-object classes, events, common errors, etc.  Plain TypeScript functions building strings via `lines(...)` from `src/util/code-builder.ts`. |
 | `*-builder.ts` | Procedural builders for content with too much per-aggregate variation to keep small (Hono routes, Hono repositories, React pages, React page-objects). |
-| `render-expr.ts` / `render-stmt.ts` | Recursive `ExprIR → string` / `StmtIR → string` renderers (only on platforms that execute domain logic — TS and .NET, not React). |
+| `render-expr.ts` / `render-stmt.ts` | `ExprIR → string` / `StmtIR → string` renderers (only on platforms that execute domain logic — TS, .NET, and Phoenix LiveView, not React).  `render-expr.ts` is a leaf-only `ExprTarget` table; the recursive dispatch lives in the shared `_expr/` subdir (below).  `render-stmt.ts` stays per-backend. |
 
 ### Shared generator subdirs
 
-Three `_`-prefixed subdirs under `src/generator/` are consumed by
+Four `_`-prefixed subdirs under `src/generator/` are consumed by
 multiple platforms:
 
 | Subdir | Consumed by | What it owns |
 |---|---|---|
 | `_packs/` | every UI-mounting backend (react, fullstack dotnet, phoenixLiveView) | Design-pack discovery + loader.  `builtin-formats.ts` holds `BUILTIN_PACK_FORMATS` + `BUILTIN_PACK_LATEST` and the `parseBuiltinDesignRef` parser.  `loader-fs.ts` / `loader-vfs.ts` are the FS / browser-VFS backends.  See [`design-packs.md`](design-packs.md). |
+| `_expr/` | every domain-logic backend (TS, .NET, phoenixLiveView) | `target.ts` defines the `ExprTarget` interface (the eight leaf-divergence axes — operators, naming, money arithmetic, collection ops, `refColl.contains` membership, regex, `ref` role, `callKind` call syntax) and `renderExprWith(e, target, ctx)`, which owns the 17-arm `ExprIR.kind` dispatch + all recursion.  Each backend's `render-expr.ts` supplies only the leaf table (`TS_TARGET` / `CS_TARGET` / `ELIXIR_TARGET`).  Expression-side analogue of `WalkerTarget`; a 5th domain-logic backend writes one target, not a 4th dispatcher (PR #843). |
 | `_walker/` | react + phoenixLiveView | `target.ts` defines the `WalkerTarget` interface that captures the framework-shaped seams (state read/write, navigation, API call lowering, `match` rendering).  Both targets are implemented and consumed: `react/walker/tsx-target.ts` is imported by `body-walker.ts` and delegated to at ~15 call sites (state-read/write, API call shape); `phoenix-live-view/heex-target.ts` is imported by `heex-walker.ts` and delegated to at 20+ call sites. |
 | `_obs/` | hono, dotnet, phoenixLiveView | Observability catalog + per-backend renderers.  `log-events.ts` defines the envelope schema; `render-<platform>.ts` emits the per-backend instrumentation.  See [`observability.md`](observability.md). |
 
@@ -1044,7 +1045,8 @@ public confirm(): void {
   `this.assertInvariants()` (added by the aggregate template, not
   the renderer).
 
-`render-expr.ts` walks each expression:
+`render-expr.ts` (a leaf table over the shared `_expr/target.ts`
+dispatch) walks each expression:
 - `call { callKind: "function" }` → `this.<name>(<args>)`
 - `member { ..., isCollectionOp: false }` on `array.count` →
   `this._lines.length` (the renderer knows `count` on a collection
@@ -1125,8 +1127,10 @@ The shape:
    that adapter usually wraps a `generate<Backend>ForContexts(contexts, ...) → Map<path, content>`
    in `generator/<backend>/index.ts`.
 2. Register the new platform in `src/platform/registry.ts`.
-3. For domain-logic-running backends, implement `render-expr.ts`
-   (`renderXxxExpr(e: ExprIR): string`) and `render-stmt.ts`
+3. For domain-logic-running backends, implement an `ExprTarget` leaf
+   table (the shared `renderExprWith` in `_expr/target.ts` owns the
+   dispatch + recursion) wrapped by a thin `renderXxxExpr(e: ExprIR):
+   string`, plus `render-stmt.ts`
    (`renderXxxStatements(stmts: StmtIR[]): string`), honouring
    `refKind` / `callKind` / `isCollectionOp` tags.  React skips
    these — the frontend doesn't run domain logic.
