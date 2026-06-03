@@ -119,7 +119,7 @@ system Acme {
                     let order = Order.create({
                         customerId: "cust-001",
                         status: Draft,
-                        placedAt: "2024-01-01T00:00:00Z"
+                        placedAt: now()
                     })
                     expectThrows order.confirm()
                 }

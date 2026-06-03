@@ -587,6 +587,12 @@ function primitiveColumnType(name: string): ColumnType {
       return { kind: "bigint" };
     case "decimal":
       return { kind: "decimal" };
+    case "money":
+      // `money` is a precise decimal — same column family as `decimal`
+      // (Drizzle numeric(19,4), Postgres NUMERIC).  sql-pg already renders
+      // money/decimal literals identically; mirror that here so a system
+      // with a money-primitive field derives migrations instead of throwing.
+      return { kind: "decimal" };
     case "string":
       return { kind: "text" };
     case "bool":

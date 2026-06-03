@@ -1,5 +1,13 @@
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst } from "../../util/naming.js";
+import {
+  type ExprTarget,
+  type MemberExpr,
+  type MethodCallExpr,
+  type NewExpr,
+  type RefExpr,
+  renderExprWith,
+} from "../_expr/target.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the TypeScript backend.
@@ -8,6 +16,9 @@ import { lowerFirst } from "../../util/naming.js";
 // tag, every member access has a receiver type, every collection op is
 // flagged as such.  No further AST or scoping work is needed; this layer
 // only deals with TypeScript-specific syntax.
+//
+// The 17-arm dispatch + recursion live in `../_expr/target.ts`; this file is
+// the TS leaf table (`TS_TARGET`) plus the thin `renderTsExpr` entry point.
 //
 // Render context lets callers swap the implicit `this` for an external
 // row variable (e.g. `r` for view bind projections).  When the context's
@@ -25,66 +36,48 @@ export interface TsRenderContext {
 
 const DEFAULT: TsRenderContext = { thisName: "this" };
 
-export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string {
-  switch (e.kind) {
-    case "literal":
-      return renderLiteral(e.lit, e.value);
-    case "this":
-      return ctx.thisName;
-    case "id":
-      return ctx.thisName === "this" ? "this._id" : `${ctx.thisName}.id`;
-    case "ref":
-      return renderRef(e, ctx);
-    case "member":
-      return renderMember(e, ctx);
-    case "method-call":
-      return renderMethodCall(e, ctx);
-    case "call":
-      return renderCall(e, ctx);
-    case "lambda":
-      // Lambdas always introduce their own parameter; the body is
-      // rendered with the outer `this` still pointing at the same
-      // receiver (lambdas in DSL are pure expressions).
-      //
-      // Lambda body is now optional (block-body lambdas land
-      // for page event handlers).  TS render contexts shouldn't see
-      // block bodies — those are React-emitter territory — but stay
-      // total to keep the build happy.
-      if (e.body) return `(${e.param}) => ${renderTsExpr(e.body, ctx)}`;
-      return `(${e.param}) => { /* block-body lambda — page metamodel territory, not TS-renderable */ }`;
-    case "new":
-      return renderNew(e, ctx);
-    case "object":
-      return `({ ${e.fields.map((f) => `${f.name}: ${renderTsExpr(f.value, ctx)}`).join(", ")} })`;
-    case "paren":
-      return `(${renderTsExpr(e.inner, ctx)})`;
-    case "unary":
-      return `${e.op}${renderTsExpr(e.operand, ctx)}`;
-    case "binary":
-      return renderBinary(e.op, e.left, e.right, e.leftType, ctx);
-    case "ternary":
-      return `${renderTsExpr(e.cond, ctx)} ? ${renderTsExpr(e.then, ctx)} : ${renderTsExpr(e.otherwise, ctx)}`;
-    case "convert":
-      return renderTsConvert(e.target, e.from, e.value, ctx);
-    case "match": {
-      // Lower a match expression to a chained ternary so it
-      // can appear inside `derived` bodies, view binds, and other
-      // TS-rendered expression positions.  Right-fold: each arm
-      // wraps the previous tail.
-      const arms = [...e.arms].reverse();
-      const tail = e.otherwise ? renderTsExpr(e.otherwise, ctx) : "undefined";
-      let out = tail;
-      for (const arm of arms) {
-        out = `(${renderTsExpr(arm.cond, ctx)} ? ${renderTsExpr(arm.value, ctx)} : ${out})`;
-      }
-      return out;
+const TS_TARGET: ExprTarget<TsRenderContext> = {
+  literal: renderLiteral,
+  id: (ctx) => (ctx.thisName === "this" ? "this._id" : `${ctx.thisName}.id`),
+  ref: renderRef,
+  member: renderMember,
+  methodCall: renderMethodCall,
+  call: renderCall,
+  lambda(param, body) {
+    // Lambdas always introduce their own parameter; the body is rendered
+    // with the outer `this` still pointing at the same receiver (lambdas in
+    // DSL are pure expressions).
+    //
+    // Lambda body is now optional (block-body lambdas land for page event
+    // handlers).  TS render contexts shouldn't see block bodies — those are
+    // React-emitter territory — but stay total to keep the build happy.
+    if (body !== undefined) return `(${param}) => ${body}`;
+    return `(${param}) => { /* block-body lambda — page metamodel territory, not TS-renderable */ }`;
+  },
+  newPart: renderNew,
+  object: (fields) => `({ ${fields.map((f) => `${f.name}: ${f.value}`).join(", ")} })`,
+  unary: (op, operand) => `${op}${operand}`,
+  binary: renderBinary,
+  ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
+  convert: (value, e) => renderTsConvert(e.target, e.from, value),
+  match(arms, otherwise) {
+    // Lower a match expression to a chained ternary so it can appear inside
+    // `derived` bodies, view binds, and other TS-rendered expression
+    // positions.  Right-fold: each arm wraps the previous tail.
+    let out = otherwise ?? "undefined";
+    for (const arm of [...arms].reverse()) {
+      out = `(${arm.cond} ? ${arm.value} : ${out})`;
     }
-    case "list":
-      // List literals are walker-config sugar (e.g. responsive Grid cols).
-      // No domain-expression position consumes one today; emit a TS array
-      // literal so unexpected uses still compile.
-      return `[${e.elements.map((el) => renderTsExpr(el, ctx)).join(", ")}]`;
-  }
+    return out;
+  },
+  // List literals are walker-config sugar (e.g. responsive Grid cols).  No
+  // domain-expression position consumes one today; emit a TS array literal
+  // so unexpected uses still compile.
+  list: (elements) => `[${elements.join(", ")}]`,
+};
+
+export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string {
+  return renderExprWith(e, TS_TARGET, ctx);
 }
 
 /**
@@ -104,13 +97,7 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
  * coercion (`String(x)`) so the output still compiles even when
  * the validator is already reporting the inferred-type problem.
  */
-function renderTsConvert(
-  target: string,
-  from: string | undefined,
-  value: ExprIR,
-  ctx: TsRenderContext,
-): string {
-  const v = renderTsExpr(value, ctx);
+function renderTsConvert(target: string, from: string | undefined, v: string): string {
   if (target === "string") {
     if (from === "money") return `${v}.toString()`;
     return `String(${v})`;
@@ -139,7 +126,7 @@ function renderLiteral(lit: LiteralKind, value: string): string {
   return value;
 }
 
-function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: TsRenderContext): string {
+function renderRef(e: RefExpr, ctx: TsRenderContext): string {
   const fromOutside = ctx.thisName !== "this";
   switch (e.refKind) {
     case "param":
@@ -177,8 +164,7 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: TsRenderContext): s
   }
 }
 
-function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: TsRenderContext): string {
-  const recv = renderTsExpr(e.receiver, ctx);
+function renderMember(recv: string, e: MemberExpr): string {
   // String length stays as `.length`; arrays expose collection ops without
   // parentheses too — `lines.count` should compile to `.length`.
   if (e.receiverType.kind === "array" && e.member === "count") return `${recv}.length`;
@@ -186,11 +172,11 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: TsRenderConte
 }
 
 function renderMethodCall(
-  e: Extract<ExprIR, { kind: "method-call" }>,
-  ctx: TsRenderContext,
+  recv: string,
+  args: string[],
+  e: MethodCallExpr,
+  _ctx: TsRenderContext,
 ): string {
-  const recv = renderTsExpr(e.receiver, ctx);
-  const args = e.args.map((a) => renderTsExpr(a, ctx));
   if (e.isCollectionOp) {
     return renderCollectionOp(`(${recv})`, e.member, args);
   }
@@ -243,56 +229,58 @@ function renderCollectionOp(recv: string, name: string, args: string[]): string 
   }
 }
 
-function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: TsRenderContext): string {
-  const args = e.args.map((a) => renderTsExpr(a, ctx)).join(", ");
+function renderCall(
+  args: string[],
+  e: Extract<ExprIR, { kind: "call" }>,
+  ctx: TsRenderContext,
+): string {
+  const argList = args.join(", ");
   const fromOutside = ctx.thisName !== "this";
   switch (e.callKind) {
     case "value-object-ctor":
-      return `new ${e.name}(${args})`;
+      return `new ${e.name}(${argList})`;
     case "function":
     case "private-operation":
       return fromOutside
-        ? `${ctx.thisName}.${lowerFirst(e.name)}(${args})`
-        : `this.${lowerFirst(e.name)}(${args})`;
+        ? `${ctx.thisName}.${lowerFirst(e.name)}(${argList})`
+        : `this.${lowerFirst(e.name)}(${argList})`;
     case "resource-op": {
       // A verb call on an ambient resource handle (Phase 4).  The
       // resource client module exports an async `<resource>$<verb>`
       // helper that owns the SDK mapping; the call site is uniform and
       // awaited inline so it composes in any expression position.
       const op = e.resourceOp!;
-      return `(await ${op.resourceName}$${op.verb}(${args}))`;
+      return `(await ${op.resourceName}$${op.verb}(${argList}))`;
     }
     case "free":
-      return `${e.name}(${args})`;
+      return `${e.name}(${argList})`;
   }
 }
 
-function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: TsRenderContext): string {
+function renderNew(
+  fields: { name: string; value: string }[],
+  e: NewExpr,
+  ctx: TsRenderContext,
+): string {
   const parentRef = ctx.thisName === "this" ? "this._id" : `${ctx.thisName}.id`;
   const inits = [
     `id: Ids.new${e.partName}Id()`,
     `parentId: ${parentRef}`,
-    ...e.fields.map((f) => `${f.name}: ${renderTsExpr(f.value, ctx)}`),
+    ...fields.map((f) => `${f.name}: ${f.value}`),
   ];
   return `${e.partName}._create({ ${inits.join(", ")} })`;
 }
 
-function renderBinary(
-  op: BinOp,
-  left: ExprIR,
-  right: ExprIR,
-  leftType: TypeIR | undefined,
-  ctx: TsRenderContext,
-): string {
+function renderBinary(left: string, right: string, e: Extract<ExprIR, { kind: "binary" }>): string {
   // Money operands carry through as decimal.js `Decimal` instances —
   // their JS operators don't do precise math, so dispatch through the
   // class's method API.  Other primitives use native operators.
-  if (leftType?.kind === "primitive" && leftType.name === "money") {
-    return renderMoneyBinary(op, left, right, ctx);
+  if (e.leftType?.kind === "primitive" && e.leftType.name === "money") {
+    return renderMoneyBinary(e.op, left, right);
   }
   // Equality comparisons in TS: prefer === / !==
-  const opPrint = op === "==" ? "===" : op === "!=" ? "!==" : op;
-  return `${renderTsExpr(left, ctx)} ${opPrint} ${renderTsExpr(right, ctx)}`;
+  const opPrint = e.op === "==" ? "===" : e.op === "!=" ? "!==" : e.op;
+  return `${left} ${opPrint} ${right}`;
 }
 
 const MONEY_METHOD: Record<string, string | undefined> = {
@@ -309,14 +297,14 @@ const MONEY_METHOD: Record<string, string | undefined> = {
   ">=": "gte",
 };
 
-function renderMoneyBinary(op: BinOp, left: ExprIR, right: ExprIR, ctx: TsRenderContext): string {
+function renderMoneyBinary(op: BinOp, left: string, right: string): string {
   const method = MONEY_METHOD[op];
   if (!method) {
     // Unknown operator for money — fall through to native rendering
     // so the failure surfaces in the generated source, not silently.
-    return `${renderTsExpr(left, ctx)} ${op} ${renderTsExpr(right, ctx)}`;
+    return `${left} ${op} ${right}`;
   }
-  const call = `${renderTsExpr(left, ctx)}.${method}(${renderTsExpr(right, ctx)})`;
+  const call = `${left}.${method}(${right})`;
   return op === "!=" ? `!(${call})` : call;
 }
 

@@ -23,6 +23,7 @@ import type {
   SystemMember,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
+import { isStatement } from "../../../../src/language/generated/ast.js";
 import { deployableContexts, deployableServes, deployableTargets, deployableUi } from "../system/deployable-bindings";
 import { computeAggregateRelations, computeEntityPartRelations } from "./aggregate-edges";
 import { computeContextRelations } from "./context-edges";
@@ -1137,7 +1138,8 @@ function operationView(ast: Model, aggName: string, opName: string): ViewGraph {
 function workflowView(ast: Model, name: string): ViewGraph {
   const wf = findWorkflow(ast, name);
   if (!wf) return { title: `workflow ${name}`, nodes: [], edges: [] };
-  return stmtFlow(`workflow ${name}()`, wf.body, "workflow", `${name}()`);
+  const stmts = wf.members.filter(isStatement);
+  return stmtFlow(`workflow ${name}()`, stmts, "workflow", `${name}()`);
 }
 
 function findRepository(ast: Model, name: string): Repository | undefined {

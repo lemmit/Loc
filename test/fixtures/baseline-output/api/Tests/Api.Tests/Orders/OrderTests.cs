@@ -15,7 +15,7 @@ public sealed class OrderTests
     [Fact(DisplayName = "confirming an order with no lines is rejected")]
     public void Confirming_an_order_with_no_lines_is_rejected()
     {
-        var order = Order.Create(new { CustomerId = "cust-001", Status = OrderStatus.Draft, PlacedAt = "2024-01-01T00:00:00Z" });
+        var order = Order.Create(customerId: "cust-001", status: OrderStatus.Draft, placedAt: DateTime.UtcNow);
         Assert.Throws<DomainException>(() => { var __ = order.Confirm(); });
     }
 

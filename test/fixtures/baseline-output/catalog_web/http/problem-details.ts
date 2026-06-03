@@ -3,21 +3,22 @@ import { z } from "zod";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 
-/** RFC 7807 ProblemDetails body — the base shape (5 fields per the spec
- *  core).  Hono's runtime additionally emits an `errors[]` extension
- *  (RFC 7807 §3.2) on 422 validation responses — consumed by the
- *  frontend ACL's `applyServerErrors` — but that field is intentionally
- *  NOT advertised here in the OpenAPI component schema until .NET +
- *  Phoenix catch up (Phase B + C of validation-error-extension.md), so
- *  the cross-backend parity gate (`test/_helpers/openapi-normalize.ts`)
- *  keeps `fieldSet("ProblemDetails")` byte-equal across all three.
- *  All fields nullable / optional, matching the base spec. */
+/** RFC 7807 ProblemDetails body — the base 5 spec fields plus the §3.2
+ *  `errors[]` extension (per-field `{ pointer, message }` array) that
+ *  the runtime emits on 422 validation responses.  Consumed by the
+ *  frontend ACL's `applyServerErrors` (see docs/proposals/frontend-acl.md).
+ *  All fields nullable / optional — base 5 per the spec core; `errors` is
+ *  only present on 422 validation responses.  Phase D of
+ *  docs/proposals/validation-error-extension.md — all three backends
+ *  (Hono / .NET / Phoenix) declare the same shape in lockstep so the
+ *  cross-backend parity gate stays green. */
 export const ProblemDetails = z.object({
   type: z.string().nullish(),
   title: z.string().nullish(),
   status: z.number().int().nullish(),
   detail: z.string().nullish(),
   instance: z.string().nullish(),
+  errors: z.array(z.object({ pointer: z.string(), message: z.string() })).nullish(),
 }).openapi("ProblemDetails");
 
 /** RFC 6901 JSON pointer from a Zod issue path.  Empty path → empty

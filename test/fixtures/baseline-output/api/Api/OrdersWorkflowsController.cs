@@ -19,6 +19,7 @@ public sealed class OrdersWorkflowsController : ControllerBase
     [HttpPost("place_order")]
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<IActionResult> PlaceOrderWorkflow([FromBody] PlaceOrderRequest request)
     {
         var cmd = new PlaceOrderCommand(

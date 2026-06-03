@@ -812,6 +812,45 @@ export interface WorkflowIR {
    *  saves; `Repo.getById(...)`/find saves only if a later op-call
    *  targets the binding. */
   savesAtExit: { name: string; aggName: string; repoName: string }[];
+  /** Event-subscription reactors declared via `on(e: Event) [by <expr>] { … }`
+   *  members (workflow-and-applier.md Phase A2, surface slice).  Omitted when
+   *  the workflow declares none.  Not yet consumed by backends — backend
+   *  emission and the `by` correlation-field type-check are deferred to later
+   *  slices, mirroring how Phase A1 landed `apply(...)` appliers ahead of any
+   *  event-store emission. */
+  subscriptions?: OnIR[];
+  /** Workflow state fields declared as `Property` members — the correlation
+   *  field plus saga state (workflow-and-applier.md A2-S2).  Lowered with the
+   *  same `lowerField` as aggregate fields.  Omitted when the workflow
+   *  declares none.  Not yet emitted by backends (a persisted workflow row is
+   *  a later slice). */
+  stateFields?: FieldIR[];
+  /** The single id-shaped state field the runtime routes inbound events to
+   *  (workflow-and-applier.md §"Identity and correlation").  Set only when
+   *  exactly one id-shaped state field exists; absence / ambiguity are
+   *  diagnosed by the IR validator. */
+  correlationField?: string;
+}
+
+/** A `on(e: Event) [by <expr>] { … }` reactor on a workflow — an extrinsic
+ *  event subscription / continuation handler.  Mirrors `ApplyIR`: the event
+ *  instance binds as a `refKind: "param"` local in the body.  Distinct from an
+ *  applier in that the body is a workflow continuation (it may load/save
+ *  aggregates and emit), so its statements are `WorkflowStmtIR`. */
+export interface OnIR {
+  /** The event type this reactor subscribes to, by name (resolved to a
+   *  context `EventDecl`). */
+  event: string;
+  /** The parameter name the inbound event instance binds to in the body
+   *  (e.g. `paid` in `on(paid: PaymentReceived)`). */
+  param: string;
+  /** The `by <expr>` routing expression (workflow-and-applier.md A2-S3),
+   *  lowered in the event-binding scope — e.g. `paid.orderId`.  Undefined when
+   *  the source omits `by`; the runtime then routes by name-match against the
+   *  workflow's correlation field (resolved at validation time). */
+  correlation?: ExprIR;
+  /** The reactor body — workflow statements (emit / let / op-call / …). */
+  statements: WorkflowStmtIR[];
 }
 
 export type WorkflowStmtIR =

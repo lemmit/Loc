@@ -886,8 +886,41 @@ Workflow:
     'workflow' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
         (transactional?='transactional' ('(' isolation=IsolationLevel ')')?)?
     '{'
+        members+=WorkflowMember*
+    '}';
+
+// A2-S1/S2 (workflow-and-applier.md): the workflow body is a flat member list
+// that still admits every legacy statement form (precondition / let / emit /
+// call — unchanged) plus the new `on(...)` reactor member (S1) and workflow
+// state `Property` fields (S2 — the correlation field + saga state).  This is
+// the additive, non-breaking shape — the full workflow-as-aggregate reshape
+// (Properties + create/handle members, no free statements) is a later slice.
+// `Property` (`name ':' …`) is unambiguous against `AssignOrCallStmt` (whose
+// LValue continues with `:=`/`.`/`(`, never a bare `:`), and `on` is a keyword
+// so it can never start a Statement.
+WorkflowMember:
+    OnDecl | Property | Statement;
+
+// Extrinsic event subscription / continuation: `on(paid: PaymentReceived)
+// { … }` reacts to a fact from outside the workflow's own scope.  Mirrors the
+// aggregate `Apply` rule.  See workflow-and-applier.md §"Member forms".  The
+// `by <expr>` routing clause is deferred to the correlation slice (it carries
+// no surface meaning without workflow correlation fields, and `by` collides
+// with existing identifier usage until handled as a soft keyword there).
+OnDecl:
+    'on' '(' param=LooseName ':' event=[EventDecl:ID] ')'
+        ('by' correlation=CorrelationExpr)?
+    '{'
         body+=Statement*
     '}';
+
+// The `by <expr>` routing/correlation expression (A2-S3).  Restricted to a
+// name or postfix chain (`paid.orderId`, `event.order`, bare `p`) — NOT the
+// full `Expression` — for the same reason `ForIterable` is restricted: a
+// `BuilderCall` (`Name { … }`) would otherwise swallow the reactor's own
+// `{ body }` block.  These are the only forms a `by` clause ever takes.
+CorrelationExpr infers Expression:
+    NameRef ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+)?;
 
 // SQL-92 isolation levels.  Optional on `transactional`; default
 // (when omitted) uses the database connection's configured level
@@ -1079,7 +1112,11 @@ Property:
         // Retrieval keywords (retrieval.md) — soft in property position so
         // user-declared fields named `sort` / `loads` / `asc` / `desc` /
         // `retrieval` keep parsing.  Hard only inside the `Retrieval` slots.
-        | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc')
+        | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc'
+        // `by` soft in property position so a field named `by` (e.g.
+        // `event Bumped { by: int }`) keeps parsing — hard only in the
+        // `on(...) by <expr>` reactor clause (workflow-and-applier.md A2-S3).
+        | 'by')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1190,6 +1227,12 @@ LooseName returns string:
     | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
     | 'design' | 'targets'
     | 'bind' | 'api'
+    // `by` is a hard keyword only in the `on(...) by <expr>` reactor clause
+    // (workflow-and-applier.md A2-S3); admit it as a soft keyword in
+    // field / parameter / object-field / emit-field name position so
+    // pre-existing identifiers named `by` (e.g. `Detail { by: id }`,
+    // `event Bumped { by: int }`) keep parsing.
+    | 'by'
     | 'primary' | 'cache' | 'search' | 'events' | 'bi'
     // `money` is a soft keyword — the only places it acts as a
     // hard keyword are `PrimitiveType` (`amount: money`) and
@@ -1459,6 +1502,9 @@ CallArg:
 // resolution / collection-op dispatch lives in the lowering
 // (lower-expr.ts + type-system.ts) rather than the grammar.
 MemberName returns string:
+    // `by` admitted after `.` so member access like `e.by` keeps parsing
+    // (workflow-and-applier.md A2-S3 — `by` is hard only in the reactor clause).
+    'by' |
     ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
        | 'filter' | 'stamp' | 'implements'
@@ -1651,6 +1697,10 @@ NameRefIdent returns string:
        | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
        | 'design' | 'targets' | 'bind'
+       // `by` admitted as a bare NameRef so expressions can read a field
+       // named `by` (e.g. `emit Bumped { by: by }`).  Hard only in the
+       // `on(...) by <expr>` reactor clause.
+       | 'by'
        | 'primary' | 'cache' | 'search' | 'events' | 'bi'
        | 'filter' | 'stamp' | 'implements'
        | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'

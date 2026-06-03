@@ -25,21 +25,23 @@
 //    JsonCamelCase encoder), applies RFC 6901 escapes (`~` → `~0`,
 //    `/` → `~1`), and emits `""` for the empty path (root error).
 //
-// What is intentionally NOT asserted (Phase D — deferred until all
-// three backends declare 422 in lockstep via the central matrix in
-// src/ir/util/openapi-errors.ts):
-//  - The 422 HTTP code on OpenAPI route response declarations.
-//  - The `errors[]` extension as a declared field on the OpenAPI
-//    `ProblemDetails` component schema.
+// As of Phase D, the OpenAPI surface has been brought into lockstep with
+// the runtime body across all three backends:
+//  - 422 declared alongside 400 on body-bearing routes
+//    (create / operation / workflow) via the central matrix in
+//    src/ir/util/openapi-errors.ts.
+//  - The `ProblemDetails` OpenAPI component schema now declares
+//    `errors: [{ pointer, message }]` so OpenAPI codegen and other
+//    spec consumers see the validation-failure shape they should expect.
 //
 // The cross-backend parity gate (`test/_helpers/openapi-normalize.ts`)
 // keeps `fieldSet("ProblemDetails")` + per-operation `errorResponses()`
-// byte-equal across all three backends.  The runtime body all three
-// emit is more specific than their OpenAPI schemas admit; the frontend
-// ACL reads the body directly.
+// byte-equal across all three backends.  Phase D moved all three
+// together so the gate stays green.
 
 import { describe, expect, it } from "vitest";
 import { emitApiControllers } from "../../../src/generator/phoenix-live-view/api-emit.js";
+import { emitOpenApiSpec } from "../../../src/generator/phoenix-live-view/openapi-emit.js";
 import { renderProblemDetailsModule } from "../../../src/generator/phoenix-live-view/problem-details-emit.js";
 import type {
   AggregateIR,
@@ -104,12 +106,7 @@ function stubModel(): {
     name: "phoenixApi",
     platform: phoenixPlatform,
     port: 4000,
-    serves: [
-      {
-        apiName: "SalesApi",
-        scopes: [{ contextName: "Sales", aggregateNames: ["Order"] }],
-      },
-    ],
+    serves: ["SalesApi"],
     moduleNames: ["Sales"],
   } as unknown as DeployableIR;
   const sys: SystemIR = {
@@ -277,5 +274,54 @@ describe("Phoenix validation-error extension — workflows controller wiring", (
     expect(wfCtrl!).toMatch(
       /defp error_response\(conn, reason\) do[\s\S]*?PhoenixAppWeb\.ProblemDetails\.problem_response\(conn, status, title, inspect\(reason\)\)/,
     );
+  });
+});
+
+describe("Phoenix validation-error extension — OpenAPI surface (Phase D)", () => {
+  it("ProblemDetails OpenApiSpex schema declares the §3.2 errors[] extension", () => {
+    const { contexts, deployable, sys } = stubModel();
+    const { files } = emitOpenApiSpec({
+      contexts,
+      deployable,
+      sys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const schemaKey = [...files.keys()].find((k) => k.endsWith("/schemas/problem_details.ex"));
+    expect(schemaKey, "expected ProblemDetails OpenApiSpex schema module").toBeDefined();
+    const schema = files.get(schemaKey!)!;
+    // Base 5 RFC 7807 fields still declared.
+    expect(schema).toMatch(/type: %OpenApiSpex\.Schema\{type: :string\}/);
+    expect(schema).toMatch(/title: %OpenApiSpex\.Schema\{type: :string\}/);
+    expect(schema).toMatch(/status: %OpenApiSpex\.Schema\{type: :integer\}/);
+    expect(schema).toMatch(/detail: %OpenApiSpex\.Schema\{type: :string\}/);
+    expect(schema).toMatch(/instance: %OpenApiSpex\.Schema\{type: :string\}/);
+    // §3.2 errors[] extension — array of { pointer, message }, both required
+    // per element, matching the wire shape the frontend ACL consumes.
+    expect(schema).toMatch(/errors: %OpenApiSpex\.Schema\{[\s\S]*?type: :array/);
+    expect(schema).toMatch(/required: \[:pointer, :message\]/);
+    expect(schema).toMatch(/pointer: %OpenApiSpex\.Schema\{type: :string\}/);
+    expect(schema).toMatch(/message: %OpenApiSpex\.Schema\{type: :string\}/);
+  });
+
+  it("Per-action OpenAPI route declarations carry 422 alongside 400 for body-bearing routes", () => {
+    // The central matrix (src/ir/util/openapi-errors.ts) now returns
+    // [400, 422] for create / [400, 404, 422] for operation /
+    // [400, 422] for workflow.  Phoenix's emitOpenApiSpec renders those
+    // through `OpenApiSpex.Response` blocks per action.
+    const { contexts, deployable, sys } = stubModel();
+    const { files } = emitOpenApiSpec({
+      contexts,
+      deployable,
+      sys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const specKey = [...files.keys()].find((k) => k.endsWith("_api_spec.ex"));
+    expect(specKey, "expected per-context API spec module").toBeDefined();
+    const spec = files.get(specKey!)!;
+    // Both 400 and 422 declared, both pointing at the ProblemDetails schema.
+    expect(spec).toMatch(/400 => %OpenApiSpex\.Response\{[\s\S]*?Schemas\.ProblemDetails/);
+    expect(spec).toMatch(/422 => %OpenApiSpex\.Response\{[\s\S]*?Schemas\.ProblemDetails/);
   });
 });
