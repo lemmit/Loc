@@ -1,4 +1,3 @@
-import type { Reference } from "langium";
 import { AstUtils } from "langium";
 import type {
   Aggregate,
@@ -10,19 +9,14 @@ import type {
   Component,
   ConfigEntry,
   ConnectionSource,
-  Containment,
   Create,
   Criterion,
   Deployable,
-  DerivedProp,
   Destroy,
-  EntityPart,
   EnumDecl,
   EventDecl,
   Expression,
-  FunctionDecl,
   HandleDecl,
-  Invariant,
   Layout,
   LayoutNamedSlot,
   LoadPath,
@@ -31,24 +25,19 @@ import type {
   OnDecl,
   Operation,
   Page,
-  Parameter,
   PayloadDecl,
   Property,
   Repository,
-  Requirement,
   Resource,
   Retrieval,
   Seed,
-  Solution,
   StateField,
   Statement,
   Storage,
   Subdomain,
   System,
   SystemMember,
-  Targetable,
   TestBlock,
-  TestCase,
   TestE2E,
   ThemeBlock,
   Ui,
@@ -128,28 +117,21 @@ import type {
   BoundedContextIR,
   ChannelIR,
   ChannelSourceIR,
-  CodeRefIR,
-  CodeRefKind,
   ComponentIR,
   ConfigEntryIR,
   ConnectionSourceIR,
-  ContainmentIR,
-  ContextStampIR,
   CreateIR,
   CriterionIR,
   DataSourceIR,
   DataSourceKind,
   DeployableIR,
-  DerivedIR,
   EntityPartIR,
   EnumIR,
   EventIR,
   ExprIR,
   FieldIR,
-  FunctionIR,
   HandleIR,
   IdValueType,
-  InvariantIR,
   LayoutIR,
   LoadPlanIR,
   LoadSegmentIR,
@@ -157,8 +139,6 @@ import type {
   MenuLinkIR,
   MenuMetaIR,
   OnIR,
-  OperationIR,
-  OperationKind,
   PageIR,
   PageLayoutIR,
   PageMetadataIR,
@@ -170,15 +150,12 @@ import type {
   RawLoomModel,
   RepositoryIR,
   RequirementIR,
-  RequirementStatus,
-  RequirementType,
   RetrievalIR,
   SeedIR,
   SeedRowIR,
   SolutionIR,
   SortTermIR,
   StateFieldIR,
-  StmtIR,
   StorageIR,
   StorageKind,
   SubdomainIR,
@@ -198,20 +175,43 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
-import { criterionRefOf, inferExprType, lowerExpr, lowerExprInContext } from "./lower-expr.js";
+import type { ContextLevelCapabilities } from "./lower-capabilities.js";
+import {
+  collectContextLevelCapabilities,
+  collectFilters,
+  collectImplements,
+  collectStamps,
+  EMPTY_CONTEXT_CAPABILITIES,
+} from "./lower-capabilities.js";
+import { criterionRefOf, inferExprType, lowerExpr } from "./lower-expr.js";
+import {
+  computeSaves,
+  lowerApply,
+  lowerContainment,
+  lowerCreate,
+  lowerDerived,
+  lowerDestroy,
+  lowerEntityPart,
+  lowerField,
+  lowerFunction,
+  lowerInvariant,
+  lowerOperation,
+  lowerPropertyChecks,
+  plural,
+} from "./lower-members.js";
 import {
   canonicalFramework,
   greenfieldAxisDefaults,
   qualifyDesign,
   qualifyPlatform,
 } from "./lower-platform.js";
+import { lowerRequirement, lowerSolution, lowerTestCase } from "./lower-requirements.js";
 import { lowerStatement } from "./lower-stmt.js";
 import {
   cstText,
   type Env,
   findEntityByName,
   inAggregate,
-  inPart,
   inValueObject,
   inWorkflow,
   lowerType,
@@ -353,122 +353,6 @@ export function mergeLoomModels(models: RawLoomModel[]): RawLoomModel {
     solutions: models.flatMap((m) => m.solutions),
     testCases: models.flatMap((m) => m.testCases),
   };
-}
-
-// ---------------------------------------------------------------------------
-// Traceability lowering
-// ---------------------------------------------------------------------------
-
-const REQUIREMENT_TYPES: ReadonlySet<string> = new Set<RequirementType>([
-  "UserStory",
-  "UseCase",
-  "AcceptanceCriteria",
-  "BusinessReq",
-]);
-const REQUIREMENT_STATUSES: ReadonlySet<string> = new Set<RequirementStatus>([
-  "Draft",
-  "Approved",
-  "InProgress",
-  "Done",
-]);
-
-/** Reads a scalar value out of a requirement prop-bag entry.  Bare
- *  identifiers (`UserStory`) lower to a NameRef whose `.name` we want;
- *  quoted titles to a StringLit; priorities to an IntLit.  Returns the
- *  raw string / number, or undefined for shapes we don't recognise
- *  (the validator reports those). */
-function requirementPropValue(expr: Expression | undefined): string | number | undefined {
-  if (!expr) return undefined;
-  switch (expr.$type) {
-    case "NameRef":
-      return (expr as { name: string }).name;
-    case "StringLit":
-      return (expr as { value: string }).value;
-    case "IntLit":
-      return (expr as { value: number }).value;
-    default:
-      return undefined;
-  }
-}
-
-function lowerRequirement(r: Requirement): RequirementIR {
-  let type: RequirementType = "UserStory";
-  let title = "";
-  let status: RequirementStatus | undefined;
-  let priority: number | undefined;
-  for (const p of r.props) {
-    const v = requirementPropValue(p.value);
-    switch (p.name) {
-      case "type":
-        if (typeof v === "string" && REQUIREMENT_TYPES.has(v)) type = v as RequirementType;
-        break;
-      case "title":
-        if (typeof v === "string") title = v;
-        break;
-      case "status":
-        if (typeof v === "string" && REQUIREMENT_STATUSES.has(v)) status = v as RequirementStatus;
-        break;
-      case "priority":
-        if (typeof v === "number") priority = v;
-        break;
-    }
-  }
-  return { id: r.name, type, title, status, priority, parentId: r.parent?.ref?.name };
-}
-
-function lowerSolution(s: Solution): SolutionIR {
-  return {
-    id: s.name,
-    forRequirement: s.requirement?.ref?.name ?? "",
-    title: s.title ?? "",
-    entitles: lowerCodeRefs(s.entitles),
-  };
-}
-
-function lowerTestCase(t: TestCase): TestCaseIR {
-  return {
-    id: t.name,
-    verifies: t.requirement?.ref?.name ?? "",
-    title: t.title ?? "",
-    covers: lowerCodeRefs(t.covers),
-  };
-}
-
-function lowerCodeRefs(refs: readonly Reference<Targetable>[]): CodeRefIR[] {
-  const out: CodeRefIR[] = [];
-  for (const ref of refs) {
-    const node = ref.ref;
-    if (!node) continue; // unresolved — reported by the linker/validator
-    out.push({ qualifiedName: ref.$refText, kind: codeRefKindOf(node) });
-  }
-  return out;
-}
-
-function codeRefKindOf(node: Targetable): CodeRefKind {
-  switch (node.$type) {
-    case "Subdomain":
-      return "subdomain";
-    case "BoundedContext":
-      return "context";
-    case "Aggregate":
-      return "aggregate";
-    case "Operation":
-      return "operation";
-    case "ValueObject":
-      return "valueobject";
-    case "EventDecl":
-      return "event";
-    case "Repository":
-      return "repository";
-    case "Workflow":
-      return "workflow";
-    case "View":
-      return "view";
-    case "Deployable":
-      return "deployable";
-    case "Api":
-      return "api";
-  }
 }
 
 /** Lower a `system { … }` block.  `extraDomainMembers` are top-level
@@ -1685,168 +1569,6 @@ function lowerAggregate(
   };
 }
 
-// Applier lowering — `apply(e: Event) { … }` folds one event type into
-// aggregate state.  The event param binds as a `refKind: "param"` local
-// over the aggregate env (so `this.x := e.y` resolves `this` against the
-// aggregate and `e` against the bound param).  The param's type carries
-// the event name as an entity-shaped marker; member access on it
-// (`e.field`) type-resolves through `findEventByName` / `memberOnEvent`
-// in lower-expr (events aren't a distinct TypeIR kind, so the entity
-// marker + a field-only fallback is the contained representation).  The
-// body's purity (assignments / derivations only; no `emit`, no
-// side-effecting calls) is enforced by the phase-⑦ discipline validator,
-// not here — lowering preserves source fidelity.
-function lowerApply(a: Apply, env: Env): ApplyIR {
-  const eventName = a.event.ref?.name ?? a.event.$refText;
-  const inner = withLocal(env, a.param, "param", { kind: "entity", name: eventName });
-  const statements: StmtIR[] = [];
-  let bodyEnv = inner;
-  for (const s of a.body) {
-    const result = lowerStatement(s, bodyEnv);
-    statements.push(result.stmt);
-    bodyEnv = result.envAfter;
-  }
-  return { event: eventName, param: a.param, statements };
-}
-
-// ---------------------------------------------------------------------------
-// Capability collection — reads structurally from `members[]` (no side
-// tables).  Context-level capabilities, when present, are appended
-// first.  Lowering is pure concatenation; the validator layer is
-// responsible for any per-aggregate override semantics.
-// ---------------------------------------------------------------------------
-
-interface ContextLevelCapabilities {
-  /** Unqualified filters — propagate to every aggregate in the
-   * context, regardless of `implements`. */
-  unqualifiedFilters: ExprIR[];
-  /** Capability-qualified filters — propagate only to aggregates
-   * whose `implementsCapabilities` includes the matching name. */
-  qualifiedFilters: Array<{ capability: string; predicate: ExprIR }>;
-  /** Unqualified stamps — propagate to every aggregate. */
-  unqualifiedStamps: ContextStampIR[];
-  /** Capability-qualified stamps — propagate only to opt-ins. */
-  qualifiedStamps: Array<{ capability: string; stamp: ContextStampIR }>;
-  /** `implements` declarations at context level propagate to every
-   * aggregate's `implementsCapabilities` (today; "for" qualifier on
-   * implements is intentionally not supported — implements IS the
-   * opt-in mechanism, qualifying it would be redundant). */
-  implementsCaps: string[];
-}
-
-const EMPTY_CONTEXT_CAPABILITIES: ContextLevelCapabilities = Object.freeze({
-  unqualifiedFilters: [],
-  qualifiedFilters: [],
-  unqualifiedStamps: [],
-  qualifiedStamps: [],
-  implementsCaps: [],
-}) as ContextLevelCapabilities;
-
-/** Scan a BoundedContext's members for FilterDecl/StampDecl/
- * ImplementsDecl nodes, lower them in the context's env, and
- * partition by qualifier.  Unqualified context-level decls apply to
- * every aggregate inside; qualified (`for "<name>"`) decls apply
- * only to aggregates whose `implements` matches. */
-function collectContextLevelCapabilities(ctx: BoundedContext, env: Env): ContextLevelCapabilities {
-  const unqualifiedFilters: ExprIR[] = [];
-  const qualifiedFilters: Array<{ capability: string; predicate: ExprIR }> = [];
-  const unqualifiedStamps: ContextStampIR[] = [];
-  const qualifiedStamps: Array<{ capability: string; stamp: ContextStampIR }> = [];
-  const implementsCaps: string[] = [];
-  for (const m of ctx.members ?? []) {
-    if (m.$type === "FilterDecl") {
-      const f = m as { expr: Expression; capability?: string };
-      const predicate = lowerExpr(f.expr, env);
-      if (f.capability) {
-        qualifiedFilters.push({ capability: f.capability, predicate });
-      } else {
-        unqualifiedFilters.push(predicate);
-      }
-    } else if (m.$type === "StampDecl") {
-      const s = m as unknown as StampDeclLike & { capability?: string };
-      const lowered = lowerStampDecl(s, env);
-      if (s.capability) {
-        qualifiedStamps.push({ capability: s.capability, stamp: lowered });
-      } else {
-        unqualifiedStamps.push(lowered);
-      }
-    } else if (m.$type === "ImplementsDecl") {
-      implementsCaps.push((m as { name: string }).name);
-    }
-  }
-  return {
-    unqualifiedFilters,
-    qualifiedFilters,
-    unqualifiedStamps,
-    qualifiedStamps,
-    implementsCaps,
-  };
-}
-
-function collectFilters(
-  agg: Aggregate,
-  env: Env,
-  ctxCaps: ContextLevelCapabilities,
-  aggImplementsCaps: readonly string[],
-): ExprIR[] {
-  const own = (agg.members ?? [])
-    .filter((m) => m.$type === "FilterDecl")
-    .map((m) => lowerExpr((m as { expr: Expression }).expr, env));
-  // Qualified context filters propagate only to aggregates whose
-  // implements set includes the qualifier name.
-  const matchingQualified = ctxCaps.qualifiedFilters
-    .filter((q) => aggImplementsCaps.includes(q.capability))
-    .map((q) => q.predicate);
-  return [...ctxCaps.unqualifiedFilters, ...matchingQualified, ...own];
-}
-
-function collectStamps(
-  agg: Aggregate,
-  env: Env,
-  ctxCaps: ContextLevelCapabilities,
-  aggImplementsCaps: readonly string[],
-): ContextStampIR[] {
-  const own = (agg.members ?? [])
-    .filter((m) => m.$type === "StampDecl")
-    .map((m) => lowerStampDecl(m as unknown as StampDeclLike, env));
-  const matchingQualified = ctxCaps.qualifiedStamps
-    .filter((q) => aggImplementsCaps.includes(q.capability))
-    .map((q) => q.stamp);
-  return [...ctxCaps.unqualifiedStamps, ...matchingQualified, ...own];
-}
-
-function collectImplements(agg: Aggregate, propagated: readonly string[]): string[] {
-  const own = (agg.members ?? [])
-    .filter((m) => m.$type === "ImplementsDecl")
-    .map((m) => (m as { name: string }).name);
-  // Dedupe + sort so generators get a deterministic order regardless
-  // of declaration source (context vs aggregate vs macro emission).
-  return [...new Set([...propagated, ...own])].sort();
-}
-
-/** Shape we rely on from a `StampDecl` AST node.  Local alias so the
- * import surface stays narrow. */
-interface StampDeclLike {
-  event: "onCreate" | "onUpdate";
-  assignments: Array<{ target: { head: string }; value?: Expression }>;
-}
-
-function lowerStampDecl(s: StampDeclLike, env: Env): ContextStampIR {
-  // The grammar's `stamp <event> { <assign>* }` produces a sequence
-  // of `AssignOrCallStmt` nodes whose LValue is a single-segment
-  // path (the target field name) and whose value is the assigned
-  // expression.  Both sides are lowered through the existing
-  // operation-body pipeline.  Stamps with chained / multi-segment
-  // targets (`this.foo.bar`) are flagged by the validator.
-  return {
-    event: s.event === "onCreate" ? "create" : "update",
-    assignments: s.assignments.map((a) => ({
-      field: a.target.head,
-      value: a.value ? lowerExpr(a.value, env) : (lowerExpr(undefined, env) as never),
-    })),
-  };
-}
-
 function lowerTest(block: TestBlock, env: Env): TestIR {
   let inner = env;
   const statements: TestStmtIR[] = [];
@@ -1870,24 +1592,6 @@ function lowerTest(block: TestBlock, env: Env): TestIR {
     }
   }
   return { name: block.name, statements, verifiesTestCase: block.verifies?.ref?.name };
-}
-
-function lowerEntityPart(part: EntityPart, agg: Aggregate, outer: Env): EntityPartIR {
-  const inner = inPart(outer, agg, part);
-  const props = part.members.filter(isProperty) as Property[];
-  return {
-    name: part.name,
-    parentName: agg.name,
-    parentIdValueType: (agg.idKind ?? "guid") as IdValueType,
-    fields: props.map((p) => lowerField(p, inner)),
-    contains: part.members.filter(isContainment).map(lowerContainment),
-    derived: part.members.filter(isDerivedProp).map((d) => lowerDerived(d, inner)),
-    invariants: [
-      ...part.members.filter(isInvariant).map((i) => lowerInvariant(i, inner)),
-      ...lowerPropertyChecks(props, inner),
-    ],
-    functions: part.members.filter(isFunctionDecl).map((f) => lowerFunction(f, inner)),
-  };
 }
 
 function lowerRepository(
@@ -2079,260 +1783,6 @@ function idFollowPath(e: ExprIR): string[] | undefined {
   return undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Member lowerings
-// ---------------------------------------------------------------------------
-
-function lowerField(p: Property, env?: Env): FieldIR {
-  const sensitivity = fieldSensitivity(p);
-  const baseType = lowerType(p.type);
-  const declared = p.access as FieldIR["access"];
-  // Default value — lowered in the declaring scope so enum values / money
-  // literals resolve in the field's type context.  Only the constructible
-  // declarations (aggregate / entity-part / value object) pass an `env`;
-  // events / views never do, so a stray default there is dropped here (and
-  // flagged by the validator).
-  const defaultExpr = p.default && env ? lowerExprInContext(p.default, baseType, env) : undefined;
-  return {
-    name: p.name,
-    // The field's `TypeIR` carries the same tag set as the field's
-    // `sensitivity` — keeps a single source of truth so downstream
-    // consumers (wire shape, future expression-typing in lower-expr,
-    // generators) can read sensitivity off the type uniformly.
-    type: sensitivity ? { ...baseType, sensitivity } : baseType,
-    optional: !!p.type?.optional,
-    provenanced: !!p.provenanced,
-    ...(sensitivity ? { sensitivity } : {}),
-    // `access` lives on the field, not the type — it's a field role
-    // (input-shaping, view exposure) rather than a type property.
-    // Enrichment fills in the default / inferred-from-type cases.
-    ...(declared ? { access: declared, accessSource: "declared" as const } : {}),
-    ...(defaultExpr ? { default: defaultExpr } : {}),
-  };
-}
-
-/** Pull sensitivity tags from a Property AST node — sorted, deduped,
- * undefined when the property declared no `sensitive(...)` clause.
- * Mirror of `propertySensitivity` in `type-system.ts`, but produces an
- * `IR` `SensitivityTags` (plain `readonly string[]`). */
-function fieldSensitivity(p: Property): readonly string[] | undefined {
-  const tags = p.sensitivity?.tags;
-  if (!tags || tags.length === 0) return undefined;
-  return Object.freeze([...new Set(tags)].sort());
-}
-
-function lowerContainment(c: Containment): ContainmentIR {
-  const ir: ContainmentIR = {
-    name: c.name,
-    partName: c.partType?.ref?.name ?? "Unknown",
-    collection: !!c.collection,
-  };
-  if (c.optional) ir.optional = true;
-  return ir;
-}
-
-function lowerDerived(d: DerivedProp, env: Env): DerivedIR {
-  // Contextual lowering: a numeric literal RHS of a money-typed
-  // derivation lowers as a money IR literal (so backends see
-  // `new Decimal("373.34")`, not the raw decimal literal).  See
-  // `lowerExprInContext`.
-  const declared = lowerType(d.type);
-  return {
-    name: d.name,
-    type: declared,
-    expr: lowerExprInContext(d.expr, declared, env),
-  };
-}
-
-function lowerInvariant(i: Invariant, env: Env): InvariantIR {
-  return {
-    expr: lowerExpr(i.expr, env),
-    guard: i.guard ? lowerExpr(i.guard, env) : undefined,
-    source: cstText(i.expr),
-    // `private invariant ...` opts out of the wire
-    // layers (frontend Zod, Hono routes, FluentValidation).  The
-    // domain-layer `AssertInvariants()` floor still enforces it.
-    scope: i.serverOnly ? "server-only" : undefined,
-  };
-}
-
-/** Synthesise an InvariantIR from an inline `field: T check <expr>`
- *  clause on a Property.  Inline-check sugar — the synthesised
- *  invariant appears in the parent's `invariants` list so the existing
- *  wire-validator + domain-floor pipelines pick it up uniformly. */
-function lowerPropertyChecks(props: Property[], env: Env): InvariantIR[] {
-  const out: InvariantIR[] = [];
-  for (const p of props) {
-    if (!p.check) continue;
-    out.push({
-      expr: lowerExpr(p.check, env),
-      // Normalise whitespace so multi-line `check` clauses don't
-      // carry indentation into error messages.
-      source: `${p.name} check ${cstText(p.check).replace(/\s+/g, " ").trim()}`,
-    });
-  }
-  return out;
-}
-
-function lowerFunction(f: FunctionDecl, env: Env): FunctionIR {
-  let inner = env;
-  const params: ParamIR[] = [];
-  for (const p of f.params) {
-    const t = lowerType(p.type, env);
-    params.push({ name: p.name, type: t });
-    inner = withLocal(inner, p.name, "param", t);
-  }
-  return {
-    name: f.name,
-    params,
-    returnType: lowerType(f.returnType),
-    body: lowerExpr(f.body, inner),
-  };
-}
-
-function lowerOperation(op: Operation, env: Env): OperationIR {
-  return lowerActionBody(
-    {
-      kind: "mutate",
-      name: op.name,
-      canonical: false,
-      params: op.params,
-      body: op.body,
-      visibility: op.private ? "private" : "public",
-      extern: !!op.extern,
-      audited: !!op.audited,
-    },
-    env,
-  );
-}
-
-// `create` / `destroy` share `operation`'s param + body shape; the
-// kind tag (not the body syntax) carries the lifecycle asymmetry.  An
-// unnamed declaration is the aggregate's canonical creator / terminator
-// — its synthesised IR `name` is the keyword itself, and `canonical` is
-// set so the Phase-2 route enrichment can route it to the bare
-// collection URL.  create / destroy are never `private` / `extern` /
-// `audited` (no grammar slot), so those default off.
-function lowerCreate(c: Create, env: Env): OperationIR {
-  return lowerActionBody(
-    {
-      kind: "create",
-      name: c.name ?? "create",
-      canonical: c.name == null,
-      params: c.params,
-      body: c.body,
-      visibility: "public",
-      extern: false,
-      audited: false,
-    },
-    env,
-  );
-}
-
-function lowerDestroy(d: Destroy, env: Env): OperationIR {
-  return lowerActionBody(
-    {
-      kind: "destroy",
-      name: d.name ?? "destroy",
-      canonical: d.name == null,
-      params: d.params,
-      body: d.body,
-      visibility: "public",
-      extern: false,
-      audited: false,
-    },
-    env,
-  );
-}
-
-interface ActionSpec {
-  kind: OperationKind;
-  name: string;
-  canonical: boolean;
-  params: Parameter[];
-  body: Statement[];
-  visibility: "public" | "private";
-  extern: boolean;
-  audited: boolean;
-}
-
-function lowerActionBody(spec: ActionSpec, env: Env): OperationIR {
-  let inner = env;
-  const params: ParamIR[] = [];
-  for (const p of spec.params) {
-    const t = lowerType(p.type, env);
-    params.push({ name: p.name, type: t });
-    inner = withLocal(inner, p.name, "param", t);
-  }
-  const stmts: StmtIR[] = [];
-  for (const s of spec.body) {
-    const result = lowerStatement(s, inner);
-    stmts.push(result.stmt);
-    inner = result.envAfter;
-  }
-  return {
-    name: spec.name,
-    kind: spec.kind,
-    canonical: spec.canonical,
-    visibility: spec.visibility,
-    params,
-    statements: stmts,
-    extern: spec.extern,
-    audited: spec.audited,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Workflow lowering
-//
-// Body statements are parsed using the operation-body Statement rules
-// (precondition, let, emit, AssignOrCallStmt) but the workflow surface
-// is a strict subset:
-//   - LetStmt RHS may be `Agg.create({...})` (factory-let),
-//     `Repo.method(args)` (repo-let), or any other Expression
-//     (expr-let).
-//   - AssignOrCallStmt is allowed only in its bare-call form
-//     `name.op(args)` — mutation forms (`:=`, `+=`, `-=`) belong to
-//     aggregate operations and surface as validator errors.
-//   - precondition / emit lower identically to operation bodies.
-//
-// `savesAtExit` is computed after the walk: every factory-let always
-// saves; a repo-let saves only when a later `op-call` targets it.
-// ---------------------------------------------------------------------------
-
-type SaveEntry = { name: string; aggName: string; repoName: string };
-
-/** Compute the bindings to save for a statement list (the dirtiness
- *  rule): every `factory-let` always, every `repo-let` only when a later
- *  op-call targets it.  When `loopVar` is supplied (a `for-each` body),
- *  the loop variable itself is saved if it is the target of any op-call
- *  in that body — the per-iteration save.  Top-level callers pass no
- *  loopVar; the result is the flat `savesAtExit` (byte-identical to the
- *  previous inline computation). */
-function computeSaves(
-  statements: WorkflowStmtIR[],
-  repoForAgg: Map<string, string>,
-  loopVar?: { name: string; aggName: string; repoName: string },
-): SaveEntry[] {
-  const opCallTargets = new Set<string>();
-  for (const st of statements) {
-    if (st.kind === "op-call") opCallTargets.add(st.target);
-  }
-  const saves: SaveEntry[] = [];
-  if (loopVar && opCallTargets.has(loopVar.name)) {
-    saves.push({ name: loopVar.name, aggName: loopVar.aggName, repoName: loopVar.repoName });
-  }
-  for (const st of statements) {
-    if (st.kind === "factory-let") {
-      const repoName = repoForAgg.get(st.aggName) ?? plural(st.aggName);
-      saves.push({ name: st.name, aggName: st.aggName, repoName });
-    } else if (st.kind === "repo-let" && opCallTargets.has(st.name)) {
-      saves.push({ name: st.name, aggName: st.aggName, repoName: st.repoName });
-    }
-  }
-  return saves;
-}
-
 function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR {
   const aggsByName = new Map<string, Aggregate>();
   const reposByName = new Map<string, Repository>();
@@ -2501,12 +1951,6 @@ function lowerOn(
     ...(correlation ? { correlation } : {}),
     statements,
   };
-}
-
-function plural(s: string): string {
-  if (s.endsWith("y") && !/[aeiou]y$/.test(s)) return s.slice(0, -1) + "ies";
-  if (/(s|x|z|ch|sh)$/.test(s)) return s + "es";
-  return s + "s";
 }
 
 interface LoweredWorkflowStmt {
