@@ -1,3 +1,4 @@
+import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -28,9 +29,11 @@ export function renderRepositoryInterface(
 ): string {
   const finds = repo?.finds ?? [];
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
+  const anyFindIsPaged = finds.some((f) => pagedReturn(f.returnType));
   const findLines = finds.map((f) => {
     const usesUser = findUsesCurrentUser(f);
-    return `    Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)});`;
+    const pageExtra = pagedReturn(f.returnType) ? ["int page", "int pageSize"] : [];
+    return `    Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser, pageExtra)});`;
   });
   // `Run<Name>Async(args, page?, ct)` per context retrieval (retrieval.md).
   const retrievalLines = retrievals.map(
@@ -42,6 +45,7 @@ export function renderRepositoryInterface(
       "// Auto-generated.",
       `using ${ns}.Domain.Ids;`,
       anyFindUsesUser ? `using ${ns}.Auth;` : null,
+      anyFindIsPaged ? `using ${ns}.Domain.Common;` : null,
       "",
       `namespace ${ns}.Domain.${plural(agg.name)};`,
       "",
@@ -109,6 +113,26 @@ export function renderRepositoryImpl(
     const filter = body?.filterClause ?? "";
     const projection = body?.projectionClause ?? ".ToListAsync(ct)";
     const usesUser = findUsesCurrentUser(f);
+    // Paged (P3b): a count query + a `Skip`/`Take` page query (the find's
+    // `where` threaded into both), returning the domain `Paged<Agg>`
+    // envelope (1-based).  The query handler maps items to response DTOs.
+    if (pagedReturn(f.returnType)) {
+      return [
+        `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser, ["int page", "int pageSize"])})`,
+        "    {",
+        "        var offset = (page - 1) * pageSize;",
+        `        var total = await _db.${setName}${filter}.CountAsync(ct);`,
+        "        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;",
+        `        var items = await _db.${setName}${filter}.Skip(offset).Take(pageSize).ToListAsync(ct);`,
+        `        ${renderDotnetLogCall("findExecuted", [
+          { name: "aggregate", valueExpr: `"${agg.name}"` },
+          { name: "find", valueExpr: `"${f.name}"` },
+          { name: "rows", valueExpr: "items.Count" },
+        ])}`,
+        `        return new Paged<${agg.name}>(items, page, pageSize, total, totalPages);`,
+        "    }",
+      ];
+    }
     // rows expression depends on the cardinality of the find — the
     // catalog field is just "rows" (an integer count), so map both
     // arrays + singles to a number.
@@ -761,9 +785,14 @@ export function renderEventSourcedRepositoryImpl(
   );
 }
 
-function renderParamsWithCt(params: ParamIR[], usesUser: boolean = false): string {
+function renderParamsWithCt(
+  params: ParamIR[],
+  usesUser: boolean = false,
+  extra: string[] = [],
+): string {
   const head = [
     ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
+    ...extra,
     usesUser ? "User currentUser" : null,
   ]
     .filter(Boolean)

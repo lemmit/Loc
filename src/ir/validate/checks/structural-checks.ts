@@ -220,8 +220,9 @@ export function validateGenericInstancesUnimplemented(
   // no backend at all — the legacy single-context path), the carrier is
   // emittable and the gate stays quiet.  React is a frontend, not a backend,
   // so it never appears here — its hooks consume whatever the backend serves.
-  // `"node"` is the hono/TS backend's platform identity (realization axes).
-  const SUPPORTED_PAGED_BACKENDS = new Set(["node"]);
+  // `"node"` is the hono/TS backend's platform identity (realization axes);
+  // `"dotnet"` the EF/ASP.NET backend.  Phoenix is still pending.
+  const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_PAGED_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 

@@ -53,6 +53,10 @@ describe.skipIf(!ENABLED)(
       // to the id-less child table (`invoice_line_items`) — the owned
       // collection's ToTable / WithOwner FK / shadow `ordinal` key path.
       "examples/value-collections.ddd",
+      // Carrier-bounded generics (payload-transport-layer.md, P3b): compiles
+      // the `Paged<T>` record, the CountAsync + Skip/Take repository methods,
+      // the paged CQRS query/handler, and the controller page/pageSize action.
+      "examples/paged-dotnet.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {

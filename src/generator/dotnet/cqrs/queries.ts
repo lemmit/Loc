@@ -1,3 +1,4 @@
+import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -64,16 +65,21 @@ export function emitFindQueriesAndHandlers(
   for (const find of repo.finds) {
     const queryReturn = renderResponseReturnType(find.returnType, agg);
     const usesUser = findUsesCurrentUser(find);
+    // A paged return references `Paged<T>` from the shared runtime.
+    const pagedUsings = pagedReturn(find.returnType) ? [`${ns}.Domain.Common`] : [];
     out.set(
       `Application/${aggFolder}/Queries/${upperFirst(find.name)}Query.cs`,
       renderQuery({
         ns,
         aggName: agg.name,
         queryName: `${upperFirst(find.name)}Query`,
-        queryParams: find.params
-          .map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`)
-          .join(", "),
+        queryParams: [
+          ...find.params.map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`),
+          // A paged find's query carries the pagination controls (P3b).
+          ...(pagedReturn(find.returnType) ? ["int Page", "int PageSize"] : []),
+        ].join(", "),
         returnType: queryReturn,
+        extraUsings: pagedUsings,
       }),
     );
     out.set(
@@ -86,7 +92,7 @@ export function emitFindQueriesAndHandlers(
         returnType: queryReturn,
         body: buildFindHandlerBody(find, agg, ctx, usesUser),
         extraDeps: usesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [],
-        extraUsings: usesUser ? [`${ns}.Auth`] : [],
+        extraUsings: [...(usesUser ? [`${ns}.Auth`] : []), ...pagedUsings],
       }),
     );
   }
@@ -105,6 +111,21 @@ function buildFindHandlerBody(
   // zero-arg `all` find compiles cleanly.
   const argList = allArgs.join(", ");
   const callArgs = argList.length > 0 ? `${argList}, ct` : `ct`;
+  if (pagedReturn(find.returnType)) {
+    // Repo returns `Paged<Agg>` (domain); map each item to its response DTO
+    // and re-wrap, preserving the page metadata (P3b).
+    const pagedArgs = [
+      ...baseArgs,
+      "q.Page",
+      "q.PageSize",
+      ...(usesUser ? ["_currentUser.User"] : []),
+    ];
+    const pagedCall = `${pagedArgs.join(", ")}, ct`;
+    return (
+      `        var domain = await _repo.${upperFirst(find.name)}(${pagedCall});\n` +
+      `        return new Paged<${agg.name}Response>(domain.Items.Select(d => ${projectEntityExpr("d", agg, ctx)}).ToList(), domain.Page, domain.PageSize, domain.Total, domain.TotalPages);\n`
+    );
+  }
   if (find.returnType.kind === "array") {
     return (
       `        var domain = await _repo.${upperFirst(find.name)}(${callArgs});\n` +
@@ -124,6 +145,10 @@ function buildFindHandlerBody(
 }
 
 function renderResponseReturnType(t: TypeIR, agg: AggregateIR): string {
+  if (pagedReturn(t)) {
+    // The wire-side paged envelope wraps the response DTO (P3b).
+    return `Paged<${agg.name}Response>`;
+  }
   if (t.kind === "array") {
     return `IReadOnlyList<${agg.name}Response>`;
   }
