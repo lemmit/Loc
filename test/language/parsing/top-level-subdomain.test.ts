@@ -176,6 +176,29 @@ describe("top-level subdomain composition", () => {
     expect(files.has("docker-compose.yml")).toBe(true);
   });
 
+  it("rejects a second user block across the composed project", async () => {
+    // One `user` nested in the system, a second declared top-level in a
+    // sibling file — a single-system project admits only one.
+    writeProject(tmp, {
+      "main.ddd": `
+        import "./extra.ddd"
+        system Acme {
+          user { id: string }
+          storage primary { type: postgres }
+        }
+      `,
+      "extra.ddd": `
+        user { id: string  role: string }
+      `,
+    });
+    const services = createDddServices(NodeFileSystem);
+    const { all } = await loadProject(URI.file(path.join(tmp, "main.ddd")), services.shared);
+    const msgs = errorsOf(all);
+    expect(
+      msgs.some((m) => /2 'user \{ \.\.\. \}' blocks, but a system admits at most one/.test(m)),
+    ).toBe(true);
+  });
+
   it("rejects a top-level subdomain when the project has no system", async () => {
     writeProject(tmp, {
       "project.ddd": `
