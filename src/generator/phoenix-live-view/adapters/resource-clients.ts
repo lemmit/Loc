@@ -8,9 +8,9 @@
 // 4c-Phoenix parity: same closed verb vocabulary, vendor-neutral source
 // → Elixir emission.  S3 via :ex_aws_s3, queue via :amqp, api via :req.
 
-import { supportsSurfaceKind } from "../../../ir/source-types.js";
 import type { DataSourceIR, StorageIR } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { supportsSurfaceKind } from "../../../util/source-types.js";
 
 export interface PhoenixResourceAdapter {
   readonly name: string;

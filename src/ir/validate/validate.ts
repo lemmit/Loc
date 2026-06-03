@@ -5,8 +5,8 @@ import {
 } from "../../language/validators/data/platform-rules.js";
 import { allPlatforms, platformFor } from "../../platform/registry.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
+import { capabilitiesFor, configSchemaFor, supportsSurfaceKind } from "../../util/source-types.js";
 import { verbsForKind } from "../resource-verbs.js";
-import { capabilitiesFor, configSchemaFor, supportsSurfaceKind } from "../source-types.js";
 import type {
   AggregateIR,
   BoundedContextIR,

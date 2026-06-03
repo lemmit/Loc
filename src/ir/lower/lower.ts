@@ -110,6 +110,7 @@ import {
 import { parseBuiltinPlatformRef, platformFor } from "../../platform/registry.js";
 import { defaultsFor } from "../../platform/resolve-adapters.js";
 import { type BuiltinPackFamily, parseBuiltinDesignRef } from "../../util/builtin-formats.js";
+import { applicationDslToAdapter } from "../../util/platform-axes.js";
 import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
@@ -186,7 +187,6 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
-import { applicationDslToAdapter } from "../types/loom-ir.js";
 import { inferExprType, lowerExpr, lowerExprInContext } from "./lower-expr.js";
 import { lowerStatement } from "./lower-stmt.js";
 import {
