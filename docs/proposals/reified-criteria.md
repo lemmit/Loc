@@ -1,16 +1,23 @@
 # Reified criteria — specifications as constructed objects
 
-> Status: **PARTIAL (.NET).** The Specification reframe has landed on the
-> .NET/EF backend in four slices: Slice 1a — emit `Criterion<T>` +
-> `IsSatisfiedBy` (the in-memory evaluate face, #890); Slice 2a — emit the
-> `ToExpression()` query face (#901); Slice 2b — retrievals consume
-> `ToExpression` (#910) and `find` consumes it (#926); Slice 3 — the
-> retrieval **Ardalis `Specification<T>` bundle**, EF-only (#936).
+> Status: **PARTIAL — retrieval criteria reified on all four backends.**
+> The Specification reframe landed first on the .NET/EF backend in four
+> slices: Slice 1a — emit `Criterion<T>` + `IsSatisfiedBy` (the in-memory
+> evaluate face, #890); Slice 2a — emit the `ToExpression()` query face
+> (#901); Slice 2b — retrievals consume `ToExpression` (#910) and `find`
+> consumes it (#926); Slice 3 — the retrieval **Ardalis `Specification<T>`
+> bundle**, EF-only (#936); Dapper retrievals as parameterised SQL (#943).
 > Generated under `src/generator/dotnet/{criteria-emit,spec-emit,find-emit}.ts`;
 > `render-expr.ts` gates query-translatable bodies via
-> `canEmitToExpressionFor()`. **Hono/Drizzle and Phoenix/Ash still inline**
-> the criterion body at each use-site (the #760/#762 filter-capability
-> mechanism); reifying them is the remaining work. The architecture below
+> `canEmitToExpressionFor()`. A `retrieval` whose `where` is exactly a named
+> criterion now **reifies on Hono** (a module-level Drizzle predicate fn,
+> `<name>Criterion`, #952) and **on Phoenix/Ash** (a `:boolean` Ash
+> **calculation** the read action filters by). These two are code-organisation
+> only — the emitted predicate is byte-identical to the inline form, so
+> conformance parity is unchanged (functional parity predates the reify).
+> Still inline everywhere: **`find` criteria** and the anonymous **`filter`
+> capability** predicates on Hono/Ash (the #760/#762 mechanism) — reifying
+> those is the remaining work. The architecture below
 > reverses the current pipeline's
 > "inline everything" decision for `criterion` (and the anonymous `filter`
 > capability): instead of substituting a criterion's body into an

@@ -2,6 +2,7 @@ import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  CriterionIR,
   EnrichedAggregateIR,
   FindIR,
   RepositoryIR,
@@ -64,7 +65,72 @@ export function buildRetrievalActions(
   const rctx: RenderCtx = { thisName: "record", contextModule, agg };
   return (ctx.retrievals ?? [])
     .filter((r) => r.targetType.kind === "entity" && r.targetType.name === agg.name)
-    .map((r) => renderRetrievalAction(r, rctx, agg));
+    .map((r) => renderRetrievalAction(r, rctx, agg, reifiedCriterionOf(r, ctx)));
+}
+
+// ---------------------------------------------------------------------------
+// Reified criteria (Ash).  A `retrieval` whose `where` is exactly a named
+// `criterion` reifies to an Ash boolean **calculation** — the platform-native
+// analog of .NET's `Criterion<T>` / Hono's predicate fn.  The read action's
+// `filter` references the calculation (`filter expr(named_like(needle: ^arg(:needle)))`)
+// instead of inlining the predicate.  Behaviour-identical to the inline form
+// (the calculation expr is the same predicate), so cross-backend conformance
+// parity is unaffected — only the generated Ash is organised around the
+// criterion as a first-class, reusable, queryable predicate.
+// ---------------------------------------------------------------------------
+
+/** The named criterion a retrieval's `where` reifies to — present in the
+ *  context and named via `criterionRef` — or undefined (the `where` is
+ *  composed/anonymous, so it stays inline). */
+export function reifiedCriterionOf(r: RetrievalIR, ctx: BoundedContextIR): CriterionIR | undefined {
+  const ref = r.criterionRef;
+  if (!ref) return undefined;
+  return (ctx.criteria ?? []).find((c) => c.name === ref.name);
+}
+
+/** Ash calculation atom for a reified criterion (`:named_like`). */
+export function criterionCalcName(name: string): string {
+  return snake(name);
+}
+
+/** The distinct criteria the retrievals targeting `agg` reify to — one Ash
+ *  boolean calculation each, deduped by name (a criterion shared by two
+ *  retrievals yields one calculation). */
+export function reifiedCriteriaFor(ctx: BoundedContextIR, agg: EnrichedAggregateIR): CriterionIR[] {
+  const seen = new Set<string>();
+  const out: CriterionIR[] = [];
+  for (const r of ctx.retrievals ?? []) {
+    if (r.targetType.kind !== "entity" || r.targetType.name !== agg.name) continue;
+    const c = reifiedCriterionOf(r, ctx);
+    if (c && !seen.has(c.name)) {
+      seen.add(c.name);
+      out.push(c);
+    }
+  }
+  return out;
+}
+
+/** `calculate :named_like, :boolean, expr(<body>) do argument … end` — the
+ *  boolean calculation a reified criterion becomes.  The body renders exactly
+ *  as the derived-field calculations do (`this-prop` → `record.<attr>`, the
+ *  established Ash-calc receiver — see `renderCalculations` / the `:display`
+ *  derived), with `filterArgs` so the criterion's params bind as `^arg(:p)`
+ *  (the calc's own arguments). */
+export function renderCriterionCalculation(
+  c: CriterionIR,
+  agg: EnrichedAggregateIR,
+  contextModule: string,
+): string {
+  const ctx: RenderCtx = { thisName: "record", contextModule, agg, filterArgs: true };
+  const body = renderExpr(c.body, ctx);
+  const name = criterionCalcName(c.name);
+  if (c.params.length === 0) {
+    return `    calculate :${name}, :boolean, expr(${body})`;
+  }
+  const args = c.params
+    .map((p) => `      argument :${snake(p.name)}, ${ashArgType(p.type)}`)
+    .join("\n");
+  return `    calculate :${name}, :boolean, expr(${body}) do\n${args}\n    end`;
 }
 
 /** The owned-containment relationships a retrieval eager-loads, as Ash
@@ -86,7 +152,12 @@ function retrievalLoadAtoms(agg: EnrichedAggregateIR): string[] {
   return agg.contains.map((c) => `:${snake(c.name)}`);
 }
 
-function renderRetrievalAction(r: RetrievalIR, ctx: RenderCtx, agg: EnrichedAggregateIR): string {
+function renderRetrievalAction(
+  r: RetrievalIR,
+  ctx: RenderCtx,
+  agg: EnrichedAggregateIR,
+  reified: CriterionIR | undefined,
+): string {
   const lines: string[] = [];
   lines.push(`    read :${snake(r.name)} do`);
   for (const p of r.params) {
@@ -110,13 +181,28 @@ function renderRetrievalAction(r: RetrievalIR, ctx: RenderCtx, agg: EnrichedAggr
   if (loadAtoms.length > 0) {
     lines.push(`      prepare build(load: [${loadAtoms.join(", ")}])`);
   }
-  // `where` → Ash filter.  Render with read-action arg binding (^arg)
-  // and strip the `record.` receiver Ash filters don't use (bare
+  // `where` → Ash filter.  When the `where` reifies to a named criterion,
+  // reference its boolean calculation (`named_like(needle: ^arg(:needle))`)
+  // instead of inlining the predicate; the calc args pair the criterion's
+  // parameter names with the retrieval's call-site argument expressions
+  // (`^arg(:…)` under `filterArgs`).  Otherwise render the inlined `where`
+  // directly — stripping the `record.` receiver Ash filters don't use (bare
   // attribute names — same convention as the #762 base_filter).
-  const rendered = renderExpr(r.where, { ...ctx, thisName: "record", filterArgs: true }).replace(
-    /\brecord\./g,
-    "",
-  );
+  const filterCtx: RenderCtx = { ...ctx, thisName: "record", filterArgs: true };
+  let rendered: string;
+  if (reified) {
+    const callArgs = reified.params.map((p, i) => {
+      const argExpr = r.criterionRef!.args[i]!;
+      const val = renderExpr(argExpr, filterCtx).replace(/\brecord\./g, "");
+      return `${snake(p.name)}: ${val}`;
+    });
+    rendered =
+      callArgs.length === 0
+        ? criterionCalcName(reified.name)
+        : `${criterionCalcName(reified.name)}(${callArgs.join(", ")})`;
+  } else {
+    rendered = renderExpr(r.where, filterCtx).replace(/\brecord\./g, "");
+  }
   lines.push(`      filter expr(${rendered})`);
   lines.push(`    end`);
   return lines.join("\n");

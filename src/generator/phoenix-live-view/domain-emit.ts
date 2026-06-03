@@ -34,6 +34,7 @@ import {
   renderExpr,
   renderTypespec,
 } from "./render-expr.js";
+import { reifiedCriteriaFor, renderCriterionCalculation } from "./repository-emit.js";
 
 /** Per-aggregate dataSource lookup the orchestrator passes in.  When
  *  present, the resource's `postgres do … end` block picks up the
@@ -200,6 +201,13 @@ function renderAggregateResource(
   const policyChecks = renderPolicyChecks(agg, renderCtx, moduleName);
   const checksPrefix = policyChecks ? `${policyChecks}\n\n` : "";
 
+  // Reified-criterion boolean calculations: each named `criterion` a
+  // retrieval targeting this aggregate reifies to becomes a `calculate
+  // :<name>, :boolean, expr(…)` the retrieval read action filters by.
+  const criterionCalcLines = reifiedCriteriaFor(ctx, agg).map((c) =>
+    renderCriterionCalculation(c, agg, ctxModule),
+  );
+
   return `${checksPrefix}defmodule ${moduleName} do
   use Ash.Resource,
     domain: ${ctxModule},
@@ -214,7 +222,7 @@ ${baseFilterLine}
     ${[...persistedFields.map((f) => renderAttribute(f, ctxModule)), ...embeddedAttrLines].join("\n    ")}
     timestamps()
   end
-${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
+${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg, criterionCalcLines)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
 
 ${jasonImpl}`;
 }
@@ -451,6 +459,7 @@ function renderCalculations(
   associations: AssociationIR[],
   ctx: RenderCtx,
   agg: AggregateIR,
+  extraCalcLines: string[] = [],
 ): string {
   const derivedLines: string[] = [];
   for (const d of derived) {
@@ -478,7 +487,11 @@ function renderCalculations(
     const rel = relationshipNameFor(agg, a.fieldName);
     return `    calculate :${fieldName}, {:array, :uuid}, expr(${rel}.id)`;
   });
-  const lines = [...derivedLines, ...assocLines];
+  // Reified-criterion boolean calculations (one per named criterion a
+  // retrieval reifies to — see reifiedCriteriaFor / renderCriterionCalculation
+  // in repository-emit).  Joins the derived + association calculations in the
+  // single `calculations do … end` block.
+  const lines = [...derivedLines, ...assocLines, ...extraCalcLines];
   if (lines.length === 0) return "";
   return `\n  calculations do\n${lines.join("\n")}\n  end\n`;
 }
