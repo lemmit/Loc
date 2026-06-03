@@ -164,6 +164,22 @@ function checkWorkflow(wf: Workflow, accept: ValidationAcceptor): void {
     }
   }
   checkWorkflowEventSourcedDiscipline(wf, accept);
+
+  // Transactional legality (workflow-and-applier.md A2-S5e): `transactional`
+  // is one DB transaction, so it is incompatible with continuation handlers —
+  // an `on(...)` reactor or a `handle` command runs in its own later
+  // transaction.  A multi-handler workflow is structurally multi-transaction.
+  if (wf.transactional) {
+    const continuations = wf.members.filter((m) => isOnDecl(m) || isHandleDecl(m));
+    for (const c of continuations) {
+      accept(
+        "error",
+        `Workflow '${wf.name}' is 'transactional' but declares a continuation handler. ` +
+          `A reactor / handle runs in its own transaction — drop 'transactional', or remove the continuation.`,
+        { node: c, code: "loom.transactional-with-continuations" },
+      );
+    }
+  }
 }
 
 // Event-sourcing discipline for workflows (workflow-and-applier.md A2-S5b) —
