@@ -18,8 +18,8 @@
 // create action) and `@handle` cross-row id refs.
 
 import type { BoundedContextIR, ExprIR } from "../../ir/types/loom-ir.js";
-import { renderSeedRowInsert } from "../../system/sql-pg.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { renderSeedRowInsert } from "../sql-pg.js";
 import { renderExpr } from "./render-expr.js";
 
 const EMPTY_STUB = "# Auto-generated — empty seeds stub.\n";

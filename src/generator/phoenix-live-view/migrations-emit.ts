@@ -23,7 +23,7 @@ import { snake, upperFirst } from "../../util/naming.js";
 //     `<MigrationsIR.version>_<snake(MigrationsIR.name)>.exs`.
 //
 // Stays in Ecto DSL (not raw SQL) so AshPostgres + ecto.migrate keep
-// working unchanged; the shared `src/system/sql-pg.ts` helper is for
+// working unchanged; the shared `src/generator/sql-pg.ts` helper is for
 // TS/.NET Postgres backends only.
 // ---------------------------------------------------------------------------
 
