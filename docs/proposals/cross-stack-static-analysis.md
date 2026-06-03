@@ -178,6 +178,142 @@ find-shape inspection the .NET nullable-return logic uses. Every
 emitter site that writes a `def` gets a paired `@spec` line — small,
 local, mechanical.
 
+### Ash-specific specing discipline (the layered model)
+
+Once the generator starts emitting `@spec`s into an Ash backend, the
+trick is to spec **the right layer** — your application's own typed
+boundary — and treat Ash internals as opaque. Concretely:
+
+```
+[ Loom-emitted service / wrapper layer  ]  ← spec everything here
+            ↓
+[ Ash domain code interface (auto)      ]  ← spec inputs/outputs only
+            ↓
+[ Ash actions / changesets / queries    ]  ← treat as opaque
+            ↓
+[ Ash internals                         ]  ← ignore entirely
+```
+
+The five disciplines that fall out of this — to be encoded in the
+generator as it grows beyond the Phase-3 surface that **PR #902**
+already covers (event modules, value-object modules, polymorphic TPC
+readers, aggregate helpers, `def inspect`):
+
+1. **Emit a shared `<App>.Types` module per app.** One module per
+   generated Phoenix project carrying the domain type vocabulary:
+
+   ```elixir
+   defmodule MyApp.Types do
+     @type id :: Ecto.UUID.t()
+     @type money_cents :: pos_integer()
+     @type timestamp :: DateTime.t()
+     @type result(t) :: {:ok, t} | {:error, Ash.Error.t()}
+     @type result_list(t) :: {:ok, [t]} | {:error, Ash.Error.t()}
+   end
+   ```
+
+   `renderTypespec` then references `<App>.Types.id()` for ID fields
+   (not bare `String.t()`) and the surrounding emitters use
+   `Types.result(T.t())` / `Types.result_list(T.t())` for the
+   action-returning wrappers below. One module, ~20 LOC, defined once;
+   downstream emission gets the abbreviation for free.
+
+2. **Use `ResourceName.t()` freely.** Ash 3.x emits a `@type t` for
+   every `Ash.Resource` module that mirrors the declared
+   `attributes do ... end` block. Reference `MyApp.Sales.Order.t()`
+   everywhere you need the aggregate type; don't redefine it in our
+   own emissions for aggregates (we still emit our own `@type t` on
+   **non-resource** modules: events, value objects that aren't
+   embedded resources, the `Types` module itself).
+
+3. **Spec the code-interface wrappers, not Ash itself.** Ash generates
+   the actual `MyApp.Accounts.get_user/1` function from a
+   `code_interface do define :get_user end` block — its spec is
+   auto-emitted. What's worth speccing is **our** wrappers around it,
+   if/when we emit a service-layer module per context. Spec shape:
+
+   ```elixir
+   @spec fetch_user(Types.id()) :: Types.result(User.t())
+   @spec fetch_user!(Types.id()) :: User.t()  # bang returns bare type
+   ```
+
+   Loom doesn't currently emit a service-layer wrapper for Ash code-
+   interface calls; if and when it does (per the vanilla-Ecto pivot
+   below, or as a deliberate service-boundary slice), the wrapper is
+   the natural home for the typed contract — not the Ash action
+   itself.
+
+4. **Skip specs on changeset / query private functions.**
+   `Ash.Changeset.t()` and `Ash.Query.t()` carry no parameterisation
+   that Dialyzer can narrow — they're generic. A `@spec` on a `defp
+   build_creation_changeset(params) :: Ash.Changeset.t()` adds zero
+   signal. The current `renderHelperFunctions` in `domain-emit.ts`
+   already only fires on declared `FunctionIR`s (derived
+   calculations, validation helpers) — none of which build
+   changesets — so the current emission is correctly aligned. Keep
+   it that way as the surface grows; if a future emitter starts
+   writing changeset-pipeline `defp`s, *don't* spec them.
+
+5. **Calculations / aggregates / relationships are not in the base
+   struct typespec.** Ash loads these dynamically and they're absent
+   from `@type t` on the resource. Our emission must respect this:
+   the `@type t` we write on event / VO modules already only
+   includes declared attribute fields, not relationships — keep that
+   discipline as the metamodel grows. If a future emitter needs a
+   "user with posts loaded" shape, emit a *distinct* type alias
+   (`@type user_with_posts :: %User{posts: [Post.t()]}`), not a
+   modification of `User.t()`.
+
+### Ash error mapping at service boundaries
+
+A sibling discipline for the future service-layer wrapper work:
+emitted wrappers should map `Ash.Error.t()` to a domain error type
+the application-level callers can pattern-match on without depending
+on Ash error-struct internals. Sketch:
+
+```elixir
+@type service_error :: :not_found | :unauthorized | :validation_failed | {:ash_error, Ash.Error.t()}
+
+@spec fetch_for_current_user(Types.id(), User.t()) ::
+  {:ok, Post.t()} | {:error, service_error()}
+```
+
+Deferred until the wrapper layer exists; tracked here so the design
+direction is captured.
+
+### `.dialyzer_ignore.exs` template (paired with Tier 4)
+
+When Tier 4 (Dialyzer) lands, the generator must emit a
+`.dialyzer_ignore.exs` template at project root that filters
+unfixable Ash-internal noise:
+
+```elixir
+[
+  {~r/lib\/ash\/.*/, :_},
+  {~r/lib\/ash_postgres\/.*/, :_},
+  {~r/lib\/ash_phoenix\/.*/, :_},
+  {"lib/my_app_web/router.ex", :_},  # Phoenix router is macro-heavy too
+]
+```
+
+Without it, Dialyzer's first run is unreadable. With it, the noise
+budget is bounded and our own emitted code stands out cleanly. This
+file is **part of the Tier 4 deliverable**, not a Tier 3 follow-up —
+emitting it without Dialyzer landing is no-op (the file is consumed
+only by `mix dialyzer`).
+
+### What PR #902 already shipped vs. what's still ahead
+
+- ✅ `@type t :: %__MODULE__{...}` on event modules (field-accurate, optionals → `| nil`).
+- ✅ `@type t :: %__MODULE__{...}` on value-object modules.
+- ✅ `@spec` on polymorphic TPC readers with union return types.
+- ✅ `@spec` on aggregate `defp` helpers.
+- ✅ `@spec inspect(t()) :: String.t()` on the derived `def inspect(record)`.
+- ⏳ **`MyApp.Types` module + `result(t)` vocabulary** — recommended next slice; cheap, mechanical, no Ash interaction.
+- ⏳ Service-layer wrapper emission (and its spec'd surface) — deferred behind the architectural decision to emit such a layer.
+- ⏳ `.dialyzer_ignore.exs` template — paired with Tier 4 landing.
+- ⏳ Empirical Dialyzer first-run audit against the existing Ash output (per the Ash v3 note above).
+
 ### The vanilla-Ecto pivot changes the Dialyzer calculus
 
 The deferral case against Dialyzer is almost entirely about Ash 3.x's
