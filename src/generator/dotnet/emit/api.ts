@@ -280,7 +280,9 @@ export function renderController(
             // shared DomainExceptionFilter stays untouched.  Dapper v1 emits no
             // FK constraints, so it skips the catch (and the EF reference).
             ...(shape.usingDapper
-              ? [`        await _mediator.Send(new Destroy${agg.name}Command(new ${agg.name}Id(id)));`]
+              ? [
+                  `        await _mediator.Send(new Destroy${agg.name}Command(new ${agg.name}Id(id)));`,
+                ]
               : [
                   "        try",
                   "        {",
