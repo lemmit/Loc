@@ -107,3 +107,21 @@ describe("ReferencesProvider — shadowing & callables", () => {
     });
   });
 });
+
+describe("ReferencesProvider — bare function calls", () => {
+  // The bare-call fallback in `nameRefDecl` (entity-member lookup) now resolves
+  // `tax()` to the function, so its references include the bare call site.
+  it("finds a bare function-call site from the declaration", async () => {
+    await expectRefs({
+      text: `
+        context Sales {
+          aggregate Order {
+            rate: int
+            function <|><|tax|>(): int = rate
+            derived total: int = <|tax|>()
+          }
+        }`,
+      includeDeclaration: true,
+    });
+  });
+});

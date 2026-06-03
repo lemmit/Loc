@@ -186,14 +186,13 @@ describe("RenameProvider — cross-reference categories", () => {
     expect(result).not.toMatch(/\bMoney\b/);
   });
 
-  // ---- KNOWN GAPS (found while writing this matrix) ------------------------
-  // Both are the operation-rename bug's siblings: the declaration renames but a
-  // use-site is left stale.  The use-sites are NameRefs resolved by Loom's
-  // custom scope/type-system but NOT tracked in the cross-reference index the
-  // default rename uses, nor reachable via the member-access path
-  // (`nameRefDecl`/env.resolve).  Fixing needs the rename machinery to resolve
-  // these reference kinds — tracked in agent-tools-and-mcp.md §4c.  Un-skip when
-  // fixed.
+  // ---- KNOWN GAP -----------------------------------------------------------
+  // Enum-value rename: the declaration renames but `state := Open` / `X.Open`
+  // use-sites are NameRefs resolved by a custom enum scope — not in the
+  // cross-reference index, not via `env.resolve`, and not an entity member (so
+  // the bare-member fallback in `nameRefDecl` doesn't reach them either).
+  // Tracked in agent-tools-and-mcp.md §4c.  Un-skip when fixed.
+  // (The bare-function-call sibling of this gap is now fixed — see above.)
   it.skip("KNOWN GAP: renames an enum value and its use sites", async () => {
     const result = await renameAt(
       `context Sales {
@@ -209,7 +208,7 @@ describe("RenameProvider — cross-reference categories", () => {
     expect(result).toContain("state := Active"); // currently NOT rewritten
   });
 
-  it.skip("KNOWN GAP: renames a function and its bare call site", async () => {
+  it("renames a function and its bare call site", async () => {
     const result = await renameAt(
       `context Sales {
   aggregate Order {
@@ -221,7 +220,8 @@ describe("RenameProvider — cross-reference categories", () => {
       "levy",
     );
     expect(result).toContain("function levy()");
-    expect(result).toContain("= levy()"); // currently NOT rewritten (this.levy() would be)
+    expect(result).toContain("= levy()"); // bare call site now follows the declaration
+    expect(result).not.toMatch(/\btax\b/);
   });
 });
 
