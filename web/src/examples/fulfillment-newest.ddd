@@ -1,0 +1,141 @@
+// "Newest features" tour — a multi-file project that imports the shared
+// kernel (root-level Money VO + Priority enum) and exercises the language
+// surface added most recently, none of which the older playground
+// examples touch:
+//
+//   • channel + channelSource  — the event-transport contract (carries
+//     a context's events) and its physical binding to a storage.
+//   • payload family            — command / query / response / error,
+//     the structured-data carriers crossing the API boundary.
+//   • criterion                 — a named, reusable boolean predicate
+//     (the Specification Pattern), inlined wherever a where-clause fits.
+//   • retrieval + Repo.run      — a named query bundle (where + sort),
+//     invoked as `Repo.run(R(args), page?)`.
+//   • workflow `for … in`       — iterate a retrieval's result, calling
+//     an operation per row (mutations persist per-iteration).
+//   • seed                      — declarative first-boot datasets, each
+//     row lowered through the aggregate's canonical create.
+//
+// To browse the imported kernel: open shared/kernel.ddd in the tabs above.
+
+import "./shared/kernel.ddd"
+
+system FulfillmentSystem {
+
+  theme {
+    primary: "#0ea5e9"
+    neutral: "#475569"
+    radius: "md"
+  }
+
+  subdomain Fulfillment {
+    context Orders {
+
+      enum OrderStatus { Pending, Picking, Shipped, Cancelled }
+
+      // Events carried by the channel below.
+      event OrderPlaced    { order: Order id, priority: Priority, at: datetime }
+      event OrderEscalated { order: Order id, at: datetime }
+
+      // Payload family (payload-transport-layer.md): structured carriers
+      // that cross the boundary.  The four sugar keywords carry intent
+      // (command / query / response / error) over the same record shape.
+      command PlaceOrder   { reference: string, priority: Priority }
+      query   FindByStatus { status: OrderStatus }
+      response OrderSummary { reference: string, status: OrderStatus, totalAmount: decimal }
+      error   OrderRejected { reference: string, reason: string }
+
+      aggregate Order with crudish {
+        reference: string
+        status: OrderStatus
+        priority: Priority         // the imported root-level enum
+        total: Money               // the imported root-level value object
+        placedAt: datetime
+
+        invariant reference.length > 0
+        derived display: string = reference
+
+        operation escalate() {
+          precondition status == Pending
+          priority := High
+          emit OrderEscalated { order: id, at: now() }
+        }
+
+        operation ship() {
+          precondition status == Pending || status == Picking
+          status := Shipped
+        }
+      }
+
+      // Criterion — a named predicate reused below by the retrieval and
+      // by a repository find.  `of Order` binds bare field names to the
+      // candidate, exactly like an invariant body.
+      criterion AwaitingPick of Order = status == Pending
+      criterion AtPriority(p: Priority) of Order = priority == p
+
+      // Retrieval — a named query bundle (composed predicate + sort).
+      // Pagination is supplied at the call site, not here.
+      retrieval PendingByPriority(p: Priority) of Order {
+        where: AwaitingPick && AtPriority(p)
+        sort:  [placedAt asc]
+      }
+
+      repository Orders for Order {
+        // The criterion is inlined here — same lowered SQL as a
+        // hand-written `status == Pending` filter.
+        find pending(): Order[] where AwaitingPick
+      }
+
+      // Workflow consuming the retrieval: `Repo.run` returns the page,
+      // the `for … in` loop escalates each row (the per-iteration save
+      // persists the mutation).
+      workflow escalateBacklog(p: Priority) {
+        let batch = Orders.run(PendingByPriority(p), page: { offset: 0, limit: 50 })
+        for o in batch {
+          o.escalate()
+        }
+      }
+
+      // Channel — the publisher-side transport contract for this
+      // context's events.  delivery × retention express a durable,
+      // partitioned stream; `key` is the ordering/partition field.
+      // `channelSource` (system scope, below) binds it to a storage.
+      channel OrderEvents {
+        carries: OrderPlaced, OrderEscalated
+        delivery: broadcast
+        retention: log
+        key: order
+      }
+
+      // Declarative seed data — lowered through Order.create, so
+      // invariants hold.  Two named datasets (default + demo).
+      seed default {
+        Order { reference: "ORD-1001", status: Pending, priority: High,
+                total: { amount: 49.90, currency: "USD" },
+                placedAt: "2026-01-02T09:00:00Z" }
+        Order { reference: "ORD-1002", status: Picking, priority: Normal,
+                total: { amount: 12.00, currency: "USD" },
+                placedAt: "2026-01-02T10:30:00Z" }
+      }
+      seed demo {
+        Order { reference: "ORD-2001", status: Pending, priority: Low,
+                total: { amount: 8.50, currency: "USD" },
+                placedAt: "2026-01-03T08:15:00Z" }
+      }
+    }
+  }
+
+  ui WebApp with scaffold(subdomains: [Fulfillment]) {
+  }
+
+  storage primary { type: postgres }
+  storage bus     { type: kafka }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  channelSource orderBus { for: OrderEvents, use: bus }
+
+  deployable api {
+    platform: hono, contexts: [Orders],
+    dataSources: [ordersState], port: 3000
+  }
+  deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
+}

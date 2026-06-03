@@ -1,10 +1,19 @@
 # Proposal — `ExprTarget`: unify the per-backend expression renderers
 
-> Status: **PROPOSED (sequenced onto A4).** This is a design sketch, not
-> a scheduled extraction. It is deliberately pinned to ride the
-> exception-less **A4** PR (`exception-less.md`) rather than land
-> standalone — see §6. Pinned by §5.1 of
-> [`../plans/type-system-feature-migration.md`](../plans/type-system-feature-migration.md).
+> Status: **SHIPPED.** The `ExprTarget` contract + shared
+> `renderExprWith(e, target, ctx)` dispatcher landed in
+> `src/generator/_expr/target.ts`; all three backends
+> (`typescript`/`dotnet`/`phoenix-live-view` `render-expr.ts`) are now
+> leaf-only target tables delegating to it. Brought **forward of A4**
+> rather than ridden on it (the original sequencing below): extracting
+> the contract first means A4 authors its new `?`-propagation / or-union
+> arms once behind `ExprTarget` instead of re-threading three
+> dispatchers. Byte-identical-output gated — verified by regenerating
+> every `examples/*.ddd` across all backends (1221 domain-logic files,
+> sha256 before == after) plus the full fast suite. The original
+> proposal text (pinned to ride A4) is retained below for context; §5.1
+> of [`../plans/type-system-feature-migration.md`](../plans/type-system-feature-migration.md)
+> no longer gates it.
 
 ## 1. Problem
 

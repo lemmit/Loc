@@ -1,0 +1,14 @@
+// Shared kernel — root-level declarations visible across every file in
+// the workspace (see the multi-file import-graph walk).  A root-level
+// `valueobject` / `enum` / `component` is an ambient shared type: any
+// context in any imported file may reference it by bare name without
+// restating the body.  `fulfillment-newest.ddd` imports this file.
+
+enum Priority { Low, Normal, High }
+
+valueobject Money {
+  amount: decimal
+  currency: string
+  invariant amount >= 0
+  invariant currency.length == 3
+}

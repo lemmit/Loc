@@ -74,5 +74,40 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 300_000);
+
+    // D-REALIZATION-AXES Phase 5b: `directoryLayout: byFeature` is a SYSTEM-MODE
+    // selection (it lives on a deployable), so `generate ts` above never sees it.
+    // This case generates the SYSTEM and type-checks the node deployable's
+    // project, proving the byFeature relocation + relative-import rewrite produce
+    // a COMPILING project — the gap that let the first byFeature attempt ship
+    // broken.
+    it("system `directoryLayout: byFeature` (node) — relocated project type-checks + bundles", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-bf-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/byfeature.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        // The node deployable is named `api` → its project lands under `api/`.
+        const proj = path.join(outDir, "api");
+        // Sanity: the layout actually relocated files under features/.
+        expect(fs.existsSync(path.join(proj, "features", "order", "order.ts"))).toBe(true);
+        expect(fs.existsSync(path.join(proj, "domain", "order.ts"))).toBe(false);
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        execSync(`npm run build`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        expect(fs.existsSync(path.join(proj, "dist", "index.js"))).toBe(true);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
   },
 );
