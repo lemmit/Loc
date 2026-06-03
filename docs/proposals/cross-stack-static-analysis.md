@@ -1,7 +1,15 @@
 # Cross-stack lint, static analysis, and type-metadata emission
 
-> Status: **proposal**. Nothing here is implemented. Extends the existing
-> `LOOM_BIOME=1` gate to the three other emission targets (.NET, Phoenix,
+> Status: **PARTIAL.** The Phoenix arm has largely landed: the generator now
+> emits Elixir `@spec`s on event/VO modules + polymorphic readers (#902), on
+> `view` module `def run/1` (#906), on `workflow` `def run/2` (#911), plus a
+> shared `<App>.Types` module threaded through every `@spec`/`@type` site
+> (#904); Dialyzer is wired onto CI behind `LOOM_PHOENIX_DIALYZER=1` (Dialyxir
+> dep + `.dialyzer_ignore.exs` template + `phoenix-dialyzer` workflow, #907/#918);
+> and opt-in format gates `LOOM_DOTNET_FORMAT` / `LOOM_PHOENIX_FORMAT` exist
+> (#903). **Remaining:** enabling C# nullable-reference annotations (the .NET
+> type-metadata arm), an analyzer gate for .NET, and repo-content lint. Extends
+> the existing `LOOM_BIOME=1` gate to the other emission targets (.NET, Phoenix,
 > repo content) and frames the deeper move: the generator should *emit
 > type metadata* — nullable annotations in C#, `@spec`s in Elixir — so
 > that whichever analyzer runs downstream has more to chew on.
