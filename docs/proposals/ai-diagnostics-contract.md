@@ -10,10 +10,12 @@
 > `test/cli/json-report.test.ts`. **Decision:** the contract names
 > `ddd validate --json`; the shipped surface is **`ddd parse --json`** (the
 > `parse` verb, extended under `--json` to also run the IR phases) — there is no
-> separate `validate` verb. **Deferred to follow-up slices:** `fixHint` patches
-> (need the model-patch applier), `related[]`, IR-diagnostic *ranges* (need CST
-> provenance through lowering), the per-code IR backfill across `validate.ts`
-> (IR diags currently carry the `loom.ir-validate` fallback), and
+> separate `validate` verb. **Slice 2 shipped:** every IR diagnostic in
+> `src/ir/validate/validate.ts` now carries a stable `loom.*` code (the
+> `loom.ir-validate` fallback is now only a defensive net), gated by
+> `test/ir/diagnostic-codes-completeness.test.ts`. **Deferred to follow-up
+> slices:** `fixHint` patches (need the model-patch applier), `related[]`,
+> IR-diagnostic *ranges* (need CST provenance through lowering), and
 > `generate --json` (§4).
 > **Role:** Defines the machine-readable interface the AI authoring loop
 > consumes. The loop in [`ai-authoring-loop.md`](./ai-authoring-loop.md) and
