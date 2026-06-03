@@ -166,15 +166,29 @@ call-site cursor (`a.b := …` / `this.op(...)`) finds no target because
 |---|---|---|---|
 | `ddd-semantic-tokens.ts` | 1 → 2 | operations, repositories, events, type-refs, parameters, member-calls, var refs | **covered** (added type-ref / function / parameter / variable / method-decl / member-method / event / repository cases) |
 | `ddd-node-kind.ts` | 0 → 1 | `Deployable → Constructor` is semantically wrong (a deployable is a module) | **fixed + first tests** (`Deployable → Module`) |
-| `ddd-rename.ts` / `member-refs.ts` | 5 | cross-ref tested only for Aggregate; no `prepareRename`, shadowing, or multi-file | open (operation rename shipped, S1) |
-| `ddd-references.ts` | 3 | derived / function / assignment / shadowing / multi-file unverified | open |
+| `ddd-rename.ts` / `member-refs.ts` | 5 → 8 (+2 skip) | — | **cross-ref matrix covered** (enum-decl / event / value-object-by-name pass) + **3 gaps found** (below) |
+| `ddd-references.ts` | 3 | derived / function / assignment / shadowing / multi-file unverified | open (likely mirrors the rename gaps — same `collectMemberUsages` machinery) |
 
-Still to add: rename per cross-ref category (module / enum + values / event /
-repository / deployable / value-object-by-name / function-by-bare-call);
-multi-file rename; `prepareRename` range; shadowing (property vs nested lambda
-param — exercises the dead-tested `localShadows` walk); references parity; a
+> **Rename gaps found writing the cross-ref matrix** (all the operation-rename
+> bug's siblings — the declaration renames but a use-site is left stale; the
+> use-sites are NameRefs / soft-keyword tokens resolved by Loom's custom
+> scope/type-system but **not in the cross-reference index** the default rename
+> uses, nor reachable via `nameRefDecl`/`env.resolve`). Captured as `it.skip`
+> regression tripwires in `lsp-rename.test.ts`:
+> - **enum value** — renaming `Open` doesn't rewrite `state := Open` / `X.Open`.
+> - **bare function call** — renaming `tax` rewrites `this.tax()` but not bare
+>   `tax()` (the bare head resolves for go-to-definition but isn't index-tracked
+>   for rename).
+> - **soft-keyword field names** — a field named with a `LooseName` keyword
+>   (`state: Status`) blocks the type-ref `Status` from being renamed (works for
+>   `kind: Status`).
+>   Fixing needs the rename machinery to resolve these reference kinds (an index
+>   or member-path extension) — a dedicated slice.
+
+Still to add: multi-file rename; `prepareRename` range; shadowing (property vs
+nested lambda param — the dead-tested `localShadows` walk); references parity; a
 hover failure-path test (render unresolved refs as `«unresolved»`, not a silent
-`?`).
+`?`); deployable / module rename (need a system-scoped fixture).
 
 > **Note (LValue blind spot, found while testing).** A statement-position
 > member call / assignment target (`this.op(...)`, `a.b := …`) parses as an

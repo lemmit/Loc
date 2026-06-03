@@ -139,3 +139,87 @@ describe("RenameProvider — operations", () => {
     expect(result).not.toMatch(/\bdebit\b/);
   });
 });
+
+describe("RenameProvider — cross-reference categories", () => {
+  // These categories reference the declaration through Langium cross-references
+  // (type refs / emit / etc.), which the index-driven default rename handles.
+  it("renames an enum declaration and its type-ref usage", async () => {
+    const result = await renameAt(
+      `context Sales {
+  enum <|>Status { Open, Closed }
+  aggregate Order { kind: Status }
+}`,
+      "State",
+    );
+    expect(result).toContain("enum State {");
+    expect(result).toContain("kind: State");
+    expect(result).not.toMatch(/\bStatus\b/);
+  });
+
+  it("renames an event and its emit usage", async () => {
+    const result = await renameAt(
+      `context Sales {
+  event <|>Placed { at: int }
+  aggregate Order {
+    total: int
+    operation place() { emit Placed { at: 1 } }
+  }
+}`,
+      "Created",
+    );
+    expect(result).toContain("event Created {");
+    expect(result).toContain("emit Created");
+    expect(result).not.toMatch(/\bPlaced\b/);
+  });
+
+  it("renames a value object referenced by name in a field type", async () => {
+    const result = await renameAt(
+      `context Sales {
+  valueobject <|>Money { amount: int }
+  aggregate Order { price: Money }
+}`,
+      "Cash",
+    );
+    expect(result).toContain("valueobject Cash {");
+    expect(result).toContain("price: Cash");
+    expect(result).not.toMatch(/\bMoney\b/);
+  });
+
+  // ---- KNOWN GAPS (found while writing this matrix) ------------------------
+  // Both are the operation-rename bug's siblings: the declaration renames but a
+  // use-site is left stale.  The use-sites are NameRefs resolved by Loom's
+  // custom scope/type-system but NOT tracked in the cross-reference index the
+  // default rename uses, nor reachable via the member-access path
+  // (`nameRefDecl`/env.resolve).  Fixing needs the rename machinery to resolve
+  // these reference kinds — tracked in agent-tools-and-mcp.md §4c.  Un-skip when
+  // fixed.
+  it.skip("KNOWN GAP: renames an enum value and its use sites", async () => {
+    const result = await renameAt(
+      `context Sales {
+  enum Status { <|>Open, Closed }
+  aggregate Order {
+    state: Status
+    operation close() { state := Open }
+  }
+}`,
+      "Active",
+    );
+    expect(result).toContain("{ Active, Closed }");
+    expect(result).toContain("state := Active"); // currently NOT rewritten
+  });
+
+  it.skip("KNOWN GAP: renames a function and its bare call site", async () => {
+    const result = await renameAt(
+      `context Sales {
+  aggregate Order {
+    rate: int
+    function <|>tax(): int = rate
+    derived total: int = tax()
+  }
+}`,
+      "levy",
+    );
+    expect(result).toContain("function levy()");
+    expect(result).toContain("= levy()"); // currently NOT rewritten (this.levy() would be)
+  });
+});
