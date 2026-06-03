@@ -19,6 +19,9 @@ import {
   findQueryMethod,
   lowerToDrizzle,
   nonPrincipalContextFilters,
+  reifiableCriterion,
+  renderCriterionFn,
+  repoTableName,
   runMethod,
 } from "./repository-find-builder.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
@@ -86,6 +89,22 @@ export function buildRepositoryFile(
     if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
     if (r.sort.length > 0) for (const s of r.sort) drizzleOps.add(s.direction);
   }
+  // Reified criteria (one module-level predicate fn per named criterion a
+  // retrieval `where` reifies to — the functional analog of .NET's
+  // `Criterion<T>`).  Deduped by name; the fn body lowers the criterion's own
+  // predicate against the candidate table, so its Drizzle ops join the import
+  // narrowing walk.  runMethod calls these instead of inlining (parity-clean).
+  const retrievalTable = repoTableName(agg, ctx);
+  const criterionFnByName = new Map<string, string>();
+  for (const r of aggRetrievals) {
+    const c = reifiableCriterion(r.criterionRef, ctx, retrievalTable);
+    if (c && !criterionFnByName.has(c.name)) {
+      criterionFnByName.set(c.name, renderCriterionFn(c, retrievalTable, ctx));
+      const lowered = lowerToDrizzle(c.body, retrievalTable, ctx);
+      if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
+    }
+  }
+  const criterionFns = [...criterionFnByName.values()];
   // The single AND-able capability-filter predicate for this aggregate's
   // table (null when it has no non-principal capability filter).  Threaded
   // into each root-table read site below; child/containment reads
@@ -162,7 +181,9 @@ export function buildRepositoryFile(
 
   // Strip string contents so symbols mentioned only inside error messages
   // or labels don't register as references for the import narrowing below.
-  const bodyScan = bodyStr
+  // The criterion fns sit outside the class but their bodies use the same
+  // Drizzle ops, so scan them too.
+  const bodyScan = `${criterionFns.join("\n")}\n${bodyStr}`
     .replace(/"(?:\\.|[^"\\])*"/g, '""')
     .replace(/'(?:\\.|[^'\\])*'/g, "''")
     .replace(/`(?:\\.|[^`\\])*`/g, "``");
@@ -208,6 +229,10 @@ export function buildRepositoryFile(
     `type Db = NodePgDatabase<typeof schema>;`,
     usesTx && `type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];`,
     "",
+    // Reified-criterion predicate functions (module-level, ahead of the class
+    // that calls them).  Empty when no retrieval reifies a named criterion.
+    criterionFns.length > 0 && criterionFns.join("\n"),
+    criterionFns.length > 0 && "",
     bodyStr,
     "",
   );
