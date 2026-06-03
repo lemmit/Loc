@@ -18,9 +18,11 @@ import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   BoundedContextIR,
   ContainmentIR,
+  CriterionIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EntityPartIR,
+  ExprIR,
   FindIR,
   RetrievalIR,
   TypeIR,
@@ -53,8 +55,56 @@ export {
 
 /** The Drizzle table const a repository reads from for `agg` — the shared
  *  TPH base table for a TPH concrete, otherwise the aggregate's own table. */
-function repoTableName(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string {
+export function repoTableName(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string {
   return lowerFirst(plural(tableOwnerName(agg, ctx.aggregates)));
+}
+
+// ---------------------------------------------------------------------------
+// Reified criteria (Hono).  A `retrieval`/`find` whose `where` is exactly a
+// named criterion consumes a module-level predicate function — the functional
+// analog of .NET's `Criterion<T>`.  Provenance is `criterionRef` (set by
+// lowering); the function body is the criterion's own predicate lowered to
+// Drizzle.  Behaviour-identical to the inline form (so conformance parity
+// holds) — composition is just function calls.
+// ---------------------------------------------------------------------------
+
+/** Module-level fn name for a reified criterion (`inRegionCriterion`). */
+export function criterionFnName(name: string): string {
+  return `${lowerFirst(name)}Criterion`;
+}
+
+/** The criterion a use-site `criterionRef` reifies to — present in the context
+ *  and with a Drizzle-lowerable body — or `undefined` (fall back to inline). */
+export function reifiableCriterion(
+  ref: { name: string; args: ExprIR[] } | undefined,
+  ctx: EnrichedBoundedContextIR,
+  tableName: string,
+): CriterionIR | undefined {
+  if (!ref) return undefined;
+  const c = ctx.criteria.find((x) => x.name === ref.name);
+  if (!c) return undefined;
+  return lowerToDrizzle(c.body, tableName, ctx) ? c : undefined;
+}
+
+/** `const <name>Criterion = (params) => <drizzle predicate>;` — the criterion's
+ *  own body (its parameters in scope), lowered against the candidate table. */
+export function renderCriterionFn(
+  c: CriterionIR,
+  tableName: string,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const lowered = lowerToDrizzle(c.body, tableName, ctx)!;
+  const params = c.params.map((p) => `${p.name}: ${tsTypeForReturn(p.type)}`).join(", ");
+  return `const ${criterionFnName(c.name)} = (${params}) => ${lowered.expr};`;
+}
+
+/** Render a criterion-call argument (the value passed at the use-site) — a
+ *  parameter/let reference renders as its name, a literal as its value. */
+export function renderCriterionArg(e: ExprIR): string {
+  if (e.kind === "ref") return e.name;
+  if (e.kind === "literal") return e.lit === "string" ? JSON.stringify(e.value) : e.value;
+  // Criterion call args are values (param refs / literals) in v1.
+  return "undefined as never";
 }
 
 /** A `kind` discriminator predicate scoping reads to this concrete's rows in
@@ -424,7 +474,16 @@ export function runMethod(
         "Please file a bug.",
     );
   }
-  const whereClause = `.where(${withKind(lowered.expr, kindPred)})`;
+  // When the `where` is exactly a named criterion, call its reified predicate
+  // function instead of inlining (behaviour-identical; the function is emitted
+  // module-level by repository-builder).
+  const reified = reifiableCriterion(retrieval.criterionRef, ctx, tableName);
+  const whereInner = reified
+    ? `${criterionFnName(reified.name)}(${(retrieval.criterionRef?.args ?? [])
+        .map(renderCriterionArg)
+        .join(", ")})`
+    : lowered.expr;
+  const whereClause = `.where(${withKind(whereInner, kindPred)})`;
 
   // `sort` → `.orderBy(asc(col), desc(col), …)`.  Only the first path
   // segment is used in v1 (a direct column); nested / collection sort
