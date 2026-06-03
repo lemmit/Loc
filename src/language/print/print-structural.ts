@@ -158,6 +158,12 @@ export function printStructural(node: AstNode): string {
       return printAggregate(node as Aggregate);
     case "EventDecl":
       return printEventDecl(node as EventDecl);
+    case "PayloadDecl":
+      return printPayloadDecl(node as import("../generated/ast.js").PayloadDecl);
+    case "Channel":
+      return printChannel(node as import("../generated/ast.js").Channel);
+    case "ChannelSource":
+      return printChannelSource(node as import("../generated/ast.js").ChannelSource);
     case "Repository":
       return printRepository(node as Repository);
     case "Workflow":
@@ -341,7 +347,23 @@ function printApi(node: Api): string {
 }
 
 function printDeployable(node: Deployable): string {
-  const items: string[] = [`platform: ${enumOrString(node.platform, PLATFORM_KEYWORDS)}`];
+  // The platform realization-axes config block — `platform: dotnet {
+  // foundation: ash, directoryLayout: byFeature, … }`.  Emitted inline
+  // after the platform value when any axis is set; bare `platform: x`
+  // otherwise.  Order is canonical (re-parse compares the AST, not text).
+  const axes: string[] = [];
+  if (node.foundation) axes.push(`foundation: ${node.foundation}`);
+  if (node.application) axes.push(`application: ${node.application}`);
+  if (node.persistence) axes.push(`persistence: ${node.persistence}`);
+  if (node.directoryLayout) axes.push(`directoryLayout: ${node.directoryLayout}`);
+  if (node.transport) axes.push(`transport: ${node.transport}`);
+  if (node.runtime) axes.push(`runtime: ${node.runtime}`);
+  const platformVal = enumOrString(node.platform, PLATFORM_KEYWORDS);
+  const items: string[] = [
+    axes.length > 0
+      ? `platform: ${platformVal} { ${axes.join(", ")} }`
+      : `platform: ${platformVal}`,
+  ];
   if (node.contextRefs.length > 0) {
     items.push(`contexts: [${node.contextRefs.map((r) => r.$refText).join(", ")}]`);
   }
@@ -529,13 +551,18 @@ function printValueObject(node: ValueObject): string {
 }
 
 function printAggregate(node: Aggregate): string {
+  // Header modifiers, emitted in grammar order (see the `Aggregate` rule
+  // in ddd.langium):
+  //   (abstract)? aggregate <name> (extends <super>)? (ids <kind>)?
+  //   (persistedAs(..))? (shape(..))? (inheritanceUsing(..))? <with>
+  const abstractKw = node.isAbstract ? "abstract " : "";
+  const ext = node.superType ? ` extends ${node.superType.$refText}` : "";
   const ids = node.idKind ? ` ids ${node.idKind}` : "";
-  // `persistedAs(…)` is a header modifier (between `ids` and `with`),
-  // not a body member — matches the grammar order.
   const persistedAs = node.persistedAs ? ` persistedAs(${node.persistedAs})` : "";
   const shape = node.shape ? ` shape(${node.shape})` : "";
+  const inheritance = node.inheritanceUsing ? ` inheritanceUsing(${node.inheritanceUsing})` : "";
   return block(
-    `aggregate ${node.name}${ids}${persistedAs}${shape}${printWithClause(node.withClause)}`,
+    `${abstractKw}aggregate ${node.name}${ext}${ids}${persistedAs}${shape}${inheritance}${printWithClause(node.withClause)}`,
     node.members.map(printStructural),
   );
 }
@@ -579,6 +606,28 @@ function printEntityPart(node: EntityPart): string {
 
 function printEventDecl(node: EventDecl): string {
   return commaBlock(`event ${node.name}`, node.fields.map(printProperty));
+}
+
+function printPayloadDecl(node: import("../generated/ast.js").PayloadDecl): string {
+  // `payload`/`command`/`query`/`response`/`error` <Name> { fields } — the
+  // leading keyword IS the `kind` discriminator, so emit it verbatim.
+  return commaBlock(`${node.kind} ${node.name}`, node.fields.map(printProperty));
+}
+
+function printChannel(node: import("../generated/ast.js").Channel): string {
+  // Fixed-order config block: carries (required) then delivery/retention/key.
+  const items: string[] = [`carries: ${node.carries.map((r) => r.$refText).join(", ")}`];
+  if (node.delivery) items.push(`delivery: ${node.delivery}`);
+  if (node.retention) items.push(`retention: ${node.retention}`);
+  if (node.key) items.push(`key: ${node.key}`);
+  return block(`channel ${node.name}`, items);
+}
+
+function printChannelSource(node: import("../generated/ast.js").ChannelSource): string {
+  // System-scope channel binding — `for:` (required) then optional `use:`.
+  const items: string[] = [`for: ${node.channel}`];
+  if (node.use) items.push(`use: ${node.use.$refText}`);
+  return block(`channelSource ${node.name}`, items);
 }
 
 function printRepository(node: Repository): string {
