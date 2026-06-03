@@ -45,10 +45,11 @@ them was costing readers an accurate mental model.
                                          AST; CLI aborts non-zero on
                                          errors.
          │
-         ▼   ⑤ Lowering (AST → Loom IR)     src/ir/lower.ts +
-   Loom IR (LoomModel)                       src/ir/lower-expr.ts +
-                                             src/ir/walker-primitive-
-                                                expander.ts
+         ▼   ⑤ Lowering (AST → Loom IR)     src/ir/lower/lower.ts +
+   Loom IR (LoomModel)                       src/ir/lower/lower-expr.ts +
+                                             src/ir/lower/walker-primitive-
+                                                expander.ts (+ lower.ts's
+                                                per-kind sibling lowerers)
                                        ─ THREE intertwined sub-passes
                                          all driven by `lowerModel`:
                                          (5a) structural walk,
@@ -64,13 +65,13 @@ them was costing readers an accurate mental model.
                                          Multi-file projects merge here
                                          via `mergeLoomModels`.
          │
-         ▼   ⑥ Enrichment                   src/ir/enrichments.ts
+         ▼   ⑥ Enrichment                   src/ir/enrich/enrichments.ts
    Loom IR'                            ─ ONE pure pass derives wireShape,
                                          auto-findAll, associations, and
                                          react `targets:` module
                                          inheritance. Idempotent.
          │
-         ▼   ⑦ IR validation                src/ir/validate.ts
+         ▼   ⑦ IR validation                src/ir/validate/validate.ts
    Loom IR' + LoomDiagnostic[]         ─ cross-aggregate / multi-file
                                          checks that need the fully-
                                          resolved IR.
@@ -310,9 +311,19 @@ sub-pass runs once per `lowerModel` call:
 
 ### Phase ⑤a — Structure layer
 
-**File**: `src/ir/lower.ts` (~1990 lines).
+**File**: `src/ir/lower/lower.ts` (~1.1k lines) — a thin **orchestrator**.
+The per-declaration-kind lowerers were extracted into sibling leaf modules
+it imports (the graph is acyclic — leaves never import `lower.ts`):
+`lower-platform.ts` (design/platform qualification), `lower-requirements.ts`,
+`lower-capabilities.ts` (filter/stamp/implements collection),
+`lower-members.ts` (shared `lowerField` / `lowerDerived` / `lowerInvariant` /
+`lowerFunction` / `lowerContainment` + `lowerOperation` / `lowerCreate` /
+`lowerDestroy` / `lowerApply` action bodies), `lower-view.ts`,
+`lower-deployment.ts`, `lower-ui.ts`, `lower-workflow.ts`. The public exports
+(`lowerModel` / `lowerProject` / `mergeLoomModels`) stay in `lower.ts`.
 
-**Responsibilities** — top-down structural walk:
+**Responsibilities** — top-down structural walk (functions below live across
+`lower.ts` + the sibling modules, but compose into one `lowerModel` pass):
 
 ```
 lowerModel
@@ -349,7 +360,7 @@ layer.
 
 ### Phase ⑤b — Expression layer
 
-**File**: `src/ir/lower-expr.ts` (~1440 lines).
+**File**: `src/ir/lower/lower-expr.ts` (~1440 lines).
 
 **Responsibilities** — name resolution + member typing + IR
 expression / statement construction:
@@ -384,11 +395,11 @@ the same import direction.
 
 ### Phase ⑤c — Inline scaffold expansion
 
-**File**: `src/ir/walker-primitive-expander.ts` (~1055 lines).
+**File**: `src/ir/lower/walker-primitive-expander.ts` (~1055 lines).
 
 **Why it's a sub-pass of lowering, not its own phase**: `lower.ts`
 calls `expandInlineScaffoldPrimitiveCalls(built)` as the final
-statement of `lowerSystem(...)` (lower.ts:552). The LoomModel
+statement of `lowerSystem(...)`. The LoomModel
 returned by `lowerModel(...)` already has its page bodies expanded.
 No downstream phase ever sees the un-expanded form.
 
@@ -574,7 +585,14 @@ backend.
 
 ## Phase ⑦ — IR validation
 
-**File**: `src/ir/validate/validate.ts` (~1700 lines), plus
+**File**: `src/ir/validate/validate.ts` (~120 lines) — a thin
+`validateLoomModel` orchestrator that fans out to per-theme check
+leaves under `src/ir/validate/checks/` (`system-checks` /
+`query-checks` / `test-checks` / `workflow-checks` /
+`structural-checks`, plus `shared.ts` helpers and `diagnostic.ts`
+for the `LoomDiagnostic` type).  `firstNonQueryableNode` +
+`LoomDiagnostic` are re-exported from `validate.ts`, so its public
+surface is unchanged.  Alongside sits
 `src/ir/validate/invariant-classify.ts` (~420 lines) — invariant
 *wire-boundary* classification + single-field shape detection
 consumed by backend emitters (Zod refines, FluentValidation
@@ -759,7 +777,7 @@ ui { scaffold modules: Sales }
    discriminator.
         │
         ▼  Pass 2 — phase ⑤c inline scaffold expansion
-                    src/ir/walker-primitive-expander.ts
+                    src/ir/lower/walker-primitive-expander.ts
    At the end of `lowerModel`, every page whose body uses the
    `scaffoldDetails(of:)` / `scaffoldOperations(of:)` primitives gets
    its `body` rewritten to the fully-expanded walker-stdlib `ExprIR`
@@ -1096,8 +1114,10 @@ Rough recipe:
 2. **AST scope / validation** — if the new node introduces names
    or has type constraints, update `ddd-scope.ts` /
    `ddd-validator.ts` / `type-system.ts`.
-3. **IR** — add the IR node in `loom-ir.ts`; lower it in
-   `lower.ts` (structure) or `lower-expr.ts` (expression /
+3. **IR** — add the IR node in `loom-ir.ts`; lower it in the
+   relevant `lower/` module — the matching per-kind sibling
+   (`lower-members.ts`, `lower-workflow.ts`, …) wired into the
+   `lower.ts` orchestrator, or `lower-expr.ts` (expression /
    statement / type).
 4. **Renderers** — extend `render-expr.ts` / `render-stmt.ts` for
    each backend that emits domain logic (TS, .NET).
@@ -1146,7 +1166,7 @@ The shape:
    go in `emit/`; per-aggregate complexity goes in builders.
 5. If the backend serves a wire shape, read `agg.wireShape` /
    `part.wireShape` / `vo.wireShape` directly from the IR — they
-   are populated by `enrichLoomModel` in `src/ir/enrichments.ts`,
+   are populated by `enrichLoomModel` in `src/ir/enrich/enrichments.ts`,
    not recomputed per backend.
 6. If the platform needs a new value in `Platform`, also extend
    `language/ddd.langium`'s `Platform` rule, `ir/loom-ir.ts`'s
