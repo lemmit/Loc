@@ -300,7 +300,21 @@ function containsUnion(type: TypeIR): boolean {
   }
 }
 
-export function validateUnionsUnimplemented(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+export function validateUnionsUnimplemented(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  // Backends that emit discriminated-union tagged wire today.  Grows one slice
+  // at a time (P4b: hono/TS; P4c: dotnet; P4d: phoenix); React is a frontend,
+  // not a backend, so it never appears here — its hooks consume whatever the
+  // backend serves.  `"node"` is the hono/TS backend's platform identity.
+  // When a context is served only by these (or by no backend at all — the
+  // legacy single-context path), unions are emittable and the gate stays quiet.
+  const SUPPORTED_UNION_BACKENDS = new Set(["node"]);
+  const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_UNION_BACKENDS.has(p));
+  if (unsupported.length === 0) return;
+
   const flag = (type: TypeIR, where: string): void => {
     if (!containsUnion(type)) return;
     diags.push({
@@ -308,8 +322,10 @@ export function validateUnionsUnimplemented(ctx: BoundedContextIR, diags: LoomDi
       code: "loom.union-unsupported",
       message:
         `${where} uses a discriminated union (\`A or B\` / \`payload = A | B\` / \`T option\`), but ` +
-        `union emission is not implemented yet (payload-transport-layer.md, P4b–d). The surface, ` +
-        `IR, and validation land in P4a; backend emission follows slice by slice.`,
+        `the backend(s) serving this context (${unsupported.sort().join(", ")}) don't emit it yet ` +
+        `(payload-transport-layer.md, P4c–d). It's supported on: ${[...SUPPORTED_UNION_BACKENDS]
+          .sort()
+          .join(", ")}.`,
       source: `${ctx.name}/${where}`,
     });
   };

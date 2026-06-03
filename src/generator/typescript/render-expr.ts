@@ -1,4 +1,5 @@
 import { genericShape } from "../../ir/stdlib/generics.js";
+import { variantTag } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst } from "../../util/naming.js";
 import {
@@ -363,15 +364,27 @@ export function renderTsType(t: TypeIR): string {
       return `{ ${fields.map((f) => `${f.name}: ${renderTsType(f.type)}`).join("; ")} }`;
     }
     case "union":
+      // Discriminated union (`A or B`, `T option`) → an inline TS tagged union
+      // (P4b).  Each variant carries the `type` discriminator; record-ish
+      // variants (entity / value object) intersect their domain type, scalars
+      // wrap a `value`, and `none` is the bare unit.  The wire DTO emitters
+      // (Hono routes / React api) produce the matching `z.discriminatedUnion`.
+      return `(${t.variants.map(renderUnionVariantTs).join(" | ")})`;
     case "none":
-      // Discriminated unions (`A or B`, `T option`) are P4b; the IR-validate
-      // gate (`loom.union-unsupported`) blocks them before any backend
-      // renderer runs, so reaching here is a bug.  `none` only ever appears
-      // inside an option union, hence unreachable for the same reason.
-      throw new Error(
-        `renderTsType: discriminated unions are not emitted yet (payload-transport-layer.md, P4b); got '${t.kind}'.`,
-      );
+      return `{ type: "none" }`;
   }
+}
+
+/** One TS member of a tagged union: `{ type: "Tag" } & Domain` for a record-ish
+ *  variant, `{ type: "Tag"; value: T }` for a scalar, `{ type: "none" }` for
+ *  the unit.  Mirrors the `unionMembers` wire shape on the domain side. */
+function renderUnionVariantTs(v: TypeIR): string {
+  const tag = variantTag(v);
+  if (v.kind === "none") return `{ type: "none" }`;
+  if (v.kind === "entity" || v.kind === "valueobject") {
+    return `({ type: "${tag}" } & ${renderTsType(v)})`;
+  }
+  return `{ type: "${tag}"; value: ${renderTsType(v)} }`;
 }
 
 /** Convert a regex source string into a `/pattern/` literal.  Escapes

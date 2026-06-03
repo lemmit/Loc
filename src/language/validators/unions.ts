@@ -16,17 +16,37 @@
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type { Model, TypeAtom, TypeRef } from "../generated/ast.js";
-import { isPayloadDecl, isSlotType, isTypeRef } from "../generated/ast.js";
+import { isFindDecl, isPayloadDecl, isProperty, isSlotType, isTypeRef } from "../generated/ast.js";
 
 export function checkUnions(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
     if (isTypeRef(node) && node.alternatives.length > 0) {
       // The anonymous `or` form: head atom + each alternative.
       checkVariants([node, ...node.alternatives], accept);
+      checkUnionPosition(node, accept);
     } else if (isPayloadDecl(node) && node.variants.length > 0) {
       checkVariants(node.variants, accept);
     }
   }
+}
+
+/** An inline `A or B` union is a transport shape (like a generic carrier) — it
+ *  may only appear as a repository find's return type or a payload field, not
+ *  as a stored property / parameter elsewhere.  This keeps the `union` TypeIR
+ *  out of the storage-side emitters (drizzle columns, migrations) that don't
+ *  render it.  A *named* union (`payload Foo = A | B`) is referenced by name
+ *  (an `entity` marker) and so is unaffected. */
+function checkUnionPosition(t: TypeRef, accept: ValidationAcceptor): void {
+  const container = t.$container;
+  if (isFindDecl(container)) return;
+  if (isProperty(container) && isPayloadDecl(container.$container)) return;
+  accept(
+    "error",
+    `An inline 'or' union is a transport shape — it may only appear as a repository find ` +
+      `return type or a payload field, not in this position. Name it with 'payload X = A | B' ` +
+      `to use it elsewhere.`,
+    { node: t, code: "loom.union-position" },
+  );
 }
 
 /** Stable structural key for a variant atom — base identity plus the postfix

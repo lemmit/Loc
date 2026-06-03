@@ -119,7 +119,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       diags,
       backendPlatformsByContext.get(c.name) ?? new Set(),
     );
-    validateUnionsUnimplemented(c, diags);
+    validateUnionsUnimplemented(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateEventSourcedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateProvenancedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());

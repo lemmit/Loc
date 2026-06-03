@@ -95,6 +95,53 @@ describe("unions — named `payload Foo = A | B` (P4a)", () => {
   });
 });
 
+describe("unions — monomorphization (P4b)", () => {
+  it("synthesizes a named payload for an anonymous `A or B` find return", async () => {
+    const payloads = await payloadsOf(
+      `system S { subdomain D { context C {
+         aggregate Order ids guid { code: string }
+         aggregate Cancel ids guid { reason: string }
+         repository Orders for Order { find f(): Order or Cancel }
+       } } }`,
+      "C",
+    );
+    const u = payloads.find((p) => p.name === "OrderOrCancel");
+    expect(u).toBeDefined();
+    expect(u!.synthesized).toBe(true);
+    expect(u!.variants).toEqual([
+      { kind: "entity", name: "Order" },
+      { kind: "entity", name: "Cancel" },
+    ]);
+  });
+
+  it("does not re-synthesize a named union (`payload Foo = …` keeps its name)", async () => {
+    const payloads = await payloadsOf(
+      `system S { subdomain D { context C {
+         payload OrderEvent = OrderPlaced | OrderCancelled
+         event OrderPlaced { ts: datetime }
+         event OrderCancelled { ts: datetime }
+       } } }`,
+      "C",
+    );
+    expect(payloads.filter((p) => p.name === "OrderEvent")).toHaveLength(1);
+    // No anonymous-union payload (`OrderPlacedOrOrderCancelled`) synthesized —
+    // the named union already covers the shape.
+    expect(payloads.some((p) => p.name === "OrderPlacedOrOrderCancelled")).toBe(false);
+  });
+
+  it("dedupes a repeated anonymous union into one payload", async () => {
+    const payloads = await payloadsOf(
+      `system S { subdomain D { context C {
+         aggregate Order ids guid { code: string }
+         aggregate Cancel ids guid { reason: string }
+         repository Orders for Order { find a(): Order or Cancel  find b(): Order or Cancel }
+       } } }`,
+      "C",
+    );
+    expect(payloads.filter((p) => p.name === "OrderOrCancel")).toHaveLength(1);
+  });
+});
+
 describe("unions — stdlib helpers (P4a)", () => {
   it("typeKey is associative-commutative — `A or B` keys equal `B or A`", () => {
     const a: TypeIR = { kind: "entity", name: "A" };
@@ -121,23 +168,47 @@ describe("unions — stdlib helpers (P4a)", () => {
   });
 });
 
-describe("unions — P4a not-implemented emission gate", () => {
-  const gate = async (ret: string): Promise<string[]> => {
-    const { model } = await parseString(REPO(ret), { validate: false });
+describe("unions — platform-aware emission gate (P4b)", () => {
+  // A union find served by the named backend platform.  P4b emits unions on
+  // hono (`node`); .NET / Phoenix stay gated until P4c / P4d.
+  const sysWith = (platform: string, ret: string): string => `
+    system Shop {
+      subdomain Sales {
+        context Shop {
+          aggregate Order ids guid { code: string }
+          aggregate Cancel ids guid { reason: string }
+          repository Orders for Order { find f(): ${ret} }
+        }
+      }
+      storage pg { type: postgres }
+      resource shopState { for: Shop, kind: state, use: pg }
+      deployable api { platform: ${platform}, contexts: [Shop], dataSources: [shopState], port: 4000 }
+    }`;
+
+  const gate = async (platform: string, ret: string): Promise<string[]> => {
+    const { model } = await parseString(sysWith(platform, ret), { validate: false });
     return validateLoomModel(enrichLoomModel(lowerModel(model)))
       .filter((d) => d.code === "loom.union-unsupported")
       .map((d) => d.message);
   };
 
-  it("fires on an anonymous-union find return", async () => {
-    expect((await gate("Order or Cancel")).length).toBeGreaterThan(0);
+  it("does NOT gate a union find served by hono (emission implemented in P4b)", async () => {
+    expect(await gate("hono", "Order or Cancel")).toEqual([]);
   });
 
-  it("fires on an `option` find return (option lowers to a union)", async () => {
-    expect((await gate("Order option")).length).toBeGreaterThan(0);
+  it("does NOT gate an `option` find served by hono", async () => {
+    expect(await gate("hono", "Order option")).toEqual([]);
   });
 
-  it("does not fire when no union is used", async () => {
-    expect(await gate("Order[]")).toEqual([]);
+  it("still gates a union find served by dotnet (P4c)", async () => {
+    expect((await gate("dotnet", "Order or Cancel")).length).toBeGreaterThan(0);
+  });
+
+  it("still gates a union find served by phoenix (P4d)", async () => {
+    expect((await gate("phoenix", "Order or Cancel")).length).toBeGreaterThan(0);
+  });
+
+  it("does not fire when no union is used (dotnet)", async () => {
+    expect(await gate("dotnet", "Order[]")).toEqual([]);
   });
 });

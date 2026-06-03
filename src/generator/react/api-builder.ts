@@ -5,6 +5,7 @@ import {
   PAGED_DEFAULT_PAGE_SIZE,
   pagedReturn,
 } from "../../ir/stdlib/generics.js";
+import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import {
   type AggregateIR,
   aggregateUsesMoney,
@@ -26,6 +27,12 @@ import {
 } from "../../ir/types/wire-types.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import {
+  discriminatedUnionZod,
+  type UnionMemberField,
+  unionMemberObjects,
+  unionMembers,
+} from "../_payload/union-wire.js";
 import {
   chainSingleFieldNative,
   refineClauseFor,
@@ -152,6 +159,19 @@ export function buildApiModule(
       lines.push(`export type ${paged.name} = z.infer<typeof ${paged.name}>;`);
     }
   }
+  // Discriminated-union response DTOs (P4b) — one `z.discriminatedUnion` per
+  // distinct union find return (anonymous `A or B` or a named `payload = …`
+  // reference).  Each variant carries the `type` discriminator + its wire
+  // fields; the frontend narrows on `.type`.
+  {
+    const unionSeen = new Set<string>();
+    for (const find of repo?.finds ?? []) {
+      const u = unionForFind(find.returnType, ctx);
+      if (!u || unionSeen.has(u.name)) continue;
+      unionSeen.add(u.name);
+      lines.push(...emitUnionSchema(u.name, u.variants, ctx));
+    }
+  }
   lines.push("");
 
   // ---------------------------------------------------------------------
@@ -243,14 +263,17 @@ export function buildApiModule(
       if (find.name === "all") continue;
       const findSnake = snake(find.name);
       const paged = pagedReturn(find.returnType);
+      const union = unionForFind(find.returnType, ctx);
       const isList = find.returnType.kind === "array";
       const responseSchema = paged
         ? paged.name
-        : isList
-          ? `${agg.name}ListResponse`
-          : find.returnType.kind === "optional"
-            ? `${agg.name}Response.nullable()`
-            : `${agg.name}Response`;
+        : union
+          ? union.name
+          : isList
+            ? `${agg.name}ListResponse`
+            : find.returnType.kind === "optional"
+              ? `${agg.name}Response.nullable()`
+              : `${agg.name}Response`;
       lines.push(
         `export function use${upperFirst(find.name)}${agg.name}(query: ${upperFirst(find.name)}Query) {`,
       );
@@ -448,7 +471,39 @@ function zodForResponse(t: TypeIR, optional: boolean): string {
   return optional ? `${z}.nullish()` : z;
 }
 
+/** A find whose return type is a discriminated union — either an inline `A or
+ *  B` (`union` TypeIR) or a reference to a named `payload Foo = …` (resolved to
+ *  an `entity` marker backed by a union `PayloadIR`).  Returns the schema name
+ *  + variants, or null. */
+function unionForFind(
+  t: TypeIR,
+  ctx: BoundedContextIR,
+): { name: string; variants: TypeIR[] } | null {
+  if (t.kind === "union") return { name: unionInstanceName(t.variants), variants: t.variants };
+  if (t.kind === "entity") {
+    const p = ctx.payloads.find((pl) => pl.name === t.name && pl.variants);
+    if (p?.variants) return { name: p.name, variants: p.variants };
+  }
+  return null;
+}
+
+/** Emit `export const <Name>Schema = z.discriminatedUnion("type", […])` + its
+ *  inferred type.  Record variants flatten their wire fields; scalars wrap a
+ *  `value`; `none` is bare. */
+function emitUnionSchema(name: string, variants: TypeIR[], ctx: BoundedContextIR): string[] {
+  const fieldZod = (f: UnionMemberField): string =>
+    f.isId ? "z.string()" : zodForResponse(f.type, f.optional);
+  const members = unionMemberObjects(unionMembers(variants, ctx), fieldZod, zodForResponseInner);
+  return [
+    `export const ${name} = ${discriminatedUnionZod(members)};`,
+    `export type ${name} = z.infer<typeof ${name}>;`,
+  ];
+}
+
 function zodForResponseInner(t: TypeIR): string {
+  // Inline discriminated union (`A or B`) → its emitted `<Name>Schema` (the
+  // schema is emitted per find return that uses it).
+  if (t.kind === "union") return unionInstanceName(t.variants);
   const info = wireTypeInfo(t, "response");
   if (info.isNullable) return `${zodForResponseInner(peelNullable(t))}.nullish()`;
   if (info.isCollection) return `z.array(${zodForResponseInner(peelCollection(t))})`;

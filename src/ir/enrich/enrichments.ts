@@ -2,6 +2,7 @@ import { platformFor } from "../../platform/registry.js";
 import { plural, snake } from "../../util/naming.js";
 import { defaultInterfaceFor } from "../../util/source-types.js";
 import { forEachGenericInstance, genericInstanceName, genericShape } from "../stdlib/generics.js";
+import { forEachUnion, unionInstanceName } from "../stdlib/unions.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -332,8 +333,70 @@ export function enrichContext(
   // `<Agg>Wire` synthesis above.  Backends map a `genericInstance` reference to
   // this payload's name and emit its DTO.  Deduped per context by name.
   const mono = monomorphizeGenericInstances(aggregates, valueObjects, repositories, basePayloads);
-  const payloads = [...basePayloads, ...mono];
+  const withGenerics = [...basePayloads, ...mono];
+  // P4 (payload-transport-layer.md): monomorphize every distinct *anonymous*
+  // union (`A or B`, `T option`) reachable from a type position into a named
+  // `PayloadIR` carrying `variants` — sibling to the generic monomorphization
+  // above.  Named unions (`payload Foo = A | B`) already carry `variants` from
+  // lowering, so they pass through `withGenerics` and are skipped here by name.
+  const unions = monomorphizeUnions(aggregates, valueObjects, repositories, withGenerics);
+  const payloads = [...withGenerics, ...unions];
   return { ...ctx, valueObjects, enums, aggregates, repositories, payloads };
+}
+
+/** Collect every distinct anonymous-union shape reachable from the context's
+ *  type positions and synthesize a named `PayloadIR` (with `variants`) for each
+ *  (deduped by `unionInstanceName`).  The union analogue of
+ *  `monomorphizeGenericInstances`: backends map an inline-union reference to
+ *  this payload's name and emit its tagged-wire `z.discriminatedUnion` DTO. */
+function monomorphizeUnions(
+  aggregates: EnrichedAggregateIR[],
+  valueObjects: EnrichedValueObjectIR[],
+  repositories: RepositoryIR[],
+  existing: PayloadIR[],
+): PayloadIR[] {
+  const found = new Map<string, TypeIR[]>();
+  const scan = (type: TypeIR): void =>
+    forEachUnion(type, (variants) => {
+      found.set(unionInstanceName(variants), variants);
+    });
+  const scanAggregateLike = (node: {
+    fields: FieldIR[];
+    derived: DerivedIR[];
+    functions: { params: { type: TypeIR }[]; returnType: TypeIR }[];
+  }): void => {
+    for (const f of node.fields) scan(f.type);
+    for (const d of node.derived) scan(d.type);
+    for (const fn of node.functions) {
+      scan(fn.returnType);
+      for (const p of fn.params) scan(p.type);
+    }
+  };
+  for (const agg of aggregates) {
+    scanAggregateLike(agg);
+    for (const op of agg.operations) for (const p of op.params) scan(p.type);
+    for (const part of agg.parts) scanAggregateLike(part);
+  }
+  for (const vo of valueObjects) scanAggregateLike(vo);
+  for (const repo of repositories) {
+    for (const find of repo.finds) {
+      scan(find.returnType);
+      for (const p of find.params) scan(p.type);
+    }
+  }
+  for (const p of existing) {
+    for (const f of p.fields) scan(f.type);
+    for (const v of p.variants ?? []) scan(v);
+  }
+
+  const taken = new Set(existing.map((p) => p.name));
+  const out: PayloadIR[] = [];
+  for (const [name, variants] of found) {
+    if (taken.has(name)) continue;
+    taken.add(name);
+    out.push({ name, kind: "payload", fields: [], variants, synthesized: true });
+  }
+  return out;
 }
 
 /** Collect every distinct generic-carrier instantiation reachable from the
