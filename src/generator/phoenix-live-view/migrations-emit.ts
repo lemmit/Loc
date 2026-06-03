@@ -58,7 +58,11 @@ function emitInitial(m: MigrationsIR, appModule: string, out: Map<string, string
   const createSteps = m.steps.filter(
     (s): s is Extract<MigrationStep, { op: "createTable" }> => s.op === "createTable",
   );
-  const allTables = createSteps.map((s) => s.table);
+  // Value-object array child tables are a relational-backend concern;
+  // Phoenix/Ash stores the array inline as a `{:array, :map}` column on the
+  // parent (the parent's `valueArrayChildTable` column renders that), so the
+  // child table itself is dropped here.
+  const allTables = createSteps.map((s) => s.table).filter((t) => !t.valueCollection);
   const joinTables = allTables.filter(isJoinTable);
   const partTables = allTables.filter((t) => !joinTables.includes(t) && isPartTable(t));
   const parentTables = allTables

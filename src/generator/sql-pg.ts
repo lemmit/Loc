@@ -46,7 +46,12 @@ export function renderPgStep(step: MigrationStep): string {
 
 function renderCreateTable(table: TableShape): string {
   const lines: string[] = [];
-  for (const c of table.columns) lines.push("  " + renderColumnDef(c));
+  // A value-object array's parent stand-in column is skipped on relational
+  // backends — its elements live in the id-less child table, not a column.
+  for (const c of table.columns) {
+    if (c.valueArrayChildTable) continue;
+    lines.push("  " + renderColumnDef(c));
+  }
   if (table.primaryKey.length > 0) {
     lines.push(`  PRIMARY KEY (${table.primaryKey.map(ident).join(", ")})`);
   }

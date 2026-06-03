@@ -19,7 +19,8 @@ system VA {
     }
   }
   api SApi from S
-  deployable api { platform: hono contexts: [C] serves: SApi port: 3000 }
+  deployable api { platform: hono            contexts: [C] serves: SApi port: 3000 }
+  deployable px  { platform: phoenixLiveView contexts: [C] serves: SApi port: 4000 }
 }
 `;
 
@@ -43,5 +44,41 @@ describe("value-object collection — child-table persistence (Hono)", () => {
     expect(schema).toMatch(/currency:\s*text\(/);
     // keyed by (parent_id, ordinal), no surrogate id
     expect(schema).toMatch(/primaryKey\(\{ columns: \[table\.parentId, table\.ordinal\] \}\)/);
+  });
+
+  it("the repository loads child rows into the VO list and replaces them on save", async () => {
+    const files = await generateSystemFiles(FIXTURE);
+    const repo = findFile(files, /order-repository\.ts$/);
+    expect(repo).toMatch(
+      /from\(schema\.orderCharges\)\.where\(eq\(schema\.orderCharges\.parentId, id\)\)\.orderBy\(schema\.orderCharges\.ordinal\)/,
+    );
+    expect(repo).toMatch(/new Money\(Number\(r\.amount\), r\.currency\)/);
+    expect(repo).toMatch(
+      /tx\.delete\(schema\.orderCharges\)\.where\(eq\(schema\.orderCharges\.parentId, aggregate\.id\)\)/,
+    );
+    expect(repo).toMatch(
+      /tx\.insert\(schema\.orderCharges\)\.values\(\{ parentId: aggregate\.id as string, ordinal: i, amount: String\(e\.amount\), currency: e\.currency \}\)/,
+    );
+  });
+});
+
+describe("value-object collection — migration (relational child table / Ash :array of :map)", () => {
+  it("the Hono migration creates the child table and drops the parent column", async () => {
+    const files = await generateSystemFiles(FIXTURE);
+    const sql = findFile(files, /api\/db\/migrations\/.*\.sql$/);
+    expect(sql).toMatch(/CREATE TABLE order_charges \(/);
+    expect(sql).toMatch(/amount\s+DECIMAL/i);
+    expect(sql).toMatch(/PRIMARY KEY \(order_id, ordinal\)/);
+    // The parent table carries no `charges` column — the data is in the child.
+    const ordersTable = sql.slice(sql.indexOf("CREATE TABLE orders"));
+    expect(ordersTable).not.toMatch(/charges/);
+  });
+
+  it("the Phoenix migration stores the array inline as {:array, :map}, no child table", async () => {
+    const files = await generateSystemFiles(FIXTURE);
+    const orders = findFile(files, /px\/priv\/repo\/migrations\/.*create_orders\.exs$/);
+    expect(orders).toMatch(/add :charges, \{:array, :map\}/);
+    // No separate child-table migration file.
+    expect([...files.keys()].some((k) => /px\/.*order_charges\.exs$/.test(k))).toBe(false);
   });
 });

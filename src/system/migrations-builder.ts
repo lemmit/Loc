@@ -30,6 +30,11 @@ import type {
   TableShape,
 } from "../ir/types/migrations-ir.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../ir/util/resolve-datasource.js";
+import {
+  isValueCollectionType,
+  type ValueCollectionIR,
+  valueCollectionsFor,
+} from "../ir/util/value-collections.js";
 import { plural, snake, upperFirst } from "../util/naming.js";
 import type { SnapshotStore } from "./snapshot.js";
 
@@ -129,6 +134,18 @@ export function schemaFromModule(
     // emission time (see `mapField`).
     for (const assoc of agg.associations) {
       tables.push(tableForAssociation(assoc, module.name));
+    }
+    // Value-object array fields (`charges: Money[]`) persist as an id-less
+    // child table (flattened VO columns + parent FK + ordinal).  Relational
+    // backends create it; Phoenix skips it (it stores the array inline as a
+    // `{:array, :map}` column on the parent).
+    for (const vc of valueCollectionsFor(agg)) {
+      tables.push(valueCollectionTableShape(vc, agg, module.name, voLookup));
+    }
+    for (const part of agg.parts) {
+      for (const vc of valueCollectionsFor(part)) {
+        tables.push(valueCollectionTableShape(vc, agg, module.name, voLookup, part.name));
+      }
     }
   }
   tables.sort((a, b) => a.name.localeCompare(b.name));
@@ -403,7 +420,7 @@ function tableForAggregate(
     // Reference collections (`Target id[]`) lower to a separate join
     // table (see `tableForAssociation`); no column on the owner row.
     if (isReferenceCollection(f.type)) continue;
-    for (const mapped of columnsForField(f, voLookup)) {
+    for (const mapped of columnsForField(f, voLookup, agg.name)) {
       columns.push(mapped.column);
       if (!mapped.fkRefTable) continue;
       foreignKeys.push({
@@ -458,7 +475,7 @@ function tphTableForAggregate(
 
   const pushField = (f: FieldIR, forceNullable: boolean): void => {
     if (isReferenceCollection(f.type)) return;
-    for (const mapped of columnsForField(f, voLookup)) {
+    for (const mapped of columnsForField(f, voLookup, base.name)) {
       if (seen.has(mapped.column.name)) continue;
       seen.add(mapped.column.name);
       const column = forceNullable ? { ...mapped.column, nullable: true } : mapped.column;
@@ -512,7 +529,7 @@ function tableForPart(
 
   for (const f of part.fields) {
     if (isReferenceCollection(f.type)) continue;
-    for (const mapped of columnsForField(f, voLookup)) {
+    for (const mapped of columnsForField(f, voLookup, part.name)) {
       columns.push(mapped.column);
       if (!mapped.fkRefTable) continue;
       foreignKeys.push({
@@ -573,6 +590,60 @@ function tableForAssociation(assoc: AssociationIR, ownerModule: string): TableSh
   };
 }
 
+/** Flatten a value object's fields into bare child-table columns (no field
+ *  prefix at the top level, `<vf>_<sub>` for a nested VO), matching the
+ *  Drizzle value-collection child table the schema emitter lays down. */
+function valueObjectChildColumns(
+  prefix: string,
+  voFields: readonly FieldIR[],
+  voLookup: VoLookup,
+): ColumnShape[] {
+  return voFields.flatMap((vf): ColumnShape[] => {
+    const name = prefix ? `${prefix}_${snake(vf.name)}` : snake(vf.name);
+    const base = vf.type.kind === "optional" ? vf.type.inner : vf.type;
+    const optional = vf.optional || vf.type.kind === "optional";
+    if (base.kind === "valueobject") {
+      return valueObjectChildColumns(name, voLookup.get(base.name) ?? [], voLookup);
+    }
+    return [{ name, type: mapTypeToColumn(base).type, nullable: optional }];
+  });
+}
+
+/** The id-less child table for a value-object array field: owner FK +
+ *  `ordinal` + the value object's flattened columns, keyed by
+ *  `(parentFk, ordinal)`.  Tagged `valueCollection` so Phoenix skips it
+ *  (it stores the array inline as a `{:array, :map}` column). */
+function valueCollectionTableShape(
+  vc: ValueCollectionIR,
+  parentAgg: AggregateIR,
+  ownerModule: string,
+  voLookup: VoLookup,
+  partName?: string,
+): TableShape {
+  const ownerTable = partName ? plural(snake(partName)) : plural(snake(parentAgg.name));
+  const idType = idColumnType(parentAgg.idValueType);
+  return {
+    name: vc.childTable,
+    ownerModule,
+    columns: [
+      { name: vc.parentFk, type: idType, nullable: false },
+      { name: "ordinal", type: { kind: "int" }, nullable: false },
+      ...valueObjectChildColumns("", voLookup.get(vc.voName) ?? [], voLookup),
+    ],
+    primaryKey: [vc.parentFk, "ordinal"],
+    foreignKeys: [{ column: vc.parentFk, refTable: ownerTable, onDelete: "cascade" }],
+    indexes: [
+      {
+        name: `${vc.childTable}_${vc.parentFk}_idx`,
+        table: vc.childTable,
+        columns: [vc.parentFk],
+        unique: false,
+      },
+    ],
+    valueCollection: true,
+  };
+}
+
 function isReferenceCollection(t: TypeIR): boolean {
   return t.kind === "array" && t.element.kind === "id";
 }
@@ -592,7 +663,7 @@ type VoLookup = ReadonlyMap<string, readonly FieldIR[]>;
  *  standard DDD shape the Drizzle / EF ORMs already query — each tagged with
  *  the originating field's `voGroup` so Phoenix can regroup them into a
  *  single `:map`.  Every other field is one column (`mapField`). */
-function columnsForField(f: FieldIR, voLookup: VoLookup): MappedColumn[] {
+function columnsForField(f: FieldIR, voLookup: VoLookup, ownerName: string): MappedColumn[] {
   const optional = f.optional || f.type.kind === "optional";
   const base = f.type.kind === "optional" ? f.type.inner : f.type;
   if (base.kind === "valueobject") {
@@ -600,6 +671,22 @@ function columnsForField(f: FieldIR, voLookup: VoLookup): MappedColumn[] {
     if (voFields) {
       return flattenValueObject(snake(f.name), voFields, optional, snake(f.name), voLookup);
     }
+  }
+  // Value-object *array* (`charges: Money[]`): a parent stand-in column
+  // tagged with the id-less child table the elements live in.  Relational
+  // backends skip the column (the child table holds the rows); Phoenix
+  // renders the `array(json)` column as `{:array, :map}`.
+  if (isValueCollectionType(f.type)) {
+    return [
+      {
+        column: {
+          name: snake(f.name),
+          type: { kind: "array", inner: { kind: "json" } },
+          nullable: optional,
+          valueArrayChildTable: `${snake(ownerName)}_${snake(f.name)}`,
+        },
+      },
+    ];
   }
   return [mapField(f)];
 }

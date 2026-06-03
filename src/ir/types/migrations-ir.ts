@@ -37,6 +37,14 @@ export interface ColumnShape {
    *  regroups columns sharing a `voGroup` back into a single `:map`
    *  column named for the group.  Absent on ordinary columns. */
   voGroup?: string;
+  /** Set on the parent-table column standing in for a value-object
+   *  *array* field (`charges: Money[]`).  Names the id-less child table the
+   *  elements actually live in.  Relational backends (Drizzle / EF) **skip**
+   *  this column — the data is in the child table — while Phoenix/Ash, which
+   *  models the array as a single `{:array, :map}` column, renders it
+   *  normally (the column's `array(json)` type already lowers to
+   *  `{:array, :map}`).  Absent on ordinary columns. */
+  valueArrayChildTable?: string;
 }
 
 export interface FKShape {
@@ -59,6 +67,11 @@ export interface TableShape {
   primaryKey: string[];
   foreignKeys: FKShape[];
   indexes: IndexShape[];
+  /** Set on the id-less child table that holds a value-object *array*
+   *  field's elements (`charges: Money[]` → `order_charges`).  Relational
+   *  backends (Drizzle / EF) create it; Phoenix/Ash **skips** it — it stores
+   *  the array inline as a `{:array, :map}` column on the parent instead. */
+  valueCollection?: boolean;
 }
 
 export interface SchemaSnapshot {
