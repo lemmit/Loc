@@ -320,10 +320,11 @@ Api:
 
 // ---- storage declaration (system-level) ------------------------
 //
-// First-class declaration of a storage instance — a typed slot
-// the deployable composition picks up via `modules: <M> { primary:
-// <Storage>, cache: <Storage>, ... }`.  Reusable across deployables
-// (one Postgres serves the api server + worker service).
+// First-class declaration of a storage instance — a typed slot the deployable
+// composition picks up via the `dataSources:` clause (a deployable lists the
+// system-level `dataSource { for:, kind:, use: }` bindings it hosts; see
+// D-STORAGE-SPLIT).  Reusable across deployables (one Postgres serves the api
+// server + worker service).
 //
 //   storage primarySql   { type: postgres }
 //   storage hotCache     { type: redis }
@@ -1145,14 +1146,15 @@ Property:
         // (`event Bumped { by: int }`) / `handle` (`engineer { handle: string }`)
         // keep parsing — hard only in the reactor clause / workflow handle member.
         | 'by' | 'handle'
-        // `state` soft in property position so a field named `state`
-        // (`aggregate Order { state: Status }`) parses — it is a hard keyword
-        // only in the page `state { … }` block and the storage-kind enum,
-        // neither of which begins an aggregate / VO / event member.  `state`
-        // is already in `LooseName`; this mirrors it for the `Property.name`
+        // `state` / `title` / `body` soft in property position so common domain
+        // fields by those names (`state: Status`, `title: string`, `body: string`)
+        // parse — they are hard keywords only in the page DSL (`state { … }`
+        // block, page `title:` / `body:` metadata) and the storage-kind enum,
+        // none of which begins an aggregate / VO / event member.  All three are
+        // already in `LooseName`; this mirrors them for the `Property.name`
         // dispatch (which can't reuse `LooseName` wholesale because that set
         // includes member-starter keywords like `contains`).
-        | 'state')
+        | 'state' | 'title' | 'body')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1273,7 +1275,12 @@ LooseName returns string:
     // member (A2-S5c); admit it as a soft keyword in identifier positions so
     // pre-existing fields/params named `handle` (showcase.ddd) keep parsing.
     | 'handle'
-    | 'primary' | 'cache' | 'search' | 'events' | 'bi'
+    // `cache` is a hard keyword as a `DataSourceKind`; admit it as soft so a
+    // field / theme key named `cache` parses.  (`primary` / `search` / `events`
+    // / `bi` were legacy storage roles in the old `modules: { … }` clause,
+    // removed with D-STORAGE-SPLIT — they are no longer keywords, so they need
+    // no escape hatch and are ordinary identifiers again.)
+    | 'cache'
     // `money` is a soft keyword — the only places it acts as a
     // hard keyword are `PrimitiveType` (`amount: money`) and
     // `MoneyLit` (`money("10.50")`).  Admitting it here lets
@@ -1754,7 +1761,12 @@ NameRefIdent returns string:
        // `on(...) by <expr>` reactor clause.
        | 'by'
        | 'handle'
-       | 'primary' | 'cache' | 'search' | 'events' | 'bi'
+       // `cache` is a hard keyword as a `DataSourceKind`; admit it as soft so a
+    // field / theme key named `cache` parses.  (`primary` / `search` / `events`
+    // / `bi` were legacy storage roles in the old `modules: { … }` clause,
+    // removed with D-STORAGE-SPLIT — they are no longer keywords, so they need
+    // no escape hatch and are ordinary identifiers again.)
+    | 'cache'
        | 'filter' | 'stamp' | 'implements'
        | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
        // Phase 2 page-metadata + favicon keywords admitted as NameRef

@@ -648,6 +648,49 @@ describe("page metamodel — grammar smoke tests", () => {
     expect(errors).toEqual([]);
   });
 
+  it("keeps `title` / `body` parseable as property names", async () => {
+    // Live page-DSL keywords (`page X { title:, body: }`) that are also common
+    // domain field names — admitted in `Property.name` alongside `state`.
+    const { errors } = await parseSnippet(`
+      system Acme {
+        subdomain M {
+          context C {
+            aggregate Post {
+              title: string
+              body: string
+            }
+            repository Posts for Post { }
+          }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+  });
+
+  it("keeps the removed storage-role fossils (`primary`/`search`/`events`/`bi`) usable as identifiers", async () => {
+    // These were keywords only as legacy `modules: { … }` storage roles, deleted
+    // with D-STORAGE-SPLIT.  Dropping them from the soft-keyword lists makes them
+    // ordinary identifiers — usable as field names AND still as the `theme`
+    // `primary:` token key (which flows through `LooseName`'s `ID` branch).
+    const { errors } = await parseSnippet(`
+      system Acme {
+        theme { primary: "#3b82f6" }
+        subdomain M {
+          context C {
+            aggregate Metric {
+              primary: bool
+              search: string
+              events: int
+              bi: string
+            }
+            repository Metrics for Metric { }
+          }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+  });
+
   it("parses examples/acme.ddd including its `ui WebApp` block", async () => {
     const { errors } = await parseExample("examples/acme.ddd");
     expect(errors).toEqual([]);
