@@ -23,6 +23,7 @@ system TV {
   }
   api SApi from S
   deployable h { platform: hono            contexts: [C] serves: SApi port: 3000 }
+  deployable d { platform: dotnet          contexts: [C] serves: SApi port: 8080 }
   deployable p { platform: phoenixLiveView contexts: [C] serves: SApi port: 4000 }
 }
 `;
@@ -47,6 +48,18 @@ describe("value-object migration — flatten into columns (relational) / :map (A
     const schema = findFile(files, /h\/db\/schema\.ts$/);
     expect(schema).toMatch(/price_amount:\s*numeric\("price_amount"\)/);
     expect(schema).toMatch(/price_currency:\s*text\("price_currency"\)/);
+  });
+
+  it(".NET names the EF owned-type columns to match the migration's snake columns", async () => {
+    const files = await generateSystemFiles(FIXTURE);
+    const cfg = findFile(files, /Configurations\/OrderConfiguration\.cs$/);
+    // EF's default would be `Price_Amount`; the owned columns are named to
+    // the migration's snake (`price_amount`) so the runtime schema agrees.
+    expect(cfg).toMatch(/OwnsOne<Money>\(x => x\.Price, o => \{/);
+    expect(cfg).toMatch(/\.HasColumnName\("price_amount"\)/);
+    expect(cfg).toMatch(/\.HasColumnName\("price_currency"\)/);
+    const migration = findFile(files, /d\/Migrations\/.*\.cs$/);
+    expect(migration).toMatch(/price_amount\s+DECIMAL/i);
   });
 
   it("the Phoenix migration regroups the columns back into a single :map", async () => {

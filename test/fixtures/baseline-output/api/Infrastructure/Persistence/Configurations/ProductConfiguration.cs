@@ -15,7 +15,10 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
         b.ToTable("products", "products");
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).HasConversion(v => v.Value, v => new ProductId(v));
-        b.OwnsOne<Money>(x => x.Price);
+        b.OwnsOne<Money>(x => x.Price, o => {
+            o.Property(x => x.Amount).HasColumnName("price_amount");
+            o.Property(x => x.Currency).HasColumnName("price_currency");
+        });
         b.HasIndex(x => x.Sku);
         b.Ignore(x => x.DomainEvents);
     }
