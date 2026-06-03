@@ -85,7 +85,15 @@ defmodule ${appModule}.MixProject do
       {:jason, "~> 1.2"},
       {:bandit, "~> 1.5"},
       {:plug_cowboy, "~> 2.5"},
-      {:open_api_spex, "~> 3.0"}${extraDepLines}
+      {:open_api_spex, "~> 3.0"},
+      # Dialyxir — dev/test only.  Wraps OTP's Dialyzer for the
+      # \`mix dialyzer\` task.  Skipped by \`mix deps.get --only prod\`,
+      # so it never lands in the release image; CI's
+      # \`phoenix-dialyzer.yml\` pulls it via \`mix deps.get\` (no
+      # --only) so it's available for the static-analysis pass.
+      # Ignore filter lives at \`.dialyzer_ignore.exs\`; PLT config
+      # in \`def project\`'s \`dialyzer:\` block above.
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}${extraDepLines}
     ]
   end
 

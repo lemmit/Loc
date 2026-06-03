@@ -1,0 +1,129 @@
+name: Phoenix Dialyzer verification
+
+# Runs `mix dialyzer` against a generated Phoenix project to catch
+# structural-typing bugs that the compile gate (`phoenix-build.yml`)
+# can't see: `@spec` / implementation mismatches, dead pattern arms,
+# `Ash.Error.t()` shape drift in error tuples, etc.
+#
+# Generator-side prep already shipped:
+#   - `@spec` / `@type` emission across event modules, value-object
+#     modules, polymorphic readers, aggregate helpers, view `def run/1`,
+#     workflow `def run/2` (PRs #902 / #904 / #906 / #911).
+#   - Shared `<App>.Types` vocabulary (`id()` / `timestamp()` /
+#     `result(t)` / `result_list(t)`) (PR #904).
+#   - `.dialyzer_ignore.exs` template + `dialyzer:` mix.exs config
+#     (PR #907) — filters the Ash + Phoenix.Router macro noise that
+#     Dialyzer can't reason about.
+#   - Dialyxir dev-only dep added to the generated mix.exs (this PR).
+#
+# The actual generate + dialyze loop lives in
+# `test/e2e/generated-phoenix-dialyzer.test.ts` (entrypoint:
+# `npm run test:dialyzer-phoenix`); this workflow pre-generates,
+# restores the PLT cache, then hands off.  PLT generation is the
+# slow part (cold ~5-15 min); warm runs with the cache restored
+# complete in ~30-60s.
+#
+# Triggers — narrower than phoenix-build.yml: only the workflow file
+# + the test + the generator pieces that produce the typed surface
+# Dialyzer reads.  Won't fire on a touch to an unrelated emitter.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/phoenix-live-view/**'
+      - 'src/platform/phoenix-live-view.ts'
+      - 'examples/**'
+      - 'test/e2e/fixtures/phoenix-build/**'
+      - 'test/e2e/generated-phoenix-dialyzer.test.ts'
+      - 'package.json'
+      - '.github/workflows/phoenix-dialyzer.yml'
+  pull_request:
+    paths:
+      - 'src/generator/phoenix-live-view/**'
+      - 'src/platform/phoenix-live-view.ts'
+      - 'examples/**'
+      - 'test/e2e/fixtures/phoenix-build/**'
+      - 'test/e2e/generated-phoenix-dialyzer.test.ts'
+      - 'package.json'
+      - '.github/workflows/phoenix-dialyzer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dialyze-generated-phoenix:
+    runs-on: ubuntu-latest
+    # Cold PLT build is 5-15 min depending on dep set; warm cached
+    # runs are ~30-60s.  30min cap leaves headroom for the first
+    # cold run on a new Elixir/Ash version bump.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      # Generate the single fixture once into a stable path so we can
+      # hash mix.exs for the cache key.  The test step honours
+      # `LOOM_PHOENIX_OUT_DIR` and skips its own regeneration when
+      # `mix.exs` already exists.
+      - name: Pre-generate acme-lv fixture (for cache key)
+        run: |
+          mkdir -p /tmp/ci/phoenix-dialyzer/acme-lv/out
+          node bin/cli.js generate system test/e2e/fixtures/phoenix-build/acme-lv.ddd \
+            -o /tmp/ci/phoenix-dialyzer/acme-lv/out
+
+      - name: Compute Dialyzer dep + PLT signature
+        id: dialyzer-sig
+        run: |
+          # PLT signature: mix.exs (dep versions) + an Elixir+OTP tag.
+          # Bumping either invalidates the PLT, which is correct — a
+          # new OTP / Elixir means the standard-library PLT changes.
+          hash=$(cat /tmp/ci/phoenix-dialyzer/acme-lv/out/phoenix_app/mix.exs | sha256sum | cut -d' ' -f1)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+          echo "image_tag=1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Phoenix deps + _build + PLTs
+        uses: actions/cache@v5
+        with:
+          path: |
+            /tmp/ci/phoenix-dialyzer/acme-lv/out/phoenix_app/deps
+            /tmp/ci/phoenix-dialyzer/acme-lv/out/phoenix_app/_build
+            /tmp/ci/phoenix-dialyzer/acme-lv/out/phoenix_app/priv/plts
+          # PLTs are sensitive to BOTH the dep set AND the Erlang/Elixir
+          # version, so the key includes the image tag.  On cache miss
+          # the cold PLT-build path runs (~5-15 min).
+          key: phoenix-dialyzer-${{ steps.dialyzer-sig.outputs.image_tag }}-${{ steps.dialyzer-sig.outputs.hash }}
+          restore-keys: |
+            phoenix-dialyzer-${{ steps.dialyzer-sig.outputs.image_tag }}-
+            phoenix-dialyzer-
+
+      - name: Run test:dialyzer-phoenix (mix dialyzer against acme-lv fixture)
+        env:
+          LOOM_PHOENIX_OUT_DIR: /tmp/ci/phoenix-dialyzer
+        run: npm run test:dialyzer-phoenix
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## Phoenix mix dialyzer failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the previous step for the captured `mix dialyzer` diagnostics.' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'Failure modes to consider:' >> $GITHUB_STEP_SUMMARY
+          echo '- **Generator bug** — a `@spec` does not match the implementation it sits above.' >> $GITHUB_STEP_SUMMARY
+          echo '- **Tunable noise** — the `.dialyzer_ignore.exs` filter needs to expand to cover a new Ash / Phoenix internal.' >> $GITHUB_STEP_SUMMARY
+          echo '- **Cold PLT** — first run after a dep bump rebuilds the PLT (5-15min); cache key includes mix.exs hash + Elixir image tag.' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See `docs/proposals/cross-stack-static-analysis.md` (Phoenix Tier 4) for the design context.' >> $GITHUB_STEP_SUMMARY

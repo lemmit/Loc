@@ -70,4 +70,12 @@ describe("renderMixExs — dialyzer config block", () => {
     expect(mix).toMatch(/\{:phoenix, "~> 1\.8"\}/);
     expect(mix).toMatch(/setup: \["deps\.get", "ash\.setup"\]/);
   });
+
+  it("declares dialyxir as a dev/test-only dep so `mix dialyzer` is available in CI", () => {
+    // Dialyxir wraps OTP Dialyzer for the `mix dialyzer` task.  Skipped
+    // by `mix deps.get --only prod` (used in the Docker build), so it
+    // never lands in the release image; CI's phoenix-dialyzer workflow
+    // runs `mix deps.get` without --only to pull it.
+    expect(mix).toMatch(/\{:dialyxir, "~> 1\.4", only: \[:dev, :test\], runtime: false\}/);
+  });
 });
