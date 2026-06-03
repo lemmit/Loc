@@ -93,10 +93,13 @@ describe("renderTypespec — error cases", () => {
   it("throws on slot (UI-only)", () => {
     expect(() => renderTypespec({ kind: "slot" } as TypeIR, CTX)).toThrow(/UI-only/);
   });
-  it("throws on genericInstance (unimplemented)", () => {
-    expect(() =>
-      renderTypespec({ kind: "genericInstance", ctor: "List", args: [] } as TypeIR, CTX),
-    ).toThrow(/not emittable/);
+  it("renders a generic carrier as `map()` (transport-only; never a stored typespec)", () => {
+    expect(
+      renderTypespec(
+        { kind: "genericInstance", ctor: "paged", arg: { kind: "primitive", name: "string" } },
+        CTX,
+      ),
+    ).toBe("map()");
   });
 });
 

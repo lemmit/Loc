@@ -1,0 +1,30 @@
+// Paged finds on the Phoenix/Ash backend — exercises P3b generic-carrier
+// emission (Ash offset pagination read action + controller page/pageSize +
+// %Ash.Page.Offset{} → wire envelope) under `mix compile
+// --warnings-as-errors` in the generated-phoenix CI matrix.
+system PagedShop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order ids guid {
+        code: string
+        region: string
+      }
+      repository Orders for Order {
+        find recent(): Order paged
+        find inRegion(region: string): Order paged where this.region == region
+      }
+    }
+  }
+  api OrdersApi from Sales
+  ui OrdersAdmin with scaffold(subdomains: [Sales]) { }
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: phoenix
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    ui: OrdersAdmin
+    port: 4000
+  }
+}

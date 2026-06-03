@@ -1,3 +1,4 @@
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -162,8 +163,13 @@ function renderFindAction(find: FindIR, agg: AggregateIR, ctx: RenderCtx): strin
     }
   }
   // Single-result reads
-  if (find.returnType.kind !== "array") {
+  if (find.returnType.kind !== "array" && !pagedReturn(find.returnType)) {
     lines.push(`      get? true`);
+  }
+  // Paged (P3b): Ash offset pagination — the controller passes
+  // `page: [limit:, offset:, count: true]`; the count gives `total`.
+  if (pagedReturn(find.returnType)) {
+    lines.push(`      pagination offset?: true, required?: false`);
   }
   lines.push(`    end`);
   return lines.join("\n");

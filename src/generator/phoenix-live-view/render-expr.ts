@@ -527,9 +527,10 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
     case "slot":
       throw new Error("renderAshType: 'slot' type is UI-only and should not reach the backend.");
     case "genericInstance":
-      throw new Error(
-        `renderAshType: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
-      );
+      // Transport-only carrier (paged/envelope) — never a stored Ash
+      // attribute (the controller wraps the page envelope as a plain map).
+      // Defensive `:map` keeps the renderer total.
+      return ":map";
   }
 }
 
@@ -598,8 +599,8 @@ export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: s
     case "slot":
       throw new Error("renderTypespec: 'slot' type is UI-only and should not reach the backend.");
     case "genericInstance":
-      throw new Error(
-        `renderTypespec: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
-      );
+      // Transport-only carrier — not a stored attribute typespec.  The page
+      // envelope is a plain map; keep the renderer total.
+      return "map()";
   }
 }

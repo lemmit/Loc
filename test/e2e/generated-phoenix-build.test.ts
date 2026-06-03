@@ -70,6 +70,10 @@ describe.skipIf(!ENABLED)(
       // itself — against real Ash 3.x.  No LiveView pages are emitted;
       // the React `assets/` half is covered by the react-build matrix.
       { name: "phoenix-embed-react.ddd" },
+      // Carrier-bounded generics (payload-transport-layer.md, P3b): compiles
+      // the Ash offset-pagination read actions + the controller page/pageSize
+      // actions that map %Ash.Page.Offset{} to the cross-backend envelope.
+      { name: "paged.ddd" },
     ])("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
