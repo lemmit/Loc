@@ -158,6 +158,12 @@ export function printStructural(node: AstNode): string {
       return printAggregate(node as Aggregate);
     case "EventDecl":
       return printEventDecl(node as EventDecl);
+    case "PayloadDecl":
+      return printPayloadDecl(node as import("../generated/ast.js").PayloadDecl);
+    case "Channel":
+      return printChannel(node as import("../generated/ast.js").Channel);
+    case "ChannelSource":
+      return printChannelSource(node as import("../generated/ast.js").ChannelSource);
     case "Repository":
       return printRepository(node as Repository);
     case "Workflow":
@@ -341,7 +347,18 @@ function printApi(node: Api): string {
 }
 
 function printDeployable(node: Deployable): string {
-  const items: string[] = [`platform: ${enumOrString(node.platform, PLATFORM_KEYWORDS)}`];
+  // The `platform: X { … }` realization-axes block (foundation / application /
+  // persistence / directoryLayout / transport / runtime).  Emit the brace block
+  // only when at least one knob is set, else the bare `platform: X`.
+  const platformHead = `platform: ${enumOrString(node.platform, PLATFORM_KEYWORDS)}`;
+  const knobs: string[] = [];
+  if (node.foundation) knobs.push(`foundation: ${node.foundation}`);
+  if (node.application) knobs.push(`application: ${node.application}`);
+  if (node.persistence) knobs.push(`persistence: ${node.persistence}`);
+  if (node.directoryLayout) knobs.push(`directoryLayout: ${node.directoryLayout}`);
+  if (node.transport) knobs.push(`transport: ${node.transport}`);
+  if (node.runtime) knobs.push(`runtime: ${node.runtime}`);
+  const items: string[] = [knobs.length > 0 ? commaBlock(platformHead, knobs) : platformHead];
   if (node.contextRefs.length > 0) {
     items.push(`contexts: [${node.contextRefs.map((r) => r.$refText).join(", ")}]`);
   }
@@ -529,13 +546,19 @@ function printValueObject(node: ValueObject): string {
 }
 
 function printAggregate(node: Aggregate): string {
+  // Header order mirrors the grammar:
+  //   `abstract`? aggregate Name (`extends` Super)? `ids`? `persistedAs`?
+  //   `shape`? `inheritanceUsing`? `with`?
+  const abstractKw = node.isAbstract ? "abstract " : "";
+  const ext = node.superType ? ` extends ${node.superType.$refText}` : "";
   const ids = node.idKind ? ` ids ${node.idKind}` : "";
   // `persistedAs(…)` is a header modifier (between `ids` and `with`),
   // not a body member — matches the grammar order.
   const persistedAs = node.persistedAs ? ` persistedAs(${node.persistedAs})` : "";
   const shape = node.shape ? ` shape(${node.shape})` : "";
+  const inh = node.inheritanceUsing ? ` inheritanceUsing(${node.inheritanceUsing})` : "";
   return block(
-    `aggregate ${node.name}${ids}${persistedAs}${shape}${printWithClause(node.withClause)}`,
+    `${abstractKw}aggregate ${node.name}${ext}${ids}${persistedAs}${shape}${inh}${printWithClause(node.withClause)}`,
     node.members.map(printStructural),
   );
 }
@@ -579,6 +602,27 @@ function printEntityPart(node: EntityPart): string {
 
 function printEventDecl(node: EventDecl): string {
   return commaBlock(`event ${node.name}`, node.fields.map(printProperty));
+}
+
+// Payload-family member (`command`/`query`/`response`/`error`/`payload` Name { … }).
+function printPayloadDecl(node: import("../generated/ast.js").PayloadDecl): string {
+  return commaBlock(`${node.kind} ${node.name}`, node.fields.map(printProperty));
+}
+
+// `channel Name { carries: …, delivery: …, retention: …, key: … }` (channels.md).
+function printChannel(node: import("../generated/ast.js").Channel): string {
+  const items: string[] = [`carries: ${node.carries.map((r) => r.$refText).join(", ")}`];
+  if (node.delivery) items.push(`delivery: ${node.delivery}`);
+  if (node.retention) items.push(`retention: ${node.retention}`);
+  if (node.key) items.push(`key: ${node.key}`);
+  return block(`channel ${node.name}`, items);
+}
+
+// `channelSource Name { for: <channel>, use: <Storage> }` (channels.md).
+function printChannelSource(node: import("../generated/ast.js").ChannelSource): string {
+  const items: string[] = [`for: ${node.channel}`];
+  if (node.use) items.push(`use: ${node.use.$refText}`);
+  return block(`channelSource ${node.name}`, items);
 }
 
 function printRepository(node: Repository): string {
@@ -745,8 +789,10 @@ function printDestroy(node: import("../generated/ast.js").Destroy): string {
 }
 
 function printApply(node: import("../generated/ast.js").Apply): string {
-  const event = node.event.ref?.name ?? node.event.$refText;
-  return block(`apply(${node.param}: ${event})`, node.body.map(printStmt));
+  // `$refText` (not `.ref`) — the printer must work on detached / not-yet-linked
+  // nodes (the round-trip harness re-parses without a workspace), and the source
+  // reference text is exactly what we re-emit.
+  return block(`apply(${node.param}: ${node.event.$refText})`, node.body.map(printStmt));
 }
 
 function printTestBlock(node: TestBlock): string {
