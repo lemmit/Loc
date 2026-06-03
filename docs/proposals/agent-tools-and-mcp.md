@@ -148,12 +148,17 @@ gates the corresponding navigational verb. In-tree under `src/language/lsp/` +
 from `isRenameableMember` (`src/language/lsp/member-refs.ts:55`, which returns
 `Property | Containment | DerivedProp | FunctionDecl`). Renaming an
 `operation close()` declaration rewrites the declaration token but **not** the
-`order.close()` call sites (they're `MemberSuffix` tokens the index can't see),
-so the user gets a renamed declaration and a flood of "unknown member" errors on
-next validate. `collectMemberUsages` already handles the `MemberSuffix` arm —
-the fix is adding `Operation` + a declaration-rename→call-site test. **Must land
-before `loom_rename` ships** (an agent renaming an operation would silently
-corrupt the model).
+`order.close()` call sites (they're `MemberSuffix`/`LValue` tokens the index
+can't see), so the user gets a renamed declaration and a flood of "unknown
+member" errors on next validate. **Fixed** (PR adds `Operation` to
+`isRenameableMember` + a declaration-rename→call-site regression test;
+`collectMemberUsages` already handles the `MemberSuffix`/`LValue` arms). Two
+**known blind spots remain**, general to *all* member renames (not operation-
+specific), tracked for S2: **(a)** receivers the type system can't infer — a
+workflow `let w = Repo.getById(...)` binding — aren't resolved, so `w.op()`
+call sites are missed; **(b)** initiating a rename *from* an `LValue`-shaped
+call-site cursor (`a.b := …` / `this.op(...)`) finds no target because
+`memberDeclAt` doesn't resolve `LValue` (renaming from the declaration works).
 
 **S2 — coverage push.** The lowest-tested providers, with the worst gaps:
 
