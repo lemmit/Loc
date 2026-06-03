@@ -135,3 +135,37 @@ describe(".NET generator — reified criteria (Slice 2b: retrieval consumes ToEx
     expect(m![1]).not.toMatch(/new \w+Criterion\(/);
   });
 });
+
+// Slice 2b (find): a repository `find … where C` whose `where` is exactly a
+// named, eligible criterion consumes that criterion's `ToExpression()` —
+// symmetric to the retrieval path. Inline / composed filters stay inline.
+const FIND_SRC = `
+  context Sales {
+    aggregate Customer { active: bool  region: string  name: string }
+    criterion InRegion(rgn: string) of Customer = region == rgn
+    repository Customers for Customer {
+      find byRegion(rgn: string): Customer[] where InRegion(rgn)
+      find byName(name: string): Customer[] where this.name == name
+    }
+  }
+`;
+
+describe(".NET generator — reified criteria (Slice 2b: find consumes ToExpression)", () => {
+  async function repo() {
+    const out = await generateDotnet(await parseValid(FIND_SRC));
+    return out.get("Infrastructure/Repositories/CustomerRepository.cs")!;
+  }
+
+  it("a find whose `where` is a named criterion consumes ToExpression()", async () => {
+    const r = await repo();
+    expect(r).toMatch(/using Sales\.Domain\.Criteria;/);
+    expect(r).toMatch(/_db\.Customers\.Where\(new InRegionCriterion\(rgn\)\.ToExpression\(\)\)/);
+  });
+
+  it("a find with an inline `where` stays inline", async () => {
+    const r = await repo();
+    const body = r.slice(r.indexOf("ByName"));
+    expect(body).toMatch(/\.Where\(x => x\.Name == name\)/);
+    expect(body.split("ByRegion")[0]).not.toMatch(/new \w+Criterion\(/);
+  });
+});

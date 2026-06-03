@@ -27,11 +27,12 @@ import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 export function buildFindBodies(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
+  ctx?: BoundedContextIR,
 ): Array<{ name: string; filterClause: string; projectionClause: string }> {
   if (!repo) return [];
   return repo.finds.map((find) => ({
     name: find.name,
-    filterClause: filterClauseFor(find, agg),
+    filterClause: filterClauseFor(find, agg, ctx),
     projectionClause: projectionClauseFor(find.returnType),
   }));
 }
@@ -115,7 +116,15 @@ export function collectRetrievalBodyUsings(
   return into;
 }
 
-function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR): string {
+function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR, ctx?: BoundedContextIR): string {
+  // A `where` that is exactly a named, eligible criterion consumes its
+  // reified `ToExpression()` (Slice 2b, symmetric to the retrieval path).
+  if (ctx && find.criterionRef && canEmitToExpressionFor(find.criterionRef.name, ctx, agg.name)) {
+    const args = find.criterionRef.args
+      .map((a) => renderCsExpr(a, { thisName: "x", agg }))
+      .join(", ");
+    return `.Where(new ${upperFirst(find.criterionRef.name)}Criterion(${args}).ToExpression())`;
+  }
   if (find.filter) {
     // `agg` is threaded so the renderer can resolve a
     // `this.<refColl>.contains(param)` predicate to its
