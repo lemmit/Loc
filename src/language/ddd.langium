@@ -1362,7 +1362,14 @@ IdType:
 NamedType:
     target=[NamedDecl:ID];
 
-type NamedDecl = Aggregate | EntityPart | EnumDecl | ValueObject;
+// EventDecl / PayloadDecl join the union so a bare name in a type position can
+// resolve to a transport type (an `event` or a `command`/`query`/… payload).
+// The scope provider (ddd-scope.ts) only *offers* these in a workflow
+// `create`/`handle` parameter position — `create(e: PaymentReceived) by …`,
+// `handle settle(c: SettleOrder)` — so they cannot leak into aggregate field /
+// operation-param / UI positions, where a bare event name stays unresolved.
+// IdType (`X id`) filters them back out — `PaymentReceived id` is meaningless.
+type NamedDecl = Aggregate | EntityPart | EnumDecl | ValueObject | EventDecl | PayloadDecl;
 
 // ---------------------------------------------------------------------------
 // Statements

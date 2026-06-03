@@ -11,6 +11,7 @@ import type {
   EventDecl,
   Expression,
   MemberSuffix,
+  PayloadDecl,
   PostfixChain,
   PostfixSuffix,
   Property,
@@ -74,6 +75,7 @@ import {
   findEntityByName,
   findEventByName,
   findFunctionInEnv,
+  findPayloadByName,
   findValueObjectByName,
   findWorkflowByName,
   inAggregate,
@@ -1249,10 +1251,15 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
   if (t.kind === "entity") {
     const target = findEntityByName(env, t.name);
     if (target) return memberOnEntity(target, name);
-    // Applier event params carry the event name as an entity marker —
-    // fall back to the event's field set when it isn't an aggregate/part.
+    // Applier / workflow-command event params carry the event name as an
+    // entity marker — fall back to the event's field set when it isn't an
+    // aggregate/part.
     const event = findEventByName(env, t.name);
     if (event) return memberOnEvent(event, name);
+    // Workflow command params may be payload-typed (`handle h(c: SettleOrder)`),
+    // also entity-marked — fall back to the payload's flat field set.
+    const payload = findPayloadByName(env, t.name);
+    if (payload) return memberOnPayload(payload, name);
     // A workflow `this`/correlation is also entity-marked — fall back to its
     // state fields (workflow-and-applier.md A2).
     const wf = findWorkflowByName(env, t.name);
@@ -1326,6 +1333,17 @@ function memberOnValueObject(vo: ValueObject, name: string): TypeIR {
  *  so resolution is field-only — no `id`, containment, or derived members. */
 function memberOnEvent(event: EventDecl, name: string): TypeIR {
   for (const f of event.fields) {
+    if (f.name === name) return lowerType(f.type);
+  }
+  return { kind: "primitive", name: "string" };
+}
+
+/** Member type on a workflow command's payload parameter (`handle h(c: C) { …
+ *  c.f … }`).  A payload is a flat record of `Property` fields (`command C { f:
+ *  T, … }`), so resolution is field-only — the transport-layer twin of
+ *  `memberOnEvent`. */
+function memberOnPayload(payload: PayloadDecl, name: string): TypeIR {
+  for (const f of payload.fields) {
     if (f.name === name) return lowerType(f.type);
   }
   return { kind: "primitive", name: "string" };
@@ -1419,6 +1437,8 @@ function stepInto(t: TypeIR, name: string, env: Env): TypeIR {
     if (target) return memberOnEntity(target, name);
     const event = findEventByName(env, t.name);
     if (event) return memberOnEvent(event, name);
+    const payload = findPayloadByName(env, t.name);
+    if (payload) return memberOnPayload(payload, name);
     const wf = findWorkflowByName(env, t.name);
     if (wf) return memberOnWorkflow(wf, name);
   }

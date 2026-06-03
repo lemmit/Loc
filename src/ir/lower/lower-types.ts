@@ -9,6 +9,7 @@ import type {
   FunctionDecl,
   Model,
   Operation,
+  PayloadDecl,
   TypeRef,
   ValueObject,
   Workflow,
@@ -25,6 +26,7 @@ import {
   isModel,
   isNamedType,
   isOperation,
+  isPayloadDecl,
   isPrimitiveType,
   isProperty,
   isSlotType,
@@ -234,6 +236,14 @@ function lowerBase(t: TypeRef, env?: Env): TypeIR {
       if (isValueObject(target)) return { kind: "valueobject", name: target.name };
       if (isAggregate(target)) return { kind: "entity", name: target.name };
       if (isEntityPart(target)) return { kind: "entity", name: target.name };
+      // Transport types (`event` / payload) referenced as a workflow command
+      // param type — `create(e: PaymentReceived) by …`, `handle h(c: SettleOrder)`.
+      // Events aren't a distinct TypeIR kind; like `on`/`apply` event params
+      // they carry the name as an `entity` marker, and member access (`e.field`)
+      // type-resolves through `findEventByName`/`findPayloadByName` in lower-expr.
+      if (isEventDecl(target) || isPayloadDecl(target)) {
+        return { kind: "entity", name: target.name };
+      }
     }
     // Macro-emitted reference without a `$refNode` — Langium's default
     // Linker skips it silently (same hazard the IdType branch handles
@@ -247,6 +257,8 @@ function lowerBase(t: TypeRef, env?: Env): TypeIR {
       if (findValueObjectByName(env, refText)) return { kind: "valueobject", name: refText };
       if (findEnumByName(env, refText)) return { kind: "enum", name: refText };
       if (findEntityByName(env, refText)) return { kind: "entity", name: refText };
+      if (findEventByName(env, refText)) return { kind: "entity", name: refText };
+      if (findPayloadByName(env, refText)) return { kind: "entity", name: refText };
     }
     return { kind: "primitive", name: "string" };
   }
@@ -327,6 +339,19 @@ export function findEventByName(env: Env, name: string): EventDecl | undefined {
   if (!env.ctx) return undefined;
   for (const m of env.ctx.members) {
     if (isEventDecl(m) && m.name === name) return m;
+  }
+  return undefined;
+}
+
+/** Look up a context-level `payload` declaration (payload / command / query /
+ *  response / error) by name.  The transport-layer twin of `findEventByName`:
+ *  member typing on a workflow command param (`handle h(c: SettleOrder) { …
+ *  c.field … }`) resolves the param's `entity` marker back to the payload's
+ *  flat field set through this lookup. */
+export function findPayloadByName(env: Env, name: string): PayloadDecl | undefined {
+  if (!env.ctx) return undefined;
+  for (const m of env.ctx.members) {
+    if (isPayloadDecl(m) && m.name === name) return m;
   }
   return undefined;
 }

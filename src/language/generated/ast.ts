@@ -474,7 +474,7 @@ export function isModelMember(item: unknown): item is ModelMember {
     return reflection.isInstance(item, ModelMember);
 }
 
-export type NamedDecl = Aggregate | EntityPart | EnumDecl | ValueObject;
+export type NamedDecl = Aggregate | EntityPart | EnumDecl | EventDecl | PayloadDecl | ValueObject;
 
 export const NamedDecl = 'NamedDecl';
 
@@ -2735,7 +2735,8 @@ export class DddAstReflection extends AbstractAstReflection {
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
         switch (subtype) {
-            case Aggregate: {
+            case Aggregate:
+            case EventDecl: {
                 return this.isSubtype(ContextMember, supertype) || this.isSubtype(NamedDecl, supertype) || this.isSubtype(Targetable, supertype);
             }
             case Api:
@@ -2801,7 +2802,6 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case Channel:
             case Criterion:
-            case PayloadDecl:
             case Retrieval:
             case Seed: {
                 return this.isSubtype(ContextMember, supertype);
@@ -2843,12 +2843,6 @@ export class DddAstReflection extends AbstractAstReflection {
             case SecretConnectionSource:
             case ServiceConnectionSource: {
                 return this.isSubtype(ConnectionSource, supertype);
-            }
-            case EventDecl:
-            case Repository:
-            case View:
-            case Workflow: {
-                return this.isSubtype(ContextMember, supertype) || this.isSubtype(Targetable, supertype);
             }
             case ExpectStmt:
             case ExpectThrowsStmt: {
@@ -2893,8 +2887,16 @@ export class DddAstReflection extends AbstractAstReflection {
             case Operation: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(Targetable, supertype);
             }
+            case PayloadDecl: {
+                return this.isSubtype(ContextMember, supertype) || this.isSubtype(NamedDecl, supertype);
+            }
             case Property: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype) || this.isSubtype(ValueObjectMember, supertype) || this.isSubtype(WorkflowMember, supertype);
+            }
+            case Repository:
+            case View:
+            case Workflow: {
+                return this.isSubtype(ContextMember, supertype) || this.isSubtype(Targetable, supertype);
             }
             case Requirement:
             case Solution:
