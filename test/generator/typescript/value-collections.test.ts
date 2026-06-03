@@ -82,3 +82,36 @@ describe("value-object collection — migration (relational child table / Ash :a
     expect([...files.keys()].some((k) => /px\/.*order_charges\.exs$/.test(k))).toBe(false);
   });
 });
+
+// Optional fields whose wire type is already nullable (`Money[]?`) must emit
+// `.nullish()` exactly once in the Hono response schema — `zodForResponse`
+// used to add it for the `optional` flag on top of the type's own
+// nullability, producing a redundant `.nullish().nullish()`.
+const OPT_FIXTURE = `
+system VB {
+  subdomain S {
+    context C {
+      valueobject Money { amount: decimal currency: string }
+      aggregate Bill with crudish {
+        name: string
+        note: string?
+        surcharges: Money[]?
+      }
+      repository Bills for Bill { }
+    }
+  }
+  api SApi from S
+  deployable api { platform: hono contexts: [C] serves: SApi port: 3000 }
+}
+`;
+
+describe("optional response fields — single .nullish()", () => {
+  it("an optional T? / VO[]? field is not double-nullished in the response DTO", async () => {
+    const files = await generateSystemFiles(OPT_FIXTURE);
+    const routes = findFile(files, /bill\.routes\.ts$/);
+    expect(routes).not.toMatch(/\.nullish\(\)\.nullish\(\)/);
+    // …and the optional fields are still nullable (single).
+    expect(routes).toMatch(/note:\s*z\.string\(\)\.nullish\(\)/);
+    expect(routes).toMatch(/surcharges:\s*z\.array\(MoneySchema\)\.nullish\(\)/);
+  });
+});
