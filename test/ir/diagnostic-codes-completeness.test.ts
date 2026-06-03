@@ -18,7 +18,17 @@ import { describe, expect, it } from "vitest";
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const validatePath = path.resolve(here, "..", "..", "src", "ir", "validate", "validate.ts");
+// The IR validator was split from one validate.ts into a thin orchestrator
+// plus per-theme leaf modules under `checks/`; the diagnostics now live in
+// the leaves, so scan the whole `validate/` tree, not just validate.ts.
+const validateDir = path.resolve(here, "..", "..", "src", "ir", "validate");
+const validateSources = [
+  path.join(validateDir, "validate.ts"),
+  ...fs
+    .readdirSync(path.join(validateDir, "checks"))
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => path.join(validateDir, "checks", f)),
+];
 
 /** Slice each `diags.push({ … })` object literal by brace-matching from the
  *  opening `{`, returning the inner text of every block. */
@@ -50,8 +60,7 @@ function pushBlocks(src: string): string[] {
 }
 
 describe("IR validator diagnostic codes", () => {
-  const src = fs.readFileSync(validatePath, "utf8");
-  const blocks = pushBlocks(src);
+  const blocks = validateSources.flatMap((p) => pushBlocks(fs.readFileSync(p, "utf8")));
 
   it("scans a non-trivial number of diagnostics (guard against vacuous pass)", () => {
     expect(blocks.length).toBeGreaterThan(80);
