@@ -72,9 +72,12 @@ function renderTsStatement(
       const ev = `{ type: ${JSON.stringify(s.eventName)}, ${fields} }`;
       // Event-sourced: record the event and fold it immediately, so the
       // aggregate's in-memory state reflects the transition before the
-      // command returns (the applier is the only place state changes).
+      // command returns (the applier is the only place state changes).  The
+      // explicit `Events.DomainEvent` annotation keeps the `type` tag a
+      // string literal (a bare `const __ev = {…}` would widen it to `string`
+      // and fail the discriminated-union push/apply).
       if (traceCtx.eventSourced) {
-        return `${INDENT}{ const __ev = ${ev}; this._events.push(__ev); this._apply(__ev); }`;
+        return `${INDENT}{ const __ev: Events.DomainEvent = ${ev}; this._events.push(__ev); this._apply(__ev); }`;
       }
       return `${INDENT}this._events.push(${ev});`;
     }

@@ -48,6 +48,11 @@ interface EntityShape {
   /** True when the aggregate is `persistedAs(eventLog)` — gates the
    *  fold/rehydrate emission and flips `emit` to push-and-apply. */
   eventSourced?: boolean;
+  /** Explicit `create` lifecycle actions (root only).  On an event-sourced
+   *  aggregate the (single) create's emit-only body drives an event-sourced
+   *  `create(...)` factory — construct an empty shell, run the body so it
+   *  emits-and-folds the creation event (appliers A2.2). */
+  creates?: OperationIR[];
 }
 
 export function renderAggregate(
@@ -155,6 +160,7 @@ function rootShape(a: AggregateIR): EntityShape {
     operations: a.operations,
     appliers: a.appliers,
     eventSourced: a.persistedAs === "eventLog",
+    creates: a.creates,
   };
 }
 
@@ -394,11 +400,44 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
     // to null.
     return "null";
   };
+  // Event-sourced create factory (appliers A2.2): an event-sourced
+  // aggregate is constructed from its creation event, not by writing state.
+  // The single `create` lifecycle action's emit-only body runs against a
+  // fresh empty shell (`_init`), where each `emit` records-and-folds — so
+  // after `create(...)` the instance holds the folded state AND carries the
+  // creation event for the repository to append.  Input is the create
+  // action's params (the command shape), not the field set.
+  const esCreate = e.creates?.[0];
+  const esCreateFactory =
+    e.isRoot && e.eventSourced && esCreate
+      ? [
+          `  static create(input: { ${esCreate.params
+            .map((p) => `${p.name}: ${renderTsType(p.type)}`)
+            .join("; ")} }): ${e.name} {`,
+          `    const inst = new ${e.name}({ id: Ids.new${e.name}Id() } as unknown as ${stateLiteral});`,
+          `    inst._init(${esCreate.params.map((p) => `input.${p.name}`).join(", ")});`,
+          `    return inst;`,
+          `  }`,
+          "",
+          `  private _init(${esCreate.params
+            .map((p) => `${p.name}: ${renderTsType(p.type)}`)
+            .join(", ")}): void {`,
+          renderTsStatements(esCreate.statements, emitProvenance, {
+            emitTrace,
+            aggregate: e.name,
+            op: esCreate.name,
+            eventSourced: true,
+          }),
+          `  }`,
+        ]
+      : [];
+
   // Public `create(...)` factory gated on constructibility — a
   // non-constructible aggregate exposes no factory; it is reconstructed
-  // only via `_create` (repository hydration).
+  // only via `_create` (repository hydration).  Suppressed for event-sourced
+  // aggregates, which use the event-sourced factory above.
   const createFactory =
-    e.isRoot && e.hasCreate
+    e.isRoot && e.hasCreate && !e.eventSourced
       ? [
           `  static create(input: { ${createInputs
             .map((f) => `${f.name}${f.optional ? "?" : ""}: ${renderTsType(f.type)}`)
@@ -507,6 +546,7 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
     `    return new ${e.name}(state);`,
     "  }",
     ...createFactory,
+    ...esCreateFactory,
     "}",
   );
 }

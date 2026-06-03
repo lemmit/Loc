@@ -274,6 +274,21 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
     return;
   }
 
+  // Rule 6 — a single canonical creator drives the `create(...)` factory +
+  // POST route; more than one is ambiguous (zero is allowed — constructed
+  // out-of-band, no create route).
+  const creates = agg.members.filter(isCreate);
+  if (creates.length > 1) {
+    for (const c of creates.slice(1)) {
+      accept(
+        "error",
+        `Aggregate '${agg.name}' is persistedAs(eventLog) and declares multiple 'create' actions. ` +
+          `An event-sourced aggregate has a single canonical creator (v1) — keep one 'create(...)'.`,
+        { node: c, code: "loom.event-sourced-multiple-creates" },
+      );
+    }
+  }
+
   // Rule 5 — one applier per event type.
   const eventName = (a: (typeof appliers)[number]): string => a.event.ref?.name ?? a.event.$refText;
   const seenApplier = new Map<string, number>();

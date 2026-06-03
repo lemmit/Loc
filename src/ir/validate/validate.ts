@@ -524,6 +524,23 @@ function validateEventSourcedDiscipline(ctx: BoundedContextIR, diags: LoomDiagno
 
     if (!isEventSourced) continue;
 
+    // Rule 6 — event-sourced construction goes through a single canonical
+    // creator: the `create` action whose emit-only body raises the creation
+    // event drives the `create(...)` factory + POST route.  More than one is
+    // ambiguous (the factory would silently use the first); zero is allowed
+    // (the aggregate is then constructed out-of-band — e.g. by a workflow —
+    // and exposes no create route).
+    const creates = agg.creates ?? [];
+    if (creates.length > 1) {
+      diags.push({
+        severity: "error",
+        message:
+          `aggregate '${agg.name}' is persistedAs(eventLog) and declares ${creates.length} 'create' actions. ` +
+          `An event-sourced aggregate has a single canonical creator (v1) — keep one 'create(...)'.`,
+        source: `${ctx.name}/${agg.name}`,
+      });
+    }
+
     // Rule 5 — one applier per event type.
     const appliersByEvent = new Map<string, number>();
     for (const ap of appliers) {

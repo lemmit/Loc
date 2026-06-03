@@ -183,8 +183,31 @@ export function buildRoutesFile(
   // excludes server-controlled fields (`managed`, `token`, `internal`)
   // from the client-supplied payload, keeping `immutable` (settable on
   // create) and `secret`.  Matches the .NET CreateRequest shape.
-  const emitCreate = hasCreate(agg);
-  const requiredFields = createInputFields(agg);
+  // Event-sourced aggregates (appliers A2.2) are constructed from their
+  // creation command: the POST body is the create action's params (not the
+  // field set), and the factory emits-and-folds the creation event.  The
+  // single `create` action drives the canonical POST route.
+  const esCreate = agg.persistedAs === "eventLog" ? agg.creates?.[0] : undefined;
+  // An event-sourced aggregate is constructible only via an emitting `create`
+  // action (validator-enforced); without one it exposes no POST route (rather
+  // than calling the suppressed field-based factory).
+  const emitCreate = esCreate ? true : agg.persistedAs === "eventLog" ? false : hasCreate(agg);
+  // Unified create-input shape: `{ name, type, optional, default }`.  ES
+  // takes the create action's params (no defaults); state takes the
+  // create-input field set (server-controlled fields excluded).
+  const requiredFields: {
+    name: string;
+    type: import("../../../ir/types/loom-ir.js").TypeIR;
+    optional: boolean;
+    default?: import("../../../ir/types/loom-ir.js").ExprIR;
+  }[] = esCreate
+    ? esCreate.params.map((p) => ({ name: p.name, type: p.type, optional: false }))
+    : createInputFields(agg).map((f) => ({
+        name: f.name,
+        type: f.type,
+        optional: !!f.optional,
+        default: wireCreateDefault(f),
+      }));
   if (emitCreate) {
     lines.push(
       ...emitWireSchema(
@@ -194,7 +217,7 @@ export function buildRoutesFile(
           // An explicit `= default` field is optional input: omitted → the
           // default is applied at the wire (`.default(...)`), so it drops
           // out of the request's required-set (mirrors the bool rule).
-          const d = wireCreateDefault(f);
+          const d = f.default;
           const base = d ? `${zodFor(f.type)}.default(${renderTsExpr(d)})` : zodFor(f.type);
           return { name: f.name, base };
         }),

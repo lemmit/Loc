@@ -109,5 +109,41 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 300_000);
+
+    // Event sourcing (appliers A2): a `persistedAs(eventLog)` aggregate emits
+    // the `<agg>_events` stream table, the `_apply`/`_fromEvents` fold, the
+    // record-and-fold `emit`, the shell-+emit-body `create` factory, and the
+    // append/fold repository.  Generated via `generate system` (the ES storage
+    // validator requires a Hono host).  The discriminated-union push/apply is
+    // the type-sensitive part this gate compiles.
+    it("system event sourcing (eventLog + appliers + create) — generated project type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-es-"));
+      try {
+        execSync(`node ${cli} generate system examples/event-sourcing.ddd -o ${outDir}`, {
+          stdio: "inherit",
+          cwd: repoRoot,
+        });
+        const proj = path.join(outDir, "api");
+        // Sanity: the event-store table + the fold rehydrator made it out.
+        expect(fs.readFileSync(path.join(proj, "db", "schema.ts"), "utf8")).toContain(
+          "account_events",
+        );
+        expect(fs.readFileSync(path.join(proj, "domain", "account.ts"), "utf8")).toContain(
+          "_fromEvents",
+        );
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
   },
 );
