@@ -166,7 +166,7 @@ call-site cursor (`a.b := …` / `this.op(...)`) finds no target because
 |---|---|---|---|
 | `ddd-semantic-tokens.ts` | 1 → 2 | operations, repositories, events, type-refs, parameters, member-calls, var refs | **covered** (added type-ref / function / parameter / variable / method-decl / member-method / event / repository cases) |
 | `ddd-node-kind.ts` | 0 → 1 | `Deployable → Constructor` is semantically wrong (a deployable is a module) | **fixed + first tests** (`Deployable → Module`) |
-| `ddd-rename.ts` / `member-refs.ts` | 5 → 12 (+1 skip) | — | cross-ref matrix + shadowing + prepareRename + multi-file covered; **3 bugs FIXED** (operation call-sites, lambda-shadowing, bare-function-call); 1 gap left (enum-value) |
+| `ddd-rename.ts` / `member-refs.ts` | 5 → 14 (+1 skip) | — | cross-ref matrix + shadowing + prepareRename + multi-file covered; **4 bugs FIXED** (operation call-sites, lambda-shadowing, bare-function-call, bare enum-value); 1 residual (qualified `Status.Open`) |
 | `ddd-references.ts` | 3 → 7 | — | shadowing + derived + operation-call + bare-function-call covered; shares `collectMemberUsages`, so all the rename fixes flow through |
 
 > **Rename bugs found writing the cross-ref matrix** — all the operation-rename
@@ -181,11 +181,13 @@ call-site cursor (`a.b := …` / `this.op(...)`) finds no target because
 >   `env.resolve` doesn't surface a function for a bare head, so `nameRefDecl`
 >   falls back to an enclosing-entity member lookup (`iterateEntityMembers`,
 >   mirroring `collectLValueUsages`).
-> - ⚠️ **enum value** (the one remaining `it.skip` tripwire) — `state := Open` /
->   `X.Open` aren't rewritten. Enum-value refs resolve through a custom enum
->   scope, aren't in the index, aren't entity members, and `env.resolve` returns
->   undefined — so none of the existing paths reach them. Needs an enum-value
->   resolver in `collectMemberUsages` (its own slice).
+> - ✅ **bare enum value** FIXED — `st := Open` rewrites with the declaration.
+>   `nameRefDecl` resolves it through the same context-enum scan `lower-expr`
+>   uses (a property of the same name still shadows, so no over-collection).
+> - ⚠️ **qualified enum value** `Status.Open` (the lone residual `it.skip`) — the
+>   head `Status` is an enum *name* (types as `unknown` as a value expression),
+>   so the MemberSuffix path's `stepIntoNode` can't reach the value; needs a
+>   dedicated enum-qualified-access case.
 > - ⚠️ **soft-keyword field names** — a field named with a `LooseName` keyword
 >   (`state: Status`) blocks the type-ref `Status` from renaming (works for
 >   `kind: Status`). Tangential parser-level edge; tracked.
@@ -194,7 +196,7 @@ Multi-file rename and `prepareRename`-range are also covered (both pass).
 
 Still to add: a hover failure-path test (render unresolved refs as
 `«unresolved»`, not a silent `?`); deployable / module rename (need a
-system-scoped fixture); the enum-value resolver (above).
+system-scoped fixture); the qualified-enum-value (`Status.Open`) case (above).
 
 > **Note (LValue blind spot, found while testing).** A statement-position
 > member call / assignment target (`this.op(...)`, `a.b := …`) parses as an

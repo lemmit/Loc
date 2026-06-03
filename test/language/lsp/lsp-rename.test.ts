@@ -186,26 +186,41 @@ describe("RenameProvider — cross-reference categories", () => {
     expect(result).not.toMatch(/\bMoney\b/);
   });
 
-  // ---- KNOWN GAP -----------------------------------------------------------
-  // Enum-value rename: the declaration renames but `state := Open` / `X.Open`
-  // use-sites are NameRefs resolved by a custom enum scope — not in the
-  // cross-reference index, not via `env.resolve`, and not an entity member (so
-  // the bare-member fallback in `nameRefDecl` doesn't reach them either).
-  // Tracked in agent-tools-and-mcp.md §4c.  Un-skip when fixed.
-  // (The bare-function-call sibling of this gap is now fixed — see above.)
-  it.skip("KNOWN GAP: renames an enum value and its use sites", async () => {
+  // Enum-value rename: bare use sites (`st := Open`) now follow the declaration
+  // (`nameRefDecl` resolves them through the same enum scan `lower-expr` uses).
+  it("renames an enum value and its bare use sites", async () => {
     const result = await renameAt(
       `context Sales {
   enum Status { <|>Open, Closed }
   aggregate Order {
-    state: Status
-    operation close() { state := Open }
+    st: Status
+    operation close() { st := Open }
   }
 }`,
       "Active",
     );
     expect(result).toContain("{ Active, Closed }");
-    expect(result).toContain("state := Active"); // currently NOT rewritten
+    expect(result).toContain("st := Active");
+    expect(result).not.toMatch(/\bOpen\b/);
+  });
+
+  // ---- KNOWN GAP (residual) ------------------------------------------------
+  // The *qualified* enum-value form `Status.Open` is not yet rewritten: the
+  // head `Status` is an enum NAME (types as `unknown` as a value expression),
+  // so the MemberSuffix path's `stepIntoNode` can't reach the value — it needs
+  // a dedicated enum-qualified-access case.  Bare `Open` works (above).
+  it.skip("KNOWN GAP: renames an enum value used in qualified form (Status.Open)", async () => {
+    const result = await renameAt(
+      `context Sales {
+  enum Status { <|>Open, Closed }
+  aggregate Order {
+    st: Status
+    operation close() { st := Status.Open }
+  }
+}`,
+      "Active",
+    );
+    expect(result).toContain("st := Status.Active");
   });
 
   it("renames a function and its bare call site", async () => {

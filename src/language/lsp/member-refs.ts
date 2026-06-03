@@ -14,7 +14,10 @@ import {
   type Aggregate,
   type EntityPart,
   isAggregate,
+  isBoundedContext,
   isEntityPart,
+  isEnumDecl,
+  isEnumValue,
   isFunctionDecl,
   isHandleDecl,
   isLambda,
@@ -55,6 +58,10 @@ function isEntityLike(n: AstNode | undefined): n is EntityLike {
  *  operation must go through the member-usage rewrite path, not the default
  *  index-driven rename (which would leave every call site stale). */
 export function isRenameableMember(node: AstNode): boolean {
+  // Enum values are referenced through string-token NameRefs (`state := Open`)
+  // / member access (`Status.Open`) the cross-reference index can't see, so —
+  // like aggregate members — they rename through the member-usage path.
+  if (isEnumValue(node)) return true;
   if (!isEntityLike(node.$container)) return false;
   const t = node.$type;
   return (
@@ -133,6 +140,25 @@ function nameRefDecl(nr: NameRef): AstNode | undefined {
   if (owner) {
     const info = iterateEntityMembers(owner).find((m) => m.name === name);
     if (info && isRenameableMember(info.node)) return info.node;
+  }
+  // Enum value: a bare reference (`state := Open`) resolves to the first enum
+  // in the enclosing context with a value of that name — mirroring lower-expr's
+  // `resolveNameRef` enum-value lookup exactly (so usages match how the model
+  // actually lowers).  Falls last, after locals / members.
+  return resolveEnumValue(nr, name);
+}
+
+/** The enum value a bare `NameRef` resolves to in its context, or `undefined`.
+ *  Mirrors `lower-expr.ts:resolveNameRef` — first `enum` (in context order)
+ *  with a value of that name. */
+function resolveEnumValue(node: AstNode, name: string): AstNode | undefined {
+  const ctx = AstUtils.getContainerOfType(node, isBoundedContext);
+  if (!ctx) return undefined;
+  for (const m of ctx.members) {
+    if (isEnumDecl(m)) {
+      const v = m.values.find((val) => val.name === name);
+      if (v) return v;
+    }
   }
   return undefined;
 }
