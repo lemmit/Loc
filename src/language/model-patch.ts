@@ -17,7 +17,7 @@
 // Pure language-layer: parses in-memory and walks the AST; no `ir/` edge.
 // ---------------------------------------------------------------------------
 
-import { type AstNode, EmptyFileSystem, URI } from "langium";
+import { type AstNode, EmptyFileSystem, type LangiumDocument, URI } from "langium";
 import type { ModelPatch } from "../diagnostics/contract.js";
 import { createDddServices } from "./ddd-module.js";
 import {
@@ -166,22 +166,28 @@ function editFor(patch: ModelPatch, node: AstNode, text: string): Edit {
   };
 }
 
-/**
- * Apply a batch of node-addressed patches to a `.ddd` source string.  Patches
- * are validated against the parsed model first; if any fails to resolve,
- * nothing is applied (atomic) and the original text is returned with the
- * collected errors.  Edits are applied end-to-start so offsets stay valid, and
- * overlapping edits are rejected.
- */
-export async function applyPatches(source: string, patches: ModelPatch[]): Promise<PatchResult> {
+/** A resolved edit with the LSP-compatible source range it spans. */
+export interface PatchTextEdit {
+  range: { start: { line: number; character: number }; end: { line: number; character: number } };
+  newText: string;
+}
+
+interface Resolved {
+  doc: LangiumDocument<Model>;
+  edits: { edit: Edit; patch: ModelPatch }[];
+  errors: PatchError[];
+}
+
+/** Parse the source, resolve every patch target to an offset edit, and reject
+ *  overlaps — the shared core of `applyPatches` (offset splice) and
+ *  `resolvePatchEdits` (LSP ranges). */
+async function resolve(source: string, patches: ModelPatch[]): Promise<Resolved> {
   const services = createDddServices(EmptyFileSystem);
   const factory = services.shared.workspace.LangiumDocumentFactory;
   const doc = factory.fromString<Model>(source, URI.parse("memory://patch.ddd"));
   await services.shared.workspace.DocumentBuilder.build([doc]);
-  const model = doc.parseResult.value;
 
-  const { map, ambiguous } = indexTargets(model);
-
+  const { map, ambiguous } = indexTargets(doc.parseResult.value);
   const errors: PatchError[] = [];
   const edits: { edit: Edit; patch: ModelPatch }[] = [];
 
@@ -210,7 +216,18 @@ export async function applyPatches(source: string, patches: ModelPatch[]): Promi
       errors.push({ patch: sorted[i]!.patch, message: `edit overlaps another patch in the batch` });
     }
   }
+  return { doc, edits, errors };
+}
 
+/**
+ * Apply a batch of node-addressed patches to a `.ddd` source string.  Patches
+ * are validated against the parsed model first; if any fails to resolve,
+ * nothing is applied (atomic) and the original text is returned with the
+ * collected errors.  Edits are applied end-to-start so offsets stay valid, and
+ * overlapping edits are rejected.
+ */
+export async function applyPatches(source: string, patches: ModelPatch[]): Promise<PatchResult> {
+  const { edits, errors } = await resolve(source, patches);
   if (errors.length > 0) {
     return { ok: false, text: source, applied: [], errors };
   }
@@ -227,4 +244,27 @@ export async function applyPatches(source: string, patches: ModelPatch[]): Promi
     applied: patches.map((p) => ({ op: p.op, target: p.target })),
     errors: [],
   };
+}
+
+/**
+ * Resolve patches to **range-based** edits (LSP `TextEdit` shape) instead of
+ * applying them, for editor transports (`ModelPatch → WorkspaceEdit/TextEdit`).
+ * Atomic: on any resolution error, `edits` is empty.
+ */
+export async function resolvePatchEdits(
+  source: string,
+  patches: ModelPatch[],
+): Promise<{ ok: boolean; edits: PatchTextEdit[]; errors: PatchError[] }> {
+  const { doc, edits, errors } = await resolve(source, patches);
+  if (errors.length > 0) {
+    return { ok: false, edits: [], errors };
+  }
+  const textEdits = edits.map(({ edit }) => ({
+    range: {
+      start: doc.textDocument.positionAt(edit.start),
+      end: doc.textDocument.positionAt(edit.end),
+    },
+    newText: edit.newText,
+  }));
+  return { ok: true, edits: textEdits, errors: [] };
 }

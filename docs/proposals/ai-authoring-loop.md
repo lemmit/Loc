@@ -90,26 +90,37 @@ neither requires the agent to read generated code.
 
 ## 3. Tool surface for the agent
 
-The agent is an LLM with exactly these tools. Each wraps an existing pipeline
-entry point and returns JSON (contract in the companion doc):
+The tools are **one transport-neutral toolkit** (`src/api/`,
+[D-API-TOOLKIT](../decisions.md#d-api-toolkit--one-transport-neutral-toolkit-core-thin-adapters-per-surface)),
+exposed across surfaces by thin adapters. The operation set lives in one place
+so it never drifts per surface:
 
-| Tool | Wraps | Returns |
+| Tool | Toolkit fn | Returns | Status |
+|---|---|---|---|
+| `validate` | `validate(source)` | `ValidateReport` — located, coded, phase-attributed `diagnostics[]` (with `fixHint`) + `outline` | **shipped** |
+| `apply_patch` | `applyPatches(source, patches)` | `PatchResult` — patched text, or a patch-conflict error (§4) | **shipped** |
+| `generate` | `generate(source)` | `GenerateReport` — `ok` + the deployable manifest | **shipped** |
+| `read_model` | (canonical print) `src/language/print/` | canonical model text + the `outline` address book | partial (outline shipped) |
+| `verify` | `ddd verify` (`src/verify/`) | per-requirement `verdicts[]` | planned |
+| `conformance` | the parity harness | cross-backend `parity[]` diffs | planned |
+| `list_primitives` | `src/language/walker-stdlib.ts` | the closed page-primitive catalog | planned |
+
+**Transports (thin adapters over the toolkit):**
+
+| Surface | Status | Notes |
 |---|---|---|
-| `read_model` | `src/language/print/` (IR→`.ddd`) | canonical model text + a structural outline (contexts/aggregates/pages) |
-| `apply_patch` | new (§4) | patched model text, or a patch-conflict error |
-| `validate` | `ddd parse` / phases ②③④⑦ | `diagnostics[]` (errors + warnings, located, with `fixHint`) |
-| `generate` | `ddd generate system` | `files[]` summary + `ok` (or surfaced generation errors) |
-| `verify` | `ddd verify` (`src/verify/`) | per-requirement `verdicts[]` |
-| `conformance` | the parity harness | cross-backend `parity[]` diffs |
-| `list_primitives` | `src/language/walker-stdlib.ts` | the closed page-primitive catalog (for page bodies) |
+| **CLI** | shipped | `ddd parse --json` / `generate system --json` / `patch --patches` |
+| **LSP / editor** (Monaco, VS Code) | shipped | `toLspDiagnostic` / `toLspDiagnostics` / `fixHintCodeActions` + `resolvePatchEdits` in `src/api/lsp.ts` (`ModelPatch → TextEdit/WorkspaceEdit`); plus the `loom.bare-aggregate-in-type` quick-fix in the live LSP provider (`ddd-code-actions.ts`), so it appears in the playground + VS Code now |
+| **MCP server** (`ddd-mcp`) | planned | declared tool handlers — the recognized way agents call tools; the agent-driver's foundation |
+| **Web playground** | available | imports the toolkit directly (`../src/api`, browser-safe) |
 
 Design rules:
 
-- **The agent never sees generated code.** Its world is the model and the four
+- **The agent never sees generated code.** Its world is the model and the
   structured result streams. This is what keeps its context small and its
   edits reviewable.
-- **`validate` is the hot path** and must be cheap. Run it client-side
-  (§6) so the inner repair loop has no network latency.
+- **`validate` is the hot path** and must be cheap. The toolkit parses on
+  `EmptyFileSystem`, so it runs client-side (§6) with no network latency.
 - **Tools are pure functions of the model.** No hidden state; re-running
   `validate` on the same model is deterministic, matching the compiler's
   determinism guarantee.
@@ -230,27 +241,38 @@ a new runtime.
 Concrete, ordered, mostly assembly over existing parts. Target: the demo in
 `ai-generation-platform.md` §6.
 
-1. **Diagnostics/result JSON contract** — implement `--json` on `ddd parse`
-   and `ddd generate` per [`ai-diagnostics-contract.md`](./ai-diagnostics-contract.md).
-   (Loom already produces structured diagnostics internally; this is surfacing,
-   not inventing.) *Gate:* a golden-file test pinning the JSON for a known-bad
-   and known-good model.
-2. **Model context-pack** — generate the system-prompt bundle from `examples/`
-   + the validator code registry. *Gate:* a frontier model emits a valid
-   `Order`/`Wallet`/`checkout` model zero-shot (validated by tool #1).
-3. **Patch apply** (§4) — implement `apply_patch` over the AST + printer.
-   *Gate:* round-trip property test (apply → print → re-parse → identical AST)
-   and a canonical-diff test (unrelated nodes byte-unchanged).
-4. **Agent driver** — wire the tool surface (§3) into a loop: draft patch →
+1. ✅ **Diagnostics JSON contract** — `ddd parse --json` (PRs #863/#865):
+   located, coded (`loom.*`), phase-attributed diagnostics + `outline`.
+2. ✅ **Patch apply** (§4) — `applyPatches` + `ddd patch` (PR #871):
+   node-addressed `add`/`replace`/`remove`, atomic, byte-preserving, round-trip
+   gated.
+3. ✅ **fixHint** (§3.3) — diagnostics carry an applyable `ModelPatch`; the
+   validate→repair loop is proven closed end-to-end (PR #873).
+4. ✅ **Transport-neutral toolkit + `generate --json`** — the `src/api/` core
+   ([D-API-TOOLKIT](../decisions.md#d-api-toolkit--one-transport-neutral-toolkit-core-thin-adapters-per-surface))
+   + the `GenerateReport` (PR #877).
+5. ✅ **LSP / editor adapters** — `src/api/lsp.ts` (`toLspDiagnostic[s]`,
+   `fixHintCodeActions`, `resolvePatchEdits`) + the `loom.bare-aggregate-in-type`
+   quick-fix wired into the live LSP provider, so squiggles + quick-fixes show
+   in the playground's Monaco editor and VS Code now. Gated by converter and
+   provider tests (apply-the-edit → clean re-validate).
+6. **MCP server (`ddd-mcp`)** *(next)* — declared tool handlers (`validate`/`patch`/
+   `generate`/`verify`) over the toolkit; the recognized way agents call tools
+   and the agent-driver foundation.
+7. **Model context-pack** — system-prompt bundle from `examples/` + the
+   validator code registry. *Gate:* a frontier model emits a valid
+   `Order`/`Wallet`/`checkout` model zero-shot (validated by `validate`).
+8. **Agent driver** — wire the tool surface (§3) into a loop: draft patch →
    `validate` → repair until clean → `generate` → `verify`/`conformance` →
-   present model diff. Run `validate`/`generate` client-side (§6).
-5. **The demo** — prose → AI-authored `.ddd` → Hono + .NET + React with the
+   present model diff. Runs client-side (§6).
+9. **The demo** — prose → AI-authored `.ddd` → Hono + .NET + React with the
    conformance harness green → review *the model diff* → show the `.loom/`
    audit bundle. *Gate:* the whole loop runs in the playground end-to-end.
 
-Items 1–3 are independently useful (they also enable the IR-first
-`@loom/core` embedding story in `ai-generation-platform.md` §4.4), so the plan
-delivers value before item 5.
+Items 1–5 are independently useful (the diagnostics/patch/fixHint/toolkit core
+also powers the editor and the IR-first `@loom/core` embedding story in
+`ai-generation-platform.md` §4.4), so the plan delivers value well before the
+end-to-end demo.
 
 ---
 
