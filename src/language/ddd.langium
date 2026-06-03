@@ -15,7 +15,7 @@ ImportStmt:
     'import' path=STRING ';'?;
 
 ModelMember:
-    System | BoundedContext | ValueObject | EnumDecl | Requirement | Solution | TestCase | Component;
+    System | Subdomain | BoundedContext | ValueObject | EnumDecl | Requirement | Solution | TestCase | Component;
 
 // ---------------------------------------------------------------------------
 // System / Module / Deployable — the deployment shape.

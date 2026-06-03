@@ -1,0 +1,135 @@
+// ── Crm subdomain — split out of the Acme ERP project.
+// A top-level `subdomain` composes into the single `system` declared in
+// main.ddd (implicit-system-composition).
+
+// ════════════════════════════════════════════════════════════════════
+//  CRM — contacts (polymorphic), leads and the opportunity pipeline.
+// ════════════════════════════════════════════════════════════════════
+subdomain Crm {
+  context Crm {
+
+    enum LeadStatus       { New, Qualified, Converted, Lost }
+    enum OpportunityStage { Prospecting, Proposal, Negotiation, Won, Lost }
+
+    // ── Inheritance (Table-Per-Hierarchy / sharedTable) ──────────────
+    // The abstract base owns the shared columns + a single `contacts`
+    // table with a `kind` discriminator; it has no repository of its own.
+    // Each backend auto-emits a polymorphic reader that unions the
+    // concrete loaders, and `Contact id` refs resolve against the one
+    // shared identity.
+    abstract aggregate Contact inheritanceUsing(sharedTable) {
+      displayName: string
+      email: string
+      invariant displayName.length > 0
+      derived display: string = displayName
+    }
+
+    aggregate PersonContact extends Contact with crudish {
+      firstName: string
+      lastName: string
+      jobTitle: string?
+    }
+
+    aggregate CompanyContact extends Contact with crudish {
+      legalName: string
+      taxId: string?
+    }
+
+    aggregate Lead with crudish {
+      name: string
+      company: string
+      status: LeadStatus = New
+      source: string
+      score: int = 0
+      invariant name.length > 0
+      invariant score >= 0
+      // derived match — the classic banding expression.
+      derived band: string = match {
+        (score >= 80) => "hot",
+        (score >= 50) => "warm",
+        else => "cold"
+      }
+      derived display: string = name
+
+      operation qualify() {
+        precondition status == New
+        status := Qualified
+      }
+      operation convert() {
+        precondition status == Qualified
+        status := Converted
+      }
+      operation lose(reason: string) {
+        precondition status != Converted
+        status := Lost
+      }
+
+      test "a lead must be qualified before it can convert" verifies TC-CRM-1 {
+        let l = Lead.create({
+          name: "Acme Co", company: "Acme", status: New, source: "Web", score: 10
+        })
+        expectThrows l.convert()
+        l.qualify()
+        l.convert()
+        expect(l.status).toBe(Converted)
+      }
+    }
+
+    aggregate Opportunity with crudish {
+      name: string
+      customerRef: string
+      stage: OpportunityStage = Prospecting
+      amount: Money
+      probability: Percentage
+      expectedClose: datetime
+      invariant name.length > 0
+      derived weightedAmount: decimal = amount.amount * probability.asFraction()
+      derived stageLabel: string = match {
+        (stage == Won)  => "Closed won",
+        (stage == Lost) => "Closed lost",
+        else => "In flight"
+      }
+      derived display: string = name
+
+      operation advance(to: OpportunityStage) {
+        precondition stage != Won
+        precondition stage != Lost
+        stage := to
+      }
+      operation win() {
+        precondition stage != Lost
+        stage := Won
+      }
+      operation lose(reason: string) {
+        precondition stage != Won
+        stage := Lost
+      }
+    }
+
+    criterion OpenOpportunity of Opportunity = stage != Won && stage != Lost
+
+    // Concrete subtypes get ordinary repositories; the abstract base
+    // does not (the polymorphic union reader is emitted as infrastructure).
+    repository PersonContacts for PersonContact {
+      find byEmail(email: string): PersonContact? where this.email == email
+    }
+    repository CompanyContacts for CompanyContact { }
+    repository Leads for Lead {
+      find byStatus(status: LeadStatus): Lead[] where this.status == status
+    }
+    repository Opportunities for Opportunity {
+      find byStage(stage: OpportunityStage): Opportunity[] where this.stage == stage
+      find open(): Opportunity[] where OpenOpportunity
+    }
+
+    view OpenPipeline = Opportunity where stage != Won && stage != Lost
+
+    seed default {
+      Lead { name: "Jane Prospect", company: "Hooli", status: New, source: "Website", score: 65 }
+      PersonContact { displayName: "John Buyer", email: "john@hooli.example",
+                      firstName: "John", lastName: "Buyer", jobTitle: "Head of Ops" }
+      CompanyContact { displayName: "Hooli Inc", email: "info@hooli.example",
+                       legalName: "Hooli Incorporated", taxId: "US-99-1234567" }
+    }
+  }
+}

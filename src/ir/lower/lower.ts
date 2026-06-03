@@ -45,6 +45,7 @@ import type {
   StateField,
   Statement,
   Storage,
+  Subdomain,
   System,
   Targetable,
   TestBlock,
@@ -306,6 +307,32 @@ function canonicalFramework(value: string | undefined): string | undefined {
 // ---------------------------------------------------------------------------
 
 export function lowerModel(model: Model): RawLoomModel {
+  // Single-document lowering = a one-element project (composes the file's
+  // own `system` with any top-level domain members it declares).
+  return lowerProject([model]);
+}
+
+/** Lower an entire project — every `.ddd` document in the import graph —
+ *  composing the lone `system { }` block (its name + singletons +
+ *  deployment) with top-level `subdomain` / `context` declarations from
+ *  ANY file into one project system.  See
+ *  docs/proposals/implicit-system-composition.md.
+ *
+ *  Resolution: exactly one `system` block in the project ⇒ fold every
+ *  top-level domain member into it (the user / permission threading in
+ *  `lowerSystem` then applies to them).  Zero or many systems ⇒ legacy
+ *  behaviour: top-level `context`s stay loose (single-deployable mode);
+ *  a stray top-level `subdomain` is a validation error
+ *  (`loom.top-level-domain-needs-single-system`), but its contexts are
+ *  still lowered loose here so nothing is silently dropped. */
+export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
+  const allMembers = models.flatMap((m) => m.members);
+  const systemNodes = allMembers.filter(isSystem);
+  const topLevelDomain = allMembers.filter(
+    (m): m is Subdomain | BoundedContext => isSubdomain(m) || isBoundedContext(m),
+  );
+  const compose = systemNodes.length === 1;
+
   const systems: SystemIR[] = [];
   const looseContexts: BoundedContextIR[] = [];
   const rootValueObjects: ValueObjectIR[] = [];
@@ -317,13 +344,18 @@ export function lowerModel(model: Model): RawLoomModel {
   // Root-level VOs / enums have no enclosing context — pass an empty
   // env so `lowerValueObject`'s `inValueObject(env, vo)` still works.
   const rootEnv: Env = { locals: new Map() };
-  for (const m of model.members) {
-    if (isSystem(m)) systems.push(lowerSystem(m));
-    // Top-level loose contexts (legacy single-deployable mode) have
-    // no enclosing system, so no user block ever applies — the env's
-    // `currentUser` resolution falls through to ordinary lookup.
-    else if (isBoundedContext(m)) looseContexts.push(lowerContext(m));
-    else if (isValueObject(m)) rootValueObjects.push(lowerValueObject(m, rootEnv));
+  for (const m of allMembers) {
+    if (isSystem(m)) {
+      systems.push(lowerSystem(m, compose ? topLevelDomain : []));
+    } else if (isBoundedContext(m)) {
+      // Folded into the single system above when composing; otherwise a
+      // legacy loose context (single-deployable mode).
+      if (!compose) looseContexts.push(lowerContext(m));
+    } else if (isSubdomain(m)) {
+      // Folded when composing; otherwise a validation error — still lower
+      // its contexts loose so the IR names them.
+      if (!compose) for (const c of m.contexts) looseContexts.push(lowerContext(c));
+    } else if (isValueObject(m)) rootValueObjects.push(lowerValueObject(m, rootEnv));
     else if (isEnumDecl(m)) rootEnums.push(lowerEnum(m));
     else if (isComponent(m)) components.push(lowerComponent(m));
     else if (isRequirement(m)) requirements.push(lowerRequirement(m));
@@ -481,7 +513,16 @@ function codeRefKindOf(node: Targetable): CodeRefKind {
   }
 }
 
-function lowerSystem(sys: System): SystemIR {
+/** Lower a `system { … }` block.  `extraDomainMembers` are top-level
+ *  `subdomain` / `context` declarations from sibling files (the import
+ *  graph) that compose into THIS system — see `lowerProject` /
+ *  docs/proposals/implicit-system-composition.md.  They are folded in
+ *  alongside `sys.members` so the `user` / `permissions` threading below
+ *  applies to them identically to a nested declaration. */
+function lowerSystem(
+  sys: System,
+  extraDomainMembers: ReadonlyArray<Subdomain | BoundedContext> = [],
+): SystemIR {
   // Pre-pass over members: pull the user block out first so every
   // context lowering downstream sees the same shape.  At most one
   // block per system (validator enforces; we take the last one if
@@ -515,7 +556,11 @@ function lowerSystem(sys: System): SystemIR {
   // Bare `context` declarations directly under a `system` block live in
   // an implicit anonymous subdomain so we can index them like any other.
   const looseContexts: BoundedContextIR[] = [];
-  for (const m of sys.members) {
+  // Fold sibling-file top-level `subdomain` / `context` declarations in
+  // with this system's own members.  Only the Subdomain / BoundedContext
+  // branches below match them; Deployable / TestE2E / Ui / … stay
+  // system-block-only (Tier 1), so iterating the union is safe.
+  for (const m of [...sys.members, ...extraDomainMembers]) {
     if (isSubdomain(m)) {
       // Subdomain-scoped permissions catalogue.  Multiple
       // `permissions { ... }` blocks merge their declarations;

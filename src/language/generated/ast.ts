@@ -466,7 +466,7 @@ export function isMemberName(item: unknown): item is MemberName {
     return item === 'by' || item === 'handle' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'create' || item === 'destroy' || item === 'where' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type ModelMember = BoundedContext | Component | EnumDecl | Requirement | Solution | System | TestCase | ValueObject;
+export type ModelMember = BoundedContext | Component | EnumDecl | Requirement | Solution | Subdomain | System | TestCase | ValueObject;
 
 export const ModelMember = 'ModelMember';
 
@@ -2222,7 +2222,7 @@ export function isStringLit(item: unknown): item is StringLit {
 }
 
 export interface Subdomain extends AstNode {
-    readonly $container: System;
+    readonly $container: Model | System;
     readonly $type: 'Subdomain';
     contexts: Array<BoundedContext>;
     name: string;
@@ -2724,8 +2724,7 @@ export class DddAstReflection extends AbstractAstReflection {
                 return this.isSubtype(ContextMember, supertype) || this.isSubtype(NamedDecl, supertype) || this.isSubtype(Targetable, supertype);
             }
             case Api:
-            case Deployable:
-            case Subdomain: {
+            case Deployable: {
                 return this.isSubtype(SystemMember, supertype) || this.isSubtype(Targetable, supertype);
             }
             case Apply: {
@@ -2779,7 +2778,8 @@ export class DddAstReflection extends AbstractAstReflection {
             case StringLit: {
                 return this.isSubtype(LiteralExpr, supertype);
             }
-            case BoundedContext: {
+            case BoundedContext:
+            case Subdomain: {
                 return this.isSubtype(ModelMember, supertype) || this.isSubtype(SystemMember, supertype) || this.isSubtype(Targetable, supertype);
             }
             case CallSuffix:
