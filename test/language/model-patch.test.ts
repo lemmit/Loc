@@ -98,4 +98,26 @@ describe("applyPatches", () => {
     const { errors } = await parseString(r.text);
     expect(errors).toEqual([]);
   });
+
+  it("targets value-object members and adds into a value object", async () => {
+    const vo = `context Sales {
+  valueobject Money {
+    amount: int
+  }
+}
+`;
+    const replaced = await applyPatches(vo, [
+      { op: "replace", target: "valueobject Sales.Money.amount", source: "amount: decimal" },
+    ]);
+    expect(replaced.ok).toBe(true);
+    expect(replaced.text).toContain("amount: decimal");
+
+    const added = await applyPatches(vo, [
+      { op: "add", target: "valueobject Sales.Money", source: "currency: string" },
+    ]);
+    expect(added.ok).toBe(true);
+    expect(added.text).toContain("currency: string");
+    const { errors } = await parseString(added.text);
+    expect(errors).toEqual([]);
+  });
 });
