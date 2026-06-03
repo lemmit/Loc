@@ -700,6 +700,71 @@ function lookupPayloadMember(target: EventDecl | PayloadDecl, name: string): Ddd
   return T.unknown;
 }
 
+/** For the unknown-member validator: when `recvType` is a record we can
+ *  fully enumerate (aggregate / entity / value object / event-or-payload, or
+ *  an `X id` resolving to one) and `name` is **not** one of its members,
+ *  returns the record's display name (for the diagnostic).  Returns
+ *  `undefined` when the member exists *or* the receiver isn't a fully
+ *  enumerable record (array, primitive, slot, enum, `any`, `unknown`, or a
+ *  nested optional) — i.e. it fails open and never reports on uncertainty.
+ *
+ *  Membership is a name match across *any* declared member (property,
+ *  containment, derived, function, operation), not the type-returning
+ *  lookups: those map a function/operation member to `T.unknown` (no useful
+ *  type without a call), which is indistinguishable from "absent" and would
+ *  flag a legitimate `this.someOperation()`.  `id` is always valid on an
+ *  aggregate / entity / id receiver (the implicit identity accessor). */
+export function absentRecordMember(recvType: DddType, name: string): string | undefined {
+  // Member access transparently unwraps a single optional level.
+  const t = recvType.kind === "optional" ? recvType.inner : recvType;
+  switch (t.kind) {
+    case "aggregate": {
+      if (name === "id") return undefined;
+      return aggregateChainHasMember(t.ref, name) ? undefined : t.ref.name;
+    }
+    case "entity": {
+      // Entity parts don't participate in `extends` inheritance (aggregate-only).
+      if (name === "id") return undefined;
+      const has = t.ref.members.some((m) => (m as { name?: string }).name === name);
+      return has ? undefined : t.ref.name;
+    }
+    case "id": {
+      if (name === "id") return undefined;
+      const tgt = t.target;
+      const has = isAggregate(tgt)
+        ? aggregateChainHasMember(tgt, name)
+        : tgt.members.some((m) => (m as { name?: string }).name === name);
+      return has ? undefined : tgt.name;
+    }
+    case "valueobject": {
+      const has = t.ref.members.some((m) => (m as { name?: string }).name === name);
+      return has ? undefined : t.ref.name;
+    }
+    case "payload": {
+      const has = t.ref.fields.some((f) => f.name === name);
+      return has ? undefined : t.ref.name;
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** True iff `name` is declared anywhere in an aggregate's `extends` chain.
+ *  A concrete aggregate inherits the abstract base's fields / operations, so
+ *  the membership check (`absentRecordMember`) must walk `superType` — without
+ *  it, `this.<inheritedField>` on a subtype is a false positive.  Cycle-guarded
+ *  (the inheritance validator reports `extends` cycles separately). */
+function aggregateChainHasMember(agg: Aggregate, name: string): boolean {
+  const seen = new Set<Aggregate>();
+  let cur: Aggregate | undefined = agg;
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    if (cur.members.some((m) => (m as { name?: string }).name === name)) return true;
+    cur = cur.superType?.ref;
+  }
+  return false;
+}
+
 // Collection-op catalogue moved to src/util/collection-ops.ts (pure data
 // catalogue, consumed by ir/, generator/, system/ as well — keeps the
 // language layer free of back-edges).

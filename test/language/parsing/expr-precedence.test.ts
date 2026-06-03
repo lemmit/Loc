@@ -248,7 +248,7 @@ describe("expr-precedence: PostfixChain shape", () => {
     const src = `
 context X {
   aggregate Order {
-    contains lines: OrderLine
+    contains lines: OrderLine[]
     derived label: int = lines.first.qty
     entity OrderLine {
       qty: int

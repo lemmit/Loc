@@ -19,6 +19,7 @@ import type {
 } from "../generated/ast.js";
 import { isBinaryChain, isDerivedProp, isMemberSuffix, isPostfixChain } from "../generated/ast.js";
 import {
+  absentRecordMember,
   arithmeticResult,
   comparable,
   type DddType,
@@ -112,6 +113,42 @@ export function checkSlotMemberAccess(model: Model, accept: ValidationAcceptor):
         flagged = true;
         // Cascade suppression for the rest of this chain — one
         // diagnostic per offending access is enough.
+      }
+      recvType = typeAfterSuffix(recvType, suffix, env);
+    }
+  }
+}
+
+/** Reject access to a member that doesn't exist on a fully-resolved record
+ *  receiver — `order.totl`, `paid.amont`, `this.noSuchField`.  Without this
+ *  an undefined-field access cascades silently to `T.unknown`, and because
+ *  the operand validators suppress on `unknown` (anti-double-reporting), the
+ *  typo produces *no* diagnostic anywhere.  Fail-open by construction
+ *  (`absentRecordMember`): fires only when the receiver is a record we can
+ *  fully enumerate (aggregate / entity / value object / event / payload, or
+ *  an `X id` resolving to one) and the member is definitively absent — never
+ *  on arrays (collection ops), primitives (`.length`), magic identifiers, or
+ *  any receiver that already typed as `unknown`. */
+export function checkUnknownMemberAccess(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isPostfixChain(node)) continue;
+    const chain = node as PostfixChain;
+    const env = envForNode(chain);
+    let recvType = typeOf(chain.head, env);
+    for (const suffix of chain.suffixes) {
+      if (isMemberSuffix(suffix)) {
+        const ms = suffix as MemberSuffix;
+        const record = absentRecordMember(recvType, ms.member);
+        if (record) {
+          accept("error", `'${ms.member}' is not a member of '${record}'.`, {
+            node: ms,
+            property: "member",
+            code: "loom.unknown-member",
+          });
+          // Stop walking this chain — the receiver is now indeterminate and
+          // any further suffix would cascade off the unresolved access.
+          break;
+        }
       }
       recvType = typeAfterSuffix(recvType, suffix, env);
     }

@@ -824,6 +824,12 @@ The validator runs after parsing and reports errors for:
 
 - `precondition` and `invariant` expressions whose type is not `bool`.
 - Field / parameter / call / member-access type mismatches.
+- Access to a member that doesn't exist on a fully-resolved record
+  receiver — `order.totl`, `paid.amont`, `this.noField` (`loom.unknown-member`).
+  Covers aggregates (including fields inherited via `extends`), entity
+  parts, value objects, events / payloads, and `X id` references; it does
+  not fire on collection ops (`lines.first`), string members (`s.length`),
+  or receivers whose type couldn't be resolved.
 - Assignment to a derived property.
 - `emit` payloads that don't match the event's declared shape.
 - Unknown / out-of-scope `X id` targets.
