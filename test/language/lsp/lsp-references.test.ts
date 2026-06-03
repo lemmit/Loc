@@ -125,3 +125,24 @@ describe("ReferencesProvider — bare function calls", () => {
     });
   });
 });
+
+describe("ReferencesProvider — enum values", () => {
+  // Enum-value use sites are string-token NameRefs (bare `Open`) and qualified
+  // `Status.Open` MemberSuffixes — neither is a cross-reference.  Both resolve
+  // to the value declaration through the shared `qualifiedEnumValueDecl` /
+  // `resolveEnumValue` fallbacks, so find-references reaches both forms.
+  it("finds bare and qualified use sites of an enum value", async () => {
+    await expectRefs({
+      text: `
+        context Sales {
+          enum Status { <|><|Open|>, Closed }
+          aggregate Order {
+            st: Status
+            operation a() { st := <|Open|> }
+            operation b() { st := Status.<|Open|> }
+          }
+        }`,
+      includeDeclaration: true,
+    });
+  });
+});

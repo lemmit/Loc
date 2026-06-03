@@ -95,6 +95,13 @@ function receiverTypeForSuffix(ms: MemberSuffix): DddType | undefined {
   return t;
 }
 
+/** The member declaration a `MemberSuffix` resolves to via its receiver's
+ *  type, or `undefined` when the receiver type is unknown. */
+function stepFromReceiver(ms: MemberSuffix): AstNode | undefined {
+  const recvType = receiverTypeForSuffix(ms);
+  return recvType ? stepIntoNode(recvType, ms.member) : undefined;
+}
+
 /** The CST node of a `NameRef`'s identifier token. */
 export function nameRefCst(nr: NameRef): CstNode | undefined {
   return GrammarUtils.findNodeForProperty(nr.$cstNode, "name");
@@ -105,6 +112,11 @@ export function nameRefCst(nr: NameRef): CstNode | undefined {
 export function memberDeclAt(cstNode: CstNode): AstNode | undefined {
   const ast = cstNode.astNode;
   if (isMemberSuffix(ast)) {
+    // Qualified enum access (`Status.Open`) first: the head `Status` is an
+    // enum NAME, which types as `unknown` as a value expression, so the
+    // receiver-type walk below can't reach the value.  Resolve it directly.
+    const enumVal = qualifiedEnumValueDecl(ast);
+    if (enumVal) return enumVal;
     const recvType = receiverTypeForSuffix(ast);
     if (!recvType) return undefined;
     return stepIntoNode(recvType, ast.member);
@@ -158,6 +170,30 @@ function resolveEnumValue(node: AstNode, name: string): AstNode | undefined {
     if (isEnumDecl(m)) {
       const v = m.values.find((val) => val.name === name);
       if (v) return v;
+    }
+  }
+  return undefined;
+}
+
+/** The enum value a *qualified* access (`Status.Open`) names, or `undefined`.
+ *  Resolves the head `NameRef` ("Status") to the like-named `enum` in the
+ *  enclosing context, then the suffix `.member` ("Open") to that enum's value.
+ *  This is the qualified counterpart of `resolveEnumValue`: it pins the enum by
+ *  the head name (not context order), and it reaches values the receiver-type
+ *  walk can't — the head types as `unknown` as a value expression. */
+function qualifiedEnumValueDecl(ms: MemberSuffix): AstNode | undefined {
+  const chain = ms.$container;
+  if (!isPostfixChain(chain)) return undefined;
+  // Only the first suffix is a bare-name `enum.value` access; deeper suffixes
+  // (`Status.Open.something`) are member access on a value, not enum-qualified.
+  if (chain.suffixes.indexOf(ms) !== 0) return undefined;
+  const head = chain.head;
+  if (!isNameRef(head)) return undefined;
+  const ctx = AstUtils.getContainerOfType(ms, isBoundedContext);
+  if (!ctx) return undefined;
+  for (const m of ctx.members) {
+    if (isEnumDecl(m) && m.name === head.name) {
+      return m.values.find((v) => v.name === ms.member);
     }
   }
   return undefined;
@@ -240,13 +276,12 @@ export function collectMemberUsages(doc: LangiumDocument, target: AstNode): CstN
   const out: CstNode[] = [];
   for (const node of AstUtils.streamAllContents(root)) {
     if (isMemberSuffix(node)) {
-      const recvType = receiverTypeForSuffix(node);
-      if (recvType) {
-        const decl = stepIntoNode(recvType, node.member);
-        if (decl === target) {
-          const cst = memberNameCst(node);
-          if (cst) out.push(cst);
-        }
+      // Qualified enum access (`Status.Open`) before the receiver-type walk —
+      // the head enum NAME types as `unknown`, so `stepIntoNode` misses it.
+      const decl = qualifiedEnumValueDecl(node) ?? stepFromReceiver(node);
+      if (decl === target) {
+        const cst = memberNameCst(node);
+        if (cst) out.push(cst);
       }
     } else if (isNameRef(node)) {
       if (nameRefDecl(node) === target) {
