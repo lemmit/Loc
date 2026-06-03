@@ -47,23 +47,27 @@ import type {
   Storage,
   Subdomain,
   System,
+  SystemMember,
   Targetable,
   TestBlock,
   TestCase,
   TestE2E,
   ThemeBlock,
   Ui,
+  UserBlock,
   ValueObject,
   View,
   Workflow,
 } from "../../language/generated/ast.js";
 import {
   isAggregate,
+  isApi,
   isApply,
   isAssignOrCallStmt,
   isBoundedContext,
   isCallSuffix,
   isChannel,
+  isChannelSource,
   isComponent,
   isContainment,
   isCreate,
@@ -81,6 +85,7 @@ import {
   isFunctionDecl,
   isHandleDecl,
   isInvariant,
+  isLayout,
   isLetStmt,
   isMemberSuffix,
   isNameRef,
@@ -99,12 +104,14 @@ import {
   isRetrieval,
   isSeed,
   isSolution,
+  isStorage,
   isSubdomain,
   isSystem,
   isTestBlock,
   isTestCase,
   isTestE2E,
   isThemeBlock,
+  isUi,
   isUserBlock,
   isValueObject,
   isView,
@@ -328,8 +335,38 @@ export function lowerModel(model: Model): RawLoomModel {
 export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
   const allMembers = models.flatMap((m) => m.members);
   const systemNodes = allMembers.filter(isSystem);
-  const topLevelDomain = allMembers.filter(
-    (m): m is Subdomain | BoundedContext => isSubdomain(m) || isBoundedContext(m),
+  // Every top-level system-scoped declaration across the import graph —
+  // domain (Tier 1: subdomain / context) plus deployment (Tier 2:
+  // deployable / storage / resource / ui / theme / user / api / layout /
+  // e2e).  These fold into the project's single system.
+  const topLevelSystemMembers = allMembers.filter(
+    (
+      m,
+    ): m is
+      | Subdomain
+      | BoundedContext
+      | Deployable
+      | Storage
+      | Resource
+      | ChannelSource
+      | Ui
+      | ThemeBlock
+      | UserBlock
+      | Api
+      | Layout
+      | TestE2E =>
+      isSubdomain(m) ||
+      isBoundedContext(m) ||
+      isDeployable(m) ||
+      isStorage(m) ||
+      isResource(m) ||
+      isChannelSource(m) ||
+      isUi(m) ||
+      isThemeBlock(m) ||
+      isUserBlock(m) ||
+      isApi(m) ||
+      isLayout(m) ||
+      isTestE2E(m),
   );
   const compose = systemNodes.length === 1;
 
@@ -346,7 +383,7 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
   const rootEnv: Env = { locals: new Map() };
   for (const m of allMembers) {
     if (isSystem(m)) {
-      systems.push(lowerSystem(m, compose ? topLevelDomain : []));
+      systems.push(lowerSystem(m, compose ? topLevelSystemMembers : []));
     } else if (isBoundedContext(m)) {
       // Folded into the single system above when composing; otherwise a
       // legacy loose context (single-deployable mode).
@@ -519,10 +556,15 @@ function codeRefKindOf(node: Targetable): CodeRefKind {
  *  docs/proposals/implicit-system-composition.md.  They are folded in
  *  alongside `sys.members` so the `user` / `permissions` threading below
  *  applies to them identically to a nested declaration. */
-function lowerSystem(
-  sys: System,
-  extraDomainMembers: ReadonlyArray<Subdomain | BoundedContext> = [],
-): SystemIR {
+function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []): SystemIR {
+  // `extraMembers` are top-level system-scoped declarations from sibling
+  // files (the import graph) that compose into THIS system — subdomains
+  // and contexts (Tier 1) plus the deployment shape (Tier 2: deployable /
+  // storage / resource / ui / theme / user / api / layout / e2e).  Fold
+  // them in alongside `sys.members` so every member-kind pass below treats
+  // them identically to a nested declaration.
+  const members: ReadonlyArray<SystemMember> =
+    extraMembers.length > 0 ? [...sys.members, ...extraMembers] : sys.members;
   // Pre-pass over members: pull the user block out first so every
   // context lowering downstream sees the same shape.  At most one
   // block per system (validator enforces; we take the last one if
@@ -531,7 +573,7 @@ function lowerSystem(
   // (otherwise reserved for aggregate identity) is admissible.
   let user: UserIR | undefined;
   let theme: ThemeIR | undefined;
-  for (const m of sys.members) {
+  for (const m of members) {
     if (isUserBlock(m)) {
       user = {
         fields: m.fields.map(
@@ -560,7 +602,7 @@ function lowerSystem(
   // with this system's own members.  Only the Subdomain / BoundedContext
   // branches below match them; Deployable / TestE2E / Ui / … stay
   // system-block-only (Tier 1), so iterating the union is safe.
-  for (const m of [...sys.members, ...extraDomainMembers]) {
+  for (const m of members) {
     if (isSubdomain(m)) {
       // Subdomain-scoped permissions catalogue.  Multiple
       // `permissions { ... }` blocks merge their declarations;
@@ -641,9 +683,9 @@ function lowerSystem(
   // components, scaffolds, and the optional menu block are each turned
   // into their literal IR shape.  Scaffold expansion and body type
   // inference happen in subsequent passes.
-  const uis = sys.members.filter((m): m is Ui => m.$type === "Ui").map((u) => lowerUi(u));
+  const uis = members.filter((m): m is Ui => m.$type === "Ui").map((u) => lowerUi(u));
   // Api declarations — system-level peers to module / ui / deployable.
-  const apis = sys.members
+  const apis = members
     .filter((m): m is Api => m.$type === "Api")
     .map(
       (a): ApiIR => ({
@@ -652,7 +694,7 @@ function lowerSystem(
         urlStyle: a.urlStyle === "resource" ? "resource" : "literal",
       }),
     );
-  const storages = sys.members
+  const storages = members
     .filter((m): m is Storage => m.$type === "Storage")
     .map(
       (s): StorageIR => ({
@@ -663,7 +705,7 @@ function lowerSystem(
         ...(s.config.length ? { config: s.config.map(lowerConfigEntry) } : {}),
       }),
     );
-  const dataSources = sys.members
+  const dataSources = members
     .filter((m): m is Resource => m.$type === "Resource")
     .map(
       (d): DataSourceIR => ({
@@ -691,7 +733,7 @@ function lowerSystem(
   // body is a page-body-shaped expression lowered against the same
   // env shape pages use.  No params or state — layouts are static
   // wrappers, not parametric components.
-  const channelSources = sys.members
+  const channelSources = members
     .filter((m): m is ChannelSource => m.$type === "ChannelSource")
     .map(
       (cs): ChannelSourceIR => ({
@@ -700,7 +742,7 @@ function lowerSystem(
         storageName: cs.use?.ref?.name ?? "",
       }),
     );
-  const layouts = sys.members
+  const layouts = members
     .filter((m): m is Layout => m.$type === "Layout")
     .map((l): LayoutIR => lowerLayout(l));
   const built: SystemIR = {

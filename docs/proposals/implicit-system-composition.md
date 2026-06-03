@@ -1,15 +1,18 @@
 # Implicit system composition — top-level domain members across files
 
-> **Status:** PARTIAL — Tier 1 prototype shipped. `subdomain` (and bare
-> `context`) may be declared at the top level of any `.ddd` file in the
-> import graph; the project loader composes them, plus the lone `system { }`
-> block's singletons + deployment, into one project system. This lets a
-> project be split file-per-subdomain. Implementation: `composeProject` /
-> `lowerProject` in `src/ir/lower/lower.ts`, grammar `ModelMember +=
-> Subdomain`, validator `loom.top-level-domain-needs-single-system`. Gate:
-> `test/language/parsing/top-level-subdomain.test.ts`. Tier 2 (top-level
-> `deployable`/`storage`/`resource`/`ui`/`theme`/`user`) is **PROPOSED**
-> below, not yet built.
+> **Status:** PARTIAL — Tiers 1 & 2 shipped. Every system-scoped member —
+> `subdomain` / `context` (Tier 1) and the deployment shape `deployable` /
+> `storage` / `resource` / `channelSource` / `ui` / `theme` / `user` / `api`
+> / `layout` / `test e2e` (Tier 2) — may be declared at the top level of any
+> `.ddd` file in the import graph; `lowerProject` composes them all into the
+> project's single `system`. A project can be split file-per-subdomain with
+> the deployment in its own file. Implementation: `lowerProject` /
+> `lowerSystem(sys, extraMembers)` in `src/ir/lower/lower.ts`, grammar
+> `ModelMember += Subdomain | … | TestE2E`, validator
+> `loom.top-level-domain-needs-single-system`. Gate:
+> `test/language/parsing/top-level-subdomain.test.ts`. The Acme ERP example
+> is split onto it (`main.ddd` = `system AcmeErp { user theme }`; subdomains
+> + `deploy.ddd` are top-level).
 
 ## Problem
 
@@ -96,14 +99,23 @@ in the one `SystemIR.subdomains`, `collectContextsFor` works as-is.
 - Existing duplicate-name checks (subdomain, context, deployable) already
   span the workspace via the index; they apply unchanged.
 
-## Tier 2 (PROPOSED)
+## Tier 2 (SHIPPED)
 
-Promote the remaining `SystemMember`s (`deployable`, `storage`,
-`resource`, `ui`, `theme`, `user`, `api`, `layout`, `test e2e`) to also be
-`ModelMember`s and fold them the same way, so the *deployment* can live in
-its own `deploy.ddd`. The singletons (`theme`, `user`) need an "at most
-one across the project" check. Mechanically identical to Tier 1; deferred
-only to keep the first slice small and the blast radius contained.
+The remaining `SystemMember`s (`deployable`, `storage`, `resource`,
+`channelSource`, `ui`, `theme`, `user`, `api`, `layout`, `test e2e`) are
+also `ModelMember`s and fold the same way, so the *deployment* can live in
+its own `deploy.ddd`. `lowerSystem` takes a generalised
+`extraMembers: SystemMember[]` and runs every member-kind pass over
+`[...sys.members, ...extraMembers]`, so a top-level `user` / `theme` is
+picked up by the same pre-pass, a top-level `deployable` by the same
+deployable pass, etc. The composition validator fires for any top-level
+foldable member (not just `subdomain`); a bare top-level `context` stays
+exempt (legacy loose-context mode with zero systems).
+
+> **`user` / `theme` are singletons.** The lowering pre-pass takes the last
+> one across the folded member list, so a duplicate is resolved rather than
+> rejected. A strict "at most one `user` / `theme` across the project"
+> diagnostic is a small follow-up, not yet added.
 
 ## Open questions
 

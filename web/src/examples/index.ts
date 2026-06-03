@@ -35,6 +35,7 @@ import fulfillmentNewestSource from "./fulfillment-newest.ddd?raw";
 import fulfillmentKernelSource from "./shared/kernel.ddd?raw";
 // Acme ERP — the big multi-file showcase (six subdomains, four deployables).
 import erpMainSource from "./erp/main.ddd?raw";
+import erpDeploySource from "./erp/deploy.ddd?raw";
 import erpSalesSource from "./erp/sales.ddd?raw";
 import erpInventorySource from "./erp/inventory.ddd?raw";
 import erpProcurementSource from "./erp/procurement.ddd?raw";
@@ -74,16 +75,18 @@ export interface LoomExample {
 // generator-level showcase that doesn't preview cleanly (its React
 // frontend targets a .NET deployable we don't run in the browser).
 export const examples: LoomExample[] = [
-  // The flagship: a full ERP, one file per subdomain.  `main.ddd` holds
-  // only the system's name, theme, user block and deployment; each
-  // `subdomain` lives in its own file and composes into that single system
+  // The flagship: a full ERP, one file per subdomain, with the deployment
+  // in its own file too.  `main.ddd` holds only `system AcmeErp { user theme }`;
+  // each `subdomain` and the deployment (deploy.ddd) are top-level
+  // declarations in their own files that compose into that single system
   // (implicit-system-composition).  Leads the list as the most complete
   // demonstration of the language — see the feature map atop main.ddd.
   {
     id: "acme-erp",
-    label: "Acme ERP — full system, one file per subdomain",
+    label: "Acme ERP — full system, one file per subdomain + deploy",
     source: erpMainSource,
     files: {
+      "deploy.ddd": erpDeploySource,
       "sales.ddd": erpSalesSource,
       "inventory.ddd": erpInventorySource,
       "procurement.ddd": erpProcurementSource,
@@ -97,7 +100,7 @@ export const examples: LoomExample[] = [
       "governance/requirements.ddd": erpRequirementsSource,
     },
     blurb:
-      "A full ERP split one-file-per-subdomain — Sales, Inventory, Procurement, CRM, Finance and HR each in their own `subdomain` file, composing into the single `system` in main.ddd — on four deployables (a Hono operations API + React back-office, plus two .NET services). Exercises the whole surface: aggregate trees, criterion/retrieval, the payload family, channels, seeds, TPH + TPC inheritance, event sourcing, money/json primitives, document/embedded storage shapes, capabilities + auth, provenance, externs, traceability and a hand-written dashboard. Hono + React previews live; the .NET services are files-only.",
+      "A full ERP split one-file-per-subdomain — Sales, Inventory, Procurement, CRM, Finance and HR each in their own `subdomain` file, plus the deployment (storage/resources/UI/deployables/e2e) in deploy.ddd, all composing into the single `system` in main.ddd — on four deployables (a Hono operations API + React back-office, plus two .NET services). Exercises the whole surface: aggregate trees, criterion/retrieval, the payload family, channels, seeds, TPH + TPC inheritance, event sourcing, money/json primitives, document/embedded storage shapes, capabilities + auth, provenance, externs, traceability and a hand-written dashboard. Hono + React previews live; the .NET services are files-only.",
   },
   // Multi-file example — picks up the workspace tabs strip and the
   // project loader's `import`-graph walk.  The companion `.ddd`

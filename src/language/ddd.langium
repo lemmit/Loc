@@ -15,7 +15,12 @@ ImportStmt:
     'import' path=STRING ';'?;
 
 ModelMember:
-    System | Subdomain | BoundedContext | ValueObject | EnumDecl | Requirement | Solution | TestCase | Component;
+    System | Subdomain | BoundedContext | ValueObject | EnumDecl | Requirement | Solution | TestCase | Component
+    // Implicit-system composition (Tier 2): the deployment-shape members are
+    // also admissible at file top level and compose into the project's single
+    // `system` — so deployment can live in its own file.  See
+    // docs/proposals/implicit-system-composition.md.
+    | Deployable | Storage | Resource | ChannelSource | Ui | ThemeBlock | UserBlock | Api | Layout | TestE2E;
 
 // ---------------------------------------------------------------------------
 // System / Module / Deployable — the deployment shape.

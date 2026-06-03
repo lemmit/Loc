@@ -118,6 +118,64 @@ describe("top-level subdomain composition", () => {
     expect(paths).toMatch(/employee/i);
   });
 
+  it("folds top-level deployment (deployable/storage/resource/e2e) from its own file", async () => {
+    // Tier 2: the deployment shape lives in deploy.ddd; main.ddd holds only
+    // the system name + theme; the domain is in domain.ddd.
+    writeProject(tmp, {
+      "main.ddd": `
+        import "./domain.ddd"
+        import "./deploy.ddd"
+        system Acme {
+          theme { primary: "#2563eb" }
+        }
+      `,
+      "domain.ddd": `
+        subdomain Sales {
+          context Sales {
+            aggregate Customer with crudish {
+              name: string
+              invariant name.length > 0
+              derived display: string = name
+            }
+            repository Customers for Customer { }
+          }
+        }
+      `,
+      "deploy.ddd": `
+        storage primary { type: postgres }
+        resource salesState { for: Sales, kind: state, use: primary }
+        deployable api {
+          platform: hono
+          contexts: [Sales]
+          dataSources: [salesState]
+          port: 3000
+        }
+        test e2e "create a customer" against api {
+          let c = api.customers.create({ name: "Buyer" })
+          let read = api.customers.getById(c)
+          expect(read.name).toBe("Buyer")
+        }
+      `,
+    });
+
+    const services = createDddServices(NodeFileSystem);
+    const { all } = await loadProject(URI.file(path.join(tmp, "main.ddd")), services.shared);
+    expect(errorsOf(all)).toEqual([]);
+
+    const loom = enrichLoomModel(lowerProject(all.map((d) => d.parseResult.value as Model)));
+    expect(loom.systems).toHaveLength(1);
+    const sys = loom.systems[0]!;
+    // The deployment members folded in from deploy.ddd.
+    expect(sys.deployables.map((d) => d.name)).toContain("api");
+    expect(sys.theme?.primary).toBe("#2563eb");
+
+    // Generation hosts the cross-file context AND emits the cross-file e2e.
+    const { files } = generateSystemsFromLoom(loom);
+    const paths = [...files.keys()].join("\n");
+    expect(paths).toMatch(/customer/i);
+    expect(files.has("docker-compose.yml")).toBe(true);
+  });
+
   it("rejects a top-level subdomain when the project has no system", async () => {
     writeProject(tmp, {
       "project.ddd": `

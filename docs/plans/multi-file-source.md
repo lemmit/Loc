@@ -6,6 +6,13 @@
 > *source-file packaging* and is unrelated to `packaging-split.md`,
 > which is about distributing the toolchain as installable npm packages.
 
+> **Update.** Stage A (below) shipped only the *shared-types* half (root-
+> level value objects / enums / components).  The "contexts in their own
+> files" goal is now delivered by
+> [`../proposals/implicit-system-composition.md`](../proposals/implicit-system-composition.md):
+> any top-level `subdomain` (and the whole deployment shape) composes into
+> the project's single `system`.  See that proposal for the current surface.
+
 ## Goal & non-goals
 
 **Goal.** Let a Loom project be split across multiple `.ddd` files,
