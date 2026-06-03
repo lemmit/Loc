@@ -989,7 +989,11 @@ export function zodFor(t: TypeIR, context: "body" | "query" = "body"): string {
  *  plain strings.  Every other shape mirrors the request side. */
 function zodForResponse(t: TypeIR, optional: boolean): string {
   const z = zodForResponseInner(t);
-  return optional ? `${z}.nullish()` : z;
+  // `zodForResponseInner` already appends `.nullish()` for a nullable type;
+  // only add it for an `optional` field whose type isn't already nullable,
+  // so an optional `T?` field doesn't emit `.nullish().nullish()`.
+  const alreadyNullable = wireTypeInfo(t, "response").isNullable;
+  return optional && !alreadyNullable ? `${z}.nullish()` : z;
 }
 
 function zodForResponseInner(t: TypeIR): string {
