@@ -1,3 +1,4 @@
+import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { parseDocument } from "langium/test";
 import { describe, expect, it } from "vitest";
@@ -221,5 +222,66 @@ describe("RenameProvider — cross-reference categories", () => {
     );
     expect(result).toContain("function levy()");
     expect(result).toContain("= levy()"); // currently NOT rewritten (this.levy() would be)
+  });
+});
+
+describe("RenameProvider — shadowing, prepareRename, multi-file", () => {
+  it("does not rename a member reference shadowed by a lambda param", async () => {
+    // The lambda param `total` shadows the property `total`; renaming the
+    // property must rewrite the declaration + `this.total`, but leave the
+    // lambda (`nums.sum(total => total)`) untouched.
+    const result = await renameAt(
+      `context Sales {
+  aggregate Order {
+    <|>total: int
+    nums: int[]
+    function f(): int = nums.sum(total => total) + this.total
+  }
+}`,
+      "amount",
+    );
+    expect(result).toContain("amount: int");
+    expect(result).toContain("this.amount");
+    expect(result).toContain("nums.sum(total => total)"); // lambda left alone
+  });
+
+  it("prepareRename selects exactly the identifier token", async () => {
+    const text = `context Sales {
+  aggregate Order {
+    total: int
+  }
+}`;
+    const doc = await parseDocument(services, text);
+    const range = await services.lsp.RenameProvider!.prepareRename!(doc, {
+      textDocument: { uri: doc.textDocument.uri },
+      position: doc.textDocument.positionAt(text.indexOf("total")),
+    });
+    expect(range).toBeDefined();
+    expect(doc.textDocument.getText(range ?? undefined)).toBe("total");
+  });
+
+  it("renames an aggregate across files (the X id usage in another file)", async () => {
+    const shared = services.shared;
+    const factory = shared.workspace.LangiumDocumentFactory;
+    const a = factory.fromString(
+      `context A {\n  aggregate Order {\n    total: int\n  }\n}`,
+      URI.parse("memory://rename-a.ddd"),
+    );
+    const b = factory.fromString(
+      `context B {\n  aggregate Cart {\n    order: Order id\n  }\n}`,
+      URI.parse("memory://rename-b.ddd"),
+    );
+    shared.workspace.LangiumDocuments.addDocument(a);
+    shared.workspace.LangiumDocuments.addDocument(b);
+    await shared.workspace.DocumentBuilder.build([a, b], { validation: true });
+
+    const edit = await services.lsp.RenameProvider!.rename(a, {
+      textDocument: { uri: a.textDocument.uri },
+      position: a.textDocument.positionAt(a.textDocument.getText().indexOf("Order")),
+      newName: "Purchase",
+    });
+    const bEdits = edit?.changes?.[b.textDocument.uri] ?? [];
+    expect(bEdits.length).toBe(1); // the `Order id` cross-ref in file B
+    expect(bEdits[0]?.newText).toBe("Purchase");
   });
 });
