@@ -1,13 +1,24 @@
-import type { BinOp, EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { upperFirst } from "../../util/naming.js";
+import {
+  type CallExpr,
+  type ExprTarget,
+  type MemberExpr,
+  type MethodCallExpr,
+  type NewExpr,
+  type RefExpr,
+  renderExprWith,
+} from "../_expr/target.js";
 import { joinDbSetName, joinFkPropName } from "./emit/join-entities.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the .NET / C# backend.
 //
 // Same shape as the TypeScript renderer — consumes fully-resolved Loom
-// ExprIR.  Output is idiomatic C# 12.
+// ExprIR.  Output is idiomatic C# 12.  The 17-arm dispatch + recursion live
+// in `../_expr/target.ts`; this file is the C# leaf table (`CS_TARGET`) plus
+// the thin `renderCsExpr` entry point.
 //
 // `renderCsExpr` accepts an optional context that controls how `this`-rooted
 // references are printed.  Default emits `this.Foo`.  In LINQ predicate
@@ -100,67 +111,51 @@ export function collectCsExprUsings(e: ExprIR, into: Set<string> = new Set()): S
   }
 }
 
-export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string {
-  switch (e.kind) {
-    case "literal":
-      return renderLiteral(e.lit, e.value);
-    case "this":
-      return ctx.thisName;
-    case "id":
-      return `${ctx.thisName}.Id`;
-    case "ref":
-      return renderRef(e, ctx);
-    case "member":
-      return renderMember(e, ctx);
-    case "method-call":
-      return renderMethodCall(e, ctx);
-    case "call":
-      return renderCall(e, ctx);
-    case "lambda":
-      // Lambdas always introduce their own parameter; the body is
-      // rendered with the outer `this` still pointing at the same
-      // receiver (lambdas in DSL are pure expressions).
-      //
-      // Lambda body is now optional.  .NET render contexts
-      // shouldn't see block bodies — those are React-emitter territory
-      // — but stay total to keep the build happy.
-      if (e.body) return `${e.param} => ${renderCsExpr(e.body, ctx)}`;
-      return `${e.param} => { /* block-body lambda — not C#-renderable */ }`;
-    case "new":
-      return renderNew(e, ctx);
-    case "object":
-      // Bare object literals only appear in e2e contexts; in operation
-      // bodies this branch is unreachable (the validator rejects them).
-      return `new { ${e.fields.map((f) => `${upperFirst(f.name)} = ${renderCsExpr(f.value, ctx)}`).join(", ")} }`;
-    case "list":
-      // List literals are walker-config sugar (e.g. responsive Grid cols).
-      // No .NET render context emits one today; keep total with an array
-      // initializer fallback so unexpected uses produce valid C#.
-      return `new[] { ${e.elements.map((el) => renderCsExpr(el, ctx)).join(", ")} }`;
-    case "paren":
-      return `(${renderCsExpr(e.inner, ctx)})`;
-    case "unary":
-      return `${e.op}${renderCsExpr(e.operand, ctx)}`;
-    case "binary":
-      return renderBinary(e.op, e.left, e.right, ctx);
-    case "ternary":
-      return `${renderCsExpr(e.cond, ctx)} ? ${renderCsExpr(e.then, ctx)} : ${renderCsExpr(e.otherwise, ctx)}`;
-    case "convert":
-      return renderCsConvert(e.target, e.from, e.value, ctx);
-    case "match": {
-      // Lower a match expression to a chained C# ternary so
-      // it can appear inside `derived` bodies, view binds, and other
-      // C#-rendered expression positions.  Same right-fold semantics
-      // as the TS renderer.
-      const arms = [...e.arms].reverse();
-      const tail = e.otherwise ? renderCsExpr(e.otherwise, ctx) : "null";
-      let out = tail;
-      for (const arm of arms) {
-        out = `(${renderCsExpr(arm.cond, ctx)} ? ${renderCsExpr(arm.value, ctx)} : ${out})`;
-      }
-      return out;
+const CS_TARGET: ExprTarget<CsRenderContext> = {
+  literal: renderLiteral,
+  id: (ctx) => `${ctx.thisName}.Id`,
+  ref: renderRef,
+  member: renderMember,
+  methodCall: renderMethodCall,
+  call: renderCall,
+  lambda(param, body) {
+    // Lambdas always introduce their own parameter; the body is rendered
+    // with the outer `this` still pointing at the same receiver (lambdas in
+    // DSL are pure expressions).
+    //
+    // Lambda body is now optional.  .NET render contexts shouldn't see block
+    // bodies — those are React-emitter territory — but stay total to keep the
+    // build happy.
+    if (body !== undefined) return `${param} => ${body}`;
+    return `${param} => { /* block-body lambda — not C#-renderable */ }`;
+  },
+  newPart: renderNew,
+  // Bare object literals only appear in e2e contexts; in operation bodies
+  // this branch is unreachable (the validator rejects them).
+  object: (fields) =>
+    `new { ${fields.map((f) => `${upperFirst(f.name)} = ${f.value}`).join(", ")} }`,
+  unary: (op, operand) => `${op}${operand}`,
+  binary: (left, right, e) => `${left} ${e.op} ${right}`,
+  ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
+  convert: (value, e) => renderCsConvert(e.target, e.from, value),
+  match(arms, otherwise) {
+    // Lower a match expression to a chained C# ternary so it can appear
+    // inside `derived` bodies, view binds, and other C#-rendered expression
+    // positions.  Same right-fold semantics as the TS renderer.
+    let out = otherwise ?? "null";
+    for (const arm of [...arms].reverse()) {
+      out = `(${arm.cond} ? ${arm.value} : ${out})`;
     }
-  }
+    return out;
+  },
+  // List literals are walker-config sugar (e.g. responsive Grid cols).  No
+  // .NET render context emits one today; keep total with an array initializer
+  // fallback so unexpected uses produce valid C#.
+  list: (elements) => `new[] { ${elements.join(", ")} }`,
+};
+
+export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string {
+  return renderExprWith(e, CS_TARGET, ctx);
 }
 
 /**
@@ -176,13 +171,7 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
  *   money(x: int|long)       → `(decimal)x`
  *   money(x: decimal)        → `x`               (no-op)
  */
-function renderCsConvert(
-  target: string,
-  from: string | undefined,
-  value: ExprIR,
-  ctx: CsRenderContext,
-): string {
-  const v = renderCsExpr(value, ctx);
+function renderCsConvert(target: string, from: string | undefined, v: string): string {
   if (target === "string") {
     if (from === "decimal" || from === "money") {
       return `${v}.ToString(System.Globalization.CultureInfo.InvariantCulture)`;
@@ -227,7 +216,7 @@ function renderLiteral(lit: string, value: string): string {
   return value;
 }
 
-function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: CsRenderContext): string {
+function renderRef(e: RefExpr, ctx: CsRenderContext): string {
   switch (e.refKind) {
     case "param":
     case "let":
@@ -260,8 +249,7 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: CsRenderContext): s
   }
 }
 
-function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: CsRenderContext): string {
-  const recv = renderCsExpr(e.receiver, ctx);
+function renderMember(recv: string, e: MemberExpr): string {
   // Arrays lower to `List<T>` which has `.Count` (not `.Length`).  The
   // DSL admits both `.count` and `.length` on arrays; map both to .Count.
   if (e.receiverType.kind === "array" && (e.member === "count" || e.member === "length")) {
@@ -278,11 +266,11 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: CsRenderConte
 }
 
 function renderMethodCall(
-  e: Extract<ExprIR, { kind: "method-call" }>,
+  recv: string,
+  args: string[],
+  e: MethodCallExpr,
   ctx: CsRenderContext,
 ): string {
-  const recv = renderCsExpr(e.receiver, ctx);
-  const args = e.args.map((a) => renderCsExpr(a, ctx));
   // `this.<refColl>.contains(x)` — membership over a reference
   // collection.  Lowers to a join-table subquery, mirroring TS's
   // `inArray(roots.id, ...)` shape.  Detection is structural: the
@@ -351,14 +339,14 @@ function renderCollectionOp(recv: string, name: string, args: string[]): string 
   }
 }
 
-function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: CsRenderContext): string {
-  const args = e.args.map((a) => renderCsExpr(a, ctx)).join(", ");
+function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
+  const argList = args.join(", ");
   switch (e.callKind) {
     case "value-object-ctor":
-      return `new ${upperFirst(e.name)}(${args})`;
+      return `new ${upperFirst(e.name)}(${argList})`;
     case "function":
     case "private-operation":
-      return `${ctx.thisName}.${upperFirst(e.name)}(${args})`;
+      return `${ctx.thisName}.${upperFirst(e.name)}(${argList})`;
     case "resource-op": {
       // Resource-op (Phase 4c) → `<Class>.<Resource>_<Verb>(args)`, an
       // async static helper the .NET ResourceAdapter emits.  Awaited by
@@ -372,24 +360,24 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: CsRenderContext):
           `Resource operation '${op.resourceName}.${op.verb}' reached the .NET renderer without a resource class mapping.`,
         );
       }
-      return `${cls}.${upperFirst(op.resourceName)}_${upperFirst(op.verb)}(${args})`;
+      return `${cls}.${upperFirst(op.resourceName)}_${upperFirst(op.verb)}(${argList})`;
     }
     case "free":
-      return `${upperFirst(e.name)}(${args})`;
+      return `${upperFirst(e.name)}(${argList})`;
   }
 }
 
-function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: CsRenderContext): string {
+function renderNew(
+  fields: { name: string; value: string }[],
+  e: NewExpr,
+  ctx: CsRenderContext,
+): string {
   const inits = [
     `Id = ${e.partName}Id.New()`,
     `ParentId = ${ctx.thisName}.Id`,
-    ...e.fields.map((f) => `${upperFirst(f.name)} = ${renderCsExpr(f.value, ctx)}`),
+    ...fields.map((f) => `${upperFirst(f.name)} = ${f.value}`),
   ];
   return `${e.partName}._Create(new ${e.partName}.State { ${inits.join(", ")} })`;
-}
-
-function renderBinary(op: BinOp, left: ExprIR, right: ExprIR, ctx: CsRenderContext): string {
-  return `${renderCsExpr(left, ctx)} ${op} ${renderCsExpr(right, ctx)}`;
 }
 
 // ---------------------------------------------------------------------------
