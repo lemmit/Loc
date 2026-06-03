@@ -608,6 +608,11 @@ function printEventDecl(node: EventDecl): string {
 /** Payload family (`command`/`query`/`response`/`error` <Name> { … }) —
  *  same record shape as an event; the `kind` keyword carries the intent. */
 function printPayloadDecl(node: import("../generated/ast.js").PayloadDecl): string {
+  // Named union (P4): `payload Foo = A | B | C`.  Variant atoms only — the
+  // record form falls through to the brace block below.
+  if (node.variants.length > 0) {
+    return `${node.kind} ${node.name} = ${node.variants.map(printTypeAtom).join(" | ")}`;
+  }
   return commaBlock(`${node.kind} ${node.name}`, node.fields.map(printProperty));
 }
 
@@ -858,6 +863,19 @@ function printParameter(node: Parameter): string {
 }
 
 function printTypeRef(node: TypeRef): string {
+  // The head atom plus any anonymous `or`-union alternatives (P4).  A
+  // non-union TypeRef has an empty `alternatives` and prints as a bare atom.
+  const head = printTypeAtom(node);
+  const alts = node.alternatives ?? [];
+  if (alts.length === 0) return head;
+  return [head, ...alts.map(printTypeAtom)].join(" or ");
+}
+
+/** Print one type atom — `base` plus the postfix generic carriers (P3:
+ *  `customer paged`; P4: `T option`) and the array/optional suffixes, matching
+ *  the grammar's `base (ctors)* ([]) (?)` order.  Shared by `printTypeRef`'s
+ *  head + `or`-alternatives and by named-union variant printing. */
+function printTypeAtom(node: TypeRef | import("../generated/ast.js").TypeAtom): string {
   const base = node.base;
   let s: string;
   switch (base.$type) {
@@ -875,13 +893,11 @@ function printTypeRef(node: TypeRef): string {
       break;
     default: {
       const exhaustive: never = base;
-      throw new Error(`printTypeRef: unhandled base ${(exhaustive as { $type: string }).$type}`);
+      throw new Error(`printTypeAtom: unhandled base ${(exhaustive as { $type: string }).$type}`);
     }
   }
-  // Postfix generic carriers (P3): `customer paged`, `string envelope paged`.
-  // They sit between the base and the array/optional suffixes, matching the
-  // grammar's `base (ctors)* ([]) (?)` order.  Guard against programmatically
-  // built TypeRef nodes (web builder, macros) that may omit the list.
+  // Guard against programmatically built nodes (web builder, macros) that may
+  // omit the ctor list.
   const ctorList = node.ctors ?? [];
   const ctors = ctorList.length > 0 ? ` ${ctorList.join(" ")}` : "";
   return `${s}${ctors}${node.array ? "[]" : ""}${node.optional ? "?" : ""}`;

@@ -58,3 +58,4 @@ export {
   checkTheme,
   checkUi,
 } from "./ui.js";
+export { checkUnions } from "./unions.js";

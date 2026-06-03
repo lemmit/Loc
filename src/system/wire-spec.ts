@@ -165,6 +165,11 @@ export function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
       throw new Error(
         `jsonPropertyForType: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
       );
+    case "union":
+    case "none":
+      throw new Error(
+        `jsonPropertyForType: discriminated unions are not emittable yet (P4); IR-validate should have rejected '${t.kind}'.`,
+      );
   }
 }
 

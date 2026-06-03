@@ -170,6 +170,11 @@ function wireTsType(t: TypeIR): string {
       throw new Error(
         `wireTsType: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
       );
+    case "union":
+    case "none":
+      throw new Error(
+        `wireTsType: discriminated unions are not emittable yet (P4); IR-validate should have rejected '${t.kind}'.`,
+      );
   }
 }
 

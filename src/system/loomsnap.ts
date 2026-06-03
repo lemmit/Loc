@@ -109,6 +109,10 @@ function typeName(t: TypeIR): string {
       return "slot";
     case "genericInstance":
       return `${typeName(t.arg)} ${t.ctor}`;
+    case "union":
+      return t.variants.map(typeName).join(" or ");
+    case "none":
+      return "none";
   }
 }
 

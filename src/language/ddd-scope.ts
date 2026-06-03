@@ -68,7 +68,8 @@ export class DddScopeProvider extends DefaultScopeProvider {
     // Everywhere else they stay out of scope, so a stray event name in an
     // aggregate field / UI param position resolves to nothing (a clear error)
     // rather than silently typing as a transport record.
-    const allowTransport = inWorkflowCommandParam(context.container);
+    const allowTransport =
+      inWorkflowCommandParam(context.container) || inUnionVariant(context.container);
     const aggregate = enclosingAggregate(context.container);
     const defaultScope = super.getScope(context);
     if (!aggregate) {
@@ -227,6 +228,22 @@ function inWorkflowCommandParam(namedType: AstNode | undefined): boolean {
   if (param?.$type !== "Parameter") return false;
   const owner = param.$container?.$type;
   return owner === "WorkflowCreateDecl" || owner === "HandleDecl";
+}
+
+/** True when `namedType` sits in a discriminated-union variant position
+ *  (payload-transport-layer.md, P4) — so a variant naming an `event` /
+ *  `payload` (`payload OrderEvent = OrderPlaced | OrderCancelled`,
+ *  `find f(): OrderId or NotFound`) resolves to that transport type rather
+ *  than falling out of scope.  A `TypeAtom` only ever appears as a union
+ *  variant (a `|` arm of a named union or an `or`-alternative); the head of an
+ *  anonymous `A or B` is a `TypeRef` carrying `alternatives`. */
+function inUnionVariant(namedType: AstNode | undefined): boolean {
+  const c = namedType?.$container;
+  if (!c) return false;
+  if (c.$type === "TypeAtom") return true;
+  return (
+    c.$type === "TypeRef" && ((c as { alternatives?: unknown[] }).alternatives?.length ?? 0) > 0
+  );
 }
 
 export function enclosingAggregate(node: AstNode | undefined): Aggregate | undefined {

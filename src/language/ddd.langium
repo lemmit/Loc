@@ -865,12 +865,19 @@ ChannelSource:
 // sugar keywords carry intent (command / query / response / error) but
 // the same structural-record wire contract.  `event` keeps its own
 // legacy `EventDecl` surface and is unified at the IR layer, so it is not
-// a `PayloadKind` here.  Generics / unions are deferred (P3 / P4): a P1
-// payload is a flat record of properties, mirroring `EventDecl`.
+// a `PayloadKind` here.
+//
+// Two forms (payload-transport-layer.md, P4):
+//   1. Record:  `payload X { a: int  b: string }` — the P1 flat-field shape.
+//   2. Named union:  `payload Foo = A | B | C` — a discriminated union whose
+//      variants are type references (each an atom, no inline `or` needed —
+//      `|` is the separator).  Identity is by name; the anonymous `A or B`
+//      form (in any type position) lowers to the same union IR shape.
 PayloadDecl:
-    kind=PayloadKind name=ID '{'
-        (fields+=Property (','? fields+=Property)* ','?)?
-    '}';
+    kind=PayloadKind name=ID (
+        '=' variants+=TypeAtom ('|' variants+=TypeAtom)*
+      | '{' (fields+=Property (','? fields+=Property)* ','?)? '}'
+    );
 
 PayloadKind returns string:
     'payload' | 'command' | 'query' | 'response' | 'error';
@@ -1133,11 +1140,11 @@ Property:
         // They act as hard keywords only at `ContextMember` position, where
         // `PayloadDecl` (`kind=PayloadKind name=ID '{'`) begins.
         | 'payload' | 'command' | 'query' | 'response' | 'error'
-        // Generic-carrier keywords (payload-transport-layer.md, P3) — soft in
-        // property position so a pre-existing field named `paged` / `envelope`
-        // (e.g. `event Foo { envelope: string }`) keeps parsing.  Hard only in
-        // the `GenericCtor` postfix-type slot.
-        | 'paged' | 'envelope'
+        // Generic-carrier keywords (payload-transport-layer.md, P3/P4) — soft
+        // in property position so a pre-existing field named `paged` /
+        // `envelope` / `option` / `or` keeps parsing.  Hard only in the
+        // `GenericCtor` postfix-type slot / the `or` union separator.
+        | 'paged' | 'envelope' | 'option' | 'or'
         // Retrieval keywords (retrieval.md) — soft in property position so
         // user-declared fields named `sort` / `loads` / `asc` / `desc` /
         // `retrieval` keep parsing.  Hard only inside the `Retrieval` slots.
@@ -1319,10 +1326,14 @@ LooseName returns string:
     // soft in loose-name positions; hard only at `ContextMember`
     // (`PayloadDecl`).
     | 'payload' | 'command' | 'query' | 'response' | 'error'
-    // Generic-carrier keywords (payload-transport-layer.md, P3) admitted as
+    // Generic-carrier keywords (payload-transport-layer.md, P3/P4) admitted as
     // soft in loose-name positions; hard only in the `GenericCtor`
-    // postfix-type slot.
-    | 'paged' | 'envelope'
+    // postfix-type slot.  `option` joins the blessed set in P4.
+    | 'paged' | 'envelope' | 'option'
+    // Anonymous type-union separator (payload-transport-layer.md, P4) admitted
+    // as soft so user code can still name a field / parameter `or`; hard only
+    // between `TypeAtom`s in a `TypeRef`.
+    | 'or'
     // D-REALIZATION-AXES — the six platform-block axis keywords admitted
     // as soft so user code can still name a field `application`,
     // `transport`, `runtime`, etc.  `transactional` is the `runtime`
@@ -1350,11 +1361,27 @@ LooseName returns string:
 // what makes the otherwise-ambiguous postfix form (`a: string b: int`)
 // safe.  User-declared generics + identifier-postfix instantiation are
 // deferred (A7b).
+// Anonymous `or` unions (payload-transport-layer.md, P4): `A or B or C` in
+// any type position.  Postfix constructors (`paged` / `envelope` / `option`)
+// and the array / optional markers bind tighter than `or` (the pin in the
+// proposal's "`or` precedence with `option`" note), so `string or int option`
+// parses as `string or (int option)` and `A or B[]` as `A or (B[])`.  The
+// head atom's fields stay on `TypeRef` itself (backward-compatible: a
+// non-union TypeRef has an empty `alternatives`, and every existing consumer
+// reading `.base` / `.ctors` / `.array` / `.optional` is unchanged); each
+// `or` adds one more `TypeAtom`.  Lowering folds the head + alternatives into
+// a single `union` TypeIR when `alternatives` is non-empty.
 TypeRef:
+    base=BaseType (ctors+=GenericCtor)* (array?='[]')? (optional?='?')?
+    ('or' alternatives+=TypeAtom)*;
+
+// One type-union variant — the same atom shape as a `TypeRef` head, used for
+// the `or`-alternative tail and for named-union `payload Foo = A | B` arms.
+TypeAtom:
     base=BaseType (ctors+=GenericCtor)* (array?='[]')? (optional?='?')?;
 
 GenericCtor returns string:
-    'paged' | 'envelope';
+    'paged' | 'envelope' | 'option';
 
 BaseType:
     PrimitiveType | SlotType | IdType | NamedType;
@@ -1472,9 +1499,10 @@ LValueIdent returns string:
        // l-value position so an assignment target naming a field `error`,
        // `query`, etc. parses; hard only at `ContextMember` (`PayloadDecl`).
        | 'payload' | 'command' | 'query' | 'response' | 'error'
-       // Generic-carrier keywords (payload-transport-layer.md, P3) — soft in
-       // l-value position; hard only in the `GenericCtor` postfix-type slot.
-       | 'paged' | 'envelope'
+       // Generic-carrier keywords (payload-transport-layer.md, P3/P4) — soft in
+       // l-value position; hard only in the `GenericCtor` postfix-type slot /
+       // the `or` union separator.
+       | 'paged' | 'envelope' | 'option' | 'or'
        // `by` / `handle` soft in l-value position so an assignment target
        // naming a field `by` / `handle` (`handle := handle`) parses — hard only
        // in the reactor clause / workflow handle member (A2-S3/S5c).
@@ -1584,10 +1612,11 @@ MemberName returns string:
        // after `.` so member access like `Sales.Customer.all.error` (a
        // generated-hook field) keeps parsing; hard only at `ContextMember`.
        | 'payload' | 'command' | 'query' | 'response' | 'error'
-       // Generic-carrier keywords (payload-transport-layer.md, P3) admitted
-       // after `.` so member access on a field named `paged` / `envelope`
-       // keeps parsing; hard only in the `GenericCtor` postfix-type slot.
-       | 'paged' | 'envelope';
+       // Generic-carrier keywords (payload-transport-layer.md, P3/P4) admitted
+       // after `.` so member access on a field named `paged` / `envelope` /
+       // `option` / `or` keeps parsing; hard only in the `GenericCtor`
+       // postfix-type slot / the `or` union separator.
+       | 'paged' | 'envelope' | 'option' | 'or';
 
 // Lambdas accept either a single expression body (the only form
 // in v22) or a brace-wrapped block of statements.  Block bodies
@@ -1789,10 +1818,11 @@ NameRefIdent returns string:
        // bare NameRefs so expressions can read a field named `payload`,
        // `error`, `query`, etc.  Hard only at `ContextMember` (`PayloadDecl`).
        | 'payload' | 'command' | 'query' | 'response' | 'error'
-       // Generic-carrier keywords (payload-transport-layer.md, P3) admitted as
-       // bare NameRefs so expressions can read a field named `paged` /
-       // `envelope`.  Hard only in the `GenericCtor` postfix-type slot.
-       | 'paged' | 'envelope'
+       // Generic-carrier keywords (payload-transport-layer.md, P3/P4) admitted
+       // as bare NameRefs so expressions can read a field named `paged` /
+       // `envelope` / `option` / `or`.  Hard only in the `GenericCtor`
+       // postfix-type slot / the `or` union separator.
+       | 'paged' | 'envelope' | 'option' | 'or'
        // Retrieval keywords (retrieval.md) admitted as bare NameRefs so an
        // expression can read a field named `retrieval` / `sort` / `loads` /
        // `asc` / `desc`.  Hard only inside the `Retrieval` rule's slots.

@@ -230,6 +230,10 @@ export function typeLabel(t: TypeIR): string {
       return "slot";
     case "genericInstance":
       return `${typeLabel(t.arg)} ${t.ctor}`;
+    case "union":
+      return t.variants.map(typeLabel).join(" or ");
+    case "none":
+      return "none";
   }
 }
 

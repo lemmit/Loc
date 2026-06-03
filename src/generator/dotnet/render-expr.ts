@@ -433,6 +433,14 @@ export function renderCsType(t: TypeIR): string {
       // entity arg stays the domain class; the controller maps it to the
       // response record when serializing.
       return `${upperFirst(t.ctor)}<${renderCsType(t.arg)}>`;
+    case "union":
+    case "none":
+      // Discriminated unions (`A or B`, `T option`) are P4c; the IR-validate
+      // gate (`loom.union-unsupported`) blocks them before any backend
+      // renderer runs, so reaching here is a bug.
+      throw new Error(
+        `renderCsType: discriminated unions are not emitted yet (payload-transport-layer.md, P4c); got '${t.kind}'.`,
+      );
   }
 }
 

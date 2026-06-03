@@ -310,5 +310,10 @@ function zodForResponseInner(t: TypeIR): string {
       throw new Error(
         `zodForResponseInner: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
       );
+    case "union":
+    case "none":
+      throw new Error(
+        `zodForResponseInner: discriminated unions are not emittable yet (P4); IR-validate should have rejected '${t.kind}'.`,
+      );
   }
 }

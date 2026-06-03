@@ -159,6 +159,7 @@ import {
   findEntityByName,
   inAggregate,
   inValueObject,
+  lowerAtom,
   lowerType,
   newEnv,
   withLocal,
@@ -951,11 +952,22 @@ function lowerEvent(e: EventDecl): EventIR {
   };
 }
 
-/** Lower a `PayloadDecl` (payload / command / query / response / error)
- *  to the unified `PayloadIR`.  Structural record only — generics and
- *  unions are P3 / P4.  The grammar `kind` token doubles as the IR
- *  discriminator. */
+/** Lower a `PayloadDecl` (payload / command / query / response / error) to the
+ *  unified `PayloadIR`.  Two forms (the grammar `kind` token doubles as the IR
+ *  discriminator in both):
+ *    - record:  `payload X { … }`  → `fields`, no `variants`.
+ *    - named union (P4):  `payload Foo = A | B`  → `variants` (each arm lowered
+ *      as a type atom), empty `fields`.  The variant set is canonicalized only
+ *      for identity/duplicate checks; the lowered list preserves source order. */
 function lowerPayload(p: PayloadDecl): PayloadIR {
+  if (p.variants.length > 0) {
+    return {
+      name: p.name,
+      kind: p.kind as PayloadIR["kind"],
+      fields: [],
+      variants: p.variants.map((v) => lowerAtom(v)),
+    };
+  }
   return {
     name: p.name,
     kind: p.kind as PayloadIR["kind"],

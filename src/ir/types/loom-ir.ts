@@ -100,6 +100,21 @@ export type TypeIR =
    *  P3a represents this in the IR but blocks emission at IR-validate; P3b
    *  monomorphizes each distinct instance into a concrete payload. */
   | { kind: "genericInstance"; ctor: GenericCtorName; arg: TypeIR; sensitivity?: SensitivityTags }
+  /** Discriminated union (payload-transport-layer.md, P4) — both the named
+   *  form (`payload Foo = A | B`) and the anonymous `or` form (`A or B` in any
+   *  type position) lower to this.  `variants` is the source-order variant
+   *  list, each a distinct carrier type; identity is structural on the
+   *  variant *set* (associative-commutative — see `unionVariantKey`), so
+   *  `A or B` and `B or A` are the same type.  The wire form is tagged by a
+   *  per-variant discriminator (the `type` field — see P4 emission); P4a
+   *  represents this in the IR but blocks emission at IR-validate. */
+  | { kind: "union"; variants: TypeIR[]; sensitivity?: SensitivityTags }
+  /** The unit variant of an `option` (payload-transport-layer.md, P4):
+   *  `T option` lowers to `union[T, none]`.  Carries no payload; on the wire
+   *  it is the tagged-empty variant.  A blessed nullary marker (like `slot`),
+   *  not an author-writable type — it only ever appears inside an option's
+   *  union. */
+  | { kind: "none"; sensitivity?: SensitivityTags }
   /** Element-shaped param marker — only valid on a `component`'s
    *  parameter list.  Values flow as JSX (any walker expression) from
    *  the caller's scope into the component body; a bare ref to a
@@ -107,9 +122,12 @@ export type TypeIR =
    *  position.  See `docs/page-metamodel.md`. */
   | { kind: "slot"; sensitivity?: SensitivityTags };
 
-/** The blessed closed set of generic-payload carriers (v1, A7a).  Kept in
- *  lockstep with the `GenericCtor` grammar rule and the stdlib registry in
- *  `src/ir/stdlib/generics.ts`. */
+/** The blessed closed set of generic-payload **record** carriers — the ones
+ *  that monomorphize to a `PayloadIR` record.  Kept in lockstep with the
+ *  record arms of the `GenericCtor` grammar rule and the stdlib registry in
+ *  `src/ir/stdlib/generics.ts`.  The grammar's third ctor, `option`, is a
+ *  *union* carrier: `T option` lowers straight to `union[T, none]` rather than
+ *  a `genericInstance`, so it never appears here. */
 export type GenericCtorName = "paged" | "envelope";
 
 export interface ParamIR {
@@ -584,12 +602,20 @@ export interface ChannelIR {
 export type PayloadKind = "payload" | "event" | "command" | "query" | "response" | "error";
 
 /** A structured-data carrier crossing a boundary (payload-transport-layer.md,
- *  P1).  Structurally typed record of fields.  Generics / unions are
- *  deferred to P3 / P4; this P1+P2 shape is a flat record only. */
+ *  P1).  Either a **record** (structurally typed field list — the P1+P2 shape)
+ *  or a **named discriminated union** (`payload Foo = A | B`, P4) when
+ *  `variants` is set.  The two forms are mutually exclusive: a union payload
+ *  carries `variants` and an empty `fields`. */
 export interface PayloadIR {
   name: string;
   kind: PayloadKind;
   fields: FieldIR[];
+  /** Set for a named union (`payload Foo = A | B | C`, P4) — the source-order
+   *  variant types.  Absent on record payloads.  Identity is by the payload's
+   *  name; the variant set is canonicalized for duplicate detection via
+   *  `unionVariantKey`.  The anonymous `A or B` form produces a `union` TypeIR
+   *  inline instead of a named `PayloadIR`. */
+  variants?: TypeIR[];
   /** True for compiler-synthesized payloads (P2's per-aggregate
    *  `<Agg>Wire`), false/absent for author-declared ones.  Lets later
    *  phases and the validator distinguish derived shapes from source. */

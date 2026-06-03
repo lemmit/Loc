@@ -93,6 +93,13 @@ function genericArgName(arg: TypeIR): string {
       return genericArgName(arg.inner);
     case "genericInstance":
       return genericInstanceName(arg.ctor, arg.arg);
+    case "union":
+      // Not a carrier (the carrier-bound check rejects a union arg); defensive
+      // only — a union nested in a carrier arg (`T option paged`) still gets a
+      // stable name.
+      return `${arg.variants.map(genericArgName).join("Or")}Union`;
+    case "none":
+      return "None";
     case "slot":
       return "Slot";
   }
