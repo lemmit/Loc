@@ -14,6 +14,7 @@ import {
 } from "./checks/structural-checks.js";
 import {
   backendPlatformsHostingEachContext,
+  validateAuditedOperationSupport,
   validateAuth,
   validateContextFilterSupport,
   validateDapperSupport,
@@ -24,6 +25,7 @@ import {
   validateMikroOrmSupport,
   validateNeedCapabilities,
   validatePermissions,
+  validateProvenancedStorage,
   validateReactIdReferences,
   validateResourceConfig,
   validateSavingShapeSupport,
@@ -118,6 +120,8 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     );
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateEventSourcedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateProvenancedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateAuditedOperationSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
   validateExprIntegrity(loom, diags);
   return diags;

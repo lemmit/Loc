@@ -20,10 +20,11 @@ Legend: ✓ implemented · ✗ gated (fail-fast validator error) · ⚠ partial 
 | TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✗ | ✗ | N/A | [aggregate-inheritance](./aggregate-inheritance.md) |
 | `shape(document)` persistence | ✓ | ✓ | ✗ | N/A | [document-and-json-hierarchies](./document-and-json-hierarchies.md) |
 | Principal `filter` (`currentUser`/tenancy) | ✗ | ✓ | ✗ | N/A | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
-| Provenanced fields (runtime trace) | ✓ | ⚠ | ⚠ | N/A | [provenance](./provenance.md) |
+| Provenanced fields (runtime trace) | ✓ | ✗ gated | ✗ gated | N/A | [provenance](./provenance.md) |
 | Generic carriers (`paged<T>`) | ✓ | ✓ | ✓ | ✗ | [payload-transport-layer](./payload-transport-layer.md) |
 | Ordered `X id[]` collections | ✓ | ✓ | ✗ | display | [load-specifications](./load-specifications.md) |
-| Audited operations (runtime) | ✓ | ⚠ | ⚠ | N/A | [audit-and-logging](./audit-and-logging.md) |
+| Per-op `audited` flag | ✓ | ✗ gated | ✗ gated | N/A | [audit-and-logging](./audit-and-logging.md) |
+| Audit stamping (`with audit`) | ✓ | ⚠ | ⚠ | N/A | [audit-and-logging](./audit-and-logging.md) |
 | Non-constructible aggregates | ✓ | ✓ | ⚠ | ⚠ | [lifecycle-operations](./lifecycle-operations.md) |
 | React `where`/list-page filter | — | — | — | ⚠ | [retrieval](./retrieval.md) |
 | Page `requires <pred>` (Phoenix) | N/A | N/A | ⚠ | N/A | [frontend-acl](./frontend-acl.md) |
@@ -50,9 +51,11 @@ Ordered by blast radius — how many real models the gap blocks today:
 1. **Phoenix backend depth** — event sourcing, TPH, `shape(document)`, ordered
    `X id[]`, principal filters. Phoenix is the backend furthest from parity; it
    is the common factor in most ✗ rows above.
-2. **dotnet/phoenix runtime parity** for already-parsed features — provenanced
-   fields and audited operations are accepted but no-op, the most surprising
-   class of gap (compiles, silently does nothing).
+2. ✅ **DONE (Tier 0) — silent no-ops made honest.** Provenanced fields and the
+   per-operation `audited` flag used to compile and do nothing on dotnet/phoenix;
+   they now fail fast (`loom.provenanced-backend-unsupported`,
+   `loom.audited-backend-unsupported`). Implementing them for real (rather than
+   gating) is the remaining work here, alongside `with audit` stamping parity.
 3. **React generative gaps** — generic carriers, list-page filters, non-
    constructible create surface; each is a localised walker/emitter addition.
 4. **Alternate adapters** — promote `dapper`/`mikroorm` past minimal-v1, or
