@@ -156,9 +156,13 @@ reformatting and are robust to the model being re-printed canonically:
 }
 ```
 
-Supported `op`s: `add`, `replace`, `remove`, `rename`. `target` uses the same
-fully-qualified addressing the printer emits (`<context>.<decl>` /
-`<aggregate>.<member>`), so the agent can name any node it just read.
+Supported `op`s: `add` (append a member to a free-body container), `replace`,
+`remove`, and `insert` (position-aware: `before`/`after` a sibling, or
+`header-end` — just before the target declaration's opening `{`, for header
+clauses like `inheritanceUsing(...)`). `rename` is still deferred (it needs
+reference rewriting). `target` uses the same fully-qualified addressing the
+printer emits (`<context>.<decl>` / `<aggregate>.<member>`), so the agent can
+name any node it just read.
 
 ### 4.2 Apply semantics
 
