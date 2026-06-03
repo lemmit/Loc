@@ -812,9 +812,18 @@ function renderProjectIndexTs(
     : "";
   // Persistence wiring (D-REALIZATION-AXES `persistence:`) — drizzle (pg pool +
   // boot-time migrate) vs mikroorm (MikroORM.init + schema:update at startup).
-  const persistenceImports = usingMikro
-    ? `${MIKRO_INDEX_IMPORTS.join("\n")}\n`
-    : `import { drizzle } from "drizzle-orm/node-postgres";\nimport pg from "pg";\nimport * as schema from "./db/schema";\n${migImport}`;
+  // The drizzle import header is kept byte-identical to the pre-mikroorm shape.
+  const importHeader = usingMikro
+    ? `import { serve } from "@hono/node-server";
+import { createApp } from "./http/index";
+${MIKRO_INDEX_IMPORTS.join("\n")}
+${seedImport}${authStubImport}import { baseLogger } from "./obs/log";`
+    : `import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
+import { serve } from "@hono/node-server";
+import * as schema from "./db/schema";
+import { createApp } from "./http/index";
+${migImport}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";`;
   const connectionBlock = usingMikro
     ? `// Persistence connection — owned by the mikroorm PersistenceAdapter\n// (MikroORM.init → dev schema bootstrap → EntityManager as \`db\`).\n${mikroConnectionSetup().join("\n")}`
     : `// Persistence connection — owned by the drizzle PersistenceAdapter\n// (DATABASE_URL guard → pg pool → pool-error logging → drizzle db).\n${DRIZZLE_CONNECTION_SETUP.join("\n")}`;
@@ -822,9 +831,7 @@ function renderProjectIndexTs(
   // so it never emits the drizzle boot-time migrate call.
   const effectiveMigCall = usingMikro ? "" : migCall;
   return `// Auto-generated.
-import { serve } from "@hono/node-server";
-import { createApp } from "./http/index";
-${persistenceImports}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";
+${importHeader}
 ${resourceImportBlock}
 ${connectionBlock}
 
@@ -835,8 +842,8 @@ const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });
 
 // Graceful shutdown — close the HTTP server (stops accepting,
-// drains in-flight), then close the persistence connection.  Without this
-// SIGTERM drops in-flight work and leaves connections lingering.  Both
+// drains in-flight), then close the pg pool.  Without this SIGTERM
+// drops in-flight work and leaves pg connections lingering.  Both
 // SIGTERM (orchestrator) and SIGINT (Ctrl-C) are handled.
 async function shutdown(signal: string): Promise<void> {
   baseLogger.info({ event: "server_shutdown", signal });
