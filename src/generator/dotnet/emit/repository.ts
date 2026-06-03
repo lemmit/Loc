@@ -128,7 +128,18 @@ export function renderRepositoryImpl(
     ];
   });
   // `Run<Name>Async` per context retrieval: where + sort baked in; page
-  // applied from the call-site argument; default-whole projection.
+  // applied from the call-site argument.
+  //
+  // The retrieval's `loadPlan` is a deliberate no-op on EF Core: owned
+  // containments map to `OwnsOne`/`OwnsMany` (see efcore.ts), and EF Core
+  // *always* materialises owned types with their owner — there is no
+  // `.Include` step to gate, and an owned navigation can't be projected
+  // away. So `whole(T)` is satisfied for free (every part rides along) and
+  // an explicit `loads:` neither widens nor narrows the query. Contrast
+  // Phoenix, where relational containments are separate `has_many`s that
+  // start `%NotLoaded{}` and the plan drives `prepare build(load:)`. The
+  // regression guard in retrieval-emit.test.ts pins that whole and an
+  // explicit-`loads` retrieval emit the identical query body here.
   const retrievals = options?.retrievals ?? [];
   const retrievalBodies = options?.retrievalBodies ?? [];
   const retrievalMethodLines = retrievals.flatMap((r) => {
