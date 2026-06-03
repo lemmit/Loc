@@ -3,12 +3,6 @@
 // storage map.
 
 import type { ValidationAcceptor } from "langium";
-import {
-  BUILTIN_PACK_LATEST,
-  builtinVersionsForFamily,
-  packFormatForBuiltin,
-  parseBuiltinDesignRef,
-} from "../../generator/_packs/builtin-formats.js";
 import type { Platform } from "../../ir/types/loom-ir.js";
 import {
   backendVersionsForFamily,
@@ -16,6 +10,12 @@ import {
   parseBuiltinPlatformRef,
   platformFor,
 } from "../../platform/registry.js";
+import {
+  BUILTIN_PACK_LATEST,
+  builtinVersionsForFamily,
+  packFormatForBuiltin,
+  parseBuiltinDesignRef,
+} from "../../util/builtin-formats.js";
 import type { Deployable } from "../generated/ast.js";
 import {
   builtinPackNamesForFormat,

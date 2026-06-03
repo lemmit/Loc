@@ -8,15 +8,11 @@
 // (`parseBuiltinPlatformRef`, `backendVersionsForFamily` etc. from
 // `src/platform/registry.ts`) and the *design-pack version
 // registry* (`BUILTIN_PACK_LATEST` etc. from
-// `src/generator/_packs/builtin-formats.ts`).  Those are dynamic
+// `src/util/builtin-formats.ts`).  Those are dynamic
 // registries that already exist; this table only encodes the
 // *grammar-level* platform-family classification — what kind of
 // thing each platform is.
 
-import {
-  BUILTIN_PACK_LATEST,
-  packFormatForBuiltin,
-} from "../../../generator/_packs/builtin-formats.js";
 import {
   applicationAdapterToDsl,
   applicationDslToAdapter,
@@ -30,6 +26,7 @@ import {
   availableAdapterNames,
   hasAdapters,
 } from "../../../platform/resolve-adapters.js";
+import { BUILTIN_PACK_LATEST, packFormatForBuiltin } from "../../../util/builtin-formats.js";
 
 /** Frontend keyword platforms — those that are valid as bareword
  *  `platform:` values without being registered as a backend family. */

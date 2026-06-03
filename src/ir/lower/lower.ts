@@ -1,9 +1,5 @@
 import type { Reference } from "langium";
 import { AstUtils } from "langium";
-import {
-  type BuiltinPackFamily,
-  parseBuiltinDesignRef,
-} from "../../generator/_packs/builtin-formats.js";
 import type {
   Aggregate,
   Api,
@@ -113,6 +109,7 @@ import {
 } from "../../language/generated/ast.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../platform/registry.js";
 import { defaultsFor } from "../../platform/resolve-adapters.js";
+import { type BuiltinPackFamily, parseBuiltinDesignRef } from "../../util/builtin-formats.js";
 import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
