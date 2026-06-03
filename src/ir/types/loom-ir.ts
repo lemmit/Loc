@@ -680,6 +680,13 @@ export interface RetrievalIR {
    *  (parameters as `param` refs, candidate fields as `this-prop`).
    *  Composes criteria + bare predicates like a `find … where`. */
   where: ExprIR;
+  /** Set when the `where` is *exactly* one named `criterion` reference
+   *  (`where: NamedLike(needle)`) — the criterion name + its lowered
+   *  argument expressions, for backends that consume the reified
+   *  `Criterion`/Specification (the `.where` body is still the inlined
+   *  predicate, so non-reifying backends are unaffected).  Omitted when
+   *  the `where` is composed or an anonymous expression. */
+  criterionRef?: { name: string; args: ExprIR[] };
   /** Ordering terms, in declaration order.  Empty when no `sort:`. */
   sort: SortTermIR[];
   /** Fetch shape; `{ kind: "whole" }` when no `loads:` clause. */

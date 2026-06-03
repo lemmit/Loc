@@ -38,7 +38,7 @@ import {
   emitValueObjects,
 } from "./context-scaffolding-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
-import { emitCriteria } from "./criteria-emit.js";
+import { canEmitToExpressionFor, emitCriteria } from "./criteria-emit.js";
 import { renderDapperRepository, renderDapperSchema } from "./emit/dapper.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
 import { emitDotnetMigrations } from "./emit/migrations.js";
@@ -550,8 +550,17 @@ function emitAggregate(
   // predicates contribute the same way.
   const repoImplUsings = collectFindBodyUsings(repoWithViews);
   collectRetrievalBodyUsings(aggRetrievals, repoImplUsings);
+  // A retrieval whose `where` is a reified criterion consumes its
+  // `Criterion` class's `ToExpression()` (Slice 2b) → needs Domain.Criteria.
+  if (
+    aggRetrievals.some(
+      (r) => r.criterionRef && canEmitToExpressionFor(r.criterionRef.name, ctx, agg.name),
+    )
+  ) {
+    repoImplUsings.add(`${ns}.Domain.Criteria`);
+  }
   const findBodies = buildFindBodies(agg, repoWithViews);
-  const retrievalBodies = buildRetrievalBodies(agg, aggRetrievals);
+  const retrievalBodies = buildRetrievalBodies(agg, aggRetrievals, ctx);
   // Persistence selection (D-REALIZATION-AXES `persistence:`): `dapper`
   // emits an Npgsql/Dapper repository (and no EF configuration / document /
   // join-table files — the validator gates those features out for dapper);

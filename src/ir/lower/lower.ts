@@ -199,7 +199,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
-import { inferExprType, lowerExpr, lowerExprInContext } from "./lower-expr.js";
+import { criterionRefOf, inferExprType, lowerExpr, lowerExprInContext } from "./lower-expr.js";
 import { lowerStatement } from "./lower-stmt.js";
 import {
   cstText,
@@ -1633,6 +1633,7 @@ function lowerRetrieval(r: Retrieval, env: Env): RetrievalIR {
     params: r.params.map((p) => ({ name: p.name, type: lowerType(p.type) })),
     targetType,
     where: lowerExpr(r.where, bodyEnv),
+    criterionRef: criterionRefOf(r.where, bodyEnv),
     sort,
     loadPlan,
   };
