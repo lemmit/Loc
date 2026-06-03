@@ -201,9 +201,11 @@ call-site cursor (`a.b := …` / `this.op(...)`) finds no target because
 
 Multi-file rename and `prepareRename`-range are also covered (both pass).
 
-Still to add: a hover failure-path test (render unresolved refs as
-`«unresolved»`, not a silent `?`); deployable / module rename (need a
-system-scoped fixture).
+Hover failure-path is now covered: an unresolved containment part / repository
+aggregate renders `«unresolved: <text>»` (or `«unresolved»` when absent) instead
+of the old silent `?`, so a dangling cross-ref reads as a failure in the bubble.
+
+Still to add: deployable / module rename (need a system-scoped fixture).
 
 > **Note (LValue blind spot, found while testing).** A statement-position
 > member call / assignment target (`this.op(...)`, `a.b := …`) parses as an

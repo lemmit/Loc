@@ -129,6 +129,33 @@ describe("DddHoverProvider", () => {
     });
   });
 
+  it("marks an unresolved containment part as «unresolved» (not a silent ?)", async () => {
+    // The cursor sits on a containment whose part type doesn't resolve.  The
+    // hover must surface the failure explicitly — `«unresolved: Missing»` —
+    // rather than the old silent `?`, which read like a valid reference.
+    await expectHoverFor({
+      text: `
+        context Sales {
+          aggregate Order {
+            contains <|>lines: Missing[]
+          }
+        }`,
+      index: 0,
+      hover: /contains lines: «unresolved: Missing»\[\]/,
+    });
+  });
+
+  it("marks an unresolved repository aggregate as «unresolved»", async () => {
+    await expectHoverFor({
+      text: `
+        context Sales {
+          repository <|>Orders for Missing { }
+        }`,
+      index: 0,
+      hover: /repository Orders for «unresolved: Missing»/,
+    });
+  });
+
   it("hovers a slot-typed component param and shows the slot type", async () => {
     // Without `DddType.slot` the hover would fall back to "unknown".
     // The variant makes it carry through `resolveTypeRef` → `typeToString`

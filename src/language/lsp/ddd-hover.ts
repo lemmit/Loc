@@ -139,7 +139,7 @@ function renderProperty(p: Property): string {
 }
 
 function renderContainment(c: Containment): string {
-  const partName = c.partType?.ref?.name ?? c.partType?.$refText ?? "?";
+  const partName = refName(c.partType);
   const suffix = c.collection ? "[]" : "";
   return code(`contains ${c.name}: ${partName}${suffix}`);
 }
@@ -165,8 +165,7 @@ function renderOperation(op: Operation): string {
 }
 
 function renderRepository(r: Repository): string {
-  const aggName = r.aggregate?.ref?.name ?? r.aggregate?.$refText ?? "?";
-  return code(`repository ${r.name} for ${aggName}`);
+  return code(`repository ${r.name} for ${refName(r.aggregate)}`);
 }
 
 function renderFind(f: FindDecl): string {
@@ -182,6 +181,19 @@ function renderInvariant(_i: Invariant): string {
 // ---------------------------------------------------------------------------
 // Helpers.
 // ---------------------------------------------------------------------------
+
+/** Render a cross-reference target name for a hover summary, surfacing
+ *  resolution failures explicitly instead of a silent `?`:
+ *   - resolved          → the target's name
+ *   - typed but dangling → `«unresolved: <text>»` (keeps what the user wrote)
+ *   - absent            → `«unresolved»`
+ *  So hovering a `contains x: Missing[]` / `repository R for Missing` reads as
+ *  a failure rather than looking like a valid reference. */
+function refName(ref: { ref?: { name: string }; $refText?: string } | undefined): string {
+  if (ref?.ref) return ref.ref.name;
+  if (ref?.$refText) return `«unresolved: ${ref.$refText}»`;
+  return "«unresolved»";
+}
 
 function propertySig(p: { name: string; type: import("../generated/ast.js").TypeRef }): string {
   return `${p.name}: ${typeToString(resolveTypeRef(p.type))}`;
