@@ -1,4 +1,4 @@
-import { E2E_FIXTURES_TS } from "../generator/react/index.js";
+import { E2E_FIXTURES_TS } from "../generator/react/emit-templates.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
 import { lowerModel } from "../ir/lower/lower.js";
 import type {
