@@ -112,7 +112,12 @@ function renderAggregateResource(
     `    repo ${repoModule}`,
   ];
 
-  const renderCtx: RenderCtx = { thisName: "record", contextModule: ctxModule, agg };
+  const renderCtx: RenderCtx = {
+    thisName: "record",
+    contextModule: ctxModule,
+    typesModule: `${appModule}.Types`,
+    agg,
+  };
 
   // Reference-collection fields (`Id<T>[]`) are persisted via a separate
   // join table (see join-resource-emit.ts), not as a column on this row.
@@ -236,7 +241,11 @@ function renderEntityPartResource(
   options: { schema?: string; prefix?: string; embedded?: boolean } = {},
 ): string {
   const moduleName = `${ctxModule}.${upperFirst(part.name)}`;
-  const renderCtxEmbedded: RenderCtx = { thisName: "record", contextModule: ctxModule };
+  const renderCtxEmbedded: RenderCtx = {
+    thisName: "record",
+    contextModule: ctxModule,
+    typesModule: `${appModule}.Types`,
+  };
 
   // Embedded (`shape(embedded)`): the part has no table of its own — it
   // is stored inline in its parent's jsonb column.  So `data_layer:
@@ -276,7 +285,11 @@ ${jasonImplEmbedded}`;
     `    repo ${repoModule}`,
   ];
 
-  const renderCtx: RenderCtx = { thisName: "record", contextModule: ctxModule };
+  const renderCtx: RenderCtx = {
+    thisName: "record",
+    contextModule: ctxModule,
+    typesModule: `${appModule}.Types`,
+  };
 
   // camelCase wire-shape Jason encoder (matches aggregate behaviour).
   // Excludes the parent FK from the wire — parts are embedded under
@@ -674,9 +687,10 @@ function renderHelperFunctions(functions: FunctionIR[], ctx: RenderCtx): string 
     // the resource module), then each declared parameter, then the
     // function's return type.  Skipped when ctx.agg is unset (no
     // aggregate context → emit untyped so we don't fabricate a `t()`
-    // that doesn't resolve).
+    // that doesn't resolve).  `ctx.typesModule`, when set, routes
+    // id / timestamp through the shared `<App>.Types` vocabulary.
     const specLine = ctx.agg
-      ? `  @spec ${snake(fn.name)}(${["t()", ...fn.params.map((p) => renderTypespec(p.type, ctx.contextModule))].join(", ")}) :: ${renderTypespec(fn.returnType, ctx.contextModule)}\n`
+      ? `  @spec ${snake(fn.name)}(${["t()", ...fn.params.map((p) => renderTypespec(p.type, ctx.contextModule, ctx.typesModule))].join(", ")}) :: ${renderTypespec(fn.returnType, ctx.contextModule, ctx.typesModule)}\n`
       : "";
     return `${specLine}  defp ${snake(fn.name)}(${params.join(", ")}) do
 ${recordPrefix}    ${body}

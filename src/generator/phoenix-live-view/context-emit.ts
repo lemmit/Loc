@@ -36,6 +36,9 @@ export function emitContext(
 ): void {
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+  // Shared <App>.Types module — referenced by id / timestamp typespecs.
+  // Emitted once at the app level by the orchestrator (index.ts).
+  const typesModule = `${appModule}.Types`;
 
   // Enums — Ash enum types
   for (const en of ctx.enums) {
@@ -46,13 +49,13 @@ export function emitContext(
   // Value objects — Ash embedded resources
   for (const vo of ctx.valueObjects) {
     const path = `lib/${appName}/${ctxSnake}/${snake(vo.name)}.ex`;
-    out.set(path, renderValueObjectModule(vo, contextModule, appModule));
+    out.set(path, renderValueObjectModule(vo, contextModule, appModule, typesModule));
   }
 
   // Events
   for (const ev of ctx.events) {
     const path = `lib/${appName}/${ctxSnake}/events/${snake(ev.name)}.ex`;
-    out.set(path, renderEventModule(ev, contextModule));
+    out.set(path, renderEventModule(ev, contextModule, typesModule));
   }
 
   // Aggregates — Ash.Resource modules. Validations (operation preconditions
@@ -145,6 +148,7 @@ function renderValueObjectModule(
   vo: import("../../ir/types/loom-ir.js").ValueObjectIR,
   contextModule: string,
   appModule: string,
+  typesModule: string,
 ): string {
   const moduleName = `${contextModule}.${upperFirst(vo.name)}`;
   const attrLines = vo.fields.map((f) => {
@@ -158,8 +162,9 @@ function renderValueObjectModule(
   // field-accurate shape that matches the IR exactly.  The IR's
   // FieldIR.optional flag corresponds to the same "| nil" the type
   // would have if it were a TypeIR `{kind: optional}`, so apply it here.
+  // `typesModule` references the shared `<App>.Types` for id / timestamp.
   const typespecLines = vo.fields.map((f, i) => {
-    const base = renderTypespec(f.type, contextModule);
+    const base = renderTypespec(f.type, contextModule, typesModule);
     const ty = f.optional && !base.endsWith("| nil") ? `${base} | nil` : base;
     const sep = i === vo.fields.length - 1 ? "" : ",";
     return `    ${snake(f.name)}: ${ty}${sep}`;
@@ -193,13 +198,16 @@ ${jasonImpl}`;
 function renderEventModule(
   ev: import("../../ir/types/loom-ir.js").EventIR,
   contextModule: string,
+  typesModule: string,
 ): string {
   const moduleName = `${contextModule}.Events.${upperFirst(ev.name)}`;
   void renderAshType; // used in sibling fns
   // FieldIR carries `optional` separately from TypeIR — preserve it in
   // the spec so a nullable event field is `T | nil`, not `T`.
+  // `typesModule` lets the IDs lower to `<App>.Types.id()` (the shared
+  // vocabulary) instead of bare `String.t()`.
   const typeFor = (f: { type: import("../../ir/types/loom-ir.js").TypeIR; optional: boolean }) => {
-    const base = renderTypespec(f.type, contextModule);
+    const base = renderTypespec(f.type, contextModule, typesModule);
     return f.optional && !base.endsWith("| nil") ? `${base} | nil` : base;
   };
   return `# Auto-generated.

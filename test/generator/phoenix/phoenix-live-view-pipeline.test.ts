@@ -100,6 +100,27 @@ describe("phoenixLiveView pipeline", () => {
     expect(files.has("phoenix_app/mix.exs")).toBe(true);
   });
 
+  it("emits the shared <App>.Types module at lib/<app>/types.ex", async () => {
+    // Per the Ash specing discipline in
+    // docs/proposals/cross-stack-static-analysis.md — one shared
+    // type vocabulary per app, consumed by every @spec / @type emit
+    // site via the `typesModule` parameter on renderTypespec.
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const types = files.get("phoenix_app/lib/phoenix_app/types.ex");
+    expect(types, "types.ex is emitted at the app-snake-cased path").toBeDefined();
+    expect(types!).toMatch(/defmodule PhoenixApp\.Types do/);
+    // Vocabulary the rest of the generator references — the four
+    // public aliases must all be present so any downstream emit site
+    // that uses them links cleanly.
+    expect(types!).toMatch(/@type id :: String\.t\(\)/);
+    expect(types!).toMatch(/@type timestamp :: DateTime\.t\(\)/);
+    expect(types!).toMatch(/@type result\(t\) :: \{:ok, t\} \| \{:error, Ash\.Error\.t\(\)\}/);
+    expect(types!).toMatch(
+      /@type result_list\(t\) :: \{:ok, \[t\]\} \| \{:error, Ash\.Error\.t\(\)\}/,
+    );
+  });
+
   it("emits docker-compose with a postgres-dependent phoenix service", async () => {
     const model = await buildFixture();
     const { files } = generateSystems(model);

@@ -38,6 +38,14 @@ export interface RenderCtx {
   thisName: string;
   /** Module prefix for the current bounded context, e.g. `"MyApp.Sales"`. */
   contextModule: string;
+  /** Shared `<App>.Types` module — emitted once per app by the
+   *  orchestrator (index.ts).  When set, `renderTypespec` lowers
+   *  `id` → `<typesModule>.id()` and primitive `datetime` →
+   *  `<typesModule>.timestamp()` instead of inlining `String.t()` /
+   *  `DateTime.t()`.  Optional so direct expression-render unit tests
+   *  (which never touch typespecs) can construct a ctx without
+   *  caring; emission paths that write `@spec` lines always set it. */
+  typesModule?: string;
   /** Aggregate whose finds/derived/op bodies we're lowering.  Required
    *  for `this.<refColl>.contains(param)` membership predicates, which
    *  lower to an Ash `exists(<rel>, id == ^arg(:<param>))` filter
@@ -536,12 +544,19 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
 // doesn't cover.
 //
 // Optionals lower to `T | nil` (Elixir's nullable convention).  Arrays
-// lower to `[T]`.  IDs and enums currently lower to `String.t()` (UUID
-// string) and the enum atom union respectively — value-object types
-// reference their module's `.t()`.
+// lower to `[T]`.  Enums and value-object/entity types reference their
+// module's `.t()`.
+//
+// When `typesModule` is provided (`<App>.Types`, emitted once per app
+// by `types-module-emit.ts`), `id` → `<typesModule>.id()` and primitive
+// `datetime` → `<typesModule>.timestamp()` — references to the shared
+// vocabulary instead of inlining `String.t()` / `DateTime.t()`.  Falls
+// back to the inline shapes when absent (used by direct unit tests and
+// for backwards compatibility with any emission site that hasn't been
+// threaded through yet).
 // ---------------------------------------------------------------------------
 
-export function renderTypespec(t: TypeIR, contextModule: string): string {
+export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: string): string {
   switch (t.kind) {
     // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
@@ -559,7 +574,7 @@ export function renderTypespec(t: TypeIR, contextModule: string): string {
         case "bool":
           return "boolean()";
         case "datetime":
-          return "DateTime.t()";
+          return typesModule ? `${typesModule}.timestamp()` : "DateTime.t()";
         case "guid":
           // Ash represents UUIDs as plain binary strings on the struct.
           return "String.t()";
@@ -568,7 +583,7 @@ export function renderTypespec(t: TypeIR, contextModule: string): string {
       }
     case "id":
       // IDs flow as UUID strings on the struct (Ash :uuid → String.t()).
-      return "String.t()";
+      return typesModule ? `${typesModule}.id()` : "String.t()";
     case "enum":
       // Enums are Ash.Type.Enum modules carrying an `atom` value on the
       // struct.  Reference the module's auto-generated `.t()`.
@@ -577,9 +592,9 @@ export function renderTypespec(t: TypeIR, contextModule: string): string {
     case "entity":
       return `${contextModule}.${upperFirst(t.name)}.t()`;
     case "array":
-      return `[${renderTypespec(t.element, contextModule)}]`;
+      return `[${renderTypespec(t.element, contextModule, typesModule)}]`;
     case "optional":
-      return `${renderTypespec(t.inner, contextModule)} | nil`;
+      return `${renderTypespec(t.inner, contextModule, typesModule)} | nil`;
     case "slot":
       throw new Error("renderTypespec: 'slot' type is UI-only and should not reach the backend.");
     case "genericInstance":
