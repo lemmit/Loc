@@ -11,9 +11,13 @@ import { renderHonoBaseLogCall, renderHonoLogCall } from "../../_obs/render-hono
 // sub-router and exposes `/openapi.json`.
 export function renderHttpIndex(
   ctx: BoundedContextIR,
-  options?: { authRequired?: boolean },
+  options?: { authRequired?: boolean; persistence?: string },
 ): string {
   const authRequired = !!options?.authRequired;
+  // Persistence selection (D-REALIZATION-AXES) — the `db` handle createApp
+  // threads is drizzle's `NodePgDatabase` by default, or a MikroORM
+  // `EntityManager` when `persistence: mikroorm`.
+  const usingMikro = options?.persistence === "mikroorm";
   // Abstract bases (aggregate-inheritance.md) own only the shared TPH table —
   // no domain module, repository, or routes — so they're never mounted here.
   const aggregates = ctx.aggregates.filter((a) => !a.isAbstract);
@@ -86,7 +90,7 @@ export function renderHttpIndex(
       "// Auto-generated.",
       'import { OpenAPIHono } from "@hono/zod-openapi";',
       'import { cors } from "hono/cors";',
-      'import { sql } from "drizzle-orm";',
+      usingMikro ? null : 'import { sql } from "drizzle-orm";',
       'import { requestIdMiddleware } from "../obs/request-id";',
       baseLoggerImport,
       authImport,
@@ -94,12 +98,14 @@ export function renderHttpIndex(
       ...externImports,
       workflowImport,
       viewImport,
-      'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
-      'import type * as schema from "../db/schema";',
+      usingMikro
+        ? 'import { EntityManager } from "@mikro-orm/postgresql";'
+        : 'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
+      usingMikro ? null : 'import type * as schema from "../db/schema";',
       'import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events";',
       "",
       "export function createApp(",
-      "  db: NodePgDatabase<typeof schema>,",
+      usingMikro ? "  db: EntityManager," : "  db: NodePgDatabase<typeof schema>,",
       "  events: DomainEventDispatcher = NoopDomainEventDispatcher,",
       "): OpenAPIHono {",
       externAggs.length > 0
@@ -136,7 +142,9 @@ export function renderHttpIndex(
       "  // still carries the message for the probe log.",
       '  app.get("/ready", async (c) => {',
       "    try {",
-      "      await db.execute(sql`select 1`);",
+      usingMikro
+        ? '      await db.getConnection().execute("select 1");'
+        : "      await db.execute(sql`select 1`);",
       `      ${renderHonoLogCall("healthOk", `checks: ["readiness", "db"]`)}`,
       '      return c.json({ status: "ready" });',
       "    } catch (err) {",

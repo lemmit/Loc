@@ -92,22 +92,31 @@ export interface JsonDiagnostic {
 
 // --- Outline (the node address book, contract §5) --------------------------
 
-export interface OutlineAggregate {
+/** A declaration that has addressable members (aggregate / value object). */
+export interface OutlineDecl {
   node: string;
   members: string[];
 }
 
+/** @deprecated alias of {@link OutlineDecl} kept for back-compat. */
+export type OutlineAggregate = OutlineDecl;
+
 export interface OutlineContext {
   name: string;
-  aggregates: OutlineAggregate[];
+  aggregates: OutlineDecl[];
+  valueObjects: OutlineDecl[];
   workflows: string[];
   views: string[];
   pages: string[];
+  enums: string[];
+  events: string[];
+  repositories: string[];
 }
 
 export interface OutlineSystem {
   name: string;
   contexts: OutlineContext[];
+  deployables: string[];
 }
 
 export interface Outline {

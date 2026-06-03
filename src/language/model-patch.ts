@@ -23,9 +23,14 @@ import { createDddServices } from "./ddd-module.js";
 import {
   isAggregate,
   isBoundedContext,
+  isDeployable,
+  isEnumDecl,
+  isEventDecl,
   isPage,
+  isRepository,
   isSubdomain,
   isSystem,
+  isValueObject,
   isView,
   isWorkflow,
   type Model,
@@ -60,9 +65,9 @@ interface Edit {
   newText: string;
 }
 
-/** A container the `add` op can insert a member into. */
+/** A container the `add` op can insert a member into (a `{ … }` body). */
 function isContainer(node: AstNode): boolean {
-  return isBoundedContext(node) || isAggregate(node);
+  return isBoundedContext(node) || isAggregate(node) || isValueObject(node) || isDeployable(node);
 }
 
 /** Walk the declaration tree (the same set `buildOutline` enumerates) building
@@ -80,23 +85,25 @@ function indexTargets(model: Model): { map: Map<string, AstNode>; ambiguous: Set
     return a;
   };
 
+  // An entity-like declaration (aggregate / value object): index it and its
+  // members (skipping members that collapse to the entity's own address, e.g.
+  // unnamed invariants).
+  const indexEntity = (decl: { members: AstNode[] } & AstNode): void => {
+    const declAddr = put(decl);
+    for (const mem of decl.members) {
+      const memAddr = addressOf(mem);
+      if (memAddr && memAddr !== declAddr) put(mem);
+    }
+  };
+
   const indexContext = (ctx: AstNode): void => {
-    const ctxAddr = put(ctx);
+    put(ctx);
     if (!("members" in ctx)) return;
     for (const m of (ctx as { members: AstNode[] }).members) {
-      if (isAggregate(m)) {
-        const aggAddr = put(m);
-        for (const mem of m.members) {
-          // Skip members that collapse to the aggregate's own address
-          // (unnamed invariants etc.) — they are not individually targetable.
-          const memAddr = addressOf(mem);
-          if (memAddr && memAddr !== aggAddr) put(mem);
-        }
-      } else if (isWorkflow(m) || isView(m) || isPage(m)) {
-        put(m);
-      }
+      if (isAggregate(m) || isValueObject(m)) indexEntity(m);
+      else if (isWorkflow(m) || isView(m) || isPage(m)) put(m);
+      else if (isEnumDecl(m) || isEventDecl(m) || isRepository(m)) put(m);
     }
-    void ctxAddr;
   };
 
   for (const member of model.members) {
@@ -104,6 +111,7 @@ function indexTargets(model: Model): { map: Map<string, AstNode>; ambiguous: Set
       for (const sm of member.members) {
         if (isBoundedContext(sm)) indexContext(sm);
         else if (isSubdomain(sm)) for (const c of sm.contexts) indexContext(c);
+        else if (isDeployable(sm)) put(sm);
       }
     } else if (isBoundedContext(member)) {
       indexContext(member);

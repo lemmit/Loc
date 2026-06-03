@@ -14,24 +14,27 @@
 // ---------------------------------------------------------------------------
 
 import { type AstNode, AstUtils } from "langium";
-import type { Outline, OutlineContext } from "../../diagnostics/contract.js";
+import type { Outline, OutlineContext, OutlineDecl } from "../../diagnostics/contract.js";
 import {
   type Aggregate,
   type BoundedContext,
   isAggregate,
   isBoundedContext,
+  isEnumDecl,
+  isEventDecl,
   isPage,
+  isRepository,
   isSubdomain,
   isSystem,
+  isValueObject,
   isView,
   isWorkflow,
   type Model,
   type System,
+  type ValueObject,
 } from "../generated/ast.js";
 
-/** Declaration keyword for a node's `$type`.  Aggregate members without a
- *  keyword of their own (properties, containments, derived, invariants…) are
- *  addressed under the `aggregate` keyword, matching the contract example. */
+/** Declaration keyword for a node's `$type`. */
 const KEYWORD_BY_TYPE: Record<string, string> = {
   Model: "model",
   System: "system",
@@ -40,6 +43,11 @@ const KEYWORD_BY_TYPE: Record<string, string> = {
   Aggregate: "aggregate",
   ValueObject: "valueobject",
   EnumDecl: "enum",
+  EnumValue: "value",
+  EventDecl: "event",
+  Repository: "repository",
+  FindDecl: "find",
+  Deployable: "deployable",
   Workflow: "workflow",
   View: "view",
   Page: "page",
@@ -51,8 +59,13 @@ const KEYWORD_BY_TYPE: Record<string, string> = {
   Apply: "apply",
 };
 
-function keywordOf(node: AstNode): string {
-  return KEYWORD_BY_TYPE[node.$type] ?? "aggregate";
+/** The nearest entity-like container (aggregate or value object) of a node —
+ *  the unit a member address is qualified by.  Includes the node itself. */
+function entityContainer(node: AstNode): Aggregate | ValueObject | undefined {
+  return (
+    AstUtils.getContainerOfType(node, isAggregate) ??
+    AstUtils.getContainerOfType(node, isValueObject)
+  );
 }
 
 function nameOf(node: AstNode): string | undefined {
@@ -62,25 +75,33 @@ function nameOf(node: AstNode): string | undefined {
 
 /**
  * Canonical address for an AST node, or `undefined` when it cannot be placed
- * (no enclosing named structure).  Best-effort: a node with no name of its own
- * (e.g. an invariant) resolves to its enclosing aggregate's address.
+ * (no enclosing named structure).  A member with its own keyword (operation /
+ * function / create / …) is addressed under that keyword; a plain member
+ * (property / containment / derived / invariant) is addressed under its
+ * enclosing entity's keyword (`aggregate`/`valueobject`).  Best-effort: a node
+ * with no name of its own resolves to its enclosing entity's address.
  */
 export function addressOf(node: AstNode): string | undefined {
   const ctx = AstUtils.getContainerOfType(node, isBoundedContext);
-  // getContainerOfType includes the node itself, so for an Aggregate node
-  // `agg === node`.
-  const agg = AstUtils.getContainerOfType(node, isAggregate);
+  // getContainerOfType includes the node itself, so for an aggregate / value
+  // object node `entity === node`.
+  const entity = entityContainer(node);
   const name = nameOf(node);
+
+  // Own keyword if mapped; otherwise (a plain member) the enclosing entity's.
+  let keyword: string | undefined = KEYWORD_BY_TYPE[node.$type];
+  if (!keyword && entity && entity !== node) keyword = KEYWORD_BY_TYPE[entity.$type];
+  if (!keyword) keyword = "node";
 
   const segs: string[] = [];
   if (ctx) segs.push(ctx.name);
-  if (agg && agg !== (node as unknown as Aggregate) && agg !== (ctx as unknown as Aggregate)) {
-    segs.push(agg.name);
+  if (entity && entity !== (node as unknown) && entity !== (ctx as unknown)) {
+    segs.push(entity.name);
   }
   if (name && node !== (ctx as unknown as AstNode)) segs.push(name);
 
   if (segs.length === 0) return undefined;
-  return `${keywordOf(node)} ${segs.join(".")}`;
+  return `${keyword} ${segs.join(".")}`;
 }
 
 /** Every BoundedContext under a system, flattening the optional subdomain
@@ -94,36 +115,71 @@ function contextsOf(system: System): BoundedContext[] {
   return out;
 }
 
+/** A declaration with addressable members (aggregate / value object); drops
+ *  members that collapse to the declaration's own address (unnamed invariants,
+ *  `implements`, …) so they don't duplicate the `node`. */
+function outlineDecl(decl: Aggregate | ValueObject): OutlineDecl | undefined {
+  const node = addressOf(decl);
+  if (!node) return undefined;
+  const members = decl.members
+    .map((mem) => addressOf(mem))
+    .filter((a): a is string => a !== undefined && a !== node);
+  return { node, members };
+}
+
 function outlineContext(ctx: BoundedContext): OutlineContext {
-  const aggregates: OutlineContext["aggregates"] = [];
+  const aggregates: OutlineDecl[] = [];
+  const valueObjects: OutlineDecl[] = [];
   const workflows: string[] = [];
   const views: string[] = [];
   const pages: string[] = [];
+  const enums: string[] = [];
+  const events: string[] = [];
+  const repositories: string[] = [];
+
+  const pushAddr = (m: AstNode, into: string[]) => {
+    const a = addressOf(m);
+    if (a) into.push(a);
+  };
 
   for (const m of ctx.members) {
     if (isAggregate(m)) {
-      const node = addressOf(m);
-      // Drop members that have no address of their own (unnamed invariants,
-      // `implements`, …): they collapse to the aggregate's address and would
-      // duplicate the `node` field.  Named members and the unnamed-but-keyworded
-      // lifecycle ops (`create`/`destroy`) keep distinct addresses.
-      const members = m.members
-        .map((mem) => addressOf(mem))
-        .filter((a): a is string => a !== undefined && a !== node);
-      if (node) aggregates.push({ node, members });
-    } else if (isWorkflow(m)) {
-      const a = addressOf(m);
-      if (a) workflows.push(a);
-    } else if (isView(m)) {
-      const a = addressOf(m);
-      if (a) views.push(a);
-    } else if (isPage(m)) {
-      const a = addressOf(m);
-      if (a) pages.push(a);
-    }
+      const d = outlineDecl(m);
+      if (d) aggregates.push(d);
+    } else if (isValueObject(m)) {
+      const d = outlineDecl(m);
+      if (d) valueObjects.push(d);
+    } else if (isWorkflow(m)) pushAddr(m, workflows);
+    else if (isView(m)) pushAddr(m, views);
+    else if (isPage(m)) pushAddr(m, pages);
+    else if (isEnumDecl(m)) pushAddr(m, enums);
+    else if (isEventDecl(m)) pushAddr(m, events);
+    else if (isRepository(m)) pushAddr(m, repositories);
   }
 
-  return { name: ctx.name, aggregates, workflows, views, pages };
+  return {
+    name: ctx.name,
+    aggregates,
+    valueObjects,
+    workflows,
+    views,
+    pages,
+    enums,
+    events,
+    repositories,
+  };
+}
+
+/** Deployable addresses declared directly under a system. */
+function deployablesOf(system: System): string[] {
+  const out: string[] = [];
+  for (const m of system.members) {
+    if (m.$type === "Deployable") {
+      const a = addressOf(m);
+      if (a) out.push(a);
+    }
+  }
+  return out;
 }
 
 /**
@@ -140,6 +196,7 @@ export function buildOutline(model: Model): Outline {
       systems.push({
         name: member.name,
         contexts: contextsOf(member).map(outlineContext),
+        deployables: deployablesOf(member),
       });
     } else if (isBoundedContext(member)) {
       contexts.push(outlineContext(member));

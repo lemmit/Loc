@@ -26,6 +26,7 @@ import { byFeatureLayoutAdapter } from "./adapters/by-feature-layout.js";
 import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
 import { drizzlePersistenceAdapter } from "./adapters/drizzle-persistence.js";
 import { layeredStyleAdapter } from "./adapters/layered-style.js";
+import { mikroOrmPersistenceAdapter } from "./adapters/mikroorm-persistence.js";
 import { generateTypeScriptForContexts } from "./emit.js";
 import { BACKEND_PINS } from "./pins.js";
 
@@ -86,27 +87,14 @@ const honoPlatform: PlatformSurface = {
       internalPort: 3000,
     };
   },
-  // hono (Node backend) — `drizzle` persistence + `layered` style +
-  // `byLayer` / `byFeature` layout are real (F6a/b/c + Phase 5b);
-  // `prisma` / `cqrs` are stubs.  Built lazily (see PlatformSurface jsdoc).
+  // hono (Node backend) — `drizzle` + `mikroorm` persistence + `layered` style
+  // + `byLayer` / `byFeature` layout are real (F6a/b/c + Phase 5b/5d);
+  // `cqrs` is a stub.  Built lazily (see PlatformSurface jsdoc).
   adapters(): PlatformAdapters {
     const menu: PlatformAdapters = {
       persistence: {
         drizzle: drizzlePersistenceAdapter,
-        prisma: stubAdapter<PersistenceAdapter>(
-          "persistence",
-          "prisma",
-          "node",
-          () => Object.keys(menu.persistence),
-          {
-            name: "prisma",
-            supportedStrategies: ["state"],
-            supports: (type, kind, strategy) =>
-              strategy === "state" &&
-              ["postgres", "mysql", "sqlite"].includes(type) &&
-              ["state", "snapshot", "replica"].includes(kind),
-          },
-        ),
+        mikroorm: mikroOrmPersistenceAdapter,
       },
       styles: {
         layered: layeredStyleAdapter,
