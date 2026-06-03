@@ -79,6 +79,7 @@ function featurePathFor(artifact: DotnetArtifact): string | null {
     case "join-entity":
     case "join-entity-configuration":
     case "document-poco":
+    case "event-record-poco":
       return `Features/${need()}/${name}`;
     default:
       // Cross-cutting / shared artifacts stay layered: context-level

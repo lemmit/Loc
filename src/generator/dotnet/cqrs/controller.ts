@@ -28,6 +28,11 @@ export function emitController(
   routePrefix?: string,
   emitTrace?: boolean,
   usingDapper?: boolean,
+  /** Force the POST create action on (event-sourced aggregates are
+   *  constructible via their `create` action even when `hasCreate` — the
+   *  field-set constructibility check — is false).  Defaults to
+   *  `hasCreate(agg)`. */
+  createActionOverride?: boolean,
 ): void {
   // Namespaces the wire→command conversions below reach into (e.g.
   // System.Globalization for a datetime/money parse); collected over the
@@ -43,7 +48,7 @@ export function emitController(
     `Api/${upperFirst(plural(agg.name))}Controller.cs`,
     renderController(agg, repo, ns, {
       idClrType: csIdValueClrType(agg.idValueType),
-      createAction: hasCreate(agg),
+      createAction: createActionOverride ?? hasCreate(agg),
       destroyAction: !!agg.canonicalDestroy,
       createCmdArgs: requiredFields.map((f) =>
         wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx),

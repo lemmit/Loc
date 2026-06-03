@@ -122,5 +122,44 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 600_000);
+
+    // Event sourcing (appliers A2.2b): a `persistedAs(eventLog)` aggregate on a
+    // dotnet deployable emits the EF `<Agg>EventRecord` entity + config, the
+    // `_Apply`/`_FromEvents` fold on the aggregate, the record-and-apply `emit`,
+    // the event-store repository (fold on load / append on save), and the
+    // event-sourced `Create(...)` factory.  Build the dotnet deployable under
+    // /warnaserror — the discriminated-union switch + STJ round-trip are the
+    // type-sensitive parts this gate compiles.
+    it("system event sourcing (eventLog + appliers + create) — dotnet project builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-es-"));
+      try {
+        execSync(`node ${cli} generate system examples/event-sourcing.ddd -o ${outDir}`, {
+          stdio: "inherit",
+          cwd: repoRoot,
+        });
+        const proj = path.join(outDir, "dotnet_api");
+        // Sanity: the EF event-record entity + the fold rehydrator made it out.
+        expect(
+          fs.existsSync(
+            path.join(proj, "Infrastructure", "Persistence", "Events", "AccountEventRecord.cs"),
+          ),
+        ).toBe(true);
+        expect(
+          fs.readFileSync(path.join(proj, "Domain", "Accounts", "Account.cs"), "utf8"),
+        ).toContain("_FromEvents");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
   },
 );

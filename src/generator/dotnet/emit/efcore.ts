@@ -38,8 +38,15 @@ export function renderDbContext(
    *  the JSON document).  Empty / omitted ⇒ byte-identical with the
    *  all-normalised output. */
   documentAggs: ReadonlySet<string> = new Set(),
+  /** Names of event-sourced (`persistedAs(eventLog)`) aggregates.  Each
+   *  contributes a `DbSet<<Agg>EventRecord>` + the event-record
+   *  configuration (the append-only `<agg>_events` stream) instead of the
+   *  normalised entity DbSet/config; its reference-collection join tables
+   *  are skipped (state lives in the stream).  Empty ⇒ byte-identical. */
+  eventSourcedAggs: ReadonlySet<string> = new Set(),
 ): string {
   const isDoc = (name: string) => documentAggs.has(name);
+  const isEs = (name: string) => eventSourcedAggs.has(name);
   // Abstract TPC (`ownTable`) bases own no table — they are excluded from the
   // EF model via `modelBuilder.Ignore<Base>()` so each concrete maps standalone
   // (its own table carrying the inherited base columns flattened), instead of
@@ -48,18 +55,24 @@ export function renderDbContext(
   const entityAggs = ctx.aggregates.filter((a) => !a.isAbstract);
   const abstractBases = ctx.aggregates.filter((a) => a.isAbstract);
   const anyDoc = entityAggs.some((a) => isDoc(a.name));
+  const anyEs = entityAggs.some((a) => isEs(a.name));
   const aggUsings = ctx.aggregates.map((a) => `using ${ns}.Domain.${plural(a.name)};`);
   if (anyDoc) aggUsings.push(`using ${ns}.Infrastructure.Persistence.Documents;`);
+  if (anyEs) aggUsings.push(`using ${ns}.Infrastructure.Persistence.Events;`);
   const dbSets = entityAggs.map((a) =>
-    isDoc(a.name)
-      ? `    public DbSet<${a.name}Document> ${plural(upperFirst(a.name))} => Set<${a.name}Document>();`
-      : `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
+    isEs(a.name)
+      ? `    public DbSet<${a.name}EventRecord> ${a.name}Events => Set<${a.name}EventRecord>();`
+      : isDoc(a.name)
+        ? `    public DbSet<${a.name}Document> ${plural(upperFirst(a.name))} => Set<${a.name}Document>();`
+        : `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
   );
   const ignoreBases = abstractBases.map((a) => `        modelBuilder.Ignore<${a.name}>();`);
   const applyConfigs = entityAggs.map((a) =>
-    isDoc(a.name)
-      ? `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}DocumentConfiguration());`
-      : `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
+    isEs(a.name)
+      ? `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}EventRecordConfiguration());`
+      : isDoc(a.name)
+        ? `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}DocumentConfiguration());`
+        : `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
   );
   // Join-entity DbSets + their ApplyConfiguration entries.  Each
   // reference-collection field on an aggregate produces one join
@@ -67,7 +80,9 @@ export function renderDbContext(
   // configuration so it can serve queries against either side).
   // Document aggregates fold their reference collections into the JSON
   // document — no join table, so drop their associations here.
-  const joinAssocs = contextAssociations(ctx).filter((a) => !isDoc(a.ownerAgg));
+  const joinAssocs = contextAssociations(ctx).filter(
+    (a) => !isDoc(a.ownerAgg) && !isEs(a.ownerAgg),
+  );
   const joinUsings =
     joinAssocs.length > 0 ? [`using ${ns}.Infrastructure.Persistence.JoinTables;`] : [];
   const joinDbSets = joinAssocs.map((a) => {

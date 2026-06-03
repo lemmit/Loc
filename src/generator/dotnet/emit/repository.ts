@@ -10,7 +10,7 @@ import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
-import { renderCsType } from "../render-expr.js";
+import { csValueTypeForId, renderCsType } from "../render-expr.js";
 import { joinDbSetName, joinEntityName, joinFkPropName } from "./join-entities.js";
 
 // Repository interface (Domain layer) + EF-backed implementation
@@ -557,6 +557,203 @@ export function renderDocumentRepositoryImpl(
       ])}`,
       "            await _events.DispatchAsync(ev, ct);",
       "        }",
+      "    }",
+      ...findMethodLines,
+      "}",
+    ) + "\n"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Event-sourced (`persistedAs(eventLog)`) repository for the .NET/EF backend
+// (appliers A2.2b).  The .NET counterpart of the Hono
+// `repository-eventsourced-builder.ts`.
+//
+// The aggregate's truth is its `<agg>_events` stream (an EF entity
+// `<Agg>EventRecord`, no state table).  `GetByIdAsync` reads the stream in
+// version order and folds it via `<Agg>._FromEvents`; `SaveAsync` appends
+// `PullEvents()` with gap-free versions then dispatches; finds load every
+// stream, fold each, and filter in-memory (fold-from-zero MVP).  Event
+// payloads round-trip through System.Text.Json (Web defaults) — the records
+// are STJ-friendly (positional records over id / value-object / enum types).
+// ---------------------------------------------------------------------------
+export function renderEventSourcedRepositoryImpl(
+  agg: EnrichedAggregateIR,
+  repo: RepositoryIR | undefined,
+  ns: string,
+  findBodies: Array<{ name: string; filterClause: string; projectionClause: string }>,
+  options?: { extraUsings?: readonly string[] },
+): string {
+  const finds = repo?.finds ?? [];
+  const anyFindUsesUser = finds.some(findUsesCurrentUser);
+  const dbSet = `${agg.name}Events`;
+  // The event types this aggregate's stream can contain — the events its
+  // appliers fold.  Drives the `RowToEvent` deserialiser dispatch.
+  const eventNames = [...new Set((agg.appliers ?? []).map((a) => a.event))];
+  const idValue = csValueTypeForId(agg.idValueType);
+  const parseId =
+    idValue === "Guid"
+      ? "Guid.Parse(__kv.Key)"
+      : idValue === "int"
+        ? "int.Parse(__kv.Key)"
+        : idValue === "long"
+          ? "long.Parse(__kv.Key)"
+          : "__kv.Key";
+
+  const rowToEventArms = eventNames.map(
+    (e) =>
+      `            "${e}" => System.Text.Json.JsonSerializer.Deserialize<${e}>(__r.Data, __json)!,`,
+  );
+
+  const findMethodLines = finds.flatMap((f) => {
+    const body = findBodies.find((b) => b.name === f.name);
+    const filter = body?.filterClause ?? "";
+    const projection = (body?.projectionClause ?? ".ToListAsync(ct)")
+      .replace(".ToListAsync(ct)", ".ToList()")
+      .replace(".FirstOrDefaultAsync(ct)", ".FirstOrDefault()")
+      .replace(".FirstAsync(ct)", ".First()");
+    const usesUser = findUsesCurrentUser(f);
+    const isArray = f.returnType.kind === "array";
+    const rowsExpr = isArray ? "result.Count" : "result == null ? 0 : 1";
+    return [
+      `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
+      "    {",
+      "        var __all = await _LoadAllAsync(ct);",
+      `        var result = __all${filter}${projection};`,
+      `        ${renderDotnetLogCall("findExecuted", [
+        { name: "aggregate", valueExpr: `"${agg.name}"` },
+        { name: "find", valueExpr: `"${f.name}"` },
+        { name: "rows", valueExpr: rowsExpr },
+      ])}`,
+      "        return result;",
+      "    }",
+    ];
+  });
+
+  const extraUsings = (options?.extraUsings ?? []).map((n) => `using ${n};`);
+  return (
+    lines(
+      "// Auto-generated.",
+      "using System;",
+      "using System.Linq;",
+      "using System.Collections.Generic;",
+      "using System.Threading;",
+      "using System.Threading.Tasks;",
+      ...extraUsings,
+      "using Microsoft.EntityFrameworkCore;",
+      "using Microsoft.Extensions.Logging;",
+      `using ${ns}.Domain.${plural(agg.name)};`,
+      `using ${ns}.Domain.Common;`,
+      `using ${ns}.Domain.Events;`,
+      `using ${ns}.Domain.Ids;`,
+      `using ${ns}.Domain.ValueObjects;`,
+      `using ${ns}.Domain.Enums;`,
+      `using ${ns}.Infrastructure.Persistence;`,
+      `using ${ns}.Infrastructure.Persistence.Events;`,
+      anyFindUsesUser ? `using ${ns}.Auth;` : null,
+      "",
+      `namespace ${ns}.Infrastructure.Repositories;`,
+      "",
+      `public sealed class ${agg.name}Repository : I${agg.name}Repository`,
+      "{",
+      "    private readonly AppDbContext _db;",
+      "    private readonly IDomainEventDispatcher _events;",
+      `    private readonly ILogger<${agg.name}Repository> _log;`,
+      "    private static readonly System.Text.Json.JsonSerializerOptions __json =",
+      "        new(System.Text.Json.JsonSerializerDefaults.Web);",
+      "",
+      `    public ${agg.name}Repository(AppDbContext db, IDomainEventDispatcher events, ILogger<${agg.name}Repository> log)`,
+      "    {",
+      "        _db = db;",
+      "        _events = events;",
+      "        _log = log;",
+      "    }",
+      "",
+      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken ct = default)`,
+      "    {",
+      "        var __sid = id.Value.ToString();",
+      `        var __rows = await _db.${dbSet}.Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync(ct);`,
+      `        ${renderDotnetLogCall("aggregateLoaded", [
+        { name: "aggregate", valueExpr: `"${agg.name}"` },
+        { name: "id", valueExpr: "id.Value" },
+        { name: "found", valueExpr: "__rows.Count > 0" },
+      ])}`,
+      "        if (__rows.Count == 0) return null;",
+      `        return ${agg.name}._FromEvents(id, __rows.Select(RowToEvent).ToList());`,
+      "    }",
+      "",
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default)`,
+      "    {",
+      `        if (ids.Count == 0) return Array.Empty<${agg.name}>();`,
+      `        var __out = new List<${agg.name}>();`,
+      "        foreach (var __id in ids)",
+      "        {",
+      "            var __a = await GetByIdAsync(__id, ct);",
+      "            if (__a != null) __out.Add(__a);",
+      "        }",
+      "        return __out;",
+      "    }",
+      "",
+      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken ct = default)`,
+      "    {",
+      "        var __pending = aggregate.PullEvents();",
+      "        if (__pending.Count > 0)",
+      "        {",
+      "            var __sid = aggregate.Id.Value.ToString();",
+      `            var __version = await _db.${dbSet}.Where(e => e.StreamId == __sid).Select(e => (int?)e.Version).MaxAsync(ct) ?? 0;`,
+      "            foreach (var __ev in __pending)",
+      "            {",
+      "                __version++;",
+      `                _db.${dbSet}.Add(new ${agg.name}EventRecord`,
+      "                {",
+      "                    StreamId = __sid,",
+      "                    Version = __version,",
+      "                    Type = __ev.GetType().Name,",
+      "                    Data = System.Text.Json.JsonSerializer.Serialize((object)__ev, __json),",
+      "                    OccurredAt = DateTime.UtcNow,",
+      "                });",
+      "            }",
+      "            await _db.SaveChangesAsync(ct);",
+      "        }",
+      `        ${renderDotnetLogCall("repositorySave", [
+        { name: "aggregate", valueExpr: `"${agg.name}"` },
+        { name: "id", valueExpr: "aggregate.Id.Value" },
+      ])}`,
+      "        foreach (var ev in __pending)",
+      "        {",
+      `            ${renderDotnetLogCall("eventDispatched", [
+        { name: "event_type", valueExpr: "ev.GetType().Name" },
+        { name: "aggregate", valueExpr: `"${agg.name}"` },
+        { name: "id", valueExpr: "aggregate.Id.Value" },
+      ])}`,
+      "            await _events.DispatchAsync(ev, ct);",
+      "        }",
+      "    }",
+      "",
+      // Load every stream, fold each — the in-memory source for finds.
+      `    private async Task<List<${agg.name}>> _LoadAllAsync(CancellationToken ct)`,
+      "    {",
+      `        var __rows = await _db.${dbSet}.OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(ct);`,
+      "        var __byStream = new Dictionary<string, List<IDomainEvent>>();",
+      "        foreach (var __r in __rows)",
+      "        {",
+      "            if (!__byStream.TryGetValue(__r.StreamId, out var __list))",
+      "            {",
+      "                __list = new List<IDomainEvent>();",
+      "                __byStream[__r.StreamId] = __list;",
+      "            }",
+      "            __list.Add(RowToEvent(__r));",
+      "        }",
+      `        return __byStream.Select(__kv => ${agg.name}._FromEvents(new ${agg.name}Id(${parseId}), __kv.Value)).ToList();`,
+      "    }",
+      "",
+      `    private static IDomainEvent RowToEvent(${agg.name}EventRecord __r)`,
+      "    {",
+      "        return __r.Type switch",
+      "        {",
+      ...rowToEventArms,
+      '            _ => throw new InvalidOperationException($"Unknown event type: {__r.Type}"),',
+      "        };",
       "    }",
       ...findMethodLines,
       "}",

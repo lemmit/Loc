@@ -1,5 +1,6 @@
 import { createInputFields, hasCreate } from "../../ir/enrich/wire-projection.js";
 import type {
+  AggregateIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   RepositoryIR,
@@ -45,15 +46,33 @@ export function emitCqrs(
   // `forCreateInput` excludes `managed` / `token` / `internal` (server-
   // owned or domain-only), keeps `immutable` (settable at creation) and
   // `secret` (client supplies password hashes / API keys).
-  const requiredFields = createInputFields(agg);
+  // Event sourcing (appliers A2.2b): an event-sourced aggregate is
+  // constructed from its single `create` action's params (the command
+  // shape), not the field set — so the CreateRequest / CreateCommand /
+  // handler / controller bind those params and call the event-sourced
+  // `Create(...)` factory.  The FluentValidation create-validator (built
+  // from invariants over the field set) is skipped: domain invariants are
+  // enforced on the fold (`_FromEvents` AssertInvariants), and the params
+  // need not align with the field set.
+  const esCreate = agg.persistedAs === "eventLog" ? agg.creates?.[0] : undefined;
+  const requiredFields = esCreate
+    ? esCreate.params.map(
+        (p) => ({ name: p.name, type: p.type, optional: false }) as AggregateIR["fields"][number],
+      )
+    : createInputFields(agg);
+  const aggHasCreate = esCreate ? true : hasCreate(agg);
 
   emitResponseDtos(agg, ctx, ns, aggFolder, out);
-  emitRequestDtos(agg, ctx, ns, aggFolder, out);
+  emitRequestDtos(agg, ctx, ns, aggFolder, out, aggHasCreate ? requiredFields : undefined);
   // Create command/handler gated on the IR lifecycle (`canonicalCreate`),
   // mirroring the destroy gate below: an aggregate that declares no create
   // is not constructible over HTTP and emits no Create command/handler,
   // request DTO, response, or controller action.
-  if (hasCreate(agg)) emitCreateCommandAndHandler(agg, requiredFields, ns, aggFolder, out);
+  if (aggHasCreate) {
+    emitCreateCommandAndHandler(agg, requiredFields, ns, aggFolder, out, {
+      emitValidator: !esCreate,
+    });
+  }
   // Canonical destroy → Delete command + handler (gated on the IR
   // lifecycle, so plain aggregates emit no extra CQRS files).
   if (agg.canonicalDestroy) emitDestroyCommandAndHandler(agg, ns, aggFolder, out);
@@ -70,5 +89,6 @@ export function emitCqrs(
     options?.routePrefix,
     options?.emitTrace,
     options?.usingDapper,
+    aggHasCreate,
   );
 }
