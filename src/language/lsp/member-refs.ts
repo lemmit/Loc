@@ -123,7 +123,18 @@ function nameRefDecl(nr: NameRef): AstNode | undefined {
   // model lambda-param shadowing, so guard explicitly.
   if (localShadows(nr, name)) return undefined;
   const sym = envForNode(nr).resolve(name);
-  return sym && isRenameableMember(sym.origin) ? sym.origin : undefined;
+  if (sym && isRenameableMember(sym.origin)) return sym.origin;
+  // Fallback: a bare reference to an entity member the expression env doesn't
+  // surface — notably a bare function call (`tax()`), which the type system
+  // resolves through a separate call-lookup, not `env.resolve`.  Resolve it
+  // against the enclosing entity's members, mirroring `collectLValueUsages`'
+  // head resolution.
+  const owner = nearestEntity(nr);
+  if (owner) {
+    const info = iterateEntityMembers(owner).find((m) => m.name === name);
+    if (info && isRenameableMember(info.node)) return info.node;
+  }
+  return undefined;
 }
 
 function nearestEntity(node: AstNode): EntityLike | undefined {
