@@ -153,6 +153,33 @@ function editFor(patch: ModelPatch, node: AstNode, text: string): Edit {
     return { start: from, end: to, newText: "" };
   }
 
+  if (patch.op === "insert") {
+    if (patch.source === undefined) throw new Error(`'insert' requires 'source'`);
+    const position = patch.position ?? "after";
+    if (position === "header-end") {
+      // Insert just before the target declaration's opening `{` (its header) —
+      // for header clauses like `inheritanceUsing(ownTable)`.  The existing
+      // space before `{` separates the prior token; a trailing space separates
+      // `source` from `{`.
+      let brace = start;
+      while (brace < end && text[brace] !== "{") brace++;
+      if (text[brace] !== "{")
+        throw new Error(`'${patch.target}' has no '{' header to insert before`);
+      return { start: brace, end: brace, newText: `${patch.source} ` };
+    }
+    // before / after — a sibling line at the target's own indentation.
+    const ls = lineStart(text, start);
+    let indent = "";
+    for (let i = ls; i < start && (text[i] === " " || text[i] === "\t"); i++) indent += text[i];
+    if (position === "before") {
+      return { start: ls, end: ls, newText: `${indent}${patch.source}\n` };
+    }
+    let lineEnd = end;
+    while (lineEnd < text.length && text[lineEnd] !== "\n") lineEnd++;
+    if (lineEnd < text.length) lineEnd++; // past the newline
+    return { start: lineEnd, end: lineEnd, newText: `${indent}${patch.source}\n` };
+  }
+
   // add — insert `source` as a new member just before the container's `}`.
   if (patch.source === undefined) throw new Error(`'add' requires 'source'`);
   if (!isContainer(node)) {

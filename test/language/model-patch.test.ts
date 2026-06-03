@@ -99,6 +99,48 @@ describe("applyPatches", () => {
     expect(errors).toEqual([]);
   });
 
+  it("insert places a sibling before/after a target member (position control)", async () => {
+    const m = `context Sales {
+  aggregate Order {
+    a: int
+    b: int
+  }
+}
+`;
+    const before = await applyPatches(m, [
+      { op: "insert", target: "aggregate Sales.Order.b", position: "before", source: "x: int" },
+    ]);
+    expect(before.ok).toBe(true);
+    expect(before.text).toMatch(/a: int\n\s+x: int\n\s+b: int/);
+
+    const after = await applyPatches(m, [
+      { op: "insert", target: "aggregate Sales.Order.a", position: "after", source: "x: int" },
+    ]);
+    expect(after.ok).toBe(true);
+    expect(after.text).toMatch(/a: int\n\s+x: int\n\s+b: int/);
+  });
+
+  it("insert header-end adds a header clause before the target's '{'", async () => {
+    const m = `context Sales {
+  aggregate Order {
+    total: int
+  }
+}
+`;
+    const r = await applyPatches(m, [
+      {
+        op: "insert",
+        target: "aggregate Sales.Order",
+        position: "header-end",
+        source: "persistedAs(state)",
+      },
+    ]);
+    expect(r.ok).toBe(true);
+    expect(r.text).toContain("aggregate Order persistedAs(state) {");
+    const { errors } = await parseString(r.text);
+    expect(errors).toEqual([]);
+  });
+
   it("rejects `add` into a deployable (its body is a positional grammar)", async () => {
     const sys = `system Shop {
   context Sales { aggregate Order { total: int } }
