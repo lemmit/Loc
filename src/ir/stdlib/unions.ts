@@ -95,3 +95,46 @@ export function canonicalUnion(variants: TypeIR[]): TypeIR {
   }
   return { kind: "union", variants: flat };
 }
+
+/** Deterministic PascalCase name for an anonymous `A or B` union — the stem of
+ *  the monomorphized union payload (the union analogue of
+ *  `genericInstanceName`).  `Order or Cancel` → `OrderOrCancel`; `string
+ *  option` (= `union[string, none]`) → `StringOrNone`.  Named unions
+ *  (`payload Foo = A | B`) keep their author name instead. */
+export function unionInstanceName(variants: TypeIR[]): string {
+  return variants.map(variantTag).join("Or");
+}
+
+/** Visit every `union` reachable from a type, descending array / optional /
+ *  generic-instance wrappers and the variants of nested unions.  The union
+ *  analogue of `forEachGenericInstance`; shared by the enrichment collector. */
+export function forEachUnion(type: TypeIR, visit: (variants: TypeIR[]) => void): void {
+  switch (type.kind) {
+    case "union":
+      visit(type.variants);
+      for (const v of type.variants) forEachUnion(v, visit);
+      return;
+    case "array":
+      forEachUnion(type.element, visit);
+      return;
+    case "optional":
+      forEachUnion(type.inner, visit);
+      return;
+    case "genericInstance":
+      forEachUnion(type.arg, visit);
+      return;
+    default:
+      return;
+  }
+}
+
+/** If `t` is a top-level `union` (an inline `A or B` / `T option` return),
+ *  return its variants and the monomorphized payload `name`; otherwise null.
+ *  The union analogue of `pagedReturn` — every backend's find/response emitter
+ *  uses it to recognise a union return and wire the tagged-union DTO.  A
+ *  *named*-union reference resolves to an `entity` marker, not a `union`, so it
+ *  is handled separately (by payload-name lookup). */
+export function unionReturn(t: TypeIR): { variants: TypeIR[]; name: string } | null {
+  if (t.kind === "union") return { variants: t.variants, name: unionInstanceName(t.variants) };
+  return null;
+}

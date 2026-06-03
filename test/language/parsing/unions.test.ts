@@ -173,4 +173,24 @@ describe("unions — variant validation (P4)", () => {
     `);
     expect(errorCodes(diagnostics)).toContain("loom.union-variant-not-carrier");
   });
+
+  it("rejects an inline union in a stored field position (`loom.union-position`)", async () => {
+    const { diagnostics } = await parseString(`
+      context C {
+        aggregate Order ids guid { x: string or int }
+      }
+    `);
+    expect(errorCodes(diagnostics)).toContain("loom.union-position");
+  });
+
+  it("allows an inline union as a repository find return", async () => {
+    const { diagnostics } = await parseString(`
+      context C {
+        aggregate Order ids guid { code: string }
+        aggregate Cancel ids guid { reason: string }
+        repository R for Order { find f(): Order or Cancel }
+      }
+    `);
+    expect(errorCodes(diagnostics)).not.toContain("loom.union-position");
+  });
 });

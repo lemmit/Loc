@@ -1,4 +1,10 @@
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
+import {
+  discriminatedUnionZod,
+  type UnionMemberField,
+  unionMemberObjects,
+  unionMembers,
+} from "../../../generator/_payload/union-wire.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
   chainSingleFieldNative,
@@ -16,6 +22,7 @@ import {
   PAGED_DEFAULT_PAGE_SIZE,
   pagedReturn,
 } from "../../../ir/stdlib/generics.js";
+import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -315,6 +322,27 @@ export function buildRoutesFile(
       pagedSeen.add(paged.name);
       lines.push(
         `export const ${paged.name} = z.object({ items: z.array(${zodForResponse(paged.arg, false)}), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }).openapi("${paged.name}");`,
+      );
+    }
+  }
+  // Discriminated-union response DTOs (P4b) — one `z.discriminatedUnion` per
+  // distinct union find return; the tagged-wire shape mirrors the React
+  // client's schema byte-for-byte (both derive from `unionMembers`).
+  {
+    const unionSeen = new Set<string>();
+    for (const find of repo?.finds ?? []) {
+      const u = unionForFind(find.returnType, ctx);
+      if (!u || unionSeen.has(u.name)) continue;
+      unionSeen.add(u.name);
+      const fieldZod = (f: UnionMemberField): string =>
+        f.isId ? "z.string()" : zodForResponse(f.type, f.optional);
+      const members = unionMemberObjects(
+        unionMembers(u.variants, ctx),
+        fieldZod,
+        zodForResponseInner,
+      );
+      lines.push(
+        `export const ${u.name} = ${discriminatedUnionZod(members)}.openapi("${u.name}");`,
       );
     }
   }
@@ -776,6 +804,20 @@ function emitOperationRoute(
   return out;
 }
 
+/** A find whose return type is a discriminated union — inline `A or B` or a
+ *  reference to a named `payload Foo = …`.  Returns the DTO name + variants. */
+function unionForFind(
+  t: TypeIR,
+  ctx: BoundedContextIR,
+): { name: string; variants: TypeIR[] } | null {
+  if (t.kind === "union") return { name: unionInstanceName(t.variants), variants: t.variants };
+  if (t.kind === "entity") {
+    const p = ctx.payloads.find((pl) => pl.name === t.name && pl.variants);
+    if (p?.variants) return { name: p.name, variants: p.variants };
+  }
+  return null;
+}
+
 function emitFindRoute(
   agg: AggregateIR,
   find: FindIR,
@@ -785,12 +827,15 @@ function emitFindRoute(
   const aggSlug = snake(plural(agg.name));
   const findSnake = snake(find.name);
   const paged = pagedReturn(find.returnType);
+  const union = unionForFind(find.returnType, ctx);
   const isList = find.returnType.kind === "array";
   const responseSchema = paged
     ? paged.name
-    : isList
-      ? `${agg.name}ListResponse`
-      : `${agg.name}Response`;
+    : union
+      ? union.name
+      : isList
+        ? `${agg.name}ListResponse`
+        : `${agg.name}Response`;
   // A paged find always carries a query (page/pageSize), even with no
   // declared params.
   const hasQuery = find.params.length > 0 || !!paged;
