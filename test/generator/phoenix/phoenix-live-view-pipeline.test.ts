@@ -100,6 +100,22 @@ describe("phoenixLiveView pipeline", () => {
     expect(files.has("phoenix_app/mix.exs")).toBe(true);
   });
 
+  it("emits .dialyzer_ignore.exs at project root + wires mix.exs to read it", async () => {
+    // Per docs/proposals/cross-stack-static-analysis.md — the ignore
+    // template ships as future-proofing for the Tier 4 Dialyzer gate.
+    // Sits unused until Dialyxir is added; the mix.exs `dialyzer:` block
+    // activates it automatically the moment the dep lands.
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const ignore = files.get("phoenix_app/.dialyzer_ignore.exs");
+    expect(ignore, ".dialyzer_ignore.exs is emitted at deployable root").toBeDefined();
+    // App-scoped router filter, scaled to the deployable slug.
+    expect(ignore!).toMatch(/\{"lib\/phoenix_app_web\/router\.ex", :_\}/);
+
+    const mix = files.get("phoenix_app/mix.exs")!;
+    expect(mix).toMatch(/ignore_warnings: "\.dialyzer_ignore\.exs"/);
+  });
+
   it("emits the shared <App>.Types module at lib/<app>/types.ex", async () => {
     // Per the Ash specing discipline in
     // docs/proposals/cross-stack-static-analysis.md — one shared

@@ -281,11 +281,10 @@ on Ash error-struct internals. Sketch:
 Deferred until the wrapper layer exists; tracked here so the design
 direction is captured.
 
-### `.dialyzer_ignore.exs` template (paired with Tier 4)
+### `.dialyzer_ignore.exs` template (shipped as future-proofing)
 
-When Tier 4 (Dialyzer) lands, the generator must emit a
-`.dialyzer_ignore.exs` template at project root that filters
-unfixable Ash-internal noise:
+The generator emits a `.dialyzer_ignore.exs` template at project root
+that filters unfixable Ash-internal noise:
 
 ```elixir
 [
@@ -296,11 +295,21 @@ unfixable Ash-internal noise:
 ]
 ```
 
-Without it, Dialyzer's first run is unreadable. With it, the noise
-budget is bounded and our own emitted code stands out cleanly. This
-file is **part of the Tier 4 deliverable**, not a Tier 3 follow-up —
-emitting it without Dialyzer landing is no-op (the file is consumed
-only by `mix dialyzer`).
+Paired with a `dialyzer: [ignore_warnings: ".dialyzer_ignore.exs",
+plt_add_apps: [:mix, :ex_unit]]` config block in the generated
+`mix.exs` `def project` list.
+
+Without the ignore file, Dialyzer's first run is unreadable. With it,
+the noise budget is bounded and our own emitted code stands out
+cleanly.
+
+**Originally framed as a Tier 4-only deliverable; shipped early as
+future-proofing.** The file is inert when Dialyxir isn't a project
+dep — `mix` ignores the unknown `dialyzer:` config key — so shipping
+it standalone has zero runtime cost and zero behaviour change. The
+moment Dialyxir is added (manually or as part of the future Tier 4
+landing), the noise floor is already tuned. Re-evaluate the filter
+set after each Ash major bump.
 
 ### What PR #902 already shipped vs. what's still ahead
 
@@ -309,9 +318,11 @@ only by `mix dialyzer`).
 - ✅ `@spec` on polymorphic TPC readers with union return types.
 - ✅ `@spec` on aggregate `defp` helpers.
 - ✅ `@spec inspect(t()) :: String.t()` on the derived `def inspect(record)`.
-- ⏳ **`MyApp.Types` module + `result(t)` vocabulary** — recommended next slice; cheap, mechanical, no Ash interaction.
+- ✅ **`<App>.Types` module + `result(t)` vocabulary** — shipped in PR #904.
+- ✅ View `def run/1` `@spec` (shorthand list + full-form map projection) — shipped in PR #906.
+- ✅ `.dialyzer_ignore.exs` template + `dialyzer:` mix.exs config — shipped early as future-proofing.
+- ⏳ Workflow `def run/N` `@spec` — return type is the open problem; needs IR enrichment or a conservative-default decision.
 - ⏳ Service-layer wrapper emission (and its spec'd surface) — deferred behind the architectural decision to emit such a layer.
-- ⏳ `.dialyzer_ignore.exs` template — paired with Tier 4 landing.
 - ⏳ Empirical Dialyzer first-run audit against the existing Ash output (per the Ash v3 note above).
 
 ### The vanilla-Ecto pivot changes the Dialyzer calculus

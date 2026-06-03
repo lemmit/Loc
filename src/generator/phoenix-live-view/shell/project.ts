@@ -33,7 +33,15 @@ defmodule ${appModule}.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
-      deps: deps()
+      deps: deps(),
+      # Dialyzer config — picked up by Dialyxir's \`mix dialyzer\`
+      # task when added as a dep.  The ignore_warnings file ships
+      # alongside this project at \`.dialyzer_ignore.exs\` with the
+      # Ash + Phoenix.Router noise filter pre-tuned.
+      dialyzer: [
+        ignore_warnings: ".dialyzer_ignore.exs",
+        plt_add_apps: [:mix, :ex_unit]
+      ]
     ]
   end
 
