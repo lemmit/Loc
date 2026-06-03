@@ -186,6 +186,23 @@ describe("RenameProvider — cross-reference categories", () => {
     expect(result).not.toMatch(/\bMoney\b/);
   });
 
+  // Regression for the soft-keyword field-name gap: a field named `state`
+  // (a page/storage keyword now admitted in `Property.name`) used to fail to
+  // parse, which silently blocked renaming the `Status` type-ref on that field.
+  // Renaming the enum now rewrites the `state: Status` type-ref too.
+  it("renames an enum type-ref on a field named with a soft keyword (`state`)", async () => {
+    const result = await renameAt(
+      `context Sales {
+  enum <|>Status { Open, Closed }
+  aggregate Order { state: Status }
+}`,
+      "State",
+    );
+    expect(result).toContain("enum State {");
+    expect(result).toContain("state: State");
+    expect(result).not.toMatch(/\bStatus\b/);
+  });
+
   // Enum-value rename: bare use sites (`st := Open`) now follow the declaration
   // (`nameRefDecl` resolves them through the same enum scan `lower-expr` uses).
   it("renames an enum value and its bare use sites", async () => {
