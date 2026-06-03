@@ -49,6 +49,10 @@ describe.skipIf(!ENABLED)(
       // First-boot seeding (database-seeding.md): compiles
       // Infrastructure/Persistence/Seed.cs + the Program.cs RunSeeds wiring.
       "examples/seeding.ddd",
+      // Value-object array (`Money[]`): compiles the EF `OwnsMany` mapping
+      // to the id-less child table (`invoice_line_items`) — the owned
+      // collection's ToTable / WithOwner FK / shadow `ordinal` key path.
+      "examples/value-collections.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {

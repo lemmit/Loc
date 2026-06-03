@@ -1,0 +1,18 @@
+// Value-object collections — a `<VO>[]` field persists as an id-less child
+// table on relational backends (Hono/.NET) and a `{:array, :map}` column on
+// Phoenix/Ash.  Minimal single-context example so the build gates compile
+// the child-table / EF OwnsMany / Ash embedded-array paths end to end.
+context Invoicing {
+    valueobject Money {
+        amount: decimal
+        currency: string
+    }
+
+    aggregate Invoice with crudish {
+        reference: string
+        lineItems: Money[]
+        surcharges: Money[]?
+    }
+
+    repository Invoices for Invoice { }
+}
