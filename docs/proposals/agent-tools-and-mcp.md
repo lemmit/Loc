@@ -377,5 +377,17 @@ playground settings matter, independent of the tools.
    - rewrite trio: `loom_rename` / `loom_quickfix` / `loom_unfold_macro`
      (`src/api/refactor.ts`) — return `EditResult`s, not applied.
    Both inherit the MCP + (future) playground transports through the catalog.
-5. *(separate slice)* playground agentic chat: catalog dispatch + LLM wiring +
-   key handling + apply-to-editor.
+5. **Playground agentic chat** — split into engine + UI:
+   - ✅ **agent loop** (`src/tools/agent-loop.ts`) — the transport-neutral
+     conversation driver: ask the model, run every `tool_use` through the
+     catalog's `callTool`, feed the `tool_result`s back, repeat until it stops
+     (with a `maxSteps` cap against tool ping-pong). The LLM call is INJECTED
+     (`Complete`), so the loop is provider-neutral, pure, browser-safe, and
+     unit-tested with a scripted fake (incl. the full validate → apply_patch
+     authoring loop). Message/content-block shapes mirror Anthropic's so the
+     real client maps 1:1. This is the reference loop every in-process host
+     runs (playground today, a headless CLI later); an external MCP host runs
+     its own loop, so the MCP server doesn't use it.
+   - ⬜ **playground UI** — the chat panel + LLM-wiring (an Anthropic/proxy
+     `Complete` implementation) + API-key handling + apply-to-editor. A
+     UI + transport task with no new tool logic (web/, Playwright-tested).
