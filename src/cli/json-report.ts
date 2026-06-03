@@ -24,8 +24,10 @@ import { addressOf, buildOutline } from "../language/print/index.js";
 /** Single source for the `loomVersion` field and the CLI `.version()`. */
 export const LOOM_VERSION = "0.1.0";
 
-/** IR diagnostics that ship without a stable `code` get this fallback until
- *  the per-code backfill across `validate.ts` lands (a follow-up slice). */
+/** Defensive fallback for an IR diagnostic that somehow lacks a `code`.
+ *  Every `diags.push` in `validate.ts` now carries a stable `loom.*` code
+ *  (gated by test/ir/diagnostic-codes-completeness.test.ts), so this should
+ *  not fire in practice — it only guards a future uncoded addition. */
 const IR_FALLBACK_CODE = "loom.ir-validate";
 
 function severityOf(d: Diagnostic): JsonSeverity {
