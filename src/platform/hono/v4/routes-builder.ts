@@ -118,7 +118,12 @@ export function buildRoutesFile(
   lines.push(`import { ProblemDetails, newApp } from "./problem-details";`);
   lines.push(`import { ${agg.name} } from "../domain/${lowerFirst(agg.name)}";`);
   lines.push(
-    `import type { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
+    // Audited / provenanced routes instantiate the repo inside a
+    // transaction (`new ${agg.name}Repository(tx, events)`), so the class
+    // must be a value import there; otherwise it's only a parameter type.
+    needsTx
+      ? `import { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`
+      : `import type { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
   );
   lines.push(`import * as Ids from "../domain/ids";`);
   lines.push(
@@ -626,7 +631,9 @@ function emitOperationRoute(
   // appearing in operation bodies, so this branch is dead.
   const usesUser = operationUsesCurrentUser(op);
   if (usesUser) {
-    out.push(`    const currentUser = c.get("currentUser") as import("../auth/user-types").User;`);
+    out.push(
+      `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+    );
   }
   const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
@@ -763,7 +770,9 @@ function emitFindRoute(
   // middleware stashed it earlier in the pipeline.
   const usesUser = findUsesCurrentUser(find);
   if (usesUser) {
-    out.push(`    const currentUser = c.get("currentUser") as import("../auth/user-types").User;`);
+    out.push(
+      `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+    );
   }
   const baseArgs = find.params.map((p) => wireToDomainExpr(`params.${p.name}`, p.type, ctx));
   const argList = (usesUser ? [...baseArgs, "currentUser"] : baseArgs).join(", ");

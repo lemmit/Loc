@@ -3,6 +3,7 @@ import {
   type AggregateIR,
   type BoundedContextIR,
   type ExprIR,
+  operationUsesCurrentUser,
   type TypeIR,
   type WorkflowIR,
   type WorkflowStmtIR,
@@ -307,9 +308,23 @@ function emitWorkflowRoute(
   // per-operation route binding in routes-builder and the .NET handler's
   // `var currentUser = _currentUser.User`.  `auth: required` on the
   // deployable is validated upstream, so the value is present.
-  if (workflowUsesCurrentUser(wf)) {
+  // The binding is also required when the workflow calls a currentUser-gated
+  // operation — the op's method signature takes a trailing `currentUser`
+  // argument that the op-call renderer threads through (see the `op-call`
+  // case), so `currentUser` must be in scope even if the workflow body
+  // itself never names it.
+  const callsUserGatedOp = (sts: WorkflowStmtIR[]): boolean =>
+    sts.some((s) => {
+      if (s.kind === "op-call") {
+        const o = lookupOp(ctx, s.aggName, s.op);
+        return !!o && operationUsesCurrentUser(o);
+      }
+      if (s.kind === "for-each") return callsUserGatedOp(s.body);
+      return false;
+    });
+  if (workflowUsesCurrentUser(wf) || callsUserGatedOp(wf.statements)) {
     out.push(
-      `    const currentUser = httpCtx.get("currentUser") as import("../auth/user-types").User;`,
+      `    const currentUser = (httpCtx as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
   }
   // Repos used by this workflow.  Construct on the request `db` for
@@ -423,7 +438,13 @@ function renderStmt(
           `${indent}${st.target}.assertInvariants();`,
         ];
       }
-      return [`${indent}${st.target}.${lowerFirst(st.op)}(${args});`];
+      // A currentUser-gated op takes a trailing `currentUser` argument
+      // (appended to the method signature); thread the in-scope binding.
+      const callArgs =
+        op && operationUsesCurrentUser(op)
+          ? [args, "currentUser"].filter(Boolean).join(", ")
+          : args;
+      return [`${indent}${st.target}.${lowerFirst(st.op)}(${callArgs});`];
     }
     case "expr-let":
       return [`${indent}const ${st.name} = ${renderArg(st.expr)};`];
