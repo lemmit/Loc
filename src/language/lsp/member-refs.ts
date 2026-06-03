@@ -117,6 +117,11 @@ export function memberDeclAt(cstNode: CstNode): AstNode | undefined {
 function nameRefDecl(nr: NameRef): AstNode | undefined {
   const name = nr.name;
   if (typeof name !== "string") return undefined;
+  // A closer same-named binding (lambda param, operation/function/workflow
+  // param, `let`) shadows the member — that reference is not a member usage,
+  // so renaming the member must leave it alone.  `envForNode` doesn't always
+  // model lambda-param shadowing, so guard explicitly.
+  if (localShadows(nr, name)) return undefined;
   const sym = envForNode(nr).resolve(name);
   return sym && isRenameableMember(sym.origin) ? sym.origin : undefined;
 }

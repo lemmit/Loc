@@ -166,7 +166,7 @@ call-site cursor (`a.b := …` / `this.op(...)`) finds no target because
 |---|---|---|---|
 | `ddd-semantic-tokens.ts` | 1 → 2 | operations, repositories, events, type-refs, parameters, member-calls, var refs | **covered** (added type-ref / function / parameter / variable / method-decl / member-method / event / repository cases) |
 | `ddd-node-kind.ts` | 0 → 1 | `Deployable → Constructor` is semantically wrong (a deployable is a module) | **fixed + first tests** (`Deployable → Module`) |
-| `ddd-rename.ts` / `member-refs.ts` | 5 → 8 (+2 skip) | — | **cross-ref matrix covered** (enum-decl / event / value-object-by-name pass) + **3 gaps found** (below) |
+| `ddd-rename.ts` / `member-refs.ts` | 5 → 11 (+2 skip) | — | **cross-ref matrix + shadowing + prepareRename + multi-file covered**; **shadowing bug FIXED** (`nameRefDecl` now consults `localShadows` — see below); 2 gaps captured as tripwires |
 | `ddd-references.ts` | 3 | derived / function / assignment / shadowing / multi-file unverified | open (likely mirrors the rename gaps — same `collectMemberUsages` machinery) |
 
 > **Rename gaps found writing the cross-ref matrix** (all the operation-rename
@@ -185,10 +185,17 @@ call-site cursor (`a.b := …` / `this.op(...)`) finds no target because
 >   Fixing needs the rename machinery to resolve these reference kinds (an index
 >   or member-path extension) — a dedicated slice.
 
-Still to add: multi-file rename; `prepareRename` range; shadowing (property vs
-nested lambda param — the dead-tested `localShadows` walk); references parity; a
-hover failure-path test (render unresolved refs as `«unresolved»`, not a silent
-`?`); deployable / module rename (need a system-scoped fixture).
+**Shadowing bug FIXED.** Renaming a property that a lambda param shadowed
+(`nums.sum(total => total)` with a property `total`) used to rewrite the lambda
+*body* `total` — corrupting the lambda. `nameRefDecl` trusted `env.resolve`,
+which doesn't model lambda-param shadowing; it now guards with `localShadows`
+first (previously dead-tested). Multi-file rename and `prepareRename`-range are
+also now covered (both pass).
+
+Still to add: references parity (likely mirrors the two skip-gaps — same
+`collectMemberUsages` machinery); a hover failure-path test (render unresolved
+refs as `«unresolved»`, not a silent `?`); deployable / module rename (need a
+system-scoped fixture).
 
 > **Note (LValue blind spot, found while testing).** A statement-position
 > member call / assignment target (`this.op(...)`, `a.b := …`) parses as an
