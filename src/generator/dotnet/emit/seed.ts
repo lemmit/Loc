@@ -23,9 +23,9 @@ import type {
   EnrichedBoundedContextIR,
   SeedRowIR,
 } from "../../../ir/types/loom-ir.js";
-import { renderSeedRowInsert } from "../../../system/sql-pg.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
+import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderCsExpr } from "../render-expr.js";
 
 interface Entry {

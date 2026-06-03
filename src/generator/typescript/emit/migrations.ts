@@ -1,6 +1,6 @@
 import type { MigrationsIR, SchemaSnapshot } from "../../../ir/types/migrations-ir.js";
-import { renderPgStep } from "../../../system/sql-pg.js";
 import { snake } from "../../../util/naming.js";
+import { renderPgStep } from "../../sql-pg.js";
 
 // ---------------------------------------------------------------------------
 // Hono / Drizzle migration emitter.

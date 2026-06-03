@@ -18,9 +18,9 @@
 // refs, and create-shape validation.
 
 import type { EnrichedBoundedContextIR, ExprIR, SeedRowIR } from "../../../ir/types/loom-ir.js";
-import { renderSeedRowInsert } from "../../../system/sql-pg.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
+import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderTsExpr } from "../render-expr.js";
 
 /** A seed row plus its block's path (domain create vs raw insert). */

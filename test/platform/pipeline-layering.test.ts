@@ -12,9 +12,10 @@ import { describe, expect, it } from "vitest";
 // Edges point one way.  A downstream layer never imports a VALUE
 // (runtime symbol) from a layer further down the pipeline:
 //
-//   - language/         must not value-import from ir/ or generator/
-//   - ir/               must not value-import from generator/
-//   - generator/<plat>/ must not import from a sibling platform dir
+//   - language/         must not value-import from ir/, generator/, system/
+//   - ir/               must not value-import from generator/ or system/
+//   - generator/        must not value-import from system/ (the terminal
+//                       composition layer); nor a sibling platform dir
 //
 // TYPE-only imports are deliberately exempt: the IR types
 // (`loom-ir.ts`) are the shared vocabulary every layer speaks, and a
@@ -44,12 +45,15 @@ const srcDir = path.join(repoRoot, "src");
  *
  *  EMPTY — there are no permitted backward value-edges.  The pipeline's
  *  value-dependency graph is acyclic.  The historical exceptions were
- *  all resolved by relocating the shared, mislocated vocabulary to the
- *  foundational `src/util/` layer (which every phase may depend on):
+ *  all resolved by relocating the shared, mislocated code to the layer
+ *  its consumers actually live at:
  *    - `generator/_packs/builtin-formats.ts` → `util/builtin-formats.ts`
  *    - the `application:`/`shape(…)` platform-axes lookups in
  *      `ir/types/loom-ir.ts`     → `util/platform-axes.ts`
  *    - `ir/source-types.ts`      → `util/source-types.ts`
+ *    - `system/sql-pg.ts`        → `generator/sql-pg.ts` (the Postgres
+ *      SQL renderer is consumed only by the generator backends, never by
+ *      system composition, so it was an upstream generator→system edge)
  *  A new backward value-edge fails the assertions below; only add a pin
  *  here if inverting the dependency is genuinely impossible (it has not
  *  been so far). */
@@ -130,25 +134,36 @@ function offenders(files: string[], bannedLayers: string[]): string[] {
 describe("pipeline layering — value imports point one way", () => {
   const languageFiles = tsFiles(path.join(srcDir, "language"));
   const irFiles = tsFiles(path.join(srcDir, "ir"));
+  const generatorFiles = tsFiles(path.join(srcDir, "generator"));
 
   it("scans a non-trivial number of files (guard against vacuous pass)", () => {
     expect(languageFiles.length).toBeGreaterThan(15);
     expect(irFiles.length).toBeGreaterThan(15);
+    expect(generatorFiles.length).toBeGreaterThan(15);
   });
 
-  it("language/ does not value-import from ir/ or generator/ (beyond pinned edges)", () => {
+  it("language/ does not value-import from ir/, generator/ or system/ (beyond pinned edges)", () => {
     expect(
-      offenders(languageFiles, ["ir", "generator"]),
+      offenders(languageFiles, ["ir", "generator", "system"]),
       "New value backward-edge from language/. Type-only imports are fine; " +
         "for a runtime symbol, move the shared code upstream or thread it in. " +
         "Known pins live in ALLOWED.",
     ).toEqual([]);
   });
 
-  it("ir/ does not value-import from generator/ (beyond pinned edges)", () => {
+  it("ir/ does not value-import from generator/ or system/ (beyond pinned edges)", () => {
     expect(
-      offenders(irFiles, ["generator"]),
-      "New value backward-edge from ir/ → generator/. Known pins live in ALLOWED.",
+      offenders(irFiles, ["generator", "system"]),
+      "New value backward-edge from ir/ → generator/ or system/. Known pins live in ALLOWED.",
+    ).toEqual([]);
+  });
+
+  it("generator/ does not value-import from system/ (the terminal composition layer)", () => {
+    expect(
+      offenders(generatorFiles, ["system"]),
+      "New value backward-edge from generator/ → system/. system/ composes generator " +
+        "outputs — a shared helper consumed by generators belongs in generator/ (or util/), " +
+        "not system/. Known pins live in ALLOWED.",
     ).toEqual([]);
   });
 
