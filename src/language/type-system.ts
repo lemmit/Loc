@@ -8,12 +8,14 @@ import type {
   Criterion,
   EntityPart,
   EnumDecl,
+  EventDecl,
   Expression,
   FunctionDecl,
   Lambda,
   MemberSuffix,
   Operation,
   Parameter,
+  PayloadDecl,
   PostfixChain,
   PostfixSuffix,
   Property,
@@ -23,6 +25,7 @@ import type {
 } from "./generated/ast.js";
 import {
   isAggregate,
+  isApply,
   isBinaryChain,
   isBoolLit,
   isBoundedContext,
@@ -35,6 +38,7 @@ import {
   isDerivedProp,
   isEntityPart,
   isEnumDecl,
+  isEventDecl,
   isFindDecl,
   isFunctionDecl,
   isHandleDecl,
@@ -53,6 +57,7 @@ import {
   isOperation,
   isPage,
   isParenExpr,
+  isPayloadDecl,
   isPostfixChain,
   isPrimitiveConversion,
   isPrimitiveType,
@@ -87,6 +92,14 @@ export type DddType =
   | { kind: "valueobject"; ref: ValueObject; sensitivity?: SensitivityTags }
   | { kind: "aggregate"; ref: Aggregate; sensitivity?: SensitivityTags }
   | { kind: "entity"; ref: EntityPart; sensitivity?: SensitivityTags }
+  /** A transport record — an `event` (EventDecl) or a `payload`
+   *  (`command`/`query`/`response`/`error`).  Carried by a workflow command
+   *  parameter (`create(e: PaymentReceived) by …`, `handle h(c: SettleOrder)`)
+   *  and by `on`/`apply` event bindings.  A flat record of `fields` (no `id`,
+   *  containment, or derived members); member access resolves through
+   *  `stepInto`'s payload arm so field-level type checks (comparison /
+   *  arithmetic / assignment) apply instead of cascading to `unknown`. */
+  | { kind: "payload"; ref: EventDecl | PayloadDecl; sensitivity?: SensitivityTags }
   | { kind: "array"; element: DddType; sensitivity?: SensitivityTags }
   | { kind: "optional"; inner: DddType; sensitivity?: SensitivityTags }
   /** Element-shaped param marker — mirrors the `TypeIR.slot` variant
@@ -184,6 +197,8 @@ export function typeToString(t: DddType): string {
         return t.ref.name;
       case "entity":
         return t.ref.name;
+      case "payload":
+        return t.ref.name;
       case "array":
         return `${typeToString(t.element)}[]`;
       case "optional":
@@ -223,6 +238,8 @@ export function typesEqual(a: DddType, b: DddType): boolean {
     case "aggregate":
       return a.ref === (b as typeof a).ref;
     case "entity":
+      return a.ref === (b as typeof a).ref;
+    case "payload":
       return a.ref === (b as typeof a).ref;
     case "array":
       return typesEqual(a.element, (b as typeof a).element);
@@ -338,6 +355,7 @@ function resolveBase(base: BaseType): DddType {
     if (isValueObject(target)) return { kind: "valueobject", ref: target };
     if (isAggregate(target)) return { kind: "aggregate", ref: target };
     if (isEntityPart(target)) return { kind: "entity", ref: target };
+    if (isEventDecl(target) || isPayloadDecl(target)) return { kind: "payload", ref: target };
     return T.unknown;
   }
   return T.unknown;
@@ -625,6 +643,9 @@ export function typeAfterSuffix(recvType: DddType, suffix: PostfixSuffix, env: E
   if (recvType.kind === "valueobject") {
     return lookupValueObjectMember(recvType.ref, memberName);
   }
+  if (recvType.kind === "payload") {
+    return lookupPayloadMember(recvType.ref, memberName);
+  }
   if (recvType.kind === "primitive" && recvType.name === "string") {
     if (memberName === "length") return T.prim("int");
     if (memberName === "matches" && ms.call) return T.prim("bool");
@@ -663,6 +684,18 @@ function lookupValueObjectMember(target: ValueObject, name: string): DddType {
     if (isProperty(m) && m.name === name)
       return withTags(resolveTypeRef(m.type), propertySensitivity(m));
     if (isDerivedProp(m) && m.name === name) return resolveTypeRef(m.type);
+  }
+  return T.unknown;
+}
+
+/** Member type on a transport record (`event` / `payload`) — a flat list of
+ *  `Property` fields, no `id` / containment / derived.  Resolving the field
+ *  type lets the binary-operand / comparison / assignment validators check
+ *  expressions over event/payload param fields instead of cascading to
+ *  `unknown`. */
+function lookupPayloadMember(target: EventDecl | PayloadDecl, name: string): DddType {
+  for (const f of target.fields) {
+    if (f.name === name) return withTags(resolveTypeRef(f.type), propertySensitivity(f));
   }
   return T.unknown;
 }
@@ -906,6 +939,15 @@ export function stepInto(t: DddType, name: string): DddType {
       if (isDerivedProp(m) && m.name === name) return resolveTypeRef(m.type);
     }
   }
+  if (t.kind === "payload") {
+    // A transport record is a flat list of `Property` fields — no `id`,
+    // containment, or derived members.  Resolving the field type (instead of
+    // cascading to `unknown`) is what lets the binary-operand / assignment
+    // validators check expressions over event/payload param fields.
+    for (const f of t.ref.fields) {
+      if (f.name === name) return withTags(resolveTypeRef(f.type), propertySensitivity(f));
+    }
+  }
   return T.unknown;
 }
 
@@ -1011,10 +1053,23 @@ export function envForNode(node: AstNode): Env {
   } else if (handle) {
     for (const [name, b] of collectLetBindings(handle.body)) bindings.set(name, b);
   }
-  // An `on(e: Event) { … }` reactor's own body lets are in scope inside it.
+  // An `on(e: Event) { … }` reactor / `apply(e: Event) { … }` fold bind their
+  // event instance as a typed `payload` local (these params are a LooseName +
+  // event cross-ref, not a `Parameter`, so they're bound here rather than via
+  // the param list).  Without this the binding types as `unknown` and every
+  // field-level check on `e.field` is silently suppressed.
   const on = AstUtils.getContainerOfType(node, isOnDecl);
   if (on) {
+    if (on.event?.ref)
+      bindings.set(on.param, { type: { kind: "payload", ref: on.event.ref }, origin: on });
     for (const [name, b] of collectLetBindings(on.body)) bindings.set(name, b);
+  }
+  const apply = AstUtils.getContainerOfType(node, isApply);
+  if (apply) {
+    if (apply.event?.ref) {
+      bindings.set(apply.param, { type: { kind: "payload", ref: apply.event.ref }, origin: apply });
+    }
+    for (const [name, b] of collectLetBindings(apply.body)) bindings.set(name, b);
   }
 
   // 4. Lambda params — a lambda used as a collection-op arg binds its param to
@@ -1194,6 +1249,12 @@ export function membersOfType(t: DddType): MemberCompletion[] {
       return t.name === "string" ? [{ name: "length", kind: "field", detail: "int" }] : [];
     case "enum":
       return t.ref.values.map((v) => ({ name: v.name, kind: "enum-value", detail: t.ref.name }));
+    case "payload":
+      return t.ref.fields.map((f) => ({
+        name: f.name,
+        kind: "field",
+        detail: typeToString(resolveTypeRef(f.type)),
+      }));
     default:
       return [];
   }
@@ -1220,6 +1281,11 @@ export function stepIntoNode(t: DddType, name: string): AstNode | undefined {
       if (isProperty(m) && m.name === name) return m;
       if (isDerivedProp(m) && m.name === name) return m;
       if (isFunctionDecl(m) && m.name === name) return m;
+    }
+  }
+  if (t.kind === "payload") {
+    for (const f of t.ref.fields) {
+      if (f.name === name) return f;
     }
   }
   return undefined;

@@ -507,6 +507,7 @@ A bare `Identifier` in type position must resolve to one of:
 | Enum (any context) | An `enum` value. |
 | Value object (any context) | An embedded value object — copied by value into the wire shape. |
 | Entity part of the *same* aggregate | An addressable child of this aggregate, by-reference at runtime (the engine has the loaded object). |
+| Event / payload — **workflow `create` / `handle` parameter only** | The transport record that triggers the starter / command — `create(e: PaymentReceived) by …`, `handle settle(c: SettleOrder)`.  Offered as a type *only* in these two positions (see below). |
 
 Cross-aggregate references must use **`X id`** — an explicit foreign
 key.  The validator rejects a bare aggregate name in storage / wire
@@ -514,6 +515,18 @@ positions (aggregate fields, event fields, operation / function /
 find / workflow parameters) with a fixit pointing at `'X id'`; it
 also rejects an entity-part from a different aggregate the same way,
 pointing at the owning aggregate's id.
+
+**Events and payloads as parameter types.** An `event` or a `payload`
+(`command` / `query` / `response` / `error`) may be named by a bare
+identifier as the type of a workflow **`create`** or **`handle`**
+parameter — the workflow command surface (`create(c: PlaceOrder)`,
+`create(e: OrderPlaced) by e.order`, `handle settle(c: SettleOrder)`;
+see [`workflow.md`](workflow.md)).  The bound parameter is a flat
+transport record: `e.field` resolves to the field's declared type and
+participates in the usual comparison / arithmetic / assignment checks.
+These types are scoped **only** to those two positions — a stray event
+name in an aggregate field, operation parameter, or UI position stays
+an unresolved reference, and `Event id` is not a valid `X id` link.
 
 The result is a legible three-keyword surface — `id` shows up exactly
 when you cross an aggregate boundary; everything else is a bare name,

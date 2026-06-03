@@ -1122,3 +1122,36 @@ clean, but that's another thing a stale base would have missed.)
   re-applying the (small, well-understood) split on top is faster and
   safer.
 
+## `unknown` silently disables the AST type checker — a new bindable type needs the full path
+
+Letting workflow `create`/`handle` params reference an `event`/`payload`
+by name (PRs around the queueing-abstraction branch) surfaced a sharp
+gotcha in `src/language/type-system.ts`. The operand validators
+(`checkBinaryOperands`, comparison/logical checks) **cascade-suppress
+whenever either operand types as `unknown`** — a deliberate
+anti-double-reporting rule. So a parameter whose type resolves to
+`T.unknown` doesn't just lose hover info: *every* field-level type check
+on it (`e.amount && true`, `e.amount == "x"`) is silently skipped, no
+diagnostic. A bug that looks like "missing validation" is really
+"receiver typed `unknown` → suppression."
+
+Two non-obvious consequences when adding a new bindable param type:
+
+1. **It needs a real `DddType` kind, not `unknown`.** Reusing `unknown`
+   as a placeholder "we don't model this yet" is not free — it actively
+   disables checking on anything built from it.
+2. **Member access resolves through `typeAfterSuffix` (the postfix-chain
+   path), not `stepInto`.** `stepInto` is only the assign/path-typing
+   walk. The binary-operand validator types `a.b` via
+   `typeOfPostfixChain → typeAfterSuffix`. Adding an arm to `stepInto`
+   alone changes nothing the validator sees — you must add the
+   `typeAfterSuffix` arm (and `typeToString`/`typesEqual`/`membersOfType`
+   for completeness; the `typeToString` switch is exhaustive so the
+   compiler flags that one for you, but `typesEqual`/`membersOfType` have
+   `default` arms and won't).
+
+Also: `on`/`apply` event params are a `LooseName` + cross-ref, **not** a
+`Parameter`, so `envForNode`'s param-list loop never binds them — they
+need an explicit `bindings.set` or they stay `unknown` (same suppression)
+even after the type kind exists.
+
