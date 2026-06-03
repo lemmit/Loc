@@ -548,6 +548,7 @@ function validateEventSourcedDiscipline(ctx: BoundedContextIR, diags: LoomDiagno
     if (creates.length > 1) {
       diags.push({
         severity: "error",
+        code: "loom.event-sourced-multiple-creates",
         message:
           `aggregate '${agg.name}' is persistedAs(eventLog) and declares ${creates.length} 'create' actions. ` +
           `An event-sourced aggregate has a single canonical creator (v1) — keep one 'create(...)'.`,
