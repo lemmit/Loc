@@ -1,6 +1,20 @@
 # AI diagnostics contract — `ddd validate --json` and friends
 
-> **Status:** PROPOSED / spec — no code yet.
+> **Status:** PARTIAL — slice 1 shipped. `ddd parse --json` emits the
+> `ValidateReport` envelope (§2): located/coded/phase-attributed `diagnostics[]`
+> from phases ①③④⑦, deterministic ordering (§3.4), the always-valid envelope on
+> parse failure (§6), and a name-only `outline` (§5). The flagship
+> `loom.bare-aggregate-in-type` code is now actually emitted (it was previously
+> comment-only). Implementation: `src/cli/json-report.ts`,
+> `src/language/print/outline.ts`, `src/diagnostics/contract.ts`; gate:
+> `test/cli/json-report.test.ts`. **Decision:** the contract names
+> `ddd validate --json`; the shipped surface is **`ddd parse --json`** (the
+> `parse` verb, extended under `--json` to also run the IR phases) — there is no
+> separate `validate` verb. **Deferred to follow-up slices:** `fixHint` patches
+> (need the model-patch applier), `related[]`, IR-diagnostic *ranges* (need CST
+> provenance through lowering), the per-code IR backfill across `validate.ts`
+> (IR diags currently carry the `loom.ir-validate` fallback), and
+> `generate --json` (§4).
 > **Role:** Defines the machine-readable interface the AI authoring loop
 > consumes. The loop in [`ai-authoring-loop.md`](./ai-authoring-loop.md) and
 > the platform vision in [`ai-generation-platform.md`](./ai-generation-platform.md)
