@@ -1162,9 +1162,11 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
       }
       repository Customers for Customer { }
       repository Orders for Order { }
-      workflow placeOrder(customerId: Customer id) {
+      workflow placeOrder {
+      create(customerId: Customer id) {
         let order = Order.create({ customerId: customerId, status: Draft })
       }
+    }
       view ActiveOrders = Order where status == Confirmed
     }
   }

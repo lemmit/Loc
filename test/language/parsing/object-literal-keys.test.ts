@@ -14,7 +14,9 @@ import { parseRawResult, parseString } from "../../_helpers/parse.js";
 const wf = (body: string) => `
 system Sys { subdomain Sales { context Sales {
   aggregate Order { name: string }
-  workflow W(name: string) { ${body} }
+  workflow W {
+      create(name: string) { ${body} }
+    }
 } }
 storage bus { type: rabbitmq }
 resource jobs { for: Sales, kind: queue, use: bus }

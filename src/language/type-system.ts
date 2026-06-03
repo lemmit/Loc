@@ -37,6 +37,7 @@ import {
   isEnumDecl,
   isFindDecl,
   isFunctionDecl,
+  isHandleDecl,
   isIdRef,
   isIdType,
   isIntLit,
@@ -57,7 +58,6 @@ import {
   isPrimitiveType,
   isProperty,
   isSlotType,
-  isStatement,
   isStringLit,
   isTernaryExpr,
   isThisRef,
@@ -65,6 +65,7 @@ import {
   isValueObject,
   isView,
   isWorkflow,
+  isWorkflowCreateDecl,
 } from "./generated/ast.js";
 
 // ---------------------------------------------------------------------------
@@ -948,7 +949,7 @@ export function envForNode(node: AstNode): Env {
   const op = AstUtils.getContainerOfType(node, isOperation);
   const find = AstUtils.getContainerOfType(node, isFindDecl);
   const view = AstUtils.getContainerOfType(node, isView);
-  const wf = AstUtils.getContainerOfType(node, isWorkflow);
+  const _wf = AstUtils.getContainerOfType(node, isWorkflow);
   // UI-side containers — pages and components carry typed params
   // (route-params for pages, slot/aggregate-typed for components) that
   // need to flow through `typeOf` so the binary-operand validator and
@@ -986,25 +987,29 @@ export function envForNode(node: AstNode): Env {
   //    nested component's param can shadow an outer ui-scope name —
   //    today no such nesting exists, but the order matches the lexical
   //    expectation if it ever does.
+  // A2-S5f: a workflow body is members-only — params + statements live inside
+  // the enclosing `create`/`handle` member, not on the workflow.
+  const create = AstUtils.getContainerOfType(node, isWorkflowCreateDecl);
+  const handle = AstUtils.getContainerOfType(node, isHandleDecl);
   const params =
     fn?.params ??
     op?.params ??
     find?.params ??
-    wf?.params ??
+    create?.params ??
+    handle?.params ??
     component?.params ??
     page?.params ??
     [];
   for (const p of params) bindings.set(p.name, { type: paramType(p), origin: p });
 
-  // 3. let-bindings from preceding statements in the enclosing operation / workflow.
-  //    A workflow body is a `WorkflowMember[]` (statements interleaved with
-  //    `on(...)` reactors); only the statement members carry top-level lets.
+  // 3. let-bindings from the enclosing executable body (operation / workflow
+  //    create / handle / on reactor).
   if (op) {
     for (const [name, b] of collectLetBindings(op.body)) bindings.set(name, b);
-  } else if (wf) {
-    for (const [name, b] of collectLetBindings(wf.members.filter(isStatement))) {
-      bindings.set(name, b);
-    }
+  } else if (create) {
+    for (const [name, b] of collectLetBindings(create.body)) bindings.set(name, b);
+  } else if (handle) {
+    for (const [name, b] of collectLetBindings(handle.body)) bindings.set(name, b);
   }
   // An `on(e: Event) { … }` reactor's own body lets are in scope inside it.
   const on = AstUtils.getContainerOfType(node, isOnDecl);

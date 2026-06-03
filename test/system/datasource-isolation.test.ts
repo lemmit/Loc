@@ -34,10 +34,12 @@ describe("resource isolationLevel — end-to-end emit", () => {
               }
             }
             repository Customers for Customer { }
-            workflow bumpCredit(customerId: Customer id, amount: decimal) transactional {
+            workflow bumpCredit transactional {
+      create(customerId: Customer id, amount: decimal) {
               let c = Customers.getById(customerId)
               c.addCredit(amount)
             }
+    }
           }
         }
         storage pg { type: postgres }
@@ -71,10 +73,12 @@ describe("resource isolationLevel — end-to-end emit", () => {
               }
             }
             repository Customers for Customer { }
-            workflow bumpCredit(customerId: Customer id, amount: decimal) transactional(readCommitted) {
+            workflow bumpCredit transactional(readCommitted) {
+      create(customerId: Customer id, amount: decimal) {
               let c = Customers.getById(customerId)
               c.addCredit(amount)
             }
+    }
           }
         }
         storage pg { type: postgres }
@@ -108,10 +112,12 @@ describe("resource isolationLevel — end-to-end emit", () => {
               }
             }
             repository Customers for Customer { }
-            workflow bumpCredit(customerId: Customer id, amount: decimal) {
+            workflow bumpCredit {
+      create(customerId: Customer id, amount: decimal) {
               let c = Customers.getById(customerId)
               c.addCredit(amount)
             }
+    }
           }
         }
         storage pg { type: postgres }
@@ -145,10 +151,12 @@ describe("resource isolationLevel — end-to-end emit", () => {
               }
             }
             repository Customers for Customer { }
-            workflow bumpCredit(customerId: Customer id, amount: decimal) transactional {
+            workflow bumpCredit transactional {
+      create(customerId: Customer id, amount: decimal) {
               let c = Customers.getById(customerId)
               c.addCredit(amount)
             }
+    }
           }
         }
         api CApi from C

@@ -81,10 +81,12 @@ describe("v2 — context-edges", () => {
   repository Orders for Order {
     find byId(id: int): Order? where this.id == id
   }
-  workflow place(x: int) {
+  workflow place {
+      create(x: int) {
     let o = Orders.byId(x)
     o.confirm()
   }
+    }
 }`);
     const rel = computeContextRelations(findContext(ast, "Sales"));
     expect(rel.workflowUsesRepo.get("place")).toEqual(SET(["Orders"]));
@@ -100,11 +102,13 @@ describe("v2 — context-edges", () => {
       status := "ok"
     }
   }
-  workflow place() {
+  workflow place {
+      create() {
     Order.confirm()
     emit Placed {
     }
   }
+    }
 }`);
     const rel = computeContextRelations(findContext(ast, "Sales"));
     expect(rel.workflowUses.get("place")).toEqual(SET(["Order"]));

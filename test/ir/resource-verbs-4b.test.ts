@@ -25,7 +25,9 @@ function mk(body: string): string {
 system Sys {
   subdomain Sales { context Sales {
     aggregate Order { name: string }
-    workflow Archive(name: string) { ${body} }
+    workflow Archive {
+      create(name: string) { ${body} }
+    }
   } }
   storage pg { type: postgres }
   storage files { type: s3, config: { bucket: "b" } }

@@ -127,13 +127,15 @@ subdomain Procurement {
     // Transactional receipt: create the receipt row AND flip the PO to
     // Received atomically — if `markReceived` throws, the receipt rolls
     // back too.
-    workflow receiveGoods(poId: PurchaseOrder id, warehouseRef: string) transactional {
-      let po = PurchaseOrders.getById(poId)
-      let receipt = GoodsReceipt.create({
-        poId: poId,
-        warehouseRef: warehouseRef
-      })
-      po.markReceived()
+    workflow receiveGoods transactional {
+      create(poId: PurchaseOrder id, warehouseRef: string) {
+        let po = PurchaseOrders.getById(poId)
+        let receipt = GoodsReceipt.create({
+          poId: poId,
+          warehouseRef: warehouseRef
+        })
+        po.markReceived()
+      }
     }
 
     seed default {

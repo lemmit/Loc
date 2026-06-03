@@ -131,7 +131,9 @@ const SCAFFOLD_WORKFLOW_DDD = `
     subdomain Sales {
       context Orders {
         aggregate Order { name: string derived display: string = name }
-        workflow placeOrder(name: string) {}
+        workflow placeOrder {
+      create(name: string) {}
+    }
         repository Orders for Order {}
       }
     }

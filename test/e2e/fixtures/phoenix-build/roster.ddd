@@ -48,10 +48,12 @@ system Roster {
       }
       // Exercises the workflow `for` loop (Enum.reduce_while over a paged
       // Repo.run) under the real `mix compile` gate.
-      workflow verifyByName(needle: string) {
-        let matched = Trainers.run(ByName(needle), page: { offset: 0, limit: 100 })
-        for t in matched {
-          t.verify()
+      workflow verifyByName {
+        create(needle: string) {
+          let matched = Trainers.run(ByName(needle), page: { offset: 0, limit: 100 })
+          for t in matched {
+            t.verify()
+          }
         }
       }
     }

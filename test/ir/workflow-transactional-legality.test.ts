@@ -14,13 +14,15 @@ const ctx = (wf: string) =>
 
 describe("workflow transactional legality (A2-S5e)", () => {
   it("accepts a transactional workflow with no continuations", async () => {
-    const { errors } = await parseString(ctx(`workflow Place(x: int) transactional { let y = x }`));
+    const { errors } = await parseString(
+      ctx(`workflow Place transactional { create(x: int) { let y = x } }`),
+    );
     expect(errors).toEqual([]);
   });
 
   it("rejects a transactional workflow with an on(...) reactor", async () => {
     const { errors } = await parseString(
-      ctx(`workflow Bad() transactional {
+      ctx(`workflow Bad transactional {
         orderId: Order id
         on(paid: PaymentReceived) by paid.order { let z = paid.amount }
       }`),
@@ -32,7 +34,7 @@ describe("workflow transactional legality (A2-S5e)", () => {
 
   it("rejects a transactional workflow with a handle member", async () => {
     const { errors } = await parseString(
-      ctx(`workflow Bad() transactional { handle go(n: int) { let z = n } }`),
+      ctx(`workflow Bad transactional { handle go(n: int) { let z = n } }`),
     );
     expect(errors.some((e) => /continuation handler/.test(e))).toBe(true);
   });

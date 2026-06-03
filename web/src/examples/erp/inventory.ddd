@@ -126,10 +126,12 @@ subdomain Inventory {
 
     // Non-transactional cycle-count sweep: page a warehouse's stock and
     // stamp each row's count time (per-iteration save commits as it goes).
-    workflow recountWarehouse(w: Warehouse id) {
-      let items = StockItems.run(ItemsToRecount(w), page: { offset: 0, limit: 100 })
-      for s in items {
-        s.markCounted()
+    workflow recountWarehouse {
+      create(w: Warehouse id) {
+        let items = StockItems.run(ItemsToRecount(w), page: { offset: 0, limit: 100 })
+        for s in items {
+          s.markCounted()
+        }
       }
     }
 

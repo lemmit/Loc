@@ -7,7 +7,14 @@ import type {
   Statement,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
-import { isStatement } from "../../../../src/language/generated/ast.js";
+import { isWorkflowCreateDecl } from "../../../../src/language/generated/ast.js";
+
+/** A2-S5f: sequential workflow statements live in the primary `create(...)`
+ *  starter; the emit editor scopes to that body (reactor emits are separate). */
+function wfStatements(wf: Workflow): readonly Statement[] {
+  const creates = wf.members.filter(isWorkflowCreateDecl);
+  return (creates.find((c) => !c.name) ?? creates[0])?.body ?? [];
+}
 import { applyEdits } from "../edit-engine";
 import { parseDdd } from "../parse";
 import type { NodeKind } from "./model";
@@ -58,7 +65,7 @@ export function listEmits(node: AstNode): EmitRef[] {
   } else if (node.$type === "Workflow") {
     // A workflow body is a `WorkflowMember[]`; collect emits from its statement
     // members (emits inside `on(...)` reactor bodies are a later concern).
-    collectEmits((node as Workflow).members.filter(isStatement), undefined, out);
+    collectEmits(wfStatements(node as Workflow), undefined, out);
   }
   return out;
 }
@@ -67,7 +74,7 @@ function emitBodyOf(ast: Model, kind: NodeKind, owner: string, op: string | unde
   const wantType = kind === "workflow" ? "Workflow" : "Aggregate";
   for (const n of AstUtils.streamAst(ast)) {
     if (n.$type === wantType && (n as { name?: unknown }).name === owner) {
-      if (kind === "workflow") return (n as Workflow).members.filter(isStatement);
+      if (kind === "workflow") return wfStatements(n as Workflow);
       const operation = (n as Aggregate).members.find((m): m is Operation => m.$type === "Operation" && (m as Operation).name === op);
       return operation?.body ?? null;
     }

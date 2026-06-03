@@ -58,15 +58,13 @@ system InventorySystem {
       // mutation, so a bad request never touches the DB.
       // Invoke via POST /workflows/record_reservation with body
       //   { warehouseId, sku, qty }
-      workflow recordReservation(
-        warehouseId: Warehouse id,
-        sku: string,
-        qty: int
-      ) {
-        precondition qty > 0
-        precondition sku.length > 0
-        let warehouse = Warehouses.getById(warehouseId)
-        warehouse.reserve(sku, qty)
+      workflow recordReservation {
+        create(warehouseId: Warehouse id, sku: string, qty: int) {
+          precondition qty > 0
+          precondition sku.length > 0
+          let warehouse = Warehouses.getById(warehouseId)
+          warehouse.reserve(sku, qty)
+        }
       }
     }
   }

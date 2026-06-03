@@ -56,6 +56,7 @@ import type {
   ValueObject,
   View,
   Workflow,
+  WorkflowCreateDecl,
 } from "../../language/generated/ast.js";
 import {
   isAggregate,
@@ -114,6 +115,7 @@ import {
   isValueObject,
   isView,
   isWorkflow,
+  isWorkflowCreateDecl,
 } from "../../language/generated/ast.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../platform/registry.js";
 import { defaultsFor } from "../../platform/resolve-adapters.js";
@@ -134,6 +136,7 @@ import type {
   ConnectionSourceIR,
   ContainmentIR,
   ContextStampIR,
+  CreateIR,
   CriterionIR,
   DataSourceIR,
   DataSourceKind,
@@ -2410,13 +2413,6 @@ function computeSaves(
 }
 
 function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR {
-  let inner = env;
-  const params: ParamIR[] = [];
-  for (const p of wf.params) {
-    const t = lowerType(p.type, env);
-    params.push({ name: p.name, type: t });
-    inner = withLocal(inner, p.name, "param", t);
-  }
   const aggsByName = new Map<string, Aggregate>();
   const reposByName = new Map<string, Repository>();
   const repoForAgg = new Map<string, string>(); // aggName -> repoName
@@ -2428,52 +2424,39 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
       if (target?.name) repoForAgg.set(target.name, m.name);
     }
   }
-  // Base env after params — the reactor (`on(...)`) bodies branch off this,
-  // not off the sequential statement flow (each `on` is a distinct
-  // continuation entry point, so it must not see the starter statements' lets).
-  // A workflow is a state-bearing entity (workflow-and-applier.md A2): bind
-  // `this` to it so handler bodies resolve bare names / `this.field` against
-  // the workflow's `Property` state fields.  Purely additive — legacy bodies
-  // declare no state fields, so resolution is unchanged for them.
-  inner = inWorkflow(inner, wf);
-  const paramEnv = inner;
-  const letAggs = new Map<string, { aggName: string; repoName: string }>();
-  const statements: WorkflowStmtIR[] = [];
+  // A workflow is a state-bearing entity (workflow-and-applier.md A2-S5f): bind
+  // `this` to it so every member body (create / handle / on / apply) resolves
+  // bare names / `this.field` against the workflow's `Property` state fields.
+  // The body is members-only — no header params, no free statements.
+  const paramEnv = inWorkflow(env, wf);
   const subscriptions: OnIR[] = [];
-  // Workflow state fields (`Property` members) — the correlation field +
-  // saga state (workflow-and-applier.md A2-S2).  Lowered with the same
-  // `lowerField` every aggregate / value-object field uses.
-  const stateFields: FieldIR[] = wf.members.filter(isProperty).map((p) => lowerField(p, paramEnv));
-  // Appliers fold emitted events into workflow state (A2-S5b).  Lowered with
-  // `paramEnv` — which binds `this` to the workflow (A2-S5a) — so the same
-  // `lowerApply` aggregates use produces a state-folding body for workflows.
-  const appliers: ApplyIR[] = wf.members.filter(isApply).map((a) => lowerApply(a, paramEnv));
   const handlers: HandleIR[] = [];
+  const creates: CreateIR[] = [];
+  // Workflow state fields (`Property` members) — the correlation field +
+  // saga state (A2-S2).  Lowered with the same `lowerField` aggregates use.
+  const stateFields: FieldIR[] = wf.members.filter(isProperty).map((p) => lowerField(p, paramEnv));
+  // Appliers fold emitted events into workflow state (A2-S5b).
+  const appliers: ApplyIR[] = wf.members.filter(isApply).map((a) => lowerApply(a, paramEnv));
   for (const m of wf.members) {
-    if (isOnDecl(m)) {
+    if (isWorkflowCreateDecl(m)) {
+      creates.push(lowerWorkflowCreate(m, paramEnv, aggsByName, reposByName, repoForAgg));
+    } else if (isOnDecl(m)) {
       subscriptions.push(lowerOn(m, paramEnv, aggsByName, reposByName, repoForAgg));
-      continue;
-    }
-    if (isHandleDecl(m)) {
+    } else if (isHandleDecl(m)) {
       handlers.push(lowerHandle(m, paramEnv, aggsByName, reposByName, repoForAgg));
-      continue;
     }
-    if (isProperty(m) || isApply(m)) continue; // handled above
-    const lowered = lowerWorkflowStatement(m, inner, aggsByName, reposByName, repoForAgg);
-    statements.push(lowered.stmt);
-    inner = lowered.envAfter;
-    if (lowered.binding) letAggs.set(lowered.binding.name, lowered.binding);
+    // Property / Apply handled above.
   }
   // Correlation field inference: the single id-shaped state field is the one
-  // the runtime routes inbound events to (workflow-and-applier.md §"Identity
-  // and correlation").  Ambiguity (>1 id field) / absence are diagnosed by the
-  // IR validator, not here — lowering just records the unambiguous case.
+  // the runtime routes inbound events to.  Ambiguity / absence → IR validator.
   const idFields = stateFields.filter((f) => f.type.kind === "id");
   const correlationField = idFields.length === 1 ? idFields[0].name : undefined;
-  const savesAtExit = computeSaves(statements, repoForAgg);
+  // Facade over the primary (unnamed, command-triggered) create so the backend
+  // emitters keep reading `params`/`statements`/`savesAtExit` unchanged (A2-S5f).
+  const primary = creates.find((c) => c.name === null && c.triggerKind === "command") ?? creates[0];
   return {
     name: wf.name,
-    params,
+    params: primary?.params ?? [],
     transactional: !!wf.transactional,
     isolation: wf.isolation as
       | "readUncommitted"
@@ -2481,14 +2464,62 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
       | "repeatableRead"
       | "serializable"
       | undefined,
-    statements,
-    savesAtExit,
+    statements: primary?.statements ?? [],
+    savesAtExit: primary?.savesAtExit ?? [],
+    creates,
     eventSourced: !!wf.eventSourced,
     ...(subscriptions.length > 0 ? { subscriptions } : {}),
     ...(stateFields.length > 0 ? { stateFields } : {}),
     ...(correlationField ? { correlationField } : {}),
     ...(appliers.length > 0 ? { appliers } : {}),
     ...(handlers.length > 0 ? { handlers } : {}),
+  };
+}
+
+// Lower a `create [name](params) [by <expr>] { … }` workflow starter
+// (workflow-and-applier.md A2-S5f).  Mirrors `lowerHandle`: params bind as
+// locals on the workflow `this`-env, the body lowers via
+// `lowerWorkflowStatement`.  Trigger kind is discriminated from the shape — a
+// `by` clause (and a sole event-typed param) marks an event-triggered starter.
+function lowerWorkflowCreate(
+  c: WorkflowCreateDecl,
+  baseEnv: Env,
+  aggsByName: Map<string, Aggregate>,
+  reposByName: Map<string, Repository>,
+  repoForAgg: Map<string, string>,
+): CreateIR {
+  let inner = baseEnv;
+  const params: ParamIR[] = [];
+  for (const p of c.params) {
+    const t = lowerType(p.type, baseEnv);
+    params.push({ name: p.name, type: t });
+    inner = withLocal(inner, p.name, "param", t);
+  }
+  const correlation = c.correlation ? lowerExpr(c.correlation, inner) : undefined;
+  // Event-triggered when routed by a `by` clause; capture the sole event param.
+  const triggerKind: "event" | "command" = correlation ? "event" : "command";
+  let eventBinding: string | undefined;
+  let eventRef: string | undefined;
+  if (triggerKind === "event" && c.params.length === 1) {
+    const t = lowerType(c.params[0].type, baseEnv);
+    eventBinding = c.params[0].name;
+    eventRef = t.kind === "entity" ? t.name : undefined;
+  }
+  const statements: WorkflowStmtIR[] = [];
+  for (const s of c.body) {
+    const lowered = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
+    statements.push(lowered.stmt);
+    inner = lowered.envAfter;
+  }
+  return {
+    name: c.name ?? null,
+    triggerKind,
+    params,
+    ...(correlation ? { correlation } : {}),
+    statements,
+    savesAtExit: computeSaves(statements, repoForAgg),
+    ...(eventBinding ? { eventBinding } : {}),
+    ...(eventRef ? { eventRef } : {}),
   };
 }
 

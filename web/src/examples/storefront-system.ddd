@@ -195,23 +195,19 @@ system StorefrontSystem {
       // precondition throws and the order creation rolls back too.
       // Invoke via POST /workflows/checkout with body
       //   { customerId, walletId, productId, unitPrice: { amount, currency }, qty }
-      workflow checkout(
-        customerId: Customer id,
-        walletId: Wallet id,
-        productId: Product id,
-        unitPrice: Money,
-        qty: int
-      ) transactional {
-        precondition qty > 0
-        let wallet = Wallets.getById(walletId)
-        let order = Order.create({
-          customerId: customerId,
-          status: Draft,
-          placedAt: now()
-        })
-        order.addLine(productId, unitPrice, qty)
-        order.confirm()
-        wallet.debit(unitPrice)
+      workflow checkout transactional {
+        create(customerId: Customer id, walletId: Wallet id, productId: Product id, unitPrice: Money, qty: int) {
+          precondition qty > 0
+          let wallet = Wallets.getById(walletId)
+          let order = Order.create({
+            customerId: customerId,
+            status: Draft,
+            placedAt: now()
+          })
+          order.addLine(productId, unitPrice, qty)
+          order.confirm()
+          wallet.debit(unitPrice)
+        }
       }
     }
   }

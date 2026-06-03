@@ -168,24 +168,26 @@ subdomain Sales {
 
     // ── Transactional workflow: create + confirm an order atomically.
     // If `confirm`'s precondition throws, the whole creation rolls back.
-    workflow placeOrder(
-      customerId: Customer id,
-      reference: string,
-      productRef: string,
-      unitPrice: Money,
-      qty: int,
-      shipTo: Address
-    ) transactional {
-      precondition qty > 0
-      let order = SalesOrder.create({
-        reference: reference,
-        customerId: customerId,
-        status: Draft,
-        priority: Normal,
-        shipTo: shipTo
-      })
-      order.addLine(productRef, "Ordered item", unitPrice, qty)
-      order.confirm()
+    workflow placeOrder transactional {
+      create(
+        customerId: Customer id,
+        reference: string,
+        productRef: string,
+        unitPrice: Money,
+        qty: int,
+        shipTo: Address
+      ) {
+        precondition qty > 0
+        let order = SalesOrder.create({
+          reference: reference,
+          customerId: customerId,
+          status: Draft,
+          priority: Normal,
+          shipTo: shipTo
+        })
+        order.addLine(productRef, "Ordered item", unitPrice, qty)
+        order.confirm()
+      }
     }
 
     // ── Channel — the publisher-side transport contract for this

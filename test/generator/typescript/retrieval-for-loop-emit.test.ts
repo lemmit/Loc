@@ -18,11 +18,13 @@ const SRC = `
     criterion InRegion(rgn: string) of Customer = region == rgn
     retrieval ByRegion(rgn: string) of Customer { where: InRegion(rgn) sort: [name asc] }
 
-    workflow deactivateRegion(rgn: string) {
+    workflow deactivateRegion {
+      create(rgn: string) {
       let matched = Customers.run(ByRegion(rgn), page: { offset: 0, limit: 100 })
       for c in matched {
         c.deactivate()
       }
+    }
     }
   }
 `;

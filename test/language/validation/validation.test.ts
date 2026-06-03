@@ -1712,7 +1712,8 @@ describe("Loom IR validation (post-lowering)", async () => {
         repository Customers for Customer { }
         repository Orders for Order { }
         event OrderPlaced { order: Order id, at: datetime }
-        workflow placeOrder(customerId: Customer id, amount: decimal, placedAt: datetime) {
+        workflow placeOrder {
+      create(customerId: Customer id, amount: decimal, placedAt: datetime) {
           precondition amount > 0
           let customer = Customers.getById(customerId)
           customer.deductCredit(amount)
@@ -1723,6 +1724,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           })
           emit OrderPlaced { order: order.id, at: placedAt }
         }
+    }
       }
     `);
     const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
@@ -1742,11 +1744,13 @@ describe("Loom IR validation (post-lowering)", async () => {
           }
         }
         repository Customers for Customer { }
-        workflow topUp(customerId: Customer id, amount: decimal) transactional {
+        workflow topUp transactional {
+      create(customerId: Customer id, amount: decimal) {
           precondition amount > 0
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
+    }
       }
     `);
     const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
@@ -1762,10 +1766,12 @@ describe("Loom IR validation (post-lowering)", async () => {
           private operation hush() { }
         }
         repository Customers for Customer { }
-        workflow w(customerId: Customer id) {
+        workflow w {
+      create(customerId: Customer id) {
           let c = Customers.getById(id)
           c.hush()
         }
+    }
       }
     `);
     const diags = validateLoomModel(loom);
@@ -1784,10 +1790,12 @@ describe("Loom IR validation (post-lowering)", async () => {
           operation confirm() extern { precondition name.length > 0 }
         }
         repository Customers for Customer { }
-        workflow w(customerId: Customer id) {
+        workflow w {
+      create(customerId: Customer id) {
           let c = Customers.getById(customerId)
           c.confirm()
         }
+    }
       }
     `);
     const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
@@ -1804,10 +1812,12 @@ describe("Loom IR validation (post-lowering)", async () => {
           operation deduct(amount: decimal) extern { precondition amount > 0 }
         }
         repository Customers for Customer { }
-        workflow w(customerId: Customer id, amount: decimal) {
+        workflow w {
+      create(customerId: Customer id, amount: decimal) {
           let c = Customers.getById(customerId)
           c.deduct(amount)
         }
+    }
       }
     `);
     const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
@@ -1819,9 +1829,11 @@ describe("Loom IR validation (post-lowering)", async () => {
       context T {
         aggregate Customer { name: string  derived display: string = name }
         repository Customers for Customer { }
-        workflow w(customerId: Customer id) {
+        workflow w {
+      create(customerId: Customer id) {
           let c = Customers.byMagic(id)
         }
+    }
       }
     `);
     const diags = validateLoomModel(loom);
@@ -1844,9 +1856,11 @@ describe("Loom IR validation (post-lowering)", async () => {
           email: string
         }
         repository Customers for Customer { }
-        workflow makeOne(name: string) {
+        workflow makeOne {
+      create(name: string) {
           let c = Customer.create({ name: name })
         }
+    }
       }
     `);
     const diags = validateLoomModel(loom);
@@ -1869,8 +1883,10 @@ describe("Loom IR validation (post-lowering)", async () => {
           openedAt: datetime managed
         }
         repository Tickets for Ticket { }
-        workflow open(subject: string) {
-          let t = Ticket.create({ subject: subject })
+        workflow open {
+          create(subject: string) {
+            let t = Ticket.create({ subject: subject })
+          }
         }
       }
     `);
@@ -1890,8 +1906,10 @@ describe("Loom IR validation (post-lowering)", async () => {
           openedAt: datetime managed
         }
         repository Tickets for Ticket { }
-        workflow open(subject: string) {
-          let t = Ticket.create({ subject: subject, openedAt: "2026-01-01T00:00:00Z" })
+        workflow open {
+          create(subject: string) {
+            let t = Ticket.create({ subject: subject, openedAt: "2026-01-01T00:00:00Z" })
+          }
         }
       }
     `);
@@ -1913,9 +1931,11 @@ describe("Loom IR validation (post-lowering)", async () => {
         repository Customers for Customer {
           find byTier(tier: string): Customer[] where this.tier == tier
         }
-        workflow w(tier: string) {
+        workflow w {
+      create(tier: string) {
           let cs = Customers.byTier(tier)
         }
+    }
       }
     `);
     const diags = validateLoomModel(loom);
@@ -1934,9 +1954,11 @@ describe("Loom IR validation (post-lowering)", async () => {
       context T {
         aggregate Customer { name: string  derived display: string = name }
         repository Customers for Customer { }
-        workflow w(customerId: Customer id) {
+        workflow w {
+      create(customerId: Customer id) {
           emit Nope { x: id }
         }
+    }
       }
     `);
     const diags = validateLoomModel(loom);
@@ -2055,10 +2077,12 @@ describe("Loom IR validation (post-lowering)", async () => {
             }
           }
           repository Customers for Customer { }
-          workflow w(customerId: Customer id, amount: decimal) transactional(${level}) {
+          workflow w transactional(${level}) {
+      create(customerId: Customer id, amount: decimal) {
             let c = Customers.getById(customerId)
             c.addCredit(amount)
           }
+    }
         }
       `);
       const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
@@ -2076,10 +2100,12 @@ describe("Loom IR validation (post-lowering)", async () => {
           derived display: string = name
         }
         repository Customers for Customer { }
-        workflow w(customerId: Customer id) {
+        workflow w {
+      create(customerId: Customer id) {
           let c = Customers.getById(id)
           c.name := "X"
         }
+    }
       }
     `);
     const diags = validateLoomModel(loom);
@@ -2335,10 +2361,12 @@ describe("Loom IR validation (post-lowering)", async () => {
             repository Customers for Customer {
               find me(): Customer where id == currentUser.id
             }
-            workflow doIt() {
+            workflow doIt {
+      create() {
               let c = Customers.me()
               c.addCredit(1.0)
             }
+    }
           }
         }
       }

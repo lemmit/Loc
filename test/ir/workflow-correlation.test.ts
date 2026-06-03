@@ -16,7 +16,7 @@ function src(reactors: string): string {
       aggregate Payment { amount: int }
       event PaymentReceived { order: Order id, amount: int, payment: Payment id }
       event OrderConfirmed { orderId: Order id }
-      workflow Fulfillment() {
+      workflow Fulfillment {
         orderId: Order id
         ${reactors}
       }

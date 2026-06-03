@@ -136,14 +136,16 @@ system Acme {
             // emits a /workflows/place_order page from this; the
             // backend (api / catalogApi) emits the matching
             // POST /workflows/place_order route.
-            workflow placeOrder(customerId: string, productId: Product id, quantity: int) {
+            workflow placeOrder {
+              create(customerId: string, productId: Product id, quantity: int) {
                 precondition quantity > 0
-                let order = Order.create({
-                    customerId: customerId,
-                    status: Draft,
-                    placedAt: now()
-                })
-                order.addLine(productId, quantity)
+                  let order = Order.create({
+                      customerId: customerId,
+                      status: Draft,
+                      placedAt: now()
+                  })
+                  order.addLine(productId, quantity)
+              }
             }
 
             // View surfacing — exercises the React generator's view

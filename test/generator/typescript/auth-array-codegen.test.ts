@@ -35,9 +35,11 @@ system AuthArray {
         }
       }
       repository Items for Item { }
-      workflow turnOff(name: string) {
-        let item = Item.create({ name: name, active: true })
-        item.deactivate()
+      workflow turnOff {
+        create(name: string) {
+          let item = Item.create({ name: name, active: true })
+          item.deactivate()
+        }
       }
     }
   }
