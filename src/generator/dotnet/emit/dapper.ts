@@ -354,10 +354,12 @@ export function renderDapperRepository(
       "    {",
       // Only a non-nullable reference type (string) needs the `= default!`
       // initializer to suppress CS8618; value types + nullable types default
-      // on their own (and `!` on a value type would warn under /warnaserror).
+      // on their own.  An auto-property block takes a trailing `;` ONLY when an
+      // initializer follows (`{ get; set; } = default!;`) — a bare `{ get; set; };`
+      // is a CS1597 error, so the no-initializer arm ends at `}`.
       ...cols.map(
         (c) =>
-          `        public ${c.rowCs} ${c.col} { get; set; }${c.rowCs === "string" ? " = default!;" : ";"}`,
+          `        public ${c.rowCs} ${c.col} { get; set; }${c.rowCs === "string" ? " = default!;" : ""}`,
       ),
       "    }",
       "",
