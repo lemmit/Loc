@@ -63,7 +63,7 @@ export function emitCqrs(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
-  options?: { routePrefix?: string; emitTrace?: boolean },
+  options?: { routePrefix?: string; emitTrace?: boolean; usingDapper?: boolean },
 ): void {
   const aggFolder = plural(agg.name);
   // Create-request payload: required + access-permitted client input.
@@ -85,7 +85,17 @@ export function emitCqrs(
   emitOperationCommandsAndHandlers(agg, ctx, ns, aggFolder, out);
   emitGetByIdQueryAndHandler(agg, ctx, ns, aggFolder, out);
   emitFindQueriesAndHandlers(agg, repo, ctx, ns, aggFolder, out);
-  emitController(agg, repo, ctx, requiredFields, ns, out, options?.routePrefix, options?.emitTrace);
+  emitController(
+    agg,
+    repo,
+    ctx,
+    requiredFields,
+    ns,
+    out,
+    options?.routePrefix,
+    options?.emitTrace,
+    options?.usingDapper,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -632,6 +642,7 @@ function emitController(
   out: Map<string, string>,
   routePrefix?: string,
   emitTrace?: boolean,
+  usingDapper?: boolean,
 ): void {
   // Namespaces the wire→command conversions below reach into (e.g.
   // System.Globalization for a datetime/money parse); collected over the
@@ -697,6 +708,7 @@ function emitController(
       extraUsings: [...usings].sort(),
       routePrefix,
       emitTrace,
+      usingDapper,
     }),
   );
 }

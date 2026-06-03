@@ -403,7 +403,23 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 // decide "should I send traffic to this pod?".  Returns 503 with a
 // one-line cause when the DB is unreachable so operators see the
 // reason in the probe log instead of having to exec into the pod.
-app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
+${
+  usingDapper
+    ? `app.MapGet("/ready", async (NpgsqlDataSource db, CancellationToken ct) =>
+{
+    try
+    {
+        await using var conn = await db.OpenConnectionAsync(ct);
+        return Results.Ok(new { status = "ready" });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(
+            new { status = "not_ready", error = ex.Message },
+            statusCode: 503);
+    }
+});`
+    : `app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
 {
     try
     {
@@ -420,7 +436,8 @@ app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
             new { status = "not_ready", error = ex.Message },
             statusCode: 503);
     }
-});
+});`
+}
 // Catalog-identity request log — emits the cross-backend
 // request_start / request_end events (same envelope shape Hono
 // and Phoenix produce).  Mounted FIRST so its Stopwatch covers the
@@ -452,7 +469,12 @@ app.MapFallbackToFile("index.html");
 `
     : ""
 }
-// Dev-friendly schema bootstrap: create the schema from the model on
+${
+  usingDapper
+    ? // Dapper applied its schema via DbSchema.EnsureAsync at startup (above);
+      // no EF EnsureCreated block.
+      ""
+    : `// Dev-friendly schema bootstrap: create the schema from the model on
 // first boot.  System-mode compose isolates each deployable to its own
 // database (see db-init/), so EnsureCreated runs cleanly without
 // racing peers.  For production, replace this with
@@ -462,7 +484,8 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 }
-${authVerify}${externVerify}
+`
+}${authVerify}${externVerify}
 app.Run();
 `;
 }
