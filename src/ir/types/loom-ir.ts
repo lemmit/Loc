@@ -607,6 +607,11 @@ export interface FindIR {
   returnType: TypeIR;
   /** Optional `where ...` filter expression in IR form. */
   filter?: ExprIR;
+  /** Set when the `where` filter is *exactly* one named `criterion`
+   *  reference — its name + lowered args, for backends that consume the
+   *  reified `Criterion`.  `filter` still carries the inlined predicate, so
+   *  composed/anonymous filters and non-reifying backends are unaffected. */
+  criterionRef?: { name: string; args: ExprIR[] };
 }
 
 export interface RepositoryIR {

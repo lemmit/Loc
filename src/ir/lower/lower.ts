@@ -1620,6 +1620,7 @@ function lowerRepository(
         params: f.params.map((p) => ({ name: p.name, type: lowerType(p.type) })),
         returnType: lowerType(f.returnType),
         filter: f.filter ? lowerExpr(f.filter, env) : undefined,
+        criterionRef: criterionRefOf(f.filter, env),
       };
     }),
   };
