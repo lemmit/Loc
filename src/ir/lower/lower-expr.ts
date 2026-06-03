@@ -617,6 +617,38 @@ function findCriterionInEnv(env: Env, name: string): Criterion | undefined {
   return undefined;
 }
 
+/** When `where`/`filter` is *exactly* one named `criterion` reference — a
+ *  bare parameterless criterion (`ActiveCustomer`) or a parameterised call
+ *  (`InRegion("EU")`) — return the criterion name + its lowered argument
+ *  expressions; otherwise `undefined` (composed / anonymous clause).
+ *
+ *  Reified-criteria Slice 2b: lets retrieval/find lowering record the
+ *  reference so a backend can consume the reified `Criterion` / Specification,
+ *  even though the use-site otherwise keeps no provenance (the clause is still
+ *  inlined into the IR for every non-reifying backend). */
+export function criterionRefOf(
+  where: Expression | undefined,
+  env: Env,
+): { name: string; args: ExprIR[] } | undefined {
+  if (!where) return undefined;
+  if (isNameRef(where)) {
+    const crit = findCriterionInEnv(env, where.name);
+    return crit && crit.params.length === 0 ? { name: crit.name, args: [] } : undefined;
+  }
+  if (isPostfixChain(where) && isNameRef(where.head)) {
+    const crit = findCriterionInEnv(env, where.head.name);
+    if (!crit) return undefined;
+    if (where.suffixes.length === 0 && crit.params.length === 0) {
+      return { name: crit.name, args: [] };
+    }
+    const first = where.suffixes[0];
+    if (where.suffixes.length === 1 && first && isCallSuffix(first)) {
+      return { name: crit.name, args: first.args.map((a) => lowerExpr(a.value, env)) };
+    }
+  }
+  return undefined;
+}
+
 /** Inline a criterion reference into the host expression.  Re-lowers the
  *  predicate body in a scope whose candidate is the criterion's `of <T>`
  *  aggregate (so the body's bare field names / `this` rebind to the host

@@ -41,8 +41,11 @@ describe(".NET generator — retrieval", () => {
     expect(repo).toMatch(
       /public async Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, CancellationToken ct = default\)/,
     );
+    // `where: InRegion(rgn)` is exactly one named criterion → reified
+    // (Slice 2b): the query consumes the criterion's `ToExpression()` rather
+    // than inlining the predicate.
     expect(repo).toMatch(
-      /var query = _db\.Customers\.Where\(x => x\.Region == rgn\)\.OrderByDescending\(x => x\.Name\)\.AsQueryable\(\);/,
+      /var query = _db\.Customers\.Where\(new InRegionCriterion\(rgn\)\.ToExpression\(\)\)\.OrderByDescending\(x => x\.Name\)\.AsQueryable\(\);/,
     );
     expect(repo).toMatch(/if \(p\.offset is \{ \} off\) query = query\.Skip\(off\);/);
     expect(repo).toMatch(/if \(p\.limit is \{ \} lim\) query = query\.Take\(lim\);/);

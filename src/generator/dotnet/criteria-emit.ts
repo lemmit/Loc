@@ -37,6 +37,22 @@ export function emitCriteria(ctx: BoundedContextIR, ns: string, out: Map<string,
   }
 }
 
+/** Does `criterionName` have an emitted `Criterion<aggName>` class *with* a
+ *  `ToExpression()` query face? — i.e. it's Slice-1a eligible (entity
+ *  candidate named `aggName`, no `currentUser`) and in the queryable subset.
+ *  Lets the retrieval/find emitters decide whether to consume `ToExpression()`
+ *  (reified) or fall back to the inlined predicate. */
+export function canEmitToExpressionFor(
+  criterionName: string,
+  ctx: BoundedContextIR,
+  aggName: string,
+): boolean {
+  const crit = ctx.criteria.find((c) => c.name === criterionName);
+  if (!crit) return false;
+  if (candidateName(crit, ctx) !== aggName) return false;
+  return firstNonQueryableNode(crit.body) === null;
+}
+
 /** The aggregate name a criterion is a `Criterion<T>` over, or `undefined`
  *  when it isn't eligible for Slice-1 emission: ambient (`of bool`)
  *  criteria have no candidate, a missing aggregate can't be referenced,

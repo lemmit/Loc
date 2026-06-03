@@ -1,4 +1,5 @@
 import type {
+  BoundedContextIR,
   EnrichedAggregateIR,
   FindIR,
   RepositoryIR,
@@ -6,6 +7,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
+import { canEmitToExpressionFor } from "./criteria-emit.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -55,12 +57,31 @@ export function collectFindBodyUsings(
 export function buildRetrievalBodies(
   agg: EnrichedAggregateIR,
   retrievals: RetrievalIR[],
+  ctx: BoundedContextIR,
 ): Array<{ name: string; whereClause: string; orderByClause: string }> {
   return retrievals.map((r) => ({
     name: r.name,
-    whereClause: `.Where(x => ${renderCsExpr(r.where, { thisName: "x", agg })})`,
+    whereClause: retrievalWhereClause(r, agg, ctx),
     orderByClause: orderByClauseFor(r),
   }));
+}
+
+/** A retrieval's `.Where(...)` clause.  When the `where` is exactly a named
+ *  criterion with an emitted reified class (Slice 2b), consume its
+ *  `ToExpression()` — `.Where(new XCriterion(args).ToExpression())` — so the
+ *  query is the reified Specification rather than an inlined predicate.
+ *  Composed / anonymous / non-eligible `where`s fall back to the inline
+ *  `x => …` form (byte-identical to before). */
+function retrievalWhereClause(
+  r: RetrievalIR,
+  agg: EnrichedAggregateIR,
+  ctx: BoundedContextIR,
+): string {
+  if (r.criterionRef && canEmitToExpressionFor(r.criterionRef.name, ctx, agg.name)) {
+    const args = r.criterionRef.args.map((a) => renderCsExpr(a, { thisName: "x", agg })).join(", ");
+    return `.Where(new ${upperFirst(r.criterionRef.name)}Criterion(${args}).ToExpression())`;
+  }
+  return `.Where(x => ${renderCsExpr(r.where, { thisName: "x", agg })})`;
 }
 
 /** `.OrderBy(x => x.Col)[.ThenBy…]` for a retrieval's sort terms (empty

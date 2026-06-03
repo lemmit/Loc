@@ -92,3 +92,46 @@ describe(".NET generator — reified criteria (Slice 1: evaluate face)", () => {
     expect(c).not.toMatch(/using System\.Linq\.Expressions;/);
   });
 });
+
+// Slice 2b: a retrieval whose `where` is *exactly* a named, eligible criterion
+// consumes that criterion's reified `ToExpression()` —
+// `.Where(new XCriterion(args).ToExpression())` — instead of inlining the
+// predicate. Composed / anonymous / ineligible `where`s stay inline.
+const CONSUME_SRC = `
+  context Sales {
+    aggregate Customer { active: bool  region: string  name: string }
+    repository Customers for Customer { }
+    criterion ActiveCustomer of Customer = active
+    criterion InRegion(rgn: string) of Customer = region == rgn
+    retrieval ByRegion(rgn: string) of Customer { where: InRegion(rgn) }
+    retrieval AllActive of Customer { where: ActiveCustomer }
+    retrieval ActiveInRegion(rgn: string) of Customer { where: ActiveCustomer && InRegion(rgn) }
+  }
+`;
+
+describe(".NET generator — reified criteria (Slice 2b: retrieval consumes ToExpression)", () => {
+  async function repo() {
+    const out = await generateDotnet(await parseValid(CONSUME_SRC));
+    return out.get("Infrastructure/Repositories/CustomerRepository.cs")!;
+  }
+
+  it("a single parameterized criterion `where` consumes ToExpression()", async () => {
+    const r = await repo();
+    expect(r).toMatch(/using Sales\.Domain\.Criteria;/);
+    expect(r).toMatch(/_db\.Customers\.Where\(new InRegionCriterion\(rgn\)\.ToExpression\(\)\)/);
+  });
+
+  it("a parameterless criterion `where` consumes ToExpression() (no args)", async () => {
+    const r = await repo();
+    expect(r).toMatch(/_db\.Customers\.Where\(new ActiveCustomerCriterion\(\)\.ToExpression\(\)\)/);
+  });
+
+  it("a composed `where` stays inline (not reified)", async () => {
+    const r = await repo();
+    // ActiveInRegion's where is `A && B` → criterionRef undefined → inline lambda.
+    const m = r.match(/RunActiveInRegionAsync[\s\S]*?var query = ([^\n]*)/);
+    expect(m, "RunActiveInRegionAsync not found").not.toBeNull();
+    expect(m![1]).toMatch(/\.Where\(x =>/);
+    expect(m![1]).not.toMatch(/new \w+Criterion\(/);
+  });
+});
