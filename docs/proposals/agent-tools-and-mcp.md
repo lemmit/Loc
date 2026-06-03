@@ -329,6 +329,44 @@ new tool logic:
 The only browser-new concern is **LLM API key / endpoint handling**, which is a
 playground settings matter, independent of the tools.
 
+### 5b. Playground chat UI — concrete plan (the remaining ⬜)
+
+The engine is done (`runAgent` in `src/tools/agent-loop.ts`, #946) — it takes an
+injected `Complete` and drives the whole `tool_use → callTool → tool_result`
+loop, streaming each turn via `onMessage`. So the UI slice is **purely
+browser-side**: implement one `Complete`, render the stream, apply edits. No new
+tool logic. Architecture map (from the playground audit):
+
+1. **A `Complete` implementation** — a thin `fetch` to the model.
+   - **Transport decision (open):** direct Anthropic (`api.anthropic.com` +
+     `anthropic-dangerous-direct-browser-access` header, key in `localStorage`)
+     vs a bring-your-own base-URL/proxy vs both (Anthropic default, override the
+     URL/model). See §7. The loop is agnostic — this is the only place the
+     choice lives.
+   - Maps the Anthropic Messages API ↔ the loop's `Message` / `ContentBlock`
+     shapes (they were modelled to match, so this is near 1:1).
+2. **Chat panel** — `web/src/layout/ChatPanel.tsx`, wired into the bottom
+   `DevToolsDock` (add `"chat"` to `DockTab` + a tab entry + a render case).
+   Mantine UI like the existing `OutputPanel` / `ProblemsPanel`.
+3. **Source read/write** — read with `ctx.getSource()`; when a tool returns new
+   source (`loom_apply_patch.text`) or the user accepts a rewrite
+   (`loom_rename` / `loom_quickfix` / `loom_unfold_macro` `EditResult`), push it
+   back via `ctx.onSourceChange(next, "builder")` — the `"builder"` origin path
+   pushes into Monaco (`editorHandleRef.setSource`) **without** an echo loop, and
+   the LSP re-lints so the model-edit shows squiggles + quick-fixes for free.
+4. **API key** — `usePersistedState("loom.apiKey", "")` (the existing
+   localStorage hook); a small settings affordance in the panel.
+5. **Apply-edits affordance** — `EditResult` edits are *returned, not applied*
+   (contract §3), so the panel shows a diff/accept button before splicing them
+   into the buffer; `apply_patch` returns whole new source directly.
+6. **Tests** — Playwright (`web/e2e/`, the playground's only test surface) with a
+   **stubbed `Complete`** (scripted turns) so the chat→tool→editor flow is
+   deterministic and offline — no real LLM call in CI. The loop itself is
+   already unit-tested in `test/tools/agent-loop.test.ts`.
+
+Risk is contained: the orchestration + the whole tool surface are done and
+tested; this slice is a panel + a `fetch` + an apply-to-editor wire.
+
 ## 6. Layering & homes
 
 - `src/tools/` imports only `src/api/` (the toolkit) + the contract types →
