@@ -40,20 +40,18 @@ system Ledger {
 }
 
 describe("event-sourced storage capability validation", () => {
-  it("accepts persistedAs(eventLog) on a Hono deployable", async () => {
+  it("accepts persistedAs(eventLog) on a Hono (node) deployable", async () => {
     expect(await esErrors(sys("hono"))).toEqual([]);
   });
 
-  it("rejects persistedAs(eventLog) on a .NET deployable (no ES emission yet)", async () => {
-    const errs = await esErrors(sys("dotnet"));
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("Account");
-    expect(errs[0]).toContain("Hono backend only");
+  it("accepts persistedAs(eventLog) on a .NET deployable (EF Core event store, A2.2b)", async () => {
+    expect(await esErrors(sys("dotnet"))).toEqual([]);
   });
 
-  it("rejects persistedAs(eventLog) on a Phoenix deployable", async () => {
+  it("rejects persistedAs(eventLog) on a Phoenix deployable (not implemented)", async () => {
     const errs = await esErrors(sys("phoenixLiveView"));
     expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("Account");
     expect(errs[0]).toContain("event-sourced");
   });
 });

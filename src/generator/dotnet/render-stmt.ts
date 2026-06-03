@@ -16,6 +16,12 @@ export interface TraceCtx {
   emitTrace: boolean;
   aggregate: string;
   op: string;
+  /** True when rendering a body on an event-sourced (`persistedAs(eventLog)`)
+   *  aggregate.  An `emit` then both records the event AND folds it via
+   *  `_Apply(ev)` so the in-memory aggregate stays consistent for the
+   *  command's response — the state transition the appliers own.  Off ⇒
+   *  `emit` is byte-identical to the legacy notification-event add. */
+  eventSourced?: boolean;
 }
 
 const NO_TRACE: TraceCtx = { emitTrace: false, aggregate: "", op: "" };
@@ -84,6 +90,12 @@ function renderCsStatement(
       const args = s.fields
         .map((f) => `${upperFirst(f.name)}: ${renderCsExpr(f.value, ctx)}`)
         .join(", ");
+      // Event-sourced: record the event and fold it immediately, so the
+      // aggregate's in-memory state reflects the transition before the
+      // command returns (the applier is the only place state changes).
+      if (traceCtx.eventSourced) {
+        return `${INDENT}{ var __ev = new ${s.eventName}(${args}); _domainEvents.Add(__ev); _Apply(__ev); }`;
+      }
       return `${INDENT}_domainEvents.Add(new ${s.eventName}(${args}));`;
     }
     case "call": {
