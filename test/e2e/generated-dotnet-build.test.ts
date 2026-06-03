@@ -131,6 +131,43 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // Dapper event sourcing (appliers, Dapper edition): a `persistence: dapper`
+    // deployable hosting a `persistedAs(eventLog)` aggregate emits the raw-Npgsql
+    // event-store repository (read stream → fold, append on save) + the
+    // `<agg>_events` table in DbSchema.cs, reusing the persistence-agnostic
+    // domain fold + CQRS create chain.  Build under /warnaserror.
+    it("system `persistence: dapper` + event sourcing — dapper event store builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-es-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-es.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        expect(
+          fs.readFileSync(path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"), "utf8"),
+        ).toContain("account_events");
+        expect(
+          fs.readFileSync(
+            path.join(proj, "Infrastructure", "Repositories", "AccountRepository.cs"),
+            "utf8",
+          ),
+        ).toContain("_FromEvents");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // Event sourcing (appliers A2.2b): a `persistedAs(eventLog)` aggregate on a
     // dotnet deployable emits the EF `<Agg>EventRecord` entity + config, the
     // `_Apply`/`_FromEvents` fold on the aggregate, the record-and-apply `emit`,

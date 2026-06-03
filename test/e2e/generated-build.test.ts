@@ -183,5 +183,39 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 300_000);
+
+    // MikroORM event sourcing (appliers, MikroORM edition): a `persistence:
+    // mikroorm` deployable hosting a `persistedAs(eventLog)` aggregate emits the
+    // EntityManager event store (read stream → fold, append on save) + the
+    // `<agg>_events` EntitySchema, reusing the persistence-agnostic domain fold
+    // + CQRS create chain.  Type-checks under tsc.
+    it("system `persistence: mikroorm` + event sourcing — mikroorm event store type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-mikro-es-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/mikroorm-es.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        expect(fs.readFileSync(path.join(proj, "db", "entities.ts"), "utf8")).toContain(
+          "AccountEventRow",
+        );
+        expect(
+          fs.readFileSync(path.join(proj, "db", "repositories", "account-repository.ts"), "utf8"),
+        ).toContain("_fromEvents");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
   },
 );

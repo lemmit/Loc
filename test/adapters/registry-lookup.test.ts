@@ -60,7 +60,8 @@ describe("adapter registry — lookup", () => {
     expect(dapper.name).toBe("dapper");
     // Capability fields answer; emit throws (verified in stub-throws.test.ts).
     expect(dapper.supports("postgres", "state", "state")).toBe(true);
-    expect(dapper.supports("postgres", "eventLog", "eventLog")).toBe(false);
+    // Event sourcing (appliers, Dapper edition) is now supported.
+    expect(dapper.supports("postgres", "eventLog", "eventLog")).toBe(true);
   });
 
   it("rejects an unknown adapter name with the error listing siblings", () => {

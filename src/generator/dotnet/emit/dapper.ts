@@ -30,7 +30,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
-import { renderCsType } from "../render-expr.js";
+import { csValueTypeForId, renderCsType } from "../render-expr.js";
 
 /** Postgres table for an aggregate — lowercase plural (e.g. `orders`). */
 const tableOf = (aggName: string): string => plural(snake(aggName));
@@ -402,12 +402,173 @@ export function renderDapperRepository(
 }
 
 // ---------------------------------------------------------------------------
+// Event-sourced (`persistedAs(eventLog)`) Dapper repository (appliers, Dapper
+// edition).  The .NET domain layer's fold (`_Apply` / `_FromEvents`) and the
+// CQRS create chain are persistence-agnostic and reused as-is; this is the raw
+// Npgsql/Dapper version of the event store — read the `<agg>_events` stream
+// ordered by version and fold via `_FromEvents`; append `PullEvents()` with
+// gap-free versions; finds load every stream + fold in-memory.  Event payloads
+// round-trip through System.Text.Json (`RowToEvent` type-switch deserialiser).
+// ---------------------------------------------------------------------------
+export function renderDapperEventSourcedRepository(
+  agg: EnrichedAggregateIR,
+  repo: RepositoryIR | undefined,
+  ns: string,
+  findBodies: Array<{ name: string; filterClause: string; projectionClause: string }>,
+): string {
+  const table = `${snake(agg.name)}_events`;
+  const eventNames = [...new Set((agg.appliers ?? []).map((a) => a.event))];
+  const idValue = csValueTypeForId(agg.idValueType);
+  const parseId =
+    idValue === "Guid"
+      ? "System.Guid.Parse(__g.Key)"
+      : idValue === "int"
+        ? "int.Parse(__g.Key)"
+        : idValue === "long"
+          ? "long.Parse(__g.Key)"
+          : "__g.Key";
+  const rowToEventArms = eventNames.map(
+    (e) =>
+      `            "${e}" => System.Text.Json.JsonSerializer.Deserialize<${e}>(__r.data, __json)!,`,
+  );
+  const findMethods = (repo?.finds ?? []).flatMap((f) => {
+    const body = findBodies.find((b) => b.name === f.name);
+    const filter = body?.filterClause ?? "";
+    const projection = (body?.projectionClause ?? ".ToListAsync(ct)")
+      .replace(".ToListAsync(ct)", ".ToList()")
+      .replace(".FirstOrDefaultAsync(ct)", ".FirstOrDefault()")
+      .replace(".FirstAsync(ct)", ".First()");
+    return [
+      `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParams(f.params)})`,
+      "    {",
+      "        var __all = await _LoadAllAsync(ct);",
+      `        return __all${filter}${projection};`,
+      "    }",
+    ];
+  });
+  return (
+    lines(
+      "// Auto-generated.  Dapper event-store (persistence: dapper, persistedAs(eventLog)).",
+      "using System;",
+      "using System.Collections.Generic;",
+      "using System.Linq;",
+      "using System.Threading;",
+      "using System.Threading.Tasks;",
+      "using Dapper;",
+      "using Npgsql;",
+      `using ${ns}.Domain.${plural(agg.name)};`,
+      `using ${ns}.Domain.Ids;`,
+      `using ${ns}.Domain.Enums;`,
+      `using ${ns}.Domain.ValueObjects;`,
+      `using ${ns}.Domain.Common;`,
+      `using ${ns}.Domain.Events;`,
+      "",
+      `namespace ${ns}.Infrastructure.Repositories;`,
+      "",
+      `public sealed class ${agg.name}Repository : I${agg.name}Repository`,
+      "{",
+      "    private readonly NpgsqlDataSource _db;",
+      "    private readonly IDomainEventDispatcher _events;",
+      "    private static readonly System.Text.Json.JsonSerializerOptions __json =",
+      "        new(System.Text.Json.JsonSerializerDefaults.Web);",
+      "",
+      `    public ${agg.name}Repository(NpgsqlDataSource db, IDomainEventDispatcher events)`,
+      "    {",
+      "        _db = db;",
+      "        _events = events;",
+      "    }",
+      "",
+      "    private sealed class EvRow",
+      "    {",
+      "        public string stream_id { get; set; } = default!;",
+      "        public string type { get; set; } = default!;",
+      "        public string data { get; set; } = default!;",
+      "    }",
+      "",
+      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken ct = default)`,
+      "    {",
+      "        var __sid = id.Value.ToString();",
+      "        await using var conn = await _db.OpenConnectionAsync(ct);",
+      `        var __rows = (await conn.QueryAsync<EvRow>(new CommandDefinition("SELECT stream_id, type, data FROM ${table} WHERE stream_id = @sid ORDER BY version", new { sid = __sid }, cancellationToken: ct))).ToList();`,
+      "        if (__rows.Count == 0) return null;",
+      `        return ${agg.name}._FromEvents(id, __rows.Select(RowToEvent).ToList());`,
+      "    }",
+      "",
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default)`,
+      "    {",
+      `        if (ids.Count == 0) return Array.Empty<${agg.name}>();`,
+      `        var __out = new List<${agg.name}>();`,
+      "        foreach (var __id in ids)",
+      "        {",
+      "            var __a = await GetByIdAsync(__id, ct);",
+      "            if (__a != null) __out.Add(__a);",
+      "        }",
+      "        return __out;",
+      "    }",
+      "",
+      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken ct = default)`,
+      "    {",
+      "        var __pending = aggregate.PullEvents();",
+      "        if (__pending.Count > 0)",
+      "        {",
+      "            var __sid = aggregate.Id.Value.ToString();",
+      "            await using var conn = await _db.OpenConnectionAsync(ct);",
+      `            var __version = await conn.ExecuteScalarAsync<int?>(new CommandDefinition("SELECT MAX(version) FROM ${table} WHERE stream_id = @sid", new { sid = __sid }, cancellationToken: ct)) ?? 0;`,
+      "            foreach (var __ev in __pending)",
+      "            {",
+      "                __version++;",
+      "                var __data = System.Text.Json.JsonSerializer.Serialize((object)__ev, __json);",
+      `                await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (stream_id, version, type, data, occurred_at) VALUES (@sid, @version, @type, CAST(@data AS jsonb), now())", new { sid = __sid, version = __version, type = __ev.GetType().Name, data = __data }, cancellationToken: ct));`,
+      "            }",
+      "        }",
+      "        foreach (var ev in __pending) await _events.DispatchAsync(ev, ct);",
+      "    }",
+      "",
+      `    private async Task<List<${agg.name}>> _LoadAllAsync(CancellationToken ct)`,
+      "    {",
+      "        await using var conn = await _db.OpenConnectionAsync(ct);",
+      `        var __rows = (await conn.QueryAsync<EvRow>(new CommandDefinition("SELECT stream_id, type, data FROM ${table} ORDER BY stream_id, version", cancellationToken: ct))).ToList();`,
+      `        return __rows`,
+      "            .GroupBy(__r => __r.stream_id)",
+      `            .Select(__g => ${agg.name}._FromEvents(new ${agg.name}Id(${parseId}), __g.Select(RowToEvent).ToList()))`,
+      "            .ToList();",
+      "    }",
+      "",
+      "    private static IDomainEvent RowToEvent(EvRow __r)",
+      "    {",
+      "        return __r.type switch",
+      "        {",
+      ...rowToEventArms,
+      '            _ => throw new InvalidOperationException($"Unknown event type: {__r.type}"),',
+      "        };",
+      "    }",
+      ...findMethods.flatMap((m) => ["", m]),
+      "}",
+    ) + "\n"
+  );
+}
+
+// ---------------------------------------------------------------------------
 // schema.sql bootstrap — a self-applied `CREATE TABLE IF NOT EXISTS` per
 // aggregate, embedded in a C# helper run once at startup.
 // ---------------------------------------------------------------------------
 
 export function renderDapperSchema(aggs: readonly EnrichedAggregateIR[], ns: string): string {
   const tables = aggs.map((agg) => {
+    // Event-sourced aggregates get the append-only `<agg>_events` stream table
+    // (mirrors the canonical migration); state aggregates get their state table.
+    if (agg.persistedAs === "eventLog") {
+      return [
+        `CREATE TABLE IF NOT EXISTS ${snake(agg.name)}_events (`,
+        "    stream_id text not null,",
+        "    version int not null,",
+        "    type text not null,",
+        "    data jsonb not null,",
+        "    occurred_at timestamptz not null default now(),",
+        "    primary key (stream_id, version)",
+        ");",
+      ].join("\n");
+    }
     const cols = columnsOf(agg).map((c, i) => {
       const pk = i === 0 ? " primary key" : "";
       const nn = c.nullable || i === 0 ? "" : " not null";

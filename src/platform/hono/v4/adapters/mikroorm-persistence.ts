@@ -48,10 +48,14 @@ const splitLines = (s: string): Lines => s.split("\n");
 
 export const mikroOrmPersistenceAdapter: PersistenceAdapter = {
   name: "mikroorm",
-  // v1 is state-based only — no event-sourcing.
-  supportedStrategies: ["state"],
+  // State + event-sourced (appliers, MikroORM edition): the `<agg>_events`
+  // stream + fold reuse the persistence-agnostic domain/CQRS layer.
+  supportedStrategies: ["state", "eventLog"],
 
   supports(storageType, kind, persistenceStrategy) {
+    if (persistenceStrategy === "eventLog") {
+      return storageType === "postgres" && kind === "eventLog";
+    }
     return (
       persistenceStrategy === "state" &&
       ["postgres"].includes(storageType) &&

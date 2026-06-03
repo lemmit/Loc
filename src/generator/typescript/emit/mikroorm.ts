@@ -30,13 +30,21 @@
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  EventIR,
   ExprIR,
   FieldIR,
   RepositoryIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
+import {
+  deserializeField,
+  docFieldType,
+  findPredicate,
+  serializeField,
+} from "../repository-document-builder.js";
 import { hydrateRootExpr } from "../repository-find-builder.js";
 import { projectFieldEntries, projectionObject } from "../repository-save-builder.js";
 import { toWireMethod } from "../repository-wire-builder.js";
@@ -156,6 +164,40 @@ export function renderMikroEntities(
   const blocks: string[] = [];
   const schemaNames: string[] = [];
   for (const agg of aggs) {
+    // Event-sourced (`persistedAs(eventLog)`): the aggregate's MikroORM entity
+    // is its append-only `<agg>_events` stream row (composite (streamId,
+    // version) key), not a state row.  MikroORM owns the schema, so this is
+    // self-consistent — the repository queries it via the EntityManager.
+    if (agg.persistedAs === "eventLog") {
+      const cls = `${agg.name}EventRow`;
+      const schemaName = `${cls}Schema`;
+      schemaNames.push(schemaName);
+      blocks.push(
+        lines(
+          `export class ${cls} {`,
+          "  streamId!: string;",
+          "  version!: number;",
+          "  type!: string;",
+          "  data!: unknown;",
+          "  occurredAt!: Date;",
+          "}",
+          "",
+          `export const ${schemaName} = new EntitySchema<${cls}>({`,
+          `  class: ${cls},`,
+          `  tableName: "${snake(agg.name)}_events",`,
+          "  properties: {",
+          '    streamId: { type: "string", primary: true },',
+          '    version: { type: "number", primary: true },',
+          '    type: { type: "string" },',
+          '    data: { type: "json", columnType: "jsonb" },',
+          '    occurredAt: { type: "Date", columnType: "timestamptz" },',
+          "  },",
+          "});",
+          "",
+        ),
+      );
+      continue;
+    }
     const cols = columnsOf(agg, ctx);
     const cls = rowClassOf(agg.name);
     const schemaName = `${cls}Schema`;
@@ -531,4 +573,203 @@ function tsParamType(t: TypeIR): string {
     }
   }
   return "string";
+}
+
+// ---------------------------------------------------------------------------
+// Event-sourced (`persistedAs(eventLog)`) MikroORM repository (appliers,
+// MikroORM edition).  The Hono domain fold (`_apply` / `_fromEvents`) + CQRS
+// are persistence-agnostic and reused; this is the EntityManager version of
+// the event store — read the `<agg>_events` stream ordered by version and fold
+// via `_fromEvents`; append `pullEvents()` with gap-free versions; finds load
+// every stream + fold in-memory.  Payloads round-trip through the document
+// builder's field (de)serialisers.
+// ---------------------------------------------------------------------------
+export function renderMikroEventSourcedRepository(
+  agg: EnrichedAggregateIR,
+  repo: RepositoryIR | undefined,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const eventRow = `${agg.name}EventRow`;
+  const streamEvents: EventIR[] = (agg.appliers ?? [])
+    .map((ap) => ctx.events.find((e) => e.name === ap.event))
+    .filter((e): e is EventIR => e != null);
+
+  const eventToDataArms = streamEvents.flatMap((e) => {
+    const entries = e.fields.map(
+      (f) => `${f.name}: ${serializeField(f.type, `ev.${f.name}`, ctx)}`,
+    );
+    return [`    case ${JSON.stringify(e.name)}:`, `      return { ${entries.join(", ")} };`];
+  });
+  const rowToEventArms = streamEvents.flatMap((e) => {
+    const entries = [
+      `type: ${JSON.stringify(e.name)}`,
+      ...e.fields.map((f) => `${f.name}: ${deserializeField(f.type, `d.${f.name}`, ctx)}`),
+    ];
+    const dType = e.fields.map((f) => `${f.name}: ${docFieldType(f.type, ctx)}`).join("; ");
+    return [
+      `    case ${JSON.stringify(e.name)}: {`,
+      `      const d = data as { ${dType} };`,
+      `      return { ${entries.join(", ")} } as Events.${e.name};`,
+      "    }",
+    ];
+  });
+
+  const findMethods = (repo?.finds ?? []).map((find) => {
+    const usesUser = findUsesCurrentUser(find);
+    const baseParams = find.params.map((p) => `${p.name}: ${tsParamType(p.type)}`);
+    const params = (usesUser ? [...baseParams, "currentUser: User"] : baseParams).join(", ");
+    const pred = findPredicate(agg, find, ctx);
+    const isArray = find.returnType.kind === "array";
+    const isOptional = find.returnType.kind === "optional";
+    const ret = isArray ? `${agg.name}[]` : isOptional ? `${agg.name} | null` : agg.name;
+    const selector = isArray
+      ? pred
+        ? `all.filter(${pred})`
+        : "all"
+      : isOptional
+        ? `all.find(${pred ?? "() => true"}) ?? null`
+        : `all.find(${pred ?? "() => true"})!`;
+    return lines(
+      `  async ${find.name}(${params}): Promise<${ret}> {`,
+      "    const all = await this._loadAll();",
+      `    return ${selector};`,
+      "  }",
+    );
+  });
+
+  const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser);
+
+  const body = lines(
+    `export class ${agg.name}Repository {`,
+    "  constructor(",
+    "    private readonly em: EntityManager,",
+    "    private readonly events: DomainEventDispatcher,",
+    "  ) {}",
+    "",
+    `  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`,
+    "    const em = this.em.fork();",
+    `    const rows = await em.find(${eventRow}, { streamId: id as string }, { orderBy: { version: "ASC" } });`,
+    "    if (rows.length === 0) return null;",
+    `    return ${agg.name}._fromEvents(`,
+    "      id,",
+    "      rows.map((r) => rowToEvent({ type: r.type, data: r.data })),",
+    "    );",
+    "  }",
+    "",
+    `  async getById(id: Ids.${agg.name}Id): Promise<${agg.name}> {`,
+    "    const found = await this.findById(id);",
+    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
+    "    return found;",
+    "  }",
+    "",
+    `  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`,
+    "    if (ids.length === 0) return [];",
+    `    const out: ${agg.name}[] = [];`,
+    "    for (const id of ids) {",
+    "      const found = await this.findById(id);",
+    "      if (found) out.push(found);",
+    "    }",
+    "    return out;",
+    "  }",
+    "",
+    `  async save(aggregate: ${agg.name}): Promise<void> {`,
+    "    const em = this.em.fork();",
+    "    const pending = aggregate.pullEvents();",
+    "    if (pending.length > 0) {",
+    "      const streamId = aggregate.id as string;",
+    `      const prior = await em.find(${eventRow}, { streamId }, { orderBy: { version: "DESC" }, limit: 1 });`,
+    "      let version = prior.length > 0 ? prior[0]!.version : 0;",
+    "      for (const event of pending) {",
+    "        version++;",
+    `        const r = new ${eventRow}();`,
+    "        r.streamId = streamId;",
+    "        r.version = version;",
+    "        r.type = event.type;",
+    "        r.data = eventToData(event);",
+    "        r.occurredAt = new Date();",
+    "        em.persist(r);",
+    "      }",
+    "      await em.flush();",
+    "    }",
+    '    requestLog().debug({ event: "repository_save", aggregate: ' +
+      JSON.stringify(agg.name) +
+      ", id: aggregate.id as string });",
+    "    for (const event of pending) {",
+    '      requestLog().info({ event: "event_dispatched", event_type: event.type, aggregate: ' +
+      JSON.stringify(agg.name) +
+      ", id: aggregate.id as string });",
+    "      await this.events.dispatch(event);",
+    "    }",
+    "  }",
+    "",
+    `  private async _loadAll(): Promise<${agg.name}[]> {`,
+    "    const em = this.em.fork();",
+    `    const rows = await em.find(${eventRow}, {}, { orderBy: { streamId: "ASC", version: "ASC" } });`,
+    "    const byStream = new Map<string, Events.DomainEvent[]>();",
+    "    for (const r of rows) {",
+    "      const list = byStream.get(r.streamId) ?? [];",
+    "      list.push(rowToEvent({ type: r.type, data: r.data }));",
+    "      byStream.set(r.streamId, list);",
+    "    }",
+    `    return [...byStream.entries()].map(([id, evs]) => ${agg.name}._fromEvents(Ids.${agg.name}Id(id), evs));`,
+    "  }",
+    ...findMethods.flatMap((m) => ["", m]),
+    "",
+    toWireMethod(agg, ctx),
+    "}",
+    "",
+    "function eventToData(ev: Events.DomainEvent): Record<string, unknown> {",
+    "  switch (ev.type) {",
+    ...eventToDataArms,
+    "    default:",
+    "      return {};",
+    "  }",
+    "}",
+    "",
+    "function rowToEvent(row: { type: string; data: unknown }): Events.DomainEvent {",
+    "  const data = row.data;",
+    "  switch (row.type) {",
+    ...rowToEventArms,
+    "    default:",
+    "      throw new Error(`unknown event type: ${row.type}`);",
+    "  }",
+    "}",
+  );
+
+  const bodyScan = body
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/`(?:\\.|[^`\\])*`/g, "``");
+  const candidates = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)];
+  const referenced = candidates.filter((n) => new RegExp(`\\b${n}\\b`).test(bodyScan));
+  const isValueUsed = (n: string): boolean =>
+    new RegExp(`new\\s+${n}\\(|\\b${n}\\.\\w`).test(bodyScan);
+  let voImportLine: string | false = false;
+  if (referenced.length > 0) {
+    const anyValue = referenced.some(isValueUsed);
+    voImportLine = anyValue
+      ? `import { ${referenced.map((n) => (isValueUsed(n) ? n : `type ${n}`)).join(", ")} } from "../../domain/value-objects";`
+      : `import type { ${referenced.join(", ")} } from "../../domain/value-objects";`;
+  }
+  const usesDecimal = /new\s+Decimal\(/.test(bodyScan);
+
+  return (
+    lines(
+      "// Auto-generated.  Do not edit by hand.",
+      usesDecimal && `import Decimal from "decimal.js";`,
+      `import { EntityManager } from "@mikro-orm/postgresql";`,
+      `import { ${eventRow} } from "../entities";`,
+      `import { ${agg.name} } from "../../domain/${lowerFirst(agg.name)}";`,
+      voImportLine,
+      `import * as Ids from "../../domain/ids";`,
+      `import type * as Events from "../../domain/events";`,
+      `import { AggregateNotFoundError } from "../../domain/errors";`,
+      `import type { DomainEventDispatcher } from "../../domain/events";`,
+      repoUsesUser && `import type { User } from "../../auth/user-types";`,
+      `import { requestLog } from "../../obs/als";`,
+      "",
+      body,
+      "",
+    ) + "\n"
+  );
 }

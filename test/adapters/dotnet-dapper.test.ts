@@ -59,7 +59,7 @@ describe("dapper persistence adapter — dotnet (Phase 5c)", () => {
     expect(resolvePersistence("dotnet", "dapper")).toBe(dapperPersistenceAdapter);
     expect(dapperPersistenceAdapter.name).toBe("dapper");
     expect(dapperPersistenceAdapter.supportedShapes).toEqual(["relational"]);
-    expect(dapperPersistenceAdapter.supportedStrategies).toEqual(["state"]);
+    expect(dapperPersistenceAdapter.supportedStrategies).toEqual(["state", "eventLog"]);
   });
 
   it("emits a Dapper Infrastructure instead of EF Core", async () => {
@@ -88,6 +88,40 @@ describe("dapper persistence adapter — dotnet (Phase 5c)", () => {
     expect(errors).toEqual([]);
     expect(files.has("api/Infrastructure/Persistence/AppDbContext.cs")).toBe(true);
     expect(files.has("api/Infrastructure/Persistence/DbSchema.cs")).toBe(false);
+  });
+
+  // Event sourcing (appliers, Dapper edition): a `persistence: dapper` deployable
+  // accepts a `persistedAs(eventLog)` aggregate and emits the raw-Npgsql event
+  // store + the `<agg>_events` DbSchema table, reusing the domain fold + CQRS.
+  const esSys = `
+system D {
+  subdomain S {
+    context O {
+      event Opened { account: Account id, owner: string }
+      aggregate Account ids guid persistedAs(eventLog) {
+        owner: string
+        create open(owner: string) { emit Opened { account: id, owner: owner } }
+        apply(e: Opened) { owner := e.owner }
+      }
+      repository Accounts for Account { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: eventLog, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  port: 8080 }
+}`;
+
+  it("accepts persistedAs(eventLog) and emits the Dapper event store", async () => {
+    const { files, errors } = await emit(esSys);
+    expect(errors).toEqual([]);
+    const repo = files.get("api/Infrastructure/Repositories/AccountRepository.cs")!;
+    expect(repo).toContain("Account._FromEvents(id, __rows.Select(RowToEvent).ToList());");
+    expect(repo).toContain("INSERT INTO account_events");
+    expect(repo).toContain('"Opened" => System.Text.Json.JsonSerializer.Deserialize<Opened>');
+    // The stream table ships in the self-applied schema.
+    expect(files.get("api/Infrastructure/Persistence/DbSchema.cs")).toContain(
+      "CREATE TABLE IF NOT EXISTS account_events",
+    );
   });
 });
 

@@ -38,12 +38,16 @@ function findRepoFor(ctx: EmitCtx, aggName: string) {
 
 export const dapperPersistenceAdapter: PersistenceAdapter = {
   name: "dapper",
-  // v1 is state-based only — no event-sourcing.
-  supportedStrategies: ["state"],
+  // State + event-sourced (appliers, Dapper edition): the `<agg>_events`
+  // stream + fold reuse the persistence-agnostic domain/CQRS layer.
+  supportedStrategies: ["state", "eventLog"],
   // Relational tables only; document / embedded are EF-owned in v1.
   supportedShapes: ["relational"],
 
   supports(storageType, kind, persistenceStrategy) {
+    if (persistenceStrategy === "eventLog") {
+      return storageType === "postgres" && kind === "eventLog";
+    }
     return (
       persistenceStrategy === "state" &&
       ["postgres"].includes(storageType) &&
