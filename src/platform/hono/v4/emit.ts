@@ -20,6 +20,7 @@ import {
   mikroConnectionSetup,
   renderMikroConfig,
   renderMikroEntities,
+  renderMikroEventSourcedRepository,
   renderMikroRepository,
 } from "../../../generator/typescript/emit/mikroorm.js";
 import { emitTypescriptSeeds } from "../../../generator/typescript/emit/seed.js";
@@ -421,9 +422,12 @@ export function generateTypeScriptForContexts(
         "drizzle-repository",
         agg.name,
         usingMikro
-          ? // mikroorm only ever reaches the relational case (event-sourcing /
-            // document / embedded / inheritance are validator-gated out).
-            renderMikroRepository(agg, repo, ctx)
+          ? // mikroorm: event-sourced aggregates use the EntityManager event
+            // store (appliers, MikroORM edition); document / embedded /
+            // inheritance stay validator-gated out.
+            agg.persistedAs === "eventLog"
+            ? renderMikroEventSourcedRepository(agg, repo, ctx)
+            : renderMikroRepository(agg, repo, ctx)
           : agg.persistedAs === "eventLog"
             ? buildEventSourcedRepositoryFile(agg, repo, ctx, emitTrace)
             : shape === "document"

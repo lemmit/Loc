@@ -39,7 +39,11 @@ import {
 } from "./context-scaffolding-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { canEmitToExpressionFor, emitCriteria } from "./criteria-emit.js";
-import { renderDapperRepository, renderDapperSchema } from "./emit/dapper.js";
+import {
+  renderDapperEventSourcedRepository,
+  renderDapperRepository,
+  renderDapperSchema,
+} from "./emit/dapper.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
 import { emitDotnetMigrations } from "./emit/migrations.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
@@ -579,10 +583,15 @@ function emitAggregate(
   // byte-identical.
   const usingDapper = emitCtx?.deployable.persistence === "dapper";
   if (usingDapper) {
+    // Dapper event store (persistedAs(eventLog)) reuses the persistence-agnostic
+    // domain fold + CQRS create chain; only the repository is Dapper-specific.
+    // The `<agg>_events` table ships in DbSchema.cs (renderDapperSchema).
     place(
       `${agg.name}Repository.cs`,
       "repository-impl",
-      renderDapperRepository(agg, repoWithViews, ns, aggRetrievals),
+      isEs
+        ? renderDapperEventSourcedRepository(agg, repoWithViews, ns, findBodies)
+        : renderDapperRepository(agg, repoWithViews, ns, aggRetrievals),
     );
   } else if (isEs) {
     // Event-sourced: the `<agg>_events` stream repository (fold on load,

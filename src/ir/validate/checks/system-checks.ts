@@ -448,9 +448,13 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
-        if (a.persistedAs === "eventLog") reject(where, "is event-sourced");
+        // Event sourcing IS supported on this adapter (appliers): the
+        // `<agg>_events` stream + fold reuse the persistence-agnostic
+        // domain/CQRS layer.  An event-sourced aggregate has no state table,
+        // so the `shape(...)` axis is moot — skip that check for it.
         const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
-        if (shape !== "relational") reject(where, `is persisted as shape(${shape})`);
+        if (a.persistedAs !== "eventLog" && shape !== "relational")
+          reject(where, `is persisted as shape(${shape})`);
         if (a.isAbstract || a.extendsAggregate)
           reject(where, "participates in aggregate inheritance");
         if ((a.associations ?? []).length > 0)
@@ -512,9 +516,13 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
-        if (a.persistedAs === "eventLog") reject(where, "is event-sourced");
+        // Event sourcing IS supported on this adapter (appliers): the
+        // `<agg>_events` stream + fold reuse the persistence-agnostic
+        // domain/CQRS layer.  An event-sourced aggregate has no state table,
+        // so the `shape(...)` axis is moot — skip that check for it.
         const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
-        if (shape !== "relational") reject(where, `is persisted as shape(${shape})`);
+        if (a.persistedAs !== "eventLog" && shape !== "relational")
+          reject(where, `is persisted as shape(${shape})`);
         if (a.isAbstract || a.extendsAggregate)
           reject(where, "participates in aggregate inheritance");
         if ((a.associations ?? []).length > 0)

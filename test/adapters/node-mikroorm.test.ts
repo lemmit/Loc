@@ -59,7 +59,7 @@ describe("mikroorm persistence adapter — node/hono (Phase 5d)", () => {
   it("is registered as a real persistence adapter", () => {
     expect(resolvePersistence("node", "mikroorm")).toBe(mikroOrmPersistenceAdapter);
     expect(mikroOrmPersistenceAdapter.name).toBe("mikroorm");
-    expect(mikroOrmPersistenceAdapter.supportedStrategies).toEqual(["state"]);
+    expect(mikroOrmPersistenceAdapter.supportedStrategies).toEqual(["state", "eventLog"]);
   });
 
   it("emits an idiomatic MikroORM db/ layer instead of drizzle", async () => {
@@ -91,6 +91,40 @@ describe("mikroorm persistence adapter — node/hono (Phase 5d)", () => {
     expect(errors).toEqual([]);
     expect(files.has("api/db/schema.ts")).toBe(true);
     expect(files.has("api/db/entities.ts")).toBe(false);
+  });
+
+  // Event sourcing (appliers, MikroORM edition): a `persistence: mikroorm`
+  // deployable accepts a `persistedAs(eventLog)` aggregate and emits the
+  // EntityManager event store + the `<agg>_events` EntitySchema, reusing the
+  // domain fold + CQRS.
+  const esSys = `
+system D {
+  subdomain S {
+    context O {
+      event Opened { account: Account id, owner: string }
+      aggregate Account ids guid persistedAs(eventLog) {
+        owner: string
+        create open(owner: string) { emit Opened { account: id, owner: owner } }
+        apply(e: Opened) { owner := e.owner }
+      }
+      repository Accounts for Account { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: eventLog, use: pg }
+  deployable api { platform: hono { persistence: mikroorm }  contexts: [O]  dataSources: [s]  port: 8080 }
+}`;
+
+  it("accepts persistedAs(eventLog) and emits the MikroORM event store", async () => {
+    const { files, errors } = await emit(esSys);
+    expect(errors).toEqual([]);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("export class AccountEventRow");
+    expect(entities).toContain('tableName: "account_events"');
+    const repo = files.get("api/db/repositories/account-repository.ts")!;
+    expect(repo).toContain("Account._fromEvents(");
+    expect(repo).toContain("em.persist(r);");
+    expect(repo).toContain("function rowToEvent(");
   });
 });
 
