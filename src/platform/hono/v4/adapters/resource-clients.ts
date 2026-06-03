@@ -9,8 +9,8 @@
 // kind/sourceType compatibility has one source of truth.
 
 import type { Lines, ResourceAdapter } from "../../../../generator/_adapters/index.js";
-import { supportsSurfaceKind } from "../../../../ir/source-types.js";
 import type { DataSourceIR, StorageIR } from "../../../../ir/types/loom-ir.js";
+import { supportsSurfaceKind } from "../../../../util/source-types.js";
 
 /** Read a string `config` value from a storage by key. */
 function cfg(store: StorageIR | undefined, key: string): string | undefined {

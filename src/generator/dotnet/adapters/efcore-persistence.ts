@@ -10,12 +10,8 @@
 // into one entry per platform — no semantic change to the output.
 // ---------------------------------------------------------------------------
 
-import {
-  type AggregateIR,
-  type DataSourceIR,
-  PLATFORM_SAVING_SHAPES,
-  type StorageIR,
-} from "../../../ir/types/loom-ir.js";
+import type { AggregateIR, DataSourceIR, StorageIR } from "../../../ir/types/loom-ir.js";
+import { PLATFORM_SAVING_SHAPES } from "../../../util/platform-axes.js";
 import type { EmitCtx, Lines, PersistenceAdapter } from "../../_adapters/index.js";
 import { renderConfiguration, renderDbContext } from "../emit/efcore.js";
 import { emitDotnetMigrations } from "../emit/migrations.js";

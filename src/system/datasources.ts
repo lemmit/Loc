@@ -1,8 +1,8 @@
-import { isRelational } from "../ir/source-types.js";
 import type { DataSourceIR, DeployableIR, StorageIR, SystemIR } from "../ir/types/loom-ir.js";
 import { platformOwnsBackend } from "../language/validators/data/platform-rules.js";
 import { lines } from "../util/code-builder.js";
 import { snake } from "../util/naming.js";
+import { isRelational } from "../util/source-types.js";
 
 // ---------------------------------------------------------------------------
 // `.loom/datasources.md` — a derived markdown view of how `dataSource`
