@@ -175,7 +175,46 @@ Stay with an aggregate `operation` when the work fits inside one
 aggregate's invariants — that's simpler, faster, and doesn't need
 a workflow file.
 
-For event-driven choreography ("when an order is placed, decrement
-stock in another context") wait for the event-triggered workflow
-slice — it'll add `starts on event ...` plus the typed event-handler
-registry on both backends.
+## Triggers and command parameters
+
+A workflow's entry points are declared by its members (the workflow body
+is members-only — `workflow X { create(...) { ... } }`):
+
+| Member | Trigger |
+| --- | --- |
+| `create [name](params) [by <expr>] { ... }` | A starter.  The parameter shape discriminates the trigger (resolved at lowering): positional domain params synthesise an implicit command; a single payload param (`create(c: PlaceOrder)`) is an explicit command; a single event param with a `by` clause (`create(e: OrderPlaced) by e.order`) is event-triggered. |
+| `handle name(params) { ... }` | A continuation command handler — own-state mutation, may call other aggregates / repos.  Multiple handles make a multi-command saga. |
+| `on(e: Event) [by <expr>] { ... }` | An external-event reactor. |
+
+A `create` or `handle` parameter may be typed by an **event** or a
+**payload** (`command` / `query` / `response` / `error`) named directly:
+
+```ddd
+command SettleOrder { order: Order id, note: string }
+event   PaymentReceived { order: Order id, amount: int }
+
+workflow Fulfillment {
+  invoiceId: Invoice id                          // correlation field
+
+  create(c: SettleOrder)               { ... }   // explicit command-triggered
+  create(paid: PaymentReceived) by paid.order { ... }   // event-triggered
+  handle settle(c: SettleOrder)        { ... }   // continuation command
+}
+```
+
+The bound parameter is a flat transport record: `paid.amount` resolves
+to the field's declared type and is type-checked like any other
+expression (`paid.amount == "x"` is a type error).  These transport
+types are in scope **only** in `create` / `handle` parameter positions —
+elsewhere a bare event/payload name stays unresolved.  See the
+[language reference](language.md#type-references).
+
+> **Status.** The parameter surface above parses, resolves, and
+> type-checks today, and an event-triggered `create` lowers to a
+> correlated starter (`eventRef` / `eventBinding`).  The runtime that
+> *delivers* an inbound event to that starter — the typed event-handler
+> registry / subscription wiring on each backend — is a later slice;
+> until it lands, event-triggered workflows are declarable and
+> validated but not yet dispatched end-to-end.  See
+> [`workflow-and-applier.md`](proposals/workflow-and-applier.md) for the
+> roadmap.
