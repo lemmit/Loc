@@ -30,6 +30,7 @@ import { rewriteRelativeImports } from "../../../generator/typescript/layout-imp
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import { buildDocumentRepositoryFile } from "../../../generator/typescript/repository-document-builder.js";
 import { buildEmbeddedRepositoryFile } from "../../../generator/typescript/repository-embedded-builder.js";
+import { buildEventSourcedRepositoryFile } from "../../../generator/typescript/repository-eventsourced-builder.js";
 import {
   isTpcBase,
   isTphBase,
@@ -386,7 +387,10 @@ export function generateTypeScriptForContexts(
       if (agg.isAbstract) continue;
       const repo = findRepoFor(ctx, agg.name);
       place("domain-aggregate", agg.name, renderAggregate(agg, ctx, emitProvenance, emitTrace));
-      // Saving-shape routing: `document` → one jsonb blob + JSON
+      // Persistence routing.  Event-sourced (`persistedAs(eventLog)`) wins
+      // over the saving-shape axis — its repository appends to / folds the
+      // event stream rather than reading a state table.  Otherwise the
+      // saving-shape routing applies: `document` → one jsonb blob + JSON
       // round-trip via `_create`; `embedded` → queryable root columns +
       // containments in jsonb columns; `relational` (default) → the
       // normalised table-per-entity hydrate.
@@ -394,11 +398,13 @@ export function generateTypeScriptForContexts(
       place(
         "drizzle-repository",
         agg.name,
-        shape === "document"
-          ? buildDocumentRepositoryFile(agg, repo, ctx, emitTrace)
-          : shape === "embedded"
-            ? buildEmbeddedRepositoryFile(agg, repo, ctx, emitTrace)
-            : buildRepositoryFile(agg, repo, ctx, emitTrace),
+        agg.persistedAs === "eventLog"
+          ? buildEventSourcedRepositoryFile(agg, repo, ctx, emitTrace)
+          : shape === "document"
+            ? buildDocumentRepositoryFile(agg, repo, ctx, emitTrace)
+            : shape === "embedded"
+              ? buildEmbeddedRepositoryFile(agg, repo, ctx, emitTrace)
+              : buildRepositoryFile(agg, repo, ctx, emitTrace),
       );
       // Routes file — adapter-dispatched in system mode (the layered
       // StyleAdapter re-derives audit / provenance gates from

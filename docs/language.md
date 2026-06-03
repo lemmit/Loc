@@ -301,6 +301,7 @@ Inside an aggregate or an `entity` part:
 | `operation name(params) { … }` | Public mutating method (root only). |
 | `private operation name(params) { … }` | Mutating method, only callable from within the same aggregate root. |
 | `operation name(params) extern { precondition … }` | Public op whose business decision lives in user code; body must contain only `precondition` statements. See `extern.md`. |
+| `apply(e: <Event>) { … }` | **Event-sourcing fold** (only on a `persistedAs(eventLog)` aggregate).  Folds one emitted event type into state — a pure transition: assignments / collection mutations / `let` only, no `emit`, no side-effecting calls, no guards.  One `apply` per event type.  See the event-sourcing note below. |
 | `view name = Aggregate where filter` | Shorthand: saved query, source's wire shape.  Exposed at `GET /views/<snake>`. |
 | `view name { fields ... from Aggregate where? bind ... }` | Full form: declared output shape with bind-expression projections.  See `views.md`. |
 | `entity Name { … }` | Nested part declaration (inside an aggregate). |
@@ -308,6 +309,45 @@ Inside an aggregate or an `entity` part:
 
 Entity parts may declare any of the above except `operation` and `test`
 (those live on the root).
+
+#### Event sourcing — `persistedAs(eventLog)` + `apply(...)`
+
+An aggregate marked `persistedAs(eventLog)` in its header is **event-sourced**:
+its truth is an append-only event stream, and its state is a fold of that
+stream. The body contract differs from a state-based aggregate, and the
+compiler enforces it (in the IR validator and live in the editor):
+
+- **Command bodies decide and emit.** `operation` / `create` / `destroy`
+  bodies may run `precondition`s and `emit` events, but must **not** mutate
+  `this` directly — the state change is the applier's job.
+- **Appliers fold.** Each `apply(e: <Event>) { … }` reflects one event type
+  into state, using assignments / collection mutations / `let` only (a pure,
+  replayable fold — no `emit`, no calls, no guards). There is at most one
+  applier per event type, and **every emitted event needs a matching
+  applier** (or the transition is recorded but never reflected).
+- **`emit` records and folds.** At runtime an `emit` both appends to the
+  stream and applies the fold, so the in-memory aggregate is consistent for
+  the command's response.
+
+```
+event Deposited { account: Account id, amount: int }
+
+aggregate Account ids guid persistedAs(eventLog) {
+  balance: int
+  operation deposit(amount: int) {
+    precondition amount > 0
+    emit Deposited { account: id, amount: amount }   // decide + emit
+  }
+  apply(e: Deposited) { balance := balance + e.amount }   // fold
+}
+```
+
+Storage emission is currently the **Hono** backend only: an event-sourced
+aggregate persists to an append-only `<agg>_events` table and rehydrates by
+folding the stream on load. Hosting one on .NET / Phoenix is a validation
+error (not a silent state fallback). See `generators.md` for the per-backend
+matrix and `docs/proposals/workflow-and-applier.md` for the roadmap
+(creation-from-events, snapshots, and the other backends are upcoming).
 
 #### Provenanced fields
 
