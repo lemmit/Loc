@@ -1,0 +1,60 @@
+// Compile-gate fixture for the node (hono) `directoryLayout: byFeature` layout
+// (D-REALIZATION-AXES Phase 5b).  `directoryLayout` is a SYSTEM-MODE selection,
+// so this is generated via `ddd generate system` and the node deployable's
+// project is type-checked under strict tsc — proving the byFeature relocation +
+// relative-import rewrite produce a COMPILING project (the gap that let the
+// first byFeature attempt ship broken).
+//
+// Deliberately exercises the per-aggregate files that move + cross-import each
+// other: a value object (→ lib/schemas + value-objects imports), a find
+// (→ repository-find imports), an extern op (→ the relocated <agg>-extern.ts),
+// and two aggregates so shared/pooled imports are crossed from a feature folder.
+
+system ByFeatureNode {
+  api OrdersApi from Sales
+
+  subdomain Sales {
+    context Orders {
+      enum OrderStatus { Draft, Confirmed, Shipped }
+
+      valueobject Money {
+        amount:   int
+        currency: string
+      }
+
+      aggregate Customer with crudish {
+        name:  string
+        email: string
+      }
+
+      aggregate Order with crudish {
+        customerId: string
+        status:     OrderStatus
+        total:      Money
+        derived display: string = customerId
+
+        operation notify() extern {
+          precondition status == OrderStatus.Draft
+        }
+      }
+
+      repository Customers for Customer { }
+
+      repository Orders for Order {
+        find byCustomer(customerId: string): Order[] where this.customerId == customerId
+      }
+    }
+  }
+
+  storage primarySql { type: postgres }
+
+  resource customersState { for: Orders, kind: state, use: primarySql }
+
+  deployable api {
+    platform: node { directoryLayout: byFeature }
+    contexts: [Orders]
+    dataSources: [customersState]
+    serves: OrdersApi
+    port: 3000
+  }
+}
