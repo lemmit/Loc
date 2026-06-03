@@ -1054,3 +1054,28 @@ fallback paths, and centralising AST construction. Lessons:
   tracking item or an inline TODO with a grep-able tag — otherwise it
   drifts.
 
+## The "Specification" / "Criteria" naming quirk across frameworks
+
+The DDD Specification pattern is named **inconsistently — and sometimes
+backwards — across the frameworks Loom targets**, so reusing a
+framework's term for a generated type silently hands the reader the wrong
+mental model. Map (this surfaced designing reified criteria, see
+`docs/plans/retrieval-implementation.md` Phase 5 + `reified-criteria.md`):
+
+| Framework | `Specification<T>` means | `Criteria*` means |
+|---|---|---|
+| **Ardalis (.NET)** | the **whole query** — `Where`+`OrderBy`+`Include`+`Skip/Take` → maps to Loom **`retrieval`** | — |
+| **Spring Data (Java)** | **predicate only** (`toPredicate → Predicate`) → maps to Loom **`criterion`**; the bundle is `findAll(spec, Pageable)` | — |
+| **JPA (Java)** | — | `CriteriaBuilder`/`CriteriaQuery`/`Root` = the typed **query-builder API**, *not* a predicate → collides head-on with Loom's `criterion` (which *is* a predicate) |
+| **Hibernate (legacy)** | — | the deprecated `Criteria` session API — yet another meaning |
+
+So "Specification" sits at the **retrieval** layer in Ardalis but the
+**criterion** layer in Spring, and "Criteria" means a *query builder* in
+JPA but a *predicate* in Loom. **Lesson:** in generated code prefer
+Loom-owned neutral names (`Criterion<T>` = predicate, `Retrieval<T>` =
+query bundle) and treat the framework types (Ardalis `Specification<T>`,
+Spring `Specification<T>`, JPA `Criteria*`) as **internal rendering
+details of each backend's emitter**, never the shared vocabulary. The
+neutral IR concepts are `CriterionIR` / `RetrievalIR`; the framework name
+is a rendering target, not the concept.
+

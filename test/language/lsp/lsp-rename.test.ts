@@ -108,3 +108,34 @@ describe("RenameProvider — member access", () => {
     expect(result).not.toMatch(/\bstatus\b/);
   });
 });
+
+describe("RenameProvider — operations", () => {
+  // Regression for the bug where `Operation` was excluded from
+  // `isRenameableMember`, so renaming an operation went through the index-driven
+  // default and rewrote the declaration only — leaving `x.op()` / `op()` call
+  // sites (MemberSuffix tokens the index can't see) stale.
+  //
+  // NB: receivers the type system can't infer (e.g. a workflow `let w =
+  // Repo.getById(...)` binding) are a known blind spot for *all* member renames,
+  // not just operations — tracked in agent-tools-and-mcp.md §4c. These tests use
+  // `this.`/bare call sites, which resolve.
+  it("renames an operation declaration and rewrites its call sites", async () => {
+    const result = await renameAt(
+      `context Sales {
+  aggregate Wallet {
+    balance: int
+    operation <|>debit(amount: int) {
+      balance := balance - amount
+    }
+    operation drain() {
+      this.debit(balance)
+    }
+  }
+}`,
+      "withdraw",
+    );
+    expect(result).toContain("operation withdraw(amount: int)");
+    expect(result).toContain("this.withdraw(balance)"); // call site must follow
+    expect(result).not.toMatch(/\bdebit\b/);
+  });
+});
