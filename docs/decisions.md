@@ -1228,10 +1228,20 @@ This makes the server safe by default (read-only/functional — no consent
 prompts), keeps the browser transport trivial, and inherits the toolkit's
 determinism + browser-safety. File emission stays in the CLI, never in a tool.
 
-**v1 catalog.** `loom_validate` `{source}→ValidateReport`, `loom_apply_patch`
-`{source,patches}→PatchResult`, `loom_generate` `{source}→GenerateReport`,
-`loom_outline` `{source}→Outline`. `loom_verify` / `loom_read_model` /
-`loom_list_primitives` follow as their toolkit ops land.
+**Two verb families, one catalog.** (a) **Generative** (the v1 authoring loop,
+pure functions of `source`): `loom_validate` `{source}→ValidateReport`,
+`loom_apply_patch` `{source,patches}→PatchResult`, `loom_generate`
+`{source}→GenerateReport`, `loom_outline` `{source}→Outline`. (b)
+**Navigational** (query/refactor over the LSP providers, by-name dotted-symbol
+addressing): `loom_find_symbol` / `loom_references` / `loom_hover` /
+`loom_rename` / `loom_quickfix` / `loom_unfold_macro` — **edits returned as an
+LSP `WorkspaceEdit`, never applied to disk** (consistent with pure tools).
+Folded from the superseded `language-services-and-agent-tools` proposal; the
+navigational verbs gate on fixing the LSP providers' real bugs (operation
+rename) first. `loom_verify` / `loom_read_model` / `loom_list_primitives` follow
+as their toolkit ops land. New diagnostic→fix mappings are
+`src/language/fix-hints.ts` providers (one `ModelPatch` → both the LSP
+code-action and `loom_quickfix`), not duplicated bespoke verbs.
 
 **Consequences / answers the question that prompted this.**
 - The **stdio MCP server is not runnable in the playground browser** — and isn't

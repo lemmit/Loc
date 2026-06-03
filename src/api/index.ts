@@ -15,12 +15,13 @@
 
 import { EmptyFileSystem, type LangiumDocument, URI } from "langium";
 import type { Diagnostic } from "vscode-languageserver-types";
-import type { GenerateReport, ValidateReport } from "../diagnostics/contract.js";
+import type { GenerateReport, Outline, ValidateReport } from "../diagnostics/contract.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
 import { lowerModel, mergeLoomModels } from "../ir/lower/lower.js";
 import { type LoomDiagnostic, validateLoomModel } from "../ir/validate/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
+import { buildOutline } from "../language/print/index.js";
 import {
   buildGenerateReport,
   buildValidateReport,
@@ -28,6 +29,12 @@ import {
   langiumDiagnosticToJson,
 } from "./report.js";
 
+export type {
+  GenerateReport,
+  JsonDiagnostic,
+  Outline,
+  ValidateReport,
+} from "../diagnostics/contract.js";
 export type {
   ModelPatch,
   PatchApplied,
@@ -106,6 +113,21 @@ export async function validate(
     irDiagnostics,
     model,
   });
+}
+
+/**
+ * The model's `outline` — the address book of contexts / aggregates / members
+ * (the targets a `ModelPatch` and a diagnostic `node` use).  Cheap: parse +
+ * walk, no IR phases.  Always returns a valid object.
+ */
+export async function outline(source: string): Promise<Outline> {
+  const { model } = await parseSource(source);
+  if (!model) return { systems: [], contexts: [] };
+  try {
+    return buildOutline(model);
+  } catch {
+    return { systems: [], contexts: [] };
+  }
 }
 
 /**
