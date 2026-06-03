@@ -427,9 +427,12 @@ export function renderCsType(t: TypeIR): string {
     case "slot":
       throw new Error("renderCsType: 'slot' type is UI-only and should not reach the backend.");
     case "genericInstance":
-      throw new Error(
-        `renderCsType: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
-      );
+      // Carrier-bounded generic (`order paged`, `event envelope`) → an
+      // idiomatic C# generic record (`Paged<Order>`, `Envelope<string>`),
+      // defined once in the shared runtime (P3b).  Domain-side render: an
+      // entity arg stays the domain class; the controller maps it to the
+      // response record when serializing.
+      return `${upperFirst(t.ctor)}<${renderCsType(t.arg)}>`;
   }
 }
 

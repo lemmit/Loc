@@ -12,7 +12,7 @@
 // asserted explicitly.  Pure string emission, no IO; runs in <50ms.
 
 import { describe, expect, it } from "vitest";
-import { renderCsExpr } from "../../../src/generator/dotnet/render-expr.js";
+import { renderCsExpr, renderCsType } from "../../../src/generator/dotnet/render-expr.js";
 import type { ExprIR, TypeIR } from "../../../src/ir/types/loom-ir.js";
 
 const STRING: TypeIR = { kind: "primitive", name: "string" };
@@ -399,5 +399,25 @@ describe("dotnet renderCsExpr — lambda, new, list, object", () => {
         ],
       }),
     ).toBe('new { Name = "Ada", Age = 36 }');
+  });
+});
+
+describe("dotnet renderCsType — generic carriers (P3b)", () => {
+  it("renders `paged` as the generic Paged<T> record over the domain type", () => {
+    const t: TypeIR = {
+      kind: "genericInstance",
+      ctor: "paged",
+      arg: { kind: "entity", name: "Order" },
+    };
+    expect(renderCsType(t)).toBe("Paged<Order>");
+  });
+
+  it("renders `envelope` as Envelope<T>", () => {
+    const t: TypeIR = {
+      kind: "genericInstance",
+      ctor: "envelope",
+      arg: { kind: "primitive", name: "string" },
+    };
+    expect(renderCsType(t)).toBe("Envelope<string>");
   });
 });
