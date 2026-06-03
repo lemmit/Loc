@@ -100,6 +100,43 @@ describe("phoenixLiveView pipeline", () => {
     expect(files.has("phoenix_app/mix.exs")).toBe(true);
   });
 
+  it("emits .dialyzer_ignore.exs at project root + wires mix.exs to read it", async () => {
+    // Per docs/proposals/cross-stack-static-analysis.md — the ignore
+    // template ships as future-proofing for the Tier 4 Dialyzer gate.
+    // Sits unused until Dialyxir is added; the mix.exs `dialyzer:` block
+    // activates it automatically the moment the dep lands.
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const ignore = files.get("phoenix_app/.dialyzer_ignore.exs");
+    expect(ignore, ".dialyzer_ignore.exs is emitted at deployable root").toBeDefined();
+    // App-scoped router filter, scaled to the deployable slug.
+    expect(ignore!).toMatch(/\{"lib\/phoenix_app_web\/router\.ex", :_\}/);
+
+    const mix = files.get("phoenix_app/mix.exs")!;
+    expect(mix).toMatch(/ignore_warnings: "\.dialyzer_ignore\.exs"/);
+  });
+
+  it("emits the shared <App>.Types module at lib/<app>/types.ex", async () => {
+    // Per the Ash specing discipline in
+    // docs/proposals/cross-stack-static-analysis.md — one shared
+    // type vocabulary per app, consumed by every @spec / @type emit
+    // site via the `typesModule` parameter on renderTypespec.
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const types = files.get("phoenix_app/lib/phoenix_app/types.ex");
+    expect(types, "types.ex is emitted at the app-snake-cased path").toBeDefined();
+    expect(types!).toMatch(/defmodule PhoenixApp\.Types do/);
+    // Vocabulary the rest of the generator references — the four
+    // public aliases must all be present so any downstream emit site
+    // that uses them links cleanly.
+    expect(types!).toMatch(/@type id :: String\.t\(\)/);
+    expect(types!).toMatch(/@type timestamp :: DateTime\.t\(\)/);
+    expect(types!).toMatch(/@type result\(t\) :: \{:ok, t\} \| \{:error, Ash\.Error\.t\(\)\}/);
+    expect(types!).toMatch(
+      /@type result_list\(t\) :: \{:ok, \[t\]\} \| \{:error, Ash\.Error\.t\(\)\}/,
+    );
+  });
+
   it("emits docker-compose with a postgres-dependent phoenix service", async () => {
     const model = await buildFixture();
     const { files } = generateSystems(model);
@@ -1162,9 +1199,11 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
       }
       repository Customers for Customer { }
       repository Orders for Order { }
-      workflow placeOrder(customerId: Customer id) {
+      workflow placeOrder {
+      create(customerId: Customer id) {
         let order = Order.create({ customerId: customerId, status: Draft })
       }
+    }
       view ActiveOrders = Order where status == Confirmed
     }
   }
@@ -1451,6 +1490,18 @@ describe("full-form view bind projection (view-emit unit)", () => {
     const src = getViewFile();
     expect(src).toMatch(/status: record\.status/);
   });
+
+  it("emits @spec run(any()) :: [map shape] with the declared output fields", () => {
+    // Full-form views project to a map keyed by declared field names.
+    // The spec mirrors the bind projection exactly so Dialyzer can
+    // narrow downstream code interacting with the result.  `id` routes
+    // through the shared <App>.Types vocabulary; enums reference the
+    // Ash-auto-emitted `.t()` on the enum module.
+    const src = getViewFile();
+    expect(src).toMatch(
+      /@spec run\(any\(\)\) :: \[%\{order_id: Acme\.Types\.id\(\), status: Acme\.Sales\.OrderStatus\.t\(\), line_count: integer\(\)\}\]/,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1689,6 +1740,45 @@ describe("Ash.transaction/2 domain-list form (workflow-emit unit)", () => {
     expect(wfEx).toMatch(
       /do\s*\n\s*Logger\.info\("workflow_completed", event: "workflow_completed", workflow: "placeOrder"\)\s*\n\s*\{:ok, /,
     );
+  });
+
+  it("emits @spec run/2 with a typed param map and conservative return", () => {
+    // Conservative spec: input is the declared param map shape; return is
+    // :ok | {:ok, term()} | {:error, term()} since WorkflowIR doesn't carry
+    // an explicit return type today.  current_user lowers to any().
+    // The guid param routes through the standard `String.t()` primitive
+    // mapping (guids are UUID strings on the struct — they don't go
+    // through Types.id() since `Types.id()` is for `id` TypeIRs only).
+    const out = new Map<string, string>();
+    emitWorkflows("phoenix_app", transactionalCtx, "PhoenixApp", out);
+    const wfEx = out.get("lib/phoenix_app/sales/workflows/place_order.ex")!;
+    expect(wfEx).toMatch(
+      /@spec run\(%\{customer_id: String\.t\(\)\}, any\(\)\) :: :ok \| \{:ok, term\(\)\} \| \{:error, term\(\)\}/,
+    );
+  });
+
+  it("emits @spec run/2 with any() for empty-params workflows", () => {
+    // No declared params → run/2 takes `_args` and accepts any().
+    const emptyParamsCtx: BoundedContextIR = {
+      ...transactionalCtx,
+      workflows: [
+        {
+          ...transactionalCtx.workflows[0]!,
+          params: [],
+          // factory-let still references customerId in the fixture; clear the
+          // body so the no-params workflow is syntactically valid.
+          statements: [],
+        },
+      ],
+    };
+    const out = new Map<string, string>();
+    emitWorkflows("phoenix_app", emptyParamsCtx, "PhoenixApp", out);
+    const wfEx = out.get("lib/phoenix_app/sales/workflows/place_order.ex")!;
+    expect(wfEx).toMatch(
+      /@spec run\(any\(\), any\(\)\) :: :ok \| \{:ok, term\(\)\} \| \{:error, term\(\)\}/,
+    );
+    // And the def-line should match the spec — `_args` for the empty case.
+    expect(wfEx).toMatch(/def run\(_args, current_user \\\\ nil\)/);
   });
 });
 

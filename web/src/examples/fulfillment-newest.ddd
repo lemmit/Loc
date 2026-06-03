@@ -89,10 +89,12 @@ system FulfillmentSystem {
       // Workflow consuming the retrieval: `Repo.run` returns the page,
       // the `for … in` loop escalates each row (the per-iteration save
       // persists the mutation).
-      workflow escalateBacklog(p: Priority) {
-        let batch = Orders.run(PendingByPriority(p), page: { offset: 0, limit: 50 })
-        for o in batch {
-          o.escalate()
+      workflow escalateBacklog {
+        create(p: Priority) {
+          let batch = Orders.run(PendingByPriority(p), page: { offset: 0, limit: 50 })
+          for o in batch {
+            o.escalate()
+          }
         }
       }
 

@@ -8,9 +8,11 @@ const SRC = `
 system Sys {
   subdomain Sales { context Sales {
     aggregate Order { name: string }
-    workflow Archive(name: string) {
+    workflow Archive {
+      create(name: string) {
       let prev = salesFiles.get("orders/" + name)
       salesFiles.put("orders/" + name, name)
+    }
     }
   } }
   storage pg { type: postgres }

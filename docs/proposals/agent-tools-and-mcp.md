@@ -194,26 +194,35 @@ for free.
 > (`addressOf` / `buildOutline` / the patch index) now covers contexts,
 > aggregates **+ their members**, **value objects + their members**, workflows,
 > views, pages, **enums, events, repositories**, and system-level
-> **deployables** (value objects and deployables are also `add` containers). So:
-> - **`reserved-derived-on-vo`** (edits a VO member) and
->   **`react-deployable-missing-ui`** (`add ui:` into a deployable) are **now
->   agent-reachable** — implement as `fixHintFor` providers.
-> - **`seed-id-needs-raw`** (a `seed` block) and **`es-tph-forced-own-table`**
->   (the `inheritanceUsing` **header clause** — a node property, not a child
->   declaration) remain **not node-addressable**; they need either further
->   addressing work (seed blocks) or a within-node "header edit" patch kind, or
->   ship as editor-only `TextEdit` code-actions. Tracked.
+> **deployables**. `add` containers are nodes with a **free-form `{ member* }`
+> body** (context / aggregate / value object) — *not* deployables. The
+> **`insert`** op (`before`/`after` a sibling, or **`header-end`** before a
+> declaration's `{`) covers header clauses. So:
+> - ✅ **`reserved-derived-on-vo`** SHIPPED — `replace` the VO member, dropping
+>   `derived` (`display: T = …` is a valid VO field; round-trip clean).
+> - ✅ **`es-tph-forced-own-table`** SHIPPED — `insert … position: header-end`
+>   adds `inheritanceUsing(ownTable)` to the aggregate header (absent-clause
+>   case; the present-clause case needs a clause-replace, which isn't
+>   node-addressable — skipped).
+> - **`react-deployable-missing-ui`** stays **blocked** — the deployable body is
+>   a **positional grammar** (`ui:` has a fixed slot between `serves:` and
+>   `hosts:`); `header-end` targets the *header*, not a body slot. Needs a
+>   grammar-slot-aware body insert (or config-entry addressing), or an
+>   editor-only `TextEdit`. (Deployable was removed from the `add`-container set.)
+> - **`seed-id-needs-raw`** stays **blocked** — a `seed` block is **unnamed**, so
+>   it has no node address to target at all.
 
-Next batch (the first two now unblocked by the addressing extension):
+Next batch:
 
-| Diagnostic code | Patch | Effort |
+| Diagnostic code | Patch | Status |
 |---|---|---|
-| `loom.reserved-derived-on-vo` | strip the `derived` keyword | trivial |
-| `loom.seed-id-needs-raw` | insert the `raw` modifier | trivial |
-| `loom.es-tph-forced-own-table` | remove the offending header modifier | trivial |
-| `loom.legacy-part-call` / `loom.legacy-vo-call` | rewrite to modern form | small |
-| `loom.criterion-arity` | stub the missing arg with `_` | small |
-| `loom.react-deployable-missing-ui` | insert `ui: <name>` when exactly one `ui` is in scope | small |
+| `loom.bare-aggregate-in-type` | append ` id` to the type ref | ✅ shipped |
+| `loom.reserved-derived-on-vo` | drop the `derived` keyword | ✅ shipped |
+| `loom.es-tph-forced-own-table` | `insert header-end inheritanceUsing(ownTable)` | ✅ shipped (absent-clause) |
+| `loom.legacy-part-call` / `loom.legacy-vo-call` | rewrite `name(...)` → `name { ... }` | open (positional-arg → named-field rewrite, not mechanical) |
+| `loom.criterion-arity` | stub the missing arg with `_` | open |
+| `loom.react-deployable-missing-ui` | insert `ui: <name>` in its slot | blocked — positional body slot |
+| `loom.seed-id-needs-raw` | `seed {` → `seed raw {` | blocked — `seed` is unnamed |
 
 Each follows the shipped `loom.bare-aggregate-in-type` pattern; gate via
 `test/language/fix-hints.test.ts` (model-level) + `test/api/lsp.test.ts`

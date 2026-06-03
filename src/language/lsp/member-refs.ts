@@ -16,6 +16,7 @@ import {
   isAggregate,
   isEntityPart,
   isFunctionDecl,
+  isHandleDecl,
   isLambda,
   isLetStmt,
   isLValue,
@@ -25,7 +26,7 @@ import {
   isOperation,
   isPostfixChain,
   isValueObject,
-  isWorkflow,
+  isWorkflowCreateDecl,
   type LValue,
   type MemberSuffix,
   type NameRef,
@@ -135,20 +136,21 @@ function localShadows(node: AstNode, name: string): boolean {
   let n: AstNode | undefined = node.$container;
   while (n && !isEntityLike(n)) {
     if (isLambda(n) && n.param === name) return true;
+    if ((isOperation(n) || isFunctionDecl(n)) && n.params.some((p) => p.name === name)) {
+      return true;
+    }
+    // A workflow body is members-only (A2-S5f) — params + free statements live
+    // inside `create`/`handle` members, so the param/let shadowing checks live
+    // on those, not on the workflow itself.
     if (
-      (isOperation(n) || isFunctionDecl(n) || isWorkflow(n)) &&
-      n.params.some((p) => p.name === name)
+      (isWorkflowCreateDecl(n) || isHandleDecl(n)) &&
+      (n.params.some((p) => p.name === name) || n.body.some((s) => isLetStmt(s) && s.name === name))
     ) {
       return true;
     }
     // Operation bodies are `Statement[]`; a `let` of the same name shadows the
     // member. (FunctionDecl.body is a single Expression — no lets.)
     if (isOperation(n) && n.body.some((s) => isLetStmt(s) && s.name === name)) {
-      return true;
-    }
-    // A workflow body is a `WorkflowMember[]` (statements interleaved with
-    // `on(...)` reactors); a top-level `let` shadows the member.
-    if (isWorkflow(n) && n.members.some((s) => isLetStmt(s) && s.name === name)) {
       return true;
     }
     // Inside an `on(e: Event) { … }` reactor, the event binding and the

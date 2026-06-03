@@ -41,10 +41,12 @@ const FIXTURE = `system Mini {
         invariant name.length > 0
       }
       repository Orders for Order { }
-      workflow placeOrder(customerName: string) {
+      workflow placeOrder {
+      create(customerName: string) {
         precondition customerName.length > 0
         emit OrderPlaced { name: customerName }
       }
+    }
     }
   }
   api MiniApi from M

@@ -1079,3 +1079,46 @@ details of each backend's emitter**, never the shared vocabulary. The
 neutral IR concepts are `CriterionIR` / `RetrievalIR`; the framework name
 is a rendering target, not the concept.
 
+## Stacked refactor PRs: rebase before you branch, not at merge
+
+Splitting three oversized generator files into thin orchestrators + leaf
+modules (PRs #866 phoenix `shell-emit`, #868 ts `repository-find-builder`,
+#869 dotnet `cqrs-emit`) was pure code-motion and went green on the fast
+suite first try. The cost was entirely in **branching all three off a
+stale local `main`** — the checkout predated `main`'s Dapper PR (#855),
+which had threaded a `usingDapper` option through `cqrs-emit.ts`.
+
+The trap is that **disjoint files hide the staleness until the squash**.
+The phoenix and ts splits touched files `main` hadn't moved, so they
+squash-merged clean and *looked* like proof the base was current. Only
+#869 — whose file #855 *had* edited — surfaced the drift, and it surfaced
+as a GitHub merge conflict (405) *after* CI had already passed, not as a
+local build error. Recovery was a `git reset --hard origin/main` + re-apply
+the split on the now-Dapper-aware monolith (porting the `usingDapper`
+threading into the extracted `emitController`), then force-push.
+
+A second, smaller instance rode along: the only red CI check on #869 was a
+pre-existing `expect`-not-imported bug in an unrelated LSP test that `main`
+fixed in #884 — invisible until I merged `main` in. (Merging `main` also
+pulled in #883's Biome warn→error elevation; the new modules passed it
+clean, but that's another thing a stale base would have missed.)
+
+**Lessons:**
+
+- **`git fetch origin main` and branch from `origin/main`, not whatever
+  was checked out** — especially for a multi-PR refactor sequence. The
+  container's clone can be hours behind a busy `main`.
+- **A clean squash-merge of a disjoint-file PR is not evidence the base is
+  current.** Only a PR that overlaps an upstream edit will tell you, and it
+  tells you at merge time. Don't infer "base is fresh" from the easy ones.
+- **For a stack, merge down fast and refresh the next PR against the new
+  `main` immediately** (retarget base + `git merge origin/main` or rebase),
+  rather than letting all three sit on the original base. Re-running the
+  full CI matrix after the `main` merge is what caught both the Dapper
+  drift and the unrelated red test.
+- **The fix for the stale monolith is reset-and-replay, not conflict
+  resolution.** Hand-resolving `<<<<<<<` markers across a 700-line
+  code-motion diff is error-prone; resetting to `origin/main` and
+  re-applying the (small, well-understood) split on top is faster and
+  safer.
+

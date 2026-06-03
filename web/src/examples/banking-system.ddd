@@ -164,16 +164,14 @@ system BankingSystem {
       // thing rolls back.  Both accounts must already exist.
       // Invoke via POST /workflows/transfer_funds with body
       //   { fromAccount, toAccount, amount: { amount, currency } }
-      workflow transferFunds(
-        fromAccount: Account id,
-        toAccount: Account id,
-        amount: Money
-      ) transactional {
-        precondition amount.amount > 0
-        let src = Accounts.getById(fromAccount)
-        let dst = Accounts.getById(toAccount)
-        src.withdraw(amount)
-        dst.deposit(amount)
+      workflow transferFunds transactional {
+        create(fromAccount: Account id, toAccount: Account id, amount: Money) {
+          precondition amount.amount > 0
+          let src = Accounts.getById(fromAccount)
+          let dst = Accounts.getById(toAccount)
+          src.withdraw(amount)
+          dst.deposit(amount)
+        }
       }
     }
   }

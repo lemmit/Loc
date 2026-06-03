@@ -184,7 +184,9 @@ describe("resolveWorkflowIsolation", () => {
 system Sys {
   subdomain M { context C {
     aggregate A { x: int }
-    workflow doIt() transactional(serializable) { }
+    workflow doIt transactional(serializable) {
+      create() { }
+    }
   } }
   storage pg { type: postgres }
   resource cState {
@@ -203,7 +205,9 @@ system Sys {
 system Sys {
   subdomain M { context C {
     aggregate A { x: int }
-    workflow doIt() transactional { }
+    workflow doIt transactional {
+      create() { }
+    }
   } }
   storage pg { type: postgres }
   resource cState {
@@ -222,7 +226,9 @@ system Sys {
 system Sys {
   subdomain M { context C {
     aggregate A { x: int }
-    workflow doIt() transactional { }
+    workflow doIt transactional {
+      create() { }
+    }
   } }
   storage pg { type: postgres }
   resource cState { for: C, kind: state, use: pg }
@@ -242,7 +248,9 @@ system Sys {
   subdomain M { context C {
     aggregate A { x: int }
     aggregate B persistedAs(eventLog) { y: int }
-    workflow doIt() transactional { }
+    workflow doIt transactional {
+      create() { }
+    }
   } }
   storage pg { type: postgres }
   resource cState { for: C, kind: state, use: pg }

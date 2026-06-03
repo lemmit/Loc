@@ -16,7 +16,9 @@ const wrapWith = (uiArgs: string) => `
       context Orders {
         aggregate Order { subject: string }
         aggregate Customer { name: string }
-        workflow placeOrder() { let x = 1 }
+        workflow placeOrder {
+      create() { let x = 1 }
+    }
         view ActiveOrders = Order where subject == "x"
         repository Orders for Order { }
         repository Customers for Customer { }

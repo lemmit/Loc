@@ -8,7 +8,7 @@ import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { buildPhoenixResourceModules } from "./adapters/resource-clients.js";
-import { type RenderCtx, renderExpr } from "./render-expr.js";
+import { type RenderCtx, renderExpr, renderTypespec } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Workflow emission for Phoenix LiveView / Ash.
@@ -61,9 +61,15 @@ function renderWorkflow(
   sys: SystemIR | undefined,
 ): string {
   const moduleName = `${contextModule}.Workflows.${upperFirst(wf.name)}`;
+  const typesModule = `${appModule}.Types`;
   // Resource-op routing (Phase 4c): resourceName → helper module.
   const resourceModules = buildPhoenixResourceModules(sys, appModule);
-  const renderCtx: RenderCtx = { thisName: "record", contextModule, resourceModules };
+  const renderCtx: RenderCtx = {
+    thisName: "record",
+    contextModule,
+    typesModule,
+    resourceModules,
+  };
 
   const params = wf.params.map((p) => snake(p.name));
   const paramPattern =
@@ -108,6 +114,27 @@ function renderWorkflow(
       ].join("\n")
     : body;
 
+  // @spec on `def run/2`.  Param shape: the declared workflow params lower
+  // to a typed map (`%{p1: T1, p2: T2 | nil, ...}`); empty-params workflows
+  // accept `any()` since they ignore the first arg (`_args`).  `current_user`
+  // is `any()` — Ash actors are pluggable.  Return is conservatively
+  // `:ok | {:ok, term()} | {:error, term()}` since WorkflowIR carries no
+  // explicit return type today: bodies either succeed with `:ok` / `{:ok,
+  // value}`, fail with `{:error, reason}` (guards throw, with-clauses tail
+  // `{:error, ...}` through), or compose differently per workflow.  When
+  // workflows gain an explicit returnType in the IR, this can tighten to
+  // `Types.result(T)` shape per workflow.
+  const paramSpec =
+    wf.params.length === 0
+      ? "any()"
+      : `%{${wf.params
+          .map((p) => {
+            const base = renderTypespec(p.type, contextModule, typesModule);
+            return `${snake(p.name)}: ${base}`;
+          })
+          .join(", ")}}`;
+  const runSpec = `@spec run(${paramSpec}, any()) :: :ok | {:ok, term()} | {:error, term()}`;
+
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc "Workflow: ${upperFirst(wf.name)}"
@@ -118,6 +145,7 @@ defmodule ${moduleName} do
   # \`conn.assigns.current_user\` as the second positional arg; LiveView
   # callers pass \`socket.assigns.current_user\`.  Workflows that don't
   # reference currentUser ignore the param (default = nil).
+  ${runSpec}
   def run(${paramPattern}, current_user \\\\ nil) do
     _ = current_user
     ${startedCall}

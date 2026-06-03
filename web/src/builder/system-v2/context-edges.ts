@@ -24,8 +24,26 @@ import type {
   View,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
-import { isStatement } from "../../../../src/language/generated/ast.js";
+import {
+  isApply,
+  isHandleDecl,
+  isOnDecl,
+  isWorkflowCreateDecl,
+} from "../../../../src/language/generated/ast.js";
 import { computeAggregateRelations } from "./aggregate-edges";
+
+/** A2-S5f: a workflow body is members-only; its sequential statements live
+ *  inside `create` / `handle` / `on` / `apply` member bodies.  Flatten them so
+ *  edge collection sees every aggregate / repository / event touch. */
+function workflowStatements(wf: Workflow): Statement[] {
+  const out: Statement[] = [];
+  for (const m of wf.members) {
+    if (isWorkflowCreateDecl(m) || isHandleDecl(m) || isOnDecl(m) || isApply(m)) {
+      out.push(...m.body);
+    }
+  }
+  return out;
+}
 
 export interface ContextRelations {
   /** repository name → aggregate name */
@@ -135,8 +153,7 @@ function collectWorkflow(
   const usesAgg = new Set<string>();
   const usesRepo = new Set<string>();
   const emitsSet = new Set<string>();
-  for (const s of wf.members) {
-    if (!isStatement(s)) continue; // skip on(...) reactors + Property state fields
+  for (const s of workflowStatements(wf)) {
     if (s.$type === "AssignOrCallStmt") {
       const a = s as AssignOrCallStmt;
       // A method-call target like `Account.deposit` has LValue.head =

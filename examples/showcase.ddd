@@ -161,18 +161,20 @@ system DevPlatform {
             }
 
             // Non-transactional workflow.
-            workflow registerProject(name: string, visibility: Visibility) {
+            workflow registerProject {
+              create(name: string, visibility: Visibility) {
                 requires currentUser.permissions.length > 0
-                precondition name.length > 0
-                let proj = Project.create({
-                    name: name,
-                    visibility: visibility,
-                    active: true,
-                    sequence: 0,
-                        budget: 0.0,
-                    createdAt: now()
-                })
-                proj.addPipeline("default")
+                  precondition name.length > 0
+                  let proj = Project.create({
+                      name: name,
+                      visibility: visibility,
+                      active: true,
+                      sequence: 0,
+                          budget: 0.0,
+                      createdAt: now()
+                  })
+                  proj.addPipeline("default")
+              }
             }
 
             // View — shorthand form.
@@ -231,10 +233,12 @@ system DevPlatform {
             }
 
             // Transactional workflow with explicit isolation level.
-            workflow promoteToProduction(buildId: Build id) transactional(serializable) {
+            workflow promoteToProduction transactional(serializable) {
+              create(buildId: Build id) {
                 requires currentUser.role == "admin"
-                let b = Builds.getById(buildId)
-                b.promote("production")
+                  let b = Builds.getById(buildId)
+                  b.promote("production")
+              }
             }
         }
     }

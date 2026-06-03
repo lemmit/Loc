@@ -9,7 +9,8 @@ const SRC = `
 system Sys {
   subdomain Sales { context Sales {
     aggregate Order { name: string }
-    workflow Archive(name: string) {
+    workflow Archive {
+      create(name: string) {
       let url = salesFiles.signedUrl("k/" + name)
       let keys = salesFiles.list("k/")
       salesFiles.delete("k/" + name)
@@ -17,6 +18,7 @@ system Sys {
       salesJobs.publish("events", name)
       let rate = salesApi.get("/rate")
       let res = salesApi.post("/charge", name)
+    }
     }
   } }
   storage pg { type: postgres }

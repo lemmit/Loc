@@ -65,9 +65,13 @@ interface Edit {
   newText: string;
 }
 
-/** A container the `add` op can insert a member into (a `{ … }` body). */
+/** A container the `add` op can insert a member into — a node with a free-form
+ *  `{ member* }` body where appending before the closing `}` is valid.
+ *  Deliberately excludes `Deployable`: its body is a *positional* config
+ *  grammar (the `ui:` / `serves:` / `hosts:` slots are ordered), so a generic
+ *  append would land out of position and fail to parse. */
 function isContainer(node: AstNode): boolean {
-  return isBoundedContext(node) || isAggregate(node) || isValueObject(node) || isDeployable(node);
+  return isBoundedContext(node) || isAggregate(node) || isValueObject(node);
 }
 
 /** Walk the declaration tree (the same set `buildOutline` enumerates) building
@@ -147,6 +151,33 @@ function editFor(patch: ModelPatch, node: AstNode, text: string): Edit {
     while (to < text.length && text[to] !== "\n") to++;
     if (to < text.length) to++; // include the newline
     return { start: from, end: to, newText: "" };
+  }
+
+  if (patch.op === "insert") {
+    if (patch.source === undefined) throw new Error(`'insert' requires 'source'`);
+    const position = patch.position ?? "after";
+    if (position === "header-end") {
+      // Insert just before the target declaration's opening `{` (its header) —
+      // for header clauses like `inheritanceUsing(ownTable)`.  The existing
+      // space before `{` separates the prior token; a trailing space separates
+      // `source` from `{`.
+      let brace = start;
+      while (brace < end && text[brace] !== "{") brace++;
+      if (text[brace] !== "{")
+        throw new Error(`'${patch.target}' has no '{' header to insert before`);
+      return { start: brace, end: brace, newText: `${patch.source} ` };
+    }
+    // before / after — a sibling line at the target's own indentation.
+    const ls = lineStart(text, start);
+    let indent = "";
+    for (let i = ls; i < start && (text[i] === " " || text[i] === "\t"); i++) indent += text[i];
+    if (position === "before") {
+      return { start: ls, end: ls, newText: `${indent}${patch.source}\n` };
+    }
+    let lineEnd = end;
+    while (lineEnd < text.length && text[lineEnd] !== "\n") lineEnd++;
+    if (lineEnd < text.length) lineEnd++; // past the newline
+    return { start: lineEnd, end: lineEnd, newText: `${indent}${patch.source}\n` };
   }
 
   // add — insert `source` as a new member just before the container's `}`.

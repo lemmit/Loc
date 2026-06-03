@@ -18,15 +18,21 @@ export type JsonSeverity = "error" | "warning" | "info";
  * re-printing.  `target` uses the same address space as the diagnostic `node`
  * and the outline (`<keyword> <Context>.<Decl>[.<member>]`).
  *
- * - `add`     — `target` is the container to add into; `source` is the new
- *               member/declaration text.
+ * - `add`     — `target` is a free-body container (context / aggregate / value
+ *               object); `source` is appended as a new member.
  * - `replace` — `target` is the node to replace; `source` is its new text.
  * - `remove`  — `target` is the node to delete; `source` is ignored.
+ * - `insert`  — position-aware insert of `source` relative to `target`
+ *               (`position`): `before` / `after` a sibling node, or
+ *               `header-end` (just before the target declaration's opening
+ *               `{` — for header clauses, e.g. `inheritanceUsing(...)`).
  */
 export interface ModelPatch {
-  op: "add" | "replace" | "remove";
+  op: "add" | "replace" | "remove" | "insert";
   target: string;
   source?: string;
+  /** Only for `op: "insert"`.  Defaults to `"after"`. */
+  position?: "before" | "after" | "header-end";
 }
 
 /** The pipeline phase that raised a diagnostic (contract §3.2). */

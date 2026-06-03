@@ -13,7 +13,7 @@ function mk(workflowBody: string, opts: { transactional?: boolean } = {}): strin
 system Sys {
   subdomain Sales { context Sales {
     aggregate Order { name: string }
-    workflow Archive(name: string)${t} { ${workflowBody} }
+    workflow Archive${t} { create(name: string) { ${workflowBody} } }
   } }
   storage pg { type: postgres }
   storage files { type: s3, config: { bucket: "b" } }

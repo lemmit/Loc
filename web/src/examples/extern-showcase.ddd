@@ -60,9 +60,11 @@ system ExternShowcase {
       // Workflows can drive a parameterless extern op — the generator
       // emits the same load → preconditions → handler → invariants → save
       // dance the auto HTTP route does.
-      workflow confirmOrder(orderId: Order id) {
-        let order = Orders.getById(orderId)
-        order.confirm()
+      workflow confirmOrder {
+        create(orderId: Order id) {
+          let order = Orders.getById(orderId)
+          order.confirm()
+        }
       }
     }
   }

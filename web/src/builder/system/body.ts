@@ -8,8 +8,9 @@ import type {
   Statement,
   ValueObject,
   Workflow,
+  WorkflowCreateDecl,
 } from "../../../../src/language/generated/ast.js";
-import { isStatement } from "../../../../src/language/generated/ast.js";
+import { isWorkflowCreateDecl } from "../../../../src/language/generated/ast.js";
 import { applyEdits } from "../edit-engine";
 import { parseDdd } from "../parse";
 
@@ -47,11 +48,15 @@ function resolveBody(ast: Model, loc: BodyLocator): Body | null {
   if (loc.kind === "workflow") {
     for (const n of AstUtils.streamAst(ast)) {
       if (n.$type === "Workflow" && (n as Workflow).name === loc.name) {
-        // A workflow body is a `WorkflowMember[]` (statements interleaved with
-        // `on(...)` reactors and `Property` state fields); the statement editor
-        // operates on the statement members only.
-        const statements = (n as Workflow).members.filter(isStatement);
-        return { owner: n, statements };
+        // A2-S5f: a workflow body is members-only — sequential statements live
+        // inside the primary `create(...)` starter (the unnamed, command-
+        // triggered one), so the statement editor operates on that create body.
+        const wf = n as Workflow;
+        const creates = wf.members.filter(isWorkflowCreateDecl);
+        const create: WorkflowCreateDecl | undefined =
+          creates.find((c) => !c.name) ?? creates[0];
+        if (!create) return null;
+        return { owner: create, statements: create.body };
       }
     }
     return null;

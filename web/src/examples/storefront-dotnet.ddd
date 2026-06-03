@@ -135,23 +135,19 @@ system StorefrontDotnet {
       // one DB transaction; a failing precondition throws
       // DomainException → 400 with the violated rule, and the
       // transaction rolls back.
-      workflow checkout(
-        customerId: Customer id,
-        walletId: Wallet id,
-        productId: Product id,
-        unitPrice: Money,
-        qty: int
-      ) transactional {
-        precondition qty > 0
-        let wallet = Wallets.getById(walletId)
-        let order = Order.create({
-          customerId: customerId,
-          status: Draft,
-          placedAt: now()
-        })
-        order.addLine(productId, unitPrice, qty)
-        order.confirm()
-        wallet.debit(unitPrice)
+      workflow checkout transactional {
+        create(customerId: Customer id, walletId: Wallet id, productId: Product id, unitPrice: Money, qty: int) {
+          precondition qty > 0
+          let wallet = Wallets.getById(walletId)
+          let order = Order.create({
+            customerId: customerId,
+            status: Draft,
+            placedAt: now()
+          })
+          order.addLine(productId, unitPrice, qty)
+          order.confirm()
+          wallet.debit(unitPrice)
+        }
       }
 
       view ConfirmedOrders = Order where status == Confirmed

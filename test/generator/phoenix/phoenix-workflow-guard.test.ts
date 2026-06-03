@@ -20,10 +20,12 @@ system Sys {
   subdomain Sales { context Sales {
     aggregate Order { name: string }
     repository Orders for Order { }
-    workflow Archive(name: string) {
+    workflow Archive {
+      create(name: string) {
       requires currentUser.role == "admin"
       precondition name.length > 0
       let o = Order.create({ name: name })
+    }
     }
   } }
   storage pg { type: postgres }
@@ -58,8 +60,10 @@ system Sys {
   subdomain Sales { context Sales {
     aggregate Order { name: string }
     repository Orders for Order { }
-    workflow Touch(name: string) {
+    workflow Touch {
+      create(name: string) {
       let o = Order.create({ name: name })
+    }
     }
   } }
   storage pg { type: postgres }

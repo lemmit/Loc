@@ -20,11 +20,20 @@
           "nullable": false
         },
         {
-          "name": "price",
+          "name": "price_amount",
           "type": {
-            "kind": "json"
+            "kind": "decimal"
           },
-          "nullable": false
+          "nullable": false,
+          "voGroup": "price"
+        },
+        {
+          "name": "price_currency",
+          "type": {
+            "kind": "text"
+          },
+          "nullable": false,
+          "voGroup": "price"
         }
       ],
       "primaryKey": [

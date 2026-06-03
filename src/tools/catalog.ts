@@ -66,7 +66,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "loom_apply_patch",
     description:
-      "Apply node-addressed model patches to a .ddd source. Each patch is { op: add|replace|remove, target: <node address>, source?: <.ddd text> }. Atomic — if any patch fails to resolve, nothing is applied. Returns the patched source or per-patch errors.",
+      "Apply node-addressed model patches to a .ddd source. Each patch is { op: add|replace|remove|insert, target: <node address>, source?: <.ddd text>, position? }. add appends a member to a free-body container; replace/remove edit the targeted node; insert places source before/after a sibling or at header-end (before the target's opening '{', for header clauses). Atomic — if any patch fails to resolve, nothing is applied. Returns the patched source or per-patch errors.",
     inputSchema: {
       type: "object",
       properties: {
@@ -77,7 +77,7 @@ export const TOOLS: ToolDef[] = [
           items: {
             type: "object",
             properties: {
-              op: { type: "string", enum: ["add", "replace", "remove"] },
+              op: { type: "string", enum: ["add", "replace", "remove", "insert"] },
               target: {
                 type: "string",
                 description:
@@ -85,7 +85,14 @@ export const TOOLS: ToolDef[] = [
               },
               source: {
                 type: "string",
-                description: ".ddd text for the new/replacement node (required for add/replace).",
+                description:
+                  ".ddd text for the new/replacement node (required for add/replace/insert).",
+              },
+              position: {
+                type: "string",
+                enum: ["before", "after", "header-end"],
+                description:
+                  "For op=insert only: place source before/after the target sibling, or at header-end (before its '{'). Default 'after'.",
               },
             },
             required: ["op", "target"],

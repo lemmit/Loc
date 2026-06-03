@@ -18,6 +18,7 @@ import { emitOpenApiSpec } from "./openapi-emit.js";
 import { emitShellFiles, renderSpaController, toModulePrefix, toSnakeApp } from "./shell-emit.js";
 import { renderSidebarComponent } from "./sidebar-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
+import { renderTypesModule } from "./types-module-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
 
@@ -109,6 +110,14 @@ export function generatePhoenixLiveViewProject(
       ? resolveDataSourceConfig(agg as EnrichedAggregateIR, owningCtx, sys)
       : undefined;
   };
+
+  // --- Shared type vocabulary (`<App>.Types`) ----------------------------
+  // One module per app carrying id() / timestamp() / result(t) /
+  // result_list(t).  Every emitter site that writes a typespec for an
+  // id or DateTime field references this module via the `typesModule`
+  // parameter on `renderTypespec` (see context-emit / domain-emit).
+  const typesModule = `${appModule}.Types`;
+  out.set(`lib/${appName}/types.ex`, renderTypesModule(typesModule));
 
   // --- Per-context domain files -------------------------------------------
   for (const ctx of contexts) {

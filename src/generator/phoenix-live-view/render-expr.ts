@@ -38,6 +38,14 @@ export interface RenderCtx {
   thisName: string;
   /** Module prefix for the current bounded context, e.g. `"MyApp.Sales"`. */
   contextModule: string;
+  /** Shared `<App>.Types` module — emitted once per app by the
+   *  orchestrator (index.ts).  When set, `renderTypespec` lowers
+   *  `id` → `<typesModule>.id()` and primitive `datetime` →
+   *  `<typesModule>.timestamp()` instead of inlining `String.t()` /
+   *  `DateTime.t()`.  Optional so direct expression-render unit tests
+   *  (which never touch typespecs) can construct a ctx without
+   *  caring; emission paths that write `@spec` lines always set it. */
+  typesModule?: string;
   /** Aggregate whose finds/derived/op bodies we're lowering.  Required
    *  for `this.<refColl>.contains(param)` membership predicates, which
    *  lower to an Ash `exists(<rel>, id == ^arg(:<param>))` filter
@@ -521,6 +529,77 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
     case "genericInstance":
       throw new Error(
         `renderAshType: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Elixir typespec rendering — distinct from `renderAshType` above, which
+// emits *Ash attribute types* (`:string`, `:integer`).  This emits real
+// Elixir typespec syntax (`String.t()`, `integer()`, `Foo.t() | nil`) for
+// `@spec` / `@type` annotations on event modules, value-object modules,
+// and the hand-written `def`s in context-emit / domain-emit.  Ash v3
+// auto-generates typespecs for resource modules, so we don't emit on
+// the resource itself — only on the surface that the macro layer
+// doesn't cover.
+//
+// Optionals lower to `T | nil` (Elixir's nullable convention).  Arrays
+// lower to `[T]`.  Enums and value-object/entity types reference their
+// module's `.t()`.
+//
+// When `typesModule` is provided (`<App>.Types`, emitted once per app
+// by `types-module-emit.ts`), `id` → `<typesModule>.id()` and primitive
+// `datetime` → `<typesModule>.timestamp()` — references to the shared
+// vocabulary instead of inlining `String.t()` / `DateTime.t()`.  Falls
+// back to the inline shapes when absent (used by direct unit tests and
+// for backwards compatibility with any emission site that hasn't been
+// threaded through yet).
+// ---------------------------------------------------------------------------
+
+export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: string): string {
+  switch (t.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
+    case "primitive":
+      switch (t.name) {
+        case "int":
+        case "long":
+          return "integer()";
+        case "decimal":
+        case "money":
+          // Decimal is the canonical precise type for both decimal and
+          // money fields — matches `renderAshType`'s `:decimal` mapping.
+          return "Decimal.t()";
+        case "string":
+          return "String.t()";
+        case "bool":
+          return "boolean()";
+        case "datetime":
+          return typesModule ? `${typesModule}.timestamp()` : "DateTime.t()";
+        case "guid":
+          // Ash represents UUIDs as plain binary strings on the struct.
+          return "String.t()";
+        case "json":
+          return "map()";
+      }
+    case "id":
+      // IDs flow as UUID strings on the struct (Ash :uuid → String.t()).
+      return typesModule ? `${typesModule}.id()` : "String.t()";
+    case "enum":
+      // Enums are Ash.Type.Enum modules carrying an `atom` value on the
+      // struct.  Reference the module's auto-generated `.t()`.
+      return `${contextModule}.${upperFirst(t.name)}.t()`;
+    case "valueobject":
+    case "entity":
+      return `${contextModule}.${upperFirst(t.name)}.t()`;
+    case "array":
+      return `[${renderTypespec(t.element, contextModule, typesModule)}]`;
+    case "optional":
+      return `${renderTypespec(t.inner, contextModule, typesModule)} | nil`;
+    case "slot":
+      throw new Error("renderTypespec: 'slot' type is UI-only and should not reach the backend.");
+    case "genericInstance":
+      throw new Error(
+        `renderTypespec: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
       );
   }
 }

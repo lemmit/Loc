@@ -123,7 +123,9 @@ describe("menu emitter", () => {
           context Orders {
             aggregate Order { x: int }
             repository Orders for Order { }
-            workflow placeOrder() { let o = Order.create({ }) }
+            workflow placeOrder {
+      create() { let o = Order.create({ }) }
+    }
             view ActiveOrders = Order where x > 0
           }
         }

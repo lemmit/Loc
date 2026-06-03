@@ -22,7 +22,13 @@ import { classifyForWire, singleFieldShape } from "../../ir/validate/invariant-c
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderJasonEncoderImpl } from "./jason-camel-emit.js";
 import { joinEntityName } from "./join-resource-emit.js";
-import { type RenderCtx, relationshipNameFor, renderAshType, renderExpr } from "./render-expr.js";
+import {
+  type RenderCtx,
+  relationshipNameFor,
+  renderAshType,
+  renderExpr,
+  renderTypespec,
+} from "./render-expr.js";
 import { renderElixirStatements } from "./render-stmt.js";
 
 /** True for a field type that is a collection of references
@@ -106,7 +112,12 @@ function renderAggregateResource(
     `    repo ${repoModule}`,
   ];
 
-  const renderCtx: RenderCtx = { thisName: "record", contextModule: ctxModule, agg };
+  const renderCtx: RenderCtx = {
+    thisName: "record",
+    contextModule: ctxModule,
+    typesModule: `${appModule}.Types`,
+    agg,
+  };
 
   // Reference-collection fields (`Id<T>[]`) are persisted via a separate
   // join table (see join-resource-emit.ts), not as a column on this row.
@@ -176,7 +187,7 @@ function renderAggregateResource(
   // but module-function bodies are native Elixir.
   const inspectDerived = agg.derived.find((d) => d.name === "inspect");
   const inspectFn = inspectDerived
-    ? `\n  def inspect(record) do\n    ${renderExpr(inspectDerived.expr, renderCtx)}\n  end\n`
+    ? `\n  @spec inspect(t()) :: String.t()\n  def inspect(record) do\n    ${renderExpr(inspectDerived.expr, renderCtx)}\n  end\n`
     : "";
 
   // camelCase wire-shape Jason encoder.  Pairs with the resource
@@ -230,7 +241,11 @@ function renderEntityPartResource(
   options: { schema?: string; prefix?: string; embedded?: boolean } = {},
 ): string {
   const moduleName = `${ctxModule}.${upperFirst(part.name)}`;
-  const renderCtxEmbedded: RenderCtx = { thisName: "record", contextModule: ctxModule };
+  const renderCtxEmbedded: RenderCtx = {
+    thisName: "record",
+    contextModule: ctxModule,
+    typesModule: `${appModule}.Types`,
+  };
 
   // Embedded (`shape(embedded)`): the part has no table of its own — it
   // is stored inline in its parent's jsonb column.  So `data_layer:
@@ -270,7 +285,11 @@ ${jasonImplEmbedded}`;
     `    repo ${repoModule}`,
   ];
 
-  const renderCtx: RenderCtx = { thisName: "record", contextModule: ctxModule };
+  const renderCtx: RenderCtx = {
+    thisName: "record",
+    contextModule: ctxModule,
+    typesModule: `${appModule}.Types`,
+  };
 
   // camelCase wire-shape Jason encoder (matches aggregate behaviour).
   // Excludes the parent FK from the wire — parts are embedded under
@@ -664,7 +683,16 @@ function renderHelperFunctions(functions: FunctionIR[], ctx: RenderCtx): string 
     const params = ["record", ...fn.params.map((p) => snake(p.name))];
     const body = renderExpr(fn.body, ctx);
     const recordPrefix = exprUsesThis(fn.body) ? "" : "    _ = record\n";
-    return `  defp ${snake(fn.name)}(${params.join(", ")}) do
+    // @spec — `record` is the enclosing aggregate's struct (`t()` inside
+    // the resource module), then each declared parameter, then the
+    // function's return type.  Skipped when ctx.agg is unset (no
+    // aggregate context → emit untyped so we don't fabricate a `t()`
+    // that doesn't resolve).  `ctx.typesModule`, when set, routes
+    // id / timestamp through the shared `<App>.Types` vocabulary.
+    const specLine = ctx.agg
+      ? `  @spec ${snake(fn.name)}(${["t()", ...fn.params.map((p) => renderTypespec(p.type, ctx.contextModule, ctx.typesModule))].join(", ")}) :: ${renderTypespec(fn.returnType, ctx.contextModule, ctx.typesModule)}\n`
+      : "";
+    return `${specLine}  defp ${snake(fn.name)}(${params.join(", ")}) do
 ${recordPrefix}    ${body}
   end`;
   });

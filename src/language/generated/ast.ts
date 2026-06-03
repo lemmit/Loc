@@ -624,7 +624,7 @@ export function isValueObjectMember(item: unknown): item is ValueObjectMember {
     return reflection.isInstance(item, ValueObjectMember);
 }
 
-export type WorkflowMember = Apply | HandleDecl | OnDecl | Property | Statement;
+export type WorkflowMember = Apply | HandleDecl | OnDecl | Property | WorkflowCreateDecl;
 
 export const WorkflowMember = 'WorkflowMember';
 
@@ -681,7 +681,7 @@ export function isApply(item: unknown): item is Apply {
 }
 
 export interface AssignOrCallStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | StampDecl | TestBlock | TestE2E | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | StampDecl | TestBlock | TestE2E | WorkflowCreateDecl;
     readonly $type: 'AssignOrCallStmt';
     op?: '+=' | '-=' | ':=';
     target: LValue;
@@ -695,7 +695,7 @@ export function isAssignOrCallStmt(item: unknown): item is AssignOrCallStmt {
 }
 
 export interface BinaryChain extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'BinaryChain';
     head: Expression;
     ops: Array<'!=' | '%' | '&&' | '*' | '+' | '-' | '/' | '<' | '<=' | '==' | '>' | '>=' | '||'>;
@@ -746,7 +746,7 @@ export function isBoolConfigValue(item: unknown): item is BoolConfigValue {
 }
 
 export interface BoolLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'BoolLit';
     value: 'false' | 'true';
 }
@@ -772,7 +772,7 @@ export function isBoundedContext(item: unknown): item is BoundedContext {
 }
 
 export interface BuilderCall extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'BuilderCall';
     entries: Array<BuilderEntry>;
     type: string;
@@ -939,7 +939,7 @@ export function isCriterion(item: unknown): item is Criterion {
 }
 
 export interface DecLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'DecLit';
     value: string;
 }
@@ -1035,7 +1035,7 @@ export function isEmitField(item: unknown): item is EmitField {
 }
 
 export interface EmitStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | TestBlock | TestE2E | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
     readonly $type: 'EmitStmt';
     event: Reference<EventDecl>;
     fields: Array<EmitField>;
@@ -1163,7 +1163,7 @@ export function isFindDecl(item: unknown): item is FindDecl {
 }
 
 export interface ForStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | WorkflowCreateDecl;
     readonly $type: 'ForStmt';
     body: Array<Statement>;
     iterable: Expression;
@@ -1206,7 +1206,7 @@ export function isHandleDecl(item: unknown): item is HandleDecl {
 }
 
 export interface IdRef extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'IdRef';
 }
 
@@ -1265,7 +1265,7 @@ export function isIntConfigValue(item: unknown): item is IntConfigValue {
 }
 
 export interface IntLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'IntLit';
     value: number;
 }
@@ -1291,7 +1291,7 @@ export function isInvariant(item: unknown): item is Invariant {
 }
 
 export interface Lambda extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'Lambda';
     body?: Expression;
     param: string;
@@ -1354,7 +1354,7 @@ export function isLayoutProp(item: unknown): item is LayoutProp {
 }
 
 export interface LetStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | TestBlock | TestE2E | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
     readonly $type: 'LetStmt';
     expr: Expression;
     name: string;
@@ -1367,7 +1367,7 @@ export function isLetStmt(item: unknown): item is LetStmt {
 }
 
 export interface ListLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'ListLit';
     elements: Array<Expression>;
 }
@@ -1530,7 +1530,7 @@ export function isMatchArm(item: unknown): item is MatchArm {
 }
 
 export interface MatchExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'MatchExpr';
     arms: Array<MatchArm>;
     elseExpr?: Expression;
@@ -1635,7 +1635,7 @@ export function isModel(item: unknown): item is Model {
 }
 
 export interface MoneyLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'MoneyLit';
     value?: string;
 }
@@ -1659,7 +1659,7 @@ export function isNamedType(item: unknown): item is NamedType {
 }
 
 export interface NameRef extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'NameRef';
     name: NameRefIdent;
 }
@@ -1671,7 +1671,7 @@ export function isNameRef(item: unknown): item is NameRef {
 }
 
 export interface NowExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'NowExpr';
 }
 
@@ -1682,7 +1682,7 @@ export function isNowExpr(item: unknown): item is NowExpr {
 }
 
 export interface NullLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'NullLit';
     value: 'null';
 }
@@ -1707,7 +1707,7 @@ export function isObjectFieldInit(item: unknown): item is ObjectFieldInit {
 }
 
 export interface ObjectLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | SeedRow | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | SeedRow | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'ObjectLit';
     fields: Array<ObjectFieldInit>;
 }
@@ -1789,7 +1789,7 @@ export function isPageMenuMeta(item: unknown): item is PageMenuMeta {
 }
 
 export interface Parameter extends AstNode {
-    readonly $container: Component | Create | Criterion | Destroy | FindDecl | FunctionDecl | HandleDecl | Operation | Page | Retrieval | Workflow;
+    readonly $container: Component | Create | Criterion | Destroy | FindDecl | FunctionDecl | HandleDecl | Operation | Page | Retrieval | WorkflowCreateDecl;
     readonly $type: 'Parameter';
     name: LooseName;
     type: TypeRef;
@@ -1802,7 +1802,7 @@ export function isParameter(item: unknown): item is Parameter {
 }
 
 export interface ParenExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'ParenExpr';
     inner: Expression;
 }
@@ -1852,7 +1852,7 @@ export function isPermissionsBlock(item: unknown): item is PermissionsBlock {
 }
 
 export interface PostfixChain extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'PostfixChain';
     head: Expression | NameRef;
     suffixes: Array<PostfixSuffix>;
@@ -1865,7 +1865,7 @@ export function isPostfixChain(item: unknown): item is PostfixChain {
 }
 
 export interface PreconditionStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | TestBlock | TestE2E | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
     readonly $type: 'PreconditionStmt';
     expr: Expression;
 }
@@ -1877,7 +1877,7 @@ export function isPreconditionStmt(item: unknown): item is PreconditionStmt {
 }
 
 export interface PrimitiveConversion extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'PrimitiveConversion';
     target?: 'decimal' | 'long' | 'money' | 'string';
     value?: Expression;
@@ -1973,7 +1973,7 @@ export function isRequiresProp(item: unknown): item is RequiresProp {
 }
 
 export interface RequiresStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | Workflow;
+    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | WorkflowCreateDecl;
     readonly $type: 'RequiresStmt';
     expr: Expression;
 }
@@ -2210,7 +2210,7 @@ export function isStringConfigValue(item: unknown): item is StringConfigValue {
 }
 
 export interface StringLit extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'StringLit';
     value: string;
 }
@@ -2249,7 +2249,7 @@ export function isSystem(item: unknown): item is System {
 }
 
 export interface TernaryExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'TernaryExpr';
     cond: Expression;
     elseExpr: Expression;
@@ -2332,7 +2332,7 @@ export function isThemeProp(item: unknown): item is ThemeProp {
 }
 
 export interface ThisRef extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'ThisRef';
 }
 
@@ -2449,7 +2449,7 @@ export function isUiSugarBinding(item: unknown): item is UiSugarBinding {
 }
 
 export interface UnaryExpr extends AstNode {
-    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View;
+    readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | ExpectThrowsStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'UnaryExpr';
     op: '!' | '-';
     operand: Expression;
@@ -2534,7 +2534,6 @@ export interface Workflow extends AstNode {
     isolation?: IsolationLevel;
     members: Array<WorkflowMember>;
     name: string;
-    params: Array<Parameter>;
     transactional: boolean;
 }
 
@@ -2542,6 +2541,21 @@ export const Workflow = 'Workflow';
 
 export function isWorkflow(item: unknown): item is Workflow {
     return reflection.isInstance(item, Workflow);
+}
+
+export interface WorkflowCreateDecl extends AstNode {
+    readonly $container: Workflow;
+    readonly $type: 'WorkflowCreateDecl';
+    body: Array<Statement>;
+    correlation?: Expression;
+    name?: string;
+    params: Array<Parameter>;
+}
+
+export const WorkflowCreateDecl = 'WorkflowCreateDecl';
+
+export function isWorkflowCreateDecl(item: unknown): item is WorkflowCreateDecl {
+    return reflection.isInstance(item, WorkflowCreateDecl);
 }
 
 export type DddAstType = {
@@ -2709,13 +2723,14 @@ export type DddAstType = {
     View: View
     WithClause: WithClause
     Workflow: Workflow
+    WorkflowCreateDecl: WorkflowCreateDecl
     WorkflowMember: WorkflowMember
 }
 
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow, WorkflowMember];
+        return [Aggregate, AggregateMember, Api, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2850,7 +2865,7 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case HandleDecl:
             case OnDecl:
-            case Statement: {
+            case WorkflowCreateDecl: {
                 return this.isSubtype(WorkflowMember, supertype);
             }
             case IdType:
@@ -4282,8 +4297,18 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'isolation' },
                         { name: 'members', defaultValue: [] },
                         { name: 'name' },
-                        { name: 'params', defaultValue: [] },
                         { name: 'transactional', defaultValue: false }
+                    ]
+                };
+            }
+            case WorkflowCreateDecl: {
+                return {
+                    name: WorkflowCreateDecl,
+                    properties: [
+                        { name: 'body', defaultValue: [] },
+                        { name: 'correlation' },
+                        { name: 'name' },
+                        { name: 'params', defaultValue: [] }
                     ]
                 };
             }

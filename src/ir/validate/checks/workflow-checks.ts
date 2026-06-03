@@ -1,0 +1,662 @@
+// -------------------------------------------------------------------------
+// Workflow + view checks — correlation typing, workflow-body legality,
+// resource-op expressions, and view query semantics.
+// -------------------------------------------------------------------------
+
+import { createInputFields, omittableCreateInputs } from "../../enrich/wire-projection.js";
+import { verbsForKind } from "../../resource-verbs.js";
+import type { BoundedContextIR, ExprIR, TypeIR, WorkflowIR } from "../../types/loom-ir.js";
+import { findUsesCurrentUser } from "../../types/loom-ir.js";
+import type { LoomDiagnostic } from "./diagnostic.js";
+import { firstColumnVsColumn, firstNonQueryableNode, firstUnknownColumnRef } from "./shared.js";
+
+// ---------------------------------------------------------------------------
+// Workflow validation.
+//
+// A `workflow` is a context-level orchestration of aggregate operations.
+// The grammar reuses operation-body Statement rules; this validator
+// constrains the surface to what workflow lowering supports:
+//
+//   - factory-let (`let x = Agg.create({...})`)
+//   - repo-let (`let x = Repo.method(args)`) returning a single
+//     non-nullable aggregate
+//   - op-call (`name.op(args)` on a let binding)
+//   - precondition / emit
+//
+// Mutation forms (`:=`, `+=`, `-=`), bare-call statements, deep paths,
+// nullable / array repo returns, and op-calls on non-aggregate
+// bindings all surface as errors here.
+// ---------------------------------------------------------------------------
+
+export function validateWorkflows(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  // Reserved-name guard: workflows share the context namespace with
+  // aggregates, value objects, enums, events, repositories.
+  const namesUsed = new Map<string, string>();
+  for (const a of ctx.aggregates) namesUsed.set(a.name, "aggregate");
+  for (const v of ctx.valueObjects) namesUsed.set(v.name, "value object");
+  for (const e of ctx.enums) namesUsed.set(e.name, "enum");
+  for (const ev of ctx.events) namesUsed.set(ev.name, "event");
+  for (const r of ctx.repositories) namesUsed.set(r.name, "repository");
+  const seenWorkflowNames = new Set<string>();
+  for (const wf of ctx.workflows) {
+    if (seenWorkflowNames.has(wf.name)) {
+      diags.push({
+        severity: "error",
+        code: "loom.duplicate-workflow",
+        message: `context '${ctx.name}': workflow '${wf.name}' is declared more than once.`,
+        source: `${ctx.name}/${wf.name}`,
+      });
+    } else {
+      seenWorkflowNames.add(wf.name);
+    }
+    const clash = namesUsed.get(wf.name);
+    if (clash) {
+      diags.push({
+        severity: "error",
+        code: "loom.workflow-name-collision",
+        message: `context '${ctx.name}': workflow '${wf.name}' collides with the ${clash} of the same name.`,
+        source: `${ctx.name}/${wf.name}`,
+      });
+    }
+    validateWorkflowBody(ctx, wf, diags);
+    validateWorkflowCorrelation(ctx, wf, diags);
+  }
+}
+
+/** The resolved type a `by <expr>` correlation expression yields — a member
+ *  access carries `memberType`, a bare ref carries `type`. */
+function correlationExprType(e: ExprIR): TypeIR | undefined {
+  if (e.kind === "member") return e.memberType;
+  if (e.kind === "ref") return e.type;
+  return undefined;
+}
+
+const idTarget = (t: TypeIR | undefined): string | undefined =>
+  t && t.kind === "id" ? t.targetName : undefined;
+
+// Correlation-field rules (workflow-and-applier.md A2-S2 + A2-S3).  A workflow
+// with event reactors routes inbound events to exactly one id-shaped state
+// field — the correlation field.
+//
+//   - rule 10 (`loom.workflow-correlation-required`) — no id-shaped field.
+//   - rule 19 (`loom.correlation-field-ambiguous`)   — more than one.
+//   - rule 12 (`loom.correlation-type-mismatch`)     — a `by <expr>` yields a
+//     value of a different id type than the correlation field.
+//   - (`loom.correlation-uninferrable`) — a reactor omits `by` but its event
+//     has no field whose name matches the correlation field, so routing can't
+//     be inferred by name-match.
+function validateWorkflowCorrelation(
+  ctx: BoundedContextIR,
+  wf: WorkflowIR,
+  diags: LoomDiagnostic[],
+): void {
+  const subs = wf.subscriptions ?? [];
+  if (subs.length === 0) return;
+  const src = `${ctx.name}/${wf.name}`;
+  const idFields = (wf.stateFields ?? []).filter((f) => f.type.kind === "id");
+  if (idFields.length === 0) {
+    diags.push({
+      severity: "error",
+      message:
+        `workflow '${wf.name}' has on(...) reactors but no correlation field. ` +
+        `Declare one id-shaped state field (e.g. 'orderId: Order id') for the runtime to route inbound events to.`,
+      source: src,
+      code: "loom.workflow-correlation-required",
+    });
+    return;
+  }
+  if (idFields.length > 1) {
+    diags.push({
+      severity: "error",
+      message:
+        `workflow '${wf.name}' has ${idFields.length} id-shaped state fields ` +
+        `(${idFields.map((f) => f.name).join(", ")}); the correlation field can't be inferred. ` +
+        `A workflow with reactors must declare exactly one id-shaped field.`,
+      source: src,
+      code: "loom.correlation-field-ambiguous",
+    });
+    return;
+  }
+  // Exactly one correlation field — type-check each reactor's routing.
+  const corr = idFields[0];
+  const corrTarget = idTarget(corr.type);
+  for (const sub of subs) {
+    if (sub.correlation) {
+      const byTarget = idTarget(correlationExprType(sub.correlation));
+      if (byTarget !== corrTarget) {
+        diags.push({
+          severity: "error",
+          message:
+            `workflow '${wf.name}': the 'by' expression on on(${sub.event}) yields ` +
+            `${byTarget ? `'${byTarget} id'` : "a non-id value"}, but the correlation field ` +
+            `'${corr.name}' is '${corrTarget} id'. A 'by' clause must route by the correlation field's type.`,
+          source: src,
+          code: "loom.correlation-type-mismatch",
+        });
+      }
+    } else {
+      // Omitted `by` — route by name-match: the event must carry a field of
+      // the correlation field's name.
+      const ev = ctx.events.find((e) => e.name === sub.event);
+      const hasMatch = ev?.fields.some((f) => f.name === corr.name) ?? false;
+      if (!hasMatch) {
+        diags.push({
+          severity: "error",
+          message:
+            `workflow '${wf.name}': on(${sub.event}) omits 'by' but event '${sub.event}' has no ` +
+            `field named '${corr.name}' to infer routing from. Add a 'by <expr>' clause.`,
+          source: src,
+          code: "loom.correlation-uninferrable",
+        });
+      }
+    }
+  }
+}
+
+function validateWorkflowBody(
+  ctx: BoundedContextIR,
+  wf: {
+    name: string;
+    statements: import("../../types/loom-ir.js").WorkflowStmtIR[];
+    transactional: boolean;
+    isolation?: import("../../types/loom-ir.js").IsolationLevel;
+    params: import("../../types/loom-ir.js").ParamIR[];
+  },
+  diags: LoomDiagnostic[],
+): void {
+  const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  const reposByName = new Map(ctx.repositories.map((r) => [r.name, r] as const));
+  const eventsByName = new Map(ctx.events.map((e) => [e.name, e] as const));
+  const bindingAgg = new Map<string, string>(); // bindingName -> aggName
+  const arrayBindingAgg = new Map<string, string>(); // repo-run binding -> element aggName
+  let mutated = false;
+
+  for (const st of wf.statements) {
+    switch (st.kind) {
+      case "precondition":
+      case "requires":
+        // Type-check happens at lowering via `inferExprType`; we'd
+        // need the AST node to re-check here.  Trust the lowered IR
+        // and emit a warning if the expression looks degenerate
+        // (kind === "ref" with refKind "unknown").
+        if (st.expr.kind === "ref" && st.expr.refKind === "unknown") {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-unknown-name",
+            message: `workflow '${wf.name}': ${st.kind} references unknown name '${st.expr.name}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        break;
+      case "emit": {
+        const ev = eventsByName.get(st.eventName);
+        if (!ev) {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-emit-unknown-event",
+            message: `workflow '${wf.name}': emit refers to unknown event '${st.eventName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const declared = new Set(ev.fields.map((f) => f.name));
+        const provided = new Set(st.fields.map((f) => f.name));
+        for (const f of declared) {
+          if (!provided.has(f)) {
+            diags.push({
+              severity: "error",
+              code: "loom.workflow-emit-missing-field",
+              message: `workflow '${wf.name}': emit '${ev.name}' is missing field '${f}'.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+          }
+        }
+        for (const f of provided) {
+          if (!declared.has(f)) {
+            diags.push({
+              severity: "error",
+              code: "loom.workflow-emit-unknown-field",
+              message: `workflow '${wf.name}': emit '${ev.name}' has unknown field '${f}'.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+          }
+        }
+        mutated = true;
+        break;
+      }
+      case "factory-let": {
+        const agg = aggsByName.get(st.aggName);
+        if (!agg) {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-create-unknown-aggregate",
+            message: `workflow '${wf.name}': '${st.aggName}.create(...)' references unknown aggregate '${st.aggName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        // A workflow `Agg.create({...})` invokes the canonical create,
+        // which is parameterized by the aggregate's *create-input* fields
+        // — `forCreateInput` drops the server-populated roles
+        // (`managed`/`token`/`internal`) and the required subset further
+        // drops fields the client may omit (optional, `= default`, bare
+        // `bool`).  Validate against that contract, the same set the
+        // backends' create-call emitters consume, rather than the raw
+        // field list: a `managed` timestamp is neither required here nor a
+        // legal argument (passing one would fail the backend create-call).
+        const omittable = omittableCreateInputs(agg);
+        const inputFields = createInputFields(agg).map((f) => f.name);
+        const required = inputFields.filter((n) => !omittable.has(n));
+        const provided = new Set(st.fields.map((f) => f.name));
+        for (const r of required) {
+          if (!provided.has(r)) {
+            diags.push({
+              severity: "error",
+              code: "loom.workflow-create-missing-field",
+              message: `workflow '${wf.name}': '${st.aggName}.create(...)' is missing required field '${r}'.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+          }
+        }
+        const allowed = new Set(inputFields);
+        for (const p of provided) {
+          if (!allowed.has(p)) {
+            diags.push({
+              severity: "error",
+              code: "loom.workflow-create-unknown-field",
+              message: `workflow '${wf.name}': '${st.aggName}.create(...)' has unknown field '${p}'.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+          }
+        }
+        bindingAgg.set(st.name, st.aggName);
+        mutated = true;
+        break;
+      }
+      case "repo-let": {
+        const repo = reposByName.get(st.repoName);
+        if (!repo) {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-unknown-repository",
+            message: `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' references unknown repository '${st.repoName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        if (st.method !== "getById" && !repo.finds.some((f) => f.name === st.method)) {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-unknown-repository-method",
+            message: `workflow '${wf.name}': repository '${st.repoName}' has no method '${st.method}'.  Available: getById, ${repo.finds.map((f) => f.name).join(", ") || "(no declared finds)"}.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        // A workflow can't call a find whose where clause references
+        // currentUser — the workflow handler doesn't inject
+        // ICurrentUserAccessor, and threading the user through saves +
+        // ops would be a larger reshape.  Surface a friendly error
+        // pointing at the alternative (load by id).
+        const calledFind = repo.finds.find((f) => f.name === st.method);
+        if (calledFind && findUsesCurrentUser(calledFind)) {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-currentuser-find",
+            message:
+              `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' references a currentUser-bound find, ` +
+              `which workflows don't yet pass the user into.  Use 'getById' with an explicit id parameter, ` +
+              `or call the user-aware find from the route layer instead.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        // Reject array / nullable returns — workflow body has no
+        // iteration / null-handling vocab in v1.  getById is always
+        // a single non-nullable aggregate (the impl throws on miss).
+        if (st.method !== "getById") {
+          if (st.returnType.kind === "array") {
+            diags.push({
+              severity: "error",
+              code: "loom.workflow-load-array-unsupported",
+              message: `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' returns an array; v1 supports only single non-nullable aggregates.  Split iteration into a follow-up workflow or use getById.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+            break;
+          }
+          if (st.returnType.kind === "optional") {
+            diags.push({
+              severity: "error",
+              code: "loom.workflow-load-nullable-unsupported",
+              message: `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' returns a nullable; v1 supports only single non-nullable aggregates.  Use getById (throws → 404) instead.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+            break;
+          }
+        }
+        bindingAgg.set(st.name, st.aggName);
+        break;
+      }
+      case "repo-run": {
+        // `let xs = Repo.run(<Retrieval>(args), page?)` — the bound
+        // result is an aggregate array, consumable only by a `for-each`.
+        const repo = reposByName.get(st.repoName);
+        if (!repo) {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-run-unknown-repository",
+            message: `workflow '${wf.name}': '${st.repoName}.run(...)' references unknown repository '${st.repoName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const retrieval = ctx.retrievals.find((r) => r.name === st.retrievalName);
+        if (!retrieval) {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-run-unknown-retrieval",
+            message: `workflow '${wf.name}': '${st.repoName}.run(${st.retrievalName}(...))' references unknown retrieval '${st.retrievalName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const target = retrieval.targetType.kind === "entity" ? retrieval.targetType.name : "";
+        if (target !== st.aggName) {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-run-retrieval-mismatch",
+            message: `workflow '${wf.name}': retrieval '${st.retrievalName}' is over '${target}', but '${st.repoName}' is a repository for '${st.aggName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        // Record the array binding so a `for-each` over it resolves the
+        // element aggregate.
+        arrayBindingAgg.set(st.name, st.aggName);
+        break;
+      }
+      case "for-each": {
+        // The iterable must be an aggregate array (today: a `repo-run`
+        // result).  Bind the loop var to the element aggregate so body
+        // op-calls resolve, then validate the body op-calls.
+        // The iterable should be a `repo-run` array binding (the only
+        // aggregate-array producer in v1).  A bare `ref` to such a
+        // binding is the supported shape.
+        const iterableBinding = st.iterable.kind === "ref" ? st.iterable.name : undefined;
+        const isArrayBinding = iterableBinding ? arrayBindingAgg.has(iterableBinding) : false;
+        if (st.varAggName === "Unknown" || !isArrayBinding) {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-foreach-source",
+            message: `workflow '${wf.name}': 'for ${st.var} in ...' must iterate a 'let xs = Repo.run(...)' result (the only aggregate array in v1).`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        bindingAgg.set(st.var, st.varAggName);
+        for (const inner of st.body) {
+          if (inner.kind === "op-call") {
+            mutated = true;
+            if (!bindingAgg.get(inner.target)) {
+              diags.push({
+                severity: "error",
+                code: "loom.workflow-foreach-unknown-binding",
+                message: `workflow '${wf.name}': in 'for ${st.var}', '${inner.target}.${inner.op}(...)' references unknown binding '${inner.target}'.`,
+                source: `${ctx.name}/${wf.name}`,
+              });
+            }
+          }
+        }
+        break;
+      }
+      case "op-call": {
+        const aggName = bindingAgg.get(st.target);
+        if (!aggName) {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-unknown-binding",
+            message: `workflow '${wf.name}': '${st.target}.${st.op}(...)' references unknown let-binding '${st.target}', or '${st.target}' isn't bound to an aggregate.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const agg = aggsByName.get(aggName);
+        if (!agg) break;
+        const op = agg.operations.find((o) => o.name === st.op);
+        if (!op) {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-unknown-operation",
+            message: `workflow '${wf.name}': aggregate '${aggName}' has no operation '${st.op}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        if (op.visibility === "private") {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-private-operation",
+            message: `workflow '${wf.name}': '${aggName}.${op.name}' is private.  Workflows can only call public operations.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        // (No restriction on extern ops — workflows can call
+        // parameterless and parameterized externs alike.  The
+        // emission paths construct the wire-typed request from the
+        // workflow's domain args via `domainToRequestExpr` (.NET) /
+        // a per-VO object-literal projection (TS).)
+        mutated = true;
+        break;
+      }
+      case "expr-let": {
+        if (st.name === "__bad__") {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-unrecognised-statement",
+            message: `workflow '${wf.name}': statement isn't a recognised workflow form.  Allowed: precondition, let (factory / repo / scalar), name.op(args), emit.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        // `let x = files.get(k)` — the bound form of a resource-op.
+        checkResourceOpExpr(st.expr, ctx, wf, diags);
+        break;
+      }
+      case "resource-call":
+        checkResourceOpExpr(st.call, ctx, wf, diags);
+        break;
+    }
+  }
+
+  if (wf.transactional && !mutated) {
+    diags.push({
+      severity: "warning",
+      code: "loom.transactional-no-effect",
+      message: `workflow '${wf.name}': declared 'transactional' but does not mutate any aggregate or emit any event — the keyword has no effect.`,
+      source: `${ctx.name}/${wf.name}`,
+    });
+  }
+
+  // Defence-in-depth: the grammar already gates the isolation level
+  // behind the `transactional` keyword, but if a future grammar
+  // change drops the gating we'd silently accept a meaningless
+  // setting.  Surface it as an error here too.
+  if (wf.isolation && !wf.transactional) {
+    diags.push({
+      severity: "error",
+      code: "loom.isolation-requires-transactional",
+      message: `workflow '${wf.name}': isolation level '${wf.isolation}' requires the 'transactional' keyword.`,
+      source: `${ctx.name}/${wf.name}`,
+    });
+  }
+}
+
+// Validate a resource-op call expression in a workflow body (Phase 4):
+//   - the verb must belong to the resource's kind vocabulary
+//     (lowering leaves `capability === ""` on an unknown verb);
+//   - a resource-op may not run inside a transactional span — an S3
+//     `put` can't roll back with the DB transaction (use the outbox).
+// The capability-gap check (need ⊆ sourceType) is handled by
+// `validateNeedCapabilities`, which consumes the usage-derived needs.
+function checkResourceOpExpr(
+  expr: import("../../types/loom-ir.js").ExprIR,
+  ctx: BoundedContextIR,
+  wf: { name: string; transactional: boolean },
+  diags: LoomDiagnostic[],
+): void {
+  if (expr.kind !== "call" || expr.callKind !== "resource-op" || !expr.resourceOp) return;
+  const op = expr.resourceOp;
+  if (op.capability === "") {
+    diags.push({
+      severity: "error",
+      code: "loom.resource-verb-invalid",
+      message: `workflow '${wf.name}': '${op.resourceName}.${op.verb}(...)' — '${op.verb}' is not a valid verb for a ${op.resourceKind} resource.  Available: ${verbsForKind(op.resourceKind).join(", ") || "(none)"}.`,
+      source: `${ctx.name}/${wf.name}`,
+    });
+  }
+  if (wf.transactional) {
+    diags.push({
+      severity: "error",
+      code: "loom.resource-op-in-transaction",
+      message: `workflow '${wf.name}': resource operation '${op.resourceName}.${op.verb}(...)' cannot run inside a transactional workflow — external effects don't roll back with the database transaction.  Move it out of the transactional span, or publish through an outbox.`,
+      source: `${ctx.name}/${wf.name}`,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// View validation.
+//
+// A `view <Name> = <Source> where <Filter>` is a saved, strongly-typed
+// query.  This validator enforces:
+//
+//   1. The view name is unique within the context (no clash with
+//      aggregates / value objects / enums / events / repositories /
+//      workflows or other views).
+//   2. The source aggregate exists in the same context.  (The Langium
+//      cross-ref already gates this; the IR check guards against
+//      downstream IR construction bugs.)
+//   3. The where-clause is queryable (same restrictions as repository
+//      find filters): no collection ops, no lambdas, no chained
+//      traversal beyond `field` / `field.subfield`.  Reuses
+//      `firstNonQueryableNode`.
+//   4. Every column reference in the filter resolves to a real field
+//      on the source aggregate.  Reuses `firstUnknownColumnRef`.
+//   5. No comparison sets one column against another (Drizzle's
+//      operators model column-vs-value, not column-vs-column).
+//      Reuses `firstColumnVsColumn`.
+//
+// All four reuses come from the v6/v8 work — views inherit the
+// existing query semantics rather than introducing new ones.
+// ---------------------------------------------------------------------------
+
+export function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  // Same name-set the workflow validator builds.
+  const namesUsed = new Map<string, string>();
+  for (const a of ctx.aggregates) namesUsed.set(a.name, "aggregate");
+  for (const v of ctx.valueObjects) namesUsed.set(v.name, "value object");
+  for (const e of ctx.enums) namesUsed.set(e.name, "enum");
+  for (const ev of ctx.events) namesUsed.set(ev.name, "event");
+  for (const r of ctx.repositories) namesUsed.set(r.name, "repository");
+  for (const wf of ctx.workflows) namesUsed.set(wf.name, "workflow");
+  const seen = new Set<string>();
+  for (const view of ctx.views) {
+    if (seen.has(view.name)) {
+      diags.push({
+        severity: "error",
+        code: "loom.duplicate-view",
+        message: `context '${ctx.name}': view '${view.name}' is declared more than once.`,
+        source: `${ctx.name}/${view.name}`,
+      });
+    } else {
+      seen.add(view.name);
+    }
+    const clash = namesUsed.get(view.name);
+    if (clash) {
+      diags.push({
+        severity: "error",
+        code: "loom.view-name-collision",
+        message: `context '${ctx.name}': view '${view.name}' collides with the ${clash} of the same name.`,
+        source: `${ctx.name}/${view.name}`,
+      });
+    }
+    const agg = ctx.aggregates.find((a) => a.name === view.aggregateName);
+    if (!agg) {
+      diags.push({
+        severity: "error",
+        code: "loom.view-unknown-source",
+        message: `view '${view.name}': source '${view.aggregateName}' is not an aggregate in context '${ctx.name}'.`,
+        source: `${ctx.name}/${view.name}`,
+      });
+      continue;
+    }
+    if (view.filter) {
+      const offending = firstNonQueryableNode(view.filter);
+      if (offending) {
+        diags.push({
+          severity: "error",
+          code: "loom.view-where-not-queryable",
+          message:
+            `view '${view.name}': where-clause is not queryable (${offending}). ` +
+            `Allowed: comparisons, &&/||/!, parens, ` +
+            `'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
+          source: `${ctx.name}/${view.name}`,
+        });
+        continue;
+      }
+      const unknown = firstUnknownColumnRef(view.filter, agg, ctx);
+      if (unknown) {
+        diags.push({
+          severity: "error",
+          code: "loom.view-where-unknown-field",
+          message: `view '${view.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
+          source: `${ctx.name}/${view.name}`,
+        });
+      }
+      const bothCols = firstColumnVsColumn(view.filter);
+      if (bothCols) {
+        diags.push({
+          severity: "error",
+          code: "loom.view-where-column-column",
+          message:
+            `view '${view.name}': comparison between two columns (${bothCols}) is not queryable. ` +
+            `Drizzle's eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
+          source: `${ctx.name}/${view.name}`,
+        });
+      }
+    }
+    // Full-form view: bind exhaustiveness + per-bind name validity.
+    if (view.output) {
+      const fieldNames = new Set(view.output.fields.map((f) => f.name));
+      const boundNames = new Set(view.output.binds.map((b) => b.name));
+      for (const f of view.output.fields) {
+        if (!boundNames.has(f.name)) {
+          diags.push({
+            severity: "error",
+            code: "loom.view-field-unbound",
+            message: `view '${view.name}': field '${f.name}' has no bind expression.  Add 'bind ${f.name} = ...' to the body.`,
+            source: `${ctx.name}/${view.name}`,
+          });
+        }
+      }
+      const seenBinds = new Set<string>();
+      for (const b of view.output.binds) {
+        if (!fieldNames.has(b.name)) {
+          diags.push({
+            severity: "error",
+            code: "loom.view-bind-no-field",
+            message: `view '${view.name}': bind '${b.name}' has no matching declared field.  Either declare 'name: Type' at the top of the view or remove the bind.`,
+            source: `${ctx.name}/${view.name}`,
+          });
+        }
+        if (seenBinds.has(b.name)) {
+          diags.push({
+            severity: "error",
+            code: "loom.view-bind-duplicate",
+            message: `view '${view.name}': field '${b.name}' is bound more than once.`,
+            source: `${ctx.name}/${view.name}`,
+          });
+        }
+        seenBinds.add(b.name);
+      }
+    }
+  }
+}

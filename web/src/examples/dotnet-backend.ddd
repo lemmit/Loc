@@ -84,21 +84,19 @@ system SalesBackend {
       // Transactional workflow — places a single-line order in
       // one DB transaction.  Mediator runs the FluentValidation
       // pipeline at the boundary; DomainException maps to 400.
-      workflow placeOrder(
-        customerId: Customer id,
-        productId: Product id,
-        quantity: int
-      ) transactional {
-        precondition quantity > 0
-        let customer = Customers.getById(customerId)
-        let product = Products.getById(productId)
-        let order = Order.create({
-          customerId: customerId,
-          status: Draft,
-          placedAt: now()
-        })
-        order.addLine(productId, quantity)
-        order.confirm()
+      workflow placeOrder transactional {
+        create(customerId: Customer id, productId: Product id, quantity: int) {
+          precondition quantity > 0
+          let customer = Customers.getById(customerId)
+          let product = Products.getById(productId)
+          let order = Order.create({
+            customerId: customerId,
+            status: Draft,
+            placedAt: now()
+          })
+          order.addLine(productId, quantity)
+          order.confirm()
+        }
       }
 
       view ActiveOrders = Order where status == Confirmed

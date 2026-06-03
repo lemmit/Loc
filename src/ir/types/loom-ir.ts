@@ -799,6 +799,10 @@ export type IsolationLevel =
  *  transaction. */
 export interface WorkflowIR {
   name: string;
+  /** @deprecated Facade over the primary (unnamed, command-triggered) create —
+   *  see `creates`.  Kept so the backend emitters (Hono / .NET / Phoenix /
+   *  React) keep reading `params`/`statements`/`savesAtExit` unchanged after
+   *  the A2-S5f reshape; they migrate to `creates` in a later slice. */
   params: ParamIR[];
   transactional: boolean;
   /** Set only when the source declared `transactional(<level>)`.
@@ -806,12 +810,16 @@ export interface WorkflowIR {
    *  emits a transaction without an explicit level (connection
    *  default applies). */
   isolation?: IsolationLevel;
+  /** @deprecated Facade over the primary create's body — see `creates`. */
   statements: WorkflowStmtIR[];
-  /** Computed at lowering: which let-bindings need a save call at
-   *  workflow exit, in declaration order.  `Agg.create(...)` always
-   *  saves; `Repo.getById(...)`/find saves only if a later op-call
-   *  targets the binding. */
+  /** @deprecated Facade over the primary create's saves — see `creates`.
+   *  Which let-bindings need a save call at exit, in declaration order. */
   savesAtExit: { name: string; aggName: string; repoName: string }[];
+  /** Workflow starters declared via `create [name](params) [by <expr>] { … }`
+   *  members (workflow-and-applier.md A2-S5f).  The legacy paren-body lowers to
+   *  a single unnamed command-triggered create.  This is the source of truth;
+   *  `params`/`statements`/`savesAtExit` are a facade over the primary one. */
+  creates: CreateIR[];
   /** Event-subscription reactors declared via `on(e: Event) [by <expr>] { … }`
    *  members (workflow-and-applier.md Phase A2, surface slice).  Omitted when
    *  the workflow declares none.  Not yet consumed by backends — backend
@@ -857,6 +865,26 @@ export interface HandleIR {
   /** Which let-bound aggregates need a save call at handler exit, in
    *  declaration order — same derivation as `WorkflowIR.savesAtExit`. */
   savesAtExit: { name: string; aggName: string; repoName: string }[];
+}
+
+/** A workflow starter declared via `create [name](params) [by <expr>] { … }`
+ *  (workflow-and-applier.md A2-S5f).  `triggerKind` is discriminated at lowering
+ *  from the param shape: a sole param whose type is an event reference →
+ *  `"event"` (allocate-if-correlation-misses); otherwise `"command"`. */
+export interface CreateIR {
+  /** Declared name, or null for the canonical unnamed create (the legacy
+   *  paren-body migrates to one of these). */
+  name: string | null;
+  triggerKind: "event" | "command";
+  params: ParamIR[];
+  /** The `by <expr>` routing expression (event-triggered starters), lowered in
+   *  the create's scope.  Undefined for command-triggered creates. */
+  correlation?: ExprIR;
+  statements: WorkflowStmtIR[];
+  savesAtExit: { name: string; aggName: string; repoName: string }[];
+  /** Event-triggered only: the bound event-param name and its event type. */
+  eventBinding?: string;
+  eventRef?: string;
 }
 
 /** A `on(e: Event) [by <expr>] { … }` reactor on a workflow — an extrinsic
