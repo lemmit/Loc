@@ -1,0 +1,145 @@
+// ── Inventory subdomain — split out of the Acme ERP project.
+// A top-level `subdomain` composes into the single `system` declared in
+// main.ddd (implicit-system-composition).
+
+// A root-level (ambient) value object declared at file scope, alongside
+// the `system` whose Inventory context constructs it by name in operation
+// bodies (`Quantity { … }`).  Root-level VOs in the same document are
+// constructible from any context here — see findValueObjectByName /
+// checkBuilderCallType.  (It references the imported UnitOfMeasure enum.)
+valueobject Quantity {
+  value: decimal
+  unit: UnitOfMeasure
+  invariant value >= 0
+  derived label: string = value + " " + unit
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  INVENTORY — products, warehouses and stock on hand.
+// ════════════════════════════════════════════════════════════════════
+subdomain Inventory {
+  context Inventory {
+
+    enum MovementKind { Receipt, Issue, Transfer, Adjustment }
+
+    event StockReceived { item: StockItem id, quantity: decimal, at: datetime }
+    event StockIssued   { item: StockItem id, quantity: decimal, at: datetime }
+
+    aggregate Product with crudish {
+      sku: string
+      name: string
+      uom: UnitOfMeasure = Each
+      unitCost: Money
+      active: bool = true
+      invariant sku.length > 0
+      derived display: string = sku
+    }
+
+    aggregate Warehouse with crudish {
+      code: string
+      name: string
+      location: Address
+      invariant code.length > 0
+      derived display: string = code
+    }
+
+    // Stock on hand for a (product, warehouse) pair.  guid identity is
+    // explicit; `lastCountedAt` is server-stamped (`managed`).
+    aggregate StockItem ids guid with crudish {
+      productId: Product id
+      warehouseId: Warehouse id
+      onHand: Quantity
+      reorderPoint: decimal = 0
+      lastCountedAt: datetime managed
+
+      derived belowReorder: bool = onHand.value <= reorderPoint
+      derived display: string = onHand.label
+
+      invariant reorderPoint >= 0
+
+      operation receive(qty: Quantity) {
+        precondition qty.value > 0
+        onHand := Quantity { value: onHand.value + qty.value, unit: onHand.unit }
+        emit StockReceived { item: id, quantity: qty.value, at: now() }
+      }
+
+      operation issue(qty: Quantity) {
+        precondition qty.value > 0
+        precondition onHand.value >= qty.value
+        onHand := Quantity { value: onHand.value - qty.value, unit: onHand.unit }
+        emit StockIssued { item: id, quantity: qty.value, at: now() }
+      }
+
+      operation markCounted() {
+        lastCountedAt := now()
+      }
+
+      test "stock cannot be issued below the quantity on hand" verifies TC-INV-1 {
+        let s = StockItem.create({
+          productId: "00000000-0000-0000-0000-000000000001",
+          warehouseId: "00000000-0000-0000-0000-000000000002",
+          onHand: { value: 5, unit: Each },
+          reorderPoint: 1
+        })
+        s.receive(Quantity { value: 10, unit: Each })
+        expectThrows s.issue(Quantity { value: 100, unit: Each })
+      }
+    }
+
+    // An append-only movement record (its own guid identity).
+    aggregate StockMovement ids guid with crudish {
+      productId: Product id
+      fromWarehouse: Warehouse id?
+      toWarehouse: Warehouse id?
+      kind: MovementKind
+      quantity: Quantity
+      occurredAt: datetime managed
+      derived display: string = "Movement " + kind
+    }
+
+    // Criterion over a plain column == parameter — SQL-lowerable, unlike
+    // a value-object-member comparison (`onHand.value <= reorderPoint`
+    // lives only in the in-memory `belowReorder` derived above).
+    criterion InWarehouse(w: Warehouse id) of StockItem = warehouseId == w
+
+    retrieval ItemsToRecount(w: Warehouse id) of StockItem {
+      where: InWarehouse(w)
+      sort:  [reorderPoint desc]
+    }
+
+    repository Products for Product {
+      find bySku(sku: string): Product? where this.sku == sku
+      find active(): Product[] where this.active == true
+    }
+    repository Warehouses for Warehouse {
+      find byCode(code: string): Warehouse? where this.code == code
+    }
+    repository StockItems for StockItem {
+      find byProduct(productId: Product id): StockItem[] where this.productId == productId
+      find byWarehouse(warehouseId: Warehouse id): StockItem[] where InWarehouse(warehouseId)
+    }
+    repository StockMovements for StockMovement {
+      find byProduct(productId: Product id): StockMovement[] where this.productId == productId
+    }
+
+    view ActiveProducts = Product where active == true
+
+    // Non-transactional cycle-count sweep: page a warehouse's stock and
+    // stamp each row's count time (per-iteration save commits as it goes).
+    workflow recountWarehouse(w: Warehouse id) {
+      let items = StockItems.run(ItemsToRecount(w), page: { offset: 0, limit: 100 })
+      for s in items {
+        s.markCounted()
+      }
+    }
+
+    seed default {
+      Product { sku: "WIDGET-1", name: "Standard Widget", uom: Each,
+                unitCost: { amount: 3.50, currency: "USD" }, active: true }
+      Product { sku: "GADGET-2", name: "Deluxe Gadget", uom: Each,
+                unitCost: { amount: 8.00, currency: "USD" }, active: true }
+      Warehouse { code: "WH-MAIN", name: "Main Distribution Centre",
+                  location: { line1: "10 Logistics Rd", city: "Springfield", region: "IL", postalCode: "62702", country: US } }
+    }
+  }
+}

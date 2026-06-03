@@ -24,6 +24,15 @@ deployable  →   composes platform + contexts + api + UI + resources  [composit
 Read any single declaration and you see its full picture; no
 implicit cross-references between layers.
 
+**File organisation is independent of this layering.** A project is
+*one* `system`, but its members need not live in one file: any
+`subdomain` and every deployment declaration (`storage` / `resource` /
+`channelSource` / `ui` / `deployable` / `theme` / `user` / `test e2e`)
+may be written at the top level of any `.ddd` file in the import graph
+and composes into the project's single `system` — so a project can be
+split one-file-per-subdomain with the deployment in its own file. See
+[`proposals/implicit-system-composition.md`](./proposals/implicit-system-composition.md).
+
 
 ## Domain layer
 

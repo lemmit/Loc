@@ -1,0 +1,146 @@
+// ── Procurement subdomain — split out of the Acme ERP project.
+// A top-level `subdomain` composes into the single `system` declared in
+// main.ddd (implicit-system-composition).
+
+// ════════════════════════════════════════════════════════════════════
+//  PROCUREMENT — suppliers, purchase orders and goods receipts.
+// ════════════════════════════════════════════════════════════════════
+subdomain Procurement {
+  context Procurement {
+
+    enum PurchaseOrderStatus { Draft, Approved, Received, Closed, Cancelled }
+
+    event PurchaseOrderApproved { po: PurchaseOrder id, total: decimal, at: datetime }
+    event GoodsReceiptPosted    { receipt: GoodsReceipt id, po: PurchaseOrder id, at: datetime }
+
+    aggregate Supplier with crudish {
+      name: string
+      contact: ContactInfo
+      address: Address
+      rating: int = 3
+      active: bool = true
+      invariant name.length > 0
+      invariant rating >= 1
+      invariant rating <= 5
+      derived display: string = name
+    }
+
+    aggregate PurchaseOrder with crudish {
+      reference: string
+      supplierId: Supplier id
+      status: PurchaseOrderStatus = Draft
+      priority: Priority = Normal
+      expectedAt: datetime
+      // `provenanced`: every write to `total` is captured as a rule
+      // snapshot, and the Hono backend records a runtime trace per write
+      // (two write-sites below: addLine and applyDiscount).
+      total: decimal provenanced
+      contains lines: PurchaseOrderLine[]
+
+      derived lineCount: int = lines.count
+      derived display: string = reference
+      invariant reference.length > 0
+
+      function isMutable(): bool = status == Draft
+
+      operation addLine(productRef: string, qty: int, unitCost: Money) {
+        precondition isMutable()
+        precondition qty > 0
+        lines += PurchaseOrderLine { productRef: productRef, qty: qty, unitCost: unitCost }
+        total := total + unitCost.amount * qty
+      }
+
+      operation applyDiscount(amount: decimal) {
+        precondition isMutable()
+        precondition amount >= 0
+        precondition amount <= total
+        total := total - amount
+      }
+
+      // Extern operation: the framework runs the preconditions, then
+      // dispatches to the registered handler (budget / credit check
+      // against a finance service), then re-checks invariants.  An
+      // extern body is preconditions ONLY — the handler performs the
+      // approval side effects in hand-written code.
+      operation approve() extern {
+        precondition isMutable()
+        precondition lines.count > 0
+      }
+
+      operation markReceived() {
+        precondition status != Cancelled
+        status := Received
+      }
+
+      operation cancel(reason: string) {
+        precondition status != Received
+        precondition status != Closed
+        status := Cancelled
+      }
+
+      entity PurchaseOrderLine {
+        productRef: string
+        qty: int
+        unitCost: Money
+        derived lineTotal: decimal = unitCost.amount * qty
+        invariant qty > 0
+      }
+
+      test "adding a line accrues the provenanced total" verifies TC-PROC-1 {
+        let po = PurchaseOrder.create({
+          reference: "PO-TEST-1",
+          supplierId: "00000000-0000-0000-0000-000000000001",
+          status: Draft,
+          priority: Normal,
+          expectedAt: "2026-01-15T00:00:00Z",
+          total: 0
+        })
+        po.addLine("PRD-1", 3, Money { amount: 4.00, currency: "USD" })
+        expect(po.lineCount).toBe(1)
+        expect(po.total).toBe(12)
+      }
+    }
+
+    aggregate GoodsReceipt ids guid with crudish {
+      poId: PurchaseOrder id
+      warehouseRef: string
+      receivedAt: datetime managed
+      notes: string?
+      derived display: string = warehouseRef
+    }
+
+    criterion PendingApproval of PurchaseOrder = status == Draft
+
+    repository Suppliers for Supplier {
+      find active(): Supplier[] where this.active == true
+    }
+    repository PurchaseOrders for PurchaseOrder {
+      find bySupplier(supplierId: Supplier id): PurchaseOrder[] where this.supplierId == supplierId
+      find pending(): PurchaseOrder[] where PendingApproval
+    }
+    repository GoodsReceipts for GoodsReceipt {
+      find byPurchaseOrder(poId: PurchaseOrder id): GoodsReceipt[] where this.poId == poId
+    }
+
+    view PendingPurchaseOrders = PurchaseOrder where status == Draft
+
+    // Transactional receipt: create the receipt row AND flip the PO to
+    // Received atomically — if `markReceived` throws, the receipt rolls
+    // back too.
+    workflow receiveGoods(poId: PurchaseOrder id, warehouseRef: string) transactional {
+      let po = PurchaseOrders.getById(poId)
+      let receipt = GoodsReceipt.create({
+        poId: poId,
+        warehouseRef: warehouseRef
+      })
+      po.markReceived()
+    }
+
+    seed default {
+      Supplier { name: "Acme Components Inc",
+                 contact: { email: "sales@acmecomponents.example", phone: "+1-555-0199" },
+                 address: { line1: "42 Supply St", city: "Detroit", region: "MI", postalCode: "48201", country: US },
+                 rating: 4, active: true }
+    }
+  }
+}

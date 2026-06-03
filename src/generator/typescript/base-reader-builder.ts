@@ -79,7 +79,7 @@ export function buildBaseReaderFile(
     `  switch (row.kind) {`,
     ...cases,
     `    default:`,
-    // eslint-disable-next-line no-template-curly-in-string — emitted code
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: ${row.kind} is emitted into the generated source, not interpolated here
     "      throw new Error(`unknown " + base.name + " kind: ${row.kind}`);",
     `  }`,
     `}`,

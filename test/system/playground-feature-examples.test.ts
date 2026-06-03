@@ -4,7 +4,7 @@ import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
-import { lowerModel, mergeLoomModels } from "../../src/ir/lower/lower.js";
+import { lowerProject } from "../../src/ir/lower/lower.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import { loadProject } from "../../src/language/project-loader.js";
@@ -42,9 +42,10 @@ const featureExamples = [
 async function loadExample(file: string) {
   const services = createDddServices(NodeFileSystem);
   const { all } = await loadProject(URI.file(path.join(repoRoot, file)), services.shared);
-  const loom = enrichLoomModel(
-    mergeLoomModels(all.map((doc) => lowerModel(doc.parseResult.value as Model))),
-  );
+  // `lowerProject` composes the whole import graph as one project (the
+  // same path the CLI/playground use), so top-level `subdomain`s fold into
+  // the lone system — see docs/proposals/implicit-system-composition.md.
+  const loom = enrichLoomModel(lowerProject(all.map((doc) => doc.parseResult.value as Model)));
   return { all, loom };
 }
 

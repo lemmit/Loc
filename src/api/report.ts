@@ -1,23 +1,24 @@
 // ---------------------------------------------------------------------------
-// Structured-diagnostics serializer for the CLI `--json` mode
-// (docs/proposals/ai-diagnostics-contract.md).  Normalizes Langium
-// (phases ①③④) and IR (phase ⑦) diagnostics into the one wire shape the AI
-// authoring loop consumes, with a deterministic sort and an always-valid
-// envelope.
-//
-// Lives in `src/cli/` (an entrypoint, above every pipeline layer), so it may
-// freely import from language/ and ir/.
+// Structured-diagnostics serializers — the pure core that turns Langium
+// (phases ①③④) and IR (phase ⑦) diagnostics into the contract wire shape
+// (docs/proposals/ai-diagnostics-contract.md).  Transport-neutral: consumed by
+// the CLI, the (future) MCP server, the LSP adapters, and the in-browser
+// playground alike.  No Node-only imports — safe in the browser.
 // ---------------------------------------------------------------------------
 
-import { CstUtils, type LangiumDocument } from "langium";
+import { type AstNode, CstUtils, type LangiumDocument } from "langium";
 import type { Diagnostic } from "vscode-languageserver-types";
 import type {
+  GenerateDeployable,
+  GenerateReport,
   JsonDiagnostic,
   JsonPhase,
+  JsonReportSummary,
   JsonSeverity,
   ValidateReport,
 } from "../diagnostics/contract.js";
 import type { LoomDiagnostic } from "../ir/validate/validate.js";
+import { fixHintFor } from "../language/fix-hints.js";
 import type { Model } from "../language/generated/ast.js";
 import { addressOf, buildOutline } from "../language/print/index.js";
 
@@ -66,9 +67,12 @@ function codeOf(d: Diagnostic): string {
   }
 }
 
-/** Resolve a CST-backed diagnostic to a node address + source slice
- *  (best-effort; both fields may be absent). */
-function locate(d: Diagnostic, doc: LangiumDocument): { node?: string; sourceText?: string } {
+/** Resolve a CST-backed diagnostic to its AST node + address + source slice
+ *  (best-effort; all fields may be absent). */
+function locate(
+  d: Diagnostic,
+  doc: LangiumDocument,
+): { ast?: AstNode; node?: string; sourceText?: string } {
   try {
     const rootCst = doc.parseResult?.value?.$cstNode;
     if (!rootCst) return {};
@@ -79,14 +83,15 @@ function locate(d: Diagnostic, doc: LangiumDocument): { node?: string; sourceTex
     const node = addressOf(ast);
     const raw = ast.$cstNode?.text;
     const sourceText = raw ? raw.split("\n", 1)[0]?.slice(0, 200) : undefined;
-    return { node, sourceText };
+    return { ast, node, sourceText };
   } catch {
     return {};
   }
 }
 
 export function langiumDiagnosticToJson(d: Diagnostic, doc: LangiumDocument): JsonDiagnostic {
-  const { node, sourceText } = locate(d, doc);
+  const { ast, node, sourceText } = locate(d, doc);
+  const fixHint = ast ? fixHintFor(d, doc, ast) : undefined;
   return {
     code: codeOf(d),
     severity: severityOf(d),
@@ -98,6 +103,7 @@ export function langiumDiagnosticToJson(d: Diagnostic, doc: LangiumDocument): Js
       end: { line: d.range.end.line, character: d.range.end.character },
     },
     ...(sourceText ? { sourceText } : {}),
+    ...(fixHint ? { fixHint } : {}),
   };
 }
 
@@ -134,6 +140,18 @@ export function sortDiagnostics(diags: JsonDiagnostic[]): JsonDiagnostic[] {
   });
 }
 
+function summarise(diagnostics: JsonDiagnostic[]): JsonReportSummary {
+  let errors = 0;
+  let warnings = 0;
+  let infos = 0;
+  for (const d of diagnostics) {
+    if (d.severity === "error") errors++;
+    else if (d.severity === "warning") warnings++;
+    else infos++;
+  }
+  return { errors, warnings, infos };
+}
+
 export function buildValidateReport(args: {
   modelPath: string;
   langiumDiagnostics: Diagnostic[];
@@ -145,15 +163,7 @@ export function buildValidateReport(args: {
     ...args.langiumDiagnostics.map((d) => langiumDiagnosticToJson(d, args.doc)),
     ...args.irDiagnostics.map(irDiagnosticToJson),
   ]);
-
-  let errors = 0;
-  let warnings = 0;
-  let infos = 0;
-  for (const d of diagnostics) {
-    if (d.severity === "error") errors++;
-    else if (d.severity === "warning") warnings++;
-    else infos++;
-  }
+  const summary = summarise(diagnostics);
 
   // Outline is always a valid object, even on a broken AST (contract §6).
   let outline: ValidateReport["outline"] = { systems: [], contexts: [] };
@@ -168,9 +178,26 @@ export function buildValidateReport(args: {
   return {
     loomVersion: LOOM_VERSION,
     model: args.modelPath,
-    ok: errors === 0,
-    summary: { errors, warnings, infos },
+    ok: summary.errors === 0,
+    summary,
     diagnostics,
     outline,
+  };
+}
+
+export function buildGenerateReport(args: {
+  modelPath: string;
+  diagnostics: JsonDiagnostic[];
+  deployables: GenerateDeployable[];
+}): GenerateReport {
+  const diagnostics = sortDiagnostics(args.diagnostics);
+  const summary = summarise(diagnostics);
+  return {
+    loomVersion: LOOM_VERSION,
+    model: args.modelPath,
+    ok: summary.errors === 0,
+    summary,
+    diagnostics,
+    deployables: args.deployables,
   };
 }

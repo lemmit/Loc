@@ -207,9 +207,8 @@ describe("openapi-normalize", () => {
             CreateProductRequest: {
               type: "object",
               properties: { name: {}, sku: {}, description: {} },
-              // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
               required: ["name", "sku"],
-            } as any,
+            },
           },
         },
       };
@@ -222,9 +221,8 @@ describe("openapi-normalize", () => {
           schemas: {
             ProductResponse: {
               type: "object",
-              // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
               required: ["id", "name", "name_provenance"],
-            } as any,
+            },
           },
         },
       };
@@ -283,15 +281,13 @@ describe("openapi-normalize", () => {
           Product: {
             type: "object",
             properties: { id: {}, name: {}, sku: {} },
-            // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
             required: ["id", "name"],
-          } as any,
+          },
           CreateProductRequest: {
             type: "object",
             properties: { name: {}, sku: {} },
-            // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
             required: ["name"],
-          } as any,
+          },
         },
       },
     });
@@ -376,9 +372,8 @@ describe("openapi-normalize", () => {
       other.components!.schemas!.Product = {
         type: "object",
         properties: { id: {}, name: {}, sku_alt: {} },
-        // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
         required: ["id", "name"],
-      } as any;
+      };
       const diff = diffSpecs({ name: "ref", spec: baseSpec() }, { name: "other", spec: other });
       expect(diff.fieldDiffs).toEqual(["Product: only-ref=[sku] only-other=[sku_alt]"]);
       expect(isCleanDiff(diff)).toBe(false);
@@ -390,9 +385,8 @@ describe("openapi-normalize", () => {
       other.components!.schemas!.Product = {
         type: "object",
         properties: { id: {}, name: {}, sku: {} },
-        // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
         required: ["id", "name", "sku"],
-      } as any;
+      };
       const diff = diffSpecs({ name: "ref", spec: baseSpec() }, { name: "other", spec: other });
       expect(diff.requiredDiffs).toEqual([
         "Product: required-only-ref=[] required-only-other=[sku]",
@@ -409,9 +403,8 @@ describe("openapi-normalize", () => {
       other.components!.schemas!.Product = {
         type: "object",
         properties: { id: {}, name: {}, sku: {}, extra: {} },
-        // biome-ignore lint/suspicious/noExplicitAny: test-only spec literal
         required: ["id", "name", "extra"],
-      } as any;
+      };
       const diff = diffSpecs({ name: "ref", spec: baseSpec() }, { name: "other", spec: other });
       expect(diff.fieldDiffs).toEqual(["Product: only-ref=[] only-other=[extra]"]);
       // `extra` filtered out of the required diff (not in ref's properties);

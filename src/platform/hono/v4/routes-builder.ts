@@ -17,7 +17,6 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
-  EntityPartIR,
   EnumIR,
   FindIR,
   InvariantIR,
@@ -44,7 +43,6 @@ import {
   opDestroy,
   opFind,
   opGetById,
-  opList,
   opOperation,
 } from "../../../ir/util/openapi-ids.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";

@@ -375,9 +375,6 @@ function stmtUsesCodeBlock(stmt: import("../../ir/types/loom-ir.js").StmtIR): bo
       return exprUsesCodeBlock(stmt.value);
     case "call":
       return stmt.args.some(exprUsesCodeBlock);
-    case "emit":
-    case "precondition":
-    case "requires":
     default:
       return false;
   }

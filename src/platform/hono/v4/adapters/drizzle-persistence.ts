@@ -48,7 +48,7 @@ const splitLines = (s: string): Lines => s.split("\n");
  *  `@hono/...`, `zod`, `pino` belong to the framework/style adapters. */
 const persistenceDeps = (): Lines => [
   `"drizzle-orm": "${BACKEND_PINS.dependencies["drizzle-orm"]}",`,
-  `"pg": "${BACKEND_PINS.dependencies["pg"]}",`,
+  `"pg": "${BACKEND_PINS.dependencies.pg}",`,
 ];
 
 /** The server-entry connection block (DATABASE_URL guard → pg pool →

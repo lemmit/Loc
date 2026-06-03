@@ -30,7 +30,6 @@ import type {
   PayloadIR,
   RawLoomModel,
   RepositoryIR,
-  SubdomainIR,
   SystemIR,
   TraceabilityIR,
   TypeIR,
@@ -938,6 +937,7 @@ function computeTraceability(loom: LoomModel): TraceabilityIR {
   const childrenOf: Record<string, string[]> = {};
   for (const r of loom.requirements) childrenOf[r.id] ??= [];
   for (const r of loom.requirements) {
+    // biome-ignore lint/suspicious/noAssignInExpressions: `(map[k] ??= []).push(v)` is the canonical bucket-push idiom used throughout this file
     if (r.parentId) (childrenOf[r.parentId] ??= []).push(r.id);
   }
 
@@ -959,6 +959,7 @@ function computeTraceability(loom: LoomModel): TraceabilityIR {
   // TestCases keyed by the requirement they directly verify.
   const directTests: Record<string, string[]> = {};
   for (const tc of loom.testCases) {
+    // biome-ignore lint/suspicious/noAssignInExpressions: `(map[k] ??= []).push(v)` is the canonical bucket-push idiom used throughout this file
     (directTests[tc.verifies] ??= []).push(tc.id);
   }
 
@@ -991,6 +992,7 @@ function computeTraceability(loom: LoomModel): TraceabilityIR {
   const testsByCodeElement: Record<string, string[]> = {};
   for (const tc of loom.testCases) {
     for (const c of tc.covers) {
+      // biome-ignore lint/suspicious/noAssignInExpressions: `(map[k] ??= []).push(v)` is the canonical bucket-push idiom used throughout this file
       (testsByCodeElement[c.qualifiedName] ??= []).push(tc.id);
     }
   }
@@ -1018,6 +1020,7 @@ function computeTraceability(loom: LoomModel): TraceabilityIR {
     const execs = execTestsByTestCase[tc.id] ?? [];
     if (execs.length === 0) continue;
     for (const c of tc.covers) {
+      // biome-ignore lint/suspicious/noAssignInExpressions: bind the bucket once before the inner loop dedupes-and-pushes
       const bucket = (execTestsByCodeElement[c.qualifiedName] ??= []);
       for (const e of execs) if (!bucket.includes(e)) bucket.push(e);
     }

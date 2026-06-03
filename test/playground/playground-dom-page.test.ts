@@ -66,11 +66,11 @@ describe("DomPage / DomLocator", () => {
     `);
     const page = new DomPage(document);
     let clicked = "";
-    document.querySelectorAll('[role="option"]').forEach((o) =>
+    for (const o of document.querySelectorAll('[role="option"]')) {
       o.addEventListener("click", () => {
         clicked = o.textContent ?? "";
-      }),
-    );
+      });
+    }
     const listbox = page
       .locator('[role="listbox"]')
       .filter({ has: page.getByRole("option", { name: "Confirmed", exact: true }) });

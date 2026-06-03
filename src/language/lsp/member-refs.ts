@@ -48,11 +48,21 @@ function isEntityLike(n: AstNode | undefined): n is EntityLike {
 }
 
 /** Member declarations addressed through member-access / bare this-refs —
- *  the kinds whose usages live in plain string tokens, not cross-references. */
+ *  the kinds whose usages live in plain string tokens, not cross-references.
+ *  `Operation` is included: operation call sites (`order.close()`) are
+ *  `MemberSuffix` tokens invisible to the cross-reference index, so renaming an
+ *  operation must go through the member-usage rewrite path, not the default
+ *  index-driven rename (which would leave every call site stale). */
 export function isRenameableMember(node: AstNode): boolean {
   if (!isEntityLike(node.$container)) return false;
   const t = node.$type;
-  return t === "Property" || t === "Containment" || t === "DerivedProp" || t === "FunctionDecl";
+  return (
+    t === "Property" ||
+    t === "Containment" ||
+    t === "DerivedProp" ||
+    t === "FunctionDecl" ||
+    t === "Operation"
+  );
 }
 
 /** The CST node of the `.member` identifier token of a member access

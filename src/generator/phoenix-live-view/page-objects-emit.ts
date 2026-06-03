@@ -644,10 +644,8 @@ function buildFallback(page: PageIR): string {
 function routeAsTemplateLiteral(route: string, paramNames: string[]): string {
   const paramSet = new Set(paramNames);
   const parts: string[] = [];
-  const re = /:([A-Za-z_][A-Za-z0-9_]*)/g;
   let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(route)) !== null) {
+  for (const m of route.matchAll(/:([A-Za-z_][A-Za-z0-9_]*)/g)) {
     if (m.index > last) parts.push(escapeTemplate(route.slice(last, m.index)));
     const name = m[1]!;
     parts.push(paramSet.has(name) ? "${" + name + "}" : `:${name}`);

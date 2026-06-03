@@ -5,7 +5,6 @@ import { COLLECTION_OP_SIGNATURES, isCollectionOp } from "../util/collection-ops
 import type {
   Aggregate,
   BaseType,
-  BinaryChain,
   Criterion,
   EntityPart,
   EnumDecl,

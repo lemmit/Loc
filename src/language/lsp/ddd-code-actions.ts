@@ -45,6 +45,22 @@ export class DddCodeActionProvider implements CodeActionProvider {
           }
           break;
         }
+        case "loom.bare-aggregate-in-type": {
+          // Editor-native twin of the fix-hints.ts provider (which emits the
+          // same change as a node-addressed ModelPatch for the agent loop): the
+          // diagnostic range ends just after the bare aggregate type name, so
+          // inserting ' id' there yields `Customer id` (and `Customer id[]` for
+          // a collection ref).
+          actions.push(
+            quickFix(
+              "Reference the aggregate by id",
+              document,
+              diag,
+              TextEdit.insert(diag.range.end, " id"),
+            ),
+          );
+          break;
+        }
       }
     }
     return actions;

@@ -13,10 +13,23 @@
 > separate `validate` verb. **Slice 2 shipped:** every IR diagnostic in
 > `src/ir/validate/validate.ts` now carries a stable `loom.*` code (the
 > `loom.ir-validate` fallback is now only a defensive net), gated by
-> `test/ir/diagnostic-codes-completeness.test.ts`. **Deferred to follow-up
-> slices:** `fixHint` patches (need the model-patch applier), `related[]`,
-> IR-diagnostic *ranges* (need CST provenance through lowering), and
-> `generate --json` (§4).
+> `test/ir/diagnostic-codes-completeness.test.ts`. **Slice 4 shipped:**
+> `fixHint` (§3.3) — CST-backed diagnostics can carry an applyable `ModelPatch`,
+> via a per-code provider registry (`src/language/fix-hints.ts`); the flagship
+> `loom.bare-aggregate-in-type` ships a `replace-text` fix (robust for scalar
+> and `[]` collection refs), and the validate→repair loop is proven closed
+> end-to-end (diagnostic → fixHint → `applyPatches` → clean re-validate) in
+> `test/language/fix-hints.test.ts`. More per-code providers are additive.
+> **Slice 5 shipped:** `generate --json` (§4) — `ddd generate system --json`
+> emits the `GenerateReport` (validation + the deployable manifest:
+> name/platform/port; writes no files). Landed alongside a **transport-neutral
+> toolkit** (`src/api/`): `validate()` / `generate()` / `applyPatches()` are now
+> one shared core that the CLI, the future MCP server, the LSP adapters, and the
+> in-browser playground all call (browser-safe, EmptyFileSystem) — see
+> [D-API-TOOLKIT](../decisions.md#d-api-toolkit--one-transport-neutral-toolkit-core-thin-adapters-per-surface).
+> **Deferred to follow-up slices:** `related[]`, IR-diagnostic *ranges* and
+> their fixHints (need CST provenance through lowering); per-deployable file
+> counts + `.loom/` artifact paths in the GenerateReport; multi-file generate.
 > **Role:** Defines the machine-readable interface the AI authoring loop
 > consumes. The loop in [`ai-authoring-loop.md`](./ai-authoring-loop.md) and
 > the platform vision in [`ai-generation-platform.md`](./ai-generation-platform.md)

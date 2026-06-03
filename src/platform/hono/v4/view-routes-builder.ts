@@ -297,6 +297,7 @@ function idFollowPath(e: ExprIR): string[] | undefined {
  *  inline as a string-literal union pulled from `enumValues`. */
 function zodForRow(t: TypeIR, enumValues: Map<string, string[]>): string {
   switch (t.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
       switch (t.name) {
         case "int":
