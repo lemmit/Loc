@@ -173,7 +173,7 @@ and the React Select picker.
 - `all()` — auto-included; loads all rows and hydrates with parts
 - `<find>(...)` — one method per user-declared `find`; a `where`
   clause lowers to a Drizzle predicate (`lowerToDrizzle` in
-  `repository-find-builder.ts`) over the queryable subset
+  `repository-find-predicate.ts`) over the queryable subset
   (comparisons, `&&`/`||`, `!`, bare-boolean columns, value-object
   sub-columns, `currentUser.<field>`, enum values, and
   `<refColl>.contains(x)` join-table subqueries); a paramless find

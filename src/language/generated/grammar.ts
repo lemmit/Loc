@@ -9694,6 +9694,14 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 {
                   "$type": "Keyword",
                   "value": "state"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "title"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "body"
                 }
               ]
             }
@@ -10763,23 +10771,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "primary"
-          },
-          {
-            "$type": "Keyword",
             "value": "cache"
-          },
-          {
-            "$type": "Keyword",
-            "value": "search"
-          },
-          {
-            "$type": "Keyword",
-            "value": "events"
-          },
-          {
-            "$type": "Keyword",
-            "value": "bi"
           },
           {
             "$type": "Keyword",
@@ -14206,23 +14198,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "primary"
-          },
-          {
-            "$type": "Keyword",
             "value": "cache"
-          },
-          {
-            "$type": "Keyword",
-            "value": "search"
-          },
-          {
-            "$type": "Keyword",
-            "value": "events"
-          },
-          {
-            "$type": "Keyword",
-            "value": "bi"
           },
           {
             "$type": "Keyword",
@@ -14614,6 +14590,18 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "$type": "SimpleType",
             "typeRef": {
               "$ref": "#/rules@72"
+            }
+          },
+          {
+            "$type": "SimpleType",
+            "typeRef": {
+              "$ref": "#/rules@94"
+            }
+          },
+          {
+            "$type": "SimpleType",
+            "typeRef": {
+              "$ref": "#/rules@99"
             }
           }
         ]

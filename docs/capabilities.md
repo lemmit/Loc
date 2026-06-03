@@ -149,8 +149,9 @@ tools) and for future capability-aware backend logic.
 
 ## Propagation rules
 
-At lowering time (`lowerContext` in `src/ir/lower.ts`) the compiler
-expands context-level capability members onto every aggregate in
+At lowering time (`lowerContext` in `src/ir/lower/lower.ts`, with the
+filter/stamp/implements collection in `src/ir/lower/lower-capabilities.ts`)
+the compiler expands context-level capability members onto every aggregate in
 that context, subject to the `for` filter:
 
 | Declaration | Applies to |

@@ -1,6 +1,13 @@
 # Payload — a structural transport layer
 
-> Status: proposal. **Sister proposal**:
+> Status: **PARTIAL** — the first real consumer of the carrier-generic
+> machinery has shipped: the `Paged<T>` page carrier + functional **paged
+> finds** emit across all four backends (the P3b slice — #898 React, #916 .NET,
+> #925 Phoenix, #933 cross-backend wire-parity closeout; see
+> [`pagination-design-note.md`](./pagination-design-note.md)). The full
+> `payload` keyword, ML-postfix carrier-generic surface (P1–P4), tagged unions,
+> and `<Agg>Wire` auto-synthesis remain proposal-stage; see
+> [`implementation-plan.md`](./implementation-plan.md). **Sister proposal**:
 > [`aggregate-inheritance.md`](./aggregate-inheritance.md) — they together
 > split the type system along two axes (state vs transport). Read both
 > before implementing either.

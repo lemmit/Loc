@@ -6,7 +6,6 @@ import type {
   BoundedContext,
   Channel,
   ChannelSource,
-  Component,
   ConfigEntry,
   ConnectionSource,
   Create,
@@ -15,23 +14,16 @@ import type {
   Destroy,
   EnumDecl,
   EventDecl,
-  Expression,
-  HandleDecl,
   Layout,
-  LayoutNamedSlot,
   LoadPath,
-  MenuBlock,
   Model,
-  OnDecl,
   Operation,
-  Page,
   PayloadDecl,
   Property,
   Repository,
   Resource,
   Retrieval,
   Seed,
-  StateField,
   Statement,
   Storage,
   Subdomain,
@@ -43,17 +35,12 @@ import type {
   Ui,
   UserBlock,
   ValueObject,
-  View,
-  Workflow,
-  WorkflowCreateDecl,
 } from "../../language/generated/ast.js";
 import {
   isAggregate,
   isApi,
   isApply,
-  isAssignOrCallStmt,
   isBoundedContext,
-  isCallSuffix,
   isChannel,
   isChannelSource,
   isComponent,
@@ -63,31 +50,20 @@ import {
   isDeployable,
   isDerivedProp,
   isDestroy,
-  isEmitStmt,
   isEntityPart,
   isEnumDecl,
   isEventDecl,
   isExpectStmt,
   isExpectThrowsStmt,
-  isForStmt,
   isFunctionDecl,
-  isHandleDecl,
   isInvariant,
   isLayout,
-  isLetStmt,
-  isMemberSuffix,
-  isNameRef,
-  isObjectLit,
-  isOnDecl,
   isOperation,
   isPayloadDecl,
   isPermissionsBlock,
-  isPostfixChain,
-  isPreconditionStmt,
   isProperty,
   isRepository,
   isRequirement,
-  isRequiresStmt,
   isResource,
   isRetrieval,
   isSeed,
@@ -104,23 +80,17 @@ import {
   isValueObject,
   isView,
   isWorkflow,
-  isWorkflowCreateDecl,
 } from "../../language/generated/ast.js";
 import { platformFor } from "../../platform/registry.js";
-import { defaultsFor } from "../../platform/resolve-adapters.js";
-import { applicationDslToAdapter } from "../../util/platform-axes.js";
-import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
   ApiIR,
-  ApplyIR,
   BoundedContextIR,
   ChannelIR,
   ChannelSourceIR,
   ComponentIR,
   ConfigEntryIR,
   ConnectionSourceIR,
-  CreateIR,
   CriterionIR,
   DataSourceIR,
   DataSourceKind,
@@ -128,25 +98,14 @@ import type {
   EntityPartIR,
   EnumIR,
   EventIR,
-  ExprIR,
   FieldIR,
-  HandleIR,
   IdValueType,
   LayoutIR,
   LoadPlanIR,
   LoadSegmentIR,
-  MenuBlockIR,
-  MenuLinkIR,
-  MenuMetaIR,
-  OnIR,
-  PageIR,
-  PageLayoutIR,
-  PageMetadataIR,
   PageOriginIR,
-  ParamIR,
   PayloadIR,
   PermissionDeclIR,
-  Platform,
   RawLoomModel,
   RepositoryIR,
   RequirementIR,
@@ -155,7 +114,6 @@ import type {
   SeedRowIR,
   SolutionIR,
   SortTermIR,
-  StateFieldIR,
   StorageIR,
   StorageKind,
   SubdomainIR,
@@ -165,15 +123,10 @@ import type {
   TestIR,
   TestStmtIR,
   ThemeIR,
-  TypeIR,
-  UiApiParamIR,
-  UiIR,
-  UiParamBindingIR,
   UserIR,
   ValueObjectIR,
   ViewIR,
   WorkflowIR,
-  WorkflowStmtIR,
 } from "../types/loom-ir.js";
 import type { ContextLevelCapabilities } from "./lower-capabilities.js";
 import {
@@ -183,9 +136,9 @@ import {
   collectStamps,
   EMPTY_CONTEXT_CAPABILITIES,
 } from "./lower-capabilities.js";
-import { criterionRefOf, inferExprType, lowerExpr } from "./lower-expr.js";
+import { lowerDeployable } from "./lower-deployment.js";
+import { criterionRefOf, lowerExpr } from "./lower-expr.js";
 import {
-  computeSaves,
   lowerApply,
   lowerContainment,
   lowerCreate,
@@ -197,14 +150,7 @@ import {
   lowerInvariant,
   lowerOperation,
   lowerPropertyChecks,
-  plural,
 } from "./lower-members.js";
-import {
-  canonicalFramework,
-  greenfieldAxisDefaults,
-  qualifyDesign,
-  qualifyPlatform,
-} from "./lower-platform.js";
 import { lowerRequirement, lowerSolution, lowerTestCase } from "./lower-requirements.js";
 import { lowerStatement } from "./lower-stmt.js";
 import {
@@ -213,11 +159,13 @@ import {
   findEntityByName,
   inAggregate,
   inValueObject,
-  inWorkflow,
   lowerType,
   newEnv,
   withLocal,
 } from "./lower-types.js";
+import { lowerComponent, lowerLayout, lowerUi } from "./lower-ui.js";
+import { lowerView } from "./lower-view.js";
+import { lowerWorkflow } from "./lower-workflow.js";
 import {
   buildExpandContext,
   expandInlineScaffoldPrimitives,
@@ -792,479 +740,6 @@ function lowerE2E(block: TestE2E, env: Env, kind: "api" | "ui"): TestE2EIR {
   };
 }
 
-function lowerDeployable(d: Deployable): DeployableIR {
-  const { family: platform, ref: platformRef } = qualifyPlatform(d.platform);
-  // `auth: required` is currently the only AuthMode.  Future modes
-  // (`optional` / `forbidden`) would extend this branch.
-  const auth = d.auth === "required" ? { required: true } : undefined;
-  // `design` defaults only on platforms that actually render UI in
-  // this deployable — keeping the IR honest about which deployables
-  // mount a frontend.  `react`/`static` always render React (TSX
-  // packs).  `phoenixLiveView` is fullstack and always renders HEEx
-  // against the `ashPhoenix` pack.  `dotnet` is dual-mode: it renders
-  // an embedded React SPA when (and only when) the deployable declares
-  // `ui:`; backend-only dotnet drops the field.  Other platforms
-  // (`hono`) silently drop `design:` and the validator already warns.
-  // D-PHOENIX-SURFACE: `hosts:` declarations the deployable serves.
-  // Resolve the first hosted `Ui` node so `uiName`/`uiFramework` can
-  // fall back to it (and read its own declared framework) when the
-  // legacy `ui:` binding is absent.
-  const hostedUis = (d.hosts ?? []).map((r) => r.ref).filter((u): u is Ui => !!u);
-  const hostedUiNames = hostedUis.map((u) => u.name);
-  const firstHostedUi = hostedUis[0];
-  const uiName =
-    d.uiSugar?.ref?.ref?.name ??
-    d.uiCompose?.ref?.ref?.name ??
-    d.uiBlock?.ref?.ref?.name ??
-    firstHostedUi?.name ??
-    undefined;
-  // Page-metamodel UI binding.  The grammar accepts two
-  // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
-  // (full block).  Both lower to the same `uiName` + optional
-  // `uiFramework` here.  `uiName` is computed above so the `design`
-  // default can branch on it for dual-mode platforms (fullstack
-  // dotnet).  Validator enforces that the referenced ui
-  // exists, the platform supports a UI mount, and the framework value
-  // is one of the v0-allowed alternatives.
-  // Explicit `framework: …` in the full block wins; otherwise default
-  // from the platform.  Fullstack dotnet renders React; phoenixLiveView
-  // renders LiveView; react/static render React.  Backends without a
-  // `ui:` binding leave this undefined.
-  // Precedence: explicit `framework:` on the legacy block binding, then
-  // the framework declared on the `hosts:`-ed `ui` itself (D-PHOENIX-SURFACE
-  // phase 2 — the ui owns its framework), then the legacy platform-derived
-  // default.  Computed before `design` so the pack default can branch on
-  // it (a phoenix host embedding react needs a tsx pack, not ashPhoenix).
-  const uiFramework =
-    canonicalFramework(d.uiBlock?.framework) ??
-    canonicalFramework(firstHostedUi?.framework) ??
-    (uiName
-      ? platform === "phoenix"
-        ? "phoenixLiveView"
-        : platformFor(platform).isFrontend || platform === "dotnet"
-          ? "react"
-          : undefined
-      : undefined);
-  // Design pack default depends on what actually renders:
-  //  - frontend platforms + fullstack-dotnet render React → `mantine`;
-  //  - phoenixLiveView renders HEEx → `ashPhoenix`, UNLESS it embeds a
-  //    `framework: react` ui (D-PHOENIX-SURFACE), in which case the SPA
-  //    needs a tsx pack → `mantine`;
-  //  - backends without a `ui:` mount carry no design.
-  const design = platformFor(platform).isFrontend
-    ? qualifyDesign(d.design, "mantine")
-    : platform === "phoenix"
-      ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
-      : platform === "dotnet" && uiName
-        ? qualifyDesign(d.design, "mantine")
-        : undefined;
-  // Explicit api composition.
-  const serves = (d.serves ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
-  const uiBindings = (d.uiCompose?.bindings ?? []).map(
-    (b): UiParamBindingIR => ({
-      paramName: b.name,
-      sourceDeployableName: b.source?.ref?.name ?? "",
-    }),
-  );
-  // D-STORAGE-SPLIT: `contexts:` clause references bounded contexts
-  // directly; `dataSources:` clause references the (context, kind)
-  // bindings the deployable hosts.
-  const contextNames = (d.contextRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
-  const dataSourceNames = (d.dataSourceRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
-  // D-REALIZATION-AXES: normalize the six axes.  Backends fill every axis
-  // with a concrete value (an absent knob → the platform default);
-  // frontends (`react`/`static`) carry none — `defaultsFor` is undefined
-  // for them, the validator rejects any axis written on a frontend.  The
-  // three adapter-backed axes source their default from the live adapter
-  // menu (`adapterDefaults`); the three greenfield axes from the table
-  // above.  `application`↔adapter `style`, `directoryLayout`↔`layout`.
-  const adapterDefaults = defaultsFor(platform);
-  const axes =
-    adapterDefaults !== undefined
-      ? (() => {
-          const gf = greenfieldAxisDefaults(platform);
-          return {
-            foundation: d.foundation ?? gf.foundation,
-            // Store the resolved adapter key (`serviceLayer` → `layered`)
-            // so the future codegen passes it straight to `resolveStyle`.
-            application: d.application
-              ? applicationDslToAdapter(d.application)
-              : adapterDefaults.style,
-            persistence: d.persistence ?? adapterDefaults.persistence.state,
-            directoryLayout: d.directoryLayout ?? adapterDefaults.layout,
-            transport: d.transport ?? gf.transport,
-            runtime: d.runtime ?? gf.runtime,
-          };
-        })()
-      : {
-          foundation: undefined,
-          application: undefined,
-          persistence: undefined,
-          directoryLayout: undefined,
-          transport: undefined,
-          runtime: undefined,
-        };
-  return {
-    name: d.name,
-    platform,
-    platformRef,
-    contextNames,
-    dataSourceNames,
-    port: d.port ?? defaultPortFor(platform),
-    targetName: d.targets?.ref?.name,
-    auth,
-    design,
-    foundation: axes.foundation,
-    application: axes.application,
-    persistence: axes.persistence,
-    directoryLayout: axes.directoryLayout,
-    transport: axes.transport,
-    runtime: axes.runtime,
-    uiName,
-    uiFramework,
-    hostedUiNames,
-    serves,
-    uiBindings,
-    favicon: d.favicon,
-  };
-}
-
-/** Look up a platform's default deployable port via `PlatformSurface.defaultPort`.
- *  Falls back to 3000 for an unknown / undefined platform (lowering may
- *  still be running before validation surfaces the bad value). */
-function defaultPortFor(platform: Platform | undefined): number {
-  if (!platform) return 3000;
-  try {
-    return platformFor(platform).defaultPort;
-  } catch {
-    return 3000;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Page metamodel lowering.
-//
-// Each `ui { ... }` SystemMember lowers to a `UiIR` carrying its
-// pages, components, scaffold directives, and an optional menu block
-// in source order.  This layer is intentionally shallow:
-//   - Page bodies / component bodies / state init expressions lower
-//     through the existing expression engine (`lowerExpr`); type
-//     resolution falls out from the same `Env`.
-//   - Scaffold directives stay as literal `ScaffoldIR` carrying their
-//     selector + targets.  The expander walks the system's
-//     domain IR to synthesise concrete pages from each directive.
-//   - Validator obligations catch the rest: ui-name
-//     uniqueness, deployable-references-existing-ui, scaffold target
-//     resolution, etc.
-// ---------------------------------------------------------------------------
-
-function lowerLayout(layout: Layout): LayoutIR {
-  // Each non-main slot is lowered with an empty env — layouts have no
-  // params or state, and the validator rejects refs to anything other
-  // than walker-stdlib primitives + user components + helper imports.
-  const env: Env = { locals: new Map(), user: undefined };
-  let header: ExprIR | undefined;
-  let sidebar: ExprIR | undefined;
-  let footer: ExprIR | undefined;
-  for (const slot of layout.slots) {
-    if (slot.$type === "LayoutMainSlot") {
-      // The `main` slot is the page-body sentinel.  No body to lower —
-      // the React generator emits `<Outlet />` at this position.
-      continue;
-    }
-    const named = slot as LayoutNamedSlot;
-    const body = lowerExpr(named.body, env);
-    switch (named.name) {
-      case "header":
-        header = body;
-        break;
-      case "sidebar":
-        sidebar = body;
-        break;
-      case "footer":
-        footer = body;
-        break;
-    }
-  }
-  return { name: layout.name, header, sidebar, footer };
-}
-
-function lowerUi(ui: Ui): UiIR {
-  const pages: PageIR[] = [];
-  const components: ComponentIR[] = [];
-  const apiParams: UiApiParamIR[] = [];
-  let menu: MenuBlockIR | undefined;
-  for (const m of ui.members) {
-    if (m.$type === "Page") pages.push(lowerPage(m));
-    else if (m.$type === "Component") components.push(lowerComponent(m));
-    else if (m.$type === "UiApiParam") {
-      apiParams.push({
-        name: m.name,
-        apiName: m.apiRef?.$refText ?? "",
-      });
-    } else if (m.$type === "MenuBlock") {
-      // First menu block wins.  Validator flags a duplicate
-      // `menu { ... }` block at ui scope as an error.
-      if (!menu) menu = lowerMenuBlock(m);
-    }
-  }
-  return {
-    name: ui.name,
-    framework: canonicalFramework(ui.framework),
-    pages,
-    components,
-    menu,
-    apiParams,
-  };
-}
-
-function lowerPage(p: Page): PageIR {
-  const params = (p.params ?? []).map((param) => ({
-    name: param.name,
-    type: lowerType(param.type),
-  }));
-  // Walk the unordered prop list to extract route / title / requires /
-  // body / state / per-page menu meta.  Multiple state blocks merge
-  // (matches `permissions` block multiplicity).
-  let route: string | undefined;
-  let title: ExprIR | undefined;
-  let requires: ExprIR | undefined;
-  let body: ExprIR | undefined;
-  let menuMeta: MenuMetaIR | undefined;
-  let layout: PageLayoutIR | undefined;
-  let description: string | undefined;
-  let ogImage: string | undefined;
-  let canonical: string | undefined;
-  const state: StateFieldIR[] = [];
-  // Page-scoped env: route params + state fields bind as locals so
-  // `inferExprType` resolves their refs to their declared types
-  // (otherwise NameRef refs would fall through to the string-typed
-  // default — wrong for `count + 1` arithmetic in a page primitive).
-  // The page emitter does its own walker-side scope resolution at
-  // emit time; this addition makes the IR's type info accurate enough
-  // that contextual lowering tricks (literal promotion, implicit
-  // string-concat convert injection) don't mis-fire on page bodies.
-  let env: Env = { locals: new Map(), user: undefined };
-  for (const param of p.params ?? []) {
-    env = withLocal(env, param.name, "param", lowerType(param.type));
-  }
-  for (const prop of p.props) {
-    if (prop.$type === "StateBlock") {
-      for (const f of prop.fields) {
-        env = withLocal(env, f.name, "let", lowerType(f.type));
-      }
-    }
-  }
-  for (const prop of p.props) {
-    if (prop.$type === "RouteProp") route = prop.value;
-    else if (prop.$type === "TitleProp") title = lowerExpr(prop.value, env);
-    else if (prop.$type === "RequiresProp") requires = lowerExpr(prop.expr, env);
-    else if (prop.$type === "BodyProp") body = lowerExpr(prop.expr, env);
-    else if (prop.$type === "StateBlock") {
-      for (const f of prop.fields) state.push(lowerStateField(f, env));
-    } else if (prop.$type === "PageMenuMeta") {
-      // Last block wins — validator flags repeated menu
-      // metadata blocks on a single page.
-      menuMeta = {
-        entries: prop.entries.map((e) => ({
-          name: e.name,
-          value: lowerExpr(e.value, env),
-        })),
-      };
-    } else if (prop.$type === "LayoutProp") {
-      // Phase 8: bare `ID` value resolves to either the two reserved
-      // presets (`default` / `none`) or the name of a named `layout`
-      // SystemMember declared in the same system.  Validator gates
-      // the resolution — by lowering time, anything that's not a
-      // preset is treated as a named ref (the React generator
-      // partitions pages by ref name).
-      layout =
-        prop.value === "default" || prop.value === "none"
-          ? { kind: "preset", name: prop.value }
-          : { kind: "named", ref: prop.value };
-    } else if (prop.$type === "DescriptionProp") {
-      description = prop.value;
-    } else if (prop.$type === "OgImageProp") {
-      ogImage = prop.value;
-    } else if (prop.$type === "CanonicalProp") {
-      canonical = prop.value;
-    }
-  }
-  // Static metadata projected into the `index.html` shell.  Only
-  // emitted when at least one metadata prop is present so consumers
-  // can branch on `page.metadata` truthiness rather than checking
-  // each field individually.
-  let metadata: PageMetadataIR | undefined;
-  if (description !== undefined || ogImage !== undefined || canonical !== undefined) {
-    metadata = { description, ogImage, canonical };
-  }
-  // Pass-1 AST-to-AST scaffold expansion populates
-  // synthesised pages with body expressions like
-  // `List(of: Order)` / `Form(creates: T)` / etc.  We infer the
-  // page's `archetype` discriminator and `source` from the
-  // body shape so the React emitter dispatches identically
-  // whether the page came from source or from the AST expander.
-  const inferred = inferPageOrigin(body);
-  return {
-    name: p.name,
-    params,
-    route,
-    title,
-    requires,
-    state,
-    body,
-    menuMeta,
-    source: inferred.kind === "custom" ? "explicit" : "scaffold",
-    origin: inferred,
-    layout,
-    metadata,
-  };
-}
-
-/** Infer a page's `origin` from its body shape.  The scaffold macro
- *  emits canonical body primitives (`scaffoldList(of:)`,
- *  `scaffoldNewForm(of:)`, `scaffoldWorkflowForm(runs:)`,
- *  `scaffoldViewList(of:)`, `Stack(scaffoldDetails(of:), …)`,
- *  `Home()` / `WorkflowsIndex()` / `ViewsIndex()`) — each call name
- *  maps one-to-one to an origin kind.  Anything else is a
- *  user-written page → `{ kind: "custom" }`. */
-function inferPageOrigin(body: ExprIR | undefined): PageOriginIR {
-  if (!body || body.kind !== "call") return { kind: "custom" };
-  const callName = body.name;
-  const argNames = body.argNames ?? [];
-  const refArg = (i: number): string | undefined => {
-    const arg = body.args[i];
-    return arg && arg.kind === "ref" ? arg.name : undefined;
-  };
-  // Singleton index pages — synthesised by the scaffold macro with
-  // sentinel-call bodies whose name matches the page's role.
-  if (callName === "Home") return { kind: "home" };
-  if (callName === "WorkflowsIndex") return { kind: "workflows-index" };
-  if (callName === "ViewsIndex") return { kind: "views-index" };
-  // Canonical scaffold body primitives — one call name per origin
-  // kind.  Each names its target explicitly via `of:` / `runs:`.
-  if (callName === "scaffoldList" && argNames[0] === "of") {
-    const aggName = refArg(0);
-    if (aggName) return { kind: "aggregate-list", aggregateName: aggName, contextName: "" };
-  }
-  if (callName === "scaffoldNewForm" && argNames[0] === "of") {
-    const aggName = refArg(0);
-    if (aggName) return { kind: "aggregate-new", aggregateName: aggName, contextName: "" };
-  }
-  if (callName === "scaffoldWorkflowForm" && argNames[0] === "runs") {
-    const wfName = refArg(0);
-    if (wfName) return { kind: "workflow-form", workflowName: wfName, contextName: "" };
-  }
-  if (callName === "scaffoldViewList" && argNames[0] === "of") {
-    const viewName = refArg(0);
-    if (viewName) return { kind: "view-list", viewName, contextName: "" };
-  }
-  // Detail pages emit `Stack(scaffoldDetails(of:),
-  // scaffoldOperations(of:), testid:)` — recognised by scanning for
-  // a `scaffoldDetails` child at the top of the Stack.
-  if (callName === "Stack") {
-    for (const arg of body.args) {
-      if (arg.kind !== "call") continue;
-      if (arg.name !== "scaffoldDetails") continue;
-      const ofIdx = (arg.argNames ?? []).indexOf("of");
-      const ofArg = ofIdx >= 0 ? arg.args[ofIdx] : undefined;
-      if (!ofArg || ofArg.kind !== "ref") continue;
-      return { kind: "aggregate-detail", aggregateName: ofArg.name, contextName: "" };
-    }
-  }
-  return { kind: "custom" };
-}
-
-function lowerComponent(c: Component): ComponentIR {
-  const params = c.params.map((param) => ({
-    name: param.name,
-    type: lowerType(param.type),
-  }));
-  // An `extern` component declares only its typed param contract —
-  // no body, no state to walk.  Carry the flag + src-relative module
-  // path; the React generator emits a `<Name>.props.ts` interface and
-  // imports the user's module at call sites.
-  if (c.extern) {
-    return { name: c.name, params, state: [], extern: true, externPath: c.externPath };
-  }
-  // Component-scoped env: params + state bind so `inferExprType`
-  // resolves refs to their declared types (same reason as
-  // `lowerPage`; see comment there).
-  let env: Env = { locals: new Map(), user: undefined };
-  for (const param of c.params) {
-    env = withLocal(env, param.name, "param", lowerType(param.type));
-  }
-  const state: StateFieldIR[] = [];
-  for (const decl of c.decls ?? []) {
-    if (decl.$type === "StateBlock") {
-      for (const f of decl.fields) {
-        env = withLocal(env, f.name, "let", lowerType(f.type));
-        state.push(lowerStateField(f, env));
-      }
-    }
-  }
-  // Non-extern components always carry a body (validator-enforced);
-  // guard defensively so lowering an invalid model can't crash.
-  const body = c.body ? lowerExpr(c.body, env) : undefined;
-  return { name: c.name, params, state, body };
-}
-
-function lowerStateField(f: StateField, env: Env): StateFieldIR {
-  return {
-    name: f.name,
-    type: lowerType(f.type),
-    init: f.init ? lowerExpr(f.init, env) : undefined,
-  };
-}
-
-function lowerMenuBlock(m: MenuBlock): MenuBlockIR {
-  const env: Env = { locals: new Map(), user: undefined };
-  return {
-    sections: m.sections.map((sec) => ({
-      label: sec.label,
-      links: sec.links.map((l): MenuLinkIR => {
-        // Page links use a real Langium cross-reference.
-        // Scaffold-synthesised pages are first-class AST nodes by
-        // link time, so `[Page:LooseName]` resolves through the
-        // standard linker.  We carry the resolved page's name into
-        // the IR for the menu emitter (which iterates `ui.pages` by
-        // name).  Unresolved refs surface as Langium linker errors,
-        // not silent shim misses.
-        const pageRef = l.page?.ref;
-        if (pageRef) {
-          return {
-            kind: "page",
-            pageName: pageRef.name,
-            props: (l.props ?? []).map((p) => ({
-              name: p.name,
-              value: lowerExpr(p.value, env),
-            })),
-          };
-        }
-        if (l.page?.$refText) {
-          // Reference exists but didn't resolve — preserve the text
-          // for diagnostics.  The validator / Langium linker has
-          // already reported the unresolved reference.
-          return {
-            kind: "page",
-            pageName: l.page.$refText,
-            props: (l.props ?? []).map((p) => ({
-              name: p.name,
-              value: lowerExpr(p.value, env),
-            })),
-          };
-        }
-        // External link: `link "Docs" -> "https://..."`.
-        return {
-          kind: "external",
-          label: l.externalLabel ?? "",
-          url: l.externalUrl ?? "",
-        };
-      }),
-    })),
-  };
-}
-
 function lowerContext(
   ctx: BoundedContext,
   user?: UserIR,
@@ -1624,707 +1099,4 @@ function lowerRepository(
       };
     }),
   };
-}
-
-function lowerView(view: View, env: Env): ViewIR {
-  // Filter + bind expressions resolve against the source
-  // aggregate's schema — same env shape repository find filters
-  // use.  Bare names (`status`, `lines.count`, `total`) lower to
-  // this-rooted property / containment / derived refs.
-  const source = view.source?.ref;
-  let inner = env;
-  if (source) inner = inAggregate(env, source);
-  const filter = view.filter ? lowerExpr(view.filter, inner) : undefined;
-  // Full-form views declare an output record.  Each `fields+=Property`
-  // gives us a typed field; each `binds+=BindEntry` gives us the
-  // expression that produces its value at projection time.  The
-  // shorthand form leaves `fields` empty and we surface
-  // `output: undefined` so emitters fall back to the aggregate's
-  // wire shape.
-  const hasOutput = view.fields.length > 0;
-  let output: ViewIR["output"] | undefined;
-  if (hasOutput) {
-    const binds = view.binds.map((b) => ({
-      name: b.name,
-      expr: lowerExpr(b.expr, inner),
-      type: inferExprType(b.expr, inner),
-    }));
-    // Walk every bind expression for `X id` follow patterns;
-    // each unique path becomes one bulk-load + map at emission
-    // time.  Order by path length (shortest first) so each
-    // hop's prerequisites are guaranteed to load before it.
-    const auxByKey = new Map<string, { path: string[]; aggName: string }>();
-    for (const b of binds) {
-      collectIdFollows(b.expr, auxByKey);
-    }
-    const ordered = [...auxByKey.values()].sort((a, b) => a.path.length - b.path.length);
-    const auxiliaries = ordered.map((a) => ({
-      ...a,
-      mapVar: mapVarForPath(a.path, a.aggName),
-    }));
-    output = {
-      fields: view.fields.map((p) => lowerField(p)),
-      binds,
-      auxiliaries,
-    };
-  }
-  return {
-    name: view.name,
-    aggregateName: source?.name ?? "Unknown",
-    filter,
-    output,
-  };
-}
-
-/** Walk a bind expression's IR tree and capture every `X id`
- *  follow as an auxiliary path entry.  Single-hop
- *  (`customerId.name`) yields path `["customerId"]` with target
- *  Customer; two-hop (`customerId.regionId.name`) yields paths
- *  `["customerId"]` (Customer) AND `["customerId", "regionId"]`
- *  (Region) — the longer path's prerequisites get loaded first
- *  thanks to dependency ordering at emission time. */
-function collectIdFollows(
-  expr: ExprIR,
-  out: Map<string, { path: string[]; aggName: string }>,
-): void {
-  if (expr.kind === "member" && expr.receiverType.kind === "id") {
-    const path = idFollowPath(expr.receiver);
-    if (path) {
-      const key = path.join(".");
-      if (!out.has(key)) {
-        out.set(key, { path, aggName: expr.receiverType.targetName });
-      }
-    }
-    collectIdFollows(expr.receiver, out);
-    return;
-  }
-  if (expr.kind === "member") {
-    collectIdFollows(expr.receiver, out);
-    return;
-  }
-  switch (expr.kind) {
-    case "method-call":
-      collectIdFollows(expr.receiver, out);
-      for (const a of expr.args) collectIdFollows(a, out);
-      return;
-    case "call":
-      for (const a of expr.args) collectIdFollows(a, out);
-      return;
-    case "lambda":
-      // Lambda body is now optional — single-expression form
-      // sets `body`, block-body form sets `block`.  Block bodies don't
-      // contribute Id-follow paths in v0 (they only appear in event
-      // handlers, not in `bind`/`derived`/filter expressions where this
-      // walker runs); recurse into `body` only when present.
-      if (expr.body) collectIdFollows(expr.body, out);
-      return;
-    case "match":
-      // Recurse through every arm condition + value plus the
-      // `else` branch.  Match expressions can appear inside view
-      // `bind` exprs and `derived` bodies; their Id-follow members
-      // must still surface for the bulk-load auxiliary planner.
-      for (const arm of expr.arms) {
-        collectIdFollows(arm.cond, out);
-        collectIdFollows(arm.value, out);
-      }
-      if (expr.otherwise) collectIdFollows(expr.otherwise, out);
-      return;
-    case "binary":
-      collectIdFollows(expr.left, out);
-      collectIdFollows(expr.right, out);
-      return;
-    case "unary":
-      collectIdFollows(expr.operand, out);
-      return;
-    case "ternary":
-      collectIdFollows(expr.cond, out);
-      collectIdFollows(expr.then, out);
-      collectIdFollows(expr.otherwise, out);
-      return;
-    case "paren":
-      collectIdFollows(expr.inner, out);
-      return;
-    case "new":
-    case "object":
-      for (const f of expr.fields) collectIdFollows(f.value, out);
-      return;
-  }
-}
-
-/** Map-variable name for an auxiliary at a given path.  Single-hop
- *  paths get a clean `<agg>ById`; multi-hop paths suffix the
- *  intermediate Pascal'd field names so two paths that happen to
- *  reach the same target aggregate via different intermediates
- *  get distinct map vars. */
-function mapVarForPath(path: string[], aggName: string): string {
-  const baseName = aggName.charAt(0).toLowerCase() + aggName.slice(1);
-  if (path.length === 1) return `${baseName}ById`;
-  // Multi-hop: e.g. ["customerId", "regionId"] → "regionByCustomerId"
-  const prefix = path
-    .slice(0, -1)
-    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-    .join("");
-  return `${baseName}By${prefix}`;
-}
-
-/** Extract the chain of source-field names from an Id-typed
- *  expression that's rooted in a `ref` and built up through
- *  `member` accesses on Id-typed receivers.  Returns undefined for
- *  any expression that doesn't fit this shape (calls, lambdas,
- *  member access through non-Id receivers, etc.). */
-function idFollowPath(e: ExprIR): string[] | undefined {
-  if (e.kind === "ref" && e.type?.kind === "id") {
-    return [e.name];
-  }
-  if (e.kind === "member" && e.receiverType.kind === "id") {
-    const inner = idFollowPath(e.receiver);
-    if (!inner) return undefined;
-    return [...inner, e.member];
-  }
-  return undefined;
-}
-
-function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR {
-  const aggsByName = new Map<string, Aggregate>();
-  const reposByName = new Map<string, Repository>();
-  const repoForAgg = new Map<string, string>(); // aggName -> repoName
-  for (const m of ctx.members) {
-    if (isAggregate(m)) aggsByName.set(m.name, m);
-    else if (isRepository(m)) {
-      reposByName.set(m.name, m);
-      const target = m.aggregate?.ref;
-      if (target?.name) repoForAgg.set(target.name, m.name);
-    }
-  }
-  // A workflow is a state-bearing entity (workflow-and-applier.md A2-S5f): bind
-  // `this` to it so every member body (create / handle / on / apply) resolves
-  // bare names / `this.field` against the workflow's `Property` state fields.
-  // The body is members-only — no header params, no free statements.
-  const paramEnv = inWorkflow(env, wf);
-  const subscriptions: OnIR[] = [];
-  const handlers: HandleIR[] = [];
-  const creates: CreateIR[] = [];
-  // Workflow state fields (`Property` members) — the correlation field +
-  // saga state (A2-S2).  Lowered with the same `lowerField` aggregates use.
-  const stateFields: FieldIR[] = wf.members.filter(isProperty).map((p) => lowerField(p, paramEnv));
-  // Appliers fold emitted events into workflow state (A2-S5b).
-  const appliers: ApplyIR[] = wf.members.filter(isApply).map((a) => lowerApply(a, paramEnv));
-  for (const m of wf.members) {
-    if (isWorkflowCreateDecl(m)) {
-      creates.push(lowerWorkflowCreate(m, paramEnv, aggsByName, reposByName, repoForAgg));
-    } else if (isOnDecl(m)) {
-      subscriptions.push(lowerOn(m, paramEnv, aggsByName, reposByName, repoForAgg));
-    } else if (isHandleDecl(m)) {
-      handlers.push(lowerHandle(m, paramEnv, aggsByName, reposByName, repoForAgg));
-    }
-    // Property / Apply handled above.
-  }
-  // Correlation field inference: the single id-shaped state field is the one
-  // the runtime routes inbound events to.  Ambiguity / absence → IR validator.
-  const idFields = stateFields.filter((f) => f.type.kind === "id");
-  const correlationField = idFields.length === 1 ? idFields[0].name : undefined;
-  // Facade over the primary (unnamed, command-triggered) create so the backend
-  // emitters keep reading `params`/`statements`/`savesAtExit` unchanged (A2-S5f).
-  const primary = creates.find((c) => c.name === null && c.triggerKind === "command") ?? creates[0];
-  return {
-    name: wf.name,
-    params: primary?.params ?? [],
-    transactional: !!wf.transactional,
-    isolation: wf.isolation as
-      | "readUncommitted"
-      | "readCommitted"
-      | "repeatableRead"
-      | "serializable"
-      | undefined,
-    statements: primary?.statements ?? [],
-    savesAtExit: primary?.savesAtExit ?? [],
-    creates,
-    eventSourced: !!wf.eventSourced,
-    ...(subscriptions.length > 0 ? { subscriptions } : {}),
-    ...(stateFields.length > 0 ? { stateFields } : {}),
-    ...(correlationField ? { correlationField } : {}),
-    ...(appliers.length > 0 ? { appliers } : {}),
-    ...(handlers.length > 0 ? { handlers } : {}),
-  };
-}
-
-// Lower a `create [name](params) [by <expr>] { … }` workflow starter
-// (workflow-and-applier.md A2-S5f).  Mirrors `lowerHandle`: params bind as
-// locals on the workflow `this`-env, the body lowers via
-// `lowerWorkflowStatement`.  Trigger kind is discriminated from the shape — a
-// `by` clause (and a sole event-typed param) marks an event-triggered starter.
-function lowerWorkflowCreate(
-  c: WorkflowCreateDecl,
-  baseEnv: Env,
-  aggsByName: Map<string, Aggregate>,
-  reposByName: Map<string, Repository>,
-  repoForAgg: Map<string, string>,
-): CreateIR {
-  let inner = baseEnv;
-  const params: ParamIR[] = [];
-  for (const p of c.params) {
-    const t = lowerType(p.type, baseEnv);
-    params.push({ name: p.name, type: t });
-    inner = withLocal(inner, p.name, "param", t);
-  }
-  const correlation = c.correlation ? lowerExpr(c.correlation, inner) : undefined;
-  // Event-triggered when routed by a `by` clause; capture the sole event param.
-  const triggerKind: "event" | "command" = correlation ? "event" : "command";
-  let eventBinding: string | undefined;
-  let eventRef: string | undefined;
-  if (triggerKind === "event" && c.params.length === 1) {
-    const t = lowerType(c.params[0].type, baseEnv);
-    eventBinding = c.params[0].name;
-    eventRef = t.kind === "entity" ? t.name : undefined;
-  }
-  const statements: WorkflowStmtIR[] = [];
-  for (const s of c.body) {
-    const lowered = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
-    statements.push(lowered.stmt);
-    inner = lowered.envAfter;
-  }
-  return {
-    name: c.name ?? null,
-    triggerKind,
-    params,
-    ...(correlation ? { correlation } : {}),
-    statements,
-    savesAtExit: computeSaves(statements, repoForAgg),
-    ...(eventBinding ? { eventBinding } : {}),
-    ...(eventRef ? { eventRef } : {}),
-  };
-}
-
-// Lower a `handle name(params) { … }` command handler (workflow-and-applier.md
-// A2-S5c).  Structurally the legacy paren-form workflow body: params bind as
-// locals on top of the workflow `this`-env, the body lowers through
-// `lowerWorkflowStatement`, and exit-saves are derived the same way.
-function lowerHandle(
-  h: HandleDecl,
-  baseEnv: Env,
-  aggsByName: Map<string, Aggregate>,
-  reposByName: Map<string, Repository>,
-  repoForAgg: Map<string, string>,
-): HandleIR {
-  let inner = baseEnv;
-  const params: ParamIR[] = [];
-  for (const p of h.params) {
-    const t = lowerType(p.type, baseEnv);
-    params.push({ name: p.name, type: t });
-    inner = withLocal(inner, p.name, "param", t);
-  }
-  const statements: WorkflowStmtIR[] = [];
-  for (const s of h.body) {
-    const lowered = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
-    statements.push(lowered.stmt);
-    inner = lowered.envAfter;
-  }
-  return { name: h.name, params, statements, savesAtExit: computeSaves(statements, repoForAgg) };
-}
-
-// Lower an `on(e: Event) { … }` reactor member to its IR (workflow-and-applier.md
-// Phase A2, surface slice).  Mirrors `lowerApply`: the event instance binds as a
-// `refKind: "param"` local typed as the event entity, so `e.field` accesses
-// resolve through the same machinery.  The body reuses `lowerWorkflowStatement`
-// (a reactor is a workflow continuation and may load/save aggregates and emit).
-// The `by <expr>` routing clause (A2-S3) is lowered in the event-binding scope;
-// its type-check against the workflow's correlation field lives in the validator.
-function lowerOn(
-  o: OnDecl,
-  baseEnv: Env,
-  aggsByName: Map<string, Aggregate>,
-  reposByName: Map<string, Repository>,
-  repoForAgg: Map<string, string>,
-): OnIR {
-  const eventName = o.event.ref?.name ?? o.event.$refText;
-  const inner = withLocal(baseEnv, o.param, "param", { kind: "entity", name: eventName });
-  const correlation = o.correlation ? lowerExpr(o.correlation, inner) : undefined;
-  const statements: WorkflowStmtIR[] = [];
-  let bodyEnv = inner;
-  for (const s of o.body) {
-    const lowered = lowerWorkflowStatement(s, bodyEnv, aggsByName, reposByName, repoForAgg);
-    statements.push(lowered.stmt);
-    bodyEnv = lowered.envAfter;
-  }
-  return {
-    event: eventName,
-    param: o.param,
-    ...(correlation ? { correlation } : {}),
-    statements,
-  };
-}
-
-interface LoweredWorkflowStmt {
-  stmt: WorkflowStmtIR;
-  envAfter: Env;
-  binding?: { name: string; aggName: string; repoName: string };
-}
-
-function lowerWorkflowStatement(
-  stmt: Statement,
-  env: Env,
-  aggsByName: Map<string, Aggregate>,
-  reposByName: Map<string, Repository>,
-  repoForAgg: Map<string, string>,
-): LoweredWorkflowStmt {
-  if (isPreconditionStmt(stmt)) {
-    return {
-      stmt: {
-        kind: "precondition",
-        expr: lowerExpr(stmt.expr, env),
-        source: cstText(stmt.expr),
-      },
-      envAfter: env,
-    };
-  }
-  if (isRequiresStmt(stmt)) {
-    return {
-      stmt: {
-        kind: "requires",
-        expr: lowerExpr(stmt.expr, env),
-        source: cstText(stmt.expr),
-      },
-      envAfter: env,
-    };
-  }
-  if (isEmitStmt(stmt)) {
-    return {
-      stmt: {
-        kind: "emit",
-        eventName: stmt.event?.ref?.name ?? "Unknown",
-        fields: stmt.fields.map((f) => ({
-          name: f.name,
-          value: lowerExpr(f.value, env),
-        })),
-      },
-      envAfter: env,
-    };
-  }
-  if (isForStmt(stmt)) {
-    // `for <var> in <iterable> { body }` — bind the loop var to the
-    // iterable's element aggregate type, lower the body in that extended
-    // scope, then compute the per-iteration saves over the body.
-    const iterable = lowerExpr(stmt.iterable, env);
-    const iterableType = inferExprType(stmt.iterable, env);
-    const elementType = iterableType.kind === "array" ? iterableType.element : undefined;
-    const varAggName = elementType?.kind === "entity" ? elementType.name : "Unknown";
-    const repoName = repoForAgg.get(varAggName) ?? plural(varAggName);
-    // Bind the loop var to the element type so body op-calls resolve `o`'s
-    // aggregate; fall back to the (possibly Unknown) entity type when the
-    // iterable didn't infer to an array (the validator surfaces that).
-    const varType: TypeIR = elementType ?? { kind: "entity", name: varAggName };
-    const bodyEnv = withLocal(env, stmt.var, "let", varType);
-    const body: WorkflowStmtIR[] = [];
-    let walkEnv = bodyEnv;
-    for (const s of stmt.body) {
-      const lowered = lowerWorkflowStatement(s, walkEnv, aggsByName, reposByName, repoForAgg);
-      body.push(lowered.stmt);
-      walkEnv = lowered.envAfter;
-    }
-    const savesPerIteration = computeSaves(body, repoForAgg, {
-      name: stmt.var,
-      aggName: varAggName,
-      repoName,
-    });
-    return {
-      stmt: {
-        kind: "for-each",
-        var: stmt.var,
-        varAggName,
-        iterable,
-        body,
-        savesPerIteration,
-      },
-      envAfter: env,
-    };
-  }
-  if (isLetStmt(stmt)) {
-    const expr = stmt.expr;
-    // factory-let: `Agg.create({fields})`
-    const factory = matchFactoryCall(expr, aggsByName);
-    if (factory) {
-      const repoName = repoForAgg.get(factory.aggName) ?? plural(factory.aggName);
-      const fields = factory.fields.map((f) => ({
-        name: f.name,
-        value: lowerExpr(f.value, env),
-      }));
-      const aggType: TypeIR = { kind: "entity", name: factory.aggName };
-      return {
-        stmt: {
-          kind: "factory-let",
-          name: stmt.name,
-          aggName: factory.aggName,
-          fields,
-        },
-        envAfter: withLocal(env, stmt.name, "let", aggType),
-        binding: { name: stmt.name, aggName: factory.aggName, repoName },
-      };
-    }
-    // repo-run: `Repo.run(<Retrieval>(args), page?)` — binds the
-    // retrieval's result array.  Checked before the generic repo-let so
-    // `run` doesn't fall through to the find-method path.
-    const runCall = matchRetrievalRunCall(expr, reposByName);
-    if (runCall) {
-      const aggName = runCall.repo.aggregate?.ref?.name ?? "Unknown";
-      const repoName = runCall.repo.name;
-      const elementType: TypeIR = { kind: "entity", name: aggName };
-      const arrayType: TypeIR = { kind: "array", element: elementType };
-      return {
-        stmt: {
-          kind: "repo-run",
-          name: stmt.name,
-          repoName,
-          aggName,
-          retrievalName: runCall.retrievalName,
-          retrievalArgs: runCall.retrievalArgs.map((a) => lowerExpr(a, env)),
-          ...(runCall.pageOffset || runCall.pageLimit
-            ? {
-                page: {
-                  ...(runCall.pageOffset ? { offset: lowerExpr(runCall.pageOffset, env) } : {}),
-                  ...(runCall.pageLimit ? { limit: lowerExpr(runCall.pageLimit, env) } : {}),
-                },
-              }
-            : {}),
-          returnType: arrayType,
-        },
-        envAfter: withLocal(env, stmt.name, "let", arrayType),
-      };
-    }
-    // repo-let: `Repo.method(args)`
-    const repoCall = matchRepoCall(expr, reposByName);
-    if (repoCall) {
-      const args = repoCall.args.map((a) => lowerExpr(a, env));
-      // Resolve the find's declared return type (or for getById:
-      // single non-null aggregate of the repo's target).
-      const repo = repoCall.repo;
-      const aggName = repo.aggregate?.ref?.name ?? "Unknown";
-      let returnType: TypeIR = { kind: "entity", name: aggName };
-      if (repoCall.method !== "getById") {
-        const find = repo.finds.find((f) => f.name === repoCall.method);
-        if (find) returnType = lowerType(find.returnType);
-      }
-      // The let binding's local type is the unwrapped aggregate
-      // (validator rejects array/optional repo-lets).  Use the
-      // declared return type so the validator can flag misuse.
-      const localType: TypeIR = returnType;
-      return {
-        stmt: {
-          kind: "repo-let",
-          name: stmt.name,
-          repoName: repo.name,
-          aggName,
-          method: repoCall.method,
-          args,
-          returnType,
-        },
-        envAfter: withLocal(env, stmt.name, "let", localType),
-        binding: { name: stmt.name, aggName, repoName: repo.name },
-      };
-    }
-    // expr-let: scalar / generic expression
-    const exprIR = lowerExpr(stmt.expr, env);
-    const t = inferExprType(stmt.expr, env);
-    return {
-      stmt: { kind: "expr-let", name: stmt.name, type: t, expr: exprIR },
-      envAfter: withLocal(env, stmt.name, "let", t),
-    };
-  }
-  if (isAssignOrCallStmt(stmt)) {
-    const lv = stmt.target;
-    if (!stmt.op && lv.call && lv.tail.length === 1) {
-      // `files.put(args)` — a bare resource-op call (Phase 4).  When the
-      // head is an ambient resource handle, lower to a `resource-call`
-      // statement; otherwise it's an op-call on a let binding.
-      const resourceKind = env.resources?.get(lv.head);
-      if (resourceKind) {
-        const verb = lv.tail[0]!;
-        const verbDef = findVerb(resourceKind, verb);
-        const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
-        return {
-          stmt: {
-            kind: "resource-call",
-            call: {
-              kind: "call",
-              callKind: "resource-op",
-              name: verb,
-              args,
-              resourceOp: {
-                resourceName: lv.head,
-                resourceKind,
-                verb,
-                capability: verbDef?.capability ?? "",
-                ...(verbDef?.interfaceOverride ? { interface: verbDef.interfaceOverride } : {}),
-              },
-            },
-          },
-          envAfter: env,
-        };
-      }
-      // `name.op(args)` — op-call on a let binding.
-      const aggName = aggNameForLocal(env, lv.head);
-      const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
-      return {
-        stmt: {
-          kind: "op-call",
-          target: lv.head,
-          aggName: aggName ?? "Unknown",
-          op: lv.tail[0]!,
-          args,
-        },
-        envAfter: env,
-      };
-    }
-    // Anything else (mutation forms, bare calls, deep paths) becomes
-    // an expr-let with no name — represented as an expr-let with a
-    // synthetic placeholder so the validator can flag it.
-    const placeholder: ExprIR = {
-      kind: "ref",
-      name: lv.head,
-      refKind: "unknown",
-    };
-    return {
-      stmt: {
-        kind: "expr-let",
-        name: "__bad__",
-        type: { kind: "primitive", name: "string" },
-        expr: placeholder,
-      },
-      envAfter: env,
-    };
-  }
-  // Fallback — shouldn't hit, but stay safe.
-  return {
-    stmt: {
-      kind: "expr-let",
-      name: "__bad__",
-      type: { kind: "primitive", name: "string" },
-      expr: { kind: "ref", name: "unknown", refKind: "unknown" },
-    },
-    envAfter: env,
-  };
-}
-
-/** Look up the let-binding's bound aggregate name from its local
- *  type.  Returns undefined when the binding doesn't resolve to an
- *  entity. */
-function aggNameForLocal(env: Env, name: string): string | undefined {
-  const local = env.locals.get(name);
-  if (!local) return undefined;
-  if (local.type.kind === "entity") return local.type.name;
-  return undefined;
-}
-
-interface FactoryMatch {
-  aggName: string;
-  fields: { name: string; value: Expression }[];
-}
-
-function matchFactoryCall(
-  expr: Expression | undefined,
-  aggsByName: Map<string, Aggregate>,
-): FactoryMatch | undefined {
-  if (!expr || !isPostfixChain(expr)) return undefined;
-  // Factory shape: `<NameRef>.create({...})` — exactly one
-  // MemberSuffix with member==="create" and a call payload.
-  if (expr.suffixes.length !== 1) return undefined;
-  const s = expr.suffixes[0]!;
-  if (!isMemberSuffix(s) || !s.call) return undefined;
-  if (s.member !== "create") return undefined;
-  const recv = expr.head;
-  if (!isNameRef(recv)) return undefined;
-  if (!aggsByName.has(recv.name)) return undefined;
-  if (s.args.length !== 1) return undefined;
-  const argWrap = s.args[0];
-  // Factory calls take a single object literal positional
-  // arg.  Reject the named-arg form here; the caller falls through
-  // to a generic call lowering rather than the factory shape.
-  if (!argWrap || argWrap.name) return undefined;
-  const arg = argWrap.value;
-  if (!isObjectLit(arg)) return undefined;
-  return {
-    aggName: recv.name,
-    fields: arg.fields.map((f) => ({ name: f.name, value: f.value })),
-  };
-}
-
-interface RepoMatch {
-  repo: Repository;
-  method: string;
-  args: Expression[];
-}
-
-function matchRepoCall(
-  expr: Expression | undefined,
-  reposByName: Map<string, Repository>,
-): RepoMatch | undefined {
-  if (!expr || !isPostfixChain(expr)) return undefined;
-  // Repo-call shape: `<NameRef>.<method>(args)` — exactly one
-  // MemberSuffix with a call payload.
-  if (expr.suffixes.length !== 1) return undefined;
-  const s = expr.suffixes[0]!;
-  if (!isMemberSuffix(s) || !s.call) return undefined;
-  const recv = expr.head;
-  if (!isNameRef(recv)) return undefined;
-  const repo = reposByName.get(recv.name);
-  if (!repo) return undefined;
-  // Peel CallArg wrappers — repo finds are positional.
-  return {
-    repo,
-    method: s.member,
-    args: (s.args ?? []).map((a) => a.value),
-  };
-}
-
-interface RetrievalRunMatch {
-  repo: Repository;
-  retrievalName: string;
-  retrievalArgs: Expression[];
-  /** The `page:` object-literal argument's fields, if supplied. */
-  pageOffset?: Expression;
-  pageLimit?: Expression;
-}
-
-/** Recognise `<Repo>.run(<RetrievalRef>(args), page?)`.  The first
- *  positional arg is itself a call (the retrieval reference); an optional
- *  named `page:` arg carries an object literal `{ offset?, limit? }`. */
-function matchRetrievalRunCall(
-  expr: Expression | undefined,
-  reposByName: Map<string, Repository>,
-): RetrievalRunMatch | undefined {
-  if (!expr || !isPostfixChain(expr)) return undefined;
-  if (expr.suffixes.length !== 1) return undefined;
-  const s = expr.suffixes[0]!;
-  if (!isMemberSuffix(s) || !s.call || s.member !== "run") return undefined;
-  const recv = expr.head;
-  if (!isNameRef(recv)) return undefined;
-  const repo = reposByName.get(recv.name);
-  if (!repo) return undefined;
-  const callArgs = s.args ?? [];
-  // First positional arg = the retrieval reference `Name(args)`.
-  const refArg = callArgs.find((a) => !a.name);
-  if (!refArg) return undefined;
-  const ref = refArg.value;
-  // Bare `Name` (parameterless retrieval).
-  if (isNameRef(ref)) {
-    return { repo, retrievalName: ref.name, retrievalArgs: [] };
-  }
-  // `Name(args)` — a NameRef head + a single CallSuffix.
-  if (!isPostfixChain(ref) || !isNameRef(ref.head) || ref.suffixes.length !== 1) {
-    return undefined;
-  }
-  const rs = ref.suffixes[0]!;
-  if (!isCallSuffix(rs)) return undefined;
-  const retrievalName = ref.head.name;
-  const retrievalArgs: Expression[] = (rs.args ?? []).map((a) => a.value);
-  // Optional `page:` named arg — an object literal with offset / limit.
-  const pageArg = callArgs.find((a) => a.name === "page");
-  let pageOffset: Expression | undefined;
-  let pageLimit: Expression | undefined;
-  if (pageArg && isObjectLit(pageArg.value)) {
-    for (const f of pageArg.value.fields) {
-      if (f.name === "offset") pageOffset = f.value;
-      else if (f.name === "limit") pageLimit = f.value;
-    }
-  }
-  return { repo, retrievalName, retrievalArgs, pageOffset, pageLimit };
 }

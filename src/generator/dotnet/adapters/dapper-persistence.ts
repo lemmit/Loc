@@ -65,7 +65,15 @@ export const dapperPersistenceAdapter: PersistenceAdapter = {
 
   emitRepository(agg: AggregateIR, _logical: DataSourceIR, ctx: EmitCtx): Lines {
     const enriched = agg as import("../../../ir/types/loom-ir.js").EnrichedAggregateIR;
-    return renderDapperRepository(enriched, findRepoFor(ctx, agg.name), nsOf(ctx)).split("\n");
+    const retrievals = ctx.contexts
+      .flatMap((c) => c.retrievals ?? [])
+      .filter((r) => r.targetType.kind === "entity" && r.targetType.name === agg.name);
+    return renderDapperRepository(
+      enriched,
+      findRepoFor(ctx, agg.name),
+      nsOf(ctx),
+      retrievals,
+    ).split("\n");
   },
 
   emitMigrations(): Lines | null {

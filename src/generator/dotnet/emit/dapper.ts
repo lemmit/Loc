@@ -26,11 +26,13 @@ import type {
   IdValueType,
   ParamIR,
   RepositoryIR,
+  RetrievalIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { csValueTypeForId, renderCsType } from "../render-expr.js";
+import { renderRetrievalParamsWithCt } from "./repository.js";
 
 /** Postgres table for an aggregate — lowercase plural (e.g. `orders`). */
 const tableOf = (aggName: string): string => plural(snake(aggName));
@@ -216,8 +218,10 @@ function whereToSql(e: ExprIR): string {
       if (e.receiver.kind === "this") return snake(e.member);
       throw new Error("dapper: unsupported member access in find");
     case "ref":
-      // A find parameter → Dapper named parameter.
+      // A find/retrieval parameter → Dapper named parameter.
       if (e.refKind === "param") return `@${e.name}`;
+      // A candidate field (criterion / retrieval `where`) → its column.
+      if (e.refKind === "this-prop") return snake(e.name);
       // An enum value (`Status.Confirmed`) → its text representation, matching
       // the `text` column the enum is stored as.
       if (e.refKind === "enum-value") return `'${e.name.replace(/'/g, "''")}'`;
@@ -256,6 +260,7 @@ export function renderDapperRepository(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
   ns: string,
+  retrievals: RetrievalIR[] = [],
 ): string {
   const table = tableOf(agg.name);
   const cols = columnsOf(agg);
@@ -307,6 +312,51 @@ export function renderDapperRepository(
       `        await using var conn = await _db.OpenConnectionAsync(ct);`,
       `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: ct));`,
       `        return r is null ? null : Map(r);`,
+      `    }`,
+    );
+  });
+
+  // Retrieval bundles → `Run<Name>Async`, parameterised SQL (where + sort +
+  // call-site offset/limit paging).  The `where` is the inlined predicate
+  // (criterion bodies included) rendered by `whereToSql`; anything outside the
+  // Dapper subset stubs with NotImplementedException, like the find path.
+  const retrievalMethods = retrievals.map((r) => {
+    const name = upperFirst(r.name);
+    let whereSql: string;
+    try {
+      whereSql = whereToSql(r.where);
+    } catch {
+      return lines(
+        `    public Task<IReadOnlyList<${agg.name}>> Run${name}Async(${renderRetrievalParamsWithCt(r.params)})`,
+        `        => throw new NotImplementedException("Dapper v1 does not support this retrieval's predicate.");`,
+      );
+    }
+    const orderSql =
+      r.sort.length > 0
+        ? ` ORDER BY ${r.sort
+            .map((s) => `${snake(s.path[0]!.name)} ${s.direction === "desc" ? "DESC" : "ASC"}`)
+            .join(", ")}`
+        : "";
+    const baseSql = `SELECT ${colList} FROM ${table} WHERE ${whereSql}${orderSql}`;
+    const paramAdds = r.params.map((p) => {
+      const pt = p.type.kind === "optional" ? p.type.inner : p.type;
+      const val = pt.kind === "id" ? `${p.name}.Value` : p.name;
+      return `        p.Add("${p.name}", ${val});`;
+    });
+    return lines(
+      `    public async Task<IReadOnlyList<${agg.name}>> Run${name}Async(${renderRetrievalParamsWithCt(r.params)})`,
+      `    {`,
+      `        await using var conn = await _db.OpenConnectionAsync(ct);`,
+      `        var sql = "${baseSql}";`,
+      `        var p = new DynamicParameters();`,
+      ...paramAdds,
+      `        if (page is { } pg)`,
+      `        {`,
+      `            if (pg.limit is { } lim) { sql += " LIMIT @__lim"; p.Add("__lim", lim); }`,
+      `            if (pg.offset is { } off) { sql += " OFFSET @__off"; p.Add("__off", off); }`,
+      `        }`,
+      `        var rows = await conn.QueryAsync<Row>(new CommandDefinition(sql, p, cancellationToken: ct));`,
+      `        return rows.Select(Map).ToList();`,
       `    }`,
     );
   });
@@ -396,6 +446,7 @@ export function renderDapperRepository(
       deleteMethod ? "" : null,
       deleteMethod || null,
       ...findMethods.flatMap((m) => ["", m]),
+      ...retrievalMethods.flatMap((m) => ["", m]),
       "}",
     ) + "\n"
   );

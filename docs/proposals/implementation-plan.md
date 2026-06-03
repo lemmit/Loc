@@ -25,6 +25,24 @@
 > Read all of these before starting. This doc covers ordering,
 > coordination points, risk management, and decision pins.
 
+> **Landed since this plan was written (2026-06-03 refresh)** — adjust the
+> tracks below accordingly; full PR detail in
+> [`global-implementation-plan.md`](./global-implementation-plan.md):
+> - **Payload P3b** — `Paged<T>` carrier + paged finds on all four backends
+>   (the first real consumer of the carrier-generic surface).
+> - **Criterion core** — declaration + validation + compile-time inline +
+>   filter-capability targeting on all SQL backends (Crit1–2 substance).
+> - **Reified-criteria (.NET/EF)** — the Specification reframe (`Criterion<T>`,
+>   `ToExpression`, Ardalis `Specification<T>`); D23's tail, on one backend.
+> - **Aggregate inheritance I1** — abstract aggregates + `inheritanceUsing(…)`
+>   surface/IR/validators (no emission yet).
+> - **Event-sourcing appliers** — `apply(...)` member + Hono and **.NET/EF**
+>   event-store emission (the workflow-and-applier track, parallel to this one).
+>
+> The IR/generator paths in the "File-level changes" table below have been
+> updated for the `src-ir-phase-reveal` reorg and the `lower`/`validate`
+> decompositions.
+
 ## TL;DR — the delivery story
 
 Three proposals; one type-system unification. They sequence in the
@@ -790,14 +808,14 @@ For the implementing agent:
 |---|---|
 | Grammar | `src/language/ddd.langium`, `src/language/ddd-scope.ts`, `src/language/ddd-validator.ts` |
 | Generated parser | `src/language/generated/*` (regenerate via `npm run langium:generate` after every grammar change; gitignored — see CLAUDE.md) |
-| IR | `src/ir/loom-ir.ts`, `src/ir/lower.ts`, `src/ir/lower-expr.ts`, `src/ir/enrichments.ts`, `src/ir/scaffold-expander.ts` |
+| IR | `src/ir/types/loom-ir.ts`; `src/ir/lower/` (`lower.ts` orchestrator + per-declaration-kind leaves + `lower-expr.ts` / `lower-stmt.ts` / `lower-types.ts` + `walker-primitive-expander.ts`); `src/ir/enrich/enrichments.ts`; `src/ir/validate/` (`validate.ts` + `checks/*`) — **post the `src-ir-phase-reveal` + lower/validate decompositions** |
 | Type system | `src/language/type-system.ts` |
-| TS backend | `src/generator/ts/index.ts`, `src/generator/ts/emit/*.ts`, `src/generator/ts/render-expr.ts`, `src/generator/ts/render-stmt.ts` |
-| .NET backend | `src/generator/dotnet/index.ts`, emit files, render files |
-| Phoenix backend | `src/generator/phoenix/index.ts`, `*-emit.ts`, `*-builder.ts`, render files |
+| TS backend | `src/generator/typescript/index.ts`, `src/generator/typescript/emit/*.ts`, `render-expr.ts`, `render-stmt.ts` (note: the dir is `typescript/`, not `ts/`) |
+| .NET backend | `src/generator/dotnet/index.ts`, `emit/*.ts`, `cqrs/*` (post-#869 split), render files |
+| Phoenix backend | `src/generator/phoenix-live-view/index.ts`, `*-emit.ts`, `domain/*` (post-#912 split), `*-builder.ts`, render files |
 | React backend | `src/generator/react/index.ts`, `body-walker.ts`, walker tests |
 | System orchestrator | `src/system/wire-spec.ts` (carrier instantiation entries), `src/system/index.ts` |
-| Stdlib | New: `src/stdlib/payloads/none.ddd`, `option.ddd`, `errors.ddd`, `api_error.ddd`, `problem_details.ddd`, `page.ddd`, `envelope.ddd`. All HTTP-blind — no status info on declarations. |
+| Stdlib | The stdlib home is `src/ir/stdlib/` (today `generics.ts`). New payload `.ddd` files (`none`, `option`, `errors`, `api_error`, `problem_details`, `page`, `envelope`) land here — all HTTP-blind, no status info on declarations. |
 | Generator | New: `src/system/error-defaults.ts` — hardcoded stdlib status table consumed by every backend's api-edge translator. |
 | Examples | `examples/*.ddd`, `web/src/examples/*.ddd` (audit after A4) |
 | Fixtures | `test/fixtures/*` (full re-baseline at A4) |

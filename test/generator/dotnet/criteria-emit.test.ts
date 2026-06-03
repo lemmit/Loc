@@ -109,30 +109,35 @@ const CONSUME_SRC = `
   }
 `;
 
-describe(".NET generator — reified criteria (Slice 2b: retrieval consumes ToExpression)", () => {
-  async function repo() {
-    const out = await generateDotnet(await parseValid(CONSUME_SRC));
-    return out.get("Infrastructure/Repositories/CustomerRepository.cs")!;
+describe(".NET generator — reified criteria (Slice 2b: retrieval Specification consumes ToExpression)", () => {
+  async function all() {
+    return generateDotnet(await parseValid(CONSUME_SRC));
   }
 
-  it("a single parameterized criterion `where` consumes ToExpression()", async () => {
-    const r = await repo();
-    expect(r).toMatch(/using Sales\.Domain\.Criteria;/);
-    expect(r).toMatch(/_db\.Customers\.Where\(new InRegionCriterion\(rgn\)\.ToExpression\(\)\)/);
+  it("a single parameterized criterion `where` → a Spec consuming ToExpression()", async () => {
+    const out = await all();
+    const spec = out.get("Domain/Customers/ByRegionSpec.cs")!;
+    expect(spec).toMatch(/public sealed class ByRegionSpec : Specification<Customer>/);
+    expect(spec).toMatch(/public ByRegionSpec\(string rgn\)/);
+    expect(spec).toMatch(/Query\.Where\(new InRegionCriterion\(rgn\)\.ToExpression\(\)\);/);
+    // repo applies it
+    expect(out.get("Infrastructure/Repositories/CustomerRepository.cs")!).toMatch(
+      /WithSpecification\(new ByRegionSpec\(rgn\)\)/,
+    );
   });
 
-  it("a parameterless criterion `where` consumes ToExpression() (no args)", async () => {
-    const r = await repo();
-    expect(r).toMatch(/_db\.Customers\.Where\(new ActiveCustomerCriterion\(\)\.ToExpression\(\)\)/);
+  it("a parameterless criterion `where` → a Spec with a default ctor consuming ToExpression()", async () => {
+    const spec = (await all()).get("Domain/Customers/AllActiveSpec.cs")!;
+    expect(spec).toMatch(/public sealed class AllActiveSpec : Specification<Customer>/);
+    expect(spec).not.toMatch(/public AllActiveSpec\(\w/); // no ctor params
+    expect(spec).toMatch(/Query\.Where\(new ActiveCustomerCriterion\(\)\.ToExpression\(\)\);/);
   });
 
-  it("a composed `where` stays inline (not reified)", async () => {
-    const r = await repo();
+  it("a composed `where` → the Spec inlines the predicate (not reified)", async () => {
     // ActiveInRegion's where is `A && B` → criterionRef undefined → inline lambda.
-    const m = r.match(/RunActiveInRegionAsync[\s\S]*?var query = ([^\n]*)/);
-    expect(m, "RunActiveInRegionAsync not found").not.toBeNull();
-    expect(m![1]).toMatch(/\.Where\(x =>/);
-    expect(m![1]).not.toMatch(/new \w+Criterion\(/);
+    const spec = (await all()).get("Domain/Customers/ActiveInRegionSpec.cs")!;
+    expect(spec).toMatch(/Query\.Where\(x =>/);
+    expect(spec).not.toMatch(/new \w+Criterion\(/);
   });
 });
 

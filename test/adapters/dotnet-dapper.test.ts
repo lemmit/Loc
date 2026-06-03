@@ -153,3 +153,47 @@ describe("dapper capability gating (loom.dapper-unsupported)", () => {
     expect(errors).toEqual([]);
   });
 });
+
+// Reified-criteria parity: Dapper now supports `retrieval` bundles — the gate
+// is lifted and Run<Name>Async renders as parameterised SQL (where + sort +
+// offset/limit paging), with criterion candidate-fields as columns. No Ardalis
+// Specification on this axis (that's the EF Core path).
+describe("dapper retrievals (parity)", () => {
+  const SRC = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Customer with crudish { name: string  active: bool }
+      repository Customers for Customer { }
+      criterion NameIs(n: string) of Customer = name == n
+      retrieval ByNameSorted(n: string) of Customer { where: NameIs(n) sort: [name asc] }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer rejects retrievals; emits Run<Name>Async as parameterised SQL", async () => {
+    const { files, errors } = await emit(SRC);
+    expect(errors).toEqual([]); // the dapper retrieval gate is lifted
+    const repo = files.get("api/Infrastructure/Repositories/CustomerRepository.cs")!;
+    expect(repo).toContain(
+      "public async Task<IReadOnlyList<Customer>> RunByNameSortedAsync(string n, (int? offset, int? limit)? page = null, CancellationToken ct = default)",
+    );
+    // criterion `where: NameIs(n)` → inline SQL with this-prop → column.
+    expect(repo).toContain(
+      'var sql = "SELECT id, name, active FROM customers WHERE (name = @n) ORDER BY name ASC";',
+    );
+    expect(repo).toContain("var p = new DynamicParameters();");
+    expect(repo).toContain('p.Add("n", n);');
+    expect(repo).toMatch(/sql \+= " LIMIT @__lim"/);
+  });
+
+  it("emits no Ardalis Specification / dependency on the Dapper axis", async () => {
+    const { files } = await emit(SRC);
+    expect([...files.keys()].some((k) => k.endsWith("Spec.cs"))).toBe(false);
+    expect(files.get("api/Api.csproj")!).not.toContain("Ardalis");
+  });
+});

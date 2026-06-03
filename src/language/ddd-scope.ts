@@ -51,19 +51,37 @@ export class DddScopeProvider extends DefaultScopeProvider {
       const localScope = this.localTypeScope(context);
       if (localScope) return localScope;
     }
+    // `IdType.target` (`X id`) shares the `NamedDecl` cross-ref type, which now
+    // admits events / payloads — but `PaymentReceived id` is meaningless, so
+    // filter transport types back out of the `X id` slot.  Aggregates / parts /
+    // enums / value objects still resolve via the default global scope.
+    if (context.container.$type === "IdType" && context.property === "target") {
+      return this.filterScope(super.getScope(context), (d) => !isTransportType(d.type));
+    }
     return super.getScope(context);
   }
 
   private localTypeScope(context: ReferenceInfo): Scope | undefined {
+    // Transport types (`event` / `command` / `query` / `response` / `error`)
+    // are only offered as a type in a workflow `create`/`handle` parameter —
+    // `create(e: PaymentReceived) by …`, `handle settle(c: SettleOrder)`.
+    // Everywhere else they stay out of scope, so a stray event name in an
+    // aggregate field / UI param position resolves to nothing (a clear error)
+    // rather than silently typing as a transport record.
+    const allowTransport = inWorkflowCommandParam(context.container);
     const aggregate = enclosingAggregate(context.container);
     const defaultScope = super.getScope(context);
     if (!aggregate) {
-      // Outside an aggregate (operation-param-on-page, event field, etc.):
-      // restrict to enums + value-objects + aggregates from the default
-      // scope.  Entity parts are not addressable from there.
+      // Outside an aggregate (operation-param-on-page, event field, workflow
+      // command param, etc.): restrict to enums + value-objects + aggregates
+      // from the default scope.  Entity parts are not addressable from there.
       return this.filterScope(
         defaultScope,
-        (d) => d.type === "EnumDecl" || d.type === "ValueObject" || d.type === "Aggregate",
+        (d) =>
+          d.type === "EnumDecl" ||
+          d.type === "ValueObject" ||
+          d.type === "Aggregate" ||
+          (allowTransport && isTransportType(d.type)),
       );
     }
     // Inside an aggregate: filter out entity-parts owned by *other*
@@ -72,6 +90,7 @@ export class DddScopeProvider extends DefaultScopeProvider {
       if (d.type === "EnumDecl" || d.type === "ValueObject" || d.type === "Aggregate") {
         return true;
       }
+      if (allowTransport && isTransportType(d.type)) return true;
       if (d.type === "EntityPart") {
         const node = d.node;
         return !!node && AstUtils.getContainerOfType(node, isAggregate) === aggregate;
@@ -187,6 +206,27 @@ export function qualifiedNameOf(node: AstNode): string | undefined {
     cur = cur.$container;
   }
   return segments.length > 0 ? segments.join(".") : undefined;
+}
+
+/** A transport-type declaration kind — `event` (EventDecl) or a payload
+ *  (`command`/`query`/`response`/`error`, all PayloadDecl).  These resolve as a
+ *  type only in a workflow command-parameter position (see `localTypeScope`). */
+function isTransportType(type: string): boolean {
+  return type === "EventDecl" || type === "PayloadDecl";
+}
+
+/** True when `namedType` (a `NamedType` AST node) sits directly in a workflow
+ *  `create` / `handle` parameter's type — `create(e: Event)` / `handle h(c:
+ *  Command)`.  The container chain is NamedType → TypeRef → Parameter →
+ *  WorkflowCreateDecl | HandleDecl; we match it positionally so a `NamedType`
+ *  elsewhere inside the workflow (a `let x: T` annotation, say) does not also
+ *  pull transport types into scope. */
+function inWorkflowCommandParam(namedType: AstNode | undefined): boolean {
+  const typeRef = namedType?.$container;
+  const param = typeRef?.$container;
+  if (param?.$type !== "Parameter") return false;
+  const owner = param.$container?.$type;
+  return owner === "WorkflowCreateDecl" || owner === "HandleDecl";
 }
 
 export function enclosingAggregate(node: AstNode | undefined): Aggregate | undefined {

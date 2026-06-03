@@ -1,6 +1,15 @@
 # Pagination — design note for the implementing agent
 
-> Status: **design agreed, not yet implemented.** Companion to
+> Status: **SHIPPED (offset paging on all four backends).** Functional paged
+> finds emit across Hono/Drizzle, .NET (CQRS+EF), Phoenix/Ash (offset), and
+> React, all returning the `Paged<T>` envelope (`items`, `page`, `pageSize`,
+> `total`, `totalPages`); landed as the payload P3b slice (#898 React, #916
+> .NET, #925 Phoenix) with a cross-backend wire-parity gate at P3 closeout
+> (#933). Emitters: `src/generator/typescript/repository-find-builder.ts`,
+> `src/generator/dotnet/cqrs/queries.ts` + `emit/common.ts`,
+> `src/generator/phoenix-live-view/{repository,api}-emit.ts`,
+> `src/generator/react/api-builder.ts` (all gated on `pagedReturn`). Remaining:
+> the `unpaged` opt-out + page-aware React hooks beyond the schema. Companion to
 > `multi-tenancy-design-note.md`. Pagination is a prerequisite *only in spirit* for the
 > real-time cache-invalidation feature — see "Relationship to the caching feature" at the
 > bottom for why it barely matters to the core mechanism.

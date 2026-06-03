@@ -167,3 +167,71 @@ export interface GenerateReport {
   diagnostics: JsonDiagnostic[];
   deployables: GenerateDeployable[];
 }
+
+// ---------------------------------------------------------------------------
+// Navigational results (agent-tools-and-mcp.md §4b) — the read family over the
+// LSP providers, addressed by symbol name (not line/character).  Every range is
+// the canonical 0-based `JsonRange`; locations are single-source so the `uri` is
+// implicit.  An unresolved or ambiguous `symbol` returns `NavError` with the
+// candidate addresses — never a silent pick.
+// ---------------------------------------------------------------------------
+
+/** Why a symbol lookup did not resolve to exactly one node. */
+export interface NavError {
+  error: "not-found" | "ambiguous";
+  /** Candidate canonical addresses (for `ambiguous`) — empty for `not-found`. */
+  candidates: string[];
+}
+
+/** A located symbol — its canonical address, keyword kind, name-token range,
+ *  and the address of its enclosing declaration (absent for a top-level node). */
+export interface NavSymbol {
+  address: string;
+  kind: string;
+  range: JsonRange;
+  parent?: string;
+}
+
+/** A single usage site within the source (uri implicit — single-document). */
+export interface NavLocation {
+  range: JsonRange;
+}
+
+export type FindSymbolResult = NavSymbol | NavError;
+export type ReferencesResult = { locations: NavLocation[] } | NavError;
+export type HoverResult = { markdown: string } | NavError;
+
+// ---------------------------------------------------------------------------
+// Rewrite results (agent-tools-and-mcp.md §4b, rewrite trio) — rename /
+// quickfix / unfold_macro RETURN edits, they never apply them (contract §3,
+// tools are pure).  A single-source `WorkspaceEdit`: text edits the host
+// applies to the buffer (uri implicit).  `EditError` covers the failure modes
+// beyond symbol resolution — no fix for a code, an un-unfoldable macro, etc.
+// ---------------------------------------------------------------------------
+
+/** A single text edit — `range` to replace with `newText` (structurally an LSP
+ *  `TextEdit`).  Insertions use an empty range; deletions an empty `newText`. */
+export interface NavTextEdit {
+  range: JsonRange;
+  newText: string;
+}
+
+/** Edits to apply to the single source document, plus an optional human label
+ *  (the refactor/quick-fix title). */
+export interface EditResult {
+  edits: NavTextEdit[];
+  title?: string;
+}
+
+/** A rewrite that couldn't be produced.  `error` is the reason
+ *  (`not-found` / `ambiguous` / `no-fix` / `cannot-unfold`); `candidates`
+ *  lists the disambiguating options when `ambiguous`. */
+export interface EditError {
+  error: string;
+  candidates?: string[];
+  message?: string;
+}
+
+export type RenameResult = EditResult | EditError;
+export type QuickfixResult = EditResult | EditError;
+export type UnfoldMacroResult = EditResult | EditError;

@@ -384,7 +384,7 @@ What the reader gets from any single declaration:
 The `scaffold subdomains: [M]` directive (page-metamodel §10) keeps
 working — but as **compile-time sugar**.  Synthesised pages now
 lower to explicit walker-stdlib bodies via
-`src/ir/walker-primitive-expander.ts`, called at the end of
+`src/ir/lower/walker-primitive-expander.ts`, called at the end of
 `lowerModel` as the final sub-pass of lowering (see
 [`docs/technical.md`](./technical.md) phase ⑤c):
 

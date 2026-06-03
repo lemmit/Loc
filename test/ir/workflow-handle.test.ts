@@ -12,6 +12,7 @@ async function lowerFirstWorkflow(body: string) {
       aggregate Order { total: int }
       repository Orders for Order
       event PaymentReceived { order: Order id, amount: int }
+      command SettleOrder { order: Order id, note: string }
       ${body}
     }}}`,
     { validate: false },
@@ -56,6 +57,20 @@ describe("workflow handle(...) command handlers — lowering", () => {
   it("leaves handlers undefined when none declared", async () => {
     const wf = await lowerFirstWorkflow(`workflow Ops { create() { let z = 1 } }`);
     expect(wf.handlers).toBeUndefined();
+  });
+
+  it("lowers a handle whose param is a payload (command) type", async () => {
+    // `handle settle(c: SettleOrder)` — the command payload binds as an
+    // entity-marked param (payloads aren't a distinct TypeIR kind), and a
+    // body access `c.note` type-resolves through the payload's field set.
+    const wf = await lowerFirstWorkflow(`
+      workflow Ops {
+        handle settle(c: SettleOrder) { let n = c.note }
+      }`);
+    const [h] = wf.handlers ?? [];
+    expect(h.name).toBe("settle");
+    expect(h.params).toEqual([{ name: "c", type: { kind: "entity", name: "SettleOrder" } }]);
+    expect(h.statements[0].kind).toBe("expr-let");
   });
 });
 

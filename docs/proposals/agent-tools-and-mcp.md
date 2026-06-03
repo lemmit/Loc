@@ -1,9 +1,18 @@
 # Agent tools & MCP — one catalog, many transports
 
-> **Status:** PARTIAL — the **generative catalog shipped** (`src/tools/`:
-> `loom_validate` / `loom_outline` / `loom_generate` / `loom_apply_patch` +
-> `callTool`, gated by `test/tools/catalog.test.ts`). MCP server, LSP-provider
-> correctness, and the navigational family remain (§8).
+> **Status:** PARTIAL — the **generative catalog**, the **MCP stdio server**,
+> the **full navigational family** (read + rewrite trios), and the
+> **transport-neutral agent loop** have shipped (§8 items 1, 2, 4, 5-engine).
+> The `src/tools/` catalog now carries ten tools — generative (`loom_validate` /
+> `loom_outline` / `loom_generate` / `loom_apply_patch`), read-nav
+> (`loom_find_symbol` / `loom_references` / `loom_hover`, #937), and rewrite-nav
+> (`loom_rename` / `loom_quickfix` / `loom_unfold_macro`, returning
+> `EditResult`s, #940) — over one shared resolver (`src/api/symbol-resolver.ts`);
+> `src/mcp/` + the `packages/ddd-mcp` publish wrapper register it over the
+> `@modelcontextprotocol/sdk` stdio transport (#934); the provider-neutral agent
+> loop (`src/tools/agent-loop.ts`) drives the validate→repair conversation over
+> `callTool` (#946). **Remaining:** LSP-provider correctness (§4c) and the
+> **playground agentic chat UI** (§8 item 5-UI).
 > **Role:** Pins how Loom exposes its operations as **agent-callable tools**:
 > a single transport-neutral **tool catalog** over the `src/api/` toolkit, and
 > the transports that surface it (an MCP stdio server for external hosts; direct
@@ -107,14 +116,27 @@ hover, and rename engine — behind **by-name** addressing instead of
 `(line, character)` tuples, because an LLM has a symbol name, not an offset.
 Patches *mutate*; these *query and locally rewrite*.
 
-| Tool | Input | Returns | Kind |
-|---|---|---|---|
-| `loom_find_symbol` | `{ source, symbol, kind? }` | `{ address, range, kind, parent? }` | read |
-| `loom_references` | `{ source, symbol }` | `Location[]` | read |
-| `loom_hover` | `{ source, symbol }` | markdown string | read |
-| `loom_rename` | `{ source, symbol, newName }` | `WorkspaceEdit` (edits, **not applied**) | pure |
-| `loom_quickfix` | `{ source, code, at? }` | `WorkspaceEdit` for that diagnostic code | pure |
-| `loom_unfold_macro` | `{ source, macro, on }` | `WorkspaceEdit` | pure |
+| Tool | Input | Returns | Kind | Status |
+|---|---|---|---|---|
+| `loom_find_symbol` | `{ source, symbol, kind? }` | `{ address, range, kind, parent? }` \| `NavError` | read | ✅ |
+| `loom_references` | `{ source, symbol }` | `{ locations: NavLocation[] }` \| `NavError` | read | ✅ |
+| `loom_hover` | `{ source, symbol }` | `{ markdown }` \| `NavError` | read | ✅ |
+| `loom_rename` | `{ source, symbol, newName }` | `EditResult` (edits, **not applied**) \| `EditError` | pure | ✅ |
+| `loom_quickfix` | `{ source, code, at? }` | `EditResult` for that diagnostic code \| `EditError` | pure | ✅ |
+| `loom_unfold_macro` | `{ source, macro, on }` | `EditResult` \| `EditError` | pure | ✅ |
+
+The whole family ships over one **shared resolver** (`src/api/symbol-resolver.ts`,
+pure + browser-safe): the read trio in `src/api/navigate.ts`, the rewrite trio
+in `src/api/refactor.ts`, all registered in the catalog. `kind` returns the
+node's OWN kind (`property` / `operation` / …), not the address keyword
+`addressOf` qualifies plain members under, and the same `kind` value is the
+disambiguating filter. Only nodes with their own name are addressable — an
+unnamed `create`/`destroy`/`invariant` borrows its entity's name as its address
+tail, which would otherwise collide with the entity when resolving `Order`. The
+rewrite trio RETURNS an `EditResult` (`{ edits, title? }`); the host applies it
+(contract §3: tools never touch the buffer). `EditError` covers the non-symbol
+failure modes (`no-fix` for a code without a fix-hint, `cannot-unfold`, plus the
+macros a host does carry when the requested one is absent).
 
 **Addressing.** `symbol` is a dotted path — short form (`Order.customerId`) when
 unambiguous, fully-qualified (`Sales.Orders.Order.customerId`) otherwise. This
@@ -345,14 +367,36 @@ playground settings matter, independent of the tools.
    dispatch + a completeness test (every entry has a `loom_*` name, schema, and
    handler; the validate→fix→validate loop composes through `callTool`). The
    shared dependency for both the MCP server and the playground chat.
-2. `packages/ddd-mcp/` stdio server registering the catalog; smoke test via the
-   MCP SDK's in-memory client (list tools, call `loom_validate`).
+2. ✅ MCP stdio server registering the catalog. Server core lives in `src/mcp/`
+   (a Node-only island over the browser-safe catalog, like `src/cli/`);
+   `packages/ddd-mcp/` is the publish wrapper (bin `ddd-mcp` → `out/mcp/main.js`
+   + the `@modelcontextprotocol/sdk` dep), paralleling `bin/cli.js` over
+   `src/cli/`. Uses the low-level `Server` (raw JSON-Schema `tools/list` +
+   `tools/call` → `callTool`); unknown tool / handler throw surface as
+   `isError`, not a protocol failure. Smoke-tested via the SDK's in-memory
+   transport (list the catalog, dispatch `loom_validate` clean + invalid,
+   unknown-tool error) and end-to-end over real stdio.
 3. **LSP-provider correctness** (§4c) — fix the operation-rename bug + coverage,
    add quick-fix `fixHintFor` providers. Standalone editor value; gates the
    navigational verbs.
-4. **Navigational family** (§4b) — `loom_find_symbol` / `loom_references` /
-   `loom_hover` / `loom_rename` / `loom_quickfix` / `loom_unfold_macro` over the
-   providers, by-name addressing, edits-returned. Joins the same catalog and
-   inherits the MCP + playground transports.
-5. *(separate slice)* playground agentic chat: catalog dispatch + LLM wiring +
-   key handling + apply-to-editor.
+4. ✅ **Navigational family** (§4b) — by-name addressing over the providers,
+   on one shared resolver (`src/api/symbol-resolver.ts`).
+   - read trio: `loom_find_symbol` / `loom_references` / `loom_hover`
+     (`src/api/navigate.ts`).
+   - rewrite trio: `loom_rename` / `loom_quickfix` / `loom_unfold_macro`
+     (`src/api/refactor.ts`) — return `EditResult`s, not applied.
+   Both inherit the MCP + (future) playground transports through the catalog.
+5. **Playground agentic chat** — split into engine + UI:
+   - ✅ **agent loop** (`src/tools/agent-loop.ts`) — the transport-neutral
+     conversation driver: ask the model, run every `tool_use` through the
+     catalog's `callTool`, feed the `tool_result`s back, repeat until it stops
+     (with a `maxSteps` cap against tool ping-pong). The LLM call is INJECTED
+     (`Complete`), so the loop is provider-neutral, pure, browser-safe, and
+     unit-tested with a scripted fake (incl. the full validate → apply_patch
+     authoring loop). Message/content-block shapes mirror Anthropic's so the
+     real client maps 1:1. This is the reference loop every in-process host
+     runs (playground today, a headless CLI later); an external MCP host runs
+     its own loop, so the MCP server doesn't use it.
+   - ⬜ **playground UI** — the chat panel + LLM-wiring (an Anthropic/proxy
+     `Complete` implementation) + API-key handling + apply-to-editor. A
+     UI + transport task with no new tool logic (web/, Playwright-tested).
