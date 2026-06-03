@@ -82,11 +82,13 @@ describe("field-access modifier keywords — hard-keyword position", () => {
     `);
     expect(errors).toEqual([]);
     // Walk to the Property and confirm access landed.
-    const { isProperty } = await import("../../../src/language/generated/ast.js");
-    const ctx = (model.members ?? []).find((m: any) => m.$type === "BoundedContext") as any;
-    const agg = (ctx?.members ?? []).find((m: any) => m.$type === "Aggregate") as any;
-    const payload = (agg.members ?? []).filter(isProperty).find((p: any) => p.name === "payload");
+    const { isAggregate, isBoundedContext, isProperty } = await import(
+      "../../../src/language/generated/ast.js"
+    );
+    const ctx = (model.members ?? []).find(isBoundedContext);
+    const agg = (ctx?.members ?? []).find(isAggregate);
+    const payload = (agg?.members ?? []).filter(isProperty).find((p) => p.name === "payload");
     expect(payload).toBeDefined();
-    expect((payload as any).access).toBe(modifier);
+    expect(payload?.access).toBe(modifier);
   });
 });

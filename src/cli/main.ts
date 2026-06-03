@@ -8,7 +8,7 @@ import { NodeFileSystem } from "langium/node";
 import { generate as generateModel, LOOM_VERSION, validate } from "../api/index.js";
 import { generateDotnet } from "../generator/dotnet/index.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
-import { lowerModel, lowerProject, mergeLoomModels } from "../ir/lower/lower.js";
+import { lowerModel, lowerProject } from "../ir/lower/lower.js";
 import type { EnrichedLoomModel, TestOutcome } from "../ir/types/loom-ir.js";
 import { validateLoomModel } from "../ir/validate/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
