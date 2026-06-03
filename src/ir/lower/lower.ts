@@ -199,6 +199,7 @@ import {
   inAggregate,
   inPart,
   inValueObject,
+  inWorkflow,
   lowerType,
   newEnv,
   withLocal,
@@ -2345,6 +2346,11 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
   // Base env after params — the reactor (`on(...)`) bodies branch off this,
   // not off the sequential statement flow (each `on` is a distinct
   // continuation entry point, so it must not see the starter statements' lets).
+  // A workflow is a state-bearing entity (workflow-and-applier.md A2): bind
+  // `this` to it so handler bodies resolve bare names / `this.field` against
+  // the workflow's `Property` state fields.  Purely additive — legacy bodies
+  // declare no state fields, so resolution is unchanged for them.
+  inner = inWorkflow(inner, wf);
   const paramEnv = inner;
   const letAggs = new Map<string, { aggName: string; repoName: string }>();
   const statements: WorkflowStmtIR[] = [];
