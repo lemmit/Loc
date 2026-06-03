@@ -73,6 +73,14 @@ describe("ddd parse --json", () => {
     expect(bare?.range).toBeDefined();
     expect(bare?.sourceText).toBe("Customer");
 
+    // …and an applyable fix-hint (the self-suggesting loop, §3.3).
+    expect(bare?.fixHint?.kind).toBe("replace-text");
+    expect(bare?.fixHint?.patch).toMatchObject({
+      op: "replace",
+      target: "aggregate Sales.Order.customer",
+      source: "customer: Customer id",
+    });
+
     // The envelope is valid even on a failing model (contract §6).
     expect(report.outline).toBeDefined();
   });

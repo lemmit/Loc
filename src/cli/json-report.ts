@@ -9,7 +9,7 @@
 // freely import from language/ and ir/.
 // ---------------------------------------------------------------------------
 
-import { CstUtils, type LangiumDocument } from "langium";
+import { type AstNode, CstUtils, type LangiumDocument } from "langium";
 import type { Diagnostic } from "vscode-languageserver-types";
 import type {
   JsonDiagnostic,
@@ -18,6 +18,7 @@ import type {
   ValidateReport,
 } from "../diagnostics/contract.js";
 import type { LoomDiagnostic } from "../ir/validate/validate.js";
+import { fixHintFor } from "../language/fix-hints.js";
 import type { Model } from "../language/generated/ast.js";
 import { addressOf, buildOutline } from "../language/print/index.js";
 
@@ -66,9 +67,12 @@ function codeOf(d: Diagnostic): string {
   }
 }
 
-/** Resolve a CST-backed diagnostic to a node address + source slice
- *  (best-effort; both fields may be absent). */
-function locate(d: Diagnostic, doc: LangiumDocument): { node?: string; sourceText?: string } {
+/** Resolve a CST-backed diagnostic to its AST node + address + source slice
+ *  (best-effort; all fields may be absent). */
+function locate(
+  d: Diagnostic,
+  doc: LangiumDocument,
+): { ast?: AstNode; node?: string; sourceText?: string } {
   try {
     const rootCst = doc.parseResult?.value?.$cstNode;
     if (!rootCst) return {};
@@ -79,14 +83,15 @@ function locate(d: Diagnostic, doc: LangiumDocument): { node?: string; sourceTex
     const node = addressOf(ast);
     const raw = ast.$cstNode?.text;
     const sourceText = raw ? raw.split("\n", 1)[0]?.slice(0, 200) : undefined;
-    return { node, sourceText };
+    return { ast, node, sourceText };
   } catch {
     return {};
   }
 }
 
 export function langiumDiagnosticToJson(d: Diagnostic, doc: LangiumDocument): JsonDiagnostic {
-  const { node, sourceText } = locate(d, doc);
+  const { ast, node, sourceText } = locate(d, doc);
+  const fixHint = ast ? fixHintFor(d, doc, ast) : undefined;
   return {
     code: codeOf(d),
     severity: severityOf(d),
@@ -98,6 +103,7 @@ export function langiumDiagnosticToJson(d: Diagnostic, doc: LangiumDocument): Js
       end: { line: d.range.end.line, character: d.range.end.character },
     },
     ...(sourceText ? { sourceText } : {}),
+    ...(fixHint ? { fixHint } : {}),
   };
 }
 
