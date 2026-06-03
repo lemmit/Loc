@@ -200,3 +200,38 @@ export interface NavLocation {
 export type FindSymbolResult = NavSymbol | NavError;
 export type ReferencesResult = { locations: NavLocation[] } | NavError;
 export type HoverResult = { markdown: string } | NavError;
+
+// ---------------------------------------------------------------------------
+// Rewrite results (agent-tools-and-mcp.md §4b, rewrite trio) — rename /
+// quickfix / unfold_macro RETURN edits, they never apply them (contract §3,
+// tools are pure).  A single-source `WorkspaceEdit`: text edits the host
+// applies to the buffer (uri implicit).  `EditError` covers the failure modes
+// beyond symbol resolution — no fix for a code, an un-unfoldable macro, etc.
+// ---------------------------------------------------------------------------
+
+/** A single text edit — `range` to replace with `newText` (structurally an LSP
+ *  `TextEdit`).  Insertions use an empty range; deletions an empty `newText`. */
+export interface NavTextEdit {
+  range: JsonRange;
+  newText: string;
+}
+
+/** Edits to apply to the single source document, plus an optional human label
+ *  (the refactor/quick-fix title). */
+export interface EditResult {
+  edits: NavTextEdit[];
+  title?: string;
+}
+
+/** A rewrite that couldn't be produced.  `error` is the reason
+ *  (`not-found` / `ambiguous` / `no-fix` / `cannot-unfold`); `candidates`
+ *  lists the disambiguating options when `ambiguous`. */
+export interface EditError {
+  error: string;
+  candidates?: string[];
+  message?: string;
+}
+
+export type RenameResult = EditResult | EditError;
+export type QuickfixResult = EditResult | EditError;
+export type UnfoldMacroResult = EditResult | EditError;

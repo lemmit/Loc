@@ -52,7 +52,10 @@ describe("ddd-mcp server", () => {
       "loom_generate",
       "loom_hover",
       "loom_outline",
+      "loom_quickfix",
       "loom_references",
+      "loom_rename",
+      "loom_unfold_macro",
       "loom_validate",
     ]);
     for (const t of tools) {
