@@ -43,7 +43,6 @@ import type {
   Ui,
   UserBlock,
   ValueObject,
-  View,
   Workflow,
   WorkflowCreateDecl,
 } from "../../language/generated/ast.js";
@@ -107,8 +106,6 @@ import {
   isWorkflowCreateDecl,
 } from "../../language/generated/ast.js";
 import { platformFor } from "../../platform/registry.js";
-import { defaultsFor } from "../../platform/resolve-adapters.js";
-import { applicationDslToAdapter } from "../../util/platform-axes.js";
 import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
@@ -146,7 +143,6 @@ import type {
   ParamIR,
   PayloadIR,
   PermissionDeclIR,
-  Platform,
   RawLoomModel,
   RepositoryIR,
   RequirementIR,
@@ -168,7 +164,6 @@ import type {
   TypeIR,
   UiApiParamIR,
   UiIR,
-  UiParamBindingIR,
   UserIR,
   ValueObjectIR,
   ViewIR,
@@ -183,6 +178,7 @@ import {
   collectStamps,
   EMPTY_CONTEXT_CAPABILITIES,
 } from "./lower-capabilities.js";
+import { lowerDeployable } from "./lower-deployment.js";
 import { criterionRefOf, inferExprType, lowerExpr } from "./lower-expr.js";
 import {
   computeSaves,
@@ -199,12 +195,7 @@ import {
   lowerPropertyChecks,
   plural,
 } from "./lower-members.js";
-import {
-  canonicalFramework,
-  greenfieldAxisDefaults,
-  qualifyDesign,
-  qualifyPlatform,
-} from "./lower-platform.js";
+import { canonicalFramework } from "./lower-platform.js";
 import { lowerRequirement, lowerSolution, lowerTestCase } from "./lower-requirements.js";
 import { lowerStatement } from "./lower-stmt.js";
 import {
@@ -218,6 +209,7 @@ import {
   newEnv,
   withLocal,
 } from "./lower-types.js";
+import { lowerView } from "./lower-view.js";
 import {
   buildExpandContext,
   expandInlineScaffoldPrimitives,
@@ -790,155 +782,6 @@ function lowerE2E(block: TestE2E, env: Env, kind: "api" | "ui"): TestE2EIR {
     statements,
     verifiesTestCase: block.verifies?.ref?.name,
   };
-}
-
-function lowerDeployable(d: Deployable): DeployableIR {
-  const { family: platform, ref: platformRef } = qualifyPlatform(d.platform);
-  // `auth: required` is currently the only AuthMode.  Future modes
-  // (`optional` / `forbidden`) would extend this branch.
-  const auth = d.auth === "required" ? { required: true } : undefined;
-  // `design` defaults only on platforms that actually render UI in
-  // this deployable — keeping the IR honest about which deployables
-  // mount a frontend.  `react`/`static` always render React (TSX
-  // packs).  `phoenixLiveView` is fullstack and always renders HEEx
-  // against the `ashPhoenix` pack.  `dotnet` is dual-mode: it renders
-  // an embedded React SPA when (and only when) the deployable declares
-  // `ui:`; backend-only dotnet drops the field.  Other platforms
-  // (`hono`) silently drop `design:` and the validator already warns.
-  // D-PHOENIX-SURFACE: `hosts:` declarations the deployable serves.
-  // Resolve the first hosted `Ui` node so `uiName`/`uiFramework` can
-  // fall back to it (and read its own declared framework) when the
-  // legacy `ui:` binding is absent.
-  const hostedUis = (d.hosts ?? []).map((r) => r.ref).filter((u): u is Ui => !!u);
-  const hostedUiNames = hostedUis.map((u) => u.name);
-  const firstHostedUi = hostedUis[0];
-  const uiName =
-    d.uiSugar?.ref?.ref?.name ??
-    d.uiCompose?.ref?.ref?.name ??
-    d.uiBlock?.ref?.ref?.name ??
-    firstHostedUi?.name ??
-    undefined;
-  // Page-metamodel UI binding.  The grammar accepts two
-  // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
-  // (full block).  Both lower to the same `uiName` + optional
-  // `uiFramework` here.  `uiName` is computed above so the `design`
-  // default can branch on it for dual-mode platforms (fullstack
-  // dotnet).  Validator enforces that the referenced ui
-  // exists, the platform supports a UI mount, and the framework value
-  // is one of the v0-allowed alternatives.
-  // Explicit `framework: …` in the full block wins; otherwise default
-  // from the platform.  Fullstack dotnet renders React; phoenixLiveView
-  // renders LiveView; react/static render React.  Backends without a
-  // `ui:` binding leave this undefined.
-  // Precedence: explicit `framework:` on the legacy block binding, then
-  // the framework declared on the `hosts:`-ed `ui` itself (D-PHOENIX-SURFACE
-  // phase 2 — the ui owns its framework), then the legacy platform-derived
-  // default.  Computed before `design` so the pack default can branch on
-  // it (a phoenix host embedding react needs a tsx pack, not ashPhoenix).
-  const uiFramework =
-    canonicalFramework(d.uiBlock?.framework) ??
-    canonicalFramework(firstHostedUi?.framework) ??
-    (uiName
-      ? platform === "phoenix"
-        ? "phoenixLiveView"
-        : platformFor(platform).isFrontend || platform === "dotnet"
-          ? "react"
-          : undefined
-      : undefined);
-  // Design pack default depends on what actually renders:
-  //  - frontend platforms + fullstack-dotnet render React → `mantine`;
-  //  - phoenixLiveView renders HEEx → `ashPhoenix`, UNLESS it embeds a
-  //    `framework: react` ui (D-PHOENIX-SURFACE), in which case the SPA
-  //    needs a tsx pack → `mantine`;
-  //  - backends without a `ui:` mount carry no design.
-  const design = platformFor(platform).isFrontend
-    ? qualifyDesign(d.design, "mantine")
-    : platform === "phoenix"
-      ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
-      : platform === "dotnet" && uiName
-        ? qualifyDesign(d.design, "mantine")
-        : undefined;
-  // Explicit api composition.
-  const serves = (d.serves ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
-  const uiBindings = (d.uiCompose?.bindings ?? []).map(
-    (b): UiParamBindingIR => ({
-      paramName: b.name,
-      sourceDeployableName: b.source?.ref?.name ?? "",
-    }),
-  );
-  // D-STORAGE-SPLIT: `contexts:` clause references bounded contexts
-  // directly; `dataSources:` clause references the (context, kind)
-  // bindings the deployable hosts.
-  const contextNames = (d.contextRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
-  const dataSourceNames = (d.dataSourceRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
-  // D-REALIZATION-AXES: normalize the six axes.  Backends fill every axis
-  // with a concrete value (an absent knob → the platform default);
-  // frontends (`react`/`static`) carry none — `defaultsFor` is undefined
-  // for them, the validator rejects any axis written on a frontend.  The
-  // three adapter-backed axes source their default from the live adapter
-  // menu (`adapterDefaults`); the three greenfield axes from the table
-  // above.  `application`↔adapter `style`, `directoryLayout`↔`layout`.
-  const adapterDefaults = defaultsFor(platform);
-  const axes =
-    adapterDefaults !== undefined
-      ? (() => {
-          const gf = greenfieldAxisDefaults(platform);
-          return {
-            foundation: d.foundation ?? gf.foundation,
-            // Store the resolved adapter key (`serviceLayer` → `layered`)
-            // so the future codegen passes it straight to `resolveStyle`.
-            application: d.application
-              ? applicationDslToAdapter(d.application)
-              : adapterDefaults.style,
-            persistence: d.persistence ?? adapterDefaults.persistence.state,
-            directoryLayout: d.directoryLayout ?? adapterDefaults.layout,
-            transport: d.transport ?? gf.transport,
-            runtime: d.runtime ?? gf.runtime,
-          };
-        })()
-      : {
-          foundation: undefined,
-          application: undefined,
-          persistence: undefined,
-          directoryLayout: undefined,
-          transport: undefined,
-          runtime: undefined,
-        };
-  return {
-    name: d.name,
-    platform,
-    platformRef,
-    contextNames,
-    dataSourceNames,
-    port: d.port ?? defaultPortFor(platform),
-    targetName: d.targets?.ref?.name,
-    auth,
-    design,
-    foundation: axes.foundation,
-    application: axes.application,
-    persistence: axes.persistence,
-    directoryLayout: axes.directoryLayout,
-    transport: axes.transport,
-    runtime: axes.runtime,
-    uiName,
-    uiFramework,
-    hostedUiNames,
-    serves,
-    uiBindings,
-    favicon: d.favicon,
-  };
-}
-
-/** Look up a platform's default deployable port via `PlatformSurface.defaultPort`.
- *  Falls back to 3000 for an unknown / undefined platform (lowering may
- *  still be running before validation surfaces the bad value). */
-function defaultPortFor(platform: Platform | undefined): number {
-  if (!platform) return 3000;
-  try {
-    return platformFor(platform).defaultPort;
-  } catch {
-    return 3000;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1623,164 +1466,6 @@ function lowerRepository(
       };
     }),
   };
-}
-
-function lowerView(view: View, env: Env): ViewIR {
-  // Filter + bind expressions resolve against the source
-  // aggregate's schema — same env shape repository find filters
-  // use.  Bare names (`status`, `lines.count`, `total`) lower to
-  // this-rooted property / containment / derived refs.
-  const source = view.source?.ref;
-  let inner = env;
-  if (source) inner = inAggregate(env, source);
-  const filter = view.filter ? lowerExpr(view.filter, inner) : undefined;
-  // Full-form views declare an output record.  Each `fields+=Property`
-  // gives us a typed field; each `binds+=BindEntry` gives us the
-  // expression that produces its value at projection time.  The
-  // shorthand form leaves `fields` empty and we surface
-  // `output: undefined` so emitters fall back to the aggregate's
-  // wire shape.
-  const hasOutput = view.fields.length > 0;
-  let output: ViewIR["output"] | undefined;
-  if (hasOutput) {
-    const binds = view.binds.map((b) => ({
-      name: b.name,
-      expr: lowerExpr(b.expr, inner),
-      type: inferExprType(b.expr, inner),
-    }));
-    // Walk every bind expression for `X id` follow patterns;
-    // each unique path becomes one bulk-load + map at emission
-    // time.  Order by path length (shortest first) so each
-    // hop's prerequisites are guaranteed to load before it.
-    const auxByKey = new Map<string, { path: string[]; aggName: string }>();
-    for (const b of binds) {
-      collectIdFollows(b.expr, auxByKey);
-    }
-    const ordered = [...auxByKey.values()].sort((a, b) => a.path.length - b.path.length);
-    const auxiliaries = ordered.map((a) => ({
-      ...a,
-      mapVar: mapVarForPath(a.path, a.aggName),
-    }));
-    output = {
-      fields: view.fields.map((p) => lowerField(p)),
-      binds,
-      auxiliaries,
-    };
-  }
-  return {
-    name: view.name,
-    aggregateName: source?.name ?? "Unknown",
-    filter,
-    output,
-  };
-}
-
-/** Walk a bind expression's IR tree and capture every `X id`
- *  follow as an auxiliary path entry.  Single-hop
- *  (`customerId.name`) yields path `["customerId"]` with target
- *  Customer; two-hop (`customerId.regionId.name`) yields paths
- *  `["customerId"]` (Customer) AND `["customerId", "regionId"]`
- *  (Region) — the longer path's prerequisites get loaded first
- *  thanks to dependency ordering at emission time. */
-function collectIdFollows(
-  expr: ExprIR,
-  out: Map<string, { path: string[]; aggName: string }>,
-): void {
-  if (expr.kind === "member" && expr.receiverType.kind === "id") {
-    const path = idFollowPath(expr.receiver);
-    if (path) {
-      const key = path.join(".");
-      if (!out.has(key)) {
-        out.set(key, { path, aggName: expr.receiverType.targetName });
-      }
-    }
-    collectIdFollows(expr.receiver, out);
-    return;
-  }
-  if (expr.kind === "member") {
-    collectIdFollows(expr.receiver, out);
-    return;
-  }
-  switch (expr.kind) {
-    case "method-call":
-      collectIdFollows(expr.receiver, out);
-      for (const a of expr.args) collectIdFollows(a, out);
-      return;
-    case "call":
-      for (const a of expr.args) collectIdFollows(a, out);
-      return;
-    case "lambda":
-      // Lambda body is now optional — single-expression form
-      // sets `body`, block-body form sets `block`.  Block bodies don't
-      // contribute Id-follow paths in v0 (they only appear in event
-      // handlers, not in `bind`/`derived`/filter expressions where this
-      // walker runs); recurse into `body` only when present.
-      if (expr.body) collectIdFollows(expr.body, out);
-      return;
-    case "match":
-      // Recurse through every arm condition + value plus the
-      // `else` branch.  Match expressions can appear inside view
-      // `bind` exprs and `derived` bodies; their Id-follow members
-      // must still surface for the bulk-load auxiliary planner.
-      for (const arm of expr.arms) {
-        collectIdFollows(arm.cond, out);
-        collectIdFollows(arm.value, out);
-      }
-      if (expr.otherwise) collectIdFollows(expr.otherwise, out);
-      return;
-    case "binary":
-      collectIdFollows(expr.left, out);
-      collectIdFollows(expr.right, out);
-      return;
-    case "unary":
-      collectIdFollows(expr.operand, out);
-      return;
-    case "ternary":
-      collectIdFollows(expr.cond, out);
-      collectIdFollows(expr.then, out);
-      collectIdFollows(expr.otherwise, out);
-      return;
-    case "paren":
-      collectIdFollows(expr.inner, out);
-      return;
-    case "new":
-    case "object":
-      for (const f of expr.fields) collectIdFollows(f.value, out);
-      return;
-  }
-}
-
-/** Map-variable name for an auxiliary at a given path.  Single-hop
- *  paths get a clean `<agg>ById`; multi-hop paths suffix the
- *  intermediate Pascal'd field names so two paths that happen to
- *  reach the same target aggregate via different intermediates
- *  get distinct map vars. */
-function mapVarForPath(path: string[], aggName: string): string {
-  const baseName = aggName.charAt(0).toLowerCase() + aggName.slice(1);
-  if (path.length === 1) return `${baseName}ById`;
-  // Multi-hop: e.g. ["customerId", "regionId"] → "regionByCustomerId"
-  const prefix = path
-    .slice(0, -1)
-    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-    .join("");
-  return `${baseName}By${prefix}`;
-}
-
-/** Extract the chain of source-field names from an Id-typed
- *  expression that's rooted in a `ref` and built up through
- *  `member` accesses on Id-typed receivers.  Returns undefined for
- *  any expression that doesn't fit this shape (calls, lambdas,
- *  member access through non-Id receivers, etc.). */
-function idFollowPath(e: ExprIR): string[] | undefined {
-  if (e.kind === "ref" && e.type?.kind === "id") {
-    return [e.name];
-  }
-  if (e.kind === "member" && e.receiverType.kind === "id") {
-    const inner = idFollowPath(e.receiver);
-    if (!inner) return undefined;
-    return [...inner, e.member];
-  }
-  return undefined;
 }
 
 function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR {
