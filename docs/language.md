@@ -328,25 +328,39 @@ compiler enforces it (in the IR validator and live in the editor):
 - **`emit` records and folds.** At runtime an `emit` both appends to the
   stream and applies the fold, so the in-memory aggregate is consistent for
   the command's response.
+- **Construction is a creation event.** An event-sourced aggregate is built
+  by its `create` action, whose emit-only body raises the creation event; the
+  factory runs that body against a fresh, empty instance so construction goes
+  through the same record-and-fold path. The POST body is the create's
+  params (the command shape), not the field set. At most one `create` (the
+  canonical creator); an aggregate with none is constructed out-of-band and
+  exposes no create route.
 
 ```
+event Opened { account: Account id, owner: string }
 event Deposited { account: Account id, amount: int }
 
 aggregate Account ids guid persistedAs(eventLog) {
+  owner: string
   balance: int
+  create open(owner: string) {
+    emit Opened { account: id, owner: owner }   // construct via creation event
+  }
   operation deposit(amount: int) {
     precondition amount > 0
     emit Deposited { account: id, amount: amount }   // decide + emit
   }
+  apply(e: Opened) { owner := e.owner  balance := 0 }   // fold (initialises)
   apply(e: Deposited) { balance := balance + e.amount }   // fold
 }
 ```
 
 Storage emission is currently the **Hono** backend only: an event-sourced
-aggregate persists to an append-only `<agg>_events` table and rehydrates by
-folding the stream on load. Hosting one on .NET / Phoenix is a validation
-error (not a silent state fallback). See `generators.md` for the per-backend
-matrix and `docs/proposals/workflow-and-applier.md` for the roadmap
+aggregate persists to an append-only `<agg>_events` table, constructs and
+mutates through emitted events, and rehydrates by folding the stream on load.
+Hosting one on .NET / Phoenix is a validation error (not a silent state
+fallback). See `generators.md` for the per-backend matrix and
+`docs/proposals/workflow-and-applier.md` for the roadmap
 (creation-from-events, snapshots, and the other backends are upcoming).
 
 #### Provenanced fields
