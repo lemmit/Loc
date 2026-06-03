@@ -3,13 +3,14 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Command } from "commander";
 import ignore from "ignore";
-import { URI } from "langium";
+import { type LangiumDocument, URI } from "langium";
 import { NodeFileSystem } from "langium/node";
+import type { Diagnostic } from "vscode-languageserver-types";
 import { generateDotnet } from "../generator/dotnet/index.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
 import { lowerModel, mergeLoomModels } from "../ir/lower/lower.js";
 import type { EnrichedLoomModel, TestOutcome } from "../ir/types/loom-ir.js";
-import { validateLoomModel } from "../ir/validate/validate.js";
+import { type LoomDiagnostic, validateLoomModel } from "../ir/validate/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
 import { loadProject } from "../language/project-loader.js";
@@ -29,6 +30,7 @@ import {
   renderVerificationMd,
 } from "../verify/render.js";
 import { computeVerification } from "../verify/verification.js";
+import { buildValidateReport, LOOM_VERSION } from "./json-report.js";
 
 interface ParseResult {
   model: Model;
@@ -127,6 +129,75 @@ async function runParse(file: string) {
   printDiagnostics(result);
   if (result.errorCount > 0) process.exit(1);
   console.log(`OK: ${file}`);
+}
+
+/** Build the document and return the raw structured Langium diagnostics
+ *  (not the pre-stringified human form `parseFile` produces) for `--json`. */
+async function parseFileForJson(
+  file: string,
+): Promise<{ doc: LangiumDocument; model: Model | undefined; diagnostics: Diagnostic[] }> {
+  const services = createDddServices(NodeFileSystem);
+  const absolute = path.resolve(file);
+  if (!fs.existsSync(absolute)) {
+    throw new Error(`File not found: ${absolute}`);
+  }
+  const docs = services.shared.workspace.LangiumDocuments;
+  const doc = await docs.getOrCreateDocument(URI.file(absolute));
+  await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+  return {
+    doc,
+    model: doc.parseResult?.value as Model | undefined,
+    diagnostics: [...(doc.diagnostics ?? [])],
+  };
+}
+
+/**
+ * `ddd parse --json` — the structured-diagnostics contract
+ * (docs/proposals/ai-diagnostics-contract.md).  Runs the Langium phases AND
+ * the IR validator (so `parse --json` is the `validate --json` the contract
+ * names), prints one JSON envelope to stdout, exits 1 when not `ok`.
+ */
+async function runParseJson(file: string): Promise<void> {
+  const absolute = path.resolve(file);
+  const { doc, model, diagnostics } = await parseFileForJson(file);
+
+  // Only descend into the IR phases when the AST parsed cleanly — lowering a
+  // syntactically broken AST can throw, and the envelope must stay valid
+  // (contract §6).
+  const isParseLevel = (d: Diagnostic): boolean => {
+    const code = (d.data as { code?: string } | undefined)?.code;
+    return d.severity === 1 && (code === "parsing-error" || code === "lexing-error");
+  };
+  const hasParseError = diagnostics.some(isParseLevel);
+
+  let irDiagnostics: LoomDiagnostic[] = [];
+  if (model && !hasParseError) {
+    try {
+      const enriched = enrichLoomModel(mergeLoomModels([lowerModel(model)]));
+      irDiagnostics = validateLoomModel(enriched);
+    } catch (err) {
+      irDiagnostics = [
+        {
+          severity: "error",
+          message: `IR phase failed before generation: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          source: absolute,
+          code: "loom.ir-internal",
+        },
+      ];
+    }
+  }
+
+  const report = buildValidateReport({
+    modelPath: absolute,
+    langiumDiagnostics: diagnostics,
+    doc,
+    irDiagnostics,
+    model,
+  });
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  if (!report.ok) process.exit(1);
 }
 
 /**
@@ -518,13 +589,18 @@ async function runVerify(file: string, options: VerifyOptions): Promise<void> {
 }
 
 const program = new Command();
-program.name("ddd").description("DDD DSL CLI").version("0.1.0");
+program.name("ddd").description("DDD DSL CLI").version(LOOM_VERSION);
 
 program
   .command("parse <file>")
   .description("Parse and validate a .ddd file")
-  .action(async (file: string) => {
-    await runParse(file);
+  .option(
+    "--json",
+    "emit structured diagnostics + outline as JSON (also runs IR validation); see docs/proposals/ai-diagnostics-contract.md",
+  )
+  .action(async (file: string, options: { json?: boolean }) => {
+    if (options.json) await runParseJson(file);
+    else await runParse(file);
   });
 
 const generate = program.command("generate").description("Generate code from a .ddd file");
