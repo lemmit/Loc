@@ -28,6 +28,7 @@ import { cqrsStyleAdapter } from "./adapters/cqrs-style.js";
 import { emitDotnetResourceFiles } from "./adapters/resource-clients.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
+import { renderDapperRepository, renderDapperSchema } from "./emit/dapper.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
 import { emitDotnetMigrations } from "./emit/migrations.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
@@ -258,10 +259,20 @@ function emitProjectFromContexts(
   // hand-written stamping logic).
   emitStampingInterceptor(merged, ns, out);
   const usesStamping = merged.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
-  out.set(
-    "Infrastructure/Persistence/AppDbContext.cs",
-    renderDbContext(merged, ns, documentAggNames(contexts, system?.sys)),
-  );
+  // Persistence selection (D-REALIZATION-AXES `persistence:`): `dapper` replaces
+  // the EF Core DbContext + model-derived migrations with an Npgsql/Dapper
+  // connection + a self-applied `DbSchema` (CREATE TABLE IF NOT EXISTS).  The
+  // validator gates dapper to the supported subset, so the EF-only branches
+  // below stay byte-identical for the default `efcore`.
+  const usingDapper = system?.deployable.persistence === "dapper";
+  if (usingDapper) {
+    out.set("Infrastructure/Persistence/DbSchema.cs", renderDapperSchema(merged.aggregates, ns));
+  } else {
+    out.set(
+      "Infrastructure/Persistence/AppDbContext.cs",
+      renderDbContext(merged, ns, documentAggNames(contexts, system?.sys)),
+    );
+  }
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
   // Program.cs registrations only when at least one aggregate
@@ -283,7 +294,10 @@ function emitProjectFromContexts(
   // entry points) → no-op.  Emitted before the project shell so
   // Program.cs sees `hasMigrations` and adds the
   // `Database.Migrate()` startup call.
-  const hasMigrations = !!(system?.migrations && system.migrations.length > 0);
+  // EF migrations only for the efcore path — dapper applies its own
+  // `DbSchema` at startup (see renderProgram), so it needs no migration files
+  // and `hasMigrations` stays false to suppress the `Database.Migrate()` call.
+  const hasMigrations = !usingDapper && !!(system?.migrations && system.migrations.length > 0);
   if (hasMigrations) {
     emitDotnetMigrations(system!.migrations!, ns, out);
   }
@@ -309,6 +323,7 @@ function emitProjectFromContexts(
     hasMigrations,
     hasSeeds,
     emitTrace,
+    usingDapper,
     resourceNugetDeps: resourceEmission.nugetDeps,
   });
   emitTestProject(merged, ns, out);
@@ -618,61 +633,75 @@ function emitAggregate(
   collectRetrievalBodyUsings(aggRetrievals, repoImplUsings);
   const findBodies = buildFindBodies(agg, repoWithViews);
   const retrievalBodies = buildRetrievalBodies(agg, aggRetrievals);
-  place(
-    `${agg.name}Repository.cs`,
-    "repository-impl",
-    isDoc
-      ? renderDocumentRepositoryImpl(agg, repoWithViews, ns, findBodies, {
-          extraUsings: [...repoImplUsings].sort(),
-        })
-      : renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
-          extraUsings: [...repoImplUsings].sort(),
-          emitTrace,
-          retrievals: aggRetrievals,
-          retrievalBodies,
-        }),
-  );
-  if (isDoc) {
-    // Document-shaped persistence: a `<Agg>Document` record (one JSONB
-    // column) + its EF configuration + the snapshot DTOs the repository
-    // (de)serialises.  No normalised entity configuration, no join
-    // tables — contained parts + references fold into the document.
-    place(`${agg.name}Document.cs`, "document-poco", renderDocumentPoco(agg, ns));
+  // Persistence selection (D-REALIZATION-AXES `persistence:`): `dapper`
+  // emits an Npgsql/Dapper repository (and no EF configuration / document /
+  // join-table files — the validator gates those features out for dapper);
+  // `efcore` (default) keeps the EF Core repository + configuration path
+  // byte-identical.
+  const usingDapper = emitCtx?.deployable.persistence === "dapper";
+  if (usingDapper) {
     place(
-      `${agg.name}DocumentConfiguration.cs`,
-      "ef-configuration",
-      renderDocumentConfiguration(agg, ns, { schema: ds?.schema, tablePrefix: ds?.tablePrefix }),
+      `${agg.name}Repository.cs`,
+      "repository-impl",
+      renderDapperRepository(agg, repoWithViews, ns),
     );
-    place(`${agg.name}Snapshots.cs`, "entity", renderSnapshots(agg, ns));
   } else {
-    // Relational (default) AND embedded both use the normal entity +
-    // repository + DbSet<Agg>; they differ only in the EF configuration:
-    // `embedded` folds each containment into a JSONB column via owned-
-    // types `.ToJson(...)` (no child table), so its `OwnsMany/OwnsOne`
-    // calls carry `.ToJson()` and the join tables are skipped.
-    // dataSource-driven schema / tablePrefix knobs flow through both.
     place(
-      `${agg.name}Configuration.cs`,
-      "ef-configuration",
-      renderConfiguration(agg, ns, ctx, {
-        schema: ds?.schema,
-        tablePrefix: ds?.tablePrefix,
-        embedded: isEmbedded,
-      }),
+      `${agg.name}Repository.cs`,
+      "repository-impl",
+      isDoc
+        ? renderDocumentRepositoryImpl(agg, repoWithViews, ns, findBodies, {
+            extraUsings: [...repoImplUsings].sort(),
+          })
+        : renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
+            extraUsings: [...repoImplUsings].sort(),
+            emitTrace,
+            retrievals: aggRetrievals,
+            retrievalBodies,
+          }),
     );
-    // One file per reference-collection association: the join entity
-    // class + its EF Core configuration (composite PK, ordinal, FK
-    // converters).  Skipped for embedded (reference collections fold
-    // into a JSONB column) and when the aggregate has no `Id<T>[]` fields.
-    if (!isEmbedded) {
-      for (const assoc of agg.associations) {
-        const cls = joinEntityName(assoc);
-        place(`${cls}.cs`, "join-entity", renderJoinEntity(assoc, ns));
-        place(
-          `${cls}Configuration.cs`,
-          "join-entity-configuration",
-          renderJoinEntityConfiguration(assoc, ns),
-        );
+    if (isDoc) {
+      // Document-shaped persistence: a `<Agg>Document` record (one JSONB
+      // column) + its EF configuration + the snapshot DTOs the repository
+      // (de)serialises.  No normalised entity configuration, no join
+      // tables — contained parts + references fold into the document.
+      place(`${agg.name}Document.cs`, "document-poco", renderDocumentPoco(agg, ns));
+      place(
+        `${agg.name}DocumentConfiguration.cs`,
+        "ef-configuration",
+        renderDocumentConfiguration(agg, ns, { schema: ds?.schema, tablePrefix: ds?.tablePrefix }),
+      );
+      place(`${agg.name}Snapshots.cs`, "entity", renderSnapshots(agg, ns));
+    } else {
+      // Relational (default) AND embedded both use the normal entity +
+      // repository + DbSet<Agg>; they differ only in the EF configuration:
+      // `embedded` folds each containment into a JSONB column via owned-
+      // types `.ToJson(...)` (no child table), so its `OwnsMany/OwnsOne`
+      // calls carry `.ToJson()` and the join tables are skipped.
+      // dataSource-driven schema / tablePrefix knobs flow through both.
+      place(
+        `${agg.name}Configuration.cs`,
+        "ef-configuration",
+        renderConfiguration(agg, ns, ctx, {
+          schema: ds?.schema,
+          tablePrefix: ds?.tablePrefix,
+          embedded: isEmbedded,
+        }),
+      );
+      // One file per reference-collection association: the join entity
+      // class + its EF Core configuration (composite PK, ordinal, FK
+      // converters).  Skipped for embedded (reference collections fold
+      // into a JSONB column) and when the aggregate has no `Id<T>[]` fields.
+      if (!isEmbedded) {
+        for (const assoc of agg.associations) {
+          const cls = joinEntityName(assoc);
+          place(`${cls}.cs`, "join-entity", renderJoinEntity(assoc, ns));
+          place(
+            `${cls}Configuration.cs`,
+            "join-entity-configuration",
+            renderJoinEntityConfiguration(assoc, ns),
+          );
+        }
       }
     }
   }
@@ -733,6 +762,7 @@ function emitProject(
     hasMigrations?: boolean;
     hasSeeds?: boolean;
     emitTrace?: boolean;
+    usingDapper?: boolean;
     resourceNugetDeps?: Record<string, string>;
   },
 ): void {
@@ -743,6 +773,7 @@ function emitProject(
   const hasMigrations = !!options?.hasMigrations;
   const hasSeeds = !!options?.hasSeeds;
   const emitTrace = !!options?.emitTrace;
+  const usingDapper = !!options?.usingDapper;
   out.set(
     "Program.cs",
     renderProgram(ctx, ns, {
@@ -753,9 +784,13 @@ function emitProject(
       hasMigrations,
       hasSeeds,
       emitTrace,
+      usingDapper,
     }),
   );
-  out.set(`${ns}.csproj`, renderCsproj(ns, hasExtern, usesValidators, options?.resourceNugetDeps));
+  out.set(
+    `${ns}.csproj`,
+    renderCsproj(ns, hasExtern, usesValidators, options?.resourceNugetDeps, usingDapper),
+  );
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa }));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");

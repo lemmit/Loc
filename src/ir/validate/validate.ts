@@ -76,6 +76,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDataSourceCoverage(sys, diags);
     validateSavingShapeSupport(sys, diags);
     validateContextFilterSupport(sys, diags);
+    validateDapperSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
@@ -1309,6 +1310,70 @@ function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
           source: `${sys.name}/${dep.name}`,
           code: "loom.context-filter-unsupported",
         });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// `persistence: dapper` capability gate (D-REALIZATION-AXES Phase 5c).
+//
+// The .NET Dapper adapter is a MINIMAL-v1 alternate persistence: relational,
+// state-based, flat aggregates whose fields are scalar / enum / value-object /
+// single id-ref.  This rejects — with a clear, actionable error — any model
+// feature dapper v1 doesn't emit, so a selection either works end-to-end or
+// fails fast at validate time (rather than producing a non-compiling project).
+// efcore (the default) supports the full surface, so this only fires for an
+// explicit `persistence: dapper`.
+// ---------------------------------------------------------------------------
+function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  const MANAGED_ACCESS = new Set(["managed", "token", "internal", "secret"]);
+
+  for (const dep of sys.deployables) {
+    if (dep.persistence !== "dapper") continue;
+    const reject = (subject: string, reason: string): void => {
+      diags.push({
+        severity: "error",
+        message:
+          `Deployable '${dep.name}' selects 'persistence: dapper', but ${subject} ${reason}. ` +
+          `The Dapper adapter is minimal in v1 (relational, state-based, flat aggregates with ` +
+          `scalar / enum / value-object / id-ref fields). Use 'persistence: efcore' for this model, ` +
+          `or remove the unsupported feature.`,
+        source: `${sys.name}/${dep.name}`,
+        code: "loom.dapper-unsupported",
+      });
+    };
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      // Named-query bundles emit `Run<Name>Async` on the repository interface,
+      // which the v1 Dapper repository doesn't implement.
+      if ((ctx.retrievals ?? []).length > 0)
+        reject(`context '${ctxName}'`, "declares 'retrieval' query bundles (not yet on Dapper)");
+      if ((ctx.seeds ?? []).length > 0)
+        reject(`context '${ctxName}'`, "declares 'seed' data (the Dapper seed path is not wired)");
+      for (const agg of ctx.aggregates) {
+        const a = agg as EnrichedAggregateIR;
+        const where = `aggregate '${ctxName}.${agg.name}'`;
+        if (a.persistedAs === "eventLog") reject(where, "is event-sourced");
+        const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
+        if (shape !== "relational") reject(where, `is persisted as shape(${shape})`);
+        if (a.isAbstract || a.extendsAggregate)
+          reject(where, "participates in aggregate inheritance");
+        if ((a.associations ?? []).length > 0)
+          reject(where, "has reference-collection associations (Id[] join tables)");
+        if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
+          reject(where, "contains nested entity parts");
+        if ((a.contextStamps ?? []).length > 0) reject(where, "uses audit stamping");
+        if ((a.contextFilters ?? []).length > 0)
+          reject(where, "uses a 'filter' capability predicate");
+        for (const f of a.fields) {
+          if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
+          else if (f.access && MANAGED_ACCESS.has(f.access))
+            reject(`field '${agg.name}.${f.name}'`, `has server-managed access '${f.access}'`);
+        }
       }
     }
   }
