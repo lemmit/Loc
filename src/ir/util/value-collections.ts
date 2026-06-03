@@ -75,3 +75,9 @@ export function valueCollectionsFor(owner: {
 export function hasValueCollections(owner: { name: string; fields: readonly FieldIR[] }): boolean {
   return owner.fields.some((f) => valueArrayElement(f.type) !== null);
 }
+
+/** True when a field type is a value-object collection (`<VO>[]`, optionally
+ *  `<VO>[]?`) — i.e. persisted as an id-less child table, not a root column. */
+export function isValueCollectionType(t: TypeIR): boolean {
+  return valueArrayElement(t) !== null;
+}

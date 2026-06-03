@@ -12,6 +12,7 @@ import type {
   FieldIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { isValueCollectionType, type ValueCollectionIR } from "../../ir/util/value-collections.js";
 import { valueObjectColumnNames } from "./emit.js";
 import { isRefCollection } from "./repository-associations-builder.js";
 import { isTphConcrete } from "./tph.js";
@@ -30,8 +31,10 @@ export function hydrateRootExpr(
   const fields: string[] = [];
   fields.push(`id: Ids.${agg.name}Id(${rowVar}.id)`);
   for (const f of agg.fields) {
-    if (isRefCollection(f.type)) {
-      // Loaded into a local const from the join table (see findByIdMethod).
+    if (isRefCollection(f.type) || isValueCollectionType(f.type)) {
+      // Loaded into a local const from its join / child table (see
+      // findByIdMethod): a reference collection from the join table, a
+      // value-object collection from its id-less child table.
       fields.push(`${f.name}`);
     } else {
       fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx, forceNonNull)}`);
@@ -42,6 +45,23 @@ export function hydrateRootExpr(
     fields.push(`${c.name}`);
   }
   return `${agg.name}._create({ ${fields.join(", ")} })`;
+}
+
+/** Construct one value object from a child-collection row.  Each VO field
+ *  reads its own column off the row via `hydrateValueExpr` (decimal→Number,
+ *  nested VO → its flattened columns), matching the child table the schema
+ *  emitter laid down.  Exported so the find-method builder can splice it
+ *  into the per-collection load loops. */
+export function valueCollectionElementExpr(
+  vc: ValueCollectionIR,
+  rowVar: string,
+  ctx: BoundedContextIR,
+): string {
+  const vo = ctx.valueObjects.find((v) => v.name === vc.voName);
+  const args = (vo?.fields ?? [])
+    .map((vf) => hydrateValueExpr(vf.name, vf.type, rowVar, ctx, vf.optional))
+    .join(", ");
+  return `new ${vc.voName}(${args})`;
 }
 
 /** Hydrate a TPH concrete directly from a shared-table row — used by the
@@ -172,6 +192,8 @@ export function hydrateRootForFindAllExpr(
   for (const f of agg.fields) {
     if (isRefCollection(f.type)) {
       fields.push(`${f.name}: ${f.name}ByOwner.get(${rowVar}.id) ?? []`);
+    } else if (isValueCollectionType(f.type)) {
+      fields.push(`${f.name}: ${f.name}ByParent.get(${rowVar}.id) ?? []`);
     } else {
       fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx, forceNonNull)}`);
     }
