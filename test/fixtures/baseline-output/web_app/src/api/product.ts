@@ -94,7 +94,7 @@ export function useBySkuProduct(query: BySkuQuery) {
   return useQuery({
     queryKey: ["products", "find", "by_sku", query],
     queryFn: async () => {
-      const qs = new URLSearchParams(query as Record<string, string>).toString();
+      const qs = new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)])).toString();
       const r = await api.get(`/products/by_sku${qs ? "?" + qs : ""}`);
       return ProductResponse.nullable().parse(r);
     },

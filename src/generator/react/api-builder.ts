@@ -1,6 +1,11 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
 import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
 import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../ir/stdlib/generics.js";
+import {
   type AggregateIR,
   aggregateUsesMoney,
   type BoundedContextIR,
@@ -108,6 +113,14 @@ export function buildApiModule(
       for (const p of find.params) {
         lines.push(`  ${p.name}: ${zodForRequest(p.type)},`);
       }
+      // A paged find gains 1-based `page` / `pageSize` controls (P3b),
+      // mirroring the backend route's query schema.
+      if (pagedReturn(find.returnType)) {
+        lines.push(
+          `  page: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE}),`,
+          `  pageSize: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
+        );
+      }
       lines.push(`});`);
       lines.push(
         `export type ${upperFirst(find.name)}Query = z.infer<typeof ${upperFirst(find.name)}Query>;`,
@@ -124,6 +137,21 @@ export function buildApiModule(
   lines.push(...emitResponseSchema(agg, ctx, /*isAgg*/ true));
   lines.push(`export const ${agg.name}ListResponse = z.array(${agg.name}Response);`);
   lines.push(`export type ${agg.name}ListResponse = z.infer<typeof ${agg.name}ListResponse>;`);
+  // Paged response DTOs (P3b) — one per distinct `<carrier> paged` find return.
+  // `items` reuses the carrier's response schema; the envelope mirrors the
+  // backend's `<Agg>Paged` shape byte-for-byte.
+  {
+    const pagedSeen = new Set<string>();
+    for (const find of repo?.finds ?? []) {
+      const paged = pagedReturn(find.returnType);
+      if (!paged || pagedSeen.has(paged.name)) continue;
+      pagedSeen.add(paged.name);
+      lines.push(
+        `export const ${paged.name} = z.object({ items: z.array(${zodForResponseInner(paged.arg)}), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() });`,
+      );
+      lines.push(`export type ${paged.name} = z.infer<typeof ${paged.name}>;`);
+    }
+  }
   lines.push("");
 
   // ---------------------------------------------------------------------
@@ -214,12 +242,15 @@ export function buildApiModule(
     for (const find of repo.finds) {
       if (find.name === "all") continue;
       const findSnake = snake(find.name);
+      const paged = pagedReturn(find.returnType);
       const isList = find.returnType.kind === "array";
-      const responseSchema = isList
-        ? `${agg.name}ListResponse`
-        : find.returnType.kind === "optional"
-          ? `${agg.name}Response.nullable()`
-          : `${agg.name}Response`;
+      const responseSchema = paged
+        ? paged.name
+        : isList
+          ? `${agg.name}ListResponse`
+          : find.returnType.kind === "optional"
+            ? `${agg.name}Response.nullable()`
+            : `${agg.name}Response`;
       lines.push(
         `export function use${upperFirst(find.name)}${agg.name}(query: ${upperFirst(find.name)}Query) {`,
       );
@@ -227,7 +258,10 @@ export function buildApiModule(
       lines.push(`    queryKey: ["${tag}", "find", "${findSnake}", query],`);
       lines.push(`    queryFn: async () => {`);
       lines.push(
-        `      const qs = new URLSearchParams(query as Record<string, string>).toString();`,
+        // Stringify each value: query fields may be numbers (paged
+        // page/pageSize, numeric find params), which a bare cast to
+        // Record<string,string> rejects under strict tsc.
+        `      const qs = new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)])).toString();`,
       );
       lines.push(`      const r = await api.get(\`/${tag}/${findSnake}\${qs ? "?" + qs : ""}\`);`);
       lines.push(`      return ${responseSchema}.parse(r);`);

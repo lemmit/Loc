@@ -93,7 +93,7 @@ export function useByEmailCustomer(query: ByEmailQuery) {
   return useQuery({
     queryKey: ["customers", "find", "by_email", query],
     queryFn: async () => {
-      const qs = new URLSearchParams(query as Record<string, string>).toString();
+      const qs = new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)])).toString();
       const r = await api.get(`/customers/by_email${qs ? "?" + qs : ""}`);
       return CustomerResponse.nullable().parse(r);
     },
