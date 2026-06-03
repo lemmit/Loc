@@ -114,8 +114,10 @@ describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 me
     expect(availableAdapterNames("dotnet", "layout")).toEqual(["byFeature", "byLayer"]);
   });
 
-  it("excludes stubs on hono (drizzle/layered/byLayer real)", () => {
-    expect(availableAdapterNames("hono", "persistence")).toEqual(["drizzle"]);
+  it("excludes stubs on hono (drizzle/mikroorm/layered/byLayer real)", () => {
+    // mikroorm became real in Phase 5d — the node persistence menu is now
+    // exactly { drizzle, mikroorm } (the speculative prisma stub was removed).
+    expect(availableAdapterNames("hono", "persistence")).toEqual(["drizzle", "mikroorm"]);
     expect(availableAdapterNames("hono", "style")).toEqual(["layered"]);
   });
 

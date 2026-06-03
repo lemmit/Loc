@@ -128,8 +128,30 @@ the menus go size-1 → size-N:
   seeds.  Compile-gated: `test/e2e/fixtures/dotnet-build/dapper.ddd` is built
   under `dotnet build /warnaserror` (`build-generated-dotnet`).
   `availableAdapterNames("dotnet","persistence")` → `["dapper","efcore"]`.
-- dotnet: `marten` (persistence); `serviceLayer` (style/`application`).
-- node: `express` / `fastify` (transport); `prisma` (persistence).
+- **5d — node `mikroorm` persistence (minimal-v1) — DONE.** Second node
+  persistence adapter (alongside the default `drizzle`): `persistence: mikroorm`
+  emits an idiomatic MikroORM `db/` layer — an `EntitySchema` persistence model
+  (`db/entities.ts`) separate from the rich domain aggregates, a
+  `mikro-orm.config.ts`, and per-aggregate repositories using the `EntityManager`
+  the way a MikroORM dev would (`em.fork()`, `findOne`/`find` with real
+  `FilterQuery` objects, `em.upsert`, `em.nativeDelete`; schema owned by
+  `orm.schema.updateSchema()` at startup, so no drizzle migrations).  Row↔domain
+  mapping reuses Loom's shared `hydrateRootExpr` / `projectionObject` /
+  `toWireMethod` so it stays byte-consistent with the drizzle hydrate.  The
+  orchestrator branches on the deployable's resolved `persistence` key
+  (`platform/hono/v4/emit.ts`; drizzle path byte-identical).  Validator-gated
+  (`loom.mikroorm-unsupported`): relational, state-based, flat aggregates with
+  scalar / enum / value-object / id-ref fields; document/embedded shape,
+  associations, nested parts, inheritance, event-sourcing,
+  audit/provenance/managed fields, retrievals and seeds are rejected.
+  Compile-gated: `test/e2e/fixtures/ts-build/mikroorm.ddd` is `tsc`/`tsup`-built
+  against the real `@mikro-orm/*` types (`build-generated`).  The node
+  persistence menu is now exactly `{ drizzle, mikroorm }` (the speculative
+  `prisma` stub was removed).
+- dotnet: `marten` (persistence — but **deferred**: event-sourcing / document
+  shape land on `efcore` first, then `dapper`; `marten` comes after those).
+  `serviceLayer` (style/`application`).
+- node: `express` / `fastify` (transport).
 - **node `byFeature` layout — DONE (proper, with import rewriting).** A first
   naive port (#830, reverted) shipped broken: unlike .NET `using <Namespace>`
   (path-independent), generated TS files import each other by **relative path**,

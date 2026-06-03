@@ -2,7 +2,7 @@
 // PersistenceAdapter — the per-(platform × storage type) emitter slot.
 //
 // One adapter per concrete persistence library each platform ships
-// (`efcore` and `dapper` on .NET; `drizzle` and `prisma` on Node;
+// (`efcore` and `dapper` on .NET; `drizzle` and `mikroorm` on Node;
 // `ash-postgres` on Phoenix; …).  The validator reads `supports(...)`
 // to enforce capability rules at the language layer; the orchestrator
 // calls the `emit*` methods to produce repositories / migrations /
