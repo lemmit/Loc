@@ -42,6 +42,12 @@ system DapperNet {
         find byCustomer(customerId: Customer id): Order[] where this.customerId == customerId
         find byQuantity(quantity: int): Order[] where this.quantity >= quantity
       }
+
+      // Retrieval bundle on Dapper — Run<Name>Async as parameterised SQL
+      // (where + sort + paging), exercising the criterion `this-prop` → column
+      // rendering under the dapper-build `/warnaserror` gate.
+      criterion NameIs(n: string) of Customer = name == n
+      retrieval ByNameSorted(n: string) of Customer { where: NameIs(n) sort: [name asc] }
     }
   }
 

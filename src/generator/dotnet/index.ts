@@ -546,8 +546,12 @@ function emitAggregate(
     renderRepositoryInterface(agg, repoWithViews, ns, aggRetrievals),
   );
   // Each retrieval emits an Ardalis `Specification<T>` (where + sort) the
-  // repository's `Run<Name>Async` consumes via `.WithSpecification(...)`.
-  emitRetrievalSpecs(agg, aggRetrievals, ctx, ns, out);
+  // EF repository's `Run<Name>Async` consumes via `.WithSpecification(...)`.
+  // EF-only: the Dapper repository renders retrievals as parameterised SQL
+  // (no Ardalis dependency on that persistence axis).
+  if (emitCtx?.deployable.persistence !== "dapper") {
+    emitRetrievalSpecs(agg, aggRetrievals, ctx, ns, out);
+  }
   // A find with a `where` expression that lowers to `Regex.IsMatch`
   // declares its System.Text.RegularExpressions dependency; the
   // repository impl emitter then adds the using.  Retrieval `where`
@@ -578,7 +582,7 @@ function emitAggregate(
     place(
       `${agg.name}Repository.cs`,
       "repository-impl",
-      renderDapperRepository(agg, repoWithViews, ns),
+      renderDapperRepository(agg, repoWithViews, ns, aggRetrievals),
     );
   } else if (isEs) {
     // Event-sourced: the `<agg>_events` stream repository (fold on load,

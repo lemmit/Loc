@@ -439,10 +439,10 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
-      // Named-query bundles emit `Run<Name>Async` on the repository interface,
-      // which the v1 Dapper repository doesn't implement.
-      if ((ctx.retrievals ?? []).length > 0)
-        reject(`context '${ctxName}'`, "declares 'retrieval' query bundles (not yet on Dapper)");
+      // `retrieval` bundles are now supported on Dapper — `Run<Name>Async`
+      // renders as parameterised SQL (where + sort + offset/limit paging); a
+      // predicate outside the Dapper subset stubs (NotImplementedException),
+      // mirroring the find path.  No gate.
       if ((ctx.seeds ?? []).length > 0)
         reject(`context '${ctxName}'`, "declares 'seed' data (the Dapper seed path is not wired)");
       for (const agg of ctx.aggregates) {
