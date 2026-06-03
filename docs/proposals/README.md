@@ -55,6 +55,14 @@ Status reflects `origin/main` as of the last refresh of
 | [`storage-and-platform-config-plan.md`](./storage-and-platform-config-plan.md) | REFERENCE | 14-phase, 17–19 PR build order for the storage proposal. Consumed by Phase 1A. |
 | [`storage-and-platform-config-micro-plan.md`](./storage-and-platform-config-micro-plan.md) | REFERENCE | Foundation-first sub-plan (skeleton-only delivery, ~22 days serialised, F1 broken into 6 small PRs). Consumed by Phase 1A. |
 
+### AI generation platform
+
+| Doc | Status | Role |
+|---|---|---|
+| [`ai-generation-platform.md`](./ai-generation-platform.md) | PROPOSED (strategy) | **Reframes Loom as an AI generation platform, engine-first.** Vision (the `.ddd` model as the narrow waist; "the model is the AI's memory" → no context rot as the app grows; one model / three editors / four stacks; governance as the enterprise unlock) + strategy (competitive whitespace, the on-ramp inversion, platform-first across mass-market-land + regulated-expand with IR-embedding deferred — pinned [D-AI-EMPHASIS](../decisions.md#d-ai-emphasis--loom-leads-as-a-platform-mass-market-land--regulated-expand-ir-embedding-deferred), open-core business model). No grammar/IR change — the platform is integration + UX over existing assets. Start here. |
+| [`ai-authoring-loop.md`](./ai-authoring-loop.md) | PROPOSED (spec) | The mechanics: an LLM authors/evolves a `.ddd` model through Loom's compiler as a tool set; the validate→repair→verify loop and **why it converges** (two structured oracles — phases ②③④⑦ diagnostics + `ddd verify`/conformance); the **model-patch protocol** (node-addressed, canonical-print splice, exactly-derivable diffs); grammar-constrained decoding + context-pack for `.ddd` authoring; in-browser runtime wiring (`web/` imports `../src` → client-side repair oracle); the wedge build plan. |
+| [`ai-diagnostics-contract.md`](./ai-diagnostics-contract.md) | PROPOSED (spec) | The machine-readable interface the loop consumes: `ddd validate/generate/verify --json`. Located, coded (`loom.*`), phase-attributed diagnostics with a `fixHint` (carrying a model patch, so the agent repairs without reading generated code); always-valid envelope; deterministic ordering; the `outline` address book shared with the patch protocol. Compile-time analogue of the shipped runtime `errors[]` format ([`validation-error-extension.md`](./validation-error-extension.md)). |
+
 ### Structural & layout
 
 | Doc | Status | Aspect |
