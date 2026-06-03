@@ -162,24 +162,50 @@ call-site cursor (`a.b := …` / `this.op(...)`) finds no target because
 
 **S2 — coverage push.** The lowest-tested providers, with the worst gaps:
 
-| Provider | Tests | Worst gap |
-|---|---|---|
-| `ddd-semantic-tokens.ts` | 1 | operations, repositories, events, entity-parts, containments, chained access, method-vs-property, cross-refs — none exercised (→ ~12 cases) |
-| `ddd-rename.ts` / `member-refs.ts` | 4 | operation rename (S1); cross-ref tested only for Aggregate; no `prepareRename`, shadowing, or multi-file |
-| `ddd-references.ts` | 3 | derived / function / assignment / shadowing / multi-file unverified |
-| `ddd-node-kind.ts` | 0 | `Deployable → Constructor` is semantically wrong (a deployable is a module, not an instantiation) |
+| Provider | Tests | Worst gap | Status |
+|---|---|---|---|
+| `ddd-semantic-tokens.ts` | 1 → 2 | operations, repositories, events, type-refs, parameters, member-calls, var refs | **covered** (added type-ref / function / parameter / variable / method-decl / member-method / event / repository cases) |
+| `ddd-node-kind.ts` | 0 → 1 | `Deployable → Constructor` is semantically wrong (a deployable is a module) | **fixed + first tests** (`Deployable → Module`) |
+| `ddd-rename.ts` / `member-refs.ts` | 5 | cross-ref tested only for Aggregate; no `prepareRename`, shadowing, or multi-file | open (operation rename shipped, S1) |
+| `ddd-references.ts` | 3 | derived / function / assignment / shadowing / multi-file unverified | open |
 
-Add: rename per cross-ref category (module / enum + values / event / repository /
-deployable / value-object-by-name / function-by-bare-call); multi-file rename;
-`prepareRename` range; shadowing (property vs nested lambda param — exercises the
-dead-tested `localShadows` walk); references parity; semantic-tokens per node
-kind; a hover failure-path test (render unresolved refs as `«unresolved»`, not
-a silent `?`).
+Still to add: rename per cross-ref category (module / enum + values / event /
+repository / deployable / value-object-by-name / function-by-bare-call);
+multi-file rename; `prepareRename` range; shadowing (property vs nested lambda
+param — exercises the dead-tested `localShadows` walk); references parity; a
+hover failure-path test (render unresolved refs as `«unresolved»`, not a silent
+`?`).
+
+> **Note (LValue blind spot, found while testing).** A statement-position
+> member call / assignment target (`this.op(...)`, `a.b := …`) parses as an
+> `LValue`, not a `MemberSuffix` — so neither the semantic-token highlighter
+> nor `memberDeclAt` (rename-from-cursor) resolves it. Member *declarations*
+> rename correctly and `collectMemberUsages` does rewrite LValue usages; the gap
+> is only resolving/highlighting *from* an LValue token. Tracked here; affects
+> rename-from-call-site and member-call highlighting in statement position.
 
 **S3 — fix-hint expansion.** New quick-fixes are **one `fixHintFor` provider
 each** (`src/language/fix-hints.ts`), not switch arms — so each rides
 `fixHintCodeActions` into Monaco + VS Code *and* the agent loop (`loom_quickfix`)
-for free. Next batch:
+for free.
+
+> **Prerequisite found (patch-addressing).** A `fixHintFor` provider emits a
+> `ModelPatch`, whose `target` must be an **addressable node** — and today the
+> address space (`addressOf` / `buildOutline` / the patch index) covers only
+> contexts, aggregates + their members, workflows, views, pages. The bare-
+> aggregate fix worked because it edits an *aggregate member*. The batch below,
+> however, edits **VO members** (`reserved-derived-on-vo`), **`seed` blocks**
+> (`seed-id-needs-raw`), and **aggregate / deployable headers** (`es-tph-…`,
+> `react-deployable-missing-ui`, the `inheritanceUsing` clause) — none currently
+> addressable. So these are **not agent-reachable fix-hints yet**: they need
+> either (a) **extending `ModelPatch` addressing** to VO members / seed blocks /
+> headers (the right, reusable fix — unlocks all of them as `loom_quickfix`), or
+> (b) shipping them as **editor-only `TextEdit` code-actions** in
+> `DddCodeActionProvider` (range-based, no addressing — but editor-only, and each
+> needs to locate an edit point distinct from the diagnostic range). **Recommended
+> next: (a)** — extend addressing, then the batch lands as `fixHintFor` providers.
+
+Next batch (blocked on the addressing prerequisite above):
 
 | Diagnostic code | Patch | Effort |
 |---|---|---|
