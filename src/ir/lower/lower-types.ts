@@ -10,6 +10,7 @@ import type {
   Model,
   Operation,
   PayloadDecl,
+  TypeAtom,
   TypeRef,
   ValueObject,
   Workflow,
@@ -33,6 +34,7 @@ import {
   isValueObject,
   isWorkflow,
 } from "../../language/generated/ast.js";
+import { canonicalUnion, OPTION_NONE } from "../stdlib/unions.js";
 import type {
   DataSourceKind,
   ExprIR,
@@ -188,21 +190,38 @@ export function inScopeNames(env: Env): ScopeCandidate[] {
 
 export function lowerType(t: TypeRef | undefined, env?: Env): TypeIR {
   if (!t) return { kind: "primitive", name: "string" };
+  const head = lowerAtom(t, env);
+  // Anonymous `or` union (P4): the head atom plus each `or`-alternative atom.
+  // `or` binds looser than the postfix ctors / array / optional (all folded
+  // inside `lowerAtom`), so `string or int option` is `union[string, int
+  // option]`.  Programmatically built TypeRef nodes may omit `alternatives`.
+  const alts = (t.alternatives ?? []) as TypeAtom[];
+  if (alts.length === 0) return head;
+  return canonicalUnion([head, ...alts.map((a) => lowerAtom(a, env))]);
+}
+
+/** Lower one type atom — `base` plus the postfix constructor / array /
+ *  optional markers (shared by a `TypeRef` head and each `or`-alternative /
+ *  named-union `TypeAtom`).  Folds the postfix generic constructors
+ *  left-to-right (P3): `string envelope paged` → ctors `["envelope", "paged"]`
+ *  → `paged(envelope(string))`.  The P4 carrier `option` is a *union* carrier,
+ *  so `T option` folds to `union[T, none]` rather than a `genericInstance`.
+ *  Array/optional stay outermost so `customer paged[]` is array-of-(paged
+ *  customer). */
+export function lowerAtom(t: TypeRef | TypeAtom, env?: Env): TypeIR {
   let inner = lowerBase(t, env);
-  // Fold the postfix generic constructors left-to-right (P3):
-  // `string envelope paged` → ctors `["envelope", "paged"]` →
-  // `paged(envelope(string))`.  Array/optional stay outermost so
-  // `customer paged[]` is array-of-(paged customer).  Programmatically
-  // built TypeRef nodes (web builder, macros) may omit the list.
   for (const ctor of t.ctors ?? []) {
-    inner = { kind: "genericInstance", ctor, arg: inner };
+    inner =
+      ctor === "option"
+        ? canonicalUnion([inner, OPTION_NONE])
+        : { kind: "genericInstance", ctor, arg: inner };
   }
   if (t.array) inner = { kind: "array", element: inner };
   if (t.optional) inner = { kind: "optional", inner };
   return inner;
 }
 
-function lowerBase(t: TypeRef, env?: Env): TypeIR {
+function lowerBase(t: TypeRef | TypeAtom, env?: Env): TypeIR {
   const base = t.base;
   if (isPrimitiveType(base)) return { kind: "primitive", name: base.name };
   if (isSlotType(base)) return { kind: "slot" };

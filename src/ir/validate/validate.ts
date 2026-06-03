@@ -10,6 +10,7 @@ import {
   validateFindNameCollisions,
   validateGenericInstancesUnimplemented,
   validatePermissionRefs,
+  validateUnionsUnimplemented,
   validateWorkspaceUniqueness,
 } from "./checks/structural-checks.js";
 import {
@@ -118,6 +119,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       diags,
       backendPlatformsByContext.get(c.name) ?? new Set(),
     );
+    validateUnionsUnimplemented(c, diags);
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateEventSourcedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateProvenancedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());

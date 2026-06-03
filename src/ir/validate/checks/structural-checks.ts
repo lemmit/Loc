@@ -268,6 +268,75 @@ export function validateGenericInstancesUnimplemented(
   for (const vo of ctx.valueObjects) flagAggregateLike(vo, `valueobject ${vo.name}`, flag);
 }
 
+// ---------------------------------------------------------------------------
+// Discriminated-union instantiation gate (payload-transport-layer.md, P4a).
+//
+// Both union surfaces — anonymous `A or B` (in any type position) and named
+// `payload Foo = A | B` — lower to a `union` TypeIR, and `T option` lowers to
+// `union[T, none]`.  P4a represents these in the IR and validates them
+// (duplicate-variant, exhaustiveness), but emission across the four backends
+// is P4b–d.  Until then, any `union` reachable from a type position is a hard
+// error — emission is wired in slice by slice, releasing this gate per
+// backend.  Unconditional (not platform-aware): no backend emits unions yet,
+// so a union anywhere blocks the pipeline before a renderer sees it.  Mirrors
+// the P3a `genericInstance` staging above.
+// ---------------------------------------------------------------------------
+
+/** True iff a `union` (or its `none` unit) is reachable inside a type,
+ *  descending array / optional / generic-instance / union wrappers. */
+function containsUnion(type: TypeIR): boolean {
+  switch (type.kind) {
+    case "union":
+    case "none":
+      return true;
+    case "array":
+      return containsUnion(type.element);
+    case "optional":
+      return containsUnion(type.inner);
+    case "genericInstance":
+      return containsUnion(type.arg);
+    default:
+      return false;
+  }
+}
+
+export function validateUnionsUnimplemented(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  const flag = (type: TypeIR, where: string): void => {
+    if (!containsUnion(type)) return;
+    diags.push({
+      severity: "error",
+      code: "loom.union-unsupported",
+      message:
+        `${where} uses a discriminated union (\`A or B\` / \`payload = A | B\` / \`T option\`), but ` +
+        `union emission is not implemented yet (payload-transport-layer.md, P4b–d). The surface, ` +
+        `IR, and validation land in P4a; backend emission follows slice by slice.`,
+      source: `${ctx.name}/${where}`,
+    });
+  };
+
+  // Named-union payloads carry `variants`; record payloads carry `fields`.
+  for (const p of ctx.payloads) {
+    if (p.variants) for (const v of p.variants) flag(v, `payload ${p.name} variant`);
+    for (const f of p.fields) flag(f.type, `payload ${p.name}.${f.name}`);
+  }
+  for (const repo of ctx.repositories) {
+    for (const find of repo.finds) {
+      flag(find.returnType, `repository ${repo.name}.${find.name} return`);
+      for (const param of find.params)
+        flag(param.type, `repository ${repo.name}.${find.name}(${param.name})`);
+    }
+  }
+  for (const agg of ctx.aggregates) {
+    flagAggregateLike(agg, `aggregate ${agg.name}`, flag);
+    for (const op of agg.operations) {
+      for (const param of op.params)
+        flag(param.type, `aggregate ${agg.name}.${op.name}(${param.name})`);
+    }
+    for (const part of agg.parts) flagAggregateLike(part, `part ${part.name}`, flag);
+  }
+  for (const vo of ctx.valueObjects) flagAggregateLike(vo, `valueobject ${vo.name}`, flag);
+}
+
 /** Shared field / derived / function-signature walk for the structural
  *  shapes (aggregate, entity part, value object) that carry all three. */
 function flagAggregateLike(

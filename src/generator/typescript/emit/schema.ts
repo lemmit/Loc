@@ -675,6 +675,11 @@ function drizzleColumnLinesForName(
       throw new Error(
         `drizzleColumnLinesForName: generic carrier '${inner.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
       );
+    case "union":
+    case "none":
+      throw new Error(
+        `drizzleColumnLinesForName: discriminated unions are not emittable yet (P4); IR-validate should have rejected '${inner.kind}'.`,
+      );
   }
 }
 

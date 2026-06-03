@@ -47,6 +47,7 @@ import {
   checkTraceability,
   checkTypeReferences,
   checkUi,
+  checkUnions,
 } from "./validators/index.js";
 
 export class DddValidator {
@@ -130,6 +131,10 @@ export class DddValidator {
     // v1 admits only single-level (non-nested) instantiation, and a carrier
     // may appear only in a transport position (find return / payload field).
     checkGenericCarriers(model, accept);
+    // Discriminated unions (payload-transport-layer.md, P4): anonymous
+    // `A or B` and named `payload Foo = A | B` variant sets must be distinct
+    // (unambiguous wire discriminator) and carrier-typed (no `slot` variant).
+    checkUnions(model, accept);
     // Seed datasets (database-seeding.md): a seed may only populate
     // aggregates of its own context, and a record may not repeat a field.
     checkSeeds(model, accept);

@@ -648,6 +648,11 @@ function typeShorthand(t: TypeIR): string {
       // `envelope` instance can legitimately reach here; render readable
       // postfix text rather than throwing.
       return `${typeShorthand(t.arg)} ${t.ctor}`;
+    case "union":
+      // Likewise reachable pre-gate (`A or B`, `T option`) — readable text.
+      return t.variants.map(typeShorthand).join(" or ");
+    case "none":
+      return "none";
   }
 }
 

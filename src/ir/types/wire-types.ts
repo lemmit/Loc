@@ -236,5 +236,10 @@ export function wireTypeInfo(t: TypeIR, dir: WireDirection): WireTypeInfo {
       throw new Error(
         `wireTypeInfo: generic carrier '${cur.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
       );
+    case "union":
+    case "none":
+      throw new Error(
+        `wireTypeInfo: discriminated unions are not emittable yet (payload-transport-layer.md, P4); IR-validate should have rejected '${cur.kind}'.`,
+      );
   }
 }

@@ -544,6 +544,12 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
       // attribute (the controller wraps the page envelope as a plain map).
       // Defensive `:map` keeps the renderer total.
       return ":map";
+    case "union":
+    case "none":
+      // Discriminated unions (`A or B`, `T option`) are transport-only and
+      // P4d-gated; never a stored Ash attribute.  Defensive `:map` keeps the
+      // renderer total (mirrors the generic-carrier arm).
+      return ":map";
   }
 }
 
@@ -614,6 +620,11 @@ export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: s
     case "genericInstance":
       // Transport-only carrier — not a stored attribute typespec.  The page
       // envelope is a plain map; keep the renderer total.
+      return "map()";
+    case "union":
+    case "none":
+      // Discriminated unions (`A or B`, `T option`) are transport-only; never
+      // a stored attribute typespec.  Defensive `map()` keeps it total.
       return "map()";
   }
 }
