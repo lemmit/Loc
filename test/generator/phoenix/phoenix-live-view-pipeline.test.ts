@@ -1741,6 +1741,45 @@ describe("Ash.transaction/2 domain-list form (workflow-emit unit)", () => {
       /do\s*\n\s*Logger\.info\("workflow_completed", event: "workflow_completed", workflow: "placeOrder"\)\s*\n\s*\{:ok, /,
     );
   });
+
+  it("emits @spec run/2 with a typed param map and conservative return", () => {
+    // Conservative spec: input is the declared param map shape; return is
+    // :ok | {:ok, term()} | {:error, term()} since WorkflowIR doesn't carry
+    // an explicit return type today.  current_user lowers to any().
+    // The guid param routes through the standard `String.t()` primitive
+    // mapping (guids are UUID strings on the struct — they don't go
+    // through Types.id() since `Types.id()` is for `id` TypeIRs only).
+    const out = new Map<string, string>();
+    emitWorkflows("phoenix_app", transactionalCtx, "PhoenixApp", out);
+    const wfEx = out.get("lib/phoenix_app/sales/workflows/place_order.ex")!;
+    expect(wfEx).toMatch(
+      /@spec run\(%\{customer_id: String\.t\(\)\}, any\(\)\) :: :ok \| \{:ok, term\(\)\} \| \{:error, term\(\)\}/,
+    );
+  });
+
+  it("emits @spec run/2 with any() for empty-params workflows", () => {
+    // No declared params → run/2 takes `_args` and accepts any().
+    const emptyParamsCtx: BoundedContextIR = {
+      ...transactionalCtx,
+      workflows: [
+        {
+          ...transactionalCtx.workflows[0]!,
+          params: [],
+          // factory-let still references customerId in the fixture; clear the
+          // body so the no-params workflow is syntactically valid.
+          statements: [],
+        },
+      ],
+    };
+    const out = new Map<string, string>();
+    emitWorkflows("phoenix_app", emptyParamsCtx, "PhoenixApp", out);
+    const wfEx = out.get("lib/phoenix_app/sales/workflows/place_order.ex")!;
+    expect(wfEx).toMatch(
+      /@spec run\(any\(\), any\(\)\) :: :ok \| \{:ok, term\(\)\} \| \{:error, term\(\)\}/,
+    );
+    // And the def-line should match the spec — `_args` for the empty case.
+    expect(wfEx).toMatch(/def run\(_args, current_user \\\\ nil\)/);
+  });
 });
 
 // ---------------------------------------------------------------------------
