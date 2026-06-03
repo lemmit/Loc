@@ -30,16 +30,28 @@ async function files() {
 }
 
 describe("phoenix generator — retrieval read action", () => {
-  it("emits an Ash read action with ^arg filter, sort, and offset pagination", async () => {
+  it("emits an Ash read action with reified-criterion filter, sort, and offset pagination", async () => {
     const out = await files();
     const resource = out.get("api/lib/api/shop/customer.ex")!;
     expect(resource).toMatch(/read :by_region do/);
     expect(resource).toMatch(/argument :rgn, :string/);
     expect(resource).toMatch(/pagination offset\?: true, required\?: false/);
     expect(resource).toMatch(/prepare build\(sort: \[name: :desc\]\)/);
-    // ^arg binding + bare attribute (no `record.` receiver).
-    expect(resource).toMatch(/filter expr\(region == \^arg\(:rgn\)\)/);
-    expect(resource).not.toMatch(/filter expr\(record\./);
+    // The `where: InRegion(rgn)` reifies to a boolean calculation the read
+    // action filters by — not an inlined predicate.
+    expect(resource).toMatch(/filter expr\(in_region\(rgn: \^arg\(:rgn\)\)\)/);
+    expect(resource).not.toMatch(/filter expr\(region == \^arg\(:rgn\)\)/);
+  });
+
+  it("reifies the named criterion as a boolean calculation", async () => {
+    const out = await files();
+    const resource = out.get("api/lib/api/shop/customer.ex")!;
+    // `criterion InRegion(rgn) = region == rgn` → a `:boolean` calculation
+    // whose body matches the derived-calc receiver form (`record.<attr>`) and
+    // whose param becomes a calc argument bound via `^arg`.
+    expect(resource).toMatch(
+      /calculate :in_region, :boolean, expr\(record\.region == \^arg\(:rgn\)\) do\n\s*argument :rgn, :string\n\s*end/,
+    );
   });
 
   it("exposes the retrieval as a run_<name>_<agg> code-interface define", async () => {
