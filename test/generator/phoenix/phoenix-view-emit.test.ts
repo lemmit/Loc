@@ -104,6 +104,15 @@ describe("phoenix emitViews — shorthand form", () => {
     expect(src).toMatch(/_ = current_user/);
   });
 
+  it("emits @spec run(any()) :: [<Aggregate>.t()] on a shorthand view", () => {
+    // Shorthand views return the source aggregate's full wire shape.
+    // The spec lines up with Ash's auto-generated `@type t` on the
+    // resource module — Dialyzer sees a fully-typed list return.
+    expect(emit(buildCtx(filterIR))).toMatch(
+      /@spec run\(any\(\)\) :: \[Acme\.Sales\.Order\.t\(\)\]/,
+    );
+  });
+
   it("skips the view entirely when its aggregateName doesn't resolve", () => {
     const ctx = buildCtx(filterIR);
     ctx.views[0]!.aggregateName = "DoesNotExist";

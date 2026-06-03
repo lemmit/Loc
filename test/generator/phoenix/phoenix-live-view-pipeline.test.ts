@@ -1472,6 +1472,18 @@ describe("full-form view bind projection (view-emit unit)", () => {
     const src = getViewFile();
     expect(src).toMatch(/status: record\.status/);
   });
+
+  it("emits @spec run(any()) :: [map shape] with the declared output fields", () => {
+    // Full-form views project to a map keyed by declared field names.
+    // The spec mirrors the bind projection exactly so Dialyzer can
+    // narrow downstream code interacting with the result.  `id` routes
+    // through the shared <App>.Types vocabulary; enums reference the
+    // Ash-auto-emitted `.t()` on the enum module.
+    const src = getViewFile();
+    expect(src).toMatch(
+      /@spec run\(any\(\)\) :: \[%\{order_id: Acme\.Types\.id\(\), status: Acme\.Sales\.OrderStatus\.t\(\), line_count: integer\(\)\}\]/,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
