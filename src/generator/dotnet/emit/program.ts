@@ -496,6 +496,7 @@ export function renderCsproj(
   usesValidators: boolean = false,
   resourceNugetDeps: Record<string, string> = {},
   usingDapper: boolean = false,
+  usesSpecifications: boolean = false,
 ): string {
   // Persistence package set — Dapper + raw Npgsql for `persistence: dapper`,
   // otherwise the EF Core + Npgsql.EntityFrameworkCore stack.
@@ -528,6 +529,14 @@ export function renderCsproj(
   const validatorRef = usesValidators
     ? `\n    <!-- FluentValidation — wire-boundary validators (Mediator pipeline) -->\n    <PackageReference Include="FluentValidation" Version="11.10.0" />\n    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.10.0" />`
     : "";
+  // Ardalis Specification — reified `criterion`/`retrieval` query objects.
+  // EF-Core-only: the evaluator runs against `IQueryable`, which the Dapper
+  // persistence axis doesn't have (it renders SQL fragments instead), so the
+  // dependency ships only for the EF Core path with at least one retrieval.
+  const specRef =
+    usesSpecifications && !usingDapper
+      ? `\n    <!-- Ardalis.Specification — reified retrieval/criterion query objects -->\n    <PackageReference Include="Ardalis.Specification" Version="8.0.0" />\n    <PackageReference Include="Ardalis.Specification.EntityFrameworkCore" Version="8.0.0" />`
+      : "";
   return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
@@ -550,7 +559,7 @@ ${persistenceRefs}
     </PackageReference>
     <PackageReference Include="Mediator.Abstractions" Version="2.1.7" />
     <!-- OpenAPI spec emitted at /swagger/v1/swagger.json -->
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />${scrutorRef}${validatorRef}${resourceRefs}
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />${scrutorRef}${validatorRef}${specRef}${resourceRefs}
   </ItemGroup>
 </Project>
 `;

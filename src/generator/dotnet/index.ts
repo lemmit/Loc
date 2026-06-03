@@ -80,6 +80,7 @@ import {
   collectFindBodyUsings,
   collectRetrievalBodyUsings,
 } from "./find-emit.js";
+import { emitRetrievalSpecs, renderPagingExtension } from "./spec-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
@@ -544,6 +545,9 @@ function emitAggregate(
     "repository-interface",
     renderRepositoryInterface(agg, repoWithViews, ns, aggRetrievals),
   );
+  // Each retrieval emits an Ardalis `Specification<T>` (where + sort) the
+  // repository's `Run<Name>Async` consumes via `.WithSpecification(...)`.
+  emitRetrievalSpecs(agg, aggRetrievals, ctx, ns, out);
   // A find with a `where` expression that lowers to `Regex.IsMatch`
   // declares its System.Text.RegularExpressions dependency; the
   // repository impl emitter then adds the using.  Retrieval `where`
@@ -735,9 +739,23 @@ function emitProject(
       usingDapper,
     }),
   );
+  // Ardalis.Specification ships only when a retrieval exists (EF Core path;
+  // gated against dapper inside renderCsproj) — reified retrieval specs.
+  const usesSpecifications = (ctx.retrievals ?? []).length > 0;
+  // Shared paging extension consumed by every `Run<Name>Async`.
+  if (usesSpecifications && !usingDapper) {
+    out.set("Infrastructure/Persistence/QueryablePagingExtensions.cs", renderPagingExtension(ns));
+  }
   out.set(
     `${ns}.csproj`,
-    renderCsproj(ns, hasExtern, usesValidators, options?.resourceNugetDeps, usingDapper),
+    renderCsproj(
+      ns,
+      hasExtern,
+      usesValidators,
+      options?.resourceNugetDeps,
+      usingDapper,
+      usesSpecifications,
+    ),
   );
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa }));
   out.set(".dockerignore", renderDockerignore());
