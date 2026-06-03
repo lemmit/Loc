@@ -148,9 +148,15 @@ the menus go size-1 → size-N:
   against the real `@mikro-orm/*` types (`build-generated`).  The node
   persistence menu is now exactly `{ drizzle, mikroorm }` (the speculative
   `prisma` stub was removed).
-- dotnet: `marten` (persistence — but **deferred**: event-sourcing / document
-  shape land on `efcore` first, then `dapper`; `marten` comes after those).
-  `serviceLayer` (style/`application`).
+- **dotnet persistence — grow each adapter to FULL before adding a third.** The
+  near-term work is event-sourcing (`persistedAs(eventLog)` + `apply(...)`) on
+  **`efcore` first, then `dapper`** (an `<agg>_events` table folded through the
+  appliers — workflow-and-applier.md Phase A2.2), so both shipped adapters reach
+  the full surface drizzle already has. A dedicated **`marten`** document/event-
+  store backend is **3rd priority (if ever)** — `D-DOCUMENT-AXIS` pins *no new
+  Marten backend*, so the event log lives on the existing relational stores; the
+  stub stays inert (and may be dropped) until/unless that decision is revisited.
+- dotnet: `serviceLayer` (style/`application`).
 - node: `express` / `fastify` (transport).
 - **node `byFeature` layout — DONE (proper, with import rewriting).** A first
   naive port (#830, reverted) shipped broken: unlike .NET `using <Namespace>`

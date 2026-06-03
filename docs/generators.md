@@ -24,6 +24,13 @@ fastest way to read this matrix concretely.
 
 ## Cross-platform feature matrix
 
+The persistence stack shown per column is the **default** adapter (Drizzle on
+node, EF Core on .NET). Persistence is a selectable realization axis —
+`platform: dotnet { persistence: dapper }`, `platform: node { persistence:
+mikroorm }` — see the "Realization axes" section of [`platforms.md`](platforms.md).
+The alternates (`dapper`, `mikroorm`) share the domain layer below and only
+swap the repository/schema layer (minimal-v1 surface, validator-gated).
+
 | Construct | TypeScript (Hono + Drizzle) | .NET (ASP.NET + EF + Mediator) | React (Vite + RQ + Mantine) |
 | --- | --- | --- | --- |
 | `enum` | `pgEnum`, exported union type | C# enum + EF `HasConversion<string>` | Zod `z.enum([...])` |
@@ -32,7 +39,7 @@ fastest way to read this matrix concretely.
 | `aggregate` | Class with private state, factory, ops, derived getters, `pullEvents()` | Sealed class with private state, factory, ops, derived getters, `PullEvents()` | List + Detail + New page; api hooks |
 | `entity` part | Same as aggregate but with `_parentId` | Same as aggregate; mapped via `OwnsMany` | Sub-table on detail page, master-detail row testids |
 | `abstract aggregate` + `extends` / `inheritanceUsing` | **TPC** (`ownTable`): standalone Drizzle table per concrete; a read-only `<Base>Repository.findAll()` union reader + `<Base>` discriminated-union type. **TPH** (`sharedTable`, default): one shared table + `kind` discriminator + nullable per-concrete columns; `<Base> id` refs + base reader supported. | **TPC**: `abstract class <Base>` carrying shared fields, concretes `: <Base>`, EF `Ignore<<Base>>()` (each concrete maps standalone); read-only `I<Base>Repository` / `<Base>Repository` → `IReadOnlyList<<Base>>`. **TPH**: not implemented — IR-validate error. | Concrete subtypes carry the merged base fields in their wire shape; no base-specific page. |
-| `persistedAs(eventLog)` + `apply(...)` (event sourcing) | Append-only `<agg>_events` stream table (`stream_id, version, type, data, occurred_at`); appliers render as a `_apply(ev)` fold + `_fromEvents(id, events)` rehydrator; `emit` records **and** folds; repository folds the stream on load and appends pending events on save (fold-from-zero MVP). | not implemented — IR-validate error (event-sourced aggregates must be hosted on Hono) | (n/a — wire shape unchanged) |
+| `persistedAs(eventLog)` + `apply(...)` (event sourcing) | Append-only `<agg>_events` stream table (`stream_id, version, type, data, occurred_at`); appliers render as a `_apply(ev)` fold + `_fromEvents(id, events)` rehydrator; `emit` records **and** folds; repository folds the stream on load and appends pending events on save (fold-from-zero MVP). | not implemented yet — IR-validate error (event-sourced aggregates must be hosted on node today). Roadmap: an `<agg>_events` table on the EF `DbContext` folded through the same appliers, on `efcore` first then `dapper` (workflow-and-applier.md Phase A2.2). | (n/a — wire shape unchanged) |
 | `contains` (collection) | Drizzle table with `parent_id` FK; auto-loaded in repo | EF owned-collection; auto-loaded by tracker | Sub-table on detail; not editable in the create form |
 | `X id[]` (reference collection) | Auto-derived many-to-many **join table** (composite PK enforces set semantics); save diff-syncs join rows, `.contains(param)` lowers to an `inArray` subquery against the join table. The join table also carries an `ordinal` column written on every `+=`, but the wire contract is unordered — see "What the generators don't do" below. | EF Core join entity + `DbSet<JoinEntity>` (composite PK + `Ordinal`); `GetByIdAsync` loads via the join entity, `SaveAsync` diff-syncs, `.contains(param)` lowers to `_db.<JoinDbSet>.Any(...)`. (Phoenix/Ash backend: `many_to_many ... through <JoinResource>` + a `calculate :<field>, {:array, :uuid}, expr(<rel>.id)`; `.contains` lowers to `exists(<rel>, id == ^arg(:<param>))`.) | `X id[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
 | `derived` | Getter that calls into the expression | Computed property that calls into the expression | Read-only field on detail; included in the response Zod schema |
