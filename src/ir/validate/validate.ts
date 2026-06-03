@@ -968,23 +968,25 @@ function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[]): voi
       }
     }
 
-    // `loads` — each path's first segment must resolve on the aggregate
-    // (a stored field, a containment, or a cross-aggregate reference
-    // field).  Deeper path resolution across parts / referenced
-    // aggregates is the v2 load-inference concern (load-specifications.md);
-    // v1 validates the entry point only.
+    // `loads` — explicit eager-load specs are not supported yet.  Every
+    // retrieval loads the *whole* aggregate (all owned containments).  The
+    // planned replacement is per-operation autoload: derive the load set
+    // from the expressions an operation's body uses, so it's sufficient by
+    // construction (no `loads`-sufficiency validator needed).  Until then a
+    // narrowing `loads:` would silently under-fetch on Phoenix (a
+    // `%NotLoaded{}` crash in a downstream for-loop op) while being inert
+    // on Hono/.NET (owned parts always materialise) — so it is rejected
+    // outright rather than honoured inconsistently across backends.  See
+    // load-specifications.md.
     if (r.loadPlan.kind === "explicit") {
-      for (const path of r.loadPlan.paths) {
-        const head = path[0];
-        if (head && !aggregateHasMember(agg, head.name)) {
-          diags.push({
-            severity: "error",
-            code: "loom.retrieval-loads-unknown-field",
-            message: `retrieval '${r.name}': loads references unknown field '${head.name}' on aggregate '${agg.name}'.`,
-            source: src,
-          });
-        }
-      }
+      diags.push({
+        severity: "error",
+        code: "loom.retrieval-loads-unsupported",
+        message:
+          `retrieval '${r.name}': explicit 'loads:' is not supported yet — ` +
+          `retrievals load the whole aggregate. (Per-operation autoload is planned.)`,
+        source: src,
+      });
     }
   }
 }

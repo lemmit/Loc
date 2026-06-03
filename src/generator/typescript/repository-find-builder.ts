@@ -436,8 +436,21 @@ export function findQueryMethod(
  *  retrieval's `sort` (→ `.orderBy(asc/desc(col))`) and a call-site
  *  `page` (→ `.limit().offset()`).  The `where` predicate lowers through
  *  the same `lowerToDrizzle` oracle a find filter does; the IR validator
- *  (`validateRetrievals`) guarantees it lowers cleanly.  Honours only the
- *  default-whole load plan in v1 (explicit `loads` deferred to PR6). */
+ *  (`validateRetrievals`) guarantees it lowers cleanly.
+ *
+ *  The retrieval's `loadPlan` is a deliberate no-op here, like on EF
+ *  Core.  `eagerContainsOf` bulk-loads *every* owned containment and the
+ *  hydrate folds them all into the returned aggregate — so `whole(T)` is
+ *  satisfied, and an explicit `loads:` can't narrow them out: owned
+ *  containments are part of the aggregate's `wireShape`, and the
+ *  cross-backend parity invariant requires the same wire shape from every
+ *  backend, so dropping a part here would diverge Hono from .NET/Phoenix.
+ *  (Phoenix differs only because its relational containments are separate
+ *  `has_many`s outside the Jason wire shape, so its `load:` affects
+ *  in-process access, not the payload.)  Cross-aggregate eager-fetch
+ *  (`self.lines[].product`) is the separate v2 hydration concern.  The
+ *  regression guard in retrieval-emit.test.ts pins that whole and an
+ *  explicit-`loads` retrieval emit the identical body. */
 export function runMethod(
   agg: EnrichedAggregateIR,
   retrieval: RetrievalIR,

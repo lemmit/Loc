@@ -75,13 +75,16 @@ system Sys {
   });
 });
 
-// PR4 — `loads` / loadPlan fetch realisation on Phoenix/Ash.  A retrieval's
-// load plan maps to `prepare build(load: [...])` on the read action: the
-// owned containment relationships (`has_many`/`has_one`) it eager-loads so
-// a downstream operation can read `record.<part>` without a `%NotLoaded{}`
-// crash.  `whole(T)` (no `loads:`) loads every owned containment; an
-// explicit `loads:` narrows it.  Cross-aggregate refs stay ids; embedded /
-// document aggregates fold parts inline and emit no load.
+// PR4 — `loads` / loadPlan fetch realisation on Phoenix/Ash.  A retrieval
+// maps to `prepare build(load: [...])` on the read action, eager-loading
+// every owned containment relationship (`has_many`/`has_one`) so a
+// downstream operation can read `record.<part>` without a `%NotLoaded{}`
+// crash.  Every retrieval loads the **whole** aggregate: explicit `loads:`
+// narrowing is gated at IR validation (see retrieval-validator.test.ts —
+// not supported until per-operation autoload lands), so even a retrieval
+// that carries a narrowing `loads:` still loads every containment here.
+// Cross-aggregate refs stay ids; embedded/document aggregates fold parts
+// inline and emit no load.
 const LOAD_SRC = `
 system Sys {
   subdomain Sales {
@@ -121,12 +124,13 @@ describe("phoenix generator — retrieval load plan", () => {
     expect(recent).toMatch(/prepare build\(load: \[:lines, :note\]\)/);
   });
 
-  it("an explicit `loads:` narrows the eager-load set to its listed paths", async () => {
+  it("does not narrow — a retrieval carrying an explicit `loads:` still loads the whole aggregate", async () => {
     const out = (await generateSystems(await parseValid(LOAD_SRC))).files;
+    // `Slim` declares `loads: [this.lines]`, but narrowing is gated at IR
+    // validation, so the emitter loads every owned containment regardless
+    // (whole-only) — `note` is loaded even though it is not in `loads:`.
     const slim = readAction(out.get("api/lib/api/shop/order.ex")!, "slim");
-    expect(slim).toMatch(/prepare build\(load: \[:lines\]\)/);
-    // `note` is a containment but not in `loads:` — must not be loaded.
-    expect(slim).not.toMatch(/:note/);
+    expect(slim).toMatch(/prepare build\(load: \[:lines, :note\]\)/);
   });
 
   it("emits no load for embedded aggregates (parts fold inline)", async () => {
