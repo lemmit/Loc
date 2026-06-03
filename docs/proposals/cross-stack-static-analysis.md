@@ -116,24 +116,26 @@ they earn it.
 
 ### Generator work
 
-`<Nullable>enable</Nullable>` is the lever that turns IR optionality
-into a real C# signal. Today the emitters render `string Name { get;
-set; }` regardless of whether the property is required. With nullable
-enabled, the emitter must:
+> **Correction (post-merge survey).** This section originally claimed
+> the emitter renders `string Name { get; set; }` regardless of
+> optionality. That's wrong — `src/generator/dotnet/render-expr.ts:425`
+> already maps `TypeIR.kind === "optional"` to `T?`, and every emitter
+> site that writes a property/parameter/return type goes through
+> `renderCsType` (e.g. `emit/entity.ts:123`, `:159`, `:168`,
+> `:181`, `:286`, `:320`, `:460`, `:464`). Combined with the
+> already-present `<Nullable>enable</Nullable>` in `renderCsproj`
+> (`emit/program.ts:535`, `:564`) and the existing CI `/warnaserror`
+> gate, the IR→C# nullable thread is already in place. The find-shape →
+> `Task<T?>` mapping for `FirstOrDefaultAsync` is also already wired
+> (`find-emit.ts:121`).
 
-- Render `string Name { get; set; }` (non-null) for required props and
-  `string? Name { get; set; }` for optional props, reading
-  `Property.optional` from the IR.
-- Initialize non-null reference-type properties (e.g. `= string.Empty;`
-  or `= null!;` in DTOs constructed by EF Core / serializers) or use
-  required-member syntax (`required string Name`).
-- Emit `?` on repository return types that can be null
-  (`Task<Order?> FindById(...)`) — already deducible from
-  `wireShape` + the find-shape (single vs. collection vs. paged).
-- Render nullable parameter types on event handlers and command methods
-  consistently with method-signature IR types.
-
-This is mechanical; the IR has every flag the emitter needs.
+`<Nullable>enable</Nullable>` is already the lever. The actual gap on
+the .NET side is therefore **just the analyzer flip + CA-rule
+cleanup** — adding `<AnalysisLevel>latest-recommended</AnalysisLevel>`
+to bring ~200 Roslyn analyzer rules into the build (under the existing
+`/warnaserror`) and then fixing whatever they surface. The nullable
+sub-bullets above are **already shipped**; treat this as a one-line
+csproj change followed by an empirical cleanup pass against CI output.
 
 ### The "we'll discover bugs" argument
 
@@ -187,6 +189,21 @@ ordinary functions, exactly the shape Dialyzer was designed for. Once
 the Ecto backend lands, Dialyzer's signal/noise ratio flips, and
 generator-emitted `@spec`s on every function give it a maximally rich
 input. At that point Dialyzer is the right gate, not a deferral.
+
+> **Note on Ash v3 specifically (worth re-checking empirically).** The
+> commonly-cited "Dialyzer is useless against Ash" framing is mostly
+> v2-era. Ash v3 added significantly better typespec annotations on
+> generated code, so Dialyzer coverage on **action implementations** and
+> **code-interface calls** is now reasonable. Deep introspection into
+> Ash internals remains limited, but those are not what Loom-generated
+> code touches — the generator writes the action bodies and the
+> code-interface call sites, which is exactly the surface Ash v3 has
+> improved. The practical implication: once `@spec` emission lands on
+> the existing Ash backend, **run Dialyzer once locally** against the
+> output and read the diagnostics before committing to the
+> "Ecto-only" gate posture above. If the false-positive rate is in
+> fact tractable on Ash v3, the gate can land on both backends from
+> day one — that decision is empirical, not architectural.
 
 Concrete sequencing:
 
