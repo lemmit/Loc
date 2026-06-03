@@ -25,6 +25,7 @@ import {
   isEmitStmt,
   isEntityPart,
   isFunctionDecl,
+  isHandleDecl,
   isInvariant,
   isOnDecl,
   isOperation,
@@ -205,6 +206,7 @@ function checkWorkflowEventSourcedDiscipline(wf: Workflow, accept: ValidationAcc
   const appliedEvents = new Set(appliers.map(eventOf));
   const handlerBodies: AstNode[][] = [
     ...wf.members.filter(isOnDecl).map((o) => o.body),
+    ...wf.members.filter(isHandleDecl).map((h) => h.body),
     wf.members.filter(isAssignOrCallStmt),
     wf.members.filter(isEmitStmt),
   ];

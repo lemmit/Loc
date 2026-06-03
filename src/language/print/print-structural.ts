@@ -645,9 +645,17 @@ function printWorkflow(node: Workflow): string {
           ? printProperty(m)
           : m.$type === "Apply"
             ? printApply(m)
-            : printStmt(m),
+            : m.$type === "HandleDecl"
+              ? printHandleDecl(m)
+              : printStmt(m),
     ),
   );
+}
+
+// `handle name(params) { … }` command-handler member (workflow-and-applier.md A2).
+function printHandleDecl(node: import("../generated/ast.js").HandleDecl): string {
+  const params = node.params.map(printParameter).join(", ");
+  return block(`handle ${node.name}(${params})`, node.body.map(printStmt));
 }
 
 // `on(e: Event) [by <expr>] { … }` reactor member (workflow-and-applier.md A2).

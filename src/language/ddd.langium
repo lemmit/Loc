@@ -902,7 +902,17 @@ Workflow:
 // aggregate applier rule: an `eventSourced` workflow folds its emitted events
 // into state via `apply(e: E) { … }`, exactly like an event-sourced aggregate.
 WorkflowMember:
-    Apply | OnDecl | Property | Statement;
+    Apply | OnDecl | HandleDecl | Property | Statement;
+
+// A named orchestration command handler on a workflow (A2-S5c): `handle
+// confirm(orderId: Order id) { … }`.  Like the legacy paren-form body, a
+// handle body loads/creates aggregates, calls their operations, and emits;
+// `handle` is a fresh keyword so it can never start a Statement.  Multiple
+// handles make a workflow a multi-command saga.
+HandleDecl:
+    'handle' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
+        body+=Statement*
+    '}';
 
 // Extrinsic event subscription / continuation: `on(paid: PaymentReceived)
 // { … }` reacts to a fact from outside the workflow's own scope.  Mirrors the
@@ -1111,10 +1121,10 @@ Property:
         // user-declared fields named `sort` / `loads` / `asc` / `desc` /
         // `retrieval` keep parsing.  Hard only inside the `Retrieval` slots.
         | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc'
-        // `by` soft in property position so a field named `by` (e.g.
-        // `event Bumped { by: int }`) keeps parsing — hard only in the
-        // `on(...) by <expr>` reactor clause (workflow-and-applier.md A2-S3).
-        | 'by')
+        // `by` / `handle` soft in property position so fields named `by`
+        // (`event Bumped { by: int }`) / `handle` (`engineer { handle: string }`)
+        // keep parsing — hard only in the reactor clause / workflow handle member.
+        | 'by' | 'handle')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1231,6 +1241,10 @@ LooseName returns string:
     // pre-existing identifiers named `by` (e.g. `Detail { by: id }`,
     // `event Bumped { by: int }`) keep parsing.
     | 'by'
+    // `handle` is a hard keyword only as the `handle name(...) { }` workflow
+    // member (A2-S5c); admit it as a soft keyword in identifier positions so
+    // pre-existing fields/params named `handle` (showcase.ddd) keep parsing.
+    | 'handle'
     | 'primary' | 'cache' | 'search' | 'events' | 'bi'
     // `money` is a soft keyword — the only places it acts as a
     // hard keyword are `PrimitiveType` (`amount: money`) and
@@ -1398,7 +1412,11 @@ LValueIdent returns string:
        // Payload-family keywords (payload-transport-layer.md, P1) — soft in
        // l-value position so an assignment target naming a field `error`,
        // `query`, etc. parses; hard only at `ContextMember` (`PayloadDecl`).
-       | 'payload' | 'command' | 'query' | 'response' | 'error';
+       | 'payload' | 'command' | 'query' | 'response' | 'error'
+       // `by` / `handle` soft in l-value position so an assignment target
+       // naming a field `by` / `handle` (`handle := handle`) parses — hard only
+       // in the reactor clause / workflow handle member (A2-S3/S5c).
+       | 'by' | 'handle';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)
@@ -1480,9 +1498,10 @@ CallArg:
 // resolution / collection-op dispatch lives in the lowering
 // (lower-expr.ts + type-system.ts) rather than the grammar.
 MemberName returns string:
-    // `by` admitted after `.` so member access like `e.by` keeps parsing
-    // (workflow-and-applier.md A2-S3 — `by` is hard only in the reactor clause).
-    'by' |
+    // `by` / `handle` admitted after `.` so member access like `e.by`,
+    // `this.handle` keeps parsing (`by`/`handle` are hard only in the reactor
+    // clause / workflow handle member).
+    'by' | 'handle' |
     ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
        | 'filter' | 'stamp' | 'implements'
@@ -1675,6 +1694,7 @@ NameRefIdent returns string:
        // named `by` (e.g. `emit Bumped { by: by }`).  Hard only in the
        // `on(...) by <expr>` reactor clause.
        | 'by'
+       | 'handle'
        | 'primary' | 'cache' | 'search' | 'events' | 'bi'
        | 'filter' | 'stamp' | 'implements'
        | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'

@@ -26,6 +26,7 @@ import type {
   Expression,
   ForStmt,
   FunctionDecl,
+  HandleDecl,
   Invariant,
   Layout,
   LayoutMainSlot,
@@ -81,6 +82,7 @@ import {
   isExpectThrowsStmt,
   isForStmt,
   isFunctionDecl,
+  isHandleDecl,
   isInvariant,
   isLetStmt,
   isMemberSuffix,
@@ -139,6 +141,7 @@ import type {
   ExprIR,
   FieldIR,
   FunctionIR,
+  HandleIR,
   IdValueType,
   InvariantIR,
   LayoutIR,
@@ -2363,9 +2366,14 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
   // `paramEnv` — which binds `this` to the workflow (A2-S5a) — so the same
   // `lowerApply` aggregates use produces a state-folding body for workflows.
   const appliers: ApplyIR[] = wf.members.filter(isApply).map((a) => lowerApply(a, paramEnv));
+  const handlers: HandleIR[] = [];
   for (const m of wf.members) {
     if (isOnDecl(m)) {
       subscriptions.push(lowerOn(m, paramEnv, aggsByName, reposByName, repoForAgg));
+      continue;
+    }
+    if (isHandleDecl(m)) {
+      handlers.push(lowerHandle(m, paramEnv, aggsByName, reposByName, repoForAgg));
       continue;
     }
     if (isProperty(m) || isApply(m)) continue; // handled above
@@ -2398,7 +2406,35 @@ function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR 
     ...(stateFields.length > 0 ? { stateFields } : {}),
     ...(correlationField ? { correlationField } : {}),
     ...(appliers.length > 0 ? { appliers } : {}),
+    ...(handlers.length > 0 ? { handlers } : {}),
   };
+}
+
+// Lower a `handle name(params) { … }` command handler (workflow-and-applier.md
+// A2-S5c).  Structurally the legacy paren-form workflow body: params bind as
+// locals on top of the workflow `this`-env, the body lowers through
+// `lowerWorkflowStatement`, and exit-saves are derived the same way.
+function lowerHandle(
+  h: HandleDecl,
+  baseEnv: Env,
+  aggsByName: Map<string, Aggregate>,
+  reposByName: Map<string, Repository>,
+  repoForAgg: Map<string, string>,
+): HandleIR {
+  let inner = baseEnv;
+  const params: ParamIR[] = [];
+  for (const p of h.params) {
+    const t = lowerType(p.type, baseEnv);
+    params.push({ name: p.name, type: t });
+    inner = withLocal(inner, p.name, "param", t);
+  }
+  const statements: WorkflowStmtIR[] = [];
+  for (const s of h.body) {
+    const lowered = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
+    statements.push(lowered.stmt);
+    inner = lowered.envAfter;
+  }
+  return { name: h.name, params, statements, savesAtExit: computeSaves(statements, repoForAgg) };
 }
 
 // Lower an `on(e: Event) { … }` reactor member to its IR (workflow-and-applier.md
