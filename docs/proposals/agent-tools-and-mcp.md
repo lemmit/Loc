@@ -345,8 +345,15 @@ playground settings matter, independent of the tools.
    dispatch + a completeness test (every entry has a `loom_*` name, schema, and
    handler; the validate→fix→validate loop composes through `callTool`). The
    shared dependency for both the MCP server and the playground chat.
-2. `packages/ddd-mcp/` stdio server registering the catalog; smoke test via the
-   MCP SDK's in-memory client (list tools, call `loom_validate`).
+2. ✅ MCP stdio server registering the catalog. Server core lives in `src/mcp/`
+   (a Node-only island over the browser-safe catalog, like `src/cli/`);
+   `packages/ddd-mcp/` is the publish wrapper (bin `ddd-mcp` → `out/mcp/main.js`
+   + the `@modelcontextprotocol/sdk` dep), paralleling `bin/cli.js` over
+   `src/cli/`. Uses the low-level `Server` (raw JSON-Schema `tools/list` +
+   `tools/call` → `callTool`); unknown tool / handler throw surface as
+   `isError`, not a protocol failure. Smoke-tested via the SDK's in-memory
+   transport (list the catalog, dispatch `loom_validate` clean + invalid,
+   unknown-tool error) and end-to-end over real stdio.
 3. **LSP-provider correctness** (§4c) — fix the operation-rename bug + coverage,
    add quick-fix `fixHintFor` providers. Standalone editor value; gates the
    navigational verbs.
