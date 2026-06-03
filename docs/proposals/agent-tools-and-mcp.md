@@ -205,7 +205,12 @@ Hover failure-path is now covered: an unresolved containment part / repository
 aggregate renders `«unresolved: <text>»` (or `«unresolved»` when absent) instead
 of the old silent `?`, so a dangling cross-ref reads as a failure in the bubble.
 
-Still to add: deployable / module rename (need a system-scoped fixture).
+Deployable / module rename is covered too: a system-scoped fixture pins that
+renaming a `deployable` rewrites its `targets:` + `against` cross-refs, and
+renaming a `subdomain` rewrites its `api … from` reference (both flow through
+the index-driven default — they're Langium cross-references, so no member-usage
+path is needed). With these, the LSP rename/references/hover coverage backlog
+is cleared; the remaining provider work is the MCP-server transport (deferred).
 
 > **Note (LValue blind spot, found while testing).** A statement-position
 > member call / assignment target (`this.op(...)`, `a.b := …`) parses as an
