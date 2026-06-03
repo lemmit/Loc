@@ -73,6 +73,14 @@ export function renderEntity(
   // positionally.  Every constructible aggregate's create is parameterized
   // by this set; there is no parameterless form.
   const createInputFieldList = isAgg(entity) ? forCreateInput(entity.fields) : [];
+  // Event sourcing (appliers A2.2b): an event-sourced aggregate folds
+  // events into state via appliers, is rehydrated by `_FromEvents`, and is
+  // constructed by its single `create` action's emit-only body (not a
+  // state-writing factory).  `eventSourced` gates all of that; `appliers` /
+  // `esCreate` drive the fold + construction emission.
+  const eventSourced = isAgg(entity) && entity.persistedAs === "eventLog";
+  const appliers = isAgg(entity) ? (entity.appliers ?? []) : [];
+  const esCreate = isAgg(entity) ? entity.creates?.[0] : undefined;
   const hasExtern = operations.some((o) => o.extern);
   const setterVisibility = hasExtern ? "internal" : "private";
   // Non-implicit namespaces this entity's rendered expressions reach
@@ -88,6 +96,10 @@ export function renderEntity(
     if (inv.guard) collectCsExprUsings(inv.guard, usings);
   }
   for (const op of operations) collectCsStmtUsings(op.statements, usings);
+  // Applier + event-sourced-create bodies render through the same path, so
+  // their expressions can pull in the same namespaces (e.g. regex).
+  for (const ap of appliers) collectCsStmtUsings(ap.statements, usings);
+  if (esCreate) collectCsStmtUsings(esCreate.statements, usings);
   const renderCtx = {
     thisName: "this",
     // Threaded through so render-stmt's collection-mutation path can
@@ -192,6 +204,7 @@ export function renderEntity(
         emitTrace,
         aggregate: entity.name,
         op: op.name,
+        eventSourced,
       });
       if (body.length > 0) opLines.push(body);
       opLines.push("    }");
@@ -205,6 +218,7 @@ export function renderEntity(
       emitTrace,
       aggregate: entity.name,
       op: op.name,
+      eventSourced,
     });
     if (body.length > 0) opLines.push(body);
     opLines.push(
@@ -238,6 +252,85 @@ export function renderEntity(
         "",
       ]
     : [];
+
+  // Event-sourcing fold (appliers A2.2b): one `_Apply<Event>` method per
+  // applier, a `_Apply(IDomainEvent)` dispatch (C# type-pattern switch over
+  // the sealed event records), and a `_FromEvents` rehydrator that folds a
+  // stream from an empty shell.  Root-only, event-sourced-only; the
+  // repository calls `_FromEvents` on load and the record-and-apply `emit`
+  // calls `_Apply`.
+  const applierLines: string[] = [];
+  if (isRoot && eventSourced && appliers.length > 0) {
+    for (const ap of appliers) {
+      applierLines.push(`    private void _Apply${ap.event}(${ap.event} ${ap.param})`);
+      applierLines.push("    {");
+      const body = renderCsStatements(ap.statements, renderCtx, {
+        emitTrace,
+        aggregate: entity.name,
+        op: `apply(${ap.event})`,
+        eventSourced,
+      });
+      if (body.length > 0) applierLines.push(body);
+      applierLines.push("    }");
+      applierLines.push("");
+    }
+    applierLines.push("    private void _Apply(IDomainEvent ev)");
+    applierLines.push("    {");
+    applierLines.push("        switch (ev)");
+    applierLines.push("        {");
+    for (const ap of appliers) {
+      applierLines.push(`            case ${ap.event} e: _Apply${ap.event}(e); break;`);
+    }
+    applierLines.push("        }");
+    applierLines.push("    }");
+    applierLines.push("");
+    applierLines.push(
+      `    public static ${entity.name} _FromEvents(${entity.name}Id id, IReadOnlyList<IDomainEvent> events)`,
+    );
+    applierLines.push("    {");
+    applierLines.push(`        var e = new ${entity.name}();`);
+    applierLines.push("        e.Id = id;");
+    applierLines.push("        foreach (var ev in events) e._Apply(ev);");
+    applierLines.push(
+      emitTrace ? `        e.AssertInvariants("<init>");` : "        e.AssertInvariants();",
+    );
+    applierLines.push("        return e;");
+    applierLines.push("    }");
+    applierLines.push("");
+  }
+
+  // Event-sourced construction (appliers A2.2b): the single `create`
+  // action's emit-only body runs against a fresh empty shell via `_Init`,
+  // where each `emit` records-and-folds the creation event.  Input is the
+  // create action's params (the command shape).  Replaces the state-writing
+  // public factory for event-sourced aggregates.
+  const esCreateFactoryLines: string[] =
+    isRoot && eventSourced && esCreate
+      ? [
+          `    public static ${entity.name} Create(${esCreate.params
+            .map((p) => `${renderCsType(p.type)} ${p.name}`)
+            .join(", ")})`,
+          "    {",
+          `        var e = new ${entity.name}();`,
+          `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
+          `        e._Init(${esCreate.params.map((p) => p.name).join(", ")});`,
+          "        return e;",
+          "    }",
+          "",
+          `    private void _Init(${esCreate.params
+            .map((p) => `${renderCsType(p.type)} ${p.name}`)
+            .join(", ")})`,
+          "    {",
+          renderCsStatements(esCreate.statements, renderCtx, {
+            emitTrace,
+            aggregate: entity.name,
+            op: esCreate.name,
+            eventSourced,
+          }),
+          "    }",
+          "",
+        ]
+      : [];
 
   // Per-invariant body.  Trace-off: the one-liner if-throw.  Trace-on:
   // bind the boolean to `__inv_<i>_ok` so BOTH pass and fail outcomes
@@ -314,7 +407,7 @@ export function renderEntity(
     (f) => `        e.${upperFirst(f.name)} = ${f.name};`,
   );
   const createPublicLines =
-    isRoot && isAgg(entity) && hasCreate(entity)
+    isRoot && isAgg(entity) && hasCreate(entity) && !eventSourced
       ? [
           `    public static ${entity.name} Create(${createInputFieldList
             .map((f) => `${renderCsType(f.type)} ${f.name}`)
@@ -431,6 +524,8 @@ export function renderEntity(
       "",
       ...createInternalLines,
       ...createPublicLines,
+      ...(applierLines.length > 0 ? ["", ...applierLines] : []),
+      ...esCreateFactoryLines,
       ...(snapshotLines.length > 0 ? ["", ...snapshotLines] : []),
       "}",
     ) + "\n"

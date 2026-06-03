@@ -73,6 +73,7 @@ export type DotnetArtifactCategory =
   | "join-entity-configuration"
   | "repository-impl"
   | "document-poco" // Infrastructure/Persistence/Documents/<Agg>Document.cs (shape(document))
+  | "event-record-poco" // Infrastructure/Persistence/Events/<Agg>EventRecord.cs (persistedAs(eventLog))
   | "event-dispatcher"
   | "auditable-interceptor"
   | "domain-log"
@@ -188,6 +189,8 @@ function pathForCategory(artifact: DotnetArtifact): string {
       return `Infrastructure/Repositories/${name}`;
     case "document-poco":
       return `Infrastructure/Persistence/Documents/${name}`;
+    case "event-record-poco":
+      return `Infrastructure/Persistence/Events/${name}`;
     case "event-dispatcher":
       return `Infrastructure/Events/${name}`;
     case "auditable-interceptor":

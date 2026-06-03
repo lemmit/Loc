@@ -41,7 +41,7 @@ const splitLines = (s: string): Lines => s.split("\n");
 
 export const efcorePersistenceAdapter: PersistenceAdapter = {
   name: "efcore",
-  supportedStrategies: ["state"],
+  supportedStrategies: ["state", "eventLog"],
   // D-DOCUMENT-AXIS: EF emits all three saving shapes — relational
   // tables, `embedded` (owned-types `.ToJson()`), and the opaque
   // `document` blob.  Sourced from the single capability map so the
@@ -49,6 +49,11 @@ export const efcorePersistenceAdapter: PersistenceAdapter = {
   supportedShapes: PLATFORM_SAVING_SHAPES.dotnet,
 
   supports(storageType, kind, persistenceStrategy) {
+    // Event-sourced streams (appliers A2.2b): an append-only `<agg>_events`
+    // table on the same relational store (no Marten), folded at load.
+    if (persistenceStrategy === "eventLog") {
+      return ["postgres", "mysql", "sqlite"].includes(storageType) && kind === "eventLog";
+    }
     return (
       persistenceStrategy === "state" &&
       ["postgres", "mysql", "sqlite", "inMemory"].includes(storageType) &&

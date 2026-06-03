@@ -61,10 +61,14 @@ describe("efcore PersistenceAdapter (real)", () => {
   });
 
   it("answers capability fields directly (no stub-throw)", () => {
-    expect(efcorePersistenceAdapter.supportedStrategies).toEqual(["state"]);
+    expect(efcorePersistenceAdapter.supportedStrategies).toEqual(["state", "eventLog"]);
     expect(efcorePersistenceAdapter.supports("postgres", "state", "state")).toBe(true);
     expect(efcorePersistenceAdapter.supports("redis", "state", "state")).toBe(false);
     expect(efcorePersistenceAdapter.supports("postgres", "eventLog", "state")).toBe(false);
+    // Event-sourced streams (appliers A2.2b): an `eventLog` aggregate on an
+    // `eventLog` binding over a relational store is supported (EF event store).
+    expect(efcorePersistenceAdapter.supports("postgres", "eventLog", "eventLog")).toBe(true);
+    expect(efcorePersistenceAdapter.supports("redis", "eventLog", "eventLog")).toBe(false);
     expect(efcorePersistenceAdapter.supports("postgres", "state", "eventLog")).toBe(false);
   });
 

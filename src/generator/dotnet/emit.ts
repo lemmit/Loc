@@ -27,6 +27,7 @@ export { renderRequestDtos, renderResponseDtos } from "./emit/dto.js";
 export { renderConfiguration, renderDbContext } from "./emit/efcore.js";
 export { renderAbstractBaseEntity, renderEntity } from "./emit/entity.js";
 export { renderEnum, renderValueObject } from "./emit/enums-vos.js";
+export { renderEventRecordConfiguration, renderEventRecordPoco } from "./emit/event-store.js";
 export { renderEvent, renderIDomainEvent } from "./emit/events.js";
 export { renderId } from "./emit/ids.js";
 export {
@@ -45,6 +46,7 @@ export {
 } from "./emit/program.js";
 export {
   renderDocumentRepositoryImpl,
+  renderEventSourcedRepositoryImpl,
   renderRepositoryImpl,
   renderRepositoryInterface,
 } from "./emit/repository.js";

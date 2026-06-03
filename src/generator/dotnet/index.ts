@@ -57,6 +57,9 @@ import {
   renderDocumentRepositoryImpl,
   renderEntity,
   renderEvent,
+  renderEventRecordConfiguration,
+  renderEventRecordPoco,
+  renderEventSourcedRepositoryImpl,
   renderExceptionFilter,
   renderIDomainEvent,
   renderJoinEntity,
@@ -276,7 +279,12 @@ function emitProjectFromContexts(
   } else {
     out.set(
       "Infrastructure/Persistence/AppDbContext.cs",
-      renderDbContext(merged, ns, documentAggNames(contexts, system?.sys)),
+      renderDbContext(
+        merged,
+        ns,
+        documentAggNames(contexts, system?.sys),
+        eventSourcedAggNames(contexts),
+      ),
     );
   }
   // FluentValidation pipeline — emit the generic
@@ -502,8 +510,12 @@ function emitAggregate(
   // `normalised(…)` (the default).
   const ds = emitCtx ? resolveDataSourceConfig(agg, ctx, emitCtx.sys) : undefined;
   const shape = effectiveSavingShape(agg, ds);
-  const isDoc = shape === "document";
-  const isEmbedded = shape === "embedded";
+  // Event-sourced (`persistedAs(eventLog)`) wins over the saving-shape axis:
+  // the aggregate persists to a `<agg>_events` stream (an EF event-record
+  // entity), folded on load — no state table, no document, no join tables.
+  const isEs = agg.persistedAs === "eventLog";
+  const isDoc = !isEs && shape === "document";
+  const isEmbedded = !isEs && shape === "embedded";
 
   for (const part of agg.parts) {
     place(`${part.name}.cs`, "entity", renderEntity(part, false, ns, agg.name, emitTrace, isDoc));
@@ -551,6 +563,23 @@ function emitAggregate(
       `${agg.name}Repository.cs`,
       "repository-impl",
       renderDapperRepository(agg, repoWithViews, ns),
+    );
+  } else if (isEs) {
+    // Event-sourced: the `<agg>_events` stream repository (fold on load,
+    // append on save) + the EF event-record entity & configuration.  No
+    // normalised entity configuration, no document, no join tables.
+    place(
+      `${agg.name}Repository.cs`,
+      "repository-impl",
+      renderEventSourcedRepositoryImpl(agg, repoWithViews, ns, findBodies, {
+        extraUsings: [...repoImplUsings].sort(),
+      }),
+    );
+    place(`${agg.name}EventRecord.cs`, "event-record-poco", renderEventRecordPoco(agg, ns));
+    place(
+      `${agg.name}EventRecordConfiguration.cs`,
+      "ef-configuration",
+      renderEventRecordConfiguration(agg, ns),
     );
   } else {
     place(
@@ -649,7 +678,7 @@ function emitInfrastructure(
 ): void {
   out.set(
     "Infrastructure/Persistence/AppDbContext.cs",
-    renderDbContext(ctx, ns, documentAggNames([ctx])),
+    renderDbContext(ctx, ns, documentAggNames([ctx]), eventSourcedAggNames([ctx])),
   );
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
@@ -735,8 +764,23 @@ function documentAggNames(contexts: EnrichedBoundedContextIR[], sys?: SystemIR):
   const names = new Set<string>();
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) {
+      if (agg.persistedAs === "eventLog") continue; // event sourcing wins over the shape axis
       const ds = sys ? resolveDataSourceConfig(agg, ctx, sys) : undefined;
       if (isDocumentShaped(agg, ds)) names.add(agg.name);
+    }
+  }
+  return names;
+}
+
+/** Names of event-sourced (`persistedAs(eventLog)`) aggregates across the
+ *  given contexts.  Consumed by `renderDbContext` to route each to a
+ *  `DbSet<<Agg>EventRecord>` + the event-record configuration (the
+ *  `<agg>_events` stream) instead of the normalised entity DbSet. */
+function eventSourcedAggNames(contexts: EnrichedBoundedContextIR[]): Set<string> {
+  const names = new Set<string>();
+  for (const ctx of contexts) {
+    for (const agg of ctx.aggregates) {
+      if (agg.persistedAs === "eventLog") names.add(agg.name);
     }
   }
   return names;

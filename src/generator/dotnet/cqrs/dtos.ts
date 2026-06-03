@@ -74,6 +74,11 @@ export function emitRequestDtos(
   ns: string,
   aggFolder: string,
   out: Map<string, string>,
+  /** Event-sourced create-input override (appliers A2.2b): when present,
+   *  the CreateRequest is built from these (the `create` action's params,
+   *  the command shape) and force-emitted, instead of the field set gated
+   *  on `hasCreate`. */
+  createInputOverride?: AggregateIR["fields"],
 ): void {
   const records: { name: string; params: string }[] = [];
   for (const vo of valueObjectsUsedBy(agg, ctx)) {
@@ -89,8 +94,8 @@ export function emitRequestDtos(
   // owned or domain-only), keeps `immutable` (settable at creation) and
   // `secret` (client supplies password hashes / API keys).  Gated on
   // `hasCreate`: a non-constructible aggregate emits no CreateRequest.
-  if (hasCreate(agg)) {
-    const requiredFields = createInputFields(agg);
+  if (createInputOverride || hasCreate(agg)) {
+    const requiredFields = createInputOverride ?? createInputFields(agg);
     records.push({
       name: `Create${agg.name}Request`,
       params: requiredFields

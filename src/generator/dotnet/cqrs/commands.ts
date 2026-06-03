@@ -16,7 +16,13 @@ export function emitCreateCommandAndHandler(
   ns: string,
   aggFolder: string,
   out: Map<string, string>,
+  /** Emit the FluentValidation create-validator (built from invariants over
+   *  the field set).  Skipped for event-sourced aggregates, whose create
+   *  input is the command's params (not the field set) and whose invariants
+   *  are enforced on the fold.  Defaults true. */
+  opts?: { emitValidator?: boolean },
 ): void {
+  const emitValidator = opts?.emitValidator ?? true;
   out.set(
     `Application/${aggFolder}/Commands/Create${agg.name}Command.cs`,
     renderCommand({
@@ -48,12 +54,14 @@ export function emitCreateCommandAndHandler(
   // FluentValidation rules — emitted only when at least one
   // wire-translatable invariant exists for this command.  See
   // `validator-emit.ts` for the classification + chain emission.
-  const validator = renderCreateValidator(agg, ns);
-  if (validator.content) {
-    out.set(
-      `Application/${aggFolder}/Commands/Create${agg.name}CommandValidator.cs`,
-      validator.content,
-    );
+  if (emitValidator) {
+    const validator = renderCreateValidator(agg, ns);
+    if (validator.content) {
+      out.set(
+        `Application/${aggFolder}/Commands/Create${agg.name}CommandValidator.cs`,
+        validator.content,
+      );
+    }
   }
 }
 
