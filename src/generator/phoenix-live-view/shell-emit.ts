@@ -9,6 +9,7 @@ import type { EmitCtx, StyleAdapter } from "../_adapters/index.js";
 import { ashStyleAdapter } from "./adapters/ash-style.js";
 import { emitPhoenixResourceFiles } from "./adapters/resource-clients.js";
 import type { ApiRoute } from "./api-emit.js";
+import { renderDialyzerIgnoreExs } from "./dialyzer-ignore-emit.js";
 import { renderJasonCamelCaseModule } from "./jason-camel-emit.js";
 import type { LiveRoute } from "./liveview-emit.js";
 import { renderProblemDetailsModule } from "./problem-details-emit.js";
@@ -91,6 +92,11 @@ export function emitShellFiles(
     renderMixExs(appName, appModule, resourceEmission.hexDeps, contextsHaveSeeds(contexts)),
   );
   out.set(".formatter.exs", renderFormatterExs());
+  // .dialyzer_ignore.exs template — paired with the mix.exs `dialyzer:`
+  // config block.  Inert until Dialyxir is added as a dep (Tier 4 of
+  // the Phoenix ladder in docs/proposals/cross-stack-static-analysis.md);
+  // shipping it now future-proofs the project.
+  out.set(".dialyzer_ignore.exs", renderDialyzerIgnoreExs(appName));
   out.set("Dockerfile", renderDockerfile(appName, embedReact));
   out.set(".dockerignore", renderDockerignore());
   // certs/ is the CA-bake landing slot — see the COPY in renderDockerfile.
