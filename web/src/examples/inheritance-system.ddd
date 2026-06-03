@@ -1,0 +1,113 @@
+// Aggregate inheritance + alternative persistence shapes — two features
+// the older playground examples never touched.  See docs/inheritance.md.
+//
+//   • An `abstract aggregate` base (PaymentMethod) with two concrete
+//     subtypes that `extends` it.  `inheritanceUsing(sharedTable)` maps
+//     the hierarchy Table-Per-Hierarchy (one `payment_methods` table +
+//     a `kind` discriminator).  TPH is the node/Hono backend's strategy,
+//     so this whole system previews live.  The base owns no table or
+//     repository of its own — instead each backend emits a polymorphic
+//     reader (`PaymentMethodRepository.findAll()`) that unions the
+//     concrete loaders.  `PaymentMethod id` refs work under TPH because
+//     the shared table carries a single identity.
+//
+//   • An event-sourced aggregate (LoyaltyAccount) declared
+//     `persistedAs(eventLog)`: its truth is the stream of emitted events,
+//     folded back into state by the `apply(...)` bodies.  Contrast with
+//     every other example, where the aggregate's current row IS the truth.
+
+system InheritanceSystem {
+
+  theme {
+    primary: "#7c3aed"
+    neutral: "#52525b"
+    radius: "md"
+  }
+
+  subdomain Wallet {
+    context Wallet {
+
+      enum CardNetwork { Visa, Mastercard, Amex }
+
+      event PointsEarned { account: LoyaltyAccount id, points: int, at: datetime }
+      event PointsRedeemed { account: LoyaltyAccount id, points: int, at: datetime }
+
+      // --- Inheritance (TPH / sharedTable) -------------------------------
+      // The abstract base: shared fields, no table / repository / routes.
+      abstract aggregate PaymentMethod inheritanceUsing(sharedTable) {
+        holderName: string
+        last4: string
+        invariant holderName.length > 0
+        invariant last4.length == 4
+        derived display: string = holderName
+      }
+
+      // Concrete subtypes inherit holderName / last4 and add their own.
+      // Their wire shape is id → base fields → own fields, identical
+      // across every backend's DTO.
+      aggregate CreditCard extends PaymentMethod with crudish {
+        network: CardNetwork
+        expiryMonth: int
+        expiryYear: int
+        invariant expiryMonth >= 1 && expiryMonth <= 12
+      }
+
+      aggregate BankAccount extends PaymentMethod with crudish {
+        routingNumber: string
+        invariant routingNumber.length > 0
+      }
+
+      // Concrete subtypes get ordinary repositories; the abstract base
+      // does not (it owns no table).  The polymorphic union reader is
+      // emitted automatically as infrastructure.
+      repository CreditCards for CreditCard {
+        find byNetwork(network: CardNetwork): CreditCard[] where this.network == network
+      }
+      repository BankAccounts for BankAccount { }
+
+      // --- Event sourcing (persistedAs(eventLog)) ------------------------
+      // The aggregate is reconstructed by folding its event stream.  Each
+      // operation emits an event; the matching `apply(...)` body is the
+      // ONLY place state mutates — replaying the events rebuilds `this`.
+      aggregate LoyaltyAccount persistedAs(eventLog) {
+        owner: string
+        balance: int
+
+        invariant balance >= 0
+
+        operation earn(points: int) {
+          precondition points > 0
+          emit PointsEarned { account: id, points: points, at: now() }
+        }
+
+        operation redeem(points: int) {
+          precondition points > 0
+          precondition balance >= points
+          emit PointsRedeemed { account: id, points: points, at: now() }
+        }
+
+        apply(e: PointsEarned) {
+          balance := balance + e.points
+        }
+        apply(e: PointsRedeemed) {
+          balance := balance - e.points
+        }
+      }
+
+      repository LoyaltyAccounts for LoyaltyAccount { }
+    }
+  }
+
+  ui WebApp with scaffold(subdomains: [Wallet]) {
+  }
+
+  storage primary { type: postgres }
+  resource walletState  { for: Wallet, kind: state,    use: primary }
+  resource walletEvents { for: Wallet, kind: eventLog, use: primary }
+
+  deployable api {
+    platform: hono, contexts: [Wallet],
+    dataSources: [walletState, walletEvents], port: 3000
+  }
+  deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
+}

@@ -107,9 +107,12 @@ const FIXTURE_DDD = `system PhxObs {
   }
   api SalesApi from Sales
   ui SalesAdmin with scaffold(subdomains: [Sales]) { }
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
   deployable phoenixApp {
     platform: phoenix
     contexts: [Sales]
+    dataSources: [salesState]
     serves: SalesApi
     ui: SalesAdmin
     port: 4000

@@ -115,19 +115,23 @@ the menus go size-1 → size-N:
   namespaces are path-independent, `.csproj` globs `**/*.cs`).
 - dotnet: `dapper`, `marten` (persistence); `serviceLayer` (style/`application`).
 - node: `express` / `fastify` (transport); `prisma` (persistence).
-- **node `byFeature` layout — ATTEMPTED + REVERTED (#830, reverted).** A naive
-  port of the dotnet `byFeature` relocation does NOT work for the TypeScript
-  backend: unlike .NET `using <Namespace>` (path-independent), the generated TS
-  files import each other by **relative path** (`db/repositories/<agg>.ts` →
-  `../schema`, `../../domain/<agg>`, …). Relocating files to `features/<agg>/`
-  without rewriting those specifiers yields non-compiling output, and the shared
-  `src/generator/typescript/` emitters hardcode byLayer-relative imports by
-  design. A correct TS `byFeature` therefore needs **layout-aware import
-  rewriting** (compute each cross-file specifier from the source + target
-  category's resolved paths) — a real feature, scoped separately, gated by a
-  build-generated-ts example that actually selects `byFeature`. The `byLayer`
-  default is unaffected (this is why CI was green — no example selected
-  `byFeature`); the lesson: any new layout MUST be exercised by a compile gate.
+- **node `byFeature` layout — DONE (proper, with import rewriting).** A first
+  naive port (#830, reverted) shipped broken: unlike .NET `using <Namespace>`
+  (path-independent), generated TS files import each other by **relative path**,
+  so relocating them to `features/<agg>/` without rewriting specifiers yields
+  non-compiling output. The proper landing keeps the shared
+  `src/generator/typescript/` emitters layout-agnostic and adds a **post-emit
+  import-rewrite pass** (`layout-imports.ts:rewriteRelativeImports`): from the
+  layout adapter's old→new mapping it fixes every relative specifier (static
+  `from`/`import`, `export … from`, AND dynamic `import("…")` — the lazy
+  `obs/log` load) in both relocated files and the shared files that import them.
+  No-op when nothing moved → byLayer byte-identical. **Compile-gated:** a
+  system-mode fixture (`test/e2e/fixtures/ts-build/byfeature.ddd`) selects
+  `node { directoryLayout: byFeature }` and the `build-generated-ts` job
+  `tsc --noEmit`s + tsup-bundles the relocated project. (The dynamic-`import`
+  miss was caught by that real compile — which the in-suite dangling-import
+  check, sharing the same regex, had missed. Lesson applied: a layout MUST have
+  a compile gate.)
 - Activate gating **R2** (`directoryLayout × application`) once a real style does
   NOT support a real layout, and **R3** (`serviceLayer|flat` × event-sourced) as
   those values become real — R3 lands in `src/ir/validate/validate.ts` (it's an
