@@ -328,8 +328,17 @@ set after each Ash major bump.
   `returnType` field, but the conservative version is already useful: it
   documents the contract surface (workflows can fail) and gives Dialyzer a
   typed input map to narrow against.
+- ✅ **Dialyxir dev/test-only dep + CI gate** — generated mix.exs declares
+  `{:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}`; new
+  `LOOM_PHOENIX_DIALYZER=1` vitest harness boots the same hexpm/elixir
+  docker image as the build gate and runs `mix dialyzer` against a
+  fixture project; new `.github/workflows/phoenix-dialyzer.yml` runs it
+  on PR + main with deps/_build/PLT caching keyed on mix.exs hash +
+  Elixir image tag.  Cold PLT build is 5–15 min; warm runs ~30–60s.
+  **First-run audit happens in CI — the empirical Ash v3 question
+  from #897 is answered the moment the workflow goes green or surfaces
+  its first noise.**
 - ⏳ Service-layer wrapper emission (and its spec'd surface) — deferred behind the architectural decision to emit such a layer.
-- ⏳ Empirical Dialyzer first-run audit against the existing Ash output (per the Ash v3 note above).
 
 ### The vanilla-Ecto pivot changes the Dialyzer calculus
 
