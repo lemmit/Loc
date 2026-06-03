@@ -74,10 +74,13 @@ describe("phoenix emitViews — shorthand form", () => {
     expect(emit(buildCtx(filterIR))).toMatch(/^defmodule Acme\.Sales\.Views\.ActiveOrders do/m);
   });
 
-  it("emits `alias <ContextModule>.<Aggregate>` and `require Ash.Query`", () => {
+  it("emits `require Ash.Query` (no unused alias)", () => {
     const src = emit(buildCtx(filterIR));
-    expect(src).toMatch(/alias Acme\.Sales\.Order/);
     expect(src).toMatch(/require Ash\.Query/);
+    // The body spells out the fully-qualified aggregate module everywhere,
+    // so we must NOT emit a short `alias` — Elixir's --warnings-as-errors
+    // rejects an unused alias.
+    expect(src).not.toMatch(/^\s*alias Acme\.Sales\.Order$/m);
   });
 
   it("emits an Ash.Query.filter when a filter is present", () => {

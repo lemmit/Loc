@@ -425,6 +425,19 @@ function isStringType(e: ExprIR): boolean {
 }
 
 function renderBinary(l: string, r: string, e: BinaryExpr): string {
+  // `x == null` / `x != null` → `is_nil(x)` / `not is_nil(x)`.  Comparing
+  // against `nil` with `==`/`!=` is an Elixir footgun: the compiler warns
+  // ("Comparing values with nil will always return false. Use is_nil/1
+  // instead."), so `--warnings-as-errors` fails on it, and Ash `expr(...)`
+  // wants `is_nil/1` too.
+  if (e.op === "==" || e.op === "!=") {
+    const leftNull = e.left.kind === "literal" && e.left.lit === "null";
+    const rightNull = e.right.kind === "literal" && e.right.lit === "null";
+    if (leftNull || rightNull) {
+      const operand = leftNull ? r : l;
+      return e.op === "==" ? `is_nil(${operand})` : `not is_nil(${operand})`;
+    }
+  }
   // Money operands cannot use the native `+`/`*`/`>` operators in
   // Elixir — `Decimal` is a struct.  Arithmetic dispatches through
   // `Decimal.add/2` / `mult/2` / `div/2`; comparisons go through

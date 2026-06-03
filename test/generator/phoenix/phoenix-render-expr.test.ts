@@ -169,6 +169,50 @@ describe("phoenix renderExpr — binary operators", () => {
       ),
     ).toBe("rem(7, 3)");
   });
+
+  // Elixir warns ("Comparing values with nil will always return false. Use
+  // is_nil/1 instead.") and `--warnings-as-errors` fails on `x == nil`.
+  it("renders `x != null` as `not is_nil(x)`", () => {
+    expect(
+      renderExpr(
+        {
+          kind: "binary",
+          op: "!=",
+          left: thisProp("description"),
+          right: { kind: "literal", lit: "null", value: "" },
+        },
+        ctx,
+      ),
+    ).toBe("not is_nil(record.description)");
+  });
+
+  it("renders `x == null` as `is_nil(x)`", () => {
+    expect(
+      renderExpr(
+        {
+          kind: "binary",
+          op: "==",
+          left: thisProp("description"),
+          right: { kind: "literal", lit: "null", value: "" },
+        },
+        ctx,
+      ),
+    ).toBe("is_nil(record.description)");
+  });
+
+  it("renders `null == x` (null on the left) as `is_nil(x)` too", () => {
+    expect(
+      renderExpr(
+        {
+          kind: "binary",
+          op: "==",
+          left: { kind: "literal", lit: "null", value: "" },
+          right: thisProp("description"),
+        },
+        ctx,
+      ),
+    ).toBe("is_nil(record.description)");
+  });
 });
 
 describe("phoenix renderExpr — unary, paren, ternary", () => {
