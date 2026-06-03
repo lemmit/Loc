@@ -1,3 +1,4 @@
+import { createInputFields, createOmissionValue } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -27,7 +28,7 @@ import { renderCsExpr } from "../render-expr.js";
 
 export function renderTestsFile(
   agg: AggregateIR,
-  _ctx: BoundedContextIR,
+  ctx: BoundedContextIR,
   ns: string,
 ): string | null {
   if (agg.tests.length === 0) return null;
@@ -47,7 +48,7 @@ export function renderTestsFile(
   lines.push(`public sealed class ${agg.name}Tests`);
   lines.push("{");
   for (const t of agg.tests) {
-    lines.push(...renderTest(t).map((l) => `    ${l}`));
+    lines.push(...renderTest(t, ctx).map((l) => `    ${l}`));
     lines.push("");
   }
   lines.push("}");
@@ -60,18 +61,51 @@ function plural(s: string): string {
   return s + "s";
 }
 
-function renderTest(t: TestIR): string[] {
+function renderTest(t: TestIR, ctx: BoundedContextIR): string[] {
   const methodName = upperFirst(t.name.replace(/[^A-Za-z0-9]+/g, "_")) || "Test";
   const out: string[] = [];
   out.push(`[Fact(DisplayName = ${JSON.stringify(t.name)})]`);
   out.push(`public void ${methodName}()`);
   out.push(`{`);
   for (const s of t.statements) {
-    const rendered = renderTestStmt(s);
+    const rendered = renderTestStmt(s, ctx);
     if (rendered) out.push(...rendered.split("\n"));
   }
   out.push(`}`);
   return out;
+}
+
+/** Render an aggregate `Agg.create({...})` factory call as a named-arg
+ *  `Agg.Create(...)` — the same shape the workflow `factory-let` emitter
+ *  produces.  The .NET `Create(...)` factory takes *every* canonical
+ *  create-input as a positional parameter (no C# defaults), so a test
+ *  create that names only a subset must supply each omitted input
+ *  explicitly with its omission value (optional → `null`, bare `bool` →
+ *  `false`, `= default` → the default literal) or the call fails to
+ *  compile (CS7036).  Named args keep the source field order free.
+ *
+ *  Returns `null` when the expression isn't an aggregate create call, so
+ *  the caller falls back to the generic expression renderer (a bare
+ *  `object` literal would otherwise render as a C# `new { … }`, which is
+ *  not a valid argument to the positional `Create(...)`). */
+function renderCreateCall(e: ExprIR, ctx: BoundedContextIR): string | null {
+  if (e.kind !== "method-call" || e.member !== "create" || e.args.length !== 1) return null;
+  const objArg = e.args[0];
+  const receiver = e.receiver;
+  if (!objArg || objArg.kind !== "object" || receiver.kind !== "ref") return null;
+  const agg = ctx.aggregates.find((a) => a.name === receiver.name);
+  if (!agg) return null;
+  const provided = objArg.fields.map((f) => `${f.name}: ${renderCsExpr(f.value)}`);
+  const named = new Set(objArg.fields.map((f) => f.name));
+  const omitted = createInputFields(agg)
+    .filter((f) => !named.has(f.name))
+    .map((f) => {
+      const v = createOmissionValue(f);
+      const value =
+        v.kind === "default" ? renderCsExpr(v.expr) : v.kind === "false" ? "false" : "null";
+      return `${f.name}: ${value}`;
+    });
+  return `${agg.name}.Create(${[...provided, ...omitted].join(", ")})`;
 }
 
 /** Lower an explicit intrinsic value-matcher (`expect(x).toBe(y)`,
@@ -106,7 +140,7 @@ function renderExplicitMatcherToAwesome(expr: ExprIR): string | null {
   return `${actual}.Should().${method}(${arg});`;
 }
 
-function renderTestStmt(s: TestStmtIR): string {
+function renderTestStmt(s: TestStmtIR, ctx: BoundedContextIR): string {
   // See `validateAggregateTestBodies` in src/ir/validate/validate.ts — by the
   // time we reach the generator, only `expect` / `expect-throws` /
   // `let` / `expression` / pure-function `call` survive.
@@ -116,17 +150,20 @@ function renderTestStmt(s: TestStmtIR): string {
     return `    Assert.True(${renderCsExpr(s.expr)});`;
   }
   if (s.kind === "expect-throws") {
-    return `    Assert.Throws<DomainException>(() => { var __ = ${renderCsExpr(s.expr)}; });`;
+    const expr = renderCreateCall(s.expr, ctx) ?? renderCsExpr(s.expr);
+    return `    Assert.Throws<DomainException>(() => { var __ = ${expr}; });`;
   }
   if (s.kind === "let") {
-    return `    var ${s.name} = ${renderCsExpr(s.expr)};`;
+    const expr = renderCreateCall(s.expr, ctx) ?? renderCsExpr(s.expr);
+    return `    var ${s.name} = ${expr};`;
   }
   if (s.kind === "call") {
     const args = s.args.map((a) => renderCsExpr(a)).join(", ");
     return `    ${upperFirst(s.name)}(${args});`;
   }
   if (s.kind === "expression") {
-    return `    ${renderCsExpr(s.expr)};`;
+    const expr = renderCreateCall(s.expr, ctx) ?? renderCsExpr(s.expr);
+    return `    ${expr};`;
   }
   throw new Error(
     `internal: aggregate test body contains '${s.kind}' which the IR validator should have rejected`,
