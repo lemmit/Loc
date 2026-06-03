@@ -157,7 +157,7 @@ reads.
 **Registry home.** The registry splits by altitude, respecting the
 one-directional layering (`language → ir → generator → system`):
 
-- **Platform-neutral descriptor** (`src/ir/source-types.ts`) — the single source
+- **Platform-neutral descriptor** (`src/util/source-types.ts`) — the single source
   of truth for `sourceType → supported kinds → { capabilities, interfaces }` and
   the canonical kind/capability sets. Read by IR lowering/enrich (need
   derivation), IR validation (capability/kind matching), and system composition.
@@ -370,7 +370,7 @@ interface selection.
   no transitional alias; all sources migrate in one codemod step (all Loom code
   lives in this repository).
 - **Registry home is split** (see §3.4): the platform-neutral descriptor lives in
-  `src/ir/source-types.ts`; vendor realization stays in the platform adapters
+  `src/util/source-types.ts`; vendor realization stays in the platform adapters
   keyed by sourceType name; the semantic kind↔type check moves into IR validation.
 - **Config typing — generic syntax, registry-validated keys.** `config` stays a
   free-form key→value map at the grammar (no per-vendor clause keywords). The
@@ -388,7 +388,7 @@ interface selection.
   out-of-tree package rail (`packages/` + `loom` manifest key, discovered by
   `src/platform/fs-discovery.ts`) and are trusted like an out-of-tree backend
   (full code trust). Because `ir/` cannot import `platform/`,
-  `src/ir/source-types.ts` exposes a **registration API** and the platform loader
+  `src/util/source-types.ts` exposes a **registration API** and the platform loader
   pushes both the neutral descriptor and the vendor realization into it at boot
   (the inversion `bootMacros()` already uses for macros). A plugin contributes a
   descriptor entry plus a realization adapter under one manifest entry

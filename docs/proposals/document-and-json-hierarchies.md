@@ -59,7 +59,7 @@ Loom already models internal hierarchies inside an aggregate, but it splits them
 
 | Source construct | Grammar | Where it lands physically |
 |---|---|---|
-| Value object | `valueobject Money { … }` (`ddd.langium:602`) | **Inline JSONB column** — `mapTypeToColumn` returns `{ kind: "json" }` for `valueobject`/`entity` types (`src/system/migrations-builder.ts:370`), rendered `JSONB` by `renderPgType` (`src/system/sql-pg.ts`). |
+| Value object | `valueobject Money { … }` (`ddd.langium:602`) | **Inline JSONB column** — `mapTypeToColumn` returns `{ kind: "json" }` for `valueobject`/`entity` types (`src/system/migrations-builder.ts:370`), rendered `JSONB` by `renderPgType` (`src/generator/sql-pg.ts`). |
 | Entity part + containment | `entity Line { … }` + `contains lines: Line[]` (`ddd.langium:724`, `:853`) | **Separate relational table** — `tableForPart` emits one table per part; `schemaFromModule` walks `agg.parts` (`src/system/migrations-builder.ts:46`). |
 | Reference collection | `Order id[]` | **Join table** — `tableForAssociation`, metadata derived in enrichment (`src/ir/enrich/enrichments.ts:409`). |
 

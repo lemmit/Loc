@@ -114,7 +114,13 @@ above and produces output the next phase consumes — no back-edges, no
 shared mutable state. This is enforced by file structure: `language/`
 knows nothing about `ir/`, `ir/` knows nothing about `generator/`,
 `generator/<platform>/` knows nothing about other platforms, and
-`system/` composes everything from above.
+`system/` composes everything from above. The rule is now **mechanically
+guarded**, not just convention: `test/platform/pipeline-layering.test.ts`
+fails on any *value* (runtime) backward-edge across the
+`language → ir → generator → system` chain (type-only imports of the
+shared IR vocabulary are exempt), and
+`test/platform/backend-packages-layering.test.ts` guards the
+`generator → platform` (shared → versioned-package) edge.
 
 ---
 
@@ -626,7 +632,7 @@ multiple platforms:
 
 | Subdir | Consumed by | What it owns |
 |---|---|---|
-| `_packs/` | every UI-mounting backend (react, fullstack dotnet, phoenixLiveView) | Design-pack discovery + loader.  `builtin-formats.ts` holds `BUILTIN_PACK_FORMATS` + `BUILTIN_PACK_LATEST` and the `parseBuiltinDesignRef` parser.  `loader-fs.ts` / `loader-vfs.ts` are the FS / browser-VFS backends.  See [`design-packs.md`](design-packs.md). |
+| `_packs/` | every UI-mounting backend (react, fullstack dotnet, phoenixLiveView) | Design-pack discovery + loader.  `loader-fs.ts` / `loader-vfs.ts` are the FS / browser-VFS backends.  (The pack-identity metadata — `BUILTIN_PACK_FORMATS` / `BUILTIN_PACK_LATEST` + the `parseBuiltinDesignRef` parser — lives in [`src/util/builtin-formats.ts`](../src/util/builtin-formats.ts): language validators and IR lowering consume it too, so it sits at the foundational `util/` layer.)  See [`design-packs.md`](design-packs.md). |
 | `_expr/` | every domain-logic backend (TS, .NET, phoenixLiveView) | `target.ts` defines the `ExprTarget` interface (the eight leaf-divergence axes — operators, naming, money arithmetic, collection ops, `refColl.contains` membership, regex, `ref` role, `callKind` call syntax) and `renderExprWith(e, target, ctx)`, which owns the 17-arm `ExprIR.kind` dispatch + all recursion.  Each backend's `render-expr.ts` supplies only the leaf table (`TS_TARGET` / `CS_TARGET` / `ELIXIR_TARGET`).  Expression-side analogue of `WalkerTarget`; a 5th domain-logic backend writes one target, not a 4th dispatcher (PR #843). |
 | `_walker/` | react + phoenixLiveView | `target.ts` defines the `WalkerTarget` interface that captures the framework-shaped seams (state read/write, navigation, API call lowering, `match` rendering).  Both targets are implemented and consumed: `react/walker/tsx-target.ts` is imported by `body-walker.ts` and delegated to at ~15 call sites (state-read/write, API call shape); `phoenix-live-view/heex-target.ts` is imported by `heex-walker.ts` and delegated to at 20+ call sites. |
 | `_obs/` | hono, dotnet, phoenixLiveView | Observability catalog + per-backend renderers.  `log-events.ts` defines the envelope schema; `render-<platform>.ts` emits the per-backend instrumentation.  See [`observability.md`](observability.md). |
