@@ -27,8 +27,10 @@ The last refresh closed these — see `global-implementation-plan.md` "Major
 landings" for PR-level detail:
 
 - **Pagination (offset)** — `Paged<T>` + paged finds on all four backends.
-- **Reified criteria (.NET/EF)** — `Criterion<T>` / `IsSatisfiedBy` /
-  `ToExpression` / Ardalis `Specification<T>` bundle.
+- **Reified criteria (retrieval, all four backends)** — `Criterion<T>` /
+  `IsSatisfiedBy` / `ToExpression` / Ardalis `Specification<T>` bundle on
+  .NET/EF; parameterised SQL on Dapper; module-level predicate fn on Hono;
+  `:boolean` Ash calculation on Phoenix.
 - **Event-sourcing appliers** — Hono + **.NET/EF** (Phoenix still open).
 - **Agent tooling** — `ddd-mcp` stdio server + full navigational family (read +
   rewrite trios) + the transport-neutral agent loop.
@@ -59,10 +61,13 @@ landings" for PR-level detail:
 - **criterion** deferred tail — `from <Criterion>(args)`, `when <Criterion>` +
   auto-exposed `can-<op>`, built-in `Repo.findAll(criterion, sort?, page?,
   loads?)`, `private workflow`. Prereq: exception-less + payload.
-- **reified-criteria** — Hono/Drizzle + Phoenix/Ash reification (.NET done);
-  the cross-backend Specification reframe.
-- **retrieval** — Hono/Drizzle + Phoenix/Ash `Repo.run(...)` emission + the
-  `loads:` load-plan (.NET `Run<Name>Async` done).
+- **reified-criteria** — retrieval criteria reified on all four backends
+  (done). Remaining: `find` criteria + anonymous capability `filter`
+  predicates still inline; the principal/tenancy factory + `isSatisfiedBy`
+  duality (see the proposal's remaining-work register).
+- **retrieval** — `Repo.run(...)` emission shipped on all four backends
+  (.NET `Run<Name>Async`, Hono `run<Name>`, Phoenix/Ash read action);
+  remaining: the `loads:` load-plan.
 - **aggregate-inheritance** — I2 (TPH emission), I3 (TPC emission), I4
   (per-concrete override + TPT-via-`contains` docs). I1 surface/IR/validators
   done; independent track.
@@ -178,6 +183,8 @@ A pragmatic next-N, consistent with the global plan's two-agent split:
 3. **Payload P1→P4 (M1)** → **exception-less A1–A3 (M2)** → **A4 (M3)** — the
    type-system spine; everything in the criterion/exception tail rides it.
 4. **Aggregate inheritance I2/I3** — independent; parallelisable.
-5. **Reified-criteria + retrieval parity on Hono/Phoenix** — finish what .NET
-   started so the selectability model is uniform.
+5. **Reified-criteria: `find` + capability-filter reification** — retrieval
+   parity is done on all four backends; extend reification to the remaining
+   inline use-sites (and the principal/tenancy factory) so the selectability
+   model is uniform.
 6. **execution-context (Tier 0)** — before any governance tier.
