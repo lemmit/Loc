@@ -534,8 +534,14 @@ function renderValidations(
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Helper functions (`function` decls) — emitted as `defp` on the resource
-// module so validate / change bodies can call them as `<name>(record, ...)`.
+// Helper functions (`function` decls) — emitted as public `def` on the
+// resource module so validate / change bodies can call them as
+// `<name>(record, ...)`.  They are PUBLIC rather than `defp` deliberately: a
+// domain `function` is a declared aggregate capability that may have no
+// in-module caller (it can be invoked from elsewhere, or simply documents an
+// intent), and Elixir's `--warnings-as-errors` rejects an unused *private*
+// function.  Exposing them as module API is harmless and mirrors how the
+// reserved `inspect` derived is realised as a public `def inspect(record)`.
 // ---------------------------------------------------------------------------
 
 function renderHelperFunctions(functions: FunctionIR[], ctx: RenderCtx): string {
@@ -553,7 +559,10 @@ function renderHelperFunctions(functions: FunctionIR[], ctx: RenderCtx): string 
     const specLine = ctx.agg
       ? `  @spec ${snake(fn.name)}(${["t()", ...fn.params.map((p) => renderTypespec(p.type, ctx.contextModule, ctx.typesModule))].join(", ")}) :: ${renderTypespec(fn.returnType, ctx.contextModule, ctx.typesModule)}\n`
       : "";
-    return `${specLine}  defp ${snake(fn.name)}(${params.join(", ")}) do
+    // `@doc false` keeps the public helper out of generated docs without
+    // making it private (which would re-introduce the unused-function warn).
+    return `${specLine}  @doc false
+  def ${snake(fn.name)}(${params.join(", ")}) do
 ${recordPrefix}    ${body}
   end`;
   });

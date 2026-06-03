@@ -92,7 +92,6 @@ defmodule ${moduleName} do
   Form: ${isShorthand ? "shorthand" : "full (bind projection)"}
   """
 
-  alias ${contextModule}.${upperFirst(agg.name)}
   require Ash.Query
 
   @doc "Execute the view query and return results."

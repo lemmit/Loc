@@ -62,8 +62,9 @@ jobs:
     runs-on: ubuntu-latest
     # Tight cap to protect CI minutes.  Cold path (no cache hit) is
     # ~3-4min dominated by `mix deps.get`; warm runs (deps cache
-    # restored) are ~60-90s for the two fixtures.  10min leaves
-    # headroom without letting a hung job burn through quota.
+    # restored) are ~60-90s for the fixtures.  10min leaves headroom
+    # without letting a hung job burn through quota.  (The heavier
+    # showcase system compiles in its own parallel job below.)
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -137,3 +138,72 @@ jobs:
           echo '' >> $GITHUB_STEP_SUMMARY
           echo 'See the "Run test:phoenix" step above for the captured `mix deps.get` + `mix compile --warnings-as-errors` diagnostics from each fixture.' >> $GITHUB_STEP_SUMMARY
           echo 'Each fixture under `test/e2e/fixtures/phoenix-build/` runs as its own `it.each` iteration in `test/e2e/generated-phoenix-build.test.ts`.' >> $GITHUB_STEP_SUMMARY
+
+  # The showcase is the maximal multi-context, multi-deployable example.
+  # Generating its full system + compiling the phoenix_api deployable is
+  # markedly heavier than any single fixture, and its deps live under a
+  # distinct path (`phoenix_api`, not the fixtures' `phoenix_app`) with a
+  # cache key of its own.  Run it in a SEPARATE job so it executes in
+  # parallel with the fixtures job instead of stacking onto that job's
+  # sequential `docker run` legs (which blew the fixtures job's timeout
+  # when appended there).  Gated behind LOOM_PHOENIX_SHOWCASE so the
+  # fixtures job's `npm run test:phoenix` skips the standalone case.
+  build-generated-phoenix-showcase:
+    runs-on: ubuntu-latest
+    # The showcase phoenix_api is a large multi-context Ash app; a cold
+    # run (deps.get + first full compile, before the cache is seeded) is
+    # the worst case here.  20min keeps a hung job bounded while leaving
+    # room for that cold path; warm runs (cache restored) are ~5min.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      # Pre-generate the showcase once into a stable path so we can hash
+      # the emitted mix.exs for the cache key.  The test step honours
+      # LOOM_PHOENIX_OUT_DIR/showcase/out and skips its own regeneration
+      # when mix.exs already exists there.
+      - name: Pre-generate showcase (for cache key)
+        run: |
+          mkdir -p /tmp/ci/phoenix/showcase/out
+          node bin/cli.js generate system examples/showcase.ddd -o /tmp/ci/phoenix/showcase/out
+
+      - name: Compute showcase dep signature
+        id: showcase-depsig
+        run: |
+          hash=$(sha256sum /tmp/ci/phoenix/showcase/out/phoenix_api/mix.exs | cut -d' ' -f1)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+      - name: Cache showcase deps + _build
+        uses: actions/cache@v5
+        with:
+          path: |
+            /tmp/ci/phoenix/showcase/out/phoenix_api/deps
+            /tmp/ci/phoenix/showcase/out/phoenix_api/_build
+          key: phoenix-showcase-mix-${{ steps.showcase-depsig.outputs.hash }}
+          restore-keys: |
+            phoenix-showcase-mix-
+
+      # Run only the standalone showcase case (`-t showcase`).  Both
+      # LOOM_PHOENIX_BUILD (enables the describe block) and
+      # LOOM_PHOENIX_SHOWCASE (un-skips the showcase `it`) are set.
+      - name: Run showcase phoenix build (mix compile --warnings-as-errors)
+        env:
+          LOOM_PHOENIX_BUILD: '1'
+          LOOM_PHOENIX_SHOWCASE: '1'
+          LOOM_PHOENIX_OUT_DIR: /tmp/ci/phoenix
+        run: npx vitest run test/e2e/generated-phoenix-build.test.ts -t showcase
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## Phoenix showcase mix compile failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the "Run showcase phoenix build" step above for the captured `mix deps.get` + `mix compile --warnings-as-errors` diagnostics for the showcase `phoenix_api` deployable.' >> $GITHUB_STEP_SUMMARY

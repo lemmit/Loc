@@ -122,5 +122,65 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 700_000);
+
+    // The showcase is the maximal multi-context, multi-deployable example —
+    // it intentionally touches the whole language surface (derived nil-checks,
+    // unreferenced domain `function`s, function-form preconditions, views).
+    // Its phoenixApi deployable is the one that surfaced the four
+    // `--warnings-as-errors` regressions this gate now pins:
+    //   1. unused `alias` in view modules,
+    //   2. `x != nil` instead of `is_nil/1`,
+    //   3. unreferenced helper `function` as a private `defp`,
+    //   4. missing `require_atomic? false` on a function-form-validate action.
+    // It lives in examples/ (not the fixtures dir) because it's the shared
+    // cross-backend showcase, so it gets its own standalone case.
+    //
+    // Gated behind LOOM_PHOENIX_SHOWCASE (in addition to the block-level
+    // LOOM_PHOENIX_BUILD) so it runs in its OWN parallel CI job
+    // (`build-generated-phoenix-showcase`) rather than stacking onto the
+    // fixtures job's sequential docker legs — generating the full
+    // multi-deployable system + compiling this large Ash app is markedly
+    // heavier than any single fixture.  Local `npm run test:phoenix` runs
+    // (no LOOM_PHOENIX_SHOWCASE) skip it; set the var to run it directly.
+    it.skipIf(!process.env.LOOM_PHOENIX_SHOWCASE)(
+      "system showcase (phoenix) — multi-context backend compiles under --warnings-as-errors",
+      () => {
+        const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
+        const outDir = baseOutDir
+          ? path.join(baseOutDir, "showcase")
+          : fs.mkdtempSync(path.join(os.tmpdir(), "loom-phoenix-showcase-"));
+        fs.mkdirSync(outDir, { recursive: true });
+        try {
+          const projDir = path.join(outDir, "out", "phoenix_api");
+          if (!fs.existsSync(path.join(projDir, "mix.exs"))) {
+            execSync(`node ${cli} generate system examples/showcase.ddd -o ${outDir}/out`, {
+              stdio: "inherit",
+              cwd: repoRoot,
+            });
+          }
+          expect(fs.existsSync(path.join(projDir, "mix.exs"))).toBe(true);
+
+          const image = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
+          execSync(
+            `docker run --rm -v ${projDir}:/app -w /app -e MIX_ENV=prod ${image} ` +
+              `bash -c 'mix local.hex --force && mix local.rebar --force && ` +
+              `mix deps.get --only prod && mix compile --warnings-as-errors'`,
+            {
+              stdio: "inherit",
+              timeout: 600_000,
+            },
+          );
+        } finally {
+          if (!baseOutDir) {
+            try {
+              fs.rmSync(outDir, { recursive: true, force: true });
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      },
+      700_000,
+    );
   },
 );

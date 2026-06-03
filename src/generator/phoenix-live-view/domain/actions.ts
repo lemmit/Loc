@@ -167,12 +167,16 @@ function renderOperationAction(op: OperationIR, ctx: RenderCtx, _ctxModule: stri
       ? `\n      change fn changeset, ${contextBinding} ->\n${bindingBlock}${stmts}\n        changeset\n      end`
       : "";
 
-  // Ash 3.x rejects function-based changes as non-atomic and refuses to
-  // register the action without an explicit opt-out.  Only flag actions
-  // that actually emit a `change fn` body — when the operation is
-  // validate-only (no non-precondition statements) the action is already
-  // atomic-safe, and an unnecessary `require_atomic? false` is noise.
-  const atomicLine = nonPrecondStmts.length > 0 ? "\n      require_atomic? false" : "";
+  // Ash 3.x rejects both function-based changes AND function-form
+  // validations as non-atomic, and refuses to register the action without
+  // an explicit opt-out (under `--warnings-as-errors` the "action cannot be
+  // done atomically" warning is fatal).  Flag the action when it emits a
+  // `change fn` body OR a `validate fn ...` clause.  A purely built-in
+  // validation (min/max/match/… — all atomic-safe) leaves the action atomic,
+  // so an unnecessary `require_atomic? false` would be noise there.
+  const hasFnValidate = validateLines.some((l) => l.includes("validate fn"));
+  const atomicLine =
+    nonPrecondStmts.length > 0 || hasFnValidate ? "\n      require_atomic? false" : "";
 
   return `    update :${snake(op.name)} do${atomicLine}${argsBlock}${validateBlock}${changeBlock}
     end`;
