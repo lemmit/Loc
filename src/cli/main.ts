@@ -8,7 +8,7 @@ import { NodeFileSystem } from "langium/node";
 import type { Diagnostic } from "vscode-languageserver-types";
 import { generateDotnet } from "../generator/dotnet/index.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
-import { lowerModel, mergeLoomModels } from "../ir/lower/lower.js";
+import { lowerModel, lowerProject, mergeLoomModels } from "../ir/lower/lower.js";
 import type { EnrichedLoomModel, TestOutcome } from "../ir/types/loom-ir.js";
 import { type LoomDiagnostic, validateLoomModel } from "../ir/validate/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
@@ -113,8 +113,11 @@ async function parseProject(entryFile: string): Promise<ProjectParseResult> {
   // were resolved by the linker during DocumentBuilder.build so each
   // IR node carries fully-resolved cross-doc refs.  The merge is then
   // an in-order concatenation of the top-level slices.
-  const lowered = all.map((doc) => lowerModel(doc.parseResult.value as Model));
-  const merged = mergeLoomModels(lowered);
+  // `lowerProject` composes the whole import graph as one project — the
+  // lone `system { }` block plus top-level `subdomain` / `context`
+  // declarations from any file fold into a single system (see
+  // docs/proposals/implicit-system-composition.md).
+  const merged = lowerProject(all.map((doc) => doc.parseResult.value as Model));
   const loom = enrichLoomModel(merged);
   return { loom, diagnostics, errorCount, warningCount };
 }

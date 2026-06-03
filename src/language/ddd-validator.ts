@@ -42,6 +42,7 @@ import {
   checkSlotMemberAccess,
   checkSlotTypePosition,
   checkTheme,
+  checkTopLevelDomainComposition,
   checkTraceability,
   checkTypeReferences,
   checkUi,
@@ -94,6 +95,11 @@ export class DddValidator {
     // targets (VO / EntityPart / user-component / walker primitive) and
     // errors on misses.
     checkBuilderCallType(model, accept, this.services);
+    // Project composition: a top-level `subdomain` (declared outside any
+    // `system { }`) folds into the project's single system — enforce that
+    // exactly one system exists across the import graph.  See
+    // docs/proposals/implicit-system-composition.md.
+    checkTopLevelDomainComposition(model, accept, this.services);
     // `component` declarations: enforce the extern↔body exclusivity the
     // grammar admits but can't constrain (extern ⇒ no body; normal ⇒ body).
     checkComponent(model, accept);

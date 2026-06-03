@@ -2,7 +2,7 @@
 import { EmptyFileSystem, URI } from "langium";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
-import { lowerModel, mergeLoomModels } from "../../../src/ir/lower/lower.js";
+import { lowerModel, lowerProject, mergeLoomModels } from "../../../src/ir/lower/lower.js";
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
 import type { EnrichedLoomModel, LoomModel } from "../../../src/ir/types/loom-ir.js";
 import { validateLoomModel } from "../../../src/ir/validate/validate.js";
@@ -68,9 +68,9 @@ async function parseProject(
     if (diagnostics.some((d) => d.severity === "error")) {
       return { diagnostics };
     }
-    const merged = mergeLoomModels(
-      all.map((d) => lowerModel(d.parseResult?.value as Model)),
-    );
+    // Compose the whole import graph as one project (top-level subdomains
+    // fold into the lone system) — see implicit-system-composition.md.
+    const merged = lowerProject(all.map((d) => d.parseResult?.value as Model));
     return { loom: merged, diagnostics };
   } catch (err) {
     return {

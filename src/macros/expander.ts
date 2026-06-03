@@ -101,7 +101,7 @@ export function registerMacroExpander(shared: LangiumSharedServices): void {
   shared.workspace.DocumentBuilder.onDocumentPhase(DocumentState.IndexedContent, async (doc) => {
     const root = doc.parseResult.value as Model | undefined;
     if (!root) return;
-    expandModel(root, doc);
+    expandModel(root, doc, shared);
   });
 }
 
@@ -129,7 +129,7 @@ interface Inventory {
   EnumDecl: Map<string, AstNode>;
 }
 
-function buildInventory(model: Model): Inventory {
+function buildInventory(model: Model, shared?: LangiumSharedServices): Inventory {
   const inv: Inventory = {
     Aggregate: new Map(),
     Subdomain: new Map(),
@@ -139,17 +139,31 @@ function buildInventory(model: Model): Inventory {
     ValueObject: new Map(),
     EnumDecl: new Map(),
   };
-  for (const node of AstUtils.streamAllContents(model)) {
-    const named = node as AstNode & { name?: string };
-    if (typeof named.name !== "string") continue;
-    if (isAggregate(node)) inv.Aggregate.set(named.name, node);
-    else if (isSubdomain(node)) inv.Subdomain.set(named.name, node);
-    else if (isBoundedContext(node)) inv.BoundedContext.set(named.name, node);
-    else if (isWorkflow(node)) inv.Workflow.set(named.name, node);
-    else if (isView(node)) inv.View.set(named.name, node);
-    else if (node.$type === "ValueObject") inv.ValueObject.set(named.name, node);
-    else if (node.$type === "EnumDecl") inv.EnumDecl.set(named.name, node);
+  const scan = (root: Model): void => {
+    for (const node of AstUtils.streamAllContents(root)) {
+      const named = node as AstNode & { name?: string };
+      if (typeof named.name !== "string") continue;
+      if (isAggregate(node)) inv.Aggregate.set(named.name, node);
+      else if (isSubdomain(node)) inv.Subdomain.set(named.name, node);
+      else if (isBoundedContext(node)) inv.BoundedContext.set(named.name, node);
+      else if (isWorkflow(node)) inv.Workflow.set(named.name, node);
+      else if (isView(node)) inv.View.set(named.name, node);
+      else if (node.$type === "ValueObject") inv.ValueObject.set(named.name, node);
+      else if (node.$type === "EnumDecl") inv.EnumDecl.set(named.name, node);
+    }
+  };
+  // Sibling documents first, then the local model — so a local
+  // declaration wins on a name collision.  Scanning the whole import
+  // graph lets a macro ref-list argument (e.g. `scaffold(subdomains:
+  // [Sales])`) resolve a `subdomain` declared in another file, which the
+  // implicit-system composition then folds into the one project system.
+  if (shared) {
+    for (const doc of shared.workspace.LangiumDocuments.all) {
+      const root = doc.parseResult?.value as Model | undefined;
+      if (root && root !== model) scan(root);
+    }
   }
+  scan(model);
   return inv;
 }
 
@@ -157,10 +171,11 @@ function buildInventory(model: Model): Inventory {
 // Walk + expand
 // ---------------------------------------------------------------------------
 
-function expandModel(model: Model, doc: LangiumDocument): void {
+function expandModel(model: Model, doc: LangiumDocument, shared?: LangiumSharedServices): void {
   // Inventory shared across all macro expansions in this pass —
-  // O(N) AST walk once, instead of once per ref-list arg.
-  const inv = buildInventory(model);
+  // O(N) AST walk once, instead of once per ref-list arg.  Workspace-aware
+  // so a macro ref-list can name a declaration in a sibling file.
+  const inv = buildInventory(model, shared);
   // streamAllContents walks the AST via `$container`-respecting
   // traversal — safe from cycle-via-parent-pointer recursion.
   for (const node of AstUtils.streamAllContents(model)) {
