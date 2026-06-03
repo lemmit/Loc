@@ -680,7 +680,8 @@ function printLoadPath(node: import("../generated/ast.js").LoadPath): string {
 
 function printWorkflow(node: Workflow): string {
   const params = node.params.map(printParameter).join(", ");
-  let head = `workflow ${node.name}(${params})`;
+  const es = node.eventSourced ? " eventSourced" : "";
+  let head = `workflow ${node.name}${es}(${params})`;
   if (node.transactional) {
     head += node.isolation ? ` transactional(${node.isolation})` : " transactional";
   }
@@ -691,9 +692,19 @@ function printWorkflow(node: Workflow): string {
         ? printOnDecl(m)
         : m.$type === "Property"
           ? printProperty(m)
-          : printStmt(m),
+          : m.$type === "Apply"
+            ? printApply(m)
+            : m.$type === "HandleDecl"
+              ? printHandleDecl(m)
+              : printStmt(m),
     ),
   );
+}
+
+// `handle name(params) { … }` command-handler member (workflow-and-applier.md A2).
+function printHandleDecl(node: import("../generated/ast.js").HandleDecl): string {
+  const params = node.params.map(printParameter).join(", ");
+  return block(`handle ${node.name}(${params})`, node.body.map(printStmt));
 }
 
 // `on(e: Event) [by <expr>] { … }` reactor member (workflow-and-applier.md A2).
@@ -783,8 +794,10 @@ function printDestroy(node: import("../generated/ast.js").Destroy): string {
 }
 
 function printApply(node: import("../generated/ast.js").Apply): string {
-  const event = node.event.ref?.name ?? node.event.$refText;
-  return block(`apply(${node.param}: ${event})`, node.body.map(printStmt));
+  // `$refText` (not `.ref`) — the printer must work on detached / not-yet-linked
+  // nodes (the round-trip harness re-parses without a workspace), and the source
+  // reference text is exactly what we re-emit.
+  return block(`apply(${node.param}: ${node.event.$refText})`, node.body.map(printStmt));
 }
 
 function printTestBlock(node: TestBlock): string {

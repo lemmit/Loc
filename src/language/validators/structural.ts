@@ -25,6 +25,7 @@ import {
   isEmitStmt,
   isEntityPart,
   isFunctionDecl,
+  isHandleDecl,
   isInvariant,
   isOnDecl,
   isOperation,
@@ -160,6 +161,91 @@ function checkWorkflow(wf: Workflow, accept: ValidationAcceptor): void {
           `Each inbound event routes to one reactor; if these are intentional alternates, distinguish them by their 'by' clause.`,
         { node: o, property: "event", code: "loom.on-duplicate-subscription" },
       );
+    }
+  }
+  checkWorkflowEventSourcedDiscipline(wf, accept);
+
+  // Transactional legality (workflow-and-applier.md A2-S5e): `transactional`
+  // is one DB transaction, so it is incompatible with continuation handlers —
+  // an `on(...)` reactor or a `handle` command runs in its own later
+  // transaction.  A multi-handler workflow is structurally multi-transaction.
+  if (wf.transactional) {
+    const continuations = wf.members.filter((m) => isOnDecl(m) || isHandleDecl(m));
+    for (const c of continuations) {
+      accept(
+        "error",
+        `Workflow '${wf.name}' is 'transactional' but declares a continuation handler. ` +
+          `A reactor / handle runs in its own transaction — drop 'transactional', or remove the continuation.`,
+        { node: c, code: "loom.transactional-with-continuations" },
+      );
+    }
+  }
+}
+
+// Event-sourcing discipline for workflows (workflow-and-applier.md A2-S5b) —
+// the AST-level mirror of the aggregate `checkEventSourcedDiscipline` below.
+// An `eventSourced` workflow folds its emitted events into state via
+// `apply(...)`; its handler bodies (`on(...)` + legacy statements) may only
+// `emit`, and every emitted event needs an applier.
+function checkWorkflowEventSourcedDiscipline(wf: Workflow, accept: ValidationAcceptor): void {
+  const appliers = wf.members.filter(isApply);
+  const eventOf = (a: (typeof appliers)[number]): string => a.event.ref?.name ?? a.event.$refText;
+
+  // Rule 1 — appliers require an `eventSourced` workflow.
+  if (!wf.eventSourced) {
+    for (const ap of appliers) {
+      accept(
+        "error",
+        `Workflow '${wf.name}' declares apply(...) but is not event-sourced. ` +
+          `Add 'eventSourced' to the workflow header, or remove the applier.`,
+        { node: ap, code: "loom.workflow-applier-on-non-event-sourced" },
+      );
+    }
+    return;
+  }
+
+  // Rule 5 — one applier per event type.
+  const counts = new Map<string, number>();
+  for (const ap of appliers) counts.set(eventOf(ap), (counts.get(eventOf(ap)) ?? 0) + 1);
+  for (const ap of appliers) {
+    if ((counts.get(eventOf(ap)) ?? 0) > 1) {
+      accept(
+        "error",
+        `Workflow '${wf.name}' declares more than one applier for event '${eventOf(ap)}'. ` +
+          `An event folds into state exactly one way — declare a single apply(${eventOf(ap)}).`,
+        { node: ap, property: "event", code: "loom.workflow-duplicate-applier" },
+      );
+    }
+  }
+
+  // Rules 2 + 3 — handler bodies are emit-only; emitted events must be folded.
+  const appliedEvents = new Set(appliers.map(eventOf));
+  const handlerBodies: AstNode[][] = [
+    ...wf.members.filter(isOnDecl).map((o) => o.body),
+    ...wf.members.filter(isHandleDecl).map((h) => h.body),
+    wf.members.filter(isAssignOrCallStmt),
+    wf.members.filter(isEmitStmt),
+  ];
+  for (const body of handlerBodies) {
+    for (const stmt of body) {
+      if (isAssignOrCallStmt(stmt) && stmt.op) {
+        accept(
+          "error",
+          `Workflow '${wf.name}' is event-sourced — a handler body must not mutate 'this' directly. ` +
+            `Replace the assignment with an 'emit' and fold it in an apply(...) block.`,
+          { node: stmt, code: "loom.workflow-event-sourced-mutation" },
+        );
+      } else if (isEmitStmt(stmt)) {
+        const ev = stmt.event.ref?.name ?? stmt.event.$refText;
+        if (!appliedEvents.has(ev)) {
+          accept(
+            "error",
+            `Event '${ev}' is emitted in workflow '${wf.name}' but no applier folds it. ` +
+              `Add an apply(${ev}: ${ev}) block, or the event is recorded but never reflected in state.`,
+            { node: stmt, code: "loom.workflow-emitted-event-no-applier" },
+          );
+        }
+      }
     }
   }
 }

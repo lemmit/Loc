@@ -16,7 +16,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseBuiltinDesignRef } from "./builtin-formats.js";
+import { parseBuiltinDesignRef } from "../../util/builtin-formats.js";
 import { compilePack, type LoadedPack, type PackManifest } from "./loader.js";
 
 /** Names of the repo-root template directories that supply

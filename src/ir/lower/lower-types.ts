@@ -9,6 +9,7 @@ import type {
   Operation,
   TypeRef,
   ValueObject,
+  Workflow,
 } from "../../language/generated/ast.js";
 import {
   isAggregate,
@@ -25,6 +26,7 @@ import {
   isProperty,
   isSlotType,
   isValueObject,
+  isWorkflow,
 } from "../../language/generated/ast.js";
 import type {
   DataSourceKind,
@@ -52,6 +54,10 @@ export interface Env {
   aggregate?: Aggregate;
   part?: EntityPart;
   valueObject?: ValueObject;
+  /** The enclosing `workflow` when lowering a handler body — a workflow is a
+   *  state-bearing entity (workflow-and-applier.md A2), so `this` / bare names
+   *  resolve against its `Property` state fields. */
+  workflow?: Workflow;
   locals: Map<string, { kind: "param" | "let" | "lambda"; type: TypeIR }>;
   /** System-wide user-claim shape — the lowered `user { ... }` block.
    *  Threaded down by the lowering structure layer so every
@@ -117,6 +123,13 @@ export function inPart(env: Env, agg: Aggregate, part: EntityPart): Env {
 
 export function inValueObject(env: Env, vo: ValueObject): Env {
   return { ...env, valueObject: vo, aggregate: undefined, part: undefined };
+}
+
+/** Bind `this` to a workflow's state inside a handler body.  Distinct from an
+ *  aggregate `this` only in that the owner is a `Workflow`; `Property` members
+ *  resolve identically (workflow-and-applier.md A2). */
+export function inWorkflow(env: Env, wf: Workflow): Env {
+  return { ...env, workflow: wf, aggregate: undefined, part: undefined, valueObject: undefined };
 }
 
 export interface ScopeCandidate {
@@ -258,6 +271,19 @@ export function findValueObjectByName(env: Env, name: string): ValueObject | und
   if (!env.ctx) return undefined;
   for (const m of env.ctx.members) {
     if (isValueObject(m) && m.name === name) return m;
+  }
+  return undefined;
+}
+
+/** Look up a context-level `workflow` declaration by name.  Workflows are
+ *  state-bearing entities (workflow-and-applier.md A2): their `Property`
+ *  members are accessible as `this`-props inside handler bodies, and a
+ *  `this`/correlation reference types as `{ kind: "entity", name }` resolved
+ *  back through this lookup — mirroring `findEventByName`/`memberOnEvent`. */
+export function findWorkflowByName(env: Env, name: string): Workflow | undefined {
+  if (!env.ctx) return undefined;
+  for (const m of env.ctx.members) {
+    if (isWorkflow(m) && m.name === name) return m;
   }
   return undefined;
 }

@@ -25,7 +25,7 @@ import {
   type LoadedPack,
   type PackManifest,
 } from "../../../src/generator/_packs/loader.js";
-import { parseBuiltinDesignRef } from "../../../src/generator/_packs/builtin-formats.js";
+import { parseBuiltinDesignRef } from "../../../src/util/builtin-formats.js";
 import type { VfsPath } from "../vfs/types.js";
 import { getWorkerVfs } from "./worker-vfs.js";
 
