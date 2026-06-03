@@ -57,7 +57,6 @@ import { parseString } from "../_helpers/index.js";
 const fakeOrigin: OriginToken = {
   _kind: "macro-origin",
   macroName: "test-macro",
-  // biome-ignore lint/suspicious/noExplicitAny: tests don't need a real MacroCall
   callNode: {} as any,
 };
 

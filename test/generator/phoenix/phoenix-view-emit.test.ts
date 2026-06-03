@@ -106,7 +106,6 @@ describe("phoenix emitViews — shorthand form", () => {
 
   it("skips the view entirely when its aggregateName doesn't resolve", () => {
     const ctx = buildCtx(filterIR);
-    // biome-ignore lint/style/noNonNullAssertion: test setup mutation
     ctx.views[0]!.aggregateName = "DoesNotExist";
     const out = new Map<string, string>();
     emitViews("acme", ctx, "Acme", out);

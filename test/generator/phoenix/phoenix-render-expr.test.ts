@@ -194,6 +194,7 @@ describe("phoenix renderExpr — unary, paren, ternary", () => {
         {
           kind: "ternary",
           cond: { kind: "literal", lit: "bool", value: "true" },
+          // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then`
           then: litInt("1"),
           otherwise: litInt("2"),
         },

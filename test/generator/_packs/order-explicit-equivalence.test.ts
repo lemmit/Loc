@@ -46,9 +46,7 @@ async function generateFromFile(file: string): Promise<Map<string, string>> {
 /** Extract every `data-testid="..."` literal from a TSX string. */
 function extractTestids(tsx: string): Set<string> {
   const out = new Set<string>();
-  const re = /data-testid="([^"]+)"/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(tsx)) !== null) {
+  for (const m of tsx.matchAll(/data-testid="([^"]+)"/g)) {
     out.add(m[1]!);
   }
   return out;

@@ -428,11 +428,12 @@ describe("validation", () => {
       `);
       expect(errors).toEqual([]);
       // Sanity check: one OrderList page (deduped), not two.
-      const sys = (model.members ?? []).find((m: any) => m.$type === "System") as any;
-      const ui = (sys.members ?? []).find((m: any) => m.$type === "Ui");
-      const orderListPages = (ui.members ?? []).filter(
-        (m: any) => m.$type === "Page" && m.name === "OrderList",
-      );
+      const { isPage, isSystem, isUi } = await import("../../../src/language/generated/ast.js");
+      const sys = (model.members ?? []).find(isSystem);
+      const ui = (sys?.members ?? []).find(isUi);
+      const orderListPages = (ui?.members ?? [])
+        .filter(isPage)
+        .filter((p) => p.name === "OrderList");
       expect(orderListPages.length).toBe(1);
     });
 

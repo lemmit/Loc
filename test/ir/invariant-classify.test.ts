@@ -110,6 +110,7 @@ describe("classifyForWire", () => {
     const guard: ExprIR = {
       kind: "ternary",
       cond: refField("x"),
+      // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then`
       then: refField("y"),
       otherwise: litInt(0),
     };
