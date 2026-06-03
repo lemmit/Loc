@@ -16,9 +16,10 @@
 // slice — so the emitted set always compiles.
 
 import type { BoundedContextIR, CriterionIR, ExprIR } from "../../ir/types/loom-ir.js";
+import { firstNonQueryableNode } from "../../ir/validate/validate.js";
 import { lines } from "../../util/code-builder.js";
 import { plural, upperFirst } from "../../util/naming.js";
-import { renderCsExpr, renderCsType } from "./render-expr.js";
+import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
 
 /** The `IsSatisfiedBy` parameter name — a reserved-ish identifier so it
  *  can't collide with a user-declared criterion parameter. */
@@ -57,9 +58,9 @@ function renderCriterionBase(ns: string): string {
     "/// <summary>",
     "/// Reified specification predicate — Evans's <c>Specification&lt;T&gt;.isSatisfiedBy</c>,",
     "/// the in-memory *evaluate* face of a Loom <c>criterion</c>. Generated from",
-    "/// <c>criterion</c> declarations. The *query* face (Expression / EF",
-    "/// <c>Specification&lt;T&gt;</c>) and the use-site rewiring of invariants /",
-    "/// preconditions land in later reified-criteria slices.",
+    "/// <c>criterion</c> declarations. Queryable criteria additionally carry a",
+    "/// <c>ToExpression()</c> *query* face (<c>Expression&lt;Func&lt;T,bool&gt;&gt;</c>) for EF;",
+    "/// use-site consumption (find/view/filter) lands in a later slice.",
     "/// </summary>",
     "public abstract class Criterion<T>",
     "{",
@@ -75,16 +76,29 @@ function renderCriterion(c: CriterionIR, candidate: string, ns: string): string 
   const className = `${upperFirst(c.name)}Criterion`;
   const ctorParams = c.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
   // Candidate fields render against `__candidate` (this-prop → `__candidate.Prop`);
-  // parameters render as bare names, which resolve to the fields below.
+  // parameters render as bare names, which resolve to the fields below.  The
+  // same rendered body serves both faces — `IsSatisfiedBy(c) => body` and the
+  // `c => body` lambda of `ToExpression()`.
   const body = renderCsExpr(c.body, { thisName: CANDIDATE });
+  // The *query* face is emitted only for criteria in the queryable subset —
+  // `ToExpression()` is meant for EF `IQueryable`/`Where`, so a body that
+  // can't translate to SQL gets the evaluate face only.
+  const queryable = firstNonQueryableNode(c.body) === null;
+  // Namespaces beyond the SDK implicit-usings set the body reaches into
+  // (e.g. `matches` → `System.Text.RegularExpressions`).
+  const usings = new Set<string>([
+    `${ns}.Domain.Common`,
+    `${ns}.Domain.${plural(candidate)}`,
+    `${ns}.Domain.Enums`,
+    `${ns}.Domain.ValueObjects`,
+    `${ns}.Domain.Ids`,
+    "System.Linq",
+  ]);
+  for (const u of collectCsExprUsings(c.body)) usings.add(u);
+  if (queryable) usings.add("System.Linq.Expressions");
   return lines(
     "// Auto-generated.",
-    `using ${ns}.Domain.Common;`,
-    `using ${ns}.Domain.${plural(candidate)};`,
-    `using ${ns}.Domain.Enums;`,
-    `using ${ns}.Domain.ValueObjects;`,
-    `using ${ns}.Domain.Ids;`,
-    "using System.Linq;",
+    ...[...usings].map((u) => `using ${u};`),
     "",
     `namespace ${ns}.Domain.Criteria;`,
     "",
@@ -97,6 +111,12 @@ function renderCriterion(c: CriterionIR, candidate: string, ns: string): string 
     c.params.length > 0 ? "    }" : null,
     c.params.length > 0 ? "" : null,
     `    public override bool IsSatisfiedBy(${candidate} ${CANDIDATE}) => ${body};`,
+    // Query face — for `find`/`view`/`filter`/`retrieval` consumption (a
+    // later slice). Selectability decides: only queryable criteria carry it.
+    queryable ? "" : null,
+    queryable
+      ? `    public Expression<Func<${candidate}, bool>> ToExpression() => ${CANDIDATE} => ${body};`
+      : null,
     "}",
   );
 }
