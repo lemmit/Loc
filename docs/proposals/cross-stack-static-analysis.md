@@ -321,7 +321,13 @@ set after each Ash major bump.
 - ✅ **`<App>.Types` module + `result(t)` vocabulary** — shipped in PR #904.
 - ✅ View `def run/1` `@spec` (shorthand list + full-form map projection) — shipped in PR #906.
 - ✅ `.dialyzer_ignore.exs` template + `dialyzer:` mix.exs config — shipped early as future-proofing.
-- ⏳ Workflow `def run/N` `@spec` — return type is the open problem; needs IR enrichment or a conservative-default decision.
+- ✅ Workflow `def run/N` `@spec` — landed with a **conservative** return spec
+  (`:ok | {:ok, term()} | {:error, term()}`) since `WorkflowIR` carries no
+  explicit return type; the param-map shape is precise from `wf.params`.
+  Can tighten to `Types.result(T)` per workflow if the IR ever gains a
+  `returnType` field, but the conservative version is already useful: it
+  documents the contract surface (workflows can fail) and gives Dialyzer a
+  typed input map to narrow against.
 - ⏳ Service-layer wrapper emission (and its spec'd surface) — deferred behind the architectural decision to emit such a layer.
 - ⏳ Empirical Dialyzer first-run audit against the existing Ash output (per the Ash v3 note above).
 
