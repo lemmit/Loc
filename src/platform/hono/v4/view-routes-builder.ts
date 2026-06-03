@@ -170,7 +170,7 @@ function emitViewRoute(
   out.push(`  async (httpCtx) => {`);
   if (usesUser) {
     out.push(
-      `    const currentUser = httpCtx.get("currentUser") as import("../auth/user-types").User;`,
+      `    const currentUser = (httpCtx as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
   }
   out.push(`    const repo = new ${view.aggregateName}Repository(db, events);`);

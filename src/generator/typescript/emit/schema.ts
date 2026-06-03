@@ -568,7 +568,23 @@ function drizzleColumnLinesForName(
       // many-to-many join table (emitted separately in renderSchema),
       // so they contribute no column on the owning table.
       if (inner.element.kind === "id") return [];
-      return [`${fieldName}: text("${colName}")${not}, // arrays not supported as inline columns`];
+      // Scalar collections (`string[]`, `int[]`, enum[]) map to a native
+      // Postgres array column: the element's own column builder with
+      // `.array()` appended, which drizzle types as `Element[]`.
+      if (inner.element.kind === "primitive" || inner.element.kind === "enum") {
+        // Render the element's bare column builder (opt = true suppresses its
+        // own `.notNull()`); the array field's own nullability is applied via
+        // `not` after `.array()`, so an optional `T[]?` stays nullable and a
+        // required `T[]` becomes `.array().notNull()`.
+        const elemLines = drizzleColumnLinesForName(fieldName, inner.element, true, ctx);
+        if (elemLines.length === 1) {
+          const elemLine = elemLines[0]!;
+          // `field: <builder>,` → `field: <builder>.array()<not>,`
+          const builder = elemLine.slice(elemLine.indexOf(": ") + 2, elemLine.lastIndexOf(","));
+          return [`${fieldName}: ${builder}.array()${not},`];
+        }
+      }
+      return [`${fieldName}: text("${colName}")${not}, // non-scalar arrays stored as text`];
     case "optional":
       return drizzleColumnLinesForName(fieldName, inner.inner, true, ctx);
     case "slot":

@@ -1,12 +1,22 @@
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  ExprIR,
-  TestIR,
-  TestStmtIR,
+import {
+  type AggregateIR,
+  type BoundedContextIR,
+  type ExprIR,
+  operationUsesCurrentUser,
+  type TestIR,
+  type TestStmtIR,
 } from "../../../ir/types/loom-ir.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr } from "../render-expr.js";
+
+// A currentUser-gated operation's method signature picks up a trailing
+// `currentUser: User` parameter; a domain `test` block has no auth context,
+// so calls to such ops are supplied a synthetic full-access actor — admin
+// role + non-empty permissions so guards pass and the test exercises the
+// op's domain logic.  Cast through `unknown` so it stays valid regardless of
+// the system's actual `user { ... }` claim shape.
+const TEST_ACTOR =
+  '{ id: "00000000-0000-0000-0000-000000000000", role: "admin", permissions: ["*"] } as unknown as import("../auth/user-types").User';
 
 // ---------------------------------------------------------------------------
 // `test "..." { ... }` DSL → vitest test file.
@@ -31,7 +41,7 @@ export function renderTestsFile(agg: AggregateIR, ctx: BoundedContextIR): string
   const body: string[] = [];
   body.push(`describe("${agg.name}", () => {`);
   for (const t of agg.tests) {
-    body.push(...renderTest(t).map((l) => `  ${l}`));
+    body.push(...renderTest(t, ctx).map((l) => `  ${l}`));
     body.push("");
   }
   body.push(`});`);
@@ -60,15 +70,32 @@ export function renderTestsFile(agg: AggregateIR, ctx: BoundedContextIR): string
   return lines.join("\n") + "\n";
 }
 
-function renderTest(t: TestIR): string[] {
+function renderTest(t: TestIR, ctx: BoundedContextIR): string[] {
   const out: string[] = [];
   out.push(`it(${JSON.stringify(t.name)}, () => {`);
   for (const s of t.statements) {
-    const rendered = renderTestStmt(s);
+    const rendered = renderTestStmt(s, ctx);
     if (rendered) out.push(...rendered.split("\n"));
   }
   out.push(`});`);
   return out;
+}
+
+/** Render a test-body expression, threading a synthetic actor into calls of
+ *  currentUser-gated operations (whose method signature gained a trailing
+ *  `currentUser` parameter).  Everything else defers to `renderTsExpr`. */
+function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
+  if (e.kind === "method-call" && e.receiverType.kind === "entity" && !e.isCollectionOp) {
+    const entityName = e.receiverType.name;
+    const agg = ctx.aggregates.find((a) => a.name === entityName);
+    const op = agg?.operations.find((o) => o.name === e.member);
+    if (op && operationUsesCurrentUser(op)) {
+      const recv = renderTestExpr(e.receiver, ctx);
+      const args = [...e.args.map((a) => renderTestExpr(a, ctx)), TEST_ACTOR];
+      return `${recv}.${e.member}(${args.join(", ")})`;
+    }
+  }
+  return renderTsExpr(e);
 }
 
 /** Detect `expect(x).<matcher>(y)` / `expect(x).not.<matcher>(y)` — an
@@ -76,7 +103,7 @@ function renderTest(t: TestIR): string[] {
  *  Returns the vitest line directly (matcher names line up 1:1) so the
  *  inner expression isn't double-wrapped in `.toBe(true)`. Returns null
  *  for bare boolean assertions, which the caller still wraps. */
-function renderExplicitMatcher(expr: ExprIR): string | null {
+function renderExplicitMatcher(expr: ExprIR, ctx: BoundedContextIR): string | null {
   if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) return null;
   let receiver = expr.receiver;
   let negate = false;
@@ -85,13 +112,13 @@ function renderExplicitMatcher(expr: ExprIR): string | null {
     receiver = receiver.receiver;
   }
   const inner = receiver.kind === "paren" ? receiver.inner : receiver;
-  const actual = renderTsExpr(inner);
-  const args = expr.args.map((a) => renderTsExpr(a)).join(", ");
+  const actual = renderTestExpr(inner, ctx);
+  const args = expr.args.map((a) => renderTestExpr(a, ctx)).join(", ");
   const tail = negate ? `not.${expr.member}` : expr.member;
   return `  expect(${actual}).${tail}(${args});`;
 }
 
-function renderTestStmt(s: TestStmtIR): string {
+function renderTestStmt(s: TestStmtIR, ctx: BoundedContextIR): string {
   // The IR validator (`validateAggregateTestBodies` in
   // src/ir/validate/validate.ts) rejects mutating statements (`assign` /
   // `add` / `remove` / `emit` / `precondition`) and `call` to a
@@ -100,25 +127,25 @@ function renderTestStmt(s: TestStmtIR): string {
   // generator, only `expect` / `expect-throws` / `let` / `expression`
   // and `call` to a pure function survive.
   if (s.kind === "expect") {
-    const explicit = renderExplicitMatcher(s.expr);
+    const explicit = renderExplicitMatcher(s.expr, ctx);
     if (explicit) return explicit;
-    return `  expect(${renderTsExpr(s.expr)}).toBe(true);`;
+    return `  expect(${renderTestExpr(s.expr, ctx)}).toBe(true);`;
   }
   if (s.kind === "expect-throws") {
-    return `  expect(() => { ${renderTsExpr(s.expr)}; }).toThrow();`;
+    return `  expect(() => { ${renderTestExpr(s.expr, ctx)}; }).toThrow();`;
   }
   if (s.kind === "let") {
-    return `  const ${s.name} = ${renderTsExpr(s.expr)};`;
+    return `  const ${s.name} = ${renderTestExpr(s.expr, ctx)};`;
   }
   if (s.kind === "call") {
     // Only pure-function calls reach here (validator-rejected
     // private-operation calls).  Render as a real expression-stmt
     // call so the function fires.
-    const args = s.args.map((a) => renderTsExpr(a)).join(", ");
+    const args = s.args.map((a) => renderTestExpr(a, ctx)).join(", ");
     return `  ${s.name}(${args});`;
   }
   if (s.kind === "expression") {
-    return `  ${renderTsExpr(s.expr)};`;
+    return `  ${renderTestExpr(s.expr, ctx)};`;
   }
   // Other StmtIR kinds (assign / add / remove / emit / precondition)
   // are guaranteed by the validator never to land here.  If they do,
