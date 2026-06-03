@@ -15,6 +15,13 @@ import {
   buildTpcBaseReaderFile,
 } from "../../../generator/typescript/base-reader-builder.js";
 import { emitTypescriptMigrations } from "../../../generator/typescript/emit/migrations.js";
+import {
+  MIKRO_INDEX_IMPORTS,
+  mikroConnectionSetup,
+  renderMikroConfig,
+  renderMikroEntities,
+  renderMikroRepository,
+} from "../../../generator/typescript/emit/mikroorm.js";
 import { emitTypescriptSeeds } from "../../../generator/typescript/emit/seed.js";
 import {
   renderAggregate,
@@ -317,10 +324,22 @@ export function generateTypeScriptForContexts(
           : undefined;
       }
     : undefined;
-  out.set(
-    "db/schema.ts",
-    renderSchema(merged, { audit: emitAudit, provenance: emitProvenance, resolveDataSource }),
-  );
+  // Persistence selection (D-REALIZATION-AXES `persistence:`): `mikroorm`
+  // replaces the drizzle schema + per-aggregate drizzle repositories + drizzle
+  // migrations with an EntitySchema persistence model + MikroORM repositories
+  // (schema owned by `orm.schema.updateSchema()` at startup).  The validator
+  // gates mikroorm to the supported subset, so the drizzle-only branches below
+  // stay byte-identical for the default `drizzle`.
+  const usingMikro = system?.deployable.persistence === "mikroorm";
+  if (usingMikro) {
+    out.set("db/entities.ts", renderMikroEntities(merged.aggregates, merged));
+    out.set("mikro-orm.config.ts", renderMikroConfig());
+  } else {
+    out.set(
+      "db/schema.ts",
+      renderSchema(merged, { audit: emitAudit, provenance: emitProvenance, resolveDataSource }),
+    );
+  }
   if (merged.workflows.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     // resourceName → sourceType, so workflow bodies can import their
@@ -339,7 +358,10 @@ export function generateTypeScriptForContexts(
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     out.set("http/views.ts", buildViewsRoutesFile(merged, aggsByName));
   }
-  out.set("http/index.ts", renderHttpIndex(merged, { authRequired }));
+  out.set(
+    "http/index.ts",
+    renderHttpIndex(merged, { authRequired, persistence: usingMikro ? "mikroorm" : "drizzle" }),
+  );
 
   // Adapter dispatch context — present only in system-mode emit so
   // routes-file emission can route through the layered StyleAdapter +
@@ -398,13 +420,17 @@ export function generateTypeScriptForContexts(
       place(
         "drizzle-repository",
         agg.name,
-        agg.persistedAs === "eventLog"
-          ? buildEventSourcedRepositoryFile(agg, repo, ctx, emitTrace)
-          : shape === "document"
-            ? buildDocumentRepositoryFile(agg, repo, ctx, emitTrace)
-            : shape === "embedded"
-              ? buildEmbeddedRepositoryFile(agg, repo, ctx, emitTrace)
-              : buildRepositoryFile(agg, repo, ctx, emitTrace),
+        usingMikro
+          ? // mikroorm only ever reaches the relational case (event-sourcing /
+            // document / embedded / inheritance are validator-gated out).
+            renderMikroRepository(agg, repo, ctx)
+          : agg.persistedAs === "eventLog"
+            ? buildEventSourcedRepositoryFile(agg, repo, ctx, emitTrace)
+            : shape === "document"
+              ? buildDocumentRepositoryFile(agg, repo, ctx, emitTrace)
+              : shape === "embedded"
+                ? buildEmbeddedRepositoryFile(agg, repo, ctx, emitTrace)
+                : buildRepositoryFile(agg, repo, ctx, emitTrace),
       );
       // Routes file — adapter-dispatched in system mode (the layered
       // StyleAdapter re-derives audit / provenance gates from
@@ -468,7 +494,10 @@ export function generateTypeScriptForContexts(
   // Per-module Postgres migrations + Drizzle journal — emitted whenever
   // the system orchestrator hands us a migrations slice.  Empty slice
   // (non-system entry points) → no-op.
-  const hasMigrations = !!(system?.migrations && system.migrations.length > 0);
+  // mikroorm owns its schema via `orm.schema.updateSchema()` at startup, so it
+  // emits no drizzle migration files and `hasMigrations` stays false (which
+  // suppresses the boot-time `migrate(...)` call in index.ts).
+  const hasMigrations = !usingMikro && !!(system?.migrations && system.migrations.length > 0);
   if (hasMigrations) {
     emitTypescriptMigrations(system!.migrations!, out);
   }
@@ -525,7 +554,12 @@ export function generateTypeScriptForContexts(
   const projectUsesMoney = contexts.some(contextUsesMoney);
   out.set(
     "package.json",
-    projectPackageJson(pins, { withMoney: projectUsesMoney, resourceDeps, hasSeeds }),
+    projectPackageJson(pins, {
+      withMoney: projectUsesMoney,
+      resourceDeps,
+      hasSeeds,
+      persistence: usingMikro ? "mikroorm" : "drizzle",
+    }),
   );
   // Shared primitive-schema helpers — one home for non-trivial wire
   // shapes (today: `moneySchema`).  Emitted only when something in
@@ -543,9 +577,10 @@ export function generateTypeScriptForContexts(
       authRequired ? system?.sys.user : undefined,
       resourceImports,
       hasSeeds,
+      usingMikro,
     ),
   );
-  out.set("drizzle.config.ts", DRIZZLE_CONFIG);
+  if (!usingMikro) out.set("drizzle.config.ts", DRIZZLE_CONFIG);
   out.set("Dockerfile", DOCKERFILE_TS);
   out.set(".dockerignore", DOCKERIGNORE_TS);
   out.set("certs/.gitkeep", "");
@@ -574,8 +609,47 @@ export interface BackendPins {
 
 function projectPackageJson(
   pins: BackendPins,
-  opts: { withMoney: boolean; resourceDeps?: Record<string, string>; hasSeeds?: boolean },
+  opts: {
+    withMoney: boolean;
+    resourceDeps?: Record<string, string>;
+    hasSeeds?: boolean;
+    persistence?: "drizzle" | "mikroorm";
+  },
 ): string {
+  const mikro = opts.persistence === "mikroorm";
+  // mikroorm owns its schema at runtime (no drizzle-kit), so it drops the
+  // drizzle dep/devDep + the `db:*` CLI scripts; @mikro-orm packages take their
+  // place.  Default `drizzle` keeps the existing shape byte-identical.
+  const { "drizzle-orm": _drizzleOrm, ...depsNoDrizzle } = pins.dependencies as Record<
+    string,
+    string
+  >;
+  const { "drizzle-kit": _drizzleKit, ...devDepsNoDrizzle } = pins.devDependencies as Record<
+    string,
+    string
+  >;
+  const dependencies = mikro
+    ? {
+        ...depsNoDrizzle,
+        "@mikro-orm/core": "^6.4.0",
+        "@mikro-orm/postgresql": "^6.4.0",
+      }
+    : { ...pins.dependencies };
+  const devDependencies = mikro ? { ...devDepsNoDrizzle } : { ...pins.devDependencies };
+  const dbScripts = mikro
+    ? {}
+    : {
+        // We emit Drizzle-format `meta/_journal.json` + .sql files so
+        // both `drizzle-kit migrate` (the CLI) and
+        // `drizzle-orm/.../migrator` (called from index.ts at boot)
+        // can apply them.  `drizzle-kit generate` is left available
+        // for users who want to introspect the schema, but Loom owns
+        // the SQL generation end-to-end.
+        "db:generate": "drizzle-kit generate",
+        "db:migrate": "drizzle-kit migrate",
+        "db:push": "drizzle-kit push",
+        "db:studio": "drizzle-kit studio",
+      };
   return (
     JSON.stringify(
       {
@@ -588,26 +662,17 @@ function projectPackageJson(
           build: "tsup",
           typecheck: "tsc --noEmit",
           test: "vitest run",
-          // We emit Drizzle-format `meta/_journal.json` + .sql files so
-          // both `drizzle-kit migrate` (the CLI) and
-          // `drizzle-orm/.../migrator` (called from index.ts at boot)
-          // can apply them.  `drizzle-kit generate` is left available
-          // for users who want to introspect the schema, but Loom owns
-          // the SQL generation end-to-end.
-          "db:generate": "drizzle-kit generate",
-          "db:migrate": "drizzle-kit migrate",
-          "db:push": "drizzle-kit push",
-          "db:studio": "drizzle-kit studio",
+          ...dbScripts,
           // First-boot seed runner (database-seeding.md) — emitted only when
           // the model declares a `seed` block, else `db/seed.ts` doesn't exist.
           ...(opts.hasSeeds ? { "db:seed": "tsx db/seed.ts" } : {}),
         },
         dependencies: {
-          ...pins.dependencies,
+          ...dependencies,
           ...(opts.withMoney ? { "decimal.js": "^10.4.3" } : {}),
           ...(opts.resourceDeps ?? {}),
         },
-        devDependencies: { ...pins.devDependencies },
+        devDependencies,
       },
       null,
       2,
@@ -719,6 +784,7 @@ function renderProjectIndexTs(
   userShape?: UserIR,
   resourceImports: readonly string[] = [],
   runSeedsAtBoot = false,
+  usingMikro = false,
 ): string {
   // Side-effect imports for the resource-client modules (objectStore /
   // queue / api) so their clients instantiate at boot.  Empty for
@@ -744,21 +810,34 @@ function renderProjectIndexTs(
   const authStubCall = userShape
     ? `\n// Dev-stub verifier — accepts every request as a built-in admin user.\n// REPLACE for production by calling registerUserVerifier(...) with a JWT-\n// decoding implementation, ideally from a separate (non-regenerated) file.\nregisterUserVerifier(() => (${renderStubUserLiteral(userShape)}));\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`
     : "";
-  return `// Auto-generated.
-import { drizzle } from "drizzle-orm/node-postgres";
+  // Persistence wiring (D-REALIZATION-AXES `persistence:`) — drizzle (pg pool +
+  // boot-time migrate) vs mikroorm (MikroORM.init + schema:update at startup).
+  // The drizzle import header is kept byte-identical to the pre-mikroorm shape.
+  const importHeader = usingMikro
+    ? `import { serve } from "@hono/node-server";
+import { createApp } from "./http/index";
+${MIKRO_INDEX_IMPORTS.join("\n")}
+${seedImport}${authStubImport}import { baseLogger } from "./obs/log";`
+    : `import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
-${migImport}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";
+${migImport}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";`;
+  const connectionBlock = usingMikro
+    ? `// Persistence connection — owned by the mikroorm PersistenceAdapter\n// (MikroORM.init → dev schema bootstrap → EntityManager as \`db\`).\n${mikroConnectionSetup().join("\n")}`
+    : `// Persistence connection — owned by the drizzle PersistenceAdapter\n// (DATABASE_URL guard → pg pool → pool-error logging → drizzle db).\n${DRIZZLE_CONNECTION_SETUP.join("\n")}`;
+  // mikroorm bootstraps its schema inside the connection block (updateSchema),
+  // so it never emits the drizzle boot-time migrate call.
+  const effectiveMigCall = usingMikro ? "" : migCall;
+  return `// Auto-generated.
+${importHeader}
 ${resourceImportBlock}
-// Persistence connection — owned by the drizzle PersistenceAdapter
-// (DATABASE_URL guard → pg pool → pool-error logging → drizzle db).
-${DRIZZLE_CONNECTION_SETUP.join("\n")}
+${connectionBlock}
 
 const port = Number(process.env.PORT ?? 3000);
 baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
-${migCall}${seedCall}${authStubCall}const app = createApp(db);
+${effectiveMigCall}${seedCall}${authStubCall}const app = createApp(db);
 const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });
 
@@ -770,7 +849,7 @@ async function shutdown(signal: string): Promise<void> {
   baseLogger.info({ event: "server_shutdown", signal });
   await new Promise<void>((resolve) => server.close(() => resolve()));
   baseLogger.info({ event: "server_drained" });
-  await pool.end();
+  ${usingMikro ? "await orm.close();" : "await pool.end();"}
   process.exit(0);
 }
 process.on("SIGTERM", () => void shutdown("SIGTERM"));

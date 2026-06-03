@@ -79,6 +79,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateSavingShapeSupport(sys, diags);
     validateContextFilterSupport(sys, diags);
     validateDapperSupport(sys, diags);
+    validateMikroOrmSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
@@ -1484,6 +1485,70 @@ function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
         reject(`context '${ctxName}'`, "declares 'retrieval' query bundles (not yet on Dapper)");
       if ((ctx.seeds ?? []).length > 0)
         reject(`context '${ctxName}'`, "declares 'seed' data (the Dapper seed path is not wired)");
+      for (const agg of ctx.aggregates) {
+        const a = agg as EnrichedAggregateIR;
+        const where = `aggregate '${ctxName}.${agg.name}'`;
+        if (a.persistedAs === "eventLog") reject(where, "is event-sourced");
+        const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
+        if (shape !== "relational") reject(where, `is persisted as shape(${shape})`);
+        if (a.isAbstract || a.extendsAggregate)
+          reject(where, "participates in aggregate inheritance");
+        if ((a.associations ?? []).length > 0)
+          reject(where, "has reference-collection associations (Id[] join tables)");
+        if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
+          reject(where, "contains nested entity parts");
+        if ((a.contextStamps ?? []).length > 0) reject(where, "uses audit stamping");
+        if ((a.contextFilters ?? []).length > 0)
+          reject(where, "uses a 'filter' capability predicate");
+        for (const f of a.fields) {
+          if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
+          else if (f.access && MANAGED_ACCESS.has(f.access))
+            reject(`field '${agg.name}.${f.name}'`, `has server-managed access '${f.access}'`);
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// `persistence: mikroorm` capability gate (D-REALIZATION-AXES Phase 5d).
+//
+// The node/hono MikroORM adapter is the SECOND node persistence backend
+// (alongside the default `drizzle`), minimal in v1: relational, state-based,
+// flat aggregates with scalar / enum / value-object / id-ref fields.  Mirrors
+// the dapper gate — reject any feature mikroorm v1 doesn't emit so a selection
+// either works end-to-end or fails fast at validate time.  drizzle supports the
+// full surface, so this only fires for an explicit `persistence: mikroorm`.
+// ---------------------------------------------------------------------------
+function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  const MANAGED_ACCESS = new Set(["managed", "token", "internal", "secret"]);
+
+  for (const dep of sys.deployables) {
+    if (dep.persistence !== "mikroorm") continue;
+    const reject = (subject: string, reason: string): void => {
+      diags.push({
+        severity: "error",
+        message:
+          `Deployable '${dep.name}' selects 'persistence: mikroorm', but ${subject} ${reason}. ` +
+          `The MikroORM adapter is minimal in v1 (relational, state-based, flat aggregates with ` +
+          `scalar / enum / value-object / id-ref fields). Use 'persistence: drizzle' for this model, ` +
+          `or remove the unsupported feature.`,
+        source: `${sys.name}/${dep.name}`,
+        code: "loom.mikroorm-unsupported",
+      });
+    };
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      if ((ctx.retrievals ?? []).length > 0)
+        reject(`context '${ctxName}'`, "declares 'retrieval' query bundles (not yet on MikroORM)");
+      if ((ctx.seeds ?? []).length > 0)
+        reject(
+          `context '${ctxName}'`,
+          "declares 'seed' data (the MikroORM seed path is not wired)",
+        );
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;

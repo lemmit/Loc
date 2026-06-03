@@ -109,5 +109,39 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 300_000);
+
+    // D-REALIZATION-AXES Phase 5d: `persistence: mikroorm` is a SYSTEM-MODE
+    // selection (the second node persistence backend alongside the default
+    // drizzle).  Generate the SYSTEM and type-check + bundle the mikroorm
+    // deployable's project — proving the generated MikroORM EntitySchema model /
+    // repositories / config / connection wiring compile against @mikro-orm/*.
+    it("system `persistence: mikroorm` (node) — entities + repositories type-check + bundle", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-mikro-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/mikroorm.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        // Sanity: mikroorm replaced the drizzle schema with the EntitySchema model.
+        expect(fs.existsSync(path.join(proj, "db", "entities.ts"))).toBe(true);
+        expect(fs.existsSync(path.join(proj, "mikro-orm.config.ts"))).toBe(true);
+        expect(fs.existsSync(path.join(proj, "db", "schema.ts"))).toBe(false);
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        execSync(`npm run build`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        expect(fs.existsSync(path.join(proj, "dist", "index.js"))).toBe(true);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
   },
 );

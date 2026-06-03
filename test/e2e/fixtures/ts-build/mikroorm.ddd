@@ -1,0 +1,60 @@
+// Compile-gate fixture for the node/hono `persistence: mikroorm` adapter
+// (D-REALIZATION-AXES Phase 5d).  `persistence:` is a SYSTEM-MODE selection
+// (on a deployable), so this is generated via `ddd generate system` and the
+// mikroorm deployable's project is type-checked (`tsc --noEmit`) + bundled
+// (`tsup`) — proving the generated MikroORM entities / repositories / config /
+// connection wiring compile against the real @mikro-orm/* types.
+//
+// Exercises the supported v1 surface: scalar (string/int/bool/datetime), enum,
+// value-object, single id-ref, optional fields, plus scalar / enum / id-ref
+// find predicates.
+
+system MikroNode {
+  api OrdersApi from Sales
+
+  subdomain Sales {
+    context Orders {
+      enum Status { Draft, Confirmed, Shipped }
+
+      valueobject Money {
+        amount:   int
+        currency: string
+      }
+
+      aggregate Customer with crudish {
+        name:   string
+        active: bool
+      }
+
+      aggregate Order with crudish {
+        customerId: Customer id
+        status:     Status
+        total:      Money
+        placedAt:   datetime
+        quantity:   int
+        note:       string?
+      }
+
+      repository Customers for Customer {
+        find byName(name: string): Customer[] where this.name == name
+      }
+
+      repository Orders for Order {
+        find byCustomer(customerId: Customer id): Order[] where this.customerId == customerId
+        find byQuantity(quantity: int): Order[] where this.quantity >= quantity
+      }
+    }
+  }
+
+  storage pg { type: postgres }
+
+  resource ordersState { for: Orders, kind: state, use: pg }
+
+  deployable api {
+    platform: hono { persistence: mikroorm }
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 8080
+  }
+}
