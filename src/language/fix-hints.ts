@@ -55,6 +55,31 @@ const PROVIDERS: Record<string, FixHintProvider> = {
       patch: { op: "replace", target, source },
     };
   },
+
+  // `derived display: string = …` on a value object → `display: string = …`.
+  // `display`/`inspect` are reserved derived names meaningful only on
+  // aggregates; on a VO they're rejected.  Dropping `derived` keeps the field
+  // as an ordinary value-object property with its default (validates clean).
+  "loom.reserved-derived-on-vo": (_d, _doc, node) => {
+    const cst = node.$cstNode;
+    if (!cst) return undefined;
+    const target = addressOf(node);
+    if (!target) return undefined;
+    const source = cst.text.replace(/^derived\s+/, "");
+    if (source === cst.text) return undefined; // no leading `derived` to drop
+    return {
+      kind: "replace-text",
+      summary: "Drop 'derived' — keep it as a value-object field.",
+      patch: { op: "replace", target, source },
+    };
+  },
+
+  // NB: `loom.react-deployable-missing-ui` is intentionally NOT auto-fixed.
+  // The fix is `add ui: <Name>`, but the deployable body is a *positional*
+  // grammar (the `ui:` binding has a fixed slot), so the generic `add` op
+  // (append before `}`) produces invalid source.  It needs a position-aware
+  // "insert into a sequenced body" patch kind — tracked in
+  // docs/proposals/agent-tools-and-mcp.md §4c.
 };
 
 /**

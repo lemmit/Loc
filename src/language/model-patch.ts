@@ -65,9 +65,13 @@ interface Edit {
   newText: string;
 }
 
-/** A container the `add` op can insert a member into (a `{ … }` body). */
+/** A container the `add` op can insert a member into — a node with a free-form
+ *  `{ member* }` body where appending before the closing `}` is valid.
+ *  Deliberately excludes `Deployable`: its body is a *positional* config
+ *  grammar (the `ui:` / `serves:` / `hosts:` slots are ordered), so a generic
+ *  append would land out of position and fail to parse. */
 function isContainer(node: AstNode): boolean {
-  return isBoundedContext(node) || isAggregate(node) || isValueObject(node) || isDeployable(node);
+  return isBoundedContext(node) || isAggregate(node) || isValueObject(node);
 }
 
 /** Walk the declaration tree (the same set `buildOutline` enumerates) building
