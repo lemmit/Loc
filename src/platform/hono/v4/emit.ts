@@ -358,7 +358,10 @@ export function generateTypeScriptForContexts(
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     out.set("http/views.ts", buildViewsRoutesFile(merged, aggsByName));
   }
-  out.set("http/index.ts", renderHttpIndex(merged, { authRequired }));
+  out.set(
+    "http/index.ts",
+    renderHttpIndex(merged, { authRequired, persistence: usingMikro ? "mikroorm" : "drizzle" }),
+  );
 
   // Adapter dispatch context — present only in system-mode emit so
   // routes-file emission can route through the layered StyleAdapter +

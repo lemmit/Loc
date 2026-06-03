@@ -93,10 +93,15 @@ function primTypes(name: string): { mikro: string; ts: string; columnType?: stri
 
 /** Expand a single field into its column(s). VO fields flatten into one column
  *  per sub-field (`total_amount`, `total_currency`); everything else is a
- *  single column. Throws on a kind the validator should have gated. */
+ *  single column. Throws on a kind the validator should have gated.
+ *
+ *  Property names are the FIELD names (and `field_sub` for VO sub-fields), NOT
+ *  snaked — they must match what the reused `hydrateRootExpr` / `projectionObject`
+ *  reference (which use the field name / `${field}_${sub}`).  MikroORM's default
+ *  underscore naming strategy still maps `customerId` → the `customer_id` column. */
 function fieldColumns(f: FieldIR, ctx: EnrichedBoundedContextIR): MikroColumn[] {
   const { type, nullable } = unwrapOptional(f.type);
-  return columnsForType(snake(f.name), type, nullable, ctx);
+  return columnsForType(f.name, type, nullable, ctx);
 }
 
 function columnsForType(
@@ -119,7 +124,7 @@ function columnsForType(
       if (!vo) return [{ prop, mikroType: "string", tsType: "string", nullable, primary: false }];
       return vo.fields.flatMap((sub) => {
         const { type: st, nullable: sn } = unwrapOptional(sub.type);
-        return columnsForType(`${prop}_${snake(sub.name)}`, st, nullable || sn, ctx);
+        return columnsForType(`${prop}_${sub.name}`, st, nullable || sn, ctx);
       });
     }
     default:
@@ -268,7 +273,8 @@ function comparisonEntry(e: Extract<ExprIR, { kind: "binary" }>): string {
   const left = e.left;
   if (left.kind !== "member" || left.receiver.kind !== "this")
     throw new Error("mikroorm: unsupported find predicate (lhs not this.<field>)");
-  const col = snake(left.member);
+  // FilterQuery keys are entity PROPERTY names (== field names), not DB columns.
+  const col = left.member;
   const rhs = filterValue(e.right);
   if (e.op === "==") return `${col}: ${rhs}`;
   const op = FILTER_OP[e.op];
