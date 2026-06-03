@@ -122,7 +122,8 @@ export function renderConfiguration(
    *  byte-identical when both fields are undefined. */
   options: { schema?: string; tablePrefix?: string; embedded?: boolean } = {},
 ): string {
-  const fieldConfigs = agg.fields.flatMap((f) => fieldConfigLines(f, "        ", "b"));
+  const voLookup: VoLookup = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
+  const fieldConfigs = agg.fields.flatMap((f) => fieldConfigLines(f, "        ", "b", voLookup));
   const containmentLines = agg.contains.flatMap((c) => containmentConfigLines(c, agg, options));
   // Reference-collection (`Id<T>[]`) fields are persisted via a
   // separate join entity (see `join-entities.ts`), so the public
@@ -244,7 +245,15 @@ function pascalCol(name: string, _agg: AggregateIR): string {
   return name.length === 0 ? name : name[0]!.toUpperCase() + name.slice(1);
 }
 
-function fieldConfigLines(f: FieldIR, indent: string, builder: string): string[] {
+type VoLookup = ReadonlyMap<string, readonly FieldIR[]>;
+
+function fieldConfigLines(
+  f: FieldIR,
+  indent: string,
+  builder: string,
+  voLookup?: VoLookup,
+  embedded = false,
+): string[] {
   if (f.type.kind === "id") {
     return [
       `${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v));`,
@@ -254,9 +263,57 @@ function fieldConfigLines(f: FieldIR, indent: string, builder: string): string[]
     return [`${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion<string>();`];
   }
   if (f.type.kind === "valueobject") {
+    // Relational root: the value object flattens into the owner table's
+    // columns (the migration emits `price_amount`, `price_currency`), so the
+    // owned type's columns must be named to match — EF's default
+    // (`Price_Amount`) would not line up with the migration.  In the
+    // embedded shape the VO rides inside a JSONB blob, so no column names.
+    if (voLookup && !embedded) {
+      return ownedVoLines(
+        f.type.name,
+        upperFirst(f.name),
+        snake(f.name),
+        voLookup,
+        indent,
+        builder,
+      );
+    }
     return [`${indent}${builder}.OwnsOne<${f.type.name}>(x => x.${upperFirst(f.name)});`];
   }
   return [];
+}
+
+/** Configure an owned value object so its (recursively-flattened) columns
+ *  are named to the migration's snake convention (`<prefix>_<field>`),
+ *  keeping EF's runtime schema in step with the canonical migration. */
+function ownedVoLines(
+  voName: string,
+  nav: string,
+  prefix: string,
+  voLookup: VoLookup,
+  indent: string,
+  builder: string,
+): string[] {
+  const fields = voLookup.get(voName) ?? [];
+  const inner = indent + "    ";
+  const body = fields.flatMap((vf) => {
+    const col = `${prefix}_${snake(vf.name)}`;
+    const base = vf.type.kind === "optional" ? vf.type.inner : vf.type;
+    if (base.kind === "valueobject") {
+      return ownedVoLines(base.name, upperFirst(vf.name), col, voLookup, inner, "o");
+    }
+    const sel = `o.Property(x => x.${upperFirst(vf.name)})`;
+    if (base.kind === "id") {
+      return [
+        `${inner}${sel}.HasConversion(v => v.Value, v => new ${base.targetName}Id(v)).HasColumnName("${col}");`,
+      ];
+    }
+    if (base.kind === "enum") {
+      return [`${inner}${sel}.HasConversion<string>().HasColumnName("${col}");`];
+    }
+    return [`${inner}${sel}.HasColumnName("${col}");`];
+  });
+  return [`${indent}${builder}.OwnsOne<${voName}>(x => x.${nav}, o => {`, ...body, `${indent}});`];
 }
 
 function containmentConfigLines(

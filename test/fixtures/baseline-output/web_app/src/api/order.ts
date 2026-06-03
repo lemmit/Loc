@@ -134,7 +134,7 @@ export function useByCustomerOrder(query: ByCustomerQuery) {
   return useQuery({
     queryKey: ["orders", "find", "by_customer", query],
     queryFn: async () => {
-      const qs = new URLSearchParams(query as Record<string, string>).toString();
+      const qs = new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)])).toString();
       const r = await api.get(`/orders/by_customer${qs ? "?" + qs : ""}`);
       return OrderListResponse.parse(r);
     },

@@ -57,6 +57,59 @@ Resolution happens in two parts (see `parseBuiltinPlatformRef` in
 Both forms resolve to the same `PlatformSurface` instance the system
 orchestrator dispatches against.
 
+## Realization axes — picking *how* a backend renders
+
+Beyond *which* backend, a deployable can pick *how* that backend
+realises the code, via an optional block on `platform:` — the
+**realization axes** (full design in
+[`proposals/platform-realization-axes.md`](proposals/platform-realization-axes.md);
+in-flight tracker in
+[`plans/realization-axes-rollout.md`](plans/realization-axes-rollout.md)):
+
+```ddd
+deployable api { platform: dotnet { persistence: dapper }                  ... }
+deployable web { platform: node   { persistence: mikroorm, directoryLayout: byFeature } ... }
+```
+
+Each axis has a per-platform **menu** of real adapters; an out-of-menu or
+not-yet-implemented value is a validation error that lists what's
+available. The matured axis today is **`persistence:`**:
+
+| Platform | `persistence:` | Default |
+|---|---|---|
+| `dotnet` | `efcore`, `dapper` | `efcore` |
+| `node` (also spelled `hono`) | `drizzle`, `mikroorm` | `drizzle` |
+| `phoenixLiveView` | `ashPostgres` | `ashPostgres` |
+
+- **The default (`efcore` / `drizzle`) is the full-surface adapter** — every
+  aggregate shape, inheritance, associations, audit/provenance, etc.
+- **The alternates (`dapper`, `mikroorm`) are minimal-v1**: relational,
+  state-based, flat aggregates with scalar / enum / value-object / single
+  id-ref fields, CRUD + simple finds. Anything outside that (document/
+  embedded shape, associations, nested parts, inheritance, event-sourcing,
+  audit/provenance/managed fields, retrievals, seeds) is rejected at
+  validate time (`loom.dapper-unsupported` / `loom.mikroorm-unsupported`)
+  with an actionable message — use the default for that model, or drop the
+  unsupported feature. The alternates share the generated **domain layer**
+  with the default and only swap the persistence layer (Dapper SQL
+  repositories / MikroORM `EntitySchema` + `EntityManager`), so a project
+  can switch persistence without touching its domain code.
+
+**Event-sourcing** (`persistedAs(eventLog)` + `apply(...)`) emits only on
+**node / `drizzle`** today (append-only event stream, fold-from-zero MVP).
+The roadmap grows it on .NET — **`efcore` first, then `dapper`** (an
+`<agg>_events` table folded through the same appliers; see
+[`proposals/workflow-and-applier.md`](proposals/workflow-and-applier.md)
+Phase A2.2). A dedicated **Marten** document/event-store backend is **3rd
+priority (if ever)**: `D-DOCUMENT-AXIS` (see [`decisions.md`](decisions.md))
+currently pins *no new Marten backend* — the event log lives on the existing
+relational stores.
+
+Other axes — `directoryLayout: byLayer | byFeature`, `style` / `application`,
+and the greenfield `foundation` / `transport` / `runtime` axes — are at
+varying stages; the rollout tracker above is the source of truth for what's
+real today.
+
 ## Backend versioning
 
 Backend families are discoverable through an injectable source

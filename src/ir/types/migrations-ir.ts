@@ -29,6 +29,14 @@ export interface ColumnShape {
   type: ColumnType;
   nullable: boolean;
   default?: string;
+  /** Set on the flattened leaf columns of a value-object field
+   *  (`price: Money` → `price_amount`, `price_currency`, both
+   *  `voGroup: "price"`).  Relational backends (Drizzle / EF) emit each
+   *  leaf column as-is — the standard DDD destructure-into-columns shape.
+   *  Phoenix/Ash, whose embedded value objects are stored as one `:map`,
+   *  regroups columns sharing a `voGroup` back into a single `:map`
+   *  column named for the group.  Absent on ordinary columns. */
+  voGroup?: string;
 }
 
 export interface FKShape {

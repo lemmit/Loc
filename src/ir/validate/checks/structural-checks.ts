@@ -213,7 +213,18 @@ function firstGenericCtor(type: TypeIR): string | undefined {
 export function validateGenericInstancesUnimplemented(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
 ): void {
+  // Backends that can emit generic carriers (`paged` / `envelope`) today.
+  // Grows one slice at a time; when a context is served only by these (or by
+  // no backend at all — the legacy single-context path), the carrier is
+  // emittable and the gate stays quiet.  React is a frontend, not a backend,
+  // so it never appears here — its hooks consume whatever the backend serves.
+  // `"node"` is the hono/TS backend's platform identity (realization axes).
+  const SUPPORTED_PAGED_BACKENDS = new Set(["node"]);
+  const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_PAGED_BACKENDS.has(p));
+  if (unsupported.length === 0) return;
+
   const flag = (type: TypeIR, where: string): void => {
     const ctor = firstGenericCtor(type);
     if (!ctor) return;
@@ -221,9 +232,9 @@ export function validateGenericInstancesUnimplemented(
       severity: "error",
       code: "loom.generic-carrier-unsupported",
       message:
-        `${where} uses the generic carrier '${ctor}', which parses and is represented in ` +
-        `the IR but is not emittable yet (payload-transport-layer.md, P3b: monomorphization ` +
-        `+ DTO emission). Remove the '${ctor}' instantiation for now.`,
+        `${where} uses the generic carrier '${ctor}', but the backend(s) serving this context ` +
+        `(${unsupported.sort().join(", ")}) don't emit it yet (payload-transport-layer.md, P3b). ` +
+        `It's supported on: ${[...SUPPORTED_PAGED_BACKENDS].sort().join(", ")}.`,
       source: `${ctx.name}/${where}`,
     });
   };
@@ -375,6 +386,24 @@ export function validateEventSourcedDiscipline(
     }
 
     if (!isEventSourced) continue;
+
+    // Rule 6 — event-sourced construction goes through a single canonical
+    // creator: the `create` action whose emit-only body raises the creation
+    // event drives the `create(...)` factory + POST route.  More than one is
+    // ambiguous (the factory would silently use the first); zero is allowed
+    // (the aggregate is then constructed out-of-band — e.g. by a workflow —
+    // and exposes no create route).
+    const creates = agg.creates ?? [];
+    if (creates.length > 1) {
+      diags.push({
+        severity: "error",
+        code: "loom.event-sourced-multiple-creates",
+        message:
+          `aggregate '${agg.name}' is persistedAs(eventLog) and declares ${creates.length} 'create' actions. ` +
+          `An event-sourced aggregate has a single canonical creator (v1) — keep one 'create(...)'.`,
+        source: `${ctx.name}/${agg.name}`,
+      });
+    }
 
     // Rule 5 — one applier per event type.
     const appliersByEvent = new Map<string, number>();

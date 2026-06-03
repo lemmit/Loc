@@ -79,7 +79,7 @@ describe("Hono/Drizzle event-sourcing emission (persistedAs(eventLog))", () => {
     const domain = (await generate()).get("domain/account.ts")!;
     // The deposit body's emit pushes the event AND folds it via _apply.
     expect(domain).toMatch(
-      /const __ev = \{ type: "Deposited", account: this\._id, amount: amount \};\s*this\._events\.push\(__ev\);\s*this\._apply\(__ev\);/,
+      /const __ev: Events\.DomainEvent = \{ type: "Deposited", account: this\._id, amount: amount \};\s*this\._events\.push\(__ev\);\s*this\._apply\(__ev\);/,
     );
     // The fold itself mutates state (balance := balance + e.amount).
     expect(domain).toContain("this._balance = this._balance + e.amount;");

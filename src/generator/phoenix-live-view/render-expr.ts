@@ -524,3 +524,67 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
       );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Elixir typespec rendering — distinct from `renderAshType` above, which
+// emits *Ash attribute types* (`:string`, `:integer`).  This emits real
+// Elixir typespec syntax (`String.t()`, `integer()`, `Foo.t() | nil`) for
+// `@spec` / `@type` annotations on event modules, value-object modules,
+// and the hand-written `def`s in context-emit / domain-emit.  Ash v3
+// auto-generates typespecs for resource modules, so we don't emit on
+// the resource itself — only on the surface that the macro layer
+// doesn't cover.
+//
+// Optionals lower to `T | nil` (Elixir's nullable convention).  Arrays
+// lower to `[T]`.  IDs and enums currently lower to `String.t()` (UUID
+// string) and the enum atom union respectively — value-object types
+// reference their module's `.t()`.
+// ---------------------------------------------------------------------------
+
+export function renderTypespec(t: TypeIR, contextModule: string): string {
+  switch (t.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
+    case "primitive":
+      switch (t.name) {
+        case "int":
+        case "long":
+          return "integer()";
+        case "decimal":
+        case "money":
+          // Decimal is the canonical precise type for both decimal and
+          // money fields — matches `renderAshType`'s `:decimal` mapping.
+          return "Decimal.t()";
+        case "string":
+          return "String.t()";
+        case "bool":
+          return "boolean()";
+        case "datetime":
+          return "DateTime.t()";
+        case "guid":
+          // Ash represents UUIDs as plain binary strings on the struct.
+          return "String.t()";
+        case "json":
+          return "map()";
+      }
+    case "id":
+      // IDs flow as UUID strings on the struct (Ash :uuid → String.t()).
+      return "String.t()";
+    case "enum":
+      // Enums are Ash.Type.Enum modules carrying an `atom` value on the
+      // struct.  Reference the module's auto-generated `.t()`.
+      return `${contextModule}.${upperFirst(t.name)}.t()`;
+    case "valueobject":
+    case "entity":
+      return `${contextModule}.${upperFirst(t.name)}.t()`;
+    case "array":
+      return `[${renderTypespec(t.element, contextModule)}]`;
+    case "optional":
+      return `${renderTypespec(t.inner, contextModule)} | nil`;
+    case "slot":
+      throw new Error("renderTypespec: 'slot' type is UI-only and should not reach the backend.");
+    case "genericInstance":
+      throw new Error(
+        `renderTypespec: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
+  }
+}

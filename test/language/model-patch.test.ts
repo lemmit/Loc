@@ -99,6 +99,21 @@ describe("applyPatches", () => {
     expect(errors).toEqual([]);
   });
 
+  it("rejects `add` into a deployable (its body is a positional grammar)", async () => {
+    const sys = `system Shop {
+  context Sales { aggregate Order { total: int } }
+  deployable api {
+    platform: dotnet
+    contexts: [Sales]
+  }
+}`;
+    const r = await applyPatches(sys, [
+      { op: "add", target: "deployable api", source: "ui: WebApp" },
+    ]);
+    expect(r.ok).toBe(false);
+    expect(r.errors[0]?.message).toMatch(/not a container/);
+  });
+
   it("targets value-object members and adds into a value object", async () => {
     const vo = `context Sales {
   valueobject Money {

@@ -64,4 +64,32 @@ describe("fix-hints", () => {
     const re = await parseString(applied.text);
     expect(re.errors).toEqual([]);
   });
+
+  it("reserved-derived-on-vo: dropping 'derived' fixes it (round-trip clean)", async () => {
+    const VO = `context Sales {
+  valueobject Money {
+    amount: int
+    derived display: string = "x"
+  }
+}`;
+    const { doc, model, diagnostics } = await parseString(VO);
+    const report = buildValidateReport({
+      modelPath: "m.ddd",
+      langiumDiagnostics: diagnostics,
+      doc,
+      irDiagnostics: [],
+      model,
+    });
+    const hint = report.diagnostics.find((d) => d.code === "loom.reserved-derived-on-vo");
+    expect(hint?.fixHint?.patch).toMatchObject({
+      op: "replace",
+      target: "valueobject Sales.Money.display",
+      source: 'display: string = "x"',
+    });
+
+    const applied = await applyPatches(VO, [hint?.fixHint?.patch as ModelPatch]);
+    expect(applied.ok).toBe(true);
+    const re = await parseString(applied.text);
+    expect(re.errors).toEqual([]); // the reserved-derived error is gone
+  });
 });

@@ -111,7 +111,11 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateViews(c, diags);
     validateCurrentUserScope(c, diags);
     validatePermissionRefs(c, diags);
-    validateGenericInstancesUnimplemented(c, diags);
+    validateGenericInstancesUnimplemented(
+      c,
+      diags,
+      backendPlatformsByContext.get(c.name) ?? new Set(),
+    );
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateEventSourcedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
