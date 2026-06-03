@@ -8,14 +8,17 @@
 //  .NET services for Finance and HR where capabilities/auth/event-sourcing
 //  matter most).  It exercises essentially the whole language surface.
 //
-//  The project is split ONE FILE PER SUBDOMAIN: this `main.ddd` holds only
-//  the system's name, theme, user block and the deployment topology; each
-//  `subdomain` is a top-level declaration in its own file that composes
-//  into this single `system` (docs/proposals/implicit-system-composition.md).
+//  The project is split ONE FILE PER SUBDOMAIN, with the deployment in its
+//  own file too: this `main.ddd` holds ONLY the system's name + the `user`
+//  and `theme` singletons.  Each `subdomain` and every deployment
+//  declaration (`storage` / `resource` / `deployable` / `ui` / `test e2e`)
+//  is a top-level declaration in its own file that composes into this single
+//  `system` (docs/proposals/implicit-system-composition.md).
 //
 //  ── File layout (open the tabs above the editor) ──────────────────────
-//    main.ddd ................ this file — system name/theme/user, storage,
-//                              resources, UI, deployables and the e2e tests
+//    main.ddd ................ this file — just `system AcmeErp { user theme }`
+//    deploy.ddd ............. storage, resources, channelSource, the UI
+//                              (BackOffice + Dashboard), deployables, e2e tests
 //    sales.ddd ............... subdomain Sales
 //    inventory.ddd .......... subdomain Inventory (+ the Quantity root VO)
 //    procurement.ddd ........ subdomain Procurement
@@ -59,6 +62,7 @@ import "./procurement.ddd"
 import "./crm.ddd"
 import "./finance.ddd"
 import "./hr.ddd"
+import "./deploy.ddd"
 
 system AcmeErp {
 
@@ -81,148 +85,4 @@ system AcmeErp {
     fontFamily: "Inter, system-ui, sans-serif"
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  //  Deployment topology (grows as contexts are added).
-  // ════════════════════════════════════════════════════════════════════
-  storage primary { type: postgres }
-  storage bus     { type: kafka }
-
-  resource salesState       { for: Sales,       kind: state, use: primary }
-  resource inventoryState   { for: Inventory,   kind: state, use: primary }
-  resource procurementState { for: Procurement, kind: state, use: primary }
-  resource crmState         { for: Crm,         kind: state, use: primary }
-  resource billingState     { for: Billing,     kind: state,    use: primary }
-  resource ledgerState      { for: Ledger,      kind: state,    use: primary }
-  resource ledgerEvents     { for: Ledger,      kind: eventLog, use: primary }
-  resource peopleState      { for: People,      kind: state,    use: primary }
-  channelSource salesBus { for: SalesEvents, use: bus }
-
-  // The React back-office: `with scaffold(...)` generates the full
-  // list/detail/new/operation/workflow/view page set for every aggregate
-  // in the listed subdomains, and the hand-written Dashboard page below is
-  // layered on top — custom pages coexist with the scaffolded ones, and
-  // both draw on the shared top-level components from ui/components.ddd.
-  ui BackOffice with scaffold(subdomains: [Sales, Inventory, Procurement, Crm]) {
-
-    page Dashboard {
-      route: "/"
-      title: "Acme ERP"
-      body: Stack {
-        SectionHeading {
-          title: "Operations dashboard",
-          subtitle: "Sales, inventory, procurement and CRM at a glance."
-        },
-        Grid {
-          StatTile { label: "Customers", value: "Live" },
-          StatTile { label: "Stock items", value: "Live" },
-          StatTile { label: "Open pipeline", value: "Live" }
-        },
-        Divider {},
-        SectionHeading {
-          title: "Jump to a workspace",
-          subtitle: "The scaffolded list/detail pages for each subdomain."
-        },
-        Grid {
-          CtaRow {
-            title: "Sales",
-            body: "Customers, quotes and the order book.",
-            ctaLabel: "Open sales",
-            to: "/sales-orders"
-          },
-          CtaRow {
-            title: "Inventory",
-            body: "Products, warehouses and stock on hand.",
-            ctaLabel: "Open inventory",
-            to: "/stock-items"
-          },
-          CtaRow {
-            title: "Procurement",
-            body: "Suppliers and purchase orders.",
-            ctaLabel: "Open procurement",
-            to: "/purchase-orders"
-          },
-          CtaRow {
-            title: "CRM",
-            body: "Leads and the opportunity pipeline.",
-            ctaLabel: "Open CRM",
-            to: "/opportunities"
-          }
-        }
-      }
-    }
-  }
-
-  deployable coreApi {
-    platform: hono
-    contexts: [Sales, Inventory, Procurement, Crm, Ledger]
-    dataSources: [salesState, inventoryState, procurementState, crmState, ledgerState, ledgerEvents]
-    port: 3000
-  }
-  deployable webApp {
-    platform: react
-    targets: coreApi
-    ui: BackOffice
-    port: 3001
-    design: mantine
-  }
-
-  // Dedicated .NET service for Finance: EF Core + Mediator, every storage
-  // shape and the money/json primitives compiled through to runtime.  No
-  // React UI is mounted (files-only in the playground — .NET doesn't boot
-  // in-browser); open the generated tree to read the EF configurations.
-  // Finance/Billing on .NET (EF Core + money/json primitives + storage
-  // shapes).  The event-sourced Finance/Ledger context is hosted on the
-  // Hono coreApi above, where `persistedAs(eventLog)` emission is supported.
-  deployable financeApi {
-    platform: dotnet
-    contexts: [Billing]
-    dataSources: [billingState]
-    port: 8080
-  }
-
-  // HR on its own .NET service with `auth: required` → JWT-decode
-  // middleware.  Capability filters/stamps + the tenant filter compile to
-  // EF query filters and an auditable interceptor.  Files-only.
-  deployable peopleApi {
-    platform: dotnet
-    contexts: [People]
-    dataSources: [peopleState]
-    port: 8081
-    auth: required
-  }
-
-  test e2e "create a customer and read it back" against coreApi {
-    let c = api.customers.create({
-      name: "Acme Test Co",
-      contact: { email: "test@acme.example" },
-      billingAddress: { line1: "1 Way", city: "Town", region: "TS", postalCode: "00001", country: "US" },
-      creditLimit: { amount: 1000.0, currency: "USD" }
-    })
-    let read = api.customers.getById(c)
-    expect(read.name).toBe("Acme Test Co")
-  }
-
-  test e2e "create a product and read its sku back" against coreApi {
-    let p = api.products.create({
-      sku: "E2E-WIDGET",
-      name: "E2E Widget",
-      uom: "Each",
-      unitCost: { amount: 2.50, currency: "USD" },
-      active: true
-    })
-    let read = api.products.getById(p)
-    expect(read.sku).toBe("E2E-WIDGET")
-  }
-
-  test e2e "register a supplier" against coreApi {
-    let s = api.suppliers.create({
-      name: "E2E Supplies Ltd",
-      contact: { email: "hello@e2e-supplies.example" },
-      address: { line1: "9 Vendor Rd", city: "Cleveland", region: "OH", postalCode: "44101", country: "US" },
-      rating: 4,
-      active: true
-    })
-    let read = api.suppliers.getById(s)
-    expect(read.name).toBe("E2E Supplies Ltd")
-  }
 }
