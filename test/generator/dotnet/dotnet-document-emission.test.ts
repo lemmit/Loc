@@ -65,9 +65,9 @@ describe(".NET document-persistence emission (normalised(false))", () => {
       "Infrastructure/Persistence/Configurations/CartDocumentConfiguration.cs",
     )!;
     expect(cfg).toContain("IEntityTypeConfiguration<CartDocument>");
-    expect(cfg).toContain('b.ToTable("carts");');
-    expect(cfg).toContain('b.Property(x => x.Data).HasColumnType("jsonb");');
-    expect(cfg).toContain("b.Property(x => x.Version).IsConcurrencyToken();");
+    expect(cfg).toContain('builder.ToTable("carts");');
+    expect(cfg).toContain('builder.Property(x => x.Data).HasColumnType("jsonb");');
+    expect(cfg).toContain("builder.Property(x => x.Version).IsConcurrencyToken();");
   });
 
   it("emits snapshot records mirroring the entity tree (root + parts)", () => {
@@ -116,7 +116,7 @@ describe(".NET document-persistence emission (normalised(false))", () => {
       "return Cart.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<CartSnapshot>(__doc.Data, __json)!);",
     );
     // Find evaluates client-side over rehydrated documents (de-asynced
-    // terminal): `.ToList()`, not `.ToListAsync(ct)`.
+    // terminal): `.ToList()`, not `.ToListAsync(cancellationToken)`.
     expect(repo).toContain("var result = __all.Where(x => x.CustomerId == customerId).ToList();");
     expect(repo).not.toContain("_db.Carts.Where(x => x.CustomerId");
   });
@@ -146,10 +146,10 @@ describe(".NET document-persistence emission (normalised(false))", () => {
     const cfg = files.get("Infrastructure/Persistence/Configurations/WishlistConfiguration.cs")!;
     expect(cfg).toContain("IEntityTypeConfiguration<Wishlist>");
     // Root scalar / `X id` columns stay (queryable + indexed).
-    expect(cfg).toContain("b.Property(x => x.CustomerId).HasConversion");
-    expect(cfg).toContain("b.HasIndex(x => x.CustomerId);");
+    expect(cfg).toContain("builder.Property(x => x.CustomerId).HasConversion");
+    expect(cfg).toContain("builder.HasIndex(x => x.CustomerId);");
     // Containment folds to one JSONB column — no child table.
-    expect(cfg).toContain('b.OwnsMany<WishItem>("_items", o => {');
+    expect(cfg).toContain('builder.OwnsMany<WishItem>("_items", o => {');
     expect(cfg).toContain('o.ToJson("items");');
     expect(cfg).not.toContain("o.ToTable(");
     expect(cfg).not.toContain('o.WithOwner().HasForeignKey("ParentId")');
@@ -164,7 +164,9 @@ describe(".NET document-persistence emission (normalised(false))", () => {
     expect(dbctx).toContain("public DbSet<Wishlist> Wishlists => Set<Wishlist>();");
     const repo = files.get("Infrastructure/Repositories/WishlistRepository.cs")!;
     // Find is a real indexed SQL WHERE on the root column, not in-memory.
-    expect(repo).toContain("_db.Wishlists.Where(x => x.CustomerId == customerId).ToListAsync(ct)");
+    expect(repo).toContain(
+      "_db.Wishlists.Where(x => x.CustomerId == customerId).ToListAsync(cancellationToken)",
+    );
     expect(repo).not.toContain("FromSnapshot");
     // Entity carries no snapshot machinery.
     const wishlist = files.get("Domain/Wishlists/Wishlist.cs")!;

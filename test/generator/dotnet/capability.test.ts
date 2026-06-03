@@ -12,7 +12,7 @@
 //     no `: I<Capability>` clause regardless of `implements` decls.
 //   - No `Domain/Common/I*.cs` marker interfaces emitted.
 //   - No `<Cap>Filters.cs` static helpers emitted.
-//   - `b.HasQueryFilter(...)` lives in `<Aggregate>Configuration.cs`
+//   - `builder.HasQueryFilter(...)` lives in `<Aggregate>Configuration.cs`
 //     for any aggregate whose propagated IR carries `contextFilters`.
 //   - `AppDbContext.OnModelCreating` stays minimal — just
 //     `ApplyConfiguration` calls, no `foreach` loop.
@@ -97,11 +97,11 @@ describe(".NET generator: no capability artefacts emitted", () => {
 });
 
 describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () => {
-  it("emits one `b.HasQueryFilter(...)` per propagated filter on the matching config", async () => {
+  it("emits one `builder.HasQueryFilter(...)` per propagated filter on the matching config", async () => {
     const model = await modelFrom(trioed("softDelete", "softDeletable"));
     const files = generateDotnet(model);
     const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
-    expect(cfg).toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);
+    expect(cfg).toMatch(/builder\.HasQueryFilter\(x => !x\.IsDeleted\)/);
   });
 
   it("does NOT install HasQueryFilter for non-softDeletable aggregates", async () => {
@@ -124,7 +124,7 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
     `);
     const files = generateDotnet(model);
     const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
-    expect(cfg).toMatch(/b\.HasQueryFilter\(x => !x\.Archived\)/);
+    expect(cfg).toMatch(/builder\.HasQueryFilter\(x => !x\.Archived\)/);
   });
 });
 
@@ -178,11 +178,11 @@ describe(".NET generator: context-level propagation reaches per-config emission"
     `);
     const files = generateDotnet(model);
     expect(files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!).toMatch(
-      /b\.HasQueryFilter\(x => !x\.IsDeleted\)/,
+      /builder\.HasQueryFilter\(x => !x\.IsDeleted\)/,
     );
     expect(
       files.get("Infrastructure/Persistence/Configurations/CustomerConfiguration.cs")!,
-    ).toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);
+    ).toMatch(/builder\.HasQueryFilter\(x => !x\.IsDeleted\)/);
     const ctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
     expect(ctx).not.toMatch(/foreach \(var entityType/);
   });

@@ -405,11 +405,11 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 // reason in the probe log instead of having to exec into the pod.
 ${
   usingDapper
-    ? `app.MapGet("/ready", async (NpgsqlDataSource db, CancellationToken ct) =>
+    ? `app.MapGet("/ready", async (NpgsqlDataSource db, CancellationToken cancellationToken) =>
 {
     try
     {
-        await using var conn = await db.OpenConnectionAsync(ct);
+        await using var conn = await db.OpenConnectionAsync(cancellationToken);
         return Results.Ok(new { status = "ready" });
     }
     catch (Exception ex)
@@ -419,11 +419,11 @@ ${
             statusCode: 503);
     }
 });`
-    : `app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
+    : `app.MapGet("/ready", async (AppDbContext db, CancellationToken cancellationToken) =>
 {
     try
     {
-        var ok = await db.Database.CanConnectAsync(ct);
+        var ok = await db.Database.CanConnectAsync(cancellationToken);
         return ok
             ? Results.Ok(new { status = "ready" })
             : Results.Json(
@@ -544,6 +544,22 @@ export function renderCsproj(
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>${ns}</RootNamespace>
+    <!-- Roslyn analyzer level — see docs/proposals/cross-stack-static-analysis.md.
+         latest-recommended brings in ~200 high-signal CA-prefixed rules
+         on top of the compiler warnings the existing CI /warnaserror gates. -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <!-- CA1707: \`_Create\` factory uses an underscore prefix intentionally
+         to signal "internal builder, not public API" — a long-standing DDD
+         convention this generator follows uniformly.  Renaming would force
+         every emitted aggregate / part to invent a new public name and
+         break the established pattern.
+         CA1848 + CA1873: LoggerMessage source-generator delegates +
+         IsEnabled gate are high-perf optimizations for hot-path logging.
+         For the request-tier / domain-narrative logging this generator
+         emits (handful of events per request), the overhead is negligible
+         and the LoggerMessage boilerplate would dominate the file.
+         ASP.NET project templates routinely suppress these. -->
+    <NoWarn>CA1707;CA1848;CA1873</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <!-- Test files live in the sibling Tests/${ns}.Tests project -->

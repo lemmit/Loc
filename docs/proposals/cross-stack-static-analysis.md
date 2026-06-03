@@ -145,6 +145,23 @@ to bring ~200 Roslyn analyzer rules into the build (under the existing
 sub-bullets above are **already shipped**; treat this as a one-line
 csproj change followed by an empirical cleanup pass against CI output.
 
+> **Shipped.** The `<AnalysisLevel>latest-recommended</AnalysisLevel>` flip
+> landed alongside the cleanup pass.  First-run audit against
+> `examples/sales.ddd` surfaced 97 errors across 6 CA rules
+> (CA1725, CA1848, CA1707, CA1859, CA1822, CA1305); the cleanup +
+> two `<NoWarn>` suppressions (CA1707 — intentional `_Create` DDD
+> convention; CA1848 — LoggerMessage delegates are excessive
+> boilerplate for app-tier logging) takes every example fixture +
+> the dapper system fixture green under
+> `dotnet build /warnaserror`.  Concrete fixes in the emitter:
+> handler parameter names (`cmd` → `command`, `q` → `query`,
+> `ct` → `cancellationToken`, `b` → `builder`, `__candidate` →
+> `candidate`); `IFormatProvider` on numeric/datetime `ToString`
+> (CA1305); concrete `ObjectResult` return type on the exception
+> filter (CA1859); `_ = this;` discard on empty `AssertInvariants`
+> (CA1822); drop redundant `= default` initializer on optional
+> reference fields (CA1805).
+
 ### The "we'll discover bugs" argument
 
 The first run of this gate against the existing emitters **will fail**,

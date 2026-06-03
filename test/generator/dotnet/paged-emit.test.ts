@@ -36,25 +36,27 @@ describe(".NET generator — paged finds (P3b)", () => {
   it("repository method: CountAsync + Skip/Take returning Paged<Agg>, where threaded into both", async () => {
     const repo = (await files()).get("Infrastructure/Repositories/OrderRepository.cs")!;
     expect(repo).toContain(
-      "public async Task<Paged<Order>> Recent(int page, int pageSize, CancellationToken ct = default)",
+      "public async Task<Paged<Order>> Recent(int page, int pageSize, CancellationToken cancellationToken = default)",
     );
     expect(repo).toContain("var offset = (page - 1) * pageSize;");
-    expect(repo).toContain("var total = await _db.Orders.CountAsync(ct);");
+    expect(repo).toContain("var total = await _db.Orders.CountAsync(cancellationToken);");
     expect(repo).toContain(
-      "var items = await _db.Orders.Skip(offset).Take(pageSize).ToListAsync(ct);",
+      "var items = await _db.Orders.Skip(offset).Take(pageSize).ToListAsync(cancellationToken);",
     );
     expect(repo).toContain("return new Paged<Order>(items, page, pageSize, total, totalPages);");
     // where-clause threaded into both the count and the page query.
-    expect(repo).toContain("await _db.Orders.Where(x => x.Region == region).CountAsync(ct);");
     expect(repo).toContain(
-      "await _db.Orders.Where(x => x.Region == region).Skip(offset).Take(pageSize).ToListAsync(ct);",
+      "await _db.Orders.Where(x => x.Region == region).CountAsync(cancellationToken);",
+    );
+    expect(repo).toContain(
+      "await _db.Orders.Where(x => x.Region == region).Skip(offset).Take(pageSize).ToListAsync(cancellationToken);",
     );
   });
 
   it("interface declares the paged method signature", async () => {
     const iface = (await files()).get("Domain/Orders/IOrderRepository.cs")!;
     expect(iface).toContain(
-      "Task<Paged<Order>> Recent(int page, int pageSize, CancellationToken ct = default);",
+      "Task<Paged<Order>> Recent(int page, int pageSize, CancellationToken cancellationToken = default);",
     );
   });
 
@@ -64,7 +66,9 @@ describe(".NET generator — paged finds (P3b)", () => {
       "public sealed record RecentQuery(int Page, int PageSize) : IQuery<Paged<OrderResponse>>;",
     );
     const handler = (await files()).get("Application/Orders/Queries/RecentHandler.cs")!;
-    expect(handler).toContain("var domain = await _repo.Recent(q.Page, q.PageSize, ct);");
+    expect(handler).toContain(
+      "var domain = await _repo.Recent(query.Page, query.PageSize, cancellationToken);",
+    );
     expect(handler).toContain("return new Paged<OrderResponse>(domain.Items.Select(d =>");
     expect(handler).toContain(
       ").ToList(), domain.Page, domain.PageSize, domain.Total, domain.TotalPages);",

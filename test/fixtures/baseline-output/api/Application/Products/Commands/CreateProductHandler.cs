@@ -18,10 +18,10 @@ public sealed class CreateProductHandler : ICommandHandler<CreateProductCommand,
         _repo = repo;
     }
 
-    public async ValueTask<ProductId> Handle(CreateProductCommand cmd, CancellationToken ct)
+    public async ValueTask<ProductId> Handle(CreateProductCommand command, CancellationToken cancellationToken)
     {
-        var aggregate = Product.Create(cmd.Sku, cmd.Price);
-        await _repo.SaveAsync(aggregate, ct);
+        var aggregate = Product.Create(command.Sku, command.Price);
+        await _repo.SaveAsync(aggregate, cancellationToken);
         return aggregate.Id;
     }
 }

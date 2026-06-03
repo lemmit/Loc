@@ -138,7 +138,7 @@ describe("dotnet seeding — raw explicit-id path", () => {
   it("emits ExecuteSqlRawAsync INSERTs with explicit id + FK", async () => {
     const seed = find(await build(RAW), /Seed\.cs$/);
     expect(seed).toContain(
-      'await db.Database.ExecuteSqlRawAsync(@"INSERT INTO ""customers"" (""id"", ""name"") VALUES (\'c1\', \'Acme\')", ct);',
+      'await db.Database.ExecuteSqlRawAsync(@"INSERT INTO ""customers"" (""id"", ""name"") VALUES (\'c1\', \'Acme\')", cancellationToken);',
     );
     expect(seed).toContain('INSERT INTO ""orders"" (""id"", ""customer_id"", ""status"")');
     expect(seed).not.toContain("Customer.Create(");

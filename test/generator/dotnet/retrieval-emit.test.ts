@@ -39,12 +39,12 @@ describe(".NET generator — retrieval", () => {
     const out = await files();
     const repo = out.get("Infrastructure/Repositories/CustomerRepository.cs")!;
     expect(repo).toMatch(
-      /public async Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, CancellationToken ct = default\)/,
+      /public async Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, CancellationToken cancellationToken = default\)/,
     );
     // The retrieval is a reified Ardalis Specification, applied via
     // `.WithSpecification(...)` + the shared `.ApplyPaging(page)` extension.
     expect(repo).toMatch(
-      /var result = await _db\.Customers\.WithSpecification\(new ByRegionSpec\(rgn\)\)\.ApplyPaging\(page\)\.ToListAsync\(ct\);/,
+      /var result = await _db\.Customers\.WithSpecification\(new ByRegionSpec\(rgn\)\)\.ApplyPaging\(page\)\.ToListAsync\(cancellationToken\);/,
     );
     expect(repo).toMatch(/using Ardalis\.Specification\.EntityFrameworkCore;/);
     // The spec carries the where (reified criterion `where: InRegion(rgn)`) + sort.
@@ -75,7 +75,7 @@ describe(".NET generator — retrieval", () => {
     const out = await files();
     const iface = out.get("Domain/Customers/ICustomerRepository.cs")!;
     expect(iface).toMatch(
-      /Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, CancellationToken ct = default\);/,
+      /Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, CancellationToken cancellationToken = default\);/,
     );
   });
 
@@ -86,11 +86,11 @@ describe(".NET generator — retrieval", () => {
     )?.[1];
     expect(handler).toBeDefined();
     expect(handler!).toMatch(
-      /var matched = await _customers\.RunByRegionAsync\(cmd\.Rgn, \(0, 100\), ct\);/,
+      /var matched = await _customers\.RunByRegionAsync\(command\.Rgn, \(0, 100\), cancellationToken\);/,
     );
     expect(handler!).toMatch(/foreach \(var c in matched\)/);
     expect(handler!).toMatch(/c\.Deactivate\(\);/);
-    expect(handler!).toMatch(/await _customers\.SaveAsync\(c, ct\);/);
+    expect(handler!).toMatch(/await _customers\.SaveAsync\(c, cancellationToken\);/);
   });
 });
 

@@ -45,9 +45,9 @@ export function emitCreateCommandAndHandler(
       returnType: `${agg.name}Id`,
       body:
         `        var aggregate = ${agg.name}.Create(${requiredFields
-          .map((f) => `cmd.${upperFirst(f.name)}`)
+          .map((f) => `command.${upperFirst(f.name)}`)
           .join(", ")});\n` +
-        `        await _repo.SaveAsync(aggregate, ct);\n` +
+        `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
         `        return aggregate.Id;\n`,
     }),
   );
@@ -92,9 +92,9 @@ export function emitDestroyCommandAndHandler(
       handlerName: `Destroy${agg.name}Handler`,
       commandName: `Destroy${agg.name}Command`,
       body:
-        `        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)\n` +
-        `            ?? throw new AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +
-        `        await _repo.DeleteAsync(aggregate, ct);\n` +
+        `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
+        `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+        `        await _repo.DeleteAsync(aggregate, cancellationToken);\n` +
         `        return Unit.Value;\n`,
     }),
   );
@@ -142,7 +142,7 @@ export function emitOperationCommandsAndHandlers(
     // its `User` into the call.  Any non-auth-aware op stays
     // untouched — no DI changes, no handler-ctor surface widening.
     const usesUser = operationUsesCurrentUser(op);
-    const baseCallArgs = op.params.map((p) => `cmd.${upperFirst(p.name)}`);
+    const baseCallArgs = op.params.map((p) => `command.${upperFirst(p.name)}`);
     const callArgs = (usesUser ? [...baseCallArgs, "_currentUser.User"] : baseCallArgs).join(", ");
     const userExtraDeps = usesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [];
     const userExtraUsings = usesUser ? [`${ns}.Auth`] : [];
@@ -152,13 +152,13 @@ export function emitOperationCommandsAndHandlers(
       const ifaceName = `I${upperFirst(op.name)}${agg.name}Handler`;
       const reqName = `${upperFirst(op.name)}${agg.name}Request`;
       // Request record is wire-typed (X id → Guid, enum → string,
-      // datetime → string, value-object → <VO>Request) but `cmd.X`
+      // datetime → string, value-object → <VO>Request) but `command.X`
       // is domain-typed.  Convert each param via
       // `domainToRequestExpr` so the constructor types line up.
       // Without this, a parameterized extern auto handler fails to
       // compile (Cannot convert from <Domain> to <Wire>).
       const reqArgs = op.params
-        .map((p) => domainToRequestExpr(`cmd.${upperFirst(p.name)}`, p.type, ctx))
+        .map((p) => domainToRequestExpr(`command.${upperFirst(p.name)}`, p.type, ctx))
         .join(", ");
       out.set(
         `Application/${aggFolder}/Handlers/${ifaceName}.cs`,
@@ -206,13 +206,13 @@ export function emitOperationCommandsAndHandlers(
           // unchanged so DomainException → 400, ForbiddenException →
           // 403, AggregateNotFoundException → 404 still apply.
           body:
-            `        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)\n` +
-            `            ?? throw new AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +
+            `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
+            `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
             `        aggregate.Check${upperFirst(op.name)}(${callArgs});\n` +
             `        var request = new ${reqName}(${reqArgs});\n` +
             `        try\n` +
             `        {\n` +
-            `            await _user.HandleAsync(aggregate, request, ct);\n` +
+            `            await _user.HandleAsync(aggregate, request, cancellationToken);\n` +
             `        }\n` +
             `        catch (DomainException) { throw; }\n` +
             `        catch (ForbiddenException) { throw; }\n` +
@@ -223,7 +223,7 @@ export function emitOperationCommandsAndHandlers(
             `            throw new ExternHandlerException("${op.name}", "${agg.name}", ex);\n` +
             `        }\n` +
             `        aggregate.AssertInvariants();\n` +
-            `        await _repo.SaveAsync(aggregate, ct);\n` +
+            `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
             `        return Unit.Value;\n`,
         }),
       );
@@ -239,10 +239,10 @@ export function emitOperationCommandsAndHandlers(
         extraDeps: userExtraDeps,
         extraUsings: userExtraUsings,
         body:
-          `        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)\n` +
-          `            ?? throw new AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +
+          `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
+          `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
           `        aggregate.${upperFirst(op.name)}(${callArgs});\n` +
-          `        await _repo.SaveAsync(aggregate, ct);\n` +
+          `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
           `        return Unit.Value;\n`,
       }),
     );
@@ -277,7 +277,7 @@ namespace ${args.ns}.Application.${plural(args.aggName)}.Handlers;
 /// </summary>
 public interface ${args.ifaceName}
 {
-    Task HandleAsync(${args.aggName} aggregate, ${args.requestName} request, CancellationToken ct);
+    Task HandleAsync(${args.aggName} aggregate, ${args.requestName} request, CancellationToken cancellationToken);
 }
 `;
 }
@@ -314,7 +314,7 @@ namespace ${args.ns}.Application.${plural(args.aggName)}.Handlers;
 [ExternHandler]
 public sealed class ${stubName} : ${args.ifaceName}
 {
-    public Task HandleAsync(${args.aggName} aggregate, ${args.requestName} request, CancellationToken ct)
+    public Task HandleAsync(${args.aggName} aggregate, ${args.requestName} request, CancellationToken cancellationToken)
     {
         return Task.CompletedTask;
     }

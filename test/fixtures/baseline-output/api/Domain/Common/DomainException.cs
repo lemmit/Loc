@@ -72,7 +72,7 @@ public sealed class ExternHandlerAttribute : Attribute
 /// </summary>
 public interface IDomainEventDispatcher
 {
-    Task DispatchAsync(IDomainEvent ev, CancellationToken ct = default);
+    Task DispatchAsync(IDomainEvent ev, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

@@ -71,7 +71,7 @@ ${allFields.join("\n")}
         ${ctorBody};
     }
 
-    public async ValueTask<${ret}> Handle(${args.commandName} cmd, CancellationToken ct)
+    public async ValueTask<${ret}> Handle(${args.commandName} command, CancellationToken cancellationToken)
     {
 ${args.body}    }
 }
@@ -148,7 +148,7 @@ ${allFields.join("\n")}
         ${ctorBody};
     }
 
-    public async ValueTask<${args.returnType}> Handle(${args.queryName} q, CancellationToken ct)
+    public async ValueTask<${args.returnType}> Handle(${args.queryName} query, CancellationToken cancellationToken)
     {
 ${args.body}    }
 }

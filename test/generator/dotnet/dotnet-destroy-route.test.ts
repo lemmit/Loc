@@ -52,19 +52,19 @@ describe(".NET canonical-destroy → DELETE /{id}", () => {
     );
     const handler = files.get("Application/Widgets/Commands/DestroyWidgetHandler.cs");
     expect(handler, "DestroyWidgetHandler.cs should be emitted").toBeDefined();
-    expect(handler).toContain("await _repo.GetByIdAsync(cmd.Id, ct)");
+    expect(handler).toContain("await _repo.GetByIdAsync(command.Id, cancellationToken)");
     expect(handler).toContain("throw new AggregateNotFoundException");
-    expect(handler).toContain("await _repo.DeleteAsync(aggregate, ct);");
+    expect(handler).toContain("await _repo.DeleteAsync(aggregate, cancellationToken);");
   });
 
   it("repository interface + impl gain DeleteAsync", async () => {
     const files = await gen();
     expect(files.get("Domain/Widgets/IWidgetRepository.cs")).toContain(
-      "Task DeleteAsync(Widget aggregate, CancellationToken ct = default);",
+      "Task DeleteAsync(Widget aggregate, CancellationToken cancellationToken = default);",
     );
     const impl = files.get("Infrastructure/Repositories/WidgetRepository.cs");
     expect(impl).toContain(
-      "public async Task DeleteAsync(Widget aggregate, CancellationToken ct = default)",
+      "public async Task DeleteAsync(Widget aggregate, CancellationToken cancellationToken = default)",
     );
     expect(impl).toContain("_db.Widgets.Remove(aggregate);");
   });

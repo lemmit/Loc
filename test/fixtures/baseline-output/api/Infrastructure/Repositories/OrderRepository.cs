@@ -26,61 +26,61 @@ public sealed class OrderRepository : IOrderRepository
         _log = log;
     }
 
-    public async Task<Order?> GetByIdAsync(OrderId id, CancellationToken ct = default)
+    public async Task<Order?> GetByIdAsync(OrderId id, CancellationToken cancellationToken = default)
     {
-        var found = await _db.Orders.FirstOrDefaultAsync(x => x.Id == id, ct);
+        var found = await _db.Orders.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} id={Id} found={Found}", "aggregate_loaded", "Order", id.Value, found != null);
         return found;
     }
 
-    public async Task<IReadOnlyList<Order>> FindManyByIdsAsync(IReadOnlyList<OrderId> ids, CancellationToken ct = default)
+    public async Task<IReadOnlyList<Order>> FindManyByIdsAsync(IReadOnlyList<OrderId> ids, CancellationToken cancellationToken = default)
     {
         if (ids.Count == 0) return Array.Empty<Order>();
-        return await _db.Orders.Where(x => ids.Contains(x.Id)).ToListAsync(ct);
+        return await _db.Orders.Where(x => ids.Contains(x.Id)).ToListAsync(cancellationToken);
     }
 
-    public async Task SaveAsync(Order aggregate, CancellationToken ct = default)
+    public async Task SaveAsync(Order aggregate, CancellationToken cancellationToken = default)
     {
         var entry = _db.Entry(aggregate);
         if (entry.State == EntityState.Detached)
         {
             _db.Orders.Add(aggregate);
         }
-        await _db.SaveChangesAsync(ct);
+        await _db.SaveChangesAsync(cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} id={Id}", "repository_save", "Order", aggregate.Id.Value);
         foreach (var ev in aggregate.PullEvents())
         {
             _log.LogInformation("{Event} event_type={EventType} aggregate={Aggregate} id={Id}", "event_dispatched", ev.GetType().Name, "Order", aggregate.Id.Value);
-            await _events.DispatchAsync(ev, ct);
+            await _events.DispatchAsync(ev, cancellationToken);
         }
     }
 
-    public async Task DeleteAsync(Order aggregate, CancellationToken ct = default)
+    public async Task DeleteAsync(Order aggregate, CancellationToken cancellationToken = default)
     {
         _db.Orders.Remove(aggregate);
-        await _db.SaveChangesAsync(ct);
+        await _db.SaveChangesAsync(cancellationToken);
     }
-    public async Task<List<Order>> All(CancellationToken ct = default)
+    public async Task<List<Order>> All(CancellationToken cancellationToken = default)
     {
-        var result = await _db.Orders.ToListAsync(ct);
+        var result = await _db.Orders.ToListAsync(cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Order", "all", result.Count);
         return result;
     }
-    public async Task<List<Order>> ByCustomer(string customerId, CancellationToken ct = default)
+    public async Task<List<Order>> ByCustomer(string customerId, CancellationToken cancellationToken = default)
     {
-        var result = await _db.Orders.Where(x => x.CustomerId == customerId).ToListAsync(ct);
+        var result = await _db.Orders.Where(x => x.CustomerId == customerId).ToListAsync(cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Order", "byCustomer", result.Count);
         return result;
     }
-    public async Task<List<Order>> ActiveOrders(CancellationToken ct = default)
+    public async Task<List<Order>> ActiveOrders(CancellationToken cancellationToken = default)
     {
-        var result = await _db.Orders.Where(x => x.Status == OrderStatus.Confirmed).ToListAsync(ct);
+        var result = await _db.Orders.Where(x => x.Status == OrderStatus.Confirmed).ToListAsync(cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Order", "ActiveOrders", result.Count);
         return result;
     }
-    public async Task<List<Order>> OrderSummary(CancellationToken ct = default)
+    public async Task<List<Order>> OrderSummary(CancellationToken cancellationToken = default)
     {
-        var result = await _db.Orders.Where(x => x.Status != OrderStatus.Cancelled).ToListAsync(ct);
+        var result = await _db.Orders.Where(x => x.Status != OrderStatus.Cancelled).ToListAsync(cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Order", "OrderSummary", result.Count);
         return result;
     }

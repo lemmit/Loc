@@ -5,12 +5,12 @@ namespace Api.Domain.Orders;
 
 public interface IOrderRepository
 {
-    Task<Order?> GetByIdAsync(OrderId id, CancellationToken ct = default);
-    Task<IReadOnlyList<Order>> FindManyByIdsAsync(IReadOnlyList<OrderId> ids, CancellationToken ct = default);
-    Task SaveAsync(Order aggregate, CancellationToken ct = default);
-    Task DeleteAsync(Order aggregate, CancellationToken ct = default);
-    Task<List<Order>> All(CancellationToken ct = default);
-    Task<List<Order>> ByCustomer(string customerId, CancellationToken ct = default);
-    Task<List<Order>> ActiveOrders(CancellationToken ct = default);
-    Task<List<Order>> OrderSummary(CancellationToken ct = default);
+    Task<Order?> GetByIdAsync(OrderId id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Order>> FindManyByIdsAsync(IReadOnlyList<OrderId> ids, CancellationToken cancellationToken = default);
+    Task SaveAsync(Order aggregate, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Order aggregate, CancellationToken cancellationToken = default);
+    Task<List<Order>> All(CancellationToken cancellationToken = default);
+    Task<List<Order>> ByCustomer(string customerId, CancellationToken cancellationToken = default);
+    Task<List<Order>> ActiveOrders(CancellationToken cancellationToken = default);
+    Task<List<Order>> OrderSummary(CancellationToken cancellationToken = default);
 }

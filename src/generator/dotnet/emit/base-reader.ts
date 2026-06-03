@@ -33,7 +33,7 @@ export function renderBaseReaderInterface(base: EnrichedAggregateIR, ns: string)
       `// Read-only polymorphic reader for the abstract TPC base ${base.name}.`,
       `public interface I${base.name}Repository`,
       "{",
-      `    Task<IReadOnlyList<${base.name}>> FindAllAsync(CancellationToken ct = default);`,
+      `    Task<IReadOnlyList<${base.name}>> FindAllAsync(CancellationToken cancellationToken = default);`,
       "}",
     ) + "\n"
   );
@@ -73,10 +73,10 @@ export function renderBaseReaderImpl(
       ...concretes.map((c) => `        ${field(c)} = ${ctorParam(c)};`),
       "    }",
       "",
-      `    public async Task<IReadOnlyList<${base.name}>> FindAllAsync(CancellationToken ct = default)`,
+      `    public async Task<IReadOnlyList<${base.name}>> FindAllAsync(CancellationToken cancellationToken = default)`,
       "    {",
       `        var result = new List<${base.name}>();`,
-      ...concretes.map((c) => `        result.AddRange(await ${field(c)}.All(ct));`),
+      ...concretes.map((c) => `        result.AddRange(await ${field(c)}.All(cancellationToken));`),
       "        return result;",
       "    }",
       "}",

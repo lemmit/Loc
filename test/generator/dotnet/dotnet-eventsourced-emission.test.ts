@@ -66,10 +66,12 @@ describe(".NET event-sourcing emission (persistedAs(eventLog))", () => {
     const cfg = files.get(
       "Infrastructure/Persistence/Configurations/AccountEventRecordConfiguration.cs",
     )!;
-    expect(cfg).toContain('b.ToTable("account_events");');
-    expect(cfg).toContain("b.HasKey(x => new { x.StreamId, x.Version });");
-    expect(cfg).toContain('b.Property(x => x.StreamId).HasColumnName("stream_id");');
-    expect(cfg).toContain('b.Property(x => x.Data).HasColumnName("data").HasColumnType("jsonb");');
+    expect(cfg).toContain('builder.ToTable("account_events");');
+    expect(cfg).toContain("builder.HasKey(x => new { x.StreamId, x.Version });");
+    expect(cfg).toContain('builder.Property(x => x.StreamId).HasColumnName("stream_id");');
+    expect(cfg).toContain(
+      'builder.Property(x => x.Data).HasColumnName("data").HasColumnType("jsonb");',
+    );
   });
 
   it("renders appliers as a _Apply dispatch + _FromEvents rehydrator on the aggregate", async () => {
@@ -114,6 +116,6 @@ describe(".NET event-sourcing emission (persistedAs(eventLog))", () => {
     expect(req).toContain("Owner");
     expect(req).not.toMatch(/CreateAccountRequest\([^)]*Balance/);
     const handler = files.get("Application/Accounts/Commands/CreateAccountHandler.cs")!;
-    expect(handler).toContain("Account.Create(cmd.Owner)");
+    expect(handler).toContain("Account.Create(command.Owner)");
   });
 });

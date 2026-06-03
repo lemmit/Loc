@@ -146,7 +146,7 @@ system D {
     expect(errors).toEqual([]); // the dapper retrieval gate is lifted
     const repo = files.get("api/Infrastructure/Repositories/CustomerRepository.cs")!;
     expect(repo).toContain(
-      "public async Task<IReadOnlyList<Customer>> RunByNameSortedAsync(string n, (int? offset, int? limit)? page = null, CancellationToken ct = default)",
+      "public async Task<IReadOnlyList<Customer>> RunByNameSortedAsync(string n, (int? offset, int? limit)? page = null, CancellationToken cancellationToken = default)",
     );
     // criterion `where: NameIs(n)` → inline SQL with this-prop → column.
     expect(repo).toContain(

@@ -147,7 +147,7 @@ function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR, ctx?: BoundedCo
 }
 
 function projectionClauseFor(t: TypeIR): string {
-  if (t.kind === "array") return `.ToListAsync(ct)`;
-  if (t.kind === "optional") return `.FirstOrDefaultAsync(ct)`;
-  return `.FirstAsync(ct)`;
+  if (t.kind === "array") return `.ToListAsync(cancellationToken)`;
+  if (t.kind === "optional") return `.FirstOrDefaultAsync(cancellationToken)`;
+  return `.FirstAsync(cancellationToken)`;
 }
